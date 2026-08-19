@@ -666,7 +666,9 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           iconName: "sidebar"
           tooltipText: root.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar"
-          selected: !root.sidebarCollapsed
+          // No fill for the open state. The sidebar standing there is the state,
+          // said far better than a lit square on the status line could say it,
+          // and this control has no business drawing attention to itself.
           foreground: root.dim
           hoverColor: root.foreground
           iconSize: Style.font.iconSmall
