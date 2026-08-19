@@ -6,13 +6,11 @@ A Quickshell plugin that reads, triages, and answers your mail over the
 official Gmail API. It runs inside the `omarchy-shell` process you already
 have, follows your active theme, and puts an unread count in the bar.
 
-<img width="1758" height="1049" alt="image" src="https://github.com/user-attachments/assets/3a554014-bcde-40af-a133-8e599a4c34e2" />
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/3a554014-bcde-40af-a133-8e599a4c34e2" />
 
 And with mini size mode:
 
-<img width="665" height="929" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" />
-<img width="664" height="926" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
-
+<img width="330" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" /> <img width="330" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
 
 ## What it is
 
