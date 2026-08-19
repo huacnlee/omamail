@@ -298,9 +298,14 @@ Item {
 
           SearchBar {
             id: searchBar
-            anchors.centerIn: parent
-            // Centred within the gap while there is room to spare, and capped
-            // so it does not stretch across a very wide window.
+            anchors.verticalCenter: parent.verticalCenter
+            // Centred on the header rather than on the gap, so it lines up with
+            // the window instead of with whatever the controls happen to leave.
+            // Clamped into the slot, which is what keeps it off Check mail when
+            // the two clusters are not the same width.
+            x: Math.max(0, Math.min(parent.width - width,
+              (header.width - width) / 2 - parent.x))
+            // Capped so it does not stretch across a very wide window.
             width: Math.min(Style.space(460), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.

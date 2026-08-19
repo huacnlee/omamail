@@ -65,6 +65,11 @@ Flickable {
 
   Rectangle {
     id: track
+    // Centred whenever the row has slack — which is the case once segments have
+    // stood down. Left-aligned the moment it fills the width, so at the sizes
+    // where it does span, its edge is still the one the logo and the message
+    // text line up on.
+    x: Math.max(0, (root.width - width) / 2)
     width: chips.implicitWidth
     height: chips.implicitHeight
     radius: Style.cornerRadius
