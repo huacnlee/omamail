@@ -79,7 +79,7 @@ and the client itself are console-only; there is no CLI for them.
 | `Enter` | Open the selected message |
 | `u` | Back to the list |
 | `e` | Archive |
-| `#` | Move to trash |
+| `Del` or `#` | Move to trash |
 | `s` | Star or unstar |
 | `Shift+I` / `Shift+U` | Mark read / unread |
 | `r` / `a` / `f` | Reply, reply all, forward |
@@ -87,6 +87,8 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+Enter` | Send |
 | `/` or `Ctrl+K` | Search |
 | `g` then `i` / `s` / `u` / `t` | Inbox, starred, unread, sent |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
+| `F5` | Check for mail |
 | `Ctrl+?` | Every shortcut |
 | `Esc` | Back, or close the window |
 
