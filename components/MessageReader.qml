@@ -202,8 +202,18 @@ Item {
     visible: !!root.summary
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-    // TextEdit rather than Text so the body can be selected and copied, which
-    // is most of what anyone does with a message they did not write.
+    // A formatted message is the sender's page, printed on a sheet. A
+    // plain-text one is ours, and takes the theme.
+    Rectangle {
+      id: sheet
+      visible: root.htmlAvailable
+      width: bodyFlick.width
+      height: bodyText.implicitHeight
+      color: Html.PAPER
+      border.width: 1
+      border.color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.18)
+    }
+
     TextEdit {
       id: bodyText
       width: bodyFlick.width
@@ -212,12 +222,7 @@ Item {
       wrapMode: TextEdit.Wrap
       textFormat: root.htmlAvailable ? TextEdit.RichText : TextEdit.PlainText
       text: root.htmlAvailable
-        ? Html.documentFor(root.rawHtml, ({
-            foreground: root.textColor,
-            background: root.backgroundColor,
-            link: root.linkColor,
-            quote: root.dimColor
-          }))
+        ? Html.documentFor(root.rawHtml, Html.paperPalette())
         : (root.service ? root.service.selectedBody.text : "")
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)

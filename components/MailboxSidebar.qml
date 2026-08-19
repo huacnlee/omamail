@@ -104,10 +104,11 @@ Item {
         Entry {
           required property var modelData
           label: modelData.name
-          // User labels have no glyph of their own, so they take a tag drawn
-          // from their own initial — enough to tell two apart in the rail.
-          icon: ""
-          initial: modelData.name.substring(0, 1).toUpperCase()
+          // One tag for every user label. An initial letter fails the moment a
+          // label is not written in the Latin alphabet — a Chinese label would
+          // put a single hanzi in a 16px slot, which is neither an icon nor a
+          // readable name. The tooltip carries the name instead.
+          icon: "label"
           count: modelData.unread
           selected: !!root.service
             && root.service.searchQuery === "label:" + modelData.rawName
@@ -149,7 +150,6 @@ Item {
     id: entry
     required property string label
     property string icon: ""
-    property string initial: ""
     property int count: 0
     property bool selected: false
     signal activated()
@@ -163,7 +163,6 @@ Item {
 
     ActionIcon {
       id: glyph
-      visible: entry.icon !== ""
       anchors.left: parent.left
       anchors.leftMargin: root.collapsed
         ? (parent.width - width) / 2 : Style.space(8)
@@ -171,20 +170,6 @@ Item {
       name: entry.icon
       iconSize: Style.font.icon
       color: entry.selected ? root.textColor : root.dimColor
-    }
-
-    Text {
-      id: initialMark
-      visible: entry.icon === ""
-      anchors.horizontalCenter: glyph.horizontalCenter
-      anchors.verticalCenter: parent.verticalCenter
-      width: Style.font.icon
-      horizontalAlignment: Text.AlignHCenter
-      text: entry.initial
-      color: entry.selected ? root.textColor : root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      font.bold: true
     }
 
     Text {

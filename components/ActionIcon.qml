@@ -118,6 +118,10 @@ Canvas {
       move(2.5, 13.5); line(3.4, 10.4); line(11.2, 2.6); line(13.4, 4.8)
       line(5.6, 12.6); ctx.closePath()
       move(9.6, 4.2); line(11.8, 6.4)
+    } else if (root.name === "label") {
+      move(1.5, 1.5); line(7.6, 1.5); line(14.5, 8.4); line(8.4, 14.5)
+      line(1.5, 7.6); ctx.closePath()
+      move(5.7, 4.5); arc(4.5, 4.5, 1.2, 0, Math.PI * 2)
     } else if (root.name === "check") {
       move(2.5, 8.5); line(6.5, 12.5); line(13.5, 4)
     } else if (root.name === "attachment") {

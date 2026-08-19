@@ -28,11 +28,18 @@ done
 
 # 3. Nothing may name a colour inside a JS library either: colours are passed
 #    in from QML, which is the only place that can read the theme.
-for file in Html.js Model.js GmailApi.js Message.js; do
+# Html.js is the one exception, and a narrow one: PAPER and INK are the sheet a
+# sender's HTML is printed on. They are content colours, not chrome — a
+# message that sets #24292e text needs a light ground under it or it vanishes.
+for file in Model.js GmailApi.js Message.js; do
   if grep -vE '^\s*(//|\*|/\*)' "$file" | grep -nE '#[0-9A-Fa-f]{6}'; then
     fail "$file names a colour: pass it in from QML instead"
   fi
 done
+if grep -vE '^\s*(//|\*|/\*)' Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
+   | grep -vE 'PAPER|INK|paperPalette|#1155cc|#5f6368'; then
+  fail "Html.js may only name the PAPER/INK sheet colours"
+fi
 
 # 4. barForeground is a qs.Ui.Panel property. A BarWidget that reads it gets
 #    undefined, and an undefined colour paints nothing at all.
