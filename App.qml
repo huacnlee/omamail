@@ -23,7 +23,7 @@ Item {
   property bool closingFromHost: false
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "omamail.omarchy"
+    ? String(manifest.id) : "omamail"
 
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background

@@ -31,7 +31,7 @@ Item {
   property var barWidgetRegistry: null
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "omamail.omarchy"
+    ? String(manifest.id) : "omamail"
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
 

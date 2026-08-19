@@ -36,7 +36,7 @@ Then click the envelope in the bar. To open it from the keyboard, add this to
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-  o.bind("SUPER + SHIFT + G", "Omamail", "omarchy shell shell toggle omamail.omarchy '{}'")
+  o.bind("SUPER + SHIFT + G", "Omamail", "omarchy shell shell toggle omamail '{}'")
 ```
 
 The target is `shell`, not the plugin id: the window is summoned by the shell,
@@ -49,7 +49,7 @@ all of which Omarchy already ships.
 To remove it:
 
 ```bash
-omarchy plugin remove omamail.omarchy
+omarchy plugin remove omamail
 ```
 
 That takes the plugin itself. Nothing it wrote lives inside your Omarchy
