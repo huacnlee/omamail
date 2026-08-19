@@ -347,6 +347,28 @@ function extractBody(payload) {
   return { text: "", source: "" }
 }
 
+// The same walk as extractBody, kept separate because the reader wants the
+// markup and the list row wants the flattened text, and neither should pay for
+// the other's work.
+function extractHtml(payload) {
+  var found = ""
+
+  function walk(part, depth) {
+    if (!part || depth > 12 || found) return
+    var mime = String(part.mimeType || "").toLowerCase()
+    var children = Array.isArray(part.parts) ? part.parts : []
+    if (children.length > 0) {
+      for (var i = 0; i < children.length; i++) walk(children[i], depth + 1)
+      return
+    }
+    if (isAttachment(part)) return
+    if (mime.indexOf("text/html") === 0) found = decodePart(part)
+  }
+
+  walk(payload, 0)
+  return found
+}
+
 function attachments(payload) {
   var found = []
 
