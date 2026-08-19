@@ -52,7 +52,6 @@ BarWidget {
       ? root.foreground
       : Qt.darker(root.foreground, 1.55)
     readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
-    readonly property bool hasNew: !!root.gmail && root.gmail.newMailPending
 
     iconComponent: Component {
       Item {
@@ -60,10 +59,13 @@ BarWidget {
           anchors.centerIn: parent
           iconSize: Style.space(12)
           color: button.glyphColor
-          // The dot carries the state, and it means "something arrived since
-          // you last looked" rather than "you have unread mail" — so it can
-          // actually reach zero.
-          dot: button.hasNew
+          // The dot is simply whether unread mail is waiting. It used to mean
+          // "something arrived since you last looked", which was a different
+          // question from the one anyone asks of a mail icon, and it could not
+          // be answered honestly while the count included every categorised
+          // message. Now that the count is Primary-scoped it reaches zero, so
+          // the dot can just follow it.
+          dot: button.hasUnread
           crossed: !button.connected
         }
       }

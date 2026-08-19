@@ -71,7 +71,12 @@ Item {
           required property var modelData
           label: modelData.label
           icon: modelData.icon
-          count: modelData.key === "inbox" && root.service ? root.service.inboxUnread : 0
+          // No count on the mailboxes. An inbox that is thousands of messages
+          // deep reports "999+" forever, which is a number that never changes
+          // and therefore says nothing. The bar's dot carries whether anything
+          // is waiting; the labels below still count, because those are lists
+          // the user built and their sizes mean something.
+          count: 0
           selected: !!root.service && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === ""
           onActivated: root.mailboxSelected(modelData.key)

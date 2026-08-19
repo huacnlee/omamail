@@ -31,12 +31,11 @@ Item {
 
   readonly property var keys: [
     { key: "j / k", action: "Move through the list" },
-    { key: "Enter", action: "Open the selected message" },
+    { key: "Enter or o", action: "Open the selected message" },
     { key: "e", action: "Archive" },
     { key: "d", action: "Move to trash" },
     { key: "r", action: "Reply" },
-    { key: "c", action: "Compose" },
-    { key: "Right-click", action: "Archive, trash, spam, star" }
+    { key: "c", action: "Compose" }
   ]
 
   Column {

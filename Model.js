@@ -19,8 +19,11 @@ var MAILBOXES = [
   { key: "unread", label: "Unread", query: "in:inbox is:unread category:primary", labelId: "UNREAD", icon: "unread" },
   { key: "starred", label: "Starred", query: "is:starred", labelId: "STARRED", icon: "star" },
   { key: "sent", label: "Sent", query: "in:sent", labelId: "SENT", icon: "send" },
-  { key: "all", label: "All mail", query: "in:anywhere -in:spam -in:trash", labelId: "", icon: "archive" },
-  { key: "trash", label: "Trash", query: "in:trash", labelId: "TRASH", icon: "trash" }
+  // Optional: the first to go when the row cannot hold every mailbox. Neither
+  // is somewhere anyone works from — they are places you go looking for
+  // something specific, and search reaches both.
+  { key: "all", label: "All mail", query: "in:anywhere -in:spam -in:trash", labelId: "", icon: "archive", optional: true },
+  { key: "trash", label: "Trash", query: "in:trash", labelId: "TRASH", icon: "trash", optional: true }
 ]
 
 function mailboxIndex(key) {

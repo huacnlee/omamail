@@ -16,7 +16,7 @@ Rectangle {
 
   readonly property var rows: [
     { keys: "j / k", action: "Move down / up" },
-    { keys: "Enter", action: "Open the selected message" },
+    { keys: "Enter or o", action: "Open the selected message" },
     { keys: "Esc", action: "Back to the list" },
     { keys: "e", action: "Archive" },
     { keys: "d", action: "Move to trash" },
