@@ -1,5 +1,5 @@
 const assert = require("assert")
-const { load } = require("./load")
+const { load, deepEqual } = require("./load")
 
 const html = load("Html.js")
 
@@ -185,5 +185,33 @@ assert.ok(doc.indexOf("<html>") === 0)
 const bare = html.documentFor("x")
 assert.ok(bare.indexOf("undefined") < 0)
 assert.ok(bare.indexOf("x</body>") > 0)
+
+
+// ------------------------------------------------- plain text with images
+//
+// Stripping images outright left a message built around its pictures reading as
+// a long run of unexplained blank space.
+{
+  deepEqual(html.imageSources('<img src="a.png"><img src=\'b b.png\'><img data-x=1 src=c.png >'),
+    ["a.png", "b b.png", "c.png"])
+  deepEqual(html.imageSources(""), [])
+  deepEqual(html.imageSources("<img alt=none>"), [""], "an image with no src still holds its place")
+
+  var plainDoc = html.plainTextDocument("Hi\n[image 1]  spaced\n<b>not bold</b>",
+    { foreground: "#DEDEDE", background: "#131313", link: "#077CFD" }, true)
+  assert.ok(plainDoc.indexOf('<a href="omarchy-image:1">[image 1]</a>') > 0, "markers become links")
+  assert.ok(plainDoc.indexOf("&lt;b&gt;not bold&lt;/b&gt;") > 0, "text is escaped, never interpreted")
+  assert.ok(plainDoc.indexOf("&nbsp;&nbsp;spaced") > 0, "hand-made alignment survives")
+  assert.ok(plainDoc.indexOf("Hi<br>") > 0, "line breaks survive")
+
+  // A message that shipped its own text/plain part never had images in it.
+  assert.ok(html.plainTextDocument("[image 1]", {}, false).indexOf("<a ") < 0,
+    "markers are left alone when the text is the sender's own")
+
+  assert.strictEqual(html.imageLinkIndex("omarchy-image:3"), 3)
+  assert.strictEqual(html.imageLinkIndex("https://example.com"), 0, "ordinary links are untouched")
+  assert.strictEqual(html.imageLinkIndex("omarchy-image:0"), 0)
+  assert.strictEqual(html.imageLinkIndex(""), 0)
+}
 
 console.log("test_html.js ok")

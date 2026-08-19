@@ -688,13 +688,13 @@ Item {
         dimColor: root.dim
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
-        onAccountChosen: function(id) {
-          if (root.service) root.service.switchTo(id)
+        onAccountChosen: function(index) {
+          if (root.service) root.service.switchToIndex(index)
           root.backToList()
         }
         onAddAccountRequested: if (root.service) root.service.addAccount()
-        onRemoveAccountRequested: function(id) {
-          if (root.service) root.service.removeAccount(id)
+        onRemoveAccountRequested: function(index) {
+          if (root.service) root.service.removeAccountAt(index)
         }
       }
 

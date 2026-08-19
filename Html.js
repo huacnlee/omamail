@@ -238,3 +238,75 @@ function documentFor(bodyHtml, colors) {
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
 }
+
+// ------------------------------------------------------- plain text bodies
+//
+// The reader falls back to plain text when the user asks for it and when a
+// message is too heavy to lay out as rich text. Both cases still want the
+// images to be reachable, so the markers htmlToText leaves behind are turned
+// into links — and this document is built here rather than taken from the
+// sender, so it stays trivially cheap to lay out even for the messages that
+// were too heavy in the first place.
+
+var IMAGE_LINK_PREFIX = "omarchy-image:"
+
+// Counted off the sender's own HTML, with exactly the parts htmlToText drops
+// dropped first. The markers in the text are numbered by that same walk, so the
+// two lists line up position for position — counting these off the sanitised
+// HTML instead would drift the moment a tracking pixel was removed or the image
+// cap was reached, and every marker after it would open the wrong picture.
+function imageSources(html) {
+  var out = []
+  var pattern = /<img\b[^>]*>/gi
+  var tags = String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .match(pattern) || []
+  for (var i = 0; i < tags.length; i++) {
+    var src = tags[i].match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
+    out.push(src ? String(src[2] || src[3] || src[4] || "") : "")
+  }
+  return out
+}
+
+function escapeText(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
+
+// HTML collapses runs of whitespace, which would take the alignment out of a
+// signature, an indented quote or anything else the sender laid out by hand —
+// the very thing someone reading in plain text is asking to see.
+function preserveSpacing(escaped) {
+  return String(escaped).replace(/ {2,}/g, function(run) {
+    return new Array(run.length + 1).join("&nbsp;")
+  })
+}
+
+function plainTextDocument(text, colors, linkImages) {
+  var palette = colors || {}
+  var foreground = String(palette.foreground || "")
+  var background = String(palette.background || "")
+  var link = String(palette.link || foreground)
+  var body = preserveSpacing(escapeText(text))
+  if (linkImages) {
+    body = body.replace(/\[image (\d+)\]/g, function(match, index) {
+      return "<a href=\"" + IMAGE_LINK_PREFIX + index + "\">" + match + "</a>"
+    })
+  }
+  body = body.replace(/\n/g, "<br>")
+  return "<html><head><style type=\"text/css\">"
+    + "body{color:" + foreground + ";background-color:" + background + ";}"
+    + "a{color:" + link + ";}"
+    + "</style></head><body>" + body + "</body></html>"
+}
+
+// The index a marker link carries, or 0 when the link is something else.
+function imageLinkIndex(url) {
+  var text = String(url || "")
+  if (text.indexOf(IMAGE_LINK_PREFIX) !== 0) return 0
+  var index = Number(text.substring(IMAGE_LINK_PREFIX.length))
+  return index > 0 ? Math.floor(index) : 0
+}
