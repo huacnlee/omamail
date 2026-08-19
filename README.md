@@ -1,0 +1,124 @@
+# Omarchy Gmail
+
+**Gmail as a native Omarchy window — not a browser tab.**
+
+A Quickshell plugin that reads, triages, and answers your mail over the
+official Gmail API. It runs inside the `omarchy-shell` process you already
+have, follows your active theme, and puts an unread count in the bar.
+
+## What it is
+
+Three parts, one plugin:
+
+- an **unread badge** in the bar, which keeps counting whether or not the
+  window is open
+- an **application window** — a real Hyprland window, tiled like any other,
+  with your mailboxes, the message list, and the reader side by side
+- a **compose window** of its own, so the message you are answering stays on
+  screen instead of being covered by the form
+
+Everything is monospace, square-cornered, and coloured from your theme, because
+that is what the rest of Omarchy looks like.
+
+## Add it to Omarchy
+
+```bash
+omarchy plugin add https://github.com/huacnlee/omarchy-gmail.git --enable
+```
+
+Then click the envelope in the bar. To open it from the keyboard, add this to
+`~/.config/hypr/bindings.lua`:
+
+```lua
+  o.bind("SUPER + SHIFT + G", "Gmail", "omarchy shell -q gmail.omarchy toggle")
+```
+
+Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl` and `xdg-open` —
+all of which Omarchy already ships.
+
+## Connecting your mailbox
+
+Gmail has no shared application to sign in through. Google issues API access
+per Cloud project, so Omarchy Gmail signs in with an OAuth client **you own**.
+The window walks you through it in five steps, each with the console page one
+click away. It takes about two minutes, once.
+
+The step people skip, and the one that decides whether the sign-in lasts:
+**press "Publish app"** on your own project. A project left in Testing is
+issued refresh tokens that expire after seven days, so the app would sign you
+out every week. Publishing shows an "unverified app" warning once — expected
+for a client you made yourself, since you are the developer and the only user.
+
+If you have the `gcloud` CLI, `scripts/google-cloud-setup.sh` does the two
+steps that have an API — creating the project and enabling Gmail — and opens
+the console on the rest with the project already selected. The consent screen
+and the client itself are console-only; there is no CLI for them.
+
+> **Why isn't a client built in?** `gmail.modify` and `gmail.send` are
+> *restricted* scopes. Shipping a client would mean this project completing
+> Google's OAuth verification first; until then it would be stuck in Testing,
+> handing every user a seven-day session. The code is ready for one —
+> `Credentials.BUILTIN` is a single constant — and your own client always wins
+> over it.
+
+## Using it
+
+| Key | What it does |
+| --- | --- |
+| `j` / `k` | Move down / up |
+| `Enter` | Open the selected message |
+| `u` | Back to the list |
+| `e` | Archive |
+| `#` | Move to trash |
+| `s` | Star or unstar |
+| `Shift+I` / `Shift+U` | Mark read / unread |
+| `r` / `a` / `f` | Reply, reply all, forward |
+| `c` | Compose |
+| `Ctrl+Enter` | Send |
+| `/` or `Ctrl+K` | Search |
+| `g` then `i` / `s` / `u` / `t` | Inbox, starred, unread, sent |
+| `Ctrl+/` | Every shortcut |
+| `Esc` | Back, or close the window |
+
+Search takes Gmail's own operator syntax straight through — `from:jane`,
+`has:attachment`, `older_than:7d`. Right-click any row in the list for archive,
+trash, spam, star and read/unread without leaving the keyboard cursor behind.
+
+## What it does not do
+
+- **No embedded browser.** Message bodies render through Qt's own rich text
+  engine, which handles the HTML-4-and-inline-styles subset that real mail is
+  written in. A browser engine cannot be embedded in a plugin at all:
+  `QtWebEngineQuick::initialize()` has to run before the host process builds
+  its `QGuiApplication`, and a plugin loads long after that.
+- **Remote images stay blocked** until you ask for them, per message. Qt really
+  does fetch them, so rendering one fires every tracking pixel in the message.
+- One account, no attachment downloads, no offline cache. Not yet.
+
+## Where your credentials live
+
+- The refresh token goes to **GNOME Keyring**, keyed by client id, written over
+  stdin so it never appears in the process table.
+- The OAuth client goes to `~/.config/omarchy-gmail/credentials.json`, mode
+  `0600`. Not to plugin settings — `shell.json` is world-readable.
+- The access token exists only in memory.
+- Signing out clears the keyring entry.
+
+The app asks for `gmail.modify` and `gmail.send`. `gmail.modify` covers reading,
+labelling, archiving and trashing, and deliberately **cannot** delete anything
+permanently.
+
+## Development
+
+```bash
+./install.sh          # symlink this checkout into ~/.config/omarchy/plugins
+make validate         # node tests, source regressions, qmllint, manifest check
+```
+
+Working agreements are in [AGENTS.md](AGENTS.md); the design canvas and the
+implementation plan are under [docs/](docs/).
+
+Omarchy Gmail is an independent project and is not affiliated with Google.
+Gmail is a trademark of Google LLC.
+
+Licensed under the [MIT License](LICENSE).

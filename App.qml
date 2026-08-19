@@ -378,24 +378,38 @@ Item {
         // Setup takes the whole body: there is nothing else to look at until
         // the mailbox is connected.
         Flickable {
+          id: setupFlick
           anchors.fill: parent
           anchors.margins: Style.space(18)
           visible: root.showSetup
           contentWidth: width
-          contentHeight: setup.implicitHeight
+          contentHeight: setupHolder.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+          // A holder the width of the viewport, so the page below can centre
+          // against something real. Anchoring beats arithmetic here: a
+          // Flickable reparents its children, and an x binding written against
+          // the Flickable's own width lands before that reparenting settles.
+          Item {
+            id: setupHolder
+            width: setupFlick.width
+            implicitHeight: setup.implicitHeight
+
           SetupPage {
             id: setup
-            width: Math.min(parent.width, Style.space(560))
+            // A measure this long is unreadable across a wide window, so it is
+            // capped rather than stretched.
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(setupHolder.width, Style.space(560))
             service: root.service
             textColor: root.foreground
             dimColor: root.dim
             panelFontFamily: root.fontFamily
             canLeave: root.ready
             onBackRequested: root.setupVisible = false
+          }
           }
         }
       }
