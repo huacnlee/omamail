@@ -59,9 +59,11 @@ Canvas {
       arc(7, 12, 4.5, Math.PI, Math.PI + Math.PI / 2, true)
       line(2.5, 13)
     } else if (root.name === "archive") {
-      move(8, 1.5); line(8, 10.5)
-      move(4.5, 7); line(8, 10.5); line(11.5, 7)
-      move(2, 13.5); line(14, 13.5)
+      // A lidded box. The previous drawing was an arrow pointing into a line,
+      // which is the universal download icon — wrong verb entirely.
+      ctx.rect(1.5 * s, 2.5 * s, 13 * s, 3.2 * s)
+      move(2.8, 5.7); line(2.8, 13.5); line(13.2, 13.5); line(13.2, 5.7)
+      move(6.4, 8.8); line(9.6, 8.8)
     } else if (root.name === "trash") {
       move(2.5, 4); line(13.5, 4)
       move(6, 4); line(6, 2.5); line(10, 2.5); line(10, 4)

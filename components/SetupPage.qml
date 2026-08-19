@@ -68,16 +68,17 @@ Column {
     width: parent.width
     implicitHeight: Math.max(heroIcon.height, heroText.implicitHeight)
 
-    Button {
+    // Hidden only during first run, when there is genuinely no page behind
+    // this one — the mailbox does not exist yet.
+    BackBar {
       id: leaveButton
       visible: root.canLeave
       anchors.left: parent.left
       anchors.top: parent.top
-      text: "←"
-      foreground: root.textColor
-      bordered: false
-      fontSize: Style.font.title
-      onClicked: root.backRequested()
+      textColor: root.textColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: root.backRequested()
     }
 
     GmailIcon {
