@@ -388,7 +388,6 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
           switcherOpen: accountSwitcher.opened
-          onCollapseToggled: root.sidebarCollapsed = !root.sidebarCollapsed
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
@@ -655,10 +654,31 @@ Item {
           foreground: root.foreground
         }
 
+        // The rail's own switch, at the far left of the status line. On the rail
+        // it cost a whole row above the mailboxes; in the header it was a
+        // button about the sidebar sitting among buttons about the mailbox.
+        // The status line is where a view toggle belongs.
+        IconButton {
+          id: railToggle
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: !root.compact && !root.showPage && !root.composing
+          iconName: "sidebar"
+          tooltipText: root.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar"
+          selected: !root.sidebarCollapsed
+          foreground: root.dim
+          hoverColor: root.foreground
+          iconSize: Style.font.iconSmall
+          size: Style.space(20)
+          fontFamily: root.fontFamily
+          onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
+        }
+
         Text {
           id: accountLine
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(14)
+          anchors.left: railToggle.visible ? railToggle.right : parent.left
+          anchors.leftMargin: railToggle.visible ? Style.space(8) : Style.space(14)
           // An invisible sibling still holds its place, so the hints must only
           // take room from this line while they are actually on screen.
           anchors.right: statusBar.hasNotice

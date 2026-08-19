@@ -26,7 +26,6 @@ Item {
   // Forwarded to the user bar, which is the control those popups hang off.
   property bool switcherOpen: false
   signal switcherRequested(real sceneX, real sceneY)
-  signal collapseToggled()
 
   readonly property var userLabels: {
     var all = root.service ? root.service.labels : []
@@ -48,28 +47,11 @@ Item {
     foreground: root.textColor
   }
 
-  // The control that collapses the rail lives on the rail. In the header it
-  // was a button about the sidebar sitting among buttons about the mailbox.
-  IconButton {
-    id: railToggle
-    anchors.top: parent.top
-    anchors.topMargin: Style.space(6)
-    anchors.left: parent.left
-    anchors.leftMargin: root.collapsed ? (edge.x - width) / 2 : Style.space(6)
-    iconName: "sidebar"
-    tooltipText: root.collapsed ? "Show the sidebar" : "Hide the sidebar"
-    foreground: root.dimColor
-    hoverColor: root.textColor
-    fontFamily: root.panelFontFamily
-    onClicked: root.collapseToggled()
-  }
-
   Flickable {
     id: flick
     anchors.left: parent.left
     anchors.right: edge.left
-    anchors.top: railToggle.bottom
-    anchors.topMargin: Style.space(4)
+    anchors.top: parent.top
     anchors.bottom: footer.top
     contentWidth: width
     contentHeight: column.implicitHeight + Style.space(12)
