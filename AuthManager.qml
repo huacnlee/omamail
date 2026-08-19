@@ -197,8 +197,26 @@ Item {
   // difference between an upgrade and a silent sign-out.
   property bool triedLegacyLookup: false
 
+  // Two keyring entries are not tied to an address: the pre-multi-account one
+  // keyed by client alone, and the one written for a mailbox that had not
+  // learned its address yet, which keys on a literal stand-in. Either can be
+  // found by *any* account sharing the client, and both belong to whichever
+  // mailbox was signed in before accounts were separated — the first one.
+  //
+  // Only that one may claim them. Without this a mailbox you have just added
+  // restores the token of the mailbox you already had, signs itself in, reports
+  // that same address, and collapses back into it — which is exactly what
+  // adding a second account did.
+  property bool mayAdoptLegacyToken: true
+
   function startSecretLookup() {
     if (!clientId) {
+      handleSecretLookup("")
+      return
+    }
+    // A mailbox with no address has never signed in under one, so there is
+    // nothing of its own to find — only somebody else's.
+    if (accountId === "" && !mayAdoptLegacyToken) {
       handleSecretLookup("")
       return
     }
@@ -221,7 +239,7 @@ Item {
     if (lookupHandled) return
     lookupHandled = true
     var token = String(raw || "").trim()
-    if (!token && !triedLegacyLookup && clientId !== "") {
+    if (!token && !triedLegacyLookup && mayAdoptLegacyToken && clientId !== "") {
       startLegacyLookup()
       return
     }
@@ -236,8 +254,30 @@ Item {
     refreshWithToken(token, purpose)
   }
 
+  // Held only until this mailbox learns its own address, which the profile
+  // fetch settles a second or two after signing in.
+  //
+  // Writing it immediately meant writing it under a name-less key, and any
+  // other mailbox sharing the client could then find it — which is how a newly
+  // added mailbox ended up restoring the session of one that already existed
+  // and reporting itself as that address. Waiting costs a second and leaves the
+  // keyring with nothing ambiguous in it.
+  property string unnamedRefreshToken: ""
+
+  onAccountIdChanged: {
+    if (accountId === "" || unnamedRefreshToken === "") return
+    var held = unnamedRefreshToken
+    unnamedRefreshToken = ""
+    storeRefreshToken(held)
+  }
+
   function storeRefreshToken(refreshToken) {
-    if (!refreshToken || keyringStore.running) return
+    if (!refreshToken) return
+    if (accountId === "") {
+      unnamedRefreshToken = String(refreshToken)
+      return
+    }
+    if (keyringStore.running) return
     keyringWriteToken = String(refreshToken)
     keyringStore.command = [pluginDir + "/scripts/keyring-store.sh"].concat(
       Credentials.keyringAttributes(clientId, accountId))

@@ -158,7 +158,23 @@ Item {
   function nameAccount(index, email) {
     var accounts = accountList.accounts
     if (index < 0 || index >= accounts.length) return
-    if (accounts[index].id === Accounts.accountId(email)) return
+    var named = Accounts.accountId(email)
+    if (accounts[index].id === named) return
+
+    // Two rows cannot hold one address. Rebuilding the list would fold them
+    // together and take the row being added with it, which read as the add
+    // silently undoing itself. A mailbox that is already here is a duplicate,
+    // not a rename, and the row that has to go is the new one.
+    for (var d = 0; d < accounts.length; d++) {
+      if (d === index || accounts[d].id !== named) continue
+      activeIndex = -1
+      accountList = Accounts.removeAt(accountList, index)
+      saveAccounts()
+      refreshCurrent()
+      duplicateAccount(email)
+      return
+    }
+
     var updated = Accounts.emptyList()
     updated.activeId = accountList.activeId
     for (var i = 0; i < accounts.length; i++) {
@@ -174,8 +190,18 @@ Item {
     saveAccounts()
   }
 
+  // A save that arrives while one is already running is queued, never dropped.
+  // Dropping it is what made adding a mailbox undo itself: the new account was
+  // never written, and the watcher then read the older file back over it.
+  property bool accountsSaveQueued: false
+
   function saveAccounts() {
-    if (!accountsLoaded || accountsWriter.running) return
+    if (!accountsLoaded) return
+    if (accountsWriter.running) {
+      accountsSaveQueued = true
+      return
+    }
+    accountsSaveQueued = false
     accountsWritePayload = Accounts.serialize(accountList)
     accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
     accountsWriter.running = true
@@ -187,28 +213,48 @@ Item {
     // row so the existing credentials file still has somewhere to live.
     if (Accounts.count(loaded) === 0)
       loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "" }))
+    // Reading back our own write must change nothing. The list is watched so
+    // that an edit from outside is picked up, but every save triggers that
+    // watch — and reassigning the list re-derives every account's id, which
+    // resets its cache and its session. That is what made adding a mailbox
+    // flicker through several states: the window was rebuilding every account
+    // each time the file it had just written landed back.
+    if (accountsLoaded && Accounts.serialize(loaded) === Accounts.serialize(accountList))
+      return
+    // What is on disk is behind what is in memory until the pending write
+    // lands, so a reload now would be a straight revert.
+    if (accountsWriter.running || accountsSaveQueued) return
     accountList = loaded
     accountsLoaded = true
   }
 
   signal accountAdded()
+  signal duplicateAccount(string email)
 
   // ------------------------------------------------------------ aggregates
 
   property int unreadTotal: 0
   property bool anyNewMail: false
+  // Whether any mailbox at all is signed in. The first-run walkthrough keys on
+  // this rather than on the mailbox in view: once one account works, a second
+  // one that has not signed in yet is a row waiting in settings, not a reason
+  // to send the whole window back to the beginning.
+  property bool anyAccountReady: false
 
   function recount() {
     var total = 0
     var pending = false
+    var signedIn = false
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
       if (!host) continue
       total += host.inboxUnread
       if (host.newMailPending) pending = true
+      if (host.ready) signedIn = true
     }
     unreadTotal = total
     anyNewMail = pending
+    anyAccountReady = signedIn
   }
 
   // The bar answers for all of them: a badge that counted only the mailbox you
@@ -317,9 +363,11 @@ Item {
 
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
+      mayAdoptLegacyToken: index === 0
       settings: root.settings
 
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
+      onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onNewMailPendingChanged: root.recount()
       onReplySent: root.replySent()
@@ -355,6 +403,9 @@ Item {
       write(root.accountsWritePayload + "\n")
       root.accountsWritePayload = ""
     }
-    onExited: root.accountsWritePayload = ""
+    onExited: {
+      root.accountsWritePayload = ""
+      if (root.accountsSaveQueued) root.saveAccounts()
+    }
   }
 }
