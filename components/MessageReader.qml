@@ -293,13 +293,26 @@ Item {
 
   // ---------------------------------------------------------------- footer
 
+  // Edge to edge, not inset with the buttons: it separates the toolbar from the
+  // message, and that division runs the full width of the window.
+  PanelSeparator {
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: footer.top
+    anchors.bottomMargin: Style.space(4)
+    foreground: root.textColor
+    visible: footer.visible
+  }
+
   Column {
     id: footer
     anchors.bottom: parent.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.margins: root.pageInset
-    spacing: Style.space(6)
+    anchors.leftMargin: root.pageInset
+    anchors.rightMargin: root.pageInset
+    anchors.bottomMargin: Style.space(4)
+    spacing: Style.space(4)
     visible: !!root.summary
 
     Repeater {
@@ -334,13 +347,6 @@ Item {
         }
       }
     }
-
-    PanelSeparator {
-      width: parent.width
-      foreground: root.textColor
-    }
-
-    Item { width: 1; height: Style.space(2) }
 
     // Icons rather than labels: six actions fit where six words would not.
     //
