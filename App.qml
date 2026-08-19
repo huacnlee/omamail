@@ -39,6 +39,14 @@ Item {
     foreground.r * 0.45 + background.r * 0.55,
     foreground.g * 0.45 + background.g * 0.55,
     foreground.b * 0.45 + background.b * 0.55, 1)
+  // Omarchy's palette has no separate "primary": `accent` is it. This theme's
+  // accent is near fully saturated, which is right for a 5px unread dot and
+  // wrong for a link sitting inside a paragraph. Same hue, same lightness,
+  // capped saturation — calm enough to read past, still clearly a link.
+  readonly property color link: Qt.hsla(accent.hslHue,
+    Math.min(accent.hslSaturation, 0.55),
+    accent.hslLightness, 1.0)
+
   readonly property string fontFamily: Style.font.family
 
   // Two breakpoints, not a continuum: three columns, list-plus-reader with the
@@ -88,6 +96,7 @@ Item {
   function openMessage(id) {
     if (!service) return
     plainTextForced = false
+    reader.forceRichAnyway = false
     cursorId = String(id || "")
     service.select(cursorId)
     currentView = "reader"
@@ -225,7 +234,7 @@ Item {
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showSetup && root.compact
-            iconName: "send"
+            iconName: "compose"
             tooltipText: "Compose"
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -233,13 +242,13 @@ Item {
             onClicked: root.startCompose("new")
           }
 
-          Button {
+          IconTextButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showSetup && !root.compact
+            iconName: "compose"
             text: "Compose"
             foreground: root.foreground
-            bordered: true
-            fontSize: Style.font.bodySmall
+            fontFamily: root.fontFamily
             enabled: root.ready
             onClicked: root.startCompose("new")
           }
@@ -354,6 +363,8 @@ Item {
             }
           }
 
+          // The far edge of the list. The rail draws its own on the other
+          // side, so the three columns each end in one hairline.
           PanelSeparator {
             anchors.right: parent.right
             anchors.top: parent.top
@@ -377,6 +388,7 @@ Item {
           backgroundColor: root.background
           accentColor: root.accent
           urgentColor: root.urgent
+          linkColor: root.link
           dimColor: root.dim
           dimmerColor: root.dimmer
           panelFontFamily: root.fontFamily

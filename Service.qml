@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 
 import "Cache.js" as Cache
+import "Html.js" as Html
 import "GmailApi.js" as Api
 import "Message.js" as Mail
 import "Model.js" as Model
@@ -39,7 +40,6 @@ Item {
     refreshIntervalSec: 120,
     maxMessages: 25,
     defaultQuery: "in:inbox",
-    showUnreadCount: "On",
     notifyNewMail: "On",
     oauthPort: 9481
   })
@@ -71,7 +71,6 @@ Item {
   readonly property int maxMessages: Math.max(5, Math.min(100,
     Math.floor(Number(setting("maxMessages", 25))) || 25))
   readonly property string defaultQuery: String(setting("defaultQuery", "in:inbox")).trim()
-  readonly property bool showUnreadCount: String(setting("showUnreadCount", "On")) !== "Off"
   readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
 
@@ -99,7 +98,11 @@ Item {
   property string selectedId: ""
   property var selectedMessage: null
   property var selectedBody: ({ text: "", source: "" })
+  // Already sanitised: the decode and the sanitise happen off the GUI thread
+  // (MessageWorker.js) or, on the cache path, inline where they are cheap.
   property string selectedHtml: ""
+  property int selectedBlockedImages: 0
+  property bool selectedTooHeavy: false
   property var selectedAttachments: []
   property bool detailLoading: false
   property var detailHandle: null
@@ -119,6 +122,10 @@ Item {
   // what was already there.
   property var seenIds: ({})
   property bool notificationsPrimed: false
+  // Mail that arrived since the list was last looked at. The bar shows a dot
+  // for this and nothing else — an unread count that never reaches zero is a
+  // permanent red mark, which stops meaning anything.
+  property bool newMailPending: false
 
   readonly property string setupState: Model.setupState({
     toolsPresent: authManager.toolsPresent || !authManager.toolsChecked,
@@ -134,7 +141,6 @@ Item {
     : (mailboxKey === "inbox" && defaultQuery !== "" ? defaultQuery : Model.mailbox(mailboxKey).query)
   readonly property bool hasMore: nextPageToken !== ""
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
-  readonly property string badgeText: showUnreadCount ? Model.badgeText(inboxUnread, 99) : ""
   readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread)
 
   // The sign-in has three waits that look identical from outside: the helper
@@ -231,6 +237,9 @@ Item {
     for (var key in seenIds) seen[key] = true
     for (var j = 0; j < restored.length; j++) seen[restored[j].id] = true
     seenIds = seen
+    // The cache is also a record of what was on screen last time, so a live
+    // load on top of it can tell genuinely new mail from a first look.
+    notificationsPrimed = true
     listRefreshed()
     return true
   }
@@ -309,6 +318,10 @@ Item {
     lastError = ""
     listRefreshed()
 
+    // Looking at the list is what marks it seen.
+    if (windowOpen) newMailPending = false
+    else if (arrivals.length > 0) newMailPending = true
+
     if (notifyNewMail && arrivals.length > 0) notify(arrivals)
   }
 
@@ -338,8 +351,13 @@ Item {
     // replaces it a moment later.
     var cached = cacheStore.body(messageId)
     if (cached) {
+      // The body is already decoded here, so sanitising it costs a fraction
+      // of a millisecond — worth doing inline to paint in the same frame.
+      var ready = Html.sanitize(cached.html, ({ allowRemoteImages: true }))
       selectedBody = { text: cached.text, source: cached.source }
-      selectedHtml = cached.html
+      selectedHtml = ready.html
+      selectedBlockedImages = ready.blockedImages
+      selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
       selectedAttachments = cached.attachments
     }
 
@@ -352,13 +370,18 @@ Item {
       }
       var summary = Mail.summarize(payload, new Date())
       root.selectedMessage = summary
-      root.selectedBody = Mail.extractBody(payload.payload)
-      root.selectedHtml = Mail.extractHtml(payload.payload)
+      var decoded = Mail.extractBody(payload.payload)
+      var ready = Html.sanitize(Mail.extractHtml(payload.payload),
+        ({ allowRemoteImages: true }))
+      root.selectedBody = decoded
+      root.selectedHtml = ready.html
+      root.selectedBlockedImages = ready.blockedImages
+      root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
       root.selectedAttachments = Mail.attachments(payload.payload)
       cacheStore.putBody(messageId, ({
-        text: root.selectedBody.text,
-        source: root.selectedBody.source,
-        html: root.selectedHtml,
+        text: decoded.text,
+        source: decoded.source,
+        html: ready.html,
         attachments: root.selectedAttachments
       }))
       root.messages = Model.replaceById(root.messages, summary)
@@ -376,6 +399,8 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    selectedBlockedImages = 0
+    selectedTooHeavy = false
     selectedAttachments = []
     detailLoading = false
   }
@@ -604,6 +629,7 @@ Item {
     listLoaded = false
     seenIds = ({})
     notificationsPrimed = false
+    newMailPending = false
     cacheStore.clear()
     clearSelection()
   }
@@ -612,6 +638,7 @@ Item {
 
   onWindowOpenChanged: {
     if (!windowOpen) return
+    newMailPending = false
     clearNotice()
     if (!ready) return
     loadProfile()

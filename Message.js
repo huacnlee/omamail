@@ -14,12 +14,21 @@
 
 var B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
+// A lookup table rather than indexOf per character. Decoding a 60 KB body
+// means 60 000 scans of a 64-character string otherwise, which measured at
+// ~9 ms in V8 and several times that in QML's engine — a visible stutter on
+// every message, in the process that draws the whole desktop.
+var B64_LOOKUP = (function() {
+  var table = {}
+  for (var i = 0; i < B64_ALPHABET.length; i++) table[B64_ALPHABET.charAt(i)] = i
+  table["-"] = 62
+  table["_"] = 63
+  return table
+})()
+
 function b64Index(character) {
-  var index = B64_ALPHABET.indexOf(character)
-  if (index >= 0) return index
-  if (character === "-") return 62
-  if (character === "_") return 63
-  return -1
+  var value = B64_LOOKUP[character]
+  return value === undefined ? -1 : value
 }
 
 // Returns an array of byte values. Padding and stray whitespace or newlines —
@@ -30,8 +39,8 @@ function base64ToBytes(text) {
   var buffer = 0
   var bits = 0
   for (var i = 0; i < input.length; i++) {
-    var value = b64Index(input.charAt(i))
-    if (value < 0) continue
+    var value = B64_LOOKUP[input.charAt(i)]
+    if (value === undefined) continue
     buffer = (buffer << 6) | value
     bits += 6
     if (bits >= 8) {
@@ -86,8 +95,26 @@ function bytesToLatin1(bytes) {
   return out
 }
 
+// Qt.atob is native C++ and skips the per-character base64 loop entirely; it
+// hands back a string of raw bytes, which still needs UTF-8 decoding. The pure
+// JS path stays for the node tests, and as the fallback anywhere Qt is absent.
+function binaryStringToUtf8(binary) {
+  var bytes = []
+  for (var i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff)
+  return bytesToUtf8(bytes)
+}
+
 function decodeBase64Url(text) {
-  return bytesToUtf8(base64ToBytes(text))
+  var input = String(text || "")
+  if (input === "") return ""
+  if (typeof Qt !== "undefined" && typeof Qt.atob === "function") {
+    try {
+      return binaryStringToUtf8(Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/")))
+    } catch (e) {
+      // Fall through to the portable path rather than losing the message.
+    }
+  }
+  return bytesToUtf8(base64ToBytes(input))
 }
 
 function utf8Bytes(text) {

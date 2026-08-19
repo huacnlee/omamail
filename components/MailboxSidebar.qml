@@ -34,10 +34,21 @@ Item {
     return out
   }
 
+  // The rail's own edge. The list already draws one on its far side, so
+  // without this the icons sit on the same surface as the messages.
+  PanelSeparator {
+    id: edge
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    width: 1
+    foreground: root.textColor
+  }
+
   Flickable {
     id: flick
     anchors.left: parent.left
-    anchors.right: parent.right
+    anchors.right: edge.left
     anchors.top: parent.top
     anchors.bottom: footer.top
     anchors.margins: Style.space(6)
@@ -111,7 +122,7 @@ Item {
   Item {
     id: footer
     anchors.left: parent.left
-    anchors.right: parent.right
+    anchors.right: edge.left
     anchors.bottom: parent.bottom
     height: Style.space(30)
 

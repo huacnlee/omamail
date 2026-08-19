@@ -33,7 +33,6 @@
       "refreshIntervalSec": 120,
       "maxMessages": 25,
       "defaultQuery": "in:inbox",
-      "showUnreadCount": "On",
       "notifyNewMail": "On",
       "oauthPort": 9481,
       "openOnClick": "Window"
@@ -64,16 +63,6 @@
         "label": "Default search",
         "defaultValue": "in:inbox",
         "description": "Any Gmail search operator, for example `in:inbox -category:promotions`."
-      },
-      {
-        "key": "showUnreadCount",
-        "type": "enum",
-        "label": "Show unread count in bar",
-        "options": [
-          "On",
-          "Off"
-        ],
-        "defaultValue": "On"
       },
       {
         "key": "notifyNewMail",

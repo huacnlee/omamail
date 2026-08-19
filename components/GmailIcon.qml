@@ -14,8 +14,9 @@ Item {
   property real iconSize: Style.font.icon
   property color color: Color.foreground
   property color badgeColor: Color.urgent
-  property color badgeTextColor: Color.background
-  property string badgeText: ""
+  // A dot, not a count: the bar says "something arrived", the tooltip says
+  // how much, and the window says what.
+  property bool dot: false
   property bool open: false
   property bool crossed: false
 
@@ -82,29 +83,18 @@ Item {
     rotation: -45
   }
 
-  // The count sits on the corner rather than beside the icon so the bar slot
-  // stays one square whatever the number is.
+  // On the corner rather than beside the icon, so the bar slot stays one
+  // square whether or not anything is waiting.
   BorderSurface {
-    id: badge
-    visible: root.badgeText !== ""
-    height: Math.max(Style.space(9), parent.height * 0.56)
-    width: Math.max(height, label.implicitWidth + Style.space(4))
-    radius: height / 2
+    visible: root.dot
+    width: Math.max(Style.space(5), parent.width * 0.34)
+    height: width
+    radius: width / 2
     color: root.badgeColor
     anchors.right: parent.right
-    anchors.rightMargin: -parent.width * 0.12
+    anchors.rightMargin: -parent.width * 0.06
     anchors.top: parent.top
-    anchors.topMargin: -parent.height * 0.10
+    anchors.topMargin: -parent.height * 0.04
     borderSpec: Border.flat(Color.popups.background, 1)
-
-    Text {
-      id: label
-      anchors.centerIn: parent
-      text: root.badgeText
-      color: root.badgeTextColor
-      font.family: Style.font.family
-      font.pixelSize: Math.max(Style.space(7), parent.height * 0.66)
-      font.bold: true
-    }
   }
 }

@@ -386,11 +386,11 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(10)
 
-      Button {
+      IconTextButton {
+        iconName: "send"
         text: root.service && root.service.sending ? "Sending…" : "Send"
         foreground: root.textColor
-        bordered: true
-        fontSize: Style.font.bodySmall
+        fontFamily: root.panelFontFamily
         enabled: !!root.service && !root.service.sending
         onClicked: root.submit()
       }

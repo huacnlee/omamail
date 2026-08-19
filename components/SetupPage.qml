@@ -88,7 +88,6 @@ Column {
       anchors.topMargin: Style.space(2)
       iconSize: Style.font.displayLarge
       color: root.textColor
-      badgeColor: Color.urgent
       open: false
     }
 

@@ -114,6 +114,10 @@ Canvas {
       move(1.5, 9.5); line(4.5, 9.5); line(6, 11.5); line(10, 11.5); line(11.5, 9.5); line(14.5, 9.5)
       move(1.5, 9.5); line(3.5, 3); line(12.5, 3); line(14.5, 9.5); line(14.5, 13.5)
       line(1.5, 13.5); ctx.closePath()
+    } else if (root.name === "compose") {
+      move(2.5, 13.5); line(3.4, 10.4); line(11.2, 2.6); line(13.4, 4.8)
+      line(5.6, 12.6); ctx.closePath()
+      move(9.6, 4.2); line(11.8, 6.4)
     } else if (root.name === "check") {
       move(2.5, 8.5); line(6.5, 12.5); line(13.5, 4)
     } else if (root.name === "attachment") {

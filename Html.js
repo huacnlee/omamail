@@ -17,6 +17,39 @@
 
 var DROPPED_ELEMENTS = ["script", "style", "iframe", "object", "embed", "applet", "noscript"]
 
+// Qt lays rich text out synchronously on the GUI thread, and this plugin lives
+// inside the shell that draws the user's whole desktop. A message heavy enough
+// to make that layout take seconds does not just stall the reader — it stalls
+// the bar, the menu and every other panel. So the reader refuses documents past
+// these bounds and shows the plain-text part instead, with a way to override.
+var MAX_RICH_TEXT = 120000
+var MAX_ELEMENTS = 2500
+var MAX_IMAGES = 24
+
+function complexity(html) {
+  var text = String(html || "")
+  return {
+    length: text.length,
+    tags: (text.match(/<[a-zA-Z]/g) || []).length,
+    images: (text.match(/<img\b/gi) || []).length
+  }
+}
+
+function tooHeavyForRichText(html) {
+  var size = complexity(html)
+  return size.length > MAX_RICH_TEXT || size.tags > MAX_ELEMENTS
+}
+
+// A 1x1 image is a tracking pixel, never something to look at. Dropping them
+// removes both the beacon and a layout pass per message.
+function isTrackingPixel(tag) {
+  var width = tag.match(/\swidth\s*=\s*"?(\d+)/i)
+  var height = tag.match(/\sheight\s*=\s*"?(\d+)/i)
+  if (width && Number(width[1]) <= 2) return true
+  if (height && Number(height[1]) <= 2) return true
+  return /(width|height)\s*:\s*[012](\.\d+)?px/i.test(tag)
+}
+
 function stripElement(text, name) {
   var open = new RegExp("<" + name + "\\b[^>]*>[\\s\\S]*?<\\/" + name + "\\s*>", "gi")
   var lone = new RegExp("<\\/?" + name + "\\b[^>]*>", "gi")
@@ -54,22 +87,36 @@ function sanitize(html, options) {
       return safeHref(value) ? match : ""
     })
 
+  // Every image is a network fetch Qt performs while laying the document out,
+  // and every completed fetch triggers another layout pass. Tracking pixels
+  // are pure cost, and past the cap the rest are decoration.
   var blocked = 0
-  if (settings.allowRemoteImages !== true) {
-    text = text.replace(/<img\b[^>]*>/gi, function(tag) {
-      var source = tag.match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
-      if (!source) return tag
-      var value = source[2] !== undefined ? source[2]
-        : (source[3] !== undefined ? source[3] : source[4])
-      if (!isRemoteSource(value)) return tag
+  var kept = 0
+  var allowImages = settings.allowRemoteImages === true
+  var limit = Math.max(0, Math.floor(
+    settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
+
+  text = text.replace(/<img\b[^>]*>/gi, function(tag) {
+    var source = tag.match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
+    if (!source) return tag
+    var value = source[2] !== undefined ? source[2]
+      : (source[3] !== undefined ? source[3] : source[4])
+    if (!isRemoteSource(value)) return tag
+    if (isTrackingPixel(tag)) {
+      blocked++
+      return ""
+    }
+    if (!allowImages || kept >= limit) {
       blocked++
       // Removed rather than emptied: an <img> with no src still reserves a
       // broken-image box in Qt's layout, which reads as a rendering fault.
       return ""
-    })
-  }
+    }
+    kept++
+    return tag
+  })
 
-  return { html: text, blockedImages: blocked }
+  return { html: text, blockedImages: blocked, images: kept }
 }
 
 function hasRemoteImages(html) {
