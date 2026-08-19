@@ -19,7 +19,6 @@ Rectangle {
   // Two things live in this row: which mailbox you are in, and everything
   // else. The address switches accounts; the menu button opens app actions.
   signal switcherRequested(real sceneX, real sceneY)
-  signal menuRequested(real sceneX, real sceneY)
   property int accountCount: 1
 
   readonly property string initial: email === "" ? "?" : email.charAt(0).toUpperCase()
@@ -27,7 +26,6 @@ Rectangle {
   // Held while a popup this bar opened is on screen, so the popup reads as
   // belonging to it rather than as floating free.
   property bool switcherOpen: false
-  property bool menuOpen: false
 
   implicitHeight: Style.space(38)
   radius: Style.cornerRadius
@@ -63,32 +61,14 @@ Rectangle {
     visible: !root.collapsed
     anchors.left: avatar.right
     anchors.leftMargin: Style.space(8)
-    anchors.right: chevron.left
-    anchors.rightMargin: Style.space(4)
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
     text: root.email === "" ? "Not connected" : root.email
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     elide: Text.ElideMiddle
-  }
-
-  Button {
-    id: chevron
-    visible: !root.collapsed
-    anchors.right: parent.right
-    anchors.rightMargin: Style.space(4)
-    anchors.verticalCenter: parent.verticalCenter
-    text: "⋮"
-    tooltipText: "Menu"
-    foreground: root.dimColor
-    bordered: false
-    selected: root.menuOpen
-    fontSize: Style.font.bodySmall
-    onClicked: {
-      var scene = mapToGlobal(width / 2, height / 2)
-      root.menuRequested(scene.x, scene.y)
-    }
   }
 
   HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }

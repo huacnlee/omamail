@@ -267,19 +267,22 @@ Item {
             onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
           }
 
-          // Fetching mail is not an action on a message, so it sits with the
-          // mailbox rather than among Compose and the account menu.
+          // Next to the mark: this is the window's own menu, not an action on
+          // the mailbox. Anchored to the button's own edge so it lands in the
+          // same place however the control was pressed.
           IconButton {
+            id: menuButton
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage
-            iconName: "refresh"
-            tooltipText: root.service && root.service.listLoading
-              ? "Checking for mail…" : "Check mail · F5"
+            iconName: "menu"
+            tooltipText: "Menu"
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
-            enabled: root.ready && !(root.service && root.service.listLoading)
-            onClicked: if (root.service) root.service.refresh()
+            selected: appMenu.opened
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              appMenu.openAt(scene.x, scene.y)
+            }
           }
         }
 
@@ -335,6 +338,22 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(4)
 
+          // Checking for mail and writing one are both things you do to the
+          // mailbox as a whole, so they sit together. The menu is the window's
+          // own, and it stays on the left with the mark.
+          IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage
+            iconName: "refresh"
+            tooltipText: root.service && root.service.listLoading
+              ? "Checking for mail…" : "Check mail · F5"
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            enabled: root.ready && !(root.service && root.service.listLoading)
+            onClicked: if (root.service) root.service.refresh()
+          }
+
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && root.compact
@@ -388,9 +407,7 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
-          menuOpen: appMenu.opened
           switcherOpen: accountSwitcher.opened
-          onMenuRequested: function(sceneX, sceneY) { appMenu.openAt(sceneX, sceneY) }
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
@@ -657,36 +674,10 @@ Item {
           foreground: root.foreground
         }
 
-        // The menu has a control of its own rather than hiding behind the
-        // account line. A line of text that happens to be clickable is not an
-        // affordance — nothing about "how current the list is" suggests that
-        // pressing it opens anything — and at a narrow window this is the only
-        // route to the mailbox switcher and to settings.
-        IconButton {
-          id: menuButton
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(8)
-          anchors.verticalCenter: parent.verticalCenter
-          iconName: "menu"
-          tooltipText: "Menu"
-          foreground: root.dim
-          hoverColor: root.foreground
-          iconSize: Style.font.iconSmall
-          size: Style.space(20)
-          fontFamily: root.fontFamily
-          // The button's own left edge, so the menu hangs off the control
-          // rather than off wherever inside it the pointer happened to land.
-          selected: appMenu.opened
-          onClicked: {
-            var scene = mapToGlobal(0, 0)
-            appMenu.openAt(scene.x, scene.y)
-          }
-        }
-
         Text {
           id: accountLine
-          anchors.left: menuButton.right
-          anchors.leftMargin: Style.space(8)
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(14)
           // An invisible sibling still holds its place, so the hints must only
           // take room from this line while they are actually on screen.
           anchors.right: statusBar.hasNotice
