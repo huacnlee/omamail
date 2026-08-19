@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# The manifest is the contract with the shell. Every entry point it names has
+# to exist, or the plugin loads halfway and fails at the moment the user
+# clicks something.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+fail() { printf 'test_install.sh: %s\n' "$1" >&2; exit 1; }
+
+python3 -c "import json; json.load(open('manifest.json'))" || fail "manifest.json is not valid JSON"
+
+kinds=$(python3 -c "import json; print(' '.join(json.load(open('manifest.json'))['kinds']))")
+for kind in service bar-widget panel; do
+  case " $kinds " in *" $kind "*) ;; *) fail "manifest kinds must include $kind" ;; esac
+done
+
+for entry in service:Service.qml barWidget:BarWidget.qml panel:App.qml; do
+  key=${entry%%:*}
+  file=${entry##*:}
+  declared=$(python3 -c "import json; print(json.load(open('manifest.json'))['entryPoints'].get('$key',''))")
+  [ "$declared" = "$file" ] || fail "entryPoints.$key must be $file, found '$declared'"
+  [ -f "$file" ] || fail "$file is declared in the manifest but does not exist"
+done
+
+[ -x install.sh ] || fail "install.sh must be executable"
+grep -q 'plugin-backups' install.sh || fail "backups must not land inside the plugins directory"
+
+printf 'test_install.sh ok\n'
