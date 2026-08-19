@@ -372,6 +372,10 @@ Item {
   function openProjectPage() {
     Quickshell.execDetached(["xdg-open", "https://github.com/huacnlee/omamail"])
   }
+
+  function openAuthorPage() {
+    Quickshell.execDetached(["xdg-open", "https://x.com/huacnlee"])
+  }
   function openConsentScreen() { if (current) current.openConsentScreen() }
 
   signal replySent()

@@ -249,20 +249,6 @@ Item {
             font.pixelSize: Style.font.title
           }
 
-          Item {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact && !root.showPage
-            width: Style.space(8)
-            height: Style.space(18)
-
-            PanelSeparator {
-              anchors.centerIn: parent
-              width: 1
-              height: parent.height
-              foreground: root.foreground
-            }
-          }
-
           // Next to the mark: this is the window's own menu, not an action on
           // the mailbox. Anchored to the button's own edge so it lands in the
           // same place however the control was pressed.
@@ -791,6 +777,7 @@ Item {
         onSetupRequested: root.settingsVisible = true
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
+        onAuthorRequested: if (root.service) root.service.openAuthorPage()
       }
 
       // Every mailbox, with its own unread count, opened from the user bar.
