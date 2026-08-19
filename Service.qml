@@ -259,9 +259,10 @@ Item {
     if (!ready) return "Omamail · Not connected"
     var suffix = unreadTotal === 0 ? "No unread mail"
       : (unreadTotal === 1 ? "1 unread message" : unreadTotal + " unread messages")
-    if (accountCount <= 1)
-      return (accountEmail !== "" ? accountEmail : "Gmail") + " · " + suffix
-    return accountCount + " mailboxes · " + suffix
+    // The address, whatever the number of mailboxes. How many are configured is
+    // not something a tooltip on a mail icon is asked, and the count it used to
+    // give was of mailboxes rather than of anything waiting in them.
+    return (accountEmail !== "" ? accountEmail : "Omamail") + " · " + suffix
   }
 
   // The switcher's model: every mailbox, its count, and why it is not usable.

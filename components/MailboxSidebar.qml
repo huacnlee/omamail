@@ -22,6 +22,10 @@ Item {
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
+
+  // Forwarded to the user bar, which is the control those popups hang off.
+  property bool menuOpen: false
+  property bool switcherOpen: false
   signal menuRequested(real sceneX, real sceneY)
   signal switcherRequested(real sceneX, real sceneY)
 
@@ -148,6 +152,8 @@ Item {
       email: root.service ? root.service.accountEmail : ""
       accountCount: root.service ? root.service.accountCount : 1
       collapsed: root.collapsed
+      menuOpen: root.menuOpen
+      switcherOpen: root.switcherOpen
       onMenuRequested: function(sceneX, sceneY) { root.menuRequested(sceneX, sceneY) }
       onSwitcherRequested: function(sceneX, sceneY) { root.switcherRequested(sceneX, sceneY) }
     }
