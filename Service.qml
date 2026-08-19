@@ -234,7 +234,6 @@ Item {
   // ------------------------------------------------------------ aggregates
 
   property int unreadTotal: 0
-  property bool anyNewMail: false
   // Whether any mailbox at all is signed in. The first-run walkthrough keys on
   // this rather than on the mailbox in view: once one account works, a second
   // one that has not signed in yet is a row waiting in settings, not a reason
@@ -243,25 +242,21 @@ Item {
 
   function recount() {
     var total = 0
-    var pending = false
     var signedIn = false
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
       if (!host) continue
       total += host.inboxUnread
-      if (host.newMailPending) pending = true
       if (host.ready) signedIn = true
     }
     unreadTotal = total
-    anyNewMail = pending
     anyAccountReady = signedIn
   }
 
   // The bar answers for all of them: a badge that counted only the mailbox you
   // happen to be looking at would be worse than none.
-  readonly property bool newMailPending: anyNewMail
   readonly property string barTooltip: {
-    if (!ready) return "Gmail · Not connected"
+    if (!ready) return "Omamail · Not connected"
     var suffix = unreadTotal === 0 ? "No unread mail"
       : (unreadTotal === 1 ? "1 unread message" : unreadTotal + " unread messages")
     if (accountCount <= 1)
@@ -369,7 +364,6 @@ Item {
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
-      onNewMailPendingChanged: root.recount()
       onReplySent: root.replySent()
 
       Component.onCompleted: Qt.callLater(root.refreshCurrent)

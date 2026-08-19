@@ -136,7 +136,9 @@ Item {
     var next = service.selectOffset(delta)
     if (next === "") return
     cursorId = next
-    if (currentView === "reader") service.select(next)
+    // Moving is not opening. This used to open whatever it landed on while the
+    // reader was up, which made stepping through a list a way to mark half of
+    // it read without having looked at any of it. Enter and "o" open.
   }
 
   function startCompose(mode) {
@@ -397,7 +399,7 @@ Item {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.margins: Style.space(8)
+          anchors.margins: Style.space(14)
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           panelFontFamily: root.fontFamily
@@ -742,7 +744,7 @@ Item {
             ]
             return [
               ({ key: "j / k", label: "move" }),
-              ({ key: "\u21B5", label: "open" }),
+              ({ key: "o", label: "open" }),
               ({ key: "e", label: "archive" }),
               ({ key: "c", label: "compose" })
             ]
@@ -839,6 +841,9 @@ Item {
       Shortcut { sequence: "j"; enabled: !focusScope.typing; onActivated: root.moveCursor(1) }
       Shortcut { sequence: "k"; enabled: !focusScope.typing; onActivated: root.moveCursor(-1) }
       Shortcut { sequence: "Return"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
+      // "o" for open, next to j/k on the home row, so the whole read cycle can
+      // be driven without leaving it.
+      Shortcut { sequence: "o"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
       Shortcut { sequence: "e"; enabled: !focusScope.typing; onActivated: root.actOnCursor("archive") }
       Shortcut { sequence: "d"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
       Shortcut { sequence: "s"; enabled: !focusScope.typing; onActivated: if (root.service) root.service.toggleStar(root.cursorId) }

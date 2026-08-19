@@ -139,7 +139,6 @@ Item {
   // Mail that arrived since the list was last looked at. The bar shows a dot
   // for this and nothing else — an unread count that never reaches zero is a
   // permanent red mark, which stops meaning anything.
-  property bool newMailPending: false
 
   readonly property string setupState: Model.setupState({
     toolsPresent: authManager.toolsPresent || !authManager.toolsChecked,
@@ -196,11 +195,15 @@ Item {
   function refreshCounts() {
     if (!ready || countLoading) return
     countLoading = true
-    apiClient.getLabelCounts("INBOX", function(counts, error) {
+    // Counted with the same query the Unread mailbox uses, not from the INBOX
+    // label. The label counts every categorised message too, which is how this
+    // reached 2483 on a real account — a number that is never zero, can only be
+    // reported as "999+", and cannot tell anyone whether something is waiting.
+    apiClient.listMessages(Model.mailbox("unread").query, 1, "", function(page, error) {
       root.countLoading = false
-      if (error || !counts) return
+      if (error || !page) return
       var before = root.inboxUnread
-      root.inboxUnread = counts.unread
+      root.inboxUnread = page.estimate
 
       // A mailbox that gains unread mail earns a look, whether or not it is the
       // one on screen. The badge and the notification are both raised from a
@@ -218,7 +221,7 @@ Item {
       // nothing, because there is nothing to compare against.
       var first = !root.countPrimed
       root.countPrimed = true
-      if ((first || counts.unread > before) && !root.listLoading)
+      if ((first || page.estimate > before) && !root.listLoading)
         root.loadMessages(false)
     })
   }
@@ -311,7 +314,19 @@ Item {
         if (page.ids.length === 0) {
           root.listLoading = false
           root.listLoaded = true
-          if (!append) root.messages = []
+          if (!append) {
+            root.messages = []
+            // An empty answer is an answer, and it has to reach the cache. Only
+            // a non-empty result was ever written back, so a mailbox that had
+            // emptied kept its old rows on disk — and cache-first painted them
+            // again on every visit before the live load wiped them a moment
+            // later. Reading mail elsewhere made Unread do exactly that.
+            cacheStore.putQuery(root.cacheKey, ({
+              summaries: [],
+              estimate: root.resultEstimate,
+              nextPageToken: root.nextPageToken
+            }))
+          }
           root.lastError = ""
           root.listRefreshed()
           return
@@ -357,10 +372,6 @@ Item {
     lastError = ""
     lastSyncedMs = Date.now()
     listRefreshed()
-
-    // Looking at the list is what marks it seen.
-    if (windowOpen) newMailPending = false
-    else if (arrivals.length > 0) newMailPending = true
 
     if (notifyNewMail && arrivals.length > 0) notify(arrivals)
   }
@@ -689,7 +700,6 @@ Item {
     seenIds = ({})
     notificationsPrimed = false
     countPrimed = false
-    newMailPending = false
     cacheStore.clear()
     bodyCache.clear()
     clearSelection()
@@ -699,7 +709,6 @@ Item {
 
   onWindowOpenChanged: {
     if (!windowOpen) return
-    newMailPending = false
     clearNotice()
     if (!ready) return
     loadProfile()

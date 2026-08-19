@@ -6,7 +6,7 @@ A Quickshell plugin that reads, triages, and answers your mail over the
 official Gmail API. It runs inside the `omarchy-shell` process you already
 have, follows your active theme, and puts an unread count in the bar.
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/3a554014-bcde-40af-a133-8e599a4c34e2" />
+<img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
 And with mini size mode:
 
@@ -95,7 +95,7 @@ and the client itself are console-only; there is no CLI for them.
 | Key | What it does |
 | --- | --- |
 | `j` / `k` | Move down / up |
-| `Enter` | Open the selected message |
+| `Enter` or `o` | Open the selected message |
 | `Esc` | Back to the list; close the window from the list |
 | `e` | Archive |
 | `d` | Move to trash |

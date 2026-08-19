@@ -18,38 +18,101 @@ Flickable {
   signal selected(string key)
   signal chipHovered(int index, bool isHovered)
 
+  // Scrolling a six-segment control in a narrow window is worse than not
+  // offering two of the segments: All mail and Trash are places you go looking
+  // for something, not places you work from, and search reaches both. The
+  // mailbox in view is never dropped, however rarely it is used.
+  readonly property bool crowded: measure.implicitWidth > width && width > 0
+  readonly property var mailboxes: {
+    var all = Model.MAILBOXES
+    if (!crowded) return all
+    var out = []
+    for (var i = 0; i < all.length; i++) {
+      if (!all[i].optional || all[i].key === root.current) out.push(all[i])
+    }
+    return out
+  }
+
   width: parent ? parent.width : 0
-  implicitHeight: chips.implicitHeight
-  contentWidth: chips.implicitWidth
-  contentHeight: chips.implicitHeight
+  implicitHeight: track.height
+  contentWidth: track.width
+  contentHeight: track.height
   clip: true
   boundsBehavior: Flickable.StopAtBounds
   flickableDirection: Flickable.HorizontalFlick
   interactive: contentWidth > width
 
+  // One segmented control rather than loose chips. Separate chips left the
+  // selected one's fill floating at a different left edge from the logo above
+  // and the message text below; a single track has one edge, and that edge is
+  // the one everything else lines up on.
+  // Measured, not guessed: the labels are theme-dependent and this has to know
+  // the width of the full set before deciding whether to show it.
   Row {
-    id: chips
-    spacing: Style.space(4)
-
+    id: measure
+    visible: false
+    spacing: 0
     Repeater {
       model: Model.MAILBOXES
-
       Button {
         required property var modelData
-        required property int index
-
-        // Only the unread mailbox carries a count: repeating it on Inbox says
-        // the same number twice, and the bar badge already says it once.
-        text: modelData.key === "unread" && root.unread > 0
-          ? modelData.label + " " + root.unread
-          : modelData.label
-        foreground: root.textColor
+        text: modelData.label
         bordered: false
-        selected: root.current === modelData.key
-        hasCursor: root.cursorIndex === index
         fontSize: Style.font.bodySmall
-        onClicked: root.selected(modelData.key)
-        onHovered: function(isHovered) { root.chipHovered(index, isHovered) }
+      }
+    }
+  }
+
+  Rectangle {
+    id: track
+    width: chips.implicitWidth
+    height: chips.implicitHeight
+    radius: Style.cornerRadius
+    color: "transparent"
+    border.width: 1
+    border.color: Style.normalBorderFor(root.textColor, Color.accent)
+
+    Row {
+      id: chips
+      spacing: 0
+
+      Repeater {
+        model: root.mailboxes
+
+        Item {
+          id: segment
+          required property var modelData
+          required property int index
+
+          implicitWidth: chip.implicitWidth
+          implicitHeight: chip.implicitHeight
+
+          // Segments share an edge instead of standing apart, so the row reads
+          // as one control with a current position.
+          Rectangle {
+            visible: segment.index > 0
+            width: 1
+            height: parent.height
+            color: track.border.color
+          }
+
+          Button {
+            id: chip
+            anchors.fill: parent
+            // Only the unread mailbox carries a count: repeating it on Inbox
+            // says the same number twice, and the bar already says it once.
+            text: segment.modelData.key === "unread" && root.unread > 0
+              ? segment.modelData.label + " " + root.unread
+              : segment.modelData.label
+            foreground: root.textColor
+            bordered: false
+            selected: root.current === segment.modelData.key
+            hasCursor: root.cursorIndex === segment.index
+            fontSize: Style.font.bodySmall
+            onClicked: root.selected(segment.modelData.key)
+            onHovered: function(isHovered) { root.chipHovered(segment.index, isHovered) }
+          }
+        }
       }
     }
   }

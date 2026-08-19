@@ -76,19 +76,22 @@ Rectangle {
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
 
+    // The subject leads. It is what the message is, and it is what you scan a
+    // list for; the sender had the top line and the weight, which put the
+    // emphasis on who wrote rather than on what about.
     Item {
       width: parent.width
-      implicitHeight: Math.max(sender.implicitHeight, time.implicitHeight)
+      implicitHeight: Math.max(subject.implicitHeight, time.implicitHeight)
 
       Text {
-        id: sender
+        id: subject
         anchors.left: parent.left
         anchors.right: time.left
         anchors.rightMargin: Style.space(8)
-        text: root.summary.from.display
+        text: root.summary.subject
         color: root.textColor
         font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
+        font.pixelSize: Style.font.body
         font.bold: root.summary.unread
         elide: Text.ElideRight
       }
@@ -96,7 +99,7 @@ Rectangle {
       Text {
         id: time
         anchors.right: parent.right
-        anchors.baseline: sender.baseline
+        anchors.baseline: subject.baseline
         text: root.summary.time
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -106,11 +109,10 @@ Rectangle {
 
     Text {
       width: parent.width
-      text: root.summary.subject
-      color: root.summary.unread ? root.textColor : root.dimColor
+      text: root.summary.from.display
+      color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
-      font.bold: root.summary.unread
       elide: Text.ElideRight
     }
 
