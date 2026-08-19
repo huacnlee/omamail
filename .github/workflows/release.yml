@@ -1,0 +1,51 @@
+name: Release
+
+# Tag-driven: pushing v1.2.3 publishes the release for that commit. Nothing
+# else creates one, so the tag is the single record of what shipped.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Release notes are generated from the history since the last tag, so
+          # a shallow clone would produce an empty changelog.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The manifest version is what Omarchy installs and what the marketplace
+      # lists. A tag that disagrees with it would publish a release describing a
+      # version nobody can install, so it fails here instead.
+      - name: Check the tag matches the manifest
+        run: |
+          set -eu
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p 'require("./manifest.json").version')"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag $GITHUB_REF_NAME does not match manifest version $manifest" >&2
+            exit 1
+          fi
+          echo "version $manifest"
+
+      # The parsing, formatting and decision rules are plain JS and the source
+      # checks are shell, so the whole suite runs without a compositor. Only
+      # qmllint needs the Omarchy shell on the import path, which a runner does
+      # not have — that one stays a local gate.
+      - name: Test
+        run: make test
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
