@@ -6,7 +6,7 @@ const model = load("Model.js")
 // ------------------------------------------------------------- mailboxes
 
 assert.strictEqual(model.mailbox("inbox").query, "in:inbox")
-assert.strictEqual(model.mailbox("unread").query, "in:inbox is:unread")
+assert.strictEqual(model.mailbox("unread").query, "in:inbox is:unread category:primary")
 assert.strictEqual(model.mailbox("nonsense").key, "inbox", "an unknown key falls back to the inbox")
 assert.strictEqual(model.mailboxIndex("starred"), 2)
 
