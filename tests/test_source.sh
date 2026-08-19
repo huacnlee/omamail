@@ -34,4 +34,10 @@ for file in Html.js Model.js GmailApi.js Message.js; do
   fi
 done
 
+# 4. barForeground is a qs.Ui.Panel property. A BarWidget that reads it gets
+#    undefined, and an undefined colour paints nothing at all.
+if grep -vE '^\s*//' BarWidget.qml | grep -n 'barForeground'; then
+  fail "BarWidget has no barForeground; read bar.foreground instead"
+fi
+
 printf 'test_source.sh ok\n'

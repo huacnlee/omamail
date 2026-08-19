@@ -14,6 +14,11 @@ BarWidget {
   readonly property var gmail: bar && bar.shell
     ? bar.shell.serviceFor("gmail.omarchy") : null
 
+  // `barForeground` belongs to qs.Ui.Panel, not to BarWidget: reading it here
+  // yields undefined, and assigning undefined to a colour leaves the icon
+  // unpainted. The bar itself is the source.
+  readonly property color foreground: bar ? bar.foreground : Color.foreground
+
   // The service is a singleton shared with the window, and the shell hands
   // plugin settings to the bar widget rather than to the service, so the
   // widget is what pushes them across.
@@ -44,8 +49,8 @@ BarWidget {
     // here refers to `root` — it would be ambiguous about which one it meant.
     readonly property bool connected: !!root.gmail && root.gmail.ready
     readonly property color glyphColor: connected
-      ? root.barForeground
-      : Qt.darker(root.barForeground, 1.55)
+      ? root.foreground
+      : Qt.darker(root.foreground, 1.55)
     readonly property string countText: root.gmail ? root.gmail.badgeText : ""
 
     iconComponent: Component {

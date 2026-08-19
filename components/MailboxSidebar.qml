@@ -5,8 +5,12 @@ import qs.Ui
 import "../Model.js" as Model
 
 // The left column: the six built-in mailboxes, then whatever labels the user
-// has made. Collapsed to a strip of initials on medium windows, gone entirely
-// on narrow ones, where MailboxTabs takes over.
+// has made.
+//
+// Icon-first and collapsed by default. A mail window spends its width on the
+// list and the message, not on six words that never change — so the rail keeps
+// the counts visible, names everything through tooltips, and expands only when
+// somebody asks for it.
 Item {
   id: root
 
@@ -15,10 +19,11 @@ Item {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
-  property bool collapsed: false
+  property bool collapsed: true
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
+  signal collapseToggled()
 
   readonly property var userLabels: {
     var all = root.service ? root.service.labels : []
@@ -31,8 +36,11 @@ Item {
 
   Flickable {
     id: flick
-    anchors.fill: parent
-    anchors.margins: Style.space(8)
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.bottom: footer.top
+    anchors.margins: Style.space(6)
     contentWidth: width
     contentHeight: column.implicitHeight
     clip: true
@@ -50,6 +58,7 @@ Item {
         Entry {
           required property var modelData
           label: modelData.label
+          icon: modelData.icon
           count: modelData.key === "inbox" && root.service ? root.service.inboxUnread : 0
           selected: !!root.service && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === ""
@@ -59,7 +68,7 @@ Item {
 
       Item {
         width: parent.width
-        implicitHeight: Style.space(14)
+        implicitHeight: Style.space(12)
         visible: root.userLabels.length > 0
 
         PanelSeparator {
@@ -71,16 +80,11 @@ Item {
 
       PanelSectionHeader {
         visible: root.userLabels.length > 0 && !root.collapsed
-        leftPadding: Style.space(10)
+        leftPadding: Style.space(8)
+        bottomPadding: Style.space(3)
         text: "LABELS"
         foreground: root.textColor
         fontFamily: root.panelFontFamily
-      }
-
-      Item {
-        width: parent.width
-        implicitHeight: Style.space(4)
-        visible: root.userLabels.length > 0 && !root.collapsed
       }
 
       Repeater {
@@ -89,6 +93,10 @@ Item {
         Entry {
           required property var modelData
           label: modelData.name
+          // User labels have no glyph of their own, so they take a tag drawn
+          // from their own initial — enough to tell two apart in the rail.
+          icon: ""
+          initial: modelData.name.substring(0, 1).toUpperCase()
           count: modelData.unread
           selected: !!root.service
             && root.service.searchQuery === "label:" + modelData.rawName
@@ -98,31 +106,84 @@ Item {
     }
   }
 
-  // A row that shows its full name when there is room and its first character
-  // when there is not. The count survives the collapse as a dot: it is the
-  // reason to look at this column at all.
+  // The toggle sits at the bottom, out of the way of the mailboxes, and points
+  // the way the rail will move.
+  Item {
+    id: footer
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: Style.space(30)
+
+    PanelSeparator {
+      anchors.top: parent.top
+      width: parent.width
+      foreground: root.textColor
+    }
+
+    Button {
+      anchors.centerIn: parent
+      text: root.collapsed ? "»" : "«"
+      tooltipText: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar"
+      foreground: root.dimColor
+      bordered: false
+      fontSize: Style.font.bodySmall
+      onClicked: root.collapseToggled()
+    }
+  }
+
+  // One row: an icon that is always there, a name that appears when there is
+  // room, and a count that survives the collapse as a dot.
   component Entry: Rectangle {
     id: entry
     required property string label
+    property string icon: ""
+    property string initial: ""
     property int count: 0
     property bool selected: false
     signal activated()
 
     width: column.width
-    implicitHeight: Style.space(30)
+    implicitHeight: Style.space(28)
     radius: Style.cornerRadius
     color: entry.selected
       ? Style.selectedFillFor(root.textColor, root.accentColor)
       : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
-    Text {
+    ActionIcon {
+      id: glyph
+      visible: entry.icon !== ""
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(10)
+      anchors.leftMargin: root.collapsed
+        ? (parent.width - width) / 2 : Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      name: entry.icon
+      iconSize: Style.font.icon
+      color: entry.selected ? root.textColor : root.dimColor
+    }
+
+    Text {
+      id: initialMark
+      visible: entry.icon === ""
+      anchors.horizontalCenter: glyph.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.font.icon
+      horizontalAlignment: Text.AlignHCenter
+      text: entry.initial
+      color: entry.selected ? root.textColor : root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+    }
+
+    Text {
+      visible: !root.collapsed
+      anchors.left: glyph.right
+      anchors.leftMargin: Style.space(9)
       anchors.right: badge.visible ? badge.left : parent.right
       anchors.rightMargin: Style.space(6)
       anchors.verticalCenter: parent.verticalCenter
-      horizontalAlignment: root.collapsed ? Text.AlignHCenter : Text.AlignLeft
-      text: root.collapsed ? entry.label.substring(0, 1) : entry.label
+      text: entry.label
       color: entry.selected ? root.textColor : root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
@@ -132,10 +193,10 @@ Item {
 
     Text {
       id: badge
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
       visible: entry.count > 0 && !root.collapsed
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
       text: Model.badgeText(entry.count, 999)
       color: root.accentColor
       font.family: root.panelFontFamily
@@ -146,21 +207,23 @@ Item {
     Rectangle {
       visible: entry.count > 0 && root.collapsed
       anchors.right: parent.right
-      anchors.rightMargin: Style.space(4)
+      anchors.rightMargin: Style.space(3)
       anchors.top: parent.top
-      anchors.topMargin: Style.space(5)
-      width: Style.space(4)
+      anchors.topMargin: Style.space(4)
+      width: Style.space(5)
       height: width
       radius: width / 2
       color: root.accentColor
     }
 
-    HoverHandler { id: hover }
+    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: entry.activated() }
 
+    // The tooltip is how the rail stays usable while collapsed, and it carries
+    // the count too, which the dot can only hint at.
     PanelToolTip {
-      visible: root.collapsed && hover.hovered
-      text: entry.label
+      visible: hover.hovered
+      text: entry.count > 0 ? entry.label + " · " + entry.count : entry.label
       fontFamily: root.panelFontFamily
     }
   }

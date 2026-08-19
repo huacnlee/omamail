@@ -212,27 +212,99 @@ function missingScopeMessage(missing) {
     + " permission. Sign in again and leave every checkbox ticked"
 }
 
-function htmlPage(title, heading, body) {
-  return "<!doctype html><meta charset=\"utf-8\"><title>" + title + "</title>"
-    + "<style>:root{color-scheme:light dark}body{font-family:system-ui;background:Canvas;color:CanvasText;"
-    + "display:grid;place-items:center;height:100vh;margin:0}"
-    + "main{max-width:32rem;padding:2rem;border:1px solid GrayText;border-radius:.5rem}</style>"
-    + "<main><h1>" + heading + "</h1>" + body + "</main>"
+// Content-Length is a BYTE count. The old page said "Returning to Omarchy
+// Gmail\u2026", whose ellipsis is one JS character and three UTF-8 bytes, so
+// the browser was told to expect a shorter response than it got and rendered
+// a truncated page. Measuring properly means the copy is free to use any
+// character it likes.
+function byteLength(text) {
+  var value = String(text || "")
+  var bytes = 0
+  for (var i = 0; i < value.length; i++) {
+    var code = value.charCodeAt(i)
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
+      bytes += 4
+      i++
+    } else if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else bytes += 3
+  }
+  return bytes
+}
+
+function defaultTheme() {
+  return {
+    background: "#131313",
+    foreground: "#DEDEDE",
+    accent: "#077CFD",
+    urgent: "#FF5257",
+    fontFamily: "monospace"
+  }
+}
+
+// The page the browser lands on after Google redirects. It is the only part of
+// this app that renders outside Quickshell, so it takes the active Omarchy
+// theme with it rather than inventing a look of its own: same monospace, same
+// square corners, same hairline border at 40% foreground.
+function themedPage(theme, options) {
+  var palette = theme || defaultTheme()
+  var settings = options || {}
+  var fg = String(palette.foreground || "#DEDEDE")
+  var bg = String(palette.background || "#131313")
+  var mark = settings.failed ? String(palette.urgent || "#FF5257")
+    : String(palette.accent || "#077CFD")
+  var family = String(palette.fontFamily || "monospace")
+
+  return "<!doctype html><html><head><meta charset=\"utf-8\">"
+    + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    + "<title>" + settings.title + "</title><style>"
+    + "*{box-sizing:border-box}"
+    + "html,body{height:100%}"
+    + "body{margin:0;background:" + bg + ";color:" + fg + ";"
+    + "font-family:\"CaskaydiaMono Nerd Font\",\"JetBrains Mono\"," + family + ",ui-monospace,monospace;"
+    + "font-size:13px;line-height:1.7;display:flex;align-items:center;justify-content:center;padding:24px}"
+    + "main{width:100%;max-width:420px;border:1px solid " + fg + "66;padding:28px 30px}"
+    + "svg{display:block;margin-bottom:18px}"
+    + "h1{margin:0 0 10px;font-size:16px;font-weight:700;letter-spacing:-0.01em}"
+    + "p{margin:0;color:" + fg + "a6}"
+    + "p+p{margin-top:14px;font-size:11px;color:" + fg + "70}"
+    + "b{color:" + fg + ";font-weight:700}"
+    + "</style></head><body><main>"
+    + "<svg width=\"26\" height=\"26\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"" + mark + "\" "
+    + "stroke-width=\"1.3\" stroke-linejoin=\"round\">"
+    + "<rect x=\"1\" y=\"3.5\" width=\"14\" height=\"9\"/>"
+    + "<path d=\"" + (settings.failed ? "M1 3.5 L8 8.5 L15 3.5" : "M1 3.5 L8 0.8 L15 3.5") + "\"/>"
+    + "</svg>"
+    + "<h1>" + settings.heading + "</h1>"
+    + settings.body
+    + "</main></body></html>"
 }
 
 function httpResponse(statusLine, body) {
   return "HTTP/1.1 " + statusLine + "\r\nContent-Type: text/html; charset=utf-8\r\n"
-    + "Cache-Control: no-store\r\nContent-Length: " + body.length
+    + "Cache-Control: no-store\r\nContent-Length: " + byteLength(body)
     + "\r\nConnection: close\r\n\r\n" + body
 }
 
-function successResponse() {
-  return httpResponse("200 OK", htmlPage("Omarchy Gmail", "Authorization complete",
-    "<p>Returning to Omarchy Gmail…</p><p><small>If this tab stays open, it is safe to close.</small></p>"
-    + "<script>setTimeout(function(){window.close()},150)</script>"))
+function successResponse(theme) {
+  return httpResponse("200 OK", themedPage(theme, {
+    title: "Omarchy Gmail",
+    heading: "Mailbox connected",
+    failed: false,
+    body: "<p>Omarchy Gmail can read this mailbox now. "
+      + "Switch back to the window \u2014 your mail is already loading.</p>"
+      + "<p>This tab closes itself. If it stays open, it is safe to close.</p>"
+      + "<script>setTimeout(function(){window.close()},600)<\/script>"
+  }))
 }
 
-function failureResponse() {
-  return httpResponse("400 Bad Request", htmlPage("Authorization failed",
-    "Authorization failed", "<p>Return to Omarchy for details.</p>"))
+function failureResponse(theme, reason) {
+  var detail = redact(String(reason || ""))
+  return httpResponse("400 Bad Request", themedPage(theme, {
+    title: "Sign-in failed",
+    heading: "Sign-in did not finish",
+    failed: true,
+    body: "<p>" + (detail ? detail : "Google did not complete the authorization.") + "</p>"
+      + "<p>Close this tab and try again from the Omarchy Gmail window.</p>"
+  }))
 }

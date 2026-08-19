@@ -9,6 +9,14 @@ assert.strictEqual(model.mailbox("inbox").query, "in:inbox")
 assert.strictEqual(model.mailbox("unread").query, "in:inbox is:unread")
 assert.strictEqual(model.mailbox("nonsense").key, "inbox", "an unknown key falls back to the inbox")
 assert.strictEqual(model.mailboxIndex("starred"), 2)
+
+// The sidebar is icon-first, so every mailbox needs a glyph that ActionIcon
+// actually draws. A missing one renders as nothing at all.
+const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash"]
+for (const box of model.MAILBOXES) {
+  assert.ok(DRAWN.indexOf(box.icon) >= 0, box.key + " has no drawable icon: " + box.icon)
+  assert.ok(box.label.length > 0, box.key + " needs a label for its tooltip")
+}
 assert.strictEqual(model.mailboxIndex(""), 0)
 
 // A typed search replaces the mailbox query outright rather than being ANDed

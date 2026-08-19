@@ -136,15 +136,43 @@ assert.strictEqual(
   "a=1&b=two%20words")
 
 // ----------------------------------------------------------- browser pages
+//
+// This page is the only part of the app that renders outside Quickshell, so it
+// carries the active theme rather than inventing a look of its own.
 
-const success = oauth.successResponse()
+const theme = {
+  background: "#101315", foreground: "#cacccc",
+  accent: "#7aa2f7", urgent: "#a55555", fontFamily: "monospace"
+}
+const success = oauth.successResponse(theme)
 assert.ok(success.indexOf("HTTP/1.1 200 OK") === 0)
-assert.ok(success.indexOf("Content-Length: ") > 0)
-assert.ok(oauth.failureResponse().indexOf("HTTP/1.1 400 Bad Request") === 0)
+assert.ok(success.indexOf("#101315") > 0, "the theme background reaches the page")
+assert.ok(success.indexOf("#7aa2f7") > 0, "so does the accent")
+assert.ok(success.indexOf("Mailbox connected") > 0)
 
-// The listener writes bytes, so the declared length has to match the body it
-// actually sends or the browser hangs waiting for the rest.
-const length = Number(success.match(/Content-Length: (\d+)/)[1])
-assert.strictEqual(success.substring(success.indexOf("\r\n\r\n") + 4).length, length)
+const failure = oauth.failureResponse(theme, "Google sign-in was cancelled")
+assert.ok(failure.indexOf("HTTP/1.1 400 Bad Request") === 0)
+assert.ok(failure.indexOf("#a55555") > 0, "a failure takes the urgent colour")
+assert.ok(failure.indexOf("Google sign-in was cancelled") > 0)
+
+// Nothing from the error path may carry a credential onto a web page.
+assert.ok(oauth.failureResponse(theme, "bad ya29.abcDEF123 token").indexOf("ya29.") < 0)
+
+// Called with no theme at all it still renders, because a listener that
+// answers nothing leaves the browser hanging on a blank tab.
+assert.ok(oauth.successResponse().indexOf("HTTP/1.1 200 OK") === 0)
+
+// Content-Length is a BYTE count. Measuring it in JS characters truncated the
+// response for any page containing a multi-byte character — which the old
+// page did, with its ellipsis.
+function byteLen(text) { return Buffer.byteLength(text, "utf8") }
+for (const page of [success, failure, oauth.successResponse()]) {
+  const declared = Number(page.match(/Content-Length: (\d+)/)[1])
+  const body = page.substring(page.indexOf("\r\n\r\n") + 4)
+  assert.strictEqual(declared, byteLen(body), "declared length must match the bytes sent")
+}
+assert.strictEqual(oauth.byteLength("Gmail\u2026"), 8, "an ellipsis is three bytes, not one")
+assert.strictEqual(oauth.byteLength("\u4f60\u597d"), 6)
+assert.strictEqual(oauth.byteLength(""), 0)
 
 console.log("test_oauth.js ok")

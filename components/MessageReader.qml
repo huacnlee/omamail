@@ -20,22 +20,21 @@ Item {
   required property color dimColor
   required property color dimmerColor
   required property string panelFontFamily
-  property bool allowRemoteImages: false
   property bool forcePlainText: false
   property bool showBack: false
 
   signal backRequested()
-  signal loadImagesRequested()
   signal togglePlainTextRequested()
   signal composeRequested(string mode)
   signal actionRequested(string action)
 
   readonly property var summary: service ? service.selectedMessage : null
   readonly property string rawHtml: service ? service.selectedHtml : ""
-  readonly property var sanitized: Html.sanitize(rawHtml,
-    ({ allowRemoteImages: root.allowRemoteImages }))
+  // Images load. Qt's rich text engine fetches them for real, so the sender
+  // learns when the message was opened — a deliberate trade for mail that
+  // looks like mail.
+  readonly property var sanitized: Html.sanitize(rawHtml, ({ allowRemoteImages: true }))
   readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText
-  readonly property int blockedImages: root.htmlAvailable ? root.sanitized.blockedImages : 0
 
   Text {
     anchors.centerIn: parent
@@ -126,52 +125,11 @@ Item {
     }
   }
 
-  // Remote images are a tracking channel, so the choice is explicit and it is
-  // per message: the banner comes back on the next one.
-  Rectangle {
-    id: imageBanner
-    visible: root.blockedImages > 0
-    anchors.top: headerBlock.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.leftMargin: Style.space(14)
-    anchors.rightMargin: Style.space(14)
-    anchors.topMargin: Style.space(8)
-    implicitHeight: Style.space(30)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-    border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
-      text: root.blockedImages === 1
-        ? "1 remote image blocked"
-        : root.blockedImages + " remote images blocked"
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    Button {
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(6)
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Show images"
-      foreground: root.textColor
-      bordered: false
-      fontSize: Style.font.caption
-      onClicked: root.loadImagesRequested()
-    }
-  }
-
   // ------------------------------------------------------------------ body
 
   Flickable {
     id: bodyFlick
-    anchors.top: imageBanner.visible ? imageBanner.bottom : headerBlock.bottom
+    anchors.top: headerBlock.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: footer.top
@@ -206,6 +164,14 @@ Item {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+
+      // NoButton so selecting text still works; this exists only to turn the
+      // I-beam into a hand while a link is under the pointer.
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        cursorShape: bodyText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
+      }
     }
   }
 

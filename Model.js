@@ -7,9 +7,11 @@
 // The mailboxes are Gmail search queries rather than label ids: `is:unread`
 // and `in:anywhere` have no label to point at, and a query keeps every entry
 // on the same footing.
+// `icon` names an ActionIcon glyph. The sidebar is icon-first and collapsed by
+// default, so a mailbox without a drawing would simply be invisible.
 var MAILBOXES = [
   { key: "inbox", label: "Inbox", query: "in:inbox", labelId: "INBOX", icon: "inbox" },
-  { key: "unread", label: "Unread", query: "in:inbox is:unread", labelId: "UNREAD", icon: "dot" },
+  { key: "unread", label: "Unread", query: "in:inbox is:unread", labelId: "UNREAD", icon: "unread" },
   { key: "starred", label: "Starred", query: "is:starred", labelId: "STARRED", icon: "star" },
   { key: "sent", label: "Sent", query: "in:sent", labelId: "SENT", icon: "send" },
   { key: "all", label: "All mail", query: "in:anywhere -in:spam -in:trash", labelId: "", icon: "archive" },

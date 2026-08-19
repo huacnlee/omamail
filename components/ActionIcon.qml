@@ -99,6 +99,23 @@ Canvas {
     } else if (root.name === "back") {
       move(9, 3); line(4, 8); line(9, 13)
       move(4, 8); line(14, 8)
+    } else if (root.name === "eye" || root.name === "eyeOff") {
+      // Almond outline, then the pupil as its own subpath so the two do not
+      // join, and a slash for the hidden state.
+      move(1.5, 8)
+      ctx.bezierCurveTo(4 * s, 3.5 * s, 12 * s, 3.5 * s, 14.5 * s, 8 * s)
+      ctx.bezierCurveTo(12 * s, 12.5 * s, 4 * s, 12.5 * s, 1.5 * s, 8 * s)
+      move(10.2, 8)
+      arc(8, 8, 2.2, 0, Math.PI * 2)
+      if (root.name === "eyeOff") {
+        move(3, 13.2); line(13, 2.8)
+      }
+    } else if (root.name === "inbox") {
+      move(1.5, 9.5); line(4.5, 9.5); line(6, 11.5); line(10, 11.5); line(11.5, 9.5); line(14.5, 9.5)
+      move(1.5, 9.5); line(3.5, 3); line(12.5, 3); line(14.5, 9.5); line(14.5, 13.5)
+      line(1.5, 13.5); ctx.closePath()
+    } else if (root.name === "check") {
+      move(2.5, 8.5); line(6.5, 12.5); line(13.5, 4)
     } else if (root.name === "attachment") {
       move(13, 7); line(7.5, 12.5)
       arc(5, 10, 3.5, Math.PI / 4, Math.PI * 1.25)

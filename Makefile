@@ -1,6 +1,6 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := Service.qml BarWidget.qml App.qml \
-	AuthManager.qml GmailApiClient.qml \
+	AuthManager.qml GmailApiClient.qml CacheStore.qml \
 	components/GmailIcon.qml \
 	components/MailboxSidebar.qml \
 	components/MailboxTabs.qml \
@@ -10,7 +10,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
 	components/MessageReader.qml \
-	components/ComposeWindow.qml \
+	components/ComposeView.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
 	components/SetupPage.qml \
@@ -28,6 +28,7 @@ test-js:
 	node tests/test_gmail_api.js
 	node tests/test_message.js
 	node tests/test_html.js
+	node tests/test_cache.js
 	node tests/test_model.js
 
 test-shell:
