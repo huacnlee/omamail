@@ -15,19 +15,22 @@ Three plugin entry points (`manifest.kinds`):
 |---|---|---|
 | `service` | `Service.qml` | Shared singleton: auth, API, mailbox state, unread polling, new-mail notifications. Lives whether or not the window is open. |
 | `bar-widget` | `BarWidget.qml` | Envelope icon + unread badge in the bar. Left click opens the app window. |
-| `panel` | `App.qml` | The application window — `FloatingWindow`, 980×720 default, 760×520 minimum, plus a second `FloatingWindow` for compose. Hyprland treats both as ordinary windows. |
+| `panel` | `App.qml` | The application window — a single `FloatingWindow`, 980×720 default, 760×520 minimum. Hyprland treats it as an ordinary window. |
 
 ## Confirmed decisions
 
 | Question | Decision |
 |---|---|
 | List granularity | **One row per message** (`messages.list`), not per thread. Thread aggregation costs an extra `threads.get` round trip per page and doubles the UI states. |
-| Body rendering | **Qt RichText by default**, with remote images blocked until the reader opts in, plus a plain-text toggle. No browser engine — `QtWebEngineQuick::initialize()` must run before the host process's `QGuiApplication` is constructed, which a plugin loaded later cannot do. |
+| Body rendering | **Qt RichText by default**, with a plain-text toggle. Remote images load — the sender therefore learns when a message was opened, a deliberate trade for mail that looks like mail. No browser engine: `QtWebEngineQuick::initialize()` must run before the host process's `QGuiApplication` is constructed, which a plugin loaded later cannot do. |
 | Sending | **Included.** Reply, reply-all, forward, and compose, plain-text body with quoted original. Requires the `gmail.send` scope. |
 | Bar click | **Opens the app window directly.** Middle click refreshes, right click opens a small menu. |
-| Compose surface | **Its own window**, not a pane inside the mailbox. Hyprland tiles it beside the main window, so the message being answered stays on screen. 720×560. |
+| Compose surface | **The whole content area of the one window.** Omarchy's panel mechanism gives every extra window its own region, so a reply must not open one. Only a second mail account would justify a second window. |
 | List triage | **Right-click context menu** on any row: reply / reply all / forward, archive / trash / spam, mark read-unread, star, open in browser. |
-| Reader actions | **Icons with tooltips**, not labelled buttons — six actions fit where six labels would not, with the destructive one set apart by a rule and the urgent colour. |
+| Reader actions | **Icons with tooltips**, not labelled buttons — six actions fit where six labels would not, with the destructive one set apart by a rule and the urgent colour. Icons are Canvas paths on one 16px grid, because Qt's SVG renderer smears strokes at this size. |
+| Sidebar | **A collapsed icon rail by default**, named by tooltips, expandable. A mail window spends its width on the list and the message. |
+| Loading | **Cache first.** Every query, the label list, the profile and opened bodies are kept in one atomically written file under `$XDG_CACHE_HOME/omarchy-gmail`, keyed by query and bound to the mailbox address. Switching mailboxes paints immediately and revalidates behind it. |
+| Setup | **Two steps, one at a time.** Finished steps collapse to a line with a check; the walkthrough hides behind a disclosure. The Publish-app warning stays beside the sign-in button, because it decides whether the session lasts seven days or indefinitely. |
 
 ## Authentication
 

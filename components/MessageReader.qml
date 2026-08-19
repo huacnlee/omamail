@@ -36,10 +36,21 @@ Item {
   readonly property var sanitized: Html.sanitize(rawHtml, ({ allowRemoteImages: true }))
   readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText
 
+  ReaderBlankSlate {
+    anchors.fill: parent
+    visible: !root.summary && !(root.service && root.service.detailLoading)
+    service: root.service
+    textColor: root.textColor
+    accentColor: root.accentColor
+    dimColor: root.dimColor
+    dimmerColor: root.dimmerColor
+    panelFontFamily: root.panelFontFamily
+  }
+
   Text {
     anchors.centerIn: parent
-    visible: !root.summary
-    text: root.service && root.service.detailLoading ? "Opening…" : "Select a message"
+    visible: !root.summary && !!root.service && root.service.detailLoading
+    text: "Opening…"
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
