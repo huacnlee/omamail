@@ -3,7 +3,7 @@
   "id": "gmail.omarchy",
   "name": "Omarchy Gmail",
   "version": "0.1.0",
-  "author": "Jason Lee",
+  "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
   "description": "Read, triage, and reply to Gmail in a native Omarchy window, over the official Gmail API.",
   "kinds": [

@@ -114,6 +114,18 @@ Item {
   property int inboxUnread: 0
   property bool countLoading: false
 
+  // When the list last agreed with the server. Ticked separately so the label
+  // ages without anything else re-evaluating.
+  property double lastSyncedMs: 0
+  property int syncTick: 0
+  readonly property string syncedLabel: {
+    var ignored = syncTick
+    if (listLoading) return "Checking for mail…"
+    if (lastSyncedMs <= 0) return ""
+    var ago = Mail.relativeTime(new Date(lastSyncedMs), new Date())
+    return ago === "now" ? "Synced just now" : "Synced " + ago + " ago"
+  }
+
   property string lastError: ""
   property string actionStatus: ""
   property string pendingAction: ""
@@ -317,6 +329,7 @@ Item {
     messages = merged
     listLoaded = true
     lastError = ""
+    lastSyncedMs = Date.now()
     listRefreshed()
 
     // Looking at the list is what marks it seen.
@@ -690,6 +703,14 @@ Item {
   }
 
   Component.onCompleted: authManager.restoreSession()
+
+  // Only ages the "synced" label; nothing else depends on it.
+  Timer {
+    interval: 30000
+    running: root.ready
+    repeat: true
+    onTriggered: root.syncTick++
+  }
 
   Timer {
     id: noticeTimer

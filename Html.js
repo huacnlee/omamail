@@ -25,19 +25,78 @@ var DROPPED_ELEMENTS = ["script", "style", "iframe", "object", "embed", "applet"
 var MAX_RICH_TEXT = 120000
 var MAX_ELEMENTS = 2500
 var MAX_IMAGES = 24
+// Backstop for anything flattening does not tame.
+var MAX_TABLES = 60
+var MAX_TABLE_DEPTH = 4
+
+// Nesting depth is the measure that matters. Qt lays tables out by resolving
+// column widths against each other, and deeply nested tables with competing
+// widths — which is exactly how notification mail is built — can keep that
+// resolution going far longer than anyone will wait. Real mail in this mailbox
+// reaches nine levels.
+function tableDepth(html) {
+  var text = String(html || "")
+  var pattern = /<(\/?)table\b/gi
+  var depth = 0
+  var deepest = 0
+  var match
+  while ((match = pattern.exec(text)) !== null) {
+    if (match[1]) depth = Math.max(0, depth - 1)
+    else {
+      depth++
+      if (depth > deepest) deepest = depth
+    }
+  }
+  return deepest
+}
 
 function complexity(html) {
   var text = String(html || "")
   return {
     length: text.length,
     tags: (text.match(/<[a-zA-Z]/g) || []).length,
-    images: (text.match(/<img\b/gi) || []).length
+    images: (text.match(/<img\b/gi) || []).length,
+    tables: (text.match(/<table\b/gi) || []).length,
+    tableDepth: tableDepth(text)
   }
+}
+
+// Tables past this depth become plain blocks. Two levels covers the real
+// tabular content in mail — a status table, a receipt — while the layers above
+// it are only there to centre a card in an Outlook window.
+var KEEP_TABLE_DEPTH = 2
+var TABLE_TAG = /<(\/?)(table|thead|tbody|tfoot|tr|td|th)\b([^>]*)>/gi
+
+function keptStyle(attrs) {
+  var style = String(attrs || "").match(/\sstyle\s*=\s*("[^"]*"|'[^']*')/i)
+  return style ? " style=" + style[1] : ""
+}
+
+function flattenTables(html, keepDepth) {
+  var limit = keepDepth === undefined ? KEEP_TABLE_DEPTH : Math.max(0, keepDepth)
+  var depth = 0
+  return String(html || "").replace(TABLE_TAG, function(tag, slash, name, attrs) {
+    var lower = String(name).toLowerCase()
+    if (lower === "table") {
+      if (slash) {
+        var closing = depth > limit
+        depth = Math.max(0, depth - 1)
+        return closing ? "</div>" : tag
+      }
+      depth++
+      return depth > limit ? "<div" + keptStyle(attrs) + ">" : tag
+    }
+    if (depth > limit) return slash ? "</div>" : "<div" + keptStyle(attrs) + ">"
+    return tag
+  })
 }
 
 function tooHeavyForRichText(html) {
   var size = complexity(html)
-  return size.length > MAX_RICH_TEXT || size.tags > MAX_ELEMENTS
+  return size.length > MAX_RICH_TEXT
+    || size.tags > MAX_ELEMENTS
+    || size.tables > MAX_TABLES
+    || size.tableDepth > MAX_TABLE_DEPTH
 }
 
 // A 1x1 image is a tracking pixel, never something to look at. Dropping them
@@ -105,6 +164,7 @@ function sanitize(html, options) {
   // The message takes the window's theme, so the sender's palette comes out
   // before anything else looks at the markup.
   if (settings.keepColors !== true) text = stripColors(text)
+  if (settings.keepTables !== true) text = flattenTables(text, settings.keepTableDepth)
 
   text = text.replace(/<!--[\s\S]*?-->/g, "")
   for (var i = 0; i < DROPPED_ELEMENTS.length; i++) text = stripElement(text, DROPPED_ELEMENTS[i])

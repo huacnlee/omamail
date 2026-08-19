@@ -8,7 +8,11 @@ fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
 # 1. No hard-coded colours in QML. Every colour comes from the active Omarchy
 #    theme, or a light theme renders unreadable text.
-if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- *.qml components/*.qml; then
+# gmailRed in ActionIcon is the single declared exception: the M inside the
+# Gmail mark is a brand asset, the same carve-out this author's other plugins
+# make for an official logo. Everything else takes the theme.
+if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- *.qml components/*.qml \
+   | grep -v 'gmailRed'; then
   fail "hard-coded colour in QML: use Color.* or a colour passed in from App.qml"
 fi
 if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- *.qml components/*.qml; then

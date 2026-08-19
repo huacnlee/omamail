@@ -63,6 +63,8 @@ Item {
   // Reading zoom for the message body only. The window's own chrome follows
   // the theme's font scale, which is Omarchy's to set, not this app's.
   property real bodyZoom: 1.0
+  // 0 means "proportional"; anything else is a width somebody dragged to.
+  property real listWidth: 0
 
   function zoomBy(step) {
     bodyZoom = Math.max(0.6, Math.min(2.5, Math.round((bodyZoom + step) * 20) / 20))
@@ -187,11 +189,45 @@ Item {
         anchors.right: parent.right
         height: Style.space(48)
 
+        // Identity first, controls after, with a rule between them: the mark
+        // and the name say what this window is, and everything to their right
+        // does something.
         Row {
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(8)
+
+          ActionIcon {
+            anchors.verticalCenter: parent.verticalCenter
+            name: "gmail"
+            iconSize: Style.font.iconLarge
+            color: root.foreground
+            brand: true
+          }
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.compact
+            text: "Gmail"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title
+          }
+
+          Item {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.compact && !root.showSetup
+            width: Style.space(8)
+            height: Style.space(18)
+
+            PanelSeparator {
+              anchors.centerIn: parent
+              width: 1
+              height: parent.height
+              foreground: root.foreground
+            }
+          }
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
@@ -204,26 +240,8 @@ Item {
             onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
           }
 
-          ActionIcon {
-            anchors.verticalCenter: parent.verticalCenter
-            name: "unread"
-            iconSize: Style.font.iconLarge
-            color: root.foreground
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Gmail"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-          }
-
           // Fetching mail is not an action on a message, so it sits with the
-          // mailbox rather than among Compose and the overflow menu. It spins
-          // while a fetch is in flight, which is the only progress the window
-          // ever needs to show.
+          // mailbox rather than among Compose and the account menu.
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showSetup
@@ -339,14 +357,15 @@ Item {
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
-          // Proportional rather than fixed: at 1300px a 340px list truncates
-          // every subject while the reader sits half empty, and at 800px a
-          // wide list leaves the reader unusable. Clamped at both ends so the
-          // column never becomes a sliver or a page of its own.
+          // Proportional until somebody drags the divider, then whatever they
+          // dragged it to. Clamped either way so the column never becomes a
+          // sliver, and never leaves the reader too narrow to read in.
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
-            : Math.max(Style.space(300),
-                Math.min(Style.space(460), Math.round(parent.width * 0.34)))
+            : Math.max(Style.space(260),
+                Math.min(parent.width - Style.space(360),
+                  root.listWidth > 0 ? root.listWidth
+                    : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
           visible: width > 0 && !root.showSetup && !root.composing
 
           // The scroller fills the column so its bar sits on the column edge;
@@ -382,21 +401,52 @@ Item {
             }
           }
 
-          // The far edge of the list. The rail draws its own on the other
-          // side, so the three columns each end in one hairline.
+        }
+
+        // The divider between the list and the message, and the handle that
+        // moves it. A hairline is the right thing to look at and the wrong
+        // thing to aim at, so the grab area is wider than the rule it draws.
+        Item {
+          id: listSplitter
+          anchors.left: listColumn.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          visible: listColumn.visible && !root.compact
+          z: 5
+
           PanelSeparator {
-            anchors.right: parent.right
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
-            visible: !root.compact
             foreground: root.foreground
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = listColumn.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.listWidth = grabbedWidth + moved
+            }
+            // Back to the proportional default, which is what most people
+            // want after one bad drag.
+            onDoubleClicked: root.listWidth = 0
           }
         }
 
         MessageReader {
           id: reader
-          anchors.left: listColumn.visible ? listColumn.right : parent.left
+          anchors.left: listSplitter.visible ? listSplitter.right : parent.left
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
@@ -502,9 +552,20 @@ Item {
           anchors.right: notice.left
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
-          text: root.service && root.service.accountEmail !== ""
-            ? root.service.accountEmail + " · " + root.service.inboxUnread + " unread"
-            : "Not connected"
+          // The account already has a home in the sidebar's user bar, so this
+          // says something the window does not say anywhere else: how current
+          // the list is. When the sidebar is hidden it takes the account back,
+          // because then nothing else is carrying it.
+          text: {
+            if (!root.service) return "Not connected"
+            if (!root.ready) return "Not connected"
+            if (root.compact)
+              return root.service.accountEmail + " · " + root.service.inboxUnread + " unread"
+            var parts = []
+            if (root.service.syncedLabel !== "") parts.push(root.service.syncedLabel)
+            if (root.service.messages.length > 0) parts.push(root.service.resultSummary)
+            return parts.join("  ·  ")
+          }
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

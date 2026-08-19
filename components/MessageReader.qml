@@ -58,13 +58,11 @@ Item {
     panelFontFamily: root.panelFontFamily
   }
 
-  Text {
-    anchors.centerIn: parent
+  ReaderSkeleton {
+    anchors.fill: parent
     visible: !root.summary && !!root.service && root.service.detailLoading
-    text: "Opening…"
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.bodySmall
+    textColor: root.textColor
+    panelFontFamily: root.panelFontFamily
   }
 
   // --------------------------------------------------------------- headers
