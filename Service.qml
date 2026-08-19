@@ -229,6 +229,38 @@ Item {
   }
 
   signal accountAdded()
+
+  // ------------------------------------------------------ window preferences
+  //
+  // Kept beside the account list rather than in plugin settings: those are
+  // pushed in from the bar widget and are not the window's to write. Only what
+  // the window cannot recompute lives here.
+
+  property bool sidebarCollapsed: false
+  property bool windowPrefsLoaded: false
+  property string windowWritePayload: ""
+
+  function applyWindowPrefs(raw) {
+    var parsed = null
+    try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
+    if (parsed && typeof parsed === "object")
+      sidebarCollapsed = parsed.sidebarCollapsed === true
+    windowPrefsLoaded = true
+  }
+
+  function saveWindowPrefs() {
+    if (!windowPrefsLoaded || windowWriter.running) return
+    windowWritePayload = JSON.stringify({ sidebarCollapsed: sidebarCollapsed })
+    windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
+    windowWriter.running = true
+  }
+
+  function setSidebarCollapsed(value) {
+    var next = value === true
+    if (next === sidebarCollapsed) return
+    sidebarCollapsed = next
+    saveWindowPrefs()
+  }
   signal duplicateAccount(string email)
 
   // ------------------------------------------------------------ aggregates
@@ -380,6 +412,30 @@ Item {
 
   onActiveAccountIdChanged: refreshCurrent()
   onAccountListChanged: Qt.callLater(refreshCurrent)
+
+  FileView {
+    id: windowFile
+    path: {
+      var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
+      return home + "/omamail/window.json"
+    }
+    printErrors: false
+    onLoaded: root.applyWindowPrefs(text())
+    // No file yet is the ordinary first-run state, not an error.
+    onLoadFailed: root.applyWindowPrefs("")
+  }
+
+  Process {
+    id: windowWriter
+    stdinEnabled: true
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onStarted: {
+      write(root.windowWritePayload + "\n")
+      root.windowWritePayload = ""
+    }
+    onExited: root.windowWritePayload = ""
+  }
 
   FileView {
     id: accountsFile

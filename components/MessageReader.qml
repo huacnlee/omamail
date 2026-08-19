@@ -221,7 +221,7 @@ Item {
     anchors.top: heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.bottom: footer.top
+    anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
     contentWidth: width
     contentHeight: bodyText.implicitHeight + Style.space(28)
     clip: true
@@ -293,15 +293,26 @@ Item {
 
   // ---------------------------------------------------------------- footer
 
-  // Edge to edge, not inset with the buttons: it separates the toolbar from the
-  // message, and that division runs the full width of the window.
-  PanelSeparator {
+  // The toolbar sits on its own ground rather than on whatever happens to be
+  // scrolled behind it. Transparent, the message ran underneath the icons and
+  // through the rule, which read as text overlapping the controls.
+  Rectangle {
+    id: footerBackdrop
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.bottom: footer.top
-    anchors.bottomMargin: Style.space(4)
-    foreground: root.textColor
+    anchors.bottom: parent.bottom
+    height: footer.implicitHeight + Style.space(10)
+    color: root.backgroundColor
     visible: footer.visible
+
+    // Edge to edge, not inset with the buttons: it separates the toolbar from
+    // the message, and that division runs the full width of the window.
+    PanelSeparator {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      foreground: root.textColor
+    }
   }
 
   Column {

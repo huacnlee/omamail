@@ -80,7 +80,14 @@ Item {
   // Open by default, but narrow. The longest mailbox name is "All mail" — at
   // 11px monospace that needs about 116px including the icon, the gaps and a
   // count, so the rail costs little enough to leave standing.
-  property bool sidebarCollapsed: false
+  //
+  // The service owns it, because the service is what outlives the window: the
+  // rail used to come back open on every restart, which is a preference the
+  // user had already expressed and the window kept forgetting.
+  readonly property bool sidebarCollapsed: !!service && service.sidebarCollapsed
+  function toggleSidebar() {
+    if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
+  }
 
   readonly property bool ready: !!service && service.ready
   // The walkthrough is for having no mailbox at all. A mailbox that has been
@@ -676,7 +683,7 @@ Item {
           iconSize: Style.font.iconSmall
           size: Style.space(20)
           fontFamily: root.fontFamily
-          onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
+          onClicked: root.toggleSidebar()
         }
 
         Text {
