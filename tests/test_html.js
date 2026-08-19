@@ -129,6 +129,44 @@ assert.strictEqual(html.stripColors(null), "")
 assert.ok(html.sanitize("<td bgcolor=\"#fff\" style=\"color:#000\">x</td>").html.indexOf("#") < 0)
 assert.ok(html.sanitize("<td bgcolor=\"#fff\">x</td>", { keepColors: true }).html.indexOf("#fff") > 0)
 
+// --------------------------------------------------------- table nesting
+//
+// Qt lays tables out by resolving column widths against each other, and
+// deeply nested tables with competing widths keep that resolution going far
+// longer than anyone waits — with the GUI thread held, which in this plugin is
+// the thread drawing the whole desktop. Real mail in a live mailbox reaches
+// nine levels of nesting.
+
+assert.strictEqual(html.tableDepth("<table><tr><td>x</td></tr></table>"), 1)
+assert.strictEqual(html.tableDepth("<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>"), 2)
+assert.strictEqual(html.tableDepth("<p>none</p>"), 0)
+assert.strictEqual(html.tableDepth(null), 0)
+// Sibling tables are not nesting.
+assert.strictEqual(html.tableDepth("<table></table><table></table>"), 1)
+
+// A shallow table is real tabular content and survives untouched.
+const shallow = "<table><tr><td>Status</td><td>Job</td></tr></table>"
+assert.strictEqual(html.flattenTables(shallow, 2), shallow)
+
+// Past the limit the structure becomes plain blocks, keeping the content and
+// whatever styling rode on it.
+const deep = "<table><tr><td><table><tr><td><table><tr><td style=\"padding:4px\">deep</td></tr></table></td></tr></table></td></tr></table>"
+const flat = html.flattenTables(deep, 2)
+assert.strictEqual(html.tableDepth(flat), 2, "nothing survives past the limit")
+assert.ok(flat.indexOf("deep") > 0, "the content stays")
+assert.ok(flat.indexOf("padding:4px") > 0, "and so does its styling")
+// Tags balance, or Qt renders the rest of the message inside a stray block.
+assert.strictEqual((flat.match(/<div/g) || []).length, (flat.match(/<\/div>/g) || []).length)
+
+// sanitize flattens by default; a caller can ask for the original.
+assert.strictEqual(html.complexity(html.sanitize(deep).html).tableDepth, 2)
+assert.strictEqual(html.complexity(html.sanitize(deep, { keepTables: true }).html).tableDepth, 3)
+
+// The backstop still catches anything flattening cannot tame.
+let wide = ""
+for (let i = 0; i < html.MAX_TABLES + 5; i++) wide += "<table><tr><td>x</td></tr></table>"
+assert.strictEqual(html.tooHeavyForRichText(wide), true, "too many tables is still too many")
+
 // ------------------------------------------------------------- document
 //
 // Colours are passed in from the panel, which reads them off the active theme.

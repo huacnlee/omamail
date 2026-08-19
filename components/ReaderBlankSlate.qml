@@ -46,10 +46,11 @@ Item {
 
     ActionIcon {
       anchors.horizontalCenter: parent.horizontalCenter
-      name: root.empty ? "inbox" : "unread"
-      iconSize: Style.space(40)
+      name: "gmail"
+      brand: true
+      iconSize: Style.space(44)
       strokeScale: 1.0
-      color: Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, 0.45)
+      color: Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, 0.5)
     }
 
     Item { width: 1; height: Style.space(4) }
@@ -72,7 +73,7 @@ Item {
       horizontalAlignment: Text.AlignHCenter
       text: {
         if (!root.service) return ""
-        if (root.service.listLoading && root.service.messages.length === 0) return "Loading…"
+        if (root.service.listLoading && root.service.messages.length === 0) return "Fetching the mailbox…"
         if (root.empty) return root.searching ? "Nothing matches that search" : "Nothing here"
         return root.service.resultSummary + " · pick one to read it"
       }

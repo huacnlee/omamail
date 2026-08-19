@@ -12,6 +12,12 @@ Canvas {
 
   property string name: ""
   property color color: Color.foreground
+
+  // The one brand colour in the project, and it applies to exactly one glyph:
+  // the M inside the Gmail mark. Everything else in this app takes the Omarchy
+  // theme — see AGENTS.md. Set `brand: false` for a monochrome mark.
+  readonly property color gmailRed: "#EA4335"
+  property bool brand: false
   property real iconSize: Style.font.icon
   property real strokeScale: 1.4
 
@@ -24,6 +30,7 @@ Canvas {
   onNameChanged: requestPaint()
   onColorChanged: requestPaint()
   onIconSizeChanged: requestPaint()
+  onBrandChanged: requestPaint()
 
   onPaint: {
     var ctx = getContext("2d")
@@ -124,6 +131,16 @@ Canvas {
       move(1.5, 1.5); line(7.6, 1.5); line(14.5, 8.4); line(8.4, 14.5)
       line(1.5, 7.6); ctx.closePath()
       move(5.7, 4.5); arc(4.5, 4.5, 1.2, 0, Math.PI * 2)
+    } else if (root.name === "gmail") {
+      // The Gmail mark: the envelope body, with the M fold inset inside it. A
+      // plain envelope with a V fold is the generic mail glyph — the M is the
+      // whole difference. The two are stroked separately so the M can carry
+      // the brand red while the envelope stays themed.
+      ctx.rect(1 * s, 3 * s, 14 * s, 10 * s)
+      ctx.stroke()
+      ctx.beginPath()
+      if (root.brand) ctx.strokeStyle = root.gmailRed
+      move(3.6, 13); line(3.6, 5.6); line(8, 9.3); line(12.4, 5.6); line(12.4, 13)
     } else if (root.name === "sidebar") {
       ctx.rect(1.5 * s, 2.5 * s, 13 * s, 11 * s)
       move(6, 2.5); line(6, 13.5)

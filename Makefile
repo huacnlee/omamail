@@ -12,6 +12,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/IconTextButton.qml \
 	components/MessageReader.qml \
 	components/ReaderBlankSlate.qml \
+	components/ReaderSkeleton.qml \
 	components/ComposeView.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
