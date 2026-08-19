@@ -23,6 +23,7 @@ Item {
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
   signal menuRequested(real sceneX, real sceneY)
+  signal switcherRequested(real sceneX, real sceneY)
 
   readonly property var userLabels: {
     var all = root.service ? root.service.labels : []
@@ -140,8 +141,10 @@ Item {
       dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
       email: root.service ? root.service.accountEmail : ""
+      accountCount: root.service ? root.service.accountCount : 1
       collapsed: root.collapsed
       onMenuRequested: function(sceneX, sceneY) { root.menuRequested(sceneX, sceneY) }
+      onSwitcherRequested: function(sceneX, sceneY) { root.switcherRequested(sceneX, sceneY) }
     }
 
   }

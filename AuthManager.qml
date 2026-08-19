@@ -166,7 +166,7 @@ Item {
     lastError = ""
     credentialsWriteBusy = true
     credentialsWritePayload = Credentials.serialize(result.credentials)
-    credentialsWriter.command = [pluginDir + "/scripts/credentials-store.sh"]
+    credentialsWriter.command = [pluginDir + "/scripts/config-store.sh", "credentials.json"]
     credentialsWriter.running = true
     return true
   }

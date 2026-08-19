@@ -16,7 +16,11 @@ Rectangle {
   property string email: ""
   property bool collapsed: false
 
+  // Two things live in this row: which mailbox you are in, and everything
+  // else. The address switches accounts; the glyph opens the menu.
+  signal switcherRequested(real sceneX, real sceneY)
   signal menuRequested(real sceneX, real sceneY)
+  property int accountCount: 1
 
   readonly property string initial: email === "" ? "?" : email.charAt(0).toUpperCase()
 
@@ -64,15 +68,32 @@ Rectangle {
   }
 
   Text {
-    id: chevron
-    visible: !root.collapsed
-    anchors.right: parent.right
-    anchors.rightMargin: Style.space(8)
+    id: switchHint
+    visible: !root.collapsed && root.accountCount > 1
+    anchors.right: chevron.left
+    anchors.rightMargin: Style.space(4)
     anchors.verticalCenter: parent.verticalCenter
-    text: "⋮"
+    text: "⌄"
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
+  }
+
+  Button {
+    id: chevron
+    visible: !root.collapsed
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(4)
+    anchors.verticalCenter: parent.verticalCenter
+    text: "⋮"
+    tooltipText: "Menu"
+    foreground: root.dimColor
+    bordered: false
+    fontSize: Style.font.bodySmall
+    onClicked: {
+      var scene = mapToGlobal(width / 2, height / 2)
+      root.menuRequested(scene.x, scene.y)
+    }
   }
 
   HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
@@ -80,7 +101,7 @@ Rectangle {
   TapHandler {
     onTapped: function(point) {
       var scene = root.mapToGlobal(point.position.x, point.position.y)
-      root.menuRequested(scene.x, scene.y)
+      root.switcherRequested(scene.x, scene.y)
     }
   }
 

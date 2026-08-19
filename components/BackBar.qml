@@ -18,6 +18,11 @@ Item {
 
   signal activated()
 
+  // Outlined rather than flat. A flat button has to choose between aligning its
+  // glyph with the text below — which pushes the hover fill out past the
+  // content edge — and aligning the fill, which indents the glyph. An outline
+  // makes the box itself the aligned edge, so both states sit on the same line
+  // as everything under them.
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -27,10 +32,10 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     iconName: "back"
     text: root.label
-    bordered: false
+    bordered: true
     foreground: root.dimColor
     fontFamily: root.panelFontFamily
-    fontSize: Style.font.caption
+    fontSize: Style.font.bodySmall
     tooltipText: "Esc"
     onClicked: root.activated()
   }

@@ -138,11 +138,22 @@ Item {
     anchors.right: parent.right
     height: Style.space(48)
 
-    Row {
+    BackBar {
+      id: backBar
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(18)
-      anchors.right: closeButton.left
-      anchors.rightMargin: Style.space(8)
+      anchors.leftMargin: Style.space(14)
+      anchors.verticalCenter: parent.verticalCenter
+      textColor: root.textColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: root.finish()
+    }
+
+    Row {
+      anchors.left: backBar.right
+      anchors.leftMargin: Style.space(12)
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(18)
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(10)
 
@@ -169,19 +180,6 @@ Item {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
       }
-    }
-
-    IconButton {
-      id: closeButton
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(12)
-      anchors.verticalCenter: parent.verticalCenter
-      iconName: "close"
-      tooltipText: "Close"
-      foreground: root.dimColor
-      hoverColor: root.textColor
-      fontFamily: root.panelFontFamily
-      onClicked: root.finish()
     }
 
     PanelSeparator {
