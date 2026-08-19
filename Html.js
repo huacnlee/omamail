@@ -218,6 +218,55 @@ function hasRemoteImages(html) {
 
 // Wraps the sanitised body in a document. `colors` styles the parts the sender
 // did not: the ground, the default text, links and quoted replies.
+// ------------------------------------------------------------ fitting
+//
+// Qt's rich text engine takes max-width on images, but only in pixels: a
+// percentage collapses the image to nothing at all. An explicit height
+// attribute also survives the clamp, so a banner scaled from 1600 to 380 keeps
+// its original height and renders as a smear. Both were measured against the
+// engine rather than assumed — strip the heights, give a pixel ceiling, and Qt
+// derives the height from the aspect ratio on its own.
+var MIN_IMAGE_WIDTH = 40
+
+function stripImageHeights(html) {
+  return String(html || "").replace(/<img\b[^>]*>/gi, function(tag) {
+    return tag
+      .replace(/\sheight\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      // The character before "height" keeps "max-height" from matching.
+      .replace(/([;"'\s])height\s*:[^;"']*/gi, "$1")
+  })
+}
+
+// Senders lay their mail out for a wide window, and at a narrow one their
+// horizontal padding is most of the screen. The vertical rhythm is worth
+// keeping; the side gutters are not.
+function compactHorizontal(html) {
+  return String(html || "")
+    .replace(/([;"'\s])(padding|margin)-(left|right)\s*:[^;"']*/gi, "$1")
+    .replace(/([;"'\s])(padding|margin)\s*:\s*([^;"']*)/gi,
+      function(all, lead, prop, value) {
+        var parts = String(value).trim().split(/\s+/)
+        if (parts.length >= 4) return lead + prop + ":" + parts[0] + " 0 " + parts[2] + " 0"
+        if (parts.length === 3) return lead + prop + ":" + parts[0] + " 0 " + parts[2]
+        return lead + prop + ":" + parts[0] + " 0"
+      })
+}
+
+// A table told to be 600px wide inside a 380px window is a horizontal scrollbar
+// over content that would have wrapped perfectly well.
+function relaxFixedWidths(html, available) {
+  var limit = Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
+  return String(html || "").replace(/<(table|td|th|tr|div)\b[^>]*>/gi, function(tag) {
+    return tag
+      .replace(/\swidth\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))/gi, function(match, a, b, c) {
+        return Number(a || b || c) > limit ? "" : match
+      })
+      .replace(/([;"'\s])width\s*:\s*(\d+)px/gi, function(match, lead, px) {
+        return Number(px) > limit ? lead : match
+      })
+  })
+}
+
 function documentFor(bodyHtml, colors) {
   var palette = colors || {}
   var foreground = String(palette.foreground || "")
@@ -227,14 +276,18 @@ function documentFor(bodyHtml, colors) {
   // Margin on body is ignored by Qt's rich text engine, so the padding lives
   // on a wrapper the sender's markup sits inside.
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
+  var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
+  var body = stripImageHeights(bodyHtml)
+  if (palette.compact) body = relaxFixedWidths(compactHorizontal(body), maxImage)
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
     + "a{color:" + link + ";}"
     + "blockquote{color:" + quote + ";margin-left:8px;padding-left:8px;}"
     + "td,th{padding:2px;}"
+    + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body>"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
-    + String(bodyHtml || "")
+    + body
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
 }

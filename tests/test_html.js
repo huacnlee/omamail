@@ -214,4 +214,37 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.strictEqual(html.imageLinkIndex(""), 0)
 }
 
+
+// ------------------------------------------------------- fitting to width
+//
+// These encode facts measured against Qt's own rich text engine: max-width is
+// honoured in pixels but a percentage collapses the image, and an explicit
+// height survives the clamp and smears the picture.
+{
+  var img = html.stripImageHeights(
+    '<img src=a.png width="1600" height="400" style="width:1600px;height:400px;max-height:9px">')
+  assert.ok(img.indexOf('height="400"') < 0, "the height attribute goes")
+  assert.ok(img.indexOf("height:400px") < 0, "so does the height declaration")
+  assert.ok(img.indexOf('width="1600"') > 0, "the width stays; Qt derives height from it")
+  assert.ok(img.indexOf("max-height:9px") > 0, "max-height is not a height")
+
+  var fitDoc = html.documentFor("<img src=a.png>",
+    { foreground: "#fff", background: "#000", maxImageWidth: 380 })
+  assert.ok(fitDoc.indexOf("img{max-width:380px;}") > 0, "a pixel ceiling, never a percentage")
+  assert.ok(html.documentFor("<p>x</p>", {}).indexOf("img{") < 0,
+    "no ceiling until the width is known")
+
+  var compact = html.compactHorizontal(
+    '<div style="padding-left:40px;margin:10px 30px;padding:5px 20px 7px 20px">x</div>')
+  assert.ok(compact.indexOf("padding-left") < 0, "side gutters go")
+  assert.ok(compact.indexOf("margin:10px 0") > 0, "vertical rhythm stays")
+  assert.ok(compact.indexOf("padding:5px 0 7px 0") > 0, "all four sides handled")
+
+  var relaxed = html.relaxFixedWidths(
+    '<table width="600"><td width="100" style="width:640px">x</td></table>', 380)
+  assert.ok(relaxed.indexOf('width="600"') < 0, "a table wider than the window gives it up")
+  assert.ok(relaxed.indexOf('width="100"') > 0, "one that fits is left alone")
+  assert.ok(relaxed.indexOf("width:640px") < 0, "declared widths too")
+}
+
 console.log("test_html.js ok")
