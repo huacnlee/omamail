@@ -419,11 +419,13 @@ Item {
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
           // Proportional until somebody drags the divider, then whatever they
-          // dragged it to. Clamped either way so the column never becomes a
-          // sliver, and never leaves the reader too narrow to read in.
+          // dragged it to. The floor is low on purpose: at a hundred pixels the
+          // column is a strip of times and initials, which is a legitimate way
+          // to work when the message is what you are reading. Refusing to go
+          // there was the app deciding how someone else should use their screen.
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
-            : Math.max(Style.space(260),
+            : Math.max(Style.space(100),
                 Math.min(parent.width - Style.space(360),
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
