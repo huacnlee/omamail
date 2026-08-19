@@ -33,6 +33,7 @@ Item {
   signal openWebRequested()
   signal shortcutsRequested()
   signal setupRequested()
+  signal projectRequested()
   signal signOutRequested()
 
   anchors.fill: root.showTrigger ? undefined : parent
@@ -88,6 +89,13 @@ Item {
       MenuRow {
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
+      }
+
+      Separator {}
+
+      MenuRow {
+        text: "GitHub..."
+        onActivated: { menu.close(); root.projectRequested() }
       }
 
       Separator {}
