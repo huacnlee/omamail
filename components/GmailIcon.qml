@@ -2,12 +2,13 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// An envelope, drawn rather than rasterised from an SVG: the bar slot is about
+// The mark, drawn rather than rasterised from an SVG: the bar slot is about
 // 16px and Qt's SVG renderer smears strokes at that size.
 //
-// The flap direction carries the state. A closed envelope with the flap folded
-// down is the resting look; unread mail lifts the flap open, which reads at bar
-// size where a colour change alone does not.
+// The fold is an M, not the V of a generic mail glyph — that is the whole
+// difference between this application's mark and every other envelope in the
+// bar. Monochrome here: the bar paints its own foreground, and a brand colour
+// in a row of themed glyphs reads as a rendering fault rather than as identity.
 Item {
   id: root
 
@@ -17,7 +18,6 @@ Item {
   // A dot, not a count: the bar says "something arrived", the tooltip says
   // how much, and the window says what.
   property bool dot: false
-  property bool open: false
   property bool crossed: false
 
   width: iconSize
@@ -26,7 +26,6 @@ Item {
   implicitHeight: iconSize
 
   onColorChanged: envelope.requestPaint()
-  onOpenChanged: envelope.requestPaint()
   onIconSizeChanged: envelope.requestPaint()
 
   Canvas {
@@ -58,17 +57,17 @@ Item {
       ctx.rect(left, top, right - left, bottom - top)
       ctx.stroke()
 
+      // The M, inset inside the body: down the left stem, into the valley, back
+      // up, and down the right stem. Proportions match the header's mark, so
+      // the bar and the window are recognisably the same thing.
+      var innerW = right - left
+      var innerH = bottom - top
       ctx.beginPath()
-      if (root.open) {
-        // Flap standing up: the two diagonals meet above the top edge.
-        ctx.moveTo(left, top)
-        ctx.lineTo((left + right) / 2, top - (bottom - top) * 0.42)
-        ctx.lineTo(right, top)
-      } else {
-        ctx.moveTo(left, top)
-        ctx.lineTo((left + right) / 2, top + (bottom - top) * 0.55)
-        ctx.lineTo(right, top)
-      }
+      ctx.moveTo(left + innerW * 0.19, bottom)
+      ctx.lineTo(left + innerW * 0.19, top + innerH * 0.26)
+      ctx.lineTo(left + innerW * 0.50, top + innerH * 0.63)
+      ctx.lineTo(left + innerW * 0.81, top + innerH * 0.26)
+      ctx.lineTo(left + innerW * 0.81, bottom)
       ctx.stroke()
     }
   }

@@ -60,12 +60,10 @@ BarWidget {
           anchors.centerIn: parent
           iconSize: Style.space(12)
           color: button.glyphColor
-          // A closed envelope, always: at 12 px the lifted flap reads as an
-          // open box rather than as mail. The dot carries the state instead —
-          // and it means "something arrived since you last looked", not "you
-          // have unread mail", so it can actually reach zero.
+          // The dot carries the state, and it means "something arrived since
+          // you last looked" rather than "you have unread mail" — so it can
+          // actually reach zero.
           dot: button.hasNew
-          open: false
           crossed: !button.connected
         }
       }
