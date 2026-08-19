@@ -22,13 +22,15 @@ Item {
   required property color dimmerColor
   required property string panelFontFamily
   property bool forcePlainText: false
-  property bool showBack: false
+  property real zoom: 1.0
   // Set by the reader itself when a document is too heavy to lay out, and
   // cleared by the user asking for it anyway.
   property bool forceRichAnyway: false
 
   signal backRequested()
   signal togglePlainTextRequested()
+  signal zoomRequested(real step)
+  signal zoomResetRequested()
   signal composeRequested(string mode)
   signal actionRequested(string action)
 
@@ -74,25 +76,23 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.margins: Style.space(14)
-    implicitHeight: headerColumn.implicitHeight
+    implicitHeight: backBar.implicitHeight + Style.space(6) + headerColumn.implicitHeight
 
-    IconButton {
-      id: backButton
+    BackBar {
+      id: backBar
       anchors.left: parent.left
       anchors.top: parent.top
-      visible: root.showBack
-      iconName: "back"
-      tooltipText: "Back to the list"
-      foreground: root.dimColor
-      hoverColor: root.textColor
-      fontFamily: root.panelFontFamily
-      onClicked: root.backRequested()
+      textColor: root.textColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: root.backRequested()
     }
 
     IconButton {
       id: starButton
       anchors.right: parent.right
-      anchors.top: parent.top
+      anchors.top: backBar.bottom
+      anchors.topMargin: Style.space(2)
       iconName: "star"
       filled: !!root.summary && root.summary.starred
       tooltipText: root.summary && root.summary.starred ? "Unstar" : "Star"
@@ -104,11 +104,11 @@ Item {
 
     Column {
       id: headerColumn
-      anchors.left: backButton.visible ? backButton.right : parent.left
-      anchors.leftMargin: backButton.visible ? Style.space(6) : 0
+      anchors.left: parent.left
       anchors.right: starButton.left
       anchors.rightMargin: Style.space(8)
-      anchors.top: parent.top
+      anchors.top: backBar.bottom
+      anchors.topMargin: Style.space(6)
       spacing: Style.space(4)
 
       Text {
@@ -194,41 +194,36 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: footer.top
-    anchors.margins: Style.space(14)
     contentWidth: width
-    contentHeight: bodyText.implicitHeight
+    contentHeight: bodyText.implicitHeight + Style.space(28)
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     visible: !!root.summary
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-    // A formatted message is the sender's page, printed on a sheet. A
-    // plain-text one is ours, and takes the theme.
-    Rectangle {
-      id: sheet
-      visible: root.htmlAvailable
-      width: bodyFlick.width
-      height: bodyText.implicitHeight
-      color: Html.PAPER
-      border.width: 1
-      border.color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.18)
-    }
-
     TextEdit {
       id: bodyText
-      width: bodyFlick.width
+      x: Style.space(14)
+      y: Style.space(14)
+      width: bodyFlick.width - Style.space(28)
       readOnly: true
       selectByMouse: true
       wrapMode: TextEdit.Wrap
       textFormat: root.htmlAvailable ? TextEdit.RichText : TextEdit.PlainText
       text: root.htmlAvailable
-        ? Html.documentFor(root.rawHtml, Html.paperPalette())
+        ? Html.documentFor(root.rawHtml, ({
+            foreground: root.textColor,
+            background: root.backgroundColor,
+            link: root.linkColor,
+            quote: root.dimColor,
+            padding: 0
+          }))
         : (root.service ? root.service.selectedBody.text : "")
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: Math.max(7, Math.round(Style.font.bodySmall * root.zoom))
       onLinkActivated: function(link) { Qt.openUrlExternally(link) }
 
       // NoButton so selecting text still works; this exists only to turn the
@@ -237,6 +232,14 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
         cursorShape: bodyText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
+        onWheel: function(wheel) {
+          if (!(wheel.modifiers & Qt.ControlModifier)) {
+            wheel.accepted = false
+            return
+          }
+          root.zoomRequested(wheel.angleDelta.y > 0 ? 0.1 : -0.1)
+          wheel.accepted = true
+        }
       }
     }
   }

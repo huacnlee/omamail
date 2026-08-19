@@ -10,6 +10,24 @@ Item {
   required property color textColor
   required property string panelFontFamily
   property bool signedIn: false
+  // The menu is opened from wherever the account lives — the sidebar's user
+  // bar, or the status bar when the sidebar is hidden — so it carries no
+  // trigger of its own by default.
+  property bool showTrigger: false
+  readonly property bool opened: menu.opened
+
+  // Positioned against the window rather than a button, and flipped when it
+  // would run off the bottom, since it opens from a bar at the bottom.
+  function openAt(sceneX, sceneY) {
+    var local = root.mapFromGlobal(sceneX, sceneY)
+    menu.x = Math.max(0, Math.min(local.x, root.width - menu.width))
+    menu.y = local.y + menu.implicitHeight > root.height
+      ? Math.max(0, local.y - menu.implicitHeight)
+      : local.y
+    menu.open()
+  }
+
+  function close() { menu.close() }
 
   signal markAllReadRequested()
   signal openWebRequested()
@@ -17,11 +35,14 @@ Item {
   signal setupRequested()
   signal signOutRequested()
 
-  implicitWidth: Style.space(24)
-  implicitHeight: Style.space(24)
+  anchors.fill: root.showTrigger ? undefined : parent
+  implicitWidth: root.showTrigger ? Style.space(24) : 0
+  implicitHeight: root.showTrigger ? Style.space(24) : 0
+  z: 40
 
   Button {
     id: menuButton
+    visible: root.showTrigger
     anchors.fill: parent
     text: "⋮"
     foreground: root.textColor
@@ -31,8 +52,6 @@ Item {
 
   QQC.Popup {
     id: menu
-    x: menuButton.width - width
-    y: menuButton.height + Style.space(4)
     width: Style.space(210)
     implicitHeight: menuItems.implicitHeight + Style.space(8)
     padding: Style.space(4)

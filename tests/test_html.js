@@ -20,7 +20,8 @@ assert.strictEqual(html.sanitize("<meta charset='utf-8'>body").html, "body")
 // The tags that carry an email's actual layout must survive untouched. Real
 // mail is still table-and-inline-style HTML written for Outlook, which is
 // exactly the subset Qt renders.
-const table = "<table><tr><td style=\"color:#333\"><b>Total</b></td></tr></table>"
+// Layout survives; the sender's palette does not (see the theming block).
+const table = "<table><tr><td style=\"padding:6px\"><b>Total</b></td></tr></table>"
 assert.strictEqual(html.sanitize(table).html, table)
 assert.strictEqual(html.sanitize("<a href=\"https://example.com\">link</a>").html,
   "<a href=\"https://example.com\">link</a>")
@@ -98,6 +99,35 @@ assert.strictEqual(html.hasRemoteImages("<p>none</p>"), false)
 assert.strictEqual(html.sanitize("").html, "")
 assert.strictEqual(html.sanitize(null).html, "")
 assert.strictEqual(html.sanitize(null).blockedImages, 0)
+
+// ----------------------------------------------------------- theming
+//
+// A sender ships a background AND the text colour that suits it. Removing only
+// the background is what makes a message unreadable — GitHub's #24292e text
+// would land on a #131313 ground — so both come out and the document
+// stylesheet supplies the pair.
+
+assert.strictEqual(html.stripColors("<td bgcolor=\"#ffffff\">hi</td>"), "<td>hi</td>")
+assert.strictEqual(html.stripColors("<font color=\"#333\">hi</font>"), "<font>hi</font>")
+assert.strictEqual(html.stripColors("<p style=\"color:#24292e\">hi</p>"), "<p>hi</p>")
+assert.strictEqual(html.stripColors("<p style=\"background-color:#fff\">hi</p>"), "<p>hi</p>")
+
+// Everything that is not a colour survives: layout is the sender's to keep.
+assert.strictEqual(
+  html.stripColors("<p style=\"color:#111;font-weight:bold;padding:4px\">hi</p>"),
+  "<p style=\"font-weight:bold;padding:4px\">hi</p>")
+assert.strictEqual(
+  html.stripColors("<div style=\"margin:0;background:#eee;width:600px\">x</div>"),
+  "<div style=\"margin:0;width:600px\">x</div>")
+assert.strictEqual(html.stripColors("<img src=\"a.png\" width=\"600\">"),
+  "<img src=\"a.png\" width=\"600\">", "an image is not a colour")
+assert.strictEqual(html.stripColors(""), "")
+assert.strictEqual(html.stripColors(null), "")
+
+// sanitize does it by default, so nothing renders in the sender's palette
+// unless a caller explicitly asks to keep it.
+assert.ok(html.sanitize("<td bgcolor=\"#fff\" style=\"color:#000\">x</td>").html.indexOf("#") < 0)
+assert.ok(html.sanitize("<td bgcolor=\"#fff\">x</td>", { keepColors: true }).html.indexOf("#fff") > 0)
 
 // ------------------------------------------------------------- document
 //

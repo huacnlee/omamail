@@ -28,7 +28,9 @@ Rectangle {
     { keys: "/ or Ctrl+K", action: "Search" },
     { keys: "g then i / s / u / t", action: "Inbox, starred, unread, sent" },
     { keys: "Right-click a row", action: "Archive, trash, spam, star" },
-    { keys: "F5", action: "Refresh" },
+    { keys: "Ctrl+= / Ctrl+-", action: "Zoom the message body" },
+    { keys: "Ctrl+0", action: "Reset the zoom" },
+    { keys: "F5", action: "Check for mail" },
     { keys: "Ctrl+/", action: "Toggle this sheet" },
     { keys: "Esc", action: "Back, or close the window" }
   ]

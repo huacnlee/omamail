@@ -23,6 +23,7 @@ Item {
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
   signal collapseToggled()
+  signal menuRequested(real sceneX, real sceneY)
 
   readonly property var userLabels: {
     var all = root.service ? root.service.labels : []
@@ -50,16 +51,17 @@ Item {
     anchors.right: edge.left
     anchors.top: parent.top
     anchors.bottom: footer.top
-    anchors.margins: Style.space(6)
     contentWidth: width
-    contentHeight: column.implicitHeight
+    contentHeight: column.implicitHeight + Style.space(12)
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
     Column {
       id: column
-      width: flick.width
+      x: Style.space(6)
+      y: Style.space(6)
+      width: flick.width - Style.space(12)
       spacing: Style.space(1)
 
       Repeater {
@@ -117,29 +119,44 @@ Item {
     }
   }
 
-  // The toggle sits at the bottom, out of the way of the mailboxes, and points
-  // the way the rail will move.
-  Item {
+  // The account and the toggle live at the foot of the rail: the account
+  // because that is where a desktop app keeps it, and the toggle because it
+  // belongs to the rail rather than to any mailbox in it.
+  Column {
     id: footer
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.bottom: parent.bottom
-    height: Style.space(30)
 
     PanelSeparator {
-      anchors.top: parent.top
       width: parent.width
       foreground: root.textColor
     }
 
-    Button {
-      anchors.centerIn: parent
-      text: root.collapsed ? "»" : "«"
-      tooltipText: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar"
-      foreground: root.dimColor
-      bordered: false
-      fontSize: Style.font.bodySmall
-      onClicked: root.collapseToggled()
+    UserBar {
+      width: parent.width
+      textColor: root.textColor
+      accentColor: root.accentColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      email: root.service ? root.service.accountEmail : ""
+      collapsed: root.collapsed
+      onMenuRequested: function(sceneX, sceneY) { root.menuRequested(sceneX, sceneY) }
+    }
+
+    Item {
+      width: parent.width
+      implicitHeight: Style.space(26)
+
+      Button {
+        anchors.centerIn: parent
+        text: root.collapsed ? "»" : "«"
+        tooltipText: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar"
+        foreground: root.dimColor
+        bordered: false
+        fontSize: Style.font.bodySmall
+        onClicked: root.collapseToggled()
+      }
     }
   }
 

@@ -57,7 +57,16 @@ Item {
 
   property string currentView: "list"
   property string cursorId: ""
+  // Kept across messages: somebody who wants plain text wants it for their
+  // mail, not for one message.
   property bool plainTextForced: false
+  // Reading zoom for the message body only. The window's own chrome follows
+  // the theme's font scale, which is Omarchy's to set, not this app's.
+  property real bodyZoom: 1.0
+
+  function zoomBy(step) {
+    bodyZoom = Math.max(0.6, Math.min(2.5, Math.round((bodyZoom + step) * 20) / 20))
+  }
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
   // Open by default, but narrow. The longest mailbox name is "All mail" — at
@@ -92,11 +101,10 @@ Item {
     else close()
   }
 
-  // Opening a message resets the two per-message reader toggles: a decision to
-  // load images applies to the message it was made on, never to the next one.
+  // Plain text is a preference and survives; the heavy-document override is a
+  // per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
-    plainTextForced = false
     reader.forceRichAnyway = false
     cursorId = String(id || "")
     service.select(cursorId)
@@ -200,6 +208,23 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
           }
+
+          // Fetching mail is not an action on a message, so it sits with the
+          // mailbox rather than among Compose and the overflow menu. It spins
+          // while a fetch is in flight, which is the only progress the window
+          // ever needs to show.
+          IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showSetup
+            iconName: "refresh"
+            tooltipText: root.service && root.service.listLoading
+              ? "Checking for mail…" : "Check mail"
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            enabled: root.ready && !(root.service && root.service.listLoading)
+            onClicked: if (root.service) root.service.refresh()
+          }
         }
 
         SearchBar {
@@ -219,18 +244,6 @@ Item {
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(4)
-
-          IconButton {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showSetup
-            iconName: "refresh"
-            tooltipText: "Refresh"
-            foreground: root.dim
-            hoverColor: root.foreground
-            fontFamily: root.fontFamily
-            enabled: root.ready && !(root.service && root.service.listLoading)
-            onClicked: if (root.service) root.service.refresh()
-          }
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
@@ -254,17 +267,6 @@ Item {
             onClicked: root.startCompose("new")
           }
 
-          AppMenu {
-            anchors.verticalCenter: parent.verticalCenter
-            textColor: root.foreground
-            panelFontFamily: root.fontFamily
-            signedIn: root.ready
-            onMarkAllReadRequested: if (root.service) root.service.markAllRead()
-            onOpenWebRequested: if (root.service) root.service.openWebInbox()
-            onShortcutsRequested: root.shortcutHelpVisible = true
-            onSetupRequested: root.setupVisible = true
-            onSignOutRequested: if (root.service) root.service.signOut()
-          }
         }
 
         PanelSeparator {
@@ -297,6 +299,7 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
           onCollapseToggled: root.sidebarCollapsed = !root.sidebarCollapsed
+          onMenuRequested: function(sceneX, sceneY) { appMenu.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
             root.service.search("label:" + name)
@@ -336,19 +339,24 @@ Item {
                 Math.min(Style.space(460), Math.round(parent.width * 0.34)))
           visible: width > 0 && !root.showSetup && !root.composing
 
+          // The scroller fills the column so its bar sits on the column edge;
+          // the breathing room is padding on the content, not a margin on the
+          // viewport, which would push the bar inward with it.
           Flickable {
             id: listFlick
             anchors.fill: parent
-            anchors.margins: Style.space(8)
             contentWidth: width
-            contentHeight: list.implicitHeight
+            contentHeight: list.implicitHeight + Style.space(16)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             MessageList {
               id: list
-              width: listFlick.width
+              x: Style.space(8)
+              y: Style.space(8)
+              // A gutter on the right so a row never slides under the bar.
+              width: listFlick.width - Style.space(22)
               service: root.service
               textColor: root.foreground
               accentColor: root.accent
@@ -393,9 +401,11 @@ Item {
           dimColor: root.dim
           dimmerColor: root.dimmer
           panelFontFamily: root.fontFamily
+          zoom: root.bodyZoom
           forcePlainText: root.plainTextForced
-          showBack: root.compact
           onTogglePlainTextRequested: root.plainTextForced = !root.plainTextForced
+          onZoomRequested: function(step) { root.zoomBy(step) }
+          onZoomResetRequested: root.bodyZoom = 1.0
           onBackRequested: root.backToList()
           onComposeRequested: function(mode) { root.startCompose(mode) }
           onActionRequested: function(action) {
@@ -476,6 +486,7 @@ Item {
         }
 
         Text {
+          id: accountLine
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.right: notice.left
@@ -488,6 +499,19 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+
+          // The sidebar carries the account menu, and the sidebar is gone at
+          // this width, so the status line takes over rather than leaving the
+          // menu unreachable.
+          MouseArea {
+            anchors.fill: parent
+            enabled: root.compact || root.showSetup
+            cursorShape: Qt.PointingHandCursor
+            onClicked: function(mouse) {
+              var scene = mapToGlobal(mouse.x, mouse.y)
+              appMenu.openAt(scene.x, scene.y)
+            }
+          }
         }
 
         // One line for whatever the window most needs to say: what it is
@@ -508,6 +532,21 @@ Item {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
+      }
+
+      // The account menu. It has no trigger of its own: the sidebar's user bar
+      // opens it, and so does the status bar when the sidebar is hidden.
+      AppMenu {
+        id: appMenu
+        anchors.fill: parent
+        textColor: root.foreground
+        panelFontFamily: root.fontFamily
+        signedIn: root.ready
+        onMarkAllReadRequested: if (root.service) root.service.markAllRead()
+        onOpenWebRequested: if (root.service) root.service.openWebInbox()
+        onShortcutsRequested: root.shortcutHelpVisible = true
+        onSetupRequested: root.setupVisible = true
+        onSignOutRequested: if (root.service) root.service.signOut()
       }
 
       MessageMenu {
@@ -542,6 +581,7 @@ Item {
       Keys.onEscapePressed: function(event) {
         if (root.shortcutHelpVisible) root.shortcutHelpVisible = false
         else if (rowMenu.opened) rowMenu.close()
+        else if (appMenu.opened) appMenu.close()
         else if (root.composing) compose.finish()
         else if (root.currentView === "reader") root.backToList()
         else if (root.setupVisible) root.setupVisible = false
@@ -569,6 +609,10 @@ Item {
       Shortcut { sequence: "g,s"; enabled: !focusScope.typing; onActivated: root.goMailbox("starred") }
       Shortcut { sequence: "g,u"; enabled: !focusScope.typing; onActivated: root.goMailbox("unread") }
       Shortcut { sequence: "g,t"; enabled: !focusScope.typing; onActivated: root.goMailbox("sent") }
+      Shortcut { sequence: "Ctrl++"; onActivated: root.zoomBy(0.1) }
+      Shortcut { sequence: "Ctrl+="; onActivated: root.zoomBy(0.1) }
+      Shortcut { sequence: "Ctrl+-"; onActivated: root.zoomBy(-0.1) }
+      Shortcut { sequence: "Ctrl+0"; onActivated: root.bodyZoom = 1.0 }
       Shortcut { sequence: "Ctrl+/"; onActivated: root.shortcutHelpVisible = !root.shortcutHelpVisible }
       Shortcut { sequence: "F5"; onActivated: if (root.service) root.service.refresh() }
     }

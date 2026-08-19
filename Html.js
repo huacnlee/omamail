@@ -50,6 +50,35 @@ function isTrackingPixel(tag) {
   return /(width|height)\s*:\s*[012](\.\d+)?px/i.test(tag)
 }
 
+// Senders ship their own palette: a background *and* the text colour that
+// suits it. Removing only the background is what makes a message unreadable —
+// GitHub's #24292e text would sit on a #131313 ground — so both go, and the
+// document stylesheet supplies the pair. Anything that survives (images,
+// borders) belongs to the sender.
+var COLOUR_DECLARATION = /(^|;)\s*(color|background|background-color|border-color|outline-color)\s*:[^;]*/gi
+
+function stripColorsFromStyle(style) {
+  return String(style || "")
+    .replace(COLOUR_DECLARATION, "$1")
+    // Removing a declaration from the middle leaves the separators on both
+    // sides of it, which Qt reads as an empty rule.
+    .replace(/;{2,}/g, ";")
+    .replace(/^[;\s]+|[;\s]+$/g, "")
+}
+
+function stripColors(html) {
+  var text = String(html || "")
+  // Presentational attributes first: bgcolor and <font color> predate CSS and
+  // still turn up in mail written for Outlook.
+  text = text.replace(/\s(bgcolor|background|bordercolor)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+  text = text.replace(/\s(color)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+  return text.replace(/\sstyle\s*=\s*("([^"]*)"|'([^']*)')/gi,
+    function(match, raw, dq, sq) {
+      var cleaned = stripColorsFromStyle(dq !== undefined ? dq : sq)
+      return cleaned === "" ? "" : " style=\"" + cleaned + "\""
+    })
+}
+
 function stripElement(text, name) {
   var open = new RegExp("<" + name + "\\b[^>]*>[\\s\\S]*?<\\/" + name + "\\s*>", "gi")
   var lone = new RegExp("<\\/?" + name + "\\b[^>]*>", "gi")
@@ -72,6 +101,10 @@ function sanitize(html, options) {
   var settings = options || {}
   var text = String(html === undefined || html === null ? "" : html)
   if (text === "") return { html: "", blockedImages: 0 }
+
+  // The message takes the window's theme, so the sender's palette comes out
+  // before anything else looks at the markup.
+  if (settings.keepColors !== true) text = stripColors(text)
 
   text = text.replace(/<!--[\s\S]*?-->/g, "")
   for (var i = 0; i < DROPPED_ELEMENTS.length; i++) text = stripElement(text, DROPPED_ELEMENTS[i])
@@ -123,26 +156,12 @@ function hasRemoteImages(html) {
   return sanitize(html).blockedImages > 0
 }
 
-// PAPER and INK are the only literal colours in this project, and they are
-// content colours rather than theme colours.
-//
-// A sender's HTML arrives with its own palette and, crucially, its own text
-// colours to match. GitHub sets #24292e on white; stripping its backgrounds to
-// force the message dark would leave that text on a #131313 ground and make it
-// invisible. So a formatted message is rendered on a sheet, the way a mail
-// client has always shown one, and the window's own chrome stays themed.
-//
-// A plain-text body has no palette of its own and does take the theme — see
-// documentFor's callers.
-var PAPER = "#ffffff"
-var INK = "#1a1a1a"
-
 // Wraps the sanitised body in a document. `colors` styles the parts the sender
 // did not: the ground, the default text, links and quoted replies.
 function documentFor(bodyHtml, colors) {
   var palette = colors || {}
-  var foreground = String(palette.foreground || INK)
-  var background = String(palette.background || PAPER)
+  var foreground = String(palette.foreground || "")
+  var background = String(palette.background || "")
   var link = String(palette.link || foreground)
   var quote = String(palette.quote || foreground)
   // Margin on body is ignored by Qt's rich text engine, so the padding lives
@@ -158,15 +177,4 @@ function documentFor(bodyHtml, colors) {
     + String(bodyHtml || "")
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
-}
-
-// The sheet a formatted message is printed on.
-function paperPalette(linkColor) {
-  return {
-    foreground: INK,
-    background: PAPER,
-    link: String(linkColor || "#1155cc"),
-    quote: "#5f6368",
-    padding: 18
-  }
 }
