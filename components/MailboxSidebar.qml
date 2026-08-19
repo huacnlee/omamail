@@ -22,7 +22,6 @@ Item {
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
-  signal collapseToggled()
   signal menuRequested(real sceneX, real sceneY)
 
   readonly property var userLabels: {
@@ -119,9 +118,10 @@ Item {
     }
   }
 
-  // The account and the toggle live at the foot of the rail: the account
-  // because that is where a desktop app keeps it, and the toggle because it
-  // belongs to the rail rather than to any mailbox in it.
+  // The account lives at the foot of the rail, which is where a desktop app
+  // keeps it. The control that shows and hides the rail is in the header
+  // instead — a button that can disappear with the thing it toggles is a
+  // button you cannot press to get it back.
   Column {
     id: footer
     anchors.left: parent.left
@@ -144,20 +144,6 @@ Item {
       onMenuRequested: function(sceneX, sceneY) { root.menuRequested(sceneX, sceneY) }
     }
 
-    Item {
-      width: parent.width
-      implicitHeight: Style.space(26)
-
-      Button {
-        anchors.centerIn: parent
-        text: root.collapsed ? "»" : "«"
-        tooltipText: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar"
-        foreground: root.dimColor
-        bordered: false
-        fontSize: Style.font.bodySmall
-        onClicked: root.collapseToggled()
-      }
-    }
   }
 
   // One row: an icon that is always there, a name that appears when there is

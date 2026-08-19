@@ -124,6 +124,9 @@ Canvas {
       move(1.5, 1.5); line(7.6, 1.5); line(14.5, 8.4); line(8.4, 14.5)
       line(1.5, 7.6); ctx.closePath()
       move(5.7, 4.5); arc(4.5, 4.5, 1.2, 0, Math.PI * 2)
+    } else if (root.name === "sidebar") {
+      ctx.rect(1.5 * s, 2.5 * s, 13 * s, 11 * s)
+      move(6, 2.5); line(6, 13.5)
     } else if (root.name === "check") {
       move(2.5, 8.5); line(6.5, 12.5); line(13.5, 4)
     } else if (root.name === "attachment") {

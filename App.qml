@@ -193,6 +193,17 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(8)
 
+          IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.compact && !root.showSetup
+            iconName: "sidebar"
+            tooltipText: root.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar"
+            foreground: root.sidebarCollapsed ? root.dim : root.foreground
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
+          }
+
           ActionIcon {
             anchors.verticalCenter: parent.verticalCenter
             name: "unread"
@@ -298,7 +309,6 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
-          onCollapseToggled: root.sidebarCollapsed = !root.sidebarCollapsed
           onMenuRequested: function(sceneX, sceneY) { appMenu.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
