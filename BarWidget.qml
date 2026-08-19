@@ -51,7 +51,8 @@ BarWidget {
     readonly property color glyphColor: connected
       ? root.foreground
       : Qt.darker(root.foreground, 1.55)
-    readonly property string countText: root.gmail ? root.gmail.badgeText : ""
+    readonly property bool hasUnread: !!root.gmail && root.gmail.inboxUnread > 0
+    readonly property bool hasNew: !!root.gmail && root.gmail.newMailPending
 
     iconComponent: Component {
       Item {
@@ -59,12 +60,12 @@ BarWidget {
           anchors.centerIn: parent
           iconSize: Style.space(12)
           color: button.glyphColor
-          badgeColor: Color.urgent
-          badgeTextColor: Color.background
-          badgeText: button.countText
-          // The flap lifts when there is unread mail: at bar size that reads
-          // where a colour change on its own does not.
-          open: button.countText !== ""
+          // A closed envelope, always: at 12 px the lifted flap reads as an
+          // open box rather than as mail. The dot carries the state instead —
+          // and it means "something arrived since you last looked", not "you
+          // have unread mail", so it can actually reach zero.
+          dot: button.hasNew
+          open: false
           crossed: !button.connected
         }
       }

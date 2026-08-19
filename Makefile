@@ -9,6 +9,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/MessageMenu.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
+	components/IconTextButton.qml \
 	components/MessageReader.qml \
 	components/ReaderBlankSlate.qml \
 	components/ComposeView.qml \

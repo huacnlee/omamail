@@ -17,11 +17,15 @@ Item {
   required property color backgroundColor
   required property color accentColor
   required property color urgentColor
+  required property color linkColor
   required property color dimColor
   required property color dimmerColor
   required property string panelFontFamily
   property bool forcePlainText: false
   property bool showBack: false
+  // Set by the reader itself when a document is too heavy to lay out, and
+  // cleared by the user asking for it anyway.
+  property bool forceRichAnyway: false
 
   signal backRequested()
   signal togglePlainTextRequested()
@@ -29,12 +33,17 @@ Item {
   signal actionRequested(string action)
 
   readonly property var summary: service ? service.selectedMessage : null
+  // Already sanitised by the service, on a worker thread where the decode
+  // happens. Images load: Qt's rich text engine fetches them for real, so the
+  // sender learns when the message was opened — a deliberate trade for mail
+  // that looks like mail.
   readonly property string rawHtml: service ? service.selectedHtml : ""
-  // Images load. Qt's rich text engine fetches them for real, so the sender
-  // learns when the message was opened — a deliberate trade for mail that
-  // looks like mail.
-  readonly property var sanitized: Html.sanitize(rawHtml, ({ allowRemoteImages: true }))
-  readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText
+  // Qt lays rich text out on the GUI thread, and this plugin lives inside the
+  // shell that draws the whole desktop. A document past the bounds gets its
+  // plain-text part instead, with a way to insist.
+  readonly property bool tooHeavy: !!service && service.selectedTooHeavy
+    && !root.forceRichAnyway
+  readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText && !root.tooHeavy
 
   ReaderBlankSlate {
     anchors.fill: parent
@@ -138,9 +147,50 @@ Item {
 
   // ------------------------------------------------------------------ body
 
+  Rectangle {
+    id: heavyNotice
+    visible: root.tooHeavy
+    anchors.top: headerBlock.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.leftMargin: Style.space(14)
+    anchors.rightMargin: Style.space(14)
+    anchors.topMargin: Style.space(8)
+    implicitHeight: Style.space(30)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+    border.width: 1
+    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(10)
+      anchors.right: showAnyway.left
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      text: "Showing the plain text: this message is heavy enough to stall the shell"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
+
+    Button {
+      id: showAnyway
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      text: "Show anyway"
+      foreground: root.textColor
+      bordered: false
+      fontSize: Style.font.caption
+      onClicked: root.forceRichAnyway = true
+    }
+  }
+
   Flickable {
     id: bodyFlick
-    anchors.top: headerBlock.bottom
+    anchors.top: heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: footer.top
@@ -162,10 +212,10 @@ Item {
       wrapMode: TextEdit.Wrap
       textFormat: root.htmlAvailable ? TextEdit.RichText : TextEdit.PlainText
       text: root.htmlAvailable
-        ? Html.documentFor(root.sanitized.html, ({
+        ? Html.documentFor(root.rawHtml, ({
             foreground: root.textColor,
             background: root.backgroundColor,
-            link: root.accentColor,
+            link: root.linkColor,
             quote: root.dimColor
           }))
         : (root.service ? root.service.selectedBody.text : "")
