@@ -98,8 +98,9 @@ Item {
   property string selectedId: ""
   property var selectedMessage: null
   property var selectedBody: ({ text: "", source: "" })
-  // Already sanitised: the decode and the sanitise happen off the GUI thread
-  // (MessageWorker.js) or, on the cache path, inline where they are cheap.
+  // Already sanitised by the time the reader sees it. Decoding uses Qt.atob
+  // where it exists, which is native and skips the per-character base64 loop
+  // that made this the one expensive step in opening a message.
   property string selectedHtml: ""
   property int selectedBlockedImages: 0
   property bool selectedTooHeavy: false
