@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "gmail.omarchy",
+  "name": "Omarchy Gmail",
+  "version": "0.1.0",
+  "author": "Jason Lee",
+  "license": "MIT",
+  "description": "Read, triage, and reply to Gmail from the Omarchy bar, over the official Gmail API.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Omarchy Gmail",
+    "description": "Unread count in the bar, inbox triage and replies in the panel.",
+    "category": "Communication",
+    "aliases": [
+      "gmail",
+      "mail",
+      "email",
+      "inbox"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 120,
+      "maxMessages": 25,
+      "defaultQuery": "in:inbox",
+      "showUnreadCount": "On",
+      "notifyNewMail": "On",
+      "oauthPort": 9481
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Check for mail every (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 120,
+        "description": "How often the unread count is refreshed while the panel is closed."
+      },
+      {
+        "key": "maxMessages",
+        "type": "integer",
+        "label": "Messages per page",
+        "min": 5,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 25
+      },
+      {
+        "key": "defaultQuery",
+        "type": "string",
+        "label": "Default search",
+        "defaultValue": "in:inbox",
+        "description": "Any Gmail search operator, for example `in:inbox -category:promotions`."
+      },
+      {
+        "key": "showUnreadCount",
+        "type": "enum",
+        "label": "Show unread count in bar",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On"
+      },
+      {
+        "key": "notifyNewMail",
+        "type": "enum",
+        "label": "Notify on new mail",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Sends a desktop notification when a new unread message arrives in the inbox."
+      },
+      {
+        "key": "oauthPort",
+        "type": "integer",
+        "label": "Sign-in callback port",
+        "min": 1024,
+        "max": 65535,
+        "step": 1,
+        "defaultValue": 9481,
+        "description": "Loopback port used once during Google sign-in. Change it only if something else already listens there."
+      }
+    ]
+  }
+}

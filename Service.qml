@@ -1,0 +1,557 @@
+import QtQuick
+import Quickshell
+
+import "GmailApi.js" as Api
+import "Message.js" as Mail
+import "Model.js" as Model
+import "OAuth.js" as OAuth
+
+// Everything the panel knows about the mailbox. The views read properties and
+// call functions here; nothing in components/ talks to Google directly.
+//
+// Two rhythms drive the state:
+//   - a slow unread poll that runs whether or not the panel is open, because
+//     the bar badge is the whole point of a mail widget
+//   - a list refresh that only runs while the panel is open, or right after an
+//     action, because a message list nobody is looking at is wasted quota
+Item {
+  id: root
+
+  visible: false
+  width: 0
+  height: 0
+
+  required property string pluginDir
+  property var settings: ({})
+  property bool panelOpen: false
+
+  function setting(name, fallback) {
+    var value = settings ? settings[name] : undefined
+    return value === undefined || value === null ? fallback : value
+  }
+
+  readonly property int refreshIntervalSec: Math.max(30, Math.min(3600,
+    Math.floor(Number(setting("refreshIntervalSec", 120))) || 120))
+  readonly property int maxMessages: Math.max(5, Math.min(100,
+    Math.floor(Number(setting("maxMessages", 25))) || 25))
+  readonly property string defaultQuery: String(setting("defaultQuery", "in:inbox")).trim()
+  readonly property bool showUnreadCount: String(setting("showUnreadCount", "On")) !== "Off"
+  readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
+  readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
+
+  readonly property alias auth: authManager
+  readonly property alias api: apiClient
+
+  // ------------------------------------------------------------ mailbox
+
+  property string mailboxKey: "inbox"
+  property string searchQuery: ""
+  property var messages: []
+  property var labels: []
+  property string nextPageToken: ""
+  property int resultEstimate: 0
+  property bool listLoading: false
+  property bool listLoaded: false
+  property var listHandle: null
+  property int listSerial: 0
+
+  property string selectedId: ""
+  property var selectedMessage: null
+  property var selectedBody: ({ text: "", source: "" })
+  property var selectedAttachments: []
+  property bool detailLoading: false
+  property var detailHandle: null
+  property int detailSerial: 0
+
+  property var profile: null
+  readonly property string accountEmail: profile ? String(profile.email || "") : ""
+  property int inboxUnread: 0
+  property bool countLoading: false
+
+  property string lastError: ""
+  property string actionStatus: ""
+  property string pendingAction: ""
+  property bool sending: false
+
+  // Notifications only start once the first successful load has established
+  // what was already there.
+  property var seenIds: ({})
+  property bool notificationsPrimed: false
+
+  readonly property string setupState: Model.setupState({
+    toolsPresent: authManager.toolsPresent || !authManager.toolsChecked,
+    credentialsPresent: authManager.credentialsPresent,
+    signingIn: authManager.loginBusy,
+    signedIn: authManager.loggedIn
+  })
+  readonly property bool ready: setupState === "ready"
+  readonly property bool busy: listLoading || detailLoading || countLoading
+    || authManager.sessionBusy || sending || pendingAction !== ""
+  readonly property string effectiveQuery: searchQuery.trim() !== ""
+    ? searchQuery.trim()
+    : (mailboxKey === "inbox" && defaultQuery !== "" ? defaultQuery : Model.mailbox(mailboxKey).query)
+  readonly property bool hasMore: nextPageToken !== ""
+  readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
+  readonly property string badgeText: showUnreadCount ? Model.badgeText(inboxUnread, 99) : ""
+  readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread)
+
+  signal listRefreshed()
+
+  function clearNotice() {
+    lastError = ""
+    actionStatus = ""
+  }
+
+  function note(text) {
+    actionStatus = String(text || "")
+    if (actionStatus !== "") noticeTimer.restart()
+  }
+
+  function fail(text) {
+    lastError = String(text || "")
+    actionStatus = ""
+  }
+
+  // ------------------------------------------------------------- loading
+
+  function refresh() {
+    if (!ready) return
+    refreshCounts()
+    if (panelOpen || !listLoaded) loadMessages(false)
+  }
+
+  function refreshCounts() {
+    if (!ready || countLoading) return
+    countLoading = true
+    apiClient.getLabelCounts("INBOX", function(counts, error) {
+      root.countLoading = false
+      if (error || !counts) return
+      root.inboxUnread = counts.unread
+    })
+  }
+
+  function loadProfile() {
+    if (!ready || profile) return
+    apiClient.getProfile(function(result, error) {
+      if (error || !result) return
+      root.profile = result
+    })
+  }
+
+  function loadLabels() {
+    if (!ready) return
+    apiClient.getLabels(function(result, error) {
+      if (error) return
+      root.labels = result
+    })
+  }
+
+  function loadMessages(append) {
+    if (!ready) return
+    var serial = ++listSerial
+    apiClient.abortRequest(listHandle)
+    listLoading = true
+    if (!append) {
+      nextPageToken = ""
+      resultEstimate = 0
+    }
+    var token = append ? nextPageToken : ""
+
+    listHandle = apiClient.listMessages(effectiveQuery, maxMessages, token,
+      function(page, error) {
+        if (serial !== root.listSerial) return
+        if (error || !page) {
+          root.listLoading = false
+          root.fail(error || "Gmail returned nothing")
+          return
+        }
+        root.resultEstimate = page.estimate
+        root.nextPageToken = page.nextPageToken
+        if (page.ids.length === 0) {
+          root.listLoading = false
+          root.listLoaded = true
+          if (!append) root.messages = []
+          root.lastError = ""
+          root.listRefreshed()
+          return
+        }
+        root.fetchSummaries(page.ids, append, serial)
+      })
+  }
+
+  function fetchSummaries(ids, append, serial) {
+    apiClient.getMessages(ids, false, function(payloads, error) {
+      if (serial !== root.listSerial) return
+      root.listLoading = false
+      if (error && payloads.length === 0) {
+        root.fail(error)
+        return
+      }
+      var now = new Date()
+      var summaries = []
+      for (var i = 0; i < payloads.length; i++) summaries.push(Mail.summarize(payloads[i], now))
+      root.applySummaries(summaries, append)
+    }, listHandle)
+  }
+
+  function applySummaries(summaries, append) {
+    var merged = append ? root.messages.concat(summaries) : summaries
+    var arrivals = append ? [] : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+
+    var seen = {}
+    for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
+    // Ids already seen are kept so a message that scrolls off the first page
+    // does not get announced again when it comes back.
+    for (var key in seenIds) seen[key] = true
+    seenIds = seen
+    notificationsPrimed = true
+
+    messages = merged
+    listLoaded = true
+    lastError = ""
+    listRefreshed()
+
+    if (notifyNewMail && arrivals.length > 0) notify(arrivals)
+  }
+
+  function loadMore() {
+    if (!hasMore || listLoading) return
+    loadMessages(true)
+  }
+
+  // --------------------------------------------------------------- detail
+
+  function select(id) {
+    var messageId = String(id || "")
+    if (messageId === "") {
+      clearSelection()
+      return
+    }
+    selectedId = messageId
+    var serial = ++detailSerial
+    apiClient.abortRequest(detailHandle)
+    selectedMessage = null
+    selectedBody = { text: "", source: "" }
+    selectedAttachments = []
+    detailLoading = true
+
+    detailHandle = apiClient.getMessage(messageId, true, function(payload, error) {
+      if (serial !== root.detailSerial) return
+      root.detailLoading = false
+      if (error || !payload) {
+        root.fail(error || "Could not open that message")
+        return
+      }
+      var summary = Mail.summarize(payload, new Date())
+      root.selectedMessage = summary
+      root.selectedBody = Mail.extractBody(payload.payload)
+      root.selectedAttachments = Mail.attachments(payload.payload)
+      root.messages = Model.replaceById(root.messages, summary)
+      // Opening a message is the one place Gmail's own clients mark it read
+      // without being asked, and a reader that leaves it bold is confusing.
+      if (summary.unread) root.act(messageId, "markRead", true)
+    })
+  }
+
+  function clearSelection() {
+    detailSerial++
+    apiClient.abortRequest(detailHandle)
+    detailHandle = null
+    selectedId = ""
+    selectedMessage = null
+    selectedBody = { text: "", source: "" }
+    selectedAttachments = []
+    detailLoading = false
+  }
+
+  function selectOffset(delta) {
+    if (messages.length === 0) return ""
+    var index = Model.indexById(messages, selectedId)
+    var next = index < 0 ? 0 : index + Math.floor(Number(delta) || 0)
+    if (next < 0) next = 0
+    if (next > messages.length - 1) next = messages.length - 1
+    return messages[next].id
+  }
+
+  // -------------------------------------------------------------- actions
+
+  // Every action moves the list immediately and reconciles afterwards. Waiting
+  // for Google before the row moves makes the panel feel broken on a slow
+  // connection, and the failure path puts the row back.
+  function act(id, action, quiet) {
+    var messageId = String(id || "")
+    if (!ready || messageId === "") return
+    var index = Model.indexById(messages, messageId)
+    if (index < 0) return
+    var before = messages[index]
+    var updated = Model.applyLabelChange(before, action)
+    var survives = Model.survivesAction(mailboxKey, action)
+
+    if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
+    if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
+
+    if (survives) messages = Model.replaceById(messages, updated)
+    else messages = Model.removeById(messages, messageId)
+    if (selectedId === messageId) {
+      if (survives) selectedMessage = updated
+      else clearSelection()
+    }
+
+    function restore(error) {
+      root.messages = survives
+        ? Model.replaceById(root.messages, before)
+        : root.messages.slice(0, index).concat([before], root.messages.slice(index))
+      root.refreshCounts()
+      root.fail(error)
+    }
+
+    pendingAction = action
+    var done = function(payload, error) {
+      root.pendingAction = ""
+      if (error) {
+        restore(error)
+        return
+      }
+      if (!quiet) root.note(root.actionLabel(action))
+      root.refreshCounts()
+    }
+
+    if (action === "trash") apiClient.trashMessage(messageId, done)
+    else if (action === "untrash") apiClient.untrashMessage(messageId, done)
+    else {
+      var change = Model.labelChangesFor(action)
+      if (!change) {
+        pendingAction = ""
+        return
+      }
+      apiClient.modifyMessage(messageId, change.add, change.remove, done)
+    }
+  }
+
+  function actionLabel(action) {
+    if (action === "archive") return "Archived"
+    if (action === "trash") return "Moved to trash"
+    if (action === "untrash") return "Restored"
+    if (action === "star") return "Starred"
+    if (action === "unstar") return "Unstarred"
+    if (action === "markRead") return "Marked read"
+    if (action === "markUnread") return "Marked unread"
+    if (action === "spam") return "Reported as spam"
+    return "Done"
+  }
+
+  function toggleStar(id) {
+    var index = Model.indexById(messages, id)
+    if (index < 0) return
+    act(id, messages[index].starred ? "unstar" : "star")
+  }
+
+  function toggleRead(id) {
+    var index = Model.indexById(messages, id)
+    if (index < 0) return
+    act(id, messages[index].unread ? "markRead" : "markUnread")
+  }
+
+  function markAllRead() {
+    if (!ready || messages.length === 0) return
+    var ids = []
+    for (var i = 0; i < messages.length; i++) {
+      if (messages[i].unread) ids.push(messages[i].id)
+    }
+    if (ids.length === 0) return
+    var before = messages.slice()
+    var next = []
+    for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
+    messages = Model.survivesAction(mailboxKey, "markRead") ? next : []
+    pendingAction = "markRead"
+    apiClient.batchModify(ids, [], ["UNREAD"], function(payload, error) {
+      root.pendingAction = ""
+      if (error) {
+        root.messages = before
+        root.fail(error)
+        return
+      }
+      root.note(Model.pluralize(ids.length, "message") + " marked read")
+      root.refreshCounts()
+    })
+  }
+
+  // ---------------------------------------------------------------- reply
+
+  function sendReply(text, toOverride, subjectOverride, threadId, inReplyTo) {
+    if (!ready || sending) return
+    var body = String(text || "").trim()
+    if (body === "") {
+      fail("Write something before sending")
+      return
+    }
+    var to = String(toOverride || "")
+    if (to === "") {
+      fail("No recipient for this reply")
+      return
+    }
+    sending = true
+    apiClient.sendMessage(Mail.buildSendPayload({
+      to: to,
+      subject: subjectOverride,
+      body: body,
+      threadId: threadId,
+      inReplyTo: inReplyTo
+    }), function(payload, error) {
+      root.sending = false
+      if (error) {
+        root.fail(error)
+        return
+      }
+      root.note("Reply sent")
+      root.replySent()
+    })
+  }
+
+  signal replySent()
+
+  function replyRecipient(summary) {
+    if (!summary) return ""
+    var replyTo = summary.replyTo && summary.replyTo.email ? summary.replyTo.email : ""
+    return replyTo || (summary.from ? summary.from.email : "")
+  }
+
+  // -------------------------------------------------------- notifications
+
+  function notify(arrivals) {
+    var list = Array.isArray(arrivals) ? arrivals : []
+    if (list.length === 0) return
+    if (list.length === 1) {
+      Quickshell.execDetached(["notify-send", "-a", "Omarchy Gmail",
+        "-i", "mail-unread", list[0].from.display, Model.notificationBody(list[0])])
+      return
+    }
+    // One notification per message turns a batch sync into a wall of popups.
+    var names = []
+    for (var i = 0; i < list.length && i < 3; i++) names.push(list[i].from.display)
+    Quickshell.execDetached(["notify-send", "-a", "Omarchy Gmail",
+      "-i", "mail-unread", Model.pluralize(list.length, "new message"), names.join(", ")])
+  }
+
+  // ------------------------------------------------------------ navigation
+
+  function selectMailbox(key) {
+    if (mailboxKey === key && searchQuery === "") return
+    mailboxKey = String(key || "inbox")
+    searchQuery = ""
+    clearSelection()
+    messages = []
+    listLoaded = false
+    loadMessages(false)
+  }
+
+  function search(text) {
+    var query = String(text || "").trim()
+    if (query === searchQuery) return
+    searchQuery = query
+    clearSelection()
+    messages = []
+    listLoaded = false
+    loadMessages(false)
+  }
+
+  function openInBrowser(id) {
+    Quickshell.execDetached(["xdg-open", Api.webMessageUrl(id, 0)])
+  }
+
+  function openWebInbox() {
+    Quickshell.execDetached(["xdg-open", Api.webSearchUrl(effectiveQuery, 0)])
+  }
+
+  function openCloudConsole() {
+    Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/clients/create"])
+  }
+
+  function openGmailApiPage() {
+    Quickshell.execDetached(["xdg-open",
+      "https://console.cloud.google.com/apis/library/gmail.googleapis.com"])
+  }
+
+  function signIn() { authManager.beginLogin() }
+  function cancelSignIn() { authManager.cancelLogin() }
+
+  function signOut() {
+    authManager.logout()
+    messages = []
+    labels = []
+    profile = null
+    inboxUnread = 0
+    listLoaded = false
+    seenIds = ({})
+    notificationsPrimed = false
+    clearSelection()
+  }
+
+  // ------------------------------------------------------------- lifecycle
+
+  onPanelOpenChanged: {
+    if (!panelOpen) return
+    clearNotice()
+    if (!ready) return
+    loadProfile()
+    if (!listLoaded) loadMessages(false)
+    else refresh()
+  }
+
+  onReadyChanged: {
+    if (!ready) return
+    loadProfile()
+    loadLabels()
+    refreshCounts()
+    if (panelOpen && !listLoaded) loadMessages(false)
+  }
+
+  AuthManager {
+    id: authManager
+    pluginDir: root.pluginDir
+    oauthPort: root.oauthPort
+    loginHint: root.accountEmail
+
+    onLoginSucceeded: {
+      root.lastError = authManager.lastError
+      root.loadProfile()
+      root.loadLabels()
+      root.refreshCounts()
+      root.loadMessages(false)
+    }
+    onLoggedOut: root.clearNotice()
+    onSessionUnavailable: function(reason) { root.fail(reason) }
+  }
+
+  GmailApiClient {
+    id: apiClient
+    auth: authManager
+  }
+
+  Component.onCompleted: authManager.restoreSession()
+
+  Timer {
+    id: noticeTimer
+    interval: 4000
+    onTriggered: root.actionStatus = ""
+  }
+
+  // The unread count is one label read — cheap enough to keep running while
+  // the panel is closed, which is the only way the bar badge stays honest.
+  Timer {
+    id: pollTimer
+    interval: root.refreshIntervalSec * 1000
+    running: root.ready
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: {
+      root.refreshCounts()
+      if (root.panelOpen) root.loadMessages(false)
+      // A new message while the panel is closed still has to reach the
+      // notification path, so the list is refreshed on the unread count going
+      // up rather than on a second timer.
+      else if (root.notifyNewMail && root.inboxUnread > Model.unreadCount(root.messages))
+        root.loadMessages(false)
+    }
+  }
+}
