@@ -72,13 +72,16 @@ BarWidget {
     }
 
     onPressed: function(buttonCode) {
+      // Right-click does nothing. It used to open the web inbox, which is the
+      // one thing this application exists so you do not have to do, and it is
+      // also where a context menu is expected — so the gesture was both wrong
+      // and reserved. Left opens the window, middle checks for mail.
+      if (buttonCode === Qt.RightButton) return
       if (buttonCode === Qt.MiddleButton) {
         if (root.gmail) root.gmail.refresh()
-      } else if (buttonCode === Qt.RightButton) {
-        if (root.gmail) root.gmail.openWebInbox()
-      } else {
-        root.openWindow()
+        return
       }
+      root.openWindow()
     }
   }
 }
