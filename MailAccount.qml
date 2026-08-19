@@ -94,6 +94,9 @@ Item {
   property bool selectedTooHeavy: false
   property var selectedAttachments: []
   property bool detailLoading: false
+  // Set once Gmail's own copy has landed, so a slower cache read knows not to
+  // paint over it.
+  property bool detailLive: false
   property var detailHandle: null
   property int detailSerial: 0
 
@@ -350,23 +353,29 @@ Item {
     selectedAttachments = []
     detailLoading = true
 
-    // A message that has been opened before opens instantly; the live copy
-    // replaces it a moment later.
-    var cached = cacheStore.body(messageId)
-    if (cached) {
+    // A message that has been opened before opens from its file, usually well
+    // before Gmail answers. The read is asynchronous, so the live copy can win
+    // the race — in which case the cached one is simply dropped rather than
+    // painted over what is already correct.
+    detailLive = false
+    bodyCache.read(messageId, function(cached) {
+      if (serial !== root.detailSerial) return
+      if (root.detailLive || !cached) return
       // The body is already decoded here, so sanitising it costs a fraction
       // of a millisecond — worth doing inline to paint in the same frame.
       var ready = Html.sanitize(cached.html, ({ allowRemoteImages: true }))
-      selectedBody = { text: cached.text, source: cached.source }
-      selectedHtml = ready.html
-      selectedBlockedImages = ready.blockedImages
-      selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
-      selectedAttachments = cached.attachments
-    }
+      root.selectedBody = { text: cached.text, source: cached.source }
+      root.selectedHtml = ready.html
+      root.selectedBlockedImages = ready.blockedImages
+      root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+      root.selectedAttachments = cached.attachments
+      bodyCache.touch(messageId)
+    })
 
     detailHandle = apiClient.getMessage(messageId, true, function(payload, error) {
       if (serial !== root.detailSerial) return
       root.detailLoading = false
+      root.detailLive = true
       if (error || !payload) {
         root.fail(error || "Could not open that message")
         return
@@ -381,7 +390,7 @@ Item {
       root.selectedBlockedImages = ready.blockedImages
       root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
       root.selectedAttachments = Mail.attachments(payload.payload)
-      cacheStore.putBody(messageId, ({
+      bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
         html: ready.html,
@@ -434,17 +443,25 @@ Item {
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
 
-    if (survives) messages = Model.replaceById(messages, updated)
-    else messages = Model.removeById(messages, messageId)
+    // An action the user did not ask for must never move them. Opening an
+    // unread message marks it read, and being read is the very thing that
+    // disqualifies it from the unread list — so evicting it there would close
+    // the reader that the click had just opened. The row stays until the list
+    // is next loaded, which is also what Gmail's own clients do.
+    var keepOpen = quiet === true && selectedId === messageId
+    var removed = !survives && !keepOpen
+
+    if (removed) messages = Model.removeById(messages, messageId)
+    else messages = Model.replaceById(messages, updated)
     if (selectedId === messageId) {
-      if (survives) selectedMessage = updated
-      else clearSelection()
+      if (removed) clearSelection()
+      else selectedMessage = updated
     }
 
     function restore(error) {
-      root.messages = survives
-        ? Model.replaceById(root.messages, before)
-        : root.messages.slice(0, index).concat([before], root.messages.slice(index))
+      root.messages = removed
+        ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
+        : Model.replaceById(root.messages, before)
       root.refreshCounts()
       root.fail(error)
     }
@@ -634,6 +651,7 @@ Item {
     notificationsPrimed = false
     newMailPending = false
     cacheStore.clear()
+    bodyCache.clear()
     clearSelection()
   }
 
@@ -708,6 +726,12 @@ Item {
       if (root.labels.length === 0 && store.labels.length > 0) root.labels = store.labels
       if (root.messages.length === 0) root.paintFromCache()
     }
+  }
+
+  BodyCache {
+    id: bodyCache
+    pluginDir: root.pluginDir
+    accountId: root.accountId
   }
 
   Component.onCompleted: authManager.restoreSession()

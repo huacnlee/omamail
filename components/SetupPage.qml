@@ -30,6 +30,10 @@ Column {
   readonly property var auth: service ? service.auth : null
   readonly property bool configured: !!auth && auth.credentialsPresent
   readonly property bool signedIn: !!auth && auth.loggedIn
+  // A further mailbox signs in with the client that is already set up, so the
+  // page is an account chooser rather than the console walkthrough.
+  readonly property bool addingMailbox: configured && !signedIn
+    && !!service && service.accountEmail === ""
   readonly property bool toolsMissing: !!auth && auth.toolsChecked && auth.missingTools.length > 0
 
   spacing: Style.space(16)
@@ -62,29 +66,28 @@ Column {
     }
   }
 
+  // Hidden only during first run, when there is genuinely no page behind this
+  // one — the mailbox does not exist yet. On its own line rather than inline
+  // beside the hero, because that is where it sits on the reader and the
+  // compose form, and a control that moves between pages reads as a different
+  // control on each of them.
+  BackBar {
+    visible: root.canLeave
+    textColor: root.textColor
+    dimColor: root.dimColor
+    panelFontFamily: root.panelFontFamily
+    onActivated: root.backRequested()
+  }
+
   // ------------------------------------------------------------------ hero
 
   Item {
     width: parent.width
     implicitHeight: Math.max(heroIcon.height, heroText.implicitHeight)
 
-    // Hidden only during first run, when there is genuinely no page behind
-    // this one — the mailbox does not exist yet.
-    BackBar {
-      id: leaveButton
-      visible: root.canLeave
-      anchors.left: parent.left
-      anchors.top: parent.top
-      textColor: root.textColor
-      dimColor: root.dimColor
-      panelFontFamily: root.panelFontFamily
-      onActivated: root.backRequested()
-    }
-
     GmailIcon {
       id: heroIcon
-      anchors.left: leaveButton.visible ? leaveButton.right : parent.left
-      anchors.leftMargin: leaveButton.visible ? Style.space(8) : 0
+      anchors.left: parent.left
       anchors.top: parent.top
       anchors.topMargin: Style.space(2)
       iconSize: Style.font.displayLarge
@@ -102,7 +105,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Connect your mailbox"
+        text: root.addingMailbox ? "Add a mailbox" : "Connect your mailbox"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.heading
@@ -111,7 +114,9 @@ Column {
 
       Text {
         width: parent.width
-        text: "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
+        text: root.addingMailbox
+          ? "Signing in with the OAuth client you already set up. Pick the Google account you want to add."
+          : "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall

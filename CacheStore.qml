@@ -34,7 +34,16 @@ Item {
   signal restored()
 
   function get(key) { return Cache.getQuery(store, key) }
-  function body(id) { return Cache.getBody(store, id) }
+  // Reading a body counts as using it, so the hit is recorded before the entry
+  // is handed back — that stamp is what the LRU evicts on.
+  function body(id) {
+    var entry = Cache.getBody(store, id)
+    if (entry) {
+      store = Cache.touchBody(store, id, Date.now())
+      scheduleSave()
+    }
+    return entry
+  }
 
   function putQuery(key, page) {
     store = Cache.putQuery(store, key, page, Date.now())

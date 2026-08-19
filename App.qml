@@ -565,7 +565,11 @@ Item {
           id: accountLine
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
-          anchors.right: notice.left
+          // An invisible sibling still holds its place, so the hints must only
+          // take room from this line while they are actually on screen.
+          anchors.right: statusBar.hasNotice
+            ? notice.left
+            : (keyHints.visible ? keyHints.left : parent.right)
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
           // The account already has a home in the sidebar's user bar, so this
@@ -601,33 +605,61 @@ Item {
           }
         }
 
-        // One line for whatever the window most needs to say: what it is
-        // doing, or what went wrong.
+        // The right of the status line carries one of two things: what the
+        // window most needs to say, or — when it has nothing to report — what
+        // the keyboard can do from where you are standing.
+        readonly property bool hasNotice: !!root.service
+          && (root.service.actionStatus !== "" || root.service.lastError !== "")
+
         Text {
           id: notice
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          visible: statusBar.hasNotice
           width: Math.min(implicitWidth, parent.width / 2)
           horizontalAlignment: Text.AlignRight
-          // Whatever the window most needs to say, and when it has nothing to
-          // report, what the keyboard can do from where you are standing.
           text: {
             if (!root.service) return ""
             if (root.service.actionStatus !== "") return root.service.actionStatus
-            if (root.service.lastError !== "") return root.service.lastError
-            if (root.showSetup) return "Esc  back"
-            if (root.composing) return "Ctrl+Enter  send      Esc  close"
-            if (root.currentView === "reader")
-              return "u  back      r  reply      e  archive      #  trash"
-            return "j / k  move      Enter  open      e  archive      c  compose"
+            return root.service.lastError
           }
           color: root.service && root.service.lastError !== "" && root.service.actionStatus === ""
             ? root.urgent
-            : (root.service && root.service.actionStatus !== "" ? root.dim : root.dimmer)
+            : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+        }
+
+        KeyHints {
+          id: keyHints
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(14)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: !statusBar.hasNotice && !root.compact
+          textColor: root.foreground
+          dimColor: root.dimmer
+          panelFontFamily: root.fontFamily
+          hints: {
+            if (root.showSetup) return [({ key: "Esc", label: "back" })]
+            if (root.composing) return [
+              ({ key: "Ctrl+Enter", label: "send" }),
+              ({ key: "Esc", label: "close" })
+            ]
+            if (root.currentView === "reader") return [
+              ({ key: "u", label: "back" }),
+              ({ key: "r", label: "reply" }),
+              ({ key: "e", label: "archive" }),
+              ({ key: "#", label: "trash" })
+            ]
+            return [
+              ({ key: "j / k", label: "move" }),
+              ({ key: "\u21B5", label: "open" }),
+              ({ key: "e", label: "archive" }),
+              ({ key: "c", label: "compose" })
+            ]
+          }
         }
       }
 

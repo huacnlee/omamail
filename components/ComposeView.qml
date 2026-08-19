@@ -136,13 +136,18 @@ Item {
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
-    height: Style.space(48)
+    height: backBar.implicitHeight + Style.space(14) + titleRow.implicitHeight
+      + Style.space(24)
 
+    // Its own line, level with the reader's and the setup page's. Sharing a
+    // line with the title made it read as part of the title on this page and
+    // as a page control on the others.
     BackBar {
       id: backBar
       anchors.left: parent.left
       anchors.leftMargin: Style.space(14)
-      anchors.verticalCenter: parent.verticalCenter
+      anchors.top: parent.top
+      anchors.topMargin: Style.space(12)
       textColor: root.textColor
       dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
@@ -150,11 +155,13 @@ Item {
     }
 
     Row {
-      anchors.left: backBar.right
-      anchors.leftMargin: Style.space(12)
+      id: titleRow
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(14)
       anchors.right: parent.right
       anchors.rightMargin: Style.space(18)
-      anchors.verticalCenter: parent.verticalCenter
+      anchors.top: backBar.bottom
+      anchors.topMargin: Style.space(14)
       spacing: Style.space(10)
 
       ActionIcon {

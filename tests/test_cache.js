@@ -25,7 +25,7 @@ function summary(id, ms, extra) {
 // ------------------------------------------------------------------ store
 
 deepEqual(cache.emptyStore(), {
-  version: cache.VERSION, account: "", profile: null, labels: [], queries: {}, bodies: {}
+  version: cache.VERSION, account: "", profile: null, labels: [], queries: {}
 })
 
 // Anything unreadable is an empty cache, never a crash: a cache is a
@@ -90,16 +90,11 @@ store = cache.putQuery(store, "in:inbox|25", { summaries: [], estimate: 0, nextP
 assert.strictEqual(cache.getQuery(store, "in:inbox|25").summaries.length, 0)
 assert.strictEqual(Object.keys(store.queries).length, 1)
 
-// ---------------------------------------------------------------- bodies
-
-store = cache.putBody(store, "m1", { text: "您好", source: "plain", html: "", attachments: [] }, NOW)
-assert.strictEqual(cache.getBody(store, "m1").text, "您好")
-assert.strictEqual(cache.getBody(store, "zzz"), null)
-
 // ---------------------------------------------------------------- pruning
 //
-// The cache lives in a file that is rewritten whole, so it has to stay small
-// enough that writing it is never something the user notices.
+// This store is rewritten whole every time it is saved, so it has to stay small
+// enough that writing it is never something the user notices. Bodies — the one
+// bucket that would break that — live in their own files instead.
 
 let big = cache.emptyStore()
 for (let i = 0; i < cache.MAX_QUERIES + 6; i++) {
@@ -111,12 +106,6 @@ assert.strictEqual(Object.keys(big.queries).length, cache.MAX_QUERIES)
 assert.ok(cache.getQuery(big, "q0|25") === null, "the oldest goes first")
 assert.ok(cache.getQuery(big, "q" + (cache.MAX_QUERIES + 5) + "|25") !== null, "the newest stays")
 
-for (let i = 0; i < cache.MAX_BODIES + 10; i++) {
-  big = cache.putBody(big, "b" + i, { text: "x", source: "plain", html: "", attachments: [] }, NOW + i)
-}
-big = cache.prune(big)
-assert.strictEqual(Object.keys(big.bodies).length, cache.MAX_BODIES)
-assert.strictEqual(cache.getBody(big, "b0"), null)
 
 // ---------------------------------------------------------------- account
 //
@@ -256,7 +245,25 @@ const text = cache.serialize(store)
 assert.ok(text.indexOf("\n") < 0 || true)
 const reloaded = cache.load(text)
 assert.strictEqual(cache.getQuery(reloaded, "in:inbox|25").estimate, 0)
-assert.strictEqual(cache.getBody(reloaded, "m1").text, "您好")
 assert.strictEqual(reloaded.version, cache.VERSION)
+
+
+
+
+// Bodies are files now: one per message, under one directory per account. The
+// name has to survive a hostile message id without leaving that directory.
+{
+  assert.strictEqual(cache.bodyDirName("huacnlee@gmail.com"), "account-huacnlee_40gmail.com")
+  assert.strictEqual(cache.bodyFileName("198c2f3a4b"), "198c2f3a4b.json")
+  assert.strictEqual(cache.bodyFileName(""), "", "an id-less message is never written")
+  var hostile = cache.bodyFileName("../../etc/passwd")
+  assert.ok(hostile.indexOf("/") < 0, "a traversal cannot survive the escape")
+
+  var body = { text: "t", source: "plain", html: "<p>x</p>", attachments: [{ name: "a" }] }
+  deepEqual(cache.parseBody(cache.serializeBody(body)), body)
+  assert.strictEqual(cache.parseBody("not json"), null, "a truncated file reads as a miss")
+  deepEqual(cache.parseBody(cache.serializeBody({})),
+    { text: "", source: "", html: "", attachments: [] })
+}
 
 console.log("test_cache.js ok")
