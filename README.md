@@ -46,6 +46,25 @@ be registered by code that is only running once the window is already open.
 Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl` and `xdg-open` —
 all of which Omarchy already ships.
 
+To remove it:
+
+```bash
+omarchy plugin remove gmail.omarchy
+```
+
+That takes the plugin itself. Nothing it wrote lives inside your Omarchy
+config, so removing those is separate and entirely up to you:
+
+```bash
+secret-tool clear service omarchy-gmail    # the refresh token
+rm -rf ~/.config/omarchy-gmail             # the OAuth client and account list
+rm -rf ~/.cache/omarchy-gmail              # cached mail
+```
+
+Signing out from inside the app clears the keyring entry on its own. The plugin
+never edits your shell, Hyprland or theme configuration — the one keybinding
+above is yours to add and yours to remove.
+
 ## Connecting your mailbox
 
 Gmail has no shared application to sign in through. Google issues API access
