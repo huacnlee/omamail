@@ -38,6 +38,26 @@
   immediately.
 - Never let colour alone carry state. Unread is a dot, a heavier weight, and a
   brighter subject, because some themes put the accent close to the foreground.
+- Prefer the shorter label when both are honest, but never buy brevity with
+  accuracy: "Mark these read" acts on the messages that are loaded, so it does
+  not claim to mark all of them.
+
+## Popups and their triggers
+
+- A control that opens a popup holds a selected style for as long as that popup
+  is on screen. A trigger that looks untouched while its own menu is up leaves
+  the menu looking unattached to anything, and leaves the user without an answer
+  to "which of these opened it".
+- Anchor a popup to the trigger's own edge, not to the pointer. `mapToGlobal(0, 0)`
+  on the control, never the click position: the menu should land in the same
+  place however the control was pressed.
+- Place a popup *after* it opens, and again whenever its height changes. A
+  `QQC.Popup` does not build its contents until the first `open()`, so its
+  height is still zero while any placement code is deciding whether it fits —
+  the first open lands somewhere different from every one after it, which is the
+  bug this rule exists to prevent.
+- A popup that would overflow flips to the other side of its trigger, then
+  clamps to the window edge, then clamps to zero. All three, in that order.
 
 ## Secrets
 

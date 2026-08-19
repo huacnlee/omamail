@@ -21,13 +21,33 @@ Item {
 
   // Positioned against the window rather than a button, and flipped when it
   // would run off the bottom, since it opens from a bar at the bottom.
+  // Where the menu was asked to appear, kept because it cannot be placed yet.
+  property real anchorX: 0
+  property real anchorY: 0
+
   function openAt(sceneX, sceneY) {
     var local = root.mapFromGlobal(sceneX, sceneY)
-    menu.x = Math.max(0, Math.min(local.x, root.width - menu.width))
-    menu.y = local.y + menu.implicitHeight > root.height
-      ? Math.max(0, local.y - menu.implicitHeight)
-      : local.y
+    anchorX = local.x
+    anchorY = local.y
     menu.open()
+    place()
+  }
+
+  // A Popup does not build its contents until it is first opened, so on the
+  // very first click its height is still zero: the "does it fit below?" test
+  // passed trivially and the menu was placed at the click and then grew off the
+  // bottom. That matters more now the trigger sits on the status line, where
+  // below is where there is no room at all.
+  function place() {
+    if (!menu.visible) return
+    var tall = menu.height > 0 ? menu.height : menu.implicitHeight
+    var x = Math.max(0, Math.min(anchorX, root.width - menu.width))
+    var y = anchorY
+    if (y + tall > root.height) y = anchorY - tall
+    if (y + tall > root.height) y = root.height - tall
+    if (y < 0) y = 0
+    menu.x = x
+    menu.y = y
   }
 
   function close() { menu.close() }
@@ -38,7 +58,6 @@ Item {
   signal setupRequested()
   signal switchAccountRequested()
   signal projectRequested()
-  signal signOutRequested()
 
   anchors.fill: root.showTrigger ? undefined : parent
   implicitWidth: root.showTrigger ? Style.space(24) : 0
@@ -63,6 +82,8 @@ Item {
     modal: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
+    onHeightChanged: root.place()
+    onOpened: root.place()
     background: Rectangle {
       radius: Style.cornerRadius
       color: Color.popups.background
@@ -74,12 +95,14 @@ Item {
       spacing: Style.space(2)
 
       MenuRow {
-        text: "Mark everything here read"
+        // "These" and not "all": it marks the messages that are loaded, which
+        // is what you are looking at, not every message the mailbox holds.
+        text: "Mark these read"
         enabled: root.signedIn
         onActivated: { menu.close(); root.markAllReadRequested() }
       }
       MenuRow {
-        text: "Open in browser..."
+        text: "Open in Gmail"
         enabled: root.signedIn
         onActivated: { menu.close(); root.openWebRequested() }
       }
@@ -87,11 +110,7 @@ Item {
       Separator {}
 
       MenuRow {
-        text: "Keyboard shortcuts..."
-        onActivated: { menu.close(); root.shortcutsRequested() }
-      }
-      MenuRow {
-        text: "Switch mailbox..."
+        text: "Switch account..."
         visible: root.accountCount > 1
         onActivated: { menu.close(); root.switchAccountRequested() }
       }
@@ -103,16 +122,12 @@ Item {
       Separator {}
 
       MenuRow {
-        text: "GitHub..."
-        onActivated: { menu.close(); root.projectRequested() }
+        text: "Shortcuts"
+        onActivated: { menu.close(); root.shortcutsRequested() }
       }
-
-      Separator {}
-
       MenuRow {
-        text: "Sign out"
-        enabled: root.signedIn
-        onActivated: { menu.close(); root.signOutRequested() }
+        text: "GitHub"
+        onActivated: { menu.close(); root.projectRequested() }
       }
     }
   }

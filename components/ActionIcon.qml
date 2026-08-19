@@ -110,6 +110,10 @@ Canvas {
     } else if (root.name === "send") {
       move(14.5, 1.5); line(7, 9)
       move(14.5, 1.5); line(10, 14.5); line(7, 9); line(1.5, 6); ctx.closePath()
+    } else if (root.name === "menu") {
+      move(2.5, 4.5); line(13.5, 4.5)
+      move(2.5, 8); line(13.5, 8)
+      move(2.5, 11.5); line(13.5, 11.5)
     } else if (root.name === "plus") {
       move(8, 3.5); line(8, 12.5)
       move(3.5, 8); line(12.5, 8)

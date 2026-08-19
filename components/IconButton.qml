@@ -15,6 +15,10 @@ Rectangle {
   property color accent: Color.accent
   property bool filled: false
   property bool hasCursor: false
+  // Held down for as long as a menu this button opened is on screen. A trigger
+  // that looks untouched while its own popup is up leaves the popup looking
+  // unattached to anything.
+  property bool selected: false
   property real iconSize: Style.font.icon
   property real size: Math.max(Style.space(24), iconSize + Style.spacing.sm * 2)
   property string fontFamily: Style.font.family
@@ -30,13 +34,14 @@ Rectangle {
   radius: Style.cornerRadius
   opacity: enabled ? 1.0 : 0.4
   color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
-    : (hot ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+    : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
+      : (hot ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
 
   ActionIcon {
     anchors.centerIn: parent
     name: root.iconName
     iconSize: root.iconSize
-    color: root.hot ? root.hoverColor : root.foreground
+    color: root.hot || root.selected ? root.hoverColor : root.foreground
     filled: root.filled
   }
 

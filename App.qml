@@ -388,6 +388,8 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
+          menuOpen: appMenu.opened
+          switcherOpen: accountSwitcher.opened
           onMenuRequested: function(sceneX, sceneY) { appMenu.openAt(sceneX, sceneY) }
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
@@ -655,10 +657,36 @@ Item {
           foreground: root.foreground
         }
 
+        // The menu has a control of its own rather than hiding behind the
+        // account line. A line of text that happens to be clickable is not an
+        // affordance — nothing about "how current the list is" suggests that
+        // pressing it opens anything — and at a narrow window this is the only
+        // route to the mailbox switcher and to settings.
+        IconButton {
+          id: menuButton
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          iconName: "menu"
+          tooltipText: "Menu"
+          foreground: root.dim
+          hoverColor: root.foreground
+          iconSize: Style.font.iconSmall
+          size: Style.space(20)
+          fontFamily: root.fontFamily
+          // The button's own left edge, so the menu hangs off the control
+          // rather than off wherever inside it the pointer happened to land.
+          selected: appMenu.opened
+          onClicked: {
+            var scene = mapToGlobal(0, 0)
+            appMenu.openAt(scene.x, scene.y)
+          }
+        }
+
         Text {
           id: accountLine
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(14)
+          anchors.left: menuButton.right
+          anchors.leftMargin: Style.space(8)
           // An invisible sibling still holds its place, so the hints must only
           // take room from this line while they are actually on screen.
           anchors.right: statusBar.hasNotice
@@ -683,18 +711,6 @@ Item {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
 
-          // The sidebar carries the account menu, and the sidebar is gone at
-          // this width, so the status line takes over rather than leaving the
-          // menu unreachable.
-          MouseArea {
-            anchors.fill: parent
-            enabled: root.compact || root.showSetup
-            cursorShape: Qt.PointingHandCursor
-            onClicked: function(mouse) {
-              var scene = mapToGlobal(mouse.x, mouse.y)
-              appMenu.openAt(scene.x, scene.y)
-            }
-          }
         }
 
         // The right of the status line carries one of two things: what the
@@ -772,7 +788,6 @@ Item {
         onSetupRequested: root.settingsVisible = true
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
-        onSignOutRequested: if (root.service) root.service.signOut()
       }
 
       // Every mailbox, with its own unread count, opened from the user bar.
