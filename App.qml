@@ -764,6 +764,7 @@ Item {
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.shortcutHelpVisible = true
         onSetupRequested: root.settingsVisible = true
+        onProjectRequested: if (root.service) root.service.openProjectPage()
         onSignOutRequested: if (root.service) root.service.signOut()
       }
 

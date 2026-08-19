@@ -62,10 +62,13 @@ Item {
   // width rather than the text's, so the inset cannot feed back into itself.
   readonly property bool narrowBody: bodyFlick.width > 0
     && bodyFlick.width < Style.space(420)
-  readonly property int bodyInset: narrowBody ? Style.space(6) : Style.space(14)
-  // The subject and the toolbar keep a little more than the body does — they
-  // are the window's own furniture, not the sender's layout.
+  // One inset for the whole page. Giving the body a narrower one bought a few
+  // pixels and cost the alignment: the message text started to the left of the
+  // subject above it and the toolbar below, which reads as a mistake long
+  // before it reads as extra room. The space is reclaimed from the sender's own
+  // padding instead, which is where it was being wasted.
   readonly property int pageInset: narrowBody ? Style.space(8) : Style.space(14)
+  readonly property int bodyInset: pageInset
   readonly property int bodyWidth: Math.max(80, bodyFlick.width - bodyInset * 2)
   // Quantised, because this is a dependency of the document itself: bound to
   // the exact width, dragging the splitter would rebuild and re-lay-out the

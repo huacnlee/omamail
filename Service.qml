@@ -333,6 +333,12 @@ Item {
   function openWebInbox() { if (current) current.openWebInbox() }
   function openCloudConsole() { if (current) current.openCloudConsole() }
   function openGmailApiPage() { if (current) current.openGmailApiPage() }
+
+  // Not forwarded to an account: the project exists whether or not anyone has
+  // signed in, and the menu offers it on the setup page too.
+  function openProjectPage() {
+    Quickshell.execDetached(["xdg-open", "https://github.com/huacnlee/omamail"])
+  }
   function openConsentScreen() { if (current) current.openConsentScreen() }
 
   signal replySent()
