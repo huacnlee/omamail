@@ -24,11 +24,17 @@ Rectangle {
 
   readonly property string initial: email === "" ? "?" : email.charAt(0).toUpperCase()
 
+  // Held while a popup this bar opened is on screen, so the popup reads as
+  // belonging to it rather than as floating free.
+  property bool switcherOpen: false
+  property bool menuOpen: false
+
   implicitHeight: Style.space(38)
   radius: Style.cornerRadius
-  color: hover.hovered
-    ? Style.hoverFillFor(root.textColor, root.accentColor)
-    : "transparent"
+  color: root.switcherOpen
+    ? Style.selectedFillFor(root.textColor, root.accentColor)
+    : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor)
+      : "transparent")
 
   // An initial rather than a picture: Gmail's own avatar is behind an API this
   // app does not ask permission for, and an address is always Latin script, so
@@ -77,6 +83,7 @@ Rectangle {
     tooltipText: "Menu"
     foreground: root.dimColor
     bordered: false
+    selected: root.menuOpen
     fontSize: Style.font.bodySmall
     onClicked: {
       var scene = mapToGlobal(width / 2, height / 2)
