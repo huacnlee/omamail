@@ -93,6 +93,7 @@ Item {
   property string selectedId: ""
   property var selectedMessage: null
   property var selectedBody: ({ text: "", source: "" })
+  property string selectedHtml: ""
   property var selectedAttachments: []
   property bool detailLoading: false
   property var detailHandle: null
@@ -129,6 +130,17 @@ Item {
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
   readonly property string badgeText: showUnreadCount ? Model.badgeText(inboxUnread, 99) : ""
   readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread)
+
+  // The sign-in has three waits that look identical from outside: the helper
+  // script, the browser, and Google's token endpoint. Naming which one is
+  // happening is the difference between "it is working" and "it is stuck".
+  readonly property string signInProgress: {
+    if (!authManager.toolsChecked) return "Checking for socat and secret-tool…"
+    if (!authManager.credentialsPresent) return ""
+    if (authManager.loginBusy) return "Finish the sign-in in your browser…"
+    if (authManager.sessionBusy) return "Restoring the saved session…"
+    return ""
+  }
 
   signal listRefreshed()
 
@@ -267,6 +279,7 @@ Item {
     apiClient.abortRequest(detailHandle)
     selectedMessage = null
     selectedBody = { text: "", source: "" }
+    selectedHtml = ""
     selectedAttachments = []
     detailLoading = true
 
@@ -280,6 +293,7 @@ Item {
       var summary = Mail.summarize(payload, new Date())
       root.selectedMessage = summary
       root.selectedBody = Mail.extractBody(payload.payload)
+      root.selectedHtml = Mail.extractHtml(payload.payload)
       root.selectedAttachments = Mail.attachments(payload.payload)
       root.messages = Model.replaceById(root.messages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
@@ -295,6 +309,7 @@ Item {
     selectedId = ""
     selectedMessage = null
     selectedBody = { text: "", source: "" }
+    selectedHtml = ""
     selectedAttachments = []
     detailLoading = false
   }
@@ -413,43 +428,43 @@ Item {
 
   // ---------------------------------------------------------------- reply
 
-  function sendReply(text, toOverride, subjectOverride, threadId, inReplyTo) {
+  // One entry point for every kind of outgoing message. Reply, reply-all and
+  // forward differ only in what the compose window puts in the fields, which
+  // is where that decision belongs.
+  function send(fields) {
     if (!ready || sending) return
-    var body = String(text || "").trim()
+    var values = fields || ({})
+    var body = String(values.body || "").trim()
     if (body === "") {
       fail("Write something before sending")
       return
     }
-    var to = String(toOverride || "")
+    var to = String(values.to || "").trim()
     if (to === "") {
-      fail("No recipient for this reply")
+      fail("Add a recipient first")
       return
     }
     sending = true
     apiClient.sendMessage(Mail.buildSendPayload({
       to: to,
-      subject: subjectOverride,
+      cc: String(values.cc || "").trim(),
+      subject: String(values.subject || ""),
       body: body,
-      threadId: threadId,
-      inReplyTo: inReplyTo
+      threadId: values.threadId,
+      inReplyTo: values.inReplyTo,
+      references: values.references
     }), function(payload, error) {
       root.sending = false
       if (error) {
         root.fail(error)
         return
       }
-      root.note("Reply sent")
+      root.note("Sent")
       root.replySent()
     })
   }
 
   signal replySent()
-
-  function replyRecipient(summary) {
-    if (!summary) return ""
-    var replyTo = summary.replyTo && summary.replyTo.email ? summary.replyTo.email : ""
-    return replyTo || (summary.from ? summary.from.email : "")
-  }
 
   // -------------------------------------------------------- notifications
 
@@ -502,6 +517,10 @@ Item {
     Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/clients/create"])
   }
 
+  function openConsentScreen() {
+    Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/overview"])
+  }
+
   function openGmailApiPage() {
     Quickshell.execDetached(["xdg-open",
       "https://console.cloud.google.com/apis/library/gmail.googleapis.com"])
@@ -524,7 +543,7 @@ Item {
 
   // ------------------------------------------------------------- lifecycle
 
-  onPanelOpenChanged: {
+  onWindowOpenChanged: {
     if (!windowOpen) return
     clearNotice()
     if (!ready) return
