@@ -87,7 +87,7 @@ assert.strictEqual(credentials.isConfigured(null), false)
 assert.strictEqual(credentials.describe(parsed.credentials), "omarchy-gmail-42 · 1234")
 assert.strictEqual(credentials.describe(credentials.empty()), "")
 assert.strictEqual(
-  credentials.path("/home/jason"), "/home/jason/.config/omarchy-gmail/credentials.json")
+  credentials.path("/home/jason"), "/home/jason/.config/omamail/credentials.json")
 
 // -------------------------------------------------------- built-in client
 //
@@ -133,7 +133,7 @@ const first = credentials.keyringAttributes(sharedClient, "one@gmail.com")
 const second = credentials.keyringAttributes(sharedClient, "two@gmail.com")
 
 deepEqual(first, [
-  "service", "omarchy-gmail",
+  "service", "omamail",
   "kind", "refresh-token",
   "client-id", sharedClient,
   "account", "one@gmail.com"
@@ -176,11 +176,23 @@ deepEqual(credentials.legacyKeyringAttributes(""), [])
 // lookup cannot see them. They are read once with these and rewritten, rather
 // than leaving an already signed-in user at a sign-in button.
 deepEqual(credentials.legacyKeyringAttributes(sharedClient), [
-  "service", "omarchy-gmail",
+  "service", "omamail",
   "kind", "refresh-token",
   "client-id", sharedClient
 ])
 assert.strictEqual(credentials.legacyKeyringAttributes(sharedClient).indexOf("account"), -1)
+
+deepEqual(credentials.renamedKeyringAttributes(sharedClient, "one@gmail.com"), [
+  "service", "omarchy-gmail",
+  "kind", "refresh-token",
+  "client-id", sharedClient,
+  "account", "one@gmail.com"
+])
+deepEqual(credentials.renamedLegacyKeyringAttributes(sharedClient), [
+  "service", "omarchy-gmail",
+  "kind", "refresh-token",
+  "client-id", sharedClient
+])
 
 // ------------------------------------------------------------ the store
 //

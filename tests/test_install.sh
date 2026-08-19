@@ -25,6 +25,18 @@ done
 [ -x install.sh ] || fail "install.sh must be executable"
 grep -q 'plugin-backups' install.sh || fail "backups must not land inside the plugins directory"
 
+test_root=$(mktemp -d)
+trap 'rm -rf "$test_root"' EXIT
+mkdir -p "$test_root/config/omarchy-gmail" "$test_root/cache/omarchy-gmail"
+printf 'client\n' > "$test_root/config/omarchy-gmail/credentials.json"
+printf 'cache\n' > "$test_root/cache/omarchy-gmail/inbox.json"
+XDG_CONFIG_HOME="$test_root/config" XDG_CACHE_HOME="$test_root/cache" \
+  sh scripts/migrate-storage.sh
+[ -f "$test_root/config/omamail/credentials.json" ] || fail "legacy config was not moved"
+[ -f "$test_root/cache/omamail/inbox.json" ] || fail "legacy cache was not moved"
+[ ! -e "$test_root/config/omarchy-gmail" ] || fail "legacy config directory remains"
+[ ! -e "$test_root/cache/omarchy-gmail" ] || fail "legacy cache directory remains"
+
 # The keyring helper takes attribute pairs now, because keying a refresh token
 # on the OAuth client alone lets two accounts sharing one client overwrite each
 # other. An empty value is a secret-tool wildcard, so it is refused outright.

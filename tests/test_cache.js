@@ -146,7 +146,7 @@ assert.strictEqual(cache.getQuery(recased, "in:inbox|25") !== null, true,
 // One file per account, because switching mailboxes must not throw the other
 // mailbox's cache away — that is the whole point of having a cache.
 
-const DIRECTORY = "/home/u/.cache/omarchy-gmail"
+const DIRECTORY = "/home/u/.cache/omamail"
 const SAFE_NAME = /^[a-z0-9._-]+$/
 
 function checkName(id) {

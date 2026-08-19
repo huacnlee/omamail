@@ -598,14 +598,14 @@ Item {
     var list = Array.isArray(arrivals) ? arrivals : []
     if (list.length === 0) return
     if (list.length === 1) {
-      Quickshell.execDetached(["notify-send", "-a", "Omarchy Gmail",
+      Quickshell.execDetached(["notify-send", "-a", "Omamail",
         "-i", "mail-unread", list[0].from.display, Model.notificationBody(list[0])])
       return
     }
     // One notification per message turns a batch sync into a wall of popups.
     var names = []
     for (var i = 0; i < list.length && i < 3; i++) names.push(list[i].from.display)
-    Quickshell.execDetached(["notify-send", "-a", "Omarchy Gmail",
+    Quickshell.execDetached(["notify-send", "-a", "Omamail",
       "-i", "mail-unread", Model.pluralize(list.length, "new message"), names.join(", ")])
   }
 

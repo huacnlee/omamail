@@ -398,7 +398,7 @@ Item {
         onClicked: root.actionRequested("archive")
       }
       IconButton {
-        iconName: "trash"; tooltipText: "Move to trash · Del"
+        iconName: "trash"; tooltipText: "Move to trash · d"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("trash")
       }

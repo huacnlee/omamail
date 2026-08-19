@@ -19,7 +19,7 @@ Item {
 
   readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME")
     || (Quickshell.env("HOME") + "/.cache")
-  readonly property string directory: cacheHome + "/omarchy-gmail"
+  readonly property string directory: cacheHome + "/omamail"
 
   // One file per account. A shared file would mean every switch discarded the
   // cache of the account being switched to, which is the whole point of having

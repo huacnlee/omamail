@@ -31,7 +31,7 @@ Item {
   property var barWidgetRegistry: null
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "gmail.omarchy"
+    ? String(manifest.id) : "omamail"
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
 
@@ -384,7 +384,7 @@ Item {
     id: accountsFile
     path: {
       var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
-      return home + "/omarchy-gmail/accounts.json"
+      return home + "/omamail/accounts.json"
     }
     watchChanges: true
     printErrors: false

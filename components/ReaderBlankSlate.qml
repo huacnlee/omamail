@@ -33,7 +33,7 @@ Item {
     { key: "j / k", action: "Move through the list" },
     { key: "Enter", action: "Open the selected message" },
     { key: "e", action: "Archive" },
-    { key: "Del", action: "Move to trash" },
+    { key: "d", action: "Move to trash" },
     { key: "r", action: "Reply" },
     { key: "c", action: "Compose" },
     { key: "Right-click", action: "Archive, trash, spam, star" }
