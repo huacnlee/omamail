@@ -436,11 +436,14 @@ Column {
         elide: Text.ElideRight
       }
 
+      // Sized from its one child rather than childrenRect: the child sizes
+      // itself to this holder's width, so asking childrenRect for the height
+      // closes a loop through the step's own implicitHeight.
       Item {
         id: bodyHolder
         width: parent.width
         visible: step.active
-        implicitHeight: visible ? childrenRect.height : 0
+        implicitHeight: visible && children.length > 0 ? children[0].implicitHeight : 0
       }
     }
   }

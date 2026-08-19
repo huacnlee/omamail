@@ -262,16 +262,25 @@ Item {
 
   // ------------------------------------------------------------- instances
 
+  // The model is a COUNT, not the array. An Instantiator rebuilds every
+  // delegate when its model changes identity, and this list is reassigned
+  // whole on every save — so modelling the array tore down all the accounts
+  // whenever one of them learned its own address, dropping their loaded state
+  // and landing in-flight callbacks on half-destroyed objects.
   Instantiator {
     id: accountHosts
-    model: root.accountList ? root.accountList.accounts : []
+    model: root.accountCount
 
     delegate: MailAccount {
-      required property var modelData
       required property int index
 
+      readonly property var entry: {
+        var accounts = root.accountList ? root.accountList.accounts : []
+        return index < accounts.length ? accounts[index] : null
+      }
+
       pluginDir: root.pluginDir
-      accountId: modelData.id
+      accountId: entry ? entry.id : ""
       settings: root.settings
 
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
