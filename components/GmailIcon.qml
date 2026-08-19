@@ -58,16 +58,22 @@ Item {
       ctx.stroke()
 
       // The M, inset inside the body: down the left stem, into the valley, back
-      // up, and down the right stem. Proportions match the header's mark, so
-      // the bar and the window are recognisably the same thing.
+      // up, and down the right stem.
+      //
+      // Smaller and lighter than the frame around it. At bar size the two
+      // strokes at equal weight put more ink in a 12px square than it can hold,
+      // and the mark turns into a solid block; letting the M sit clear of the
+      // envelope on all four sides, at about two thirds the stroke, keeps both
+      // shapes readable.
       var innerW = right - left
       var innerH = bottom - top
+      ctx.lineWidth = Math.max(1, stroke * 0.54)
       ctx.beginPath()
-      ctx.moveTo(left + innerW * 0.19, bottom)
-      ctx.lineTo(left + innerW * 0.19, top + innerH * 0.26)
-      ctx.lineTo(left + innerW * 0.50, top + innerH * 0.63)
-      ctx.lineTo(left + innerW * 0.81, top + innerH * 0.26)
-      ctx.lineTo(left + innerW * 0.81, bottom)
+      ctx.moveTo(left + innerW * 0.30, bottom - innerH * 0.18)
+      ctx.lineTo(left + innerW * 0.30, top + innerH * 0.36)
+      ctx.lineTo(left + innerW * 0.50, top + innerH * 0.60)
+      ctx.lineTo(left + innerW * 0.70, top + innerH * 0.36)
+      ctx.lineTo(left + innerW * 0.70, bottom - innerH * 0.18)
       ctx.stroke()
     }
   }
