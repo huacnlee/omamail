@@ -57,6 +57,21 @@ Item {
     ? String(service.selectedBody.source || "") : ""
   readonly property var imageSources: service ? service.selectedImages : []
 
+  // At a narrow window the reader gives up most of its own gutter, and the
+  // sender's horizontal padding is stripped as well. Keyed off the flickable's
+  // width rather than the text's, so the inset cannot feed back into itself.
+  readonly property bool narrowBody: bodyFlick.width > 0
+    && bodyFlick.width < Style.space(420)
+  readonly property int bodyInset: narrowBody ? Style.space(6) : Style.space(14)
+  // The subject and the toolbar keep a little more than the body does — they
+  // are the window's own furniture, not the sender's layout.
+  readonly property int pageInset: narrowBody ? Style.space(8) : Style.space(14)
+  readonly property int bodyWidth: Math.max(80, bodyFlick.width - bodyInset * 2)
+  // Quantised, because this is a dependency of the document itself: bound to
+  // the exact width, dragging the splitter would rebuild and re-lay-out the
+  // whole message on every frame.
+  readonly property int imageWidth: Math.round(root.bodyWidth / 20) * 20
+
   ReaderBlankSlate {
     anchors.fill: parent
     visible: !root.summary && !(root.service && root.service.detailLoading)
@@ -83,7 +98,7 @@ Item {
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.margins: Style.space(14)
+    anchors.margins: root.pageInset
     implicitHeight: (backBar.visible ? backBar.implicitHeight + Style.space(14) : 0)
       + headerColumn.implicitHeight
 
@@ -163,8 +178,8 @@ Item {
     anchors.top: headerBlock.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.leftMargin: Style.space(14)
-    anchors.rightMargin: Style.space(14)
+    anchors.leftMargin: root.pageInset
+    anchors.rightMargin: root.pageInset
     anchors.topMargin: Style.space(8)
     implicitHeight: Style.space(30)
     radius: Style.cornerRadius
@@ -213,9 +228,9 @@ Item {
 
     TextEdit {
       id: bodyText
-      x: Style.space(14)
+      x: root.bodyInset
       y: Style.space(14)
-      width: bodyFlick.width - Style.space(28)
+      width: root.bodyWidth
       readOnly: true
       selectByMouse: true
       wrapMode: TextEdit.Wrap
@@ -230,7 +245,9 @@ Item {
             background: root.backgroundColor,
             link: root.linkColor,
             quote: root.dimColor,
-            padding: 0
+            padding: 0,
+            maxImageWidth: root.imageWidth,
+            compact: root.narrowBody
           }))
         : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
             ({
@@ -278,7 +295,7 @@ Item {
     anchors.bottom: parent.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.margins: Style.space(14)
+    anchors.margins: root.pageInset
     spacing: Style.space(6)
     visible: !!root.summary
 
