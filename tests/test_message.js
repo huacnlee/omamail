@@ -268,4 +268,15 @@ const quoted = message.quoteBody(summary, "line one\nline two")
 assert.ok(quoted.indexOf("> line one\n> line two") > 0)
 assert.ok(quoted.indexOf("李四 wrote:") > 0)
 
+// The reader wants the markup; the list row wants the flattened text. Both
+// walks must find the same part, and neither may return an attachment.
+assert.strictEqual(message.extractHtml(multipart), "<p>html body</p>")
+assert.strictEqual(message.extractHtml(nested), "<p>outer html</p>")
+assert.strictEqual(message.extractHtml({ mimeType: "text/plain", body: { data: b64url("x") } }), "")
+assert.strictEqual(message.extractHtml(null), "")
+assert.strictEqual(message.extractHtml({
+  mimeType: "multipart/mixed",
+  parts: [{ mimeType: "text/html", filename: "page.html", body: { attachmentId: "a1", data: b64url("<p>file</p>") } }]
+}), "", "an html attachment is a file, not the body")
+
 console.log("test_message.js ok")
