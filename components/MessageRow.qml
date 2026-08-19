@@ -55,7 +55,7 @@ Rectangle {
 
   Rectangle {
     anchors.left: parent.left
-    anchors.leftMargin: Style.space(6)
+    anchors.leftMargin: Style.space(4)
     anchors.top: parent.top
     anchors.topMargin: Style.space(12)
     width: Style.space(5)
@@ -69,7 +69,9 @@ Rectangle {
     id: body
     anchors.left: parent.left
     anchors.right: actions.visible ? actions.left : parent.right
-    anchors.leftMargin: Style.space(16)
+    // Matches the reader's content inset and the header's logo, so all three
+    // columns start their text on one vertical line.
+    anchors.leftMargin: Style.space(14)
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
@@ -138,7 +140,7 @@ Rectangle {
     IconButton {
       iconName: "star"
       filled: root.summary.starred
-      tooltipText: root.summary.starred ? "Unstar" : "Star"
+      tooltipText: (root.summary.starred ? "Unstar" : "Star") + " · s"
       foreground: root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       iconSize: Style.font.iconSmall
@@ -150,7 +152,7 @@ Rectangle {
     IconButton {
       visible: root.hot
       iconName: "archive"
-      tooltipText: "Archive"
+      tooltipText: "Archive · e"
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall
@@ -162,7 +164,7 @@ Rectangle {
     IconButton {
       visible: root.hot
       iconName: "trash"
-      tooltipText: "Move to trash"
+      tooltipText: "Move to trash · #"
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall

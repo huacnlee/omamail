@@ -137,7 +137,7 @@ Item {
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: "Ctrl+/ for every shortcut"
+        text: "Ctrl+? for every shortcut"
         color: root.dimmerColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

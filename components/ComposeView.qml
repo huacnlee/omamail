@@ -391,6 +391,7 @@ Item {
 
       IconTextButton {
         iconName: "send"
+        tooltipText: "Send · Ctrl+Enter"
         text: root.service && root.service.sending ? "Sending…" : "Send"
         foreground: root.textColor
         fontFamily: root.panelFontFamily

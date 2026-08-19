@@ -23,6 +23,10 @@ Item {
   required property string panelFontFamily
   property bool forcePlainText: false
   property real zoom: 1.0
+  // A way back only means something when something is behind it. At desktop
+  // width the list is on screen and clicking another row is the navigation;
+  // in a single column the reader has replaced the list, so it needs one.
+  property bool showBack: false
   // Set by the reader itself when a document is too heavy to lay out, and
   // cleared by the user asking for it anyway.
   property bool forceRichAnyway: false
@@ -74,10 +78,12 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.margins: Style.space(14)
-    implicitHeight: backBar.implicitHeight + Style.space(6) + headerColumn.implicitHeight
+    implicitHeight: (backBar.visible ? backBar.implicitHeight + Style.space(6) : 0)
+      + headerColumn.implicitHeight
 
     BackBar {
       id: backBar
+      visible: root.showBack
       anchors.left: parent.left
       anchors.top: parent.top
       textColor: root.textColor
@@ -89,11 +95,11 @@ Item {
     IconButton {
       id: starButton
       anchors.right: parent.right
-      anchors.top: backBar.bottom
-      anchors.topMargin: Style.space(2)
+      anchors.top: backBar.visible ? backBar.bottom : parent.top
+      anchors.topMargin: backBar.visible ? Style.space(2) : 0
       iconName: "star"
       filled: !!root.summary && root.summary.starred
-      tooltipText: root.summary && root.summary.starred ? "Unstar" : "Star"
+      tooltipText: (root.summary && root.summary.starred ? "Unstar" : "Star") + " · s"
       foreground: root.summary && root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       fontFamily: root.panelFontFamily
@@ -105,8 +111,8 @@ Item {
       anchors.left: parent.left
       anchors.right: starButton.left
       anchors.rightMargin: Style.space(8)
-      anchors.top: backBar.bottom
-      anchors.topMargin: Style.space(6)
+      anchors.top: backBar.visible ? backBar.bottom : parent.top
+      anchors.topMargin: backBar.visible ? Style.space(6) : 0
       spacing: Style.space(4)
 
       Text {
@@ -297,17 +303,17 @@ Item {
       spacing: Style.space(2)
 
       IconButton {
-        iconName: "reply"; tooltipText: "Reply"
+        iconName: "reply"; tooltipText: "Reply · r"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("reply")
       }
       IconButton {
-        iconName: "replyAll"; tooltipText: "Reply all"
+        iconName: "replyAll"; tooltipText: "Reply all · a"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("replyAll")
       }
       IconButton {
-        iconName: "forward"; tooltipText: "Forward"
+        iconName: "forward"; tooltipText: "Forward · f"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("forward")
       }
@@ -322,12 +328,12 @@ Item {
       }
 
       IconButton {
-        iconName: "archive"; tooltipText: "Archive"
+        iconName: "archive"; tooltipText: "Archive · e"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("archive")
       }
       IconButton {
-        iconName: "trash"; tooltipText: "Move to trash"
+        iconName: "trash"; tooltipText: "Move to trash · #"
         foreground: root.urgentColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("trash")
       }

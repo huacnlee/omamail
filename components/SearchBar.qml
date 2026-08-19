@@ -55,7 +55,7 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     visible: field.text !== ""
     iconText: "×"
-    tooltipText: "Clear search"
+    tooltipText: "Clear search · Esc"
     foreground: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.55)
     hoverColor: root.textColor
     fontSize: Style.font.body
