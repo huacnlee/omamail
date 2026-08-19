@@ -72,13 +72,21 @@ Item {
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
   property bool settingsVisible: false
+  // Something the window needs to say that no account is reporting — refusing a
+  // duplicate mailbox, for one. Cleared on a timer so it cannot outlive its
+  // moment on the status line.
+  property string notice: ""
+  onNoticeChanged: if (notice !== "") noticeTimer.restart()
   // Open by default, but narrow. The longest mailbox name is "All mail" — at
   // 11px monospace that needs about 116px including the icon, the gaps and a
   // count, so the rail costs little enough to leave standing.
   property bool sidebarCollapsed: false
 
   readonly property bool ready: !!service && service.ready
-  readonly property bool showSetup: setupVisible || !ready
+  // The walkthrough is for having no mailbox at all. A mailbox that has been
+  // added but not signed in yet belongs in settings, next to the ones that are.
+  readonly property bool anyReady: !!service && service.anyAccountReady
+  readonly property bool showSetup: setupVisible || !anyReady
   readonly property bool showSettings: settingsVisible && !showSetup
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
@@ -164,6 +172,9 @@ Item {
     // A new mailbox appears as a row in Settings, waiting to be signed in.
     // Sending the window to the first-run walkthrough instead showed a setup
     // that was already finished, for a different account.
+    function onDuplicateAccount(email) {
+      root.notice = email + " is already added"
+    }
     function onAccountAdded() {
       root.setupVisible = false
       root.settingsVisible = true
@@ -548,7 +559,7 @@ Item {
             textColor: root.foreground
             dimColor: root.dim
             panelFontFamily: root.fontFamily
-            canLeave: root.ready
+            canLeave: root.anyReady
             onBackRequested: root.setupVisible = false
           }
           }
@@ -664,8 +675,9 @@ Item {
         // The right of the status line carries one of two things: what the
         // window most needs to say, or — when it has nothing to report — what
         // the keyboard can do from where you are standing.
-        readonly property bool hasNotice: !!root.service
-          && (root.service.actionStatus !== "" || root.service.lastError !== "")
+        readonly property bool hasNotice: root.notice !== ""
+          || (!!root.service
+            && (root.service.actionStatus !== "" || root.service.lastError !== ""))
 
         Text {
           id: notice
@@ -676,6 +688,7 @@ Item {
           width: Math.min(implicitWidth, parent.width / 2)
           horizontalAlignment: Text.AlignRight
           text: {
+            if (root.notice !== "") return root.notice
             if (!root.service) return ""
             if (root.service.actionStatus !== "") return root.service.actionStatus
             return root.service.lastError
@@ -735,6 +748,12 @@ Item {
       }
 
       // Every mailbox, with its own unread count, opened from the user bar.
+      Timer {
+        id: noticeTimer
+        interval: 6000
+        onTriggered: root.notice = ""
+      }
+
       AccountSwitcher {
         id: accountSwitcher
         anchors.fill: parent

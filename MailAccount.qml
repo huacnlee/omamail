@@ -31,6 +31,9 @@ Item {
   // account still counts its unread mail; it just does not fetch lists or
   // bodies nobody can see.
   property string accountId: ""
+  // Only the mailbox that predates multi-account may claim the old
+  // client-keyed refresh token. See AuthManager.mayAdoptLegacyToken.
+  property bool mayAdoptLegacyToken: true
   property bool active: false
 
   // Pushed down from the container, which is where the bar widget's settings
@@ -708,6 +711,7 @@ Item {
     id: authManager
     pluginDir: root.pluginDir
     accountId: root.accountId
+    mayAdoptLegacyToken: root.mayAdoptLegacyToken
     oauthPort: root.oauthPort
     loginHint: root.accountEmail
 
