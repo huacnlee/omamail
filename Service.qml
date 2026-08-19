@@ -67,6 +67,14 @@ Item {
   // The instance whose mailbox is on screen. Everything below forwards to it.
   property var current: null
 
+  // A mailbox that has not signed in yet has no address, and the id every
+  // account is addressed by *is* its address — so a half-added account cannot
+  // be named by activeId at all. Position is what addresses it until it learns
+  // its own name. Not persisted: a pending account that survives a restart is
+  // just a row waiting to be signed in, and the window should come back to the
+  // mailbox that actually has mail in it.
+  property int activeIndex: -1
+
   function accountAt(index) {
     return accountHosts.objectAt(index)
   }
@@ -80,7 +88,9 @@ Item {
   }
 
   function refreshCurrent() {
-    var next = findAccount(activeAccountId)
+    var next = activeIndex >= 0 && activeIndex < accountHosts.count
+      ? accountHosts.objectAt(activeIndex)
+      : findAccount(activeAccountId)
     // A pending account has no id yet, so fall back to position: without this
     // a half-added mailbox could never be the one on screen, and setup would
     // have nothing to run in.
@@ -97,27 +107,50 @@ Item {
   // The whole point of switching is that it is instant, which it is because
   // each account keeps its own cache on disk.
   function switchTo(id) {
-    if (String(id) === activeAccountId) return
+    if (String(id) === activeAccountId && activeIndex < 0) return
+    activeIndex = -1
     accountList = Accounts.setActive(accountList, id)
     saveAccounts()
+    refreshCurrent()
+  }
+
+  // The switcher selects by position, because that is the only handle a mailbox
+  // without an address has.
+  function switchToIndex(index) {
+    var accounts = accountList ? accountList.accounts : []
+    if (index < 0 || index >= accounts.length) return
+    if (accounts[index].id !== "") {
+      switchTo(accounts[index].id)
+      return
+    }
+    activeIndex = index
+    refreshCurrent()
   }
 
   function addAccount() {
     accountList = Accounts.add(accountList, ({ email: "", clientId: "", clientSecret: "" }))
     saveAccounts()
-    // A new account has nothing to show, so the window goes straight to the
-    // page that can fix that.
+    // Switching to it is the whole point, and it has to happen before the page
+    // opens: without this the setup page ran against whichever mailbox was
+    // already on screen, so adding an account showed the *existing* account's
+    // finished setup and there was no way through to signing a new one in.
+    activeIndex = accountCount - 1
+    refreshCurrent()
     accountAdded()
   }
 
   function removeAccount(id) {
+    activeIndex = -1
     accountList = Accounts.remove(accountList, id)
     saveAccounts()
+    refreshCurrent()
   }
 
   function removeAccountAt(index) {
+    activeIndex = -1
     accountList = Accounts.removeAt(accountList, index)
     saveAccounts()
+    refreshCurrent()
   }
 
   // An account learns its own address on its first profile read; until then the
@@ -134,7 +167,9 @@ Item {
              clientSecret: accounts[i].clientSecret, label: accounts[i].label })
         : accounts[i])
     }
-    if (updated.activeId === "") updated = Accounts.setActive(updated, Accounts.accountId(email))
+    if (updated.activeId === "" || activeIndex === index)
+      updated = Accounts.setActive(updated, Accounts.accountId(email))
+    if (activeIndex === index) activeIndex = -1
     accountList = updated
     saveAccounts()
   }
@@ -229,6 +264,7 @@ Item {
   readonly property var selectedMessage: current ? current.selectedMessage : null
   readonly property var selectedBody: current ? current.selectedBody : ({ text: "", source: "" })
   readonly property string selectedHtml: current ? current.selectedHtml : ""
+  readonly property var selectedImages: current ? current.selectedImages : []
   readonly property var selectedAttachments: current ? current.selectedAttachments : []
   readonly property bool selectedTooHeavy: !!current && current.selectedTooHeavy
   readonly property bool detailLoading: !!current && current.detailLoading

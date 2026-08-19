@@ -259,11 +259,11 @@ assert.strictEqual(reloaded.version, cache.VERSION)
   var hostile = cache.bodyFileName("../../etc/passwd")
   assert.ok(hostile.indexOf("/") < 0, "a traversal cannot survive the escape")
 
-  var body = { text: "t", source: "plain", html: "<p>x</p>", attachments: [{ name: "a" }] }
+  var body = { text: "t", source: "plain", html: "<p>x</p>", attachments: [{ name: "a" }], images: ["a.png"] }
   deepEqual(cache.parseBody(cache.serializeBody(body)), body)
   assert.strictEqual(cache.parseBody("not json"), null, "a truncated file reads as a miss")
   deepEqual(cache.parseBody(cache.serializeBody({})),
-    { text: "", source: "", html: "", attachments: [] })
+    { text: "", source: "", html: "", attachments: [], images: [] })
 }
 
 console.log("test_cache.js ok")

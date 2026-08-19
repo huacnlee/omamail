@@ -51,6 +51,13 @@ Item {
     && !root.forceRichAnyway
   readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText && !root.tooHeavy
 
+  // Image markers only mean something when the plain text was made from the
+  // HTML: a message that shipped its own text/plain part never had images in
+  // it, and anything looking like a marker there is the sender's own words.
+  readonly property string bodySource: service && service.selectedBody
+    ? String(service.selectedBody.source || "") : ""
+  readonly property var imageSources: service ? service.selectedImages : []
+
   ReaderBlankSlate {
     anchors.fill: parent
     visible: !root.summary && !(root.service && root.service.detailLoading)
@@ -213,7 +220,11 @@ Item {
       readOnly: true
       selectByMouse: true
       wrapMode: TextEdit.Wrap
-      textFormat: root.htmlAvailable ? TextEdit.RichText : TextEdit.PlainText
+      // Rich text either way. The plain-text document is built here rather than
+      // taken from the sender — escaped text, line breaks and marker links and
+      // nothing else — so it stays cheap to lay out even for the messages that
+      // fell back to plain text because their own markup was too heavy.
+      textFormat: TextEdit.RichText
       text: root.htmlAvailable
         ? Html.documentFor(root.rawHtml, ({
             foreground: root.textColor,
@@ -222,13 +233,26 @@ Item {
             quote: root.dimColor,
             padding: 0
           }))
-        : (root.service ? root.service.selectedBody.text : "")
+        : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
+            ({
+              foreground: root.textColor,
+              background: root.backgroundColor,
+              link: root.linkColor
+            }), root.bodySource === "html")
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Math.max(7, Math.round(Style.font.bodySmall * root.zoom))
-      onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+      onLinkActivated: function(link) {
+        var image = Html.imageLinkIndex(link)
+        if (image > 0) {
+          var sources = root.imageSources
+          if (image <= sources.length) imagePopover.show(sources[image - 1])
+          return
+        }
+        Qt.openUrlExternally(link)
+      }
 
       // NoButton so selecting text still works; this exists only to turn the
       // I-beam into a hand while a link is under the pointer.
@@ -301,7 +325,18 @@ Item {
 
     // Icons rather than labels: six actions fit where six words would not, and
     // the destructive one is set apart by the rule and by taking urgent.
+    //
+    // Split in two. What you do to the message — answer it, file it, throw it
+    // away — sits on the left where reading ends. How you look at it is not
+    // something you do to it, so it goes to the far right, out of the path of
+    // the actions that change something.
+    Item {
+      width: parent.width
+      implicitHeight: messageActions.implicitHeight
+
     Row {
+      id: messageActions
+      anchors.left: parent.left
       spacing: Style.space(2)
 
       IconButton {
@@ -348,22 +383,14 @@ Item {
         onClicked: root.actionRequested("trash")
       }
 
-      // As tall as the buttons it stands between, taken from one of them rather
-      // than from a constant: IconButton sizes itself from its icon, so a hard
-      // number drifts. A one-pixel-high item in a Row aligns to the row's top
-      // edge, which left the rule floating above the icons instead of level
-      // with them.
-      Item {
-        width: Style.space(13)
-        height: replyButton.height
+    }
 
-        PanelSeparator {
-          anchors.centerIn: parent
-          width: 1
-          height: Style.space(15)
-          foreground: root.textColor
-        }
-      }
+    // The distance across the bar is the separation here, so these need no rule
+    // of their own.
+    Row {
+      anchors.right: parent.right
+      anchors.verticalCenter: messageActions.verticalCenter
+      spacing: Style.space(2)
 
       IconButton {
         visible: root.rawHtml !== ""
@@ -381,5 +408,13 @@ Item {
         onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
       }
     }
+    }
+  }
+
+  ImagePopover {
+    id: imagePopover
+    textColor: root.textColor
+    dimColor: root.dimColor
+    panelFontFamily: root.panelFontFamily
   }
 }

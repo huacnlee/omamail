@@ -24,21 +24,44 @@ Item {
 
   readonly property bool opened: menu.opened
 
-  signal accountChosen(string id)
+  signal accountChosen(int index)
   signal addAccountRequested()
-  signal removeAccountRequested(string id)
+  signal removeAccountRequested(int index)
   signal manageRequested()
 
   anchors.fill: parent
   z: 45
 
+  // Where the menu was asked to appear, kept because it cannot be placed yet.
+  property real anchorX: 0
+  property real anchorY: 0
+
   function openAt(sceneX, sceneY) {
     var local = root.mapFromGlobal(sceneX, sceneY)
-    menu.x = Math.max(0, Math.min(local.x, root.width - menu.width))
-    menu.y = local.y + menu.implicitHeight > root.height
-      ? Math.max(0, local.y - menu.implicitHeight)
-      : local.y
+    anchorX = local.x
+    anchorY = local.y
     menu.open()
+    place()
+  }
+
+  // A Popup does not build its contents until it is first opened, so on the
+  // very first click its height is still zero — the "does it fit below?" test
+  // passed trivially and the menu was placed at the click, then grew off the
+  // bottom of the window. Placing again whenever the height changes is what
+  // makes the first open behave like every one after it, and it also re-places
+  // the menu when a row is added or removed.
+  function place() {
+    if (!menu.visible) return
+    var tall = menu.height > 0 ? menu.height : menu.implicitHeight
+    var x = Math.max(0, Math.min(anchorX, root.width - menu.width))
+    var y = anchorY
+    // Below the click by preference, above it if that would overflow, and
+    // pinned to the bottom edge if the menu is taller than the room either way.
+    if (y + tall > root.height) y = anchorY - tall
+    if (y + tall > root.height) y = root.height - tall
+    if (y < 0) y = 0
+    menu.x = x
+    menu.y = y
   }
 
   function close() { menu.close() }
@@ -51,6 +74,8 @@ Item {
     modal: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
+    onHeightChanged: root.place()
+    onOpened: root.place()
     background: Rectangle {
       radius: Style.cornerRadius
       color: Color.popups.background
@@ -68,6 +93,7 @@ Item {
         Rectangle {
           id: row
           required property var modelData
+          required property int index
 
           width: menu.width - menu.leftPadding - menu.rightPadding
           implicitHeight: Style.space(40)
@@ -168,7 +194,7 @@ Item {
             fontFamily: root.panelFontFamily
             onClicked: {
               menu.close()
-              root.removeAccountRequested(row.modelData.id)
+              root.removeAccountRequested(row.index)
             }
           }
 
@@ -176,7 +202,7 @@ Item {
           TapHandler {
             onTapped: {
               menu.close()
-              root.accountChosen(row.modelData.id)
+              root.accountChosen(row.index)
             }
           }
         }

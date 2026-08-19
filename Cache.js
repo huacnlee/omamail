@@ -315,7 +315,8 @@ function serializeBody(body) {
     text: String(source.text || ""),
     source: String(source.source || ""),
     html: String(source.html || ""),
-    attachments: Array.isArray(source.attachments) ? source.attachments : []
+    attachments: Array.isArray(source.attachments) ? source.attachments : [],
+    images: Array.isArray(source.images) ? source.images : []
   })
 }
 
@@ -326,6 +327,7 @@ function parseBody(text) {
     text: String(parsed.text || ""),
     source: String(parsed.source || ""),
     html: String(parsed.html || ""),
-    attachments: Array.isArray(parsed.attachments) ? parsed.attachments : []
+    attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
+    images: Array.isArray(parsed.images) ? parsed.images : []
   }
 }

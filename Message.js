@@ -315,10 +315,22 @@ function decodePart(part) {
   return decodeWordBytes(partCharset(part) || "utf-8", base64ToBytes(data))
 }
 
+// Images become a marker rather than nothing at all. Stripped outright — which
+// is what removing every tag does — a message built around its pictures reads as
+// a long run of unexplained blank space, with no way to tell an empty message
+// from one whose contents happen not to be text. The number is what lets the
+// reader offer the image itself when the marker is clicked.
+var IMAGE_MARKER = /\[image (\d+)\]/g
+
 function htmlToText(html) {
+  var imageCount = 0
   return String(html || "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<img\b[^>]*>/gi, function() {
+      imageCount++
+      return "[image " + imageCount + "]"
+    })
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")

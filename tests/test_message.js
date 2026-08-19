@@ -279,4 +279,14 @@ assert.strictEqual(message.extractHtml({
   parts: [{ mimeType: "text/html", filename: "page.html", body: { attachmentId: "a1", data: b64url("<p>file</p>") } }]
 }), "", "an html attachment is a file, not the body")
 
+
+// An image becomes a numbered marker, so the reader can offer the picture
+// itself when the marker is clicked.
+{
+  assert.strictEqual(
+    message.htmlToText("<div>Hello</div><img src=\"a.png\"><br><img src='b.png' width=600><p>Bye</p>"),
+    "Hello\n[image 1]\n[image 2]Bye")
+  assert.strictEqual(message.htmlToText("<p>none</p>"), "none", "text without images is unchanged")
+}
+
 console.log("test_message.js ok")

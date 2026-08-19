@@ -90,6 +90,9 @@ Item {
   // where it exists, which is native and skips the per-character base64 loop
   // that made this the one expensive step in opening a message.
   property string selectedHtml: ""
+  // The sender's images, in the order htmlToText numbers them, so a marker in
+  // the plain-text body can be traced back to the picture it replaced.
+  property var selectedImages: []
   property int selectedBlockedImages: 0
   property bool selectedTooHeavy: false
   property var selectedAttachments: []
@@ -350,6 +353,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    selectedImages = []
     selectedAttachments = []
     detailLoading = true
 
@@ -369,6 +373,7 @@ Item {
       root.selectedBlockedImages = ready.blockedImages
       root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
       root.selectedAttachments = cached.attachments
+      root.selectedImages = cached.images
       bodyCache.touch(messageId)
     })
 
@@ -383,18 +388,20 @@ Item {
       var summary = Mail.summarize(payload, new Date())
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
-      var ready = Html.sanitize(Mail.extractHtml(payload.payload),
-        ({ allowRemoteImages: true }))
+      var rawHtml = Mail.extractHtml(payload.payload)
+      var ready = Html.sanitize(rawHtml, ({ allowRemoteImages: true }))
       root.selectedBody = decoded
       root.selectedHtml = ready.html
       root.selectedBlockedImages = ready.blockedImages
       root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
       root.selectedAttachments = Mail.attachments(payload.payload)
+      root.selectedImages = Html.imageSources(rawHtml)
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
         html: ready.html,
-        attachments: root.selectedAttachments
+        attachments: root.selectedAttachments,
+        images: root.selectedImages
       }))
       root.messages = Model.replaceById(root.messages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
@@ -411,6 +418,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    selectedImages = []
     selectedBlockedImages = 0
     selectedTooHeavy = false
     selectedAttachments = []
