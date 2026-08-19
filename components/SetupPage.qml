@@ -5,32 +5,35 @@ import qs.Ui
 // Gmail has no shared application to sign in through the way Spotify does:
 // Google issues API access per project, so every user creates their own OAuth
 // client once. This page is that walkthrough, with each step's console page one
-// click away, because the alternative is a README the panel cannot show.
+// click away, because the alternative is a README the window cannot show.
 Column {
   id: root
 
   required property var service
   required property color textColor
+  required property color dimColor
   required property string panelFontFamily
-  property string cursorTarget: ""
+  property bool canLeave: false
 
   signal backRequested()
 
-  readonly property var auth: service.auth
-  readonly property bool configured: auth.credentialsPresent
-  readonly property color dim: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.58)
+  readonly property var auth: service ? service.auth : null
+  readonly property bool configured: !!auth && auth.credentialsPresent
+  readonly property bool toolsMissing: !!auth && auth.toolsChecked && auth.missingTools.length > 0
 
   spacing: Style.space(10)
 
   function beginEdit() {
-    clientIdField.text = root.auth.clientId
+    if (!auth) return
+    clientIdField.text = auth.clientId
     clientSecretField.text = ""
     Qt.callLater(function() { clientIdField.forceActiveFocus(); clientIdField.selectAll() })
   }
 
   function save() {
+    if (!auth) return
     var secret = clientSecretField.text.trim()
-    if (root.auth.saveCredentials(clientIdField.text.trim() + (secret === "" ? "" : "\n" + secret)))
+    if (auth.saveCredentials(clientIdField.text.trim() + (secret === "" ? "" : "\n" + secret)))
       clientSecretField.text = ""
   }
 
@@ -39,6 +42,7 @@ Column {
     spacing: Style.space(8)
 
     Button {
+      visible: root.canLeave
       text: "←"
       foreground: root.textColor
       bordered: false
@@ -58,10 +62,38 @@ Column {
     width: parent.width
     text: "Google issues Gmail API access per project, so Omarchy Gmail signs in with a client you own. "
       + "Nothing here is shared with anyone, and the mailbox is only ever read by this machine."
-    color: root.dim
+    color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
     wrapMode: Text.WordWrap
+  }
+
+  // Missing dependencies come first: none of the steps below can finish
+  // without them, so offering the steps first would waste the user's time.
+  Rectangle {
+    width: parent.width
+    visible: root.toolsMissing
+    implicitHeight: missingText.implicitHeight + Style.space(20)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, Color.accent)
+    border.width: 1
+    border.color: Style.hoverBorderFor(root.textColor, Color.accent)
+
+    Text {
+      id: missingText
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.margins: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.auth
+        ? "Install " + root.auth.missingTools.join(", ")
+          + " before signing in. Omarchy Gmail uses them for the loopback listener and the keyring."
+        : ""
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
   }
 
   Step {
@@ -83,15 +115,35 @@ Column {
   Step {
     number: "3"
     title: "Add yourself as a test user"
-    detail: "While the consent screen is in testing, only listed test users can sign in. Add the Gmail address you want to read."
+    detail: "On the consent screen, add the Gmail address you want to read."
+    actionText: "Open the consent screen..."
+    onActivated: root.service.openConsentScreen()
+  }
+
+  // The step everyone skips, and the one that decides whether the sign-in
+  // lasts. Google issues seven-day refresh tokens to projects left in Testing.
+  Step {
+    number: "4"
+    title: "Press \"Publish app\""
+    detail: "A project left in Testing is issued refresh tokens that expire after seven days, so the app would sign you out every week. Publishing your own project fixes that. You will see an \"unverified app\" warning once — expected for a client you made yourself."
     actionText: ""
   }
 
   Step {
-    number: "4"
+    number: "5"
     title: "Paste the client below"
     detail: "Copy the client ID from the console. The secret is shown next to it — paste it too if your client has one."
     actionText: ""
+  }
+
+  Text {
+    width: parent.width
+    text: "Steps 1 and 2 have a CLI: run scripts/google-cloud-setup.sh if you have gcloud. "
+      + "The consent screen and the client itself are console-only."
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
   }
 
   Column {
@@ -100,7 +152,7 @@ Column {
 
     Text {
       text: "Client ID"
-      color: root.dim
+      color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
     }
@@ -109,28 +161,30 @@ Column {
       id: clientIdField
       width: parent.width
       foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
       placeholderText: "000000000000-xxxxxxxx.apps.googleusercontent.com"
-      hasCursor: root.cursorTarget === "clientId"
       onAccepted: clientSecretField.forceActiveFocus()
     }
 
     Text {
       text: "Client secret (leave empty if your client has none)"
-      color: root.dim
+      color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
     }
 
     // Masked because it is a credential, even though Google is explicit that a
-    // desktop client's secret is not confidential — a shoulder-surfable panel
+    // desktop client's secret is not confidential — a shoulder-surfable window
     // is still a worse default than a masked one.
     TextField {
       id: clientSecretField
       width: parent.width
       foreground: root.textColor
       password: true
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
       placeholderText: "GOCSPX-…"
-      hasCursor: root.cursorTarget === "clientSecret"
       onAccepted: root.save()
     }
   }
@@ -143,8 +197,7 @@ Column {
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall
-      enabled: !root.auth.credentialsWriteBusy
-      hasCursor: root.cursorTarget === "save"
+      enabled: !!root.auth && !root.auth.credentialsWriteBusy
       onClicked: root.save()
     }
 
@@ -154,17 +207,35 @@ Column {
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall
-      enabled: !root.auth.loginBusy
-      hasCursor: root.cursorTarget === "signIn"
+      enabled: !!root.auth && !root.auth.loginBusy
       onClicked: root.service.signIn()
+    }
+
+    Button {
+      visible: !!root.auth && root.auth.loginBusy
+      text: "Cancel sign-in"
+      foreground: root.dimColor
+      bordered: false
+      fontSize: Style.font.bodySmall
+      onClicked: root.service.cancelSignIn()
     }
   }
 
   Text {
     width: parent.width
+    visible: !!root.service && root.service.signInProgress !== ""
+    text: root.service ? root.service.signInProgress : ""
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
+  Text {
+    width: parent.width
     visible: root.configured
-    text: "Connected client: " + root.auth.clientDescription
-    color: root.dim
+    text: root.auth ? "Connected client: " + root.auth.clientDescription : ""
+    color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     elide: Text.ElideRight
@@ -172,9 +243,11 @@ Column {
 
   Text {
     width: parent.width
-    text: "Saved to " + root.auth.credentialsPath + ", readable only by you. "
-      + "You can also copy the JSON the console downloads to that path instead of pasting."
-    color: root.dim
+    text: root.auth
+      ? "Saved to " + root.auth.credentialsPath + ", readable only by you. "
+        + "You can also copy the JSON the console downloads to that path instead of pasting."
+      : ""
+    color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     wrapMode: Text.WordWrap
@@ -197,7 +270,7 @@ Column {
       anchors.top: parent.top
       width: Style.space(18)
       text: step.number + "."
-      color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.45)
+      color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
     }
@@ -222,7 +295,7 @@ Column {
       Text {
         width: parent.width
         text: step.detail
-        color: root.dim
+        color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
@@ -231,7 +304,7 @@ Column {
       Button {
         visible: step.actionText !== ""
         text: step.actionText
-        foreground: root.textColor
+        foreground: Color.accent
         bordered: false
         leftAlign: true
         horizontalPadding: 0

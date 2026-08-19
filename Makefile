@@ -7,12 +7,13 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/MessageList.qml \
 	components/MessageRow.qml \
 	components/MessageMenu.qml \
+	components/ActionIcon.qml \
+	components/IconButton.qml \
 	components/MessageReader.qml \
 	components/ComposeWindow.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
 	components/SetupPage.qml \
-	components/SetupCard.qml \
 	components/ShortcutHelp.qml
 
 .PHONY: test test-js test-shell qml-check validate

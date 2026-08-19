@@ -12,13 +12,13 @@ Column {
   required property var service
   required property color textColor
   required property color accentColor
+  required property color dimColor
   required property string panelFontFamily
   property string cursorId: ""
 
   signal messageActivated(string id)
   signal rowHovered(string id, bool isHovered)
-
-  readonly property color dim: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.55)
+  signal menuRequested(string id, real sceneX, real sceneY)
 
   width: parent ? parent.width : 0
   spacing: Style.space(2)
@@ -32,6 +32,7 @@ Column {
       summary: modelData
       textColor: root.textColor
       accentColor: root.accentColor
+      dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
@@ -40,6 +41,9 @@ Column {
       onArchiveRequested: root.service.act(modelData.id, "archive")
       onTrashRequested: root.service.act(modelData.id, "trash")
       onHovered: function(isHovered) { root.rowHovered(modelData.id, isHovered) }
+      onMenuRequested: function(sceneX, sceneY) {
+        root.menuRequested(modelData.id, sceneX, sceneY)
+      }
     }
   }
 
@@ -59,7 +63,7 @@ Column {
         : (root.service.listLoaded
           ? (root.service.searchQuery !== "" ? "Nothing matches that search" : "Nothing here")
           : "")
-      color: root.dim
+      color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       wrapMode: Text.WordWrap

@@ -3,14 +3,15 @@ import qs.Commons
 import qs.Ui
 
 // One message in the list. Unread is carried by weight and by the dot on the
-// left, never by colour alone — the accent colour is a theme value that some
-// themes make nearly identical to the foreground.
+// left, never by colour alone — the accent is a theme value that some themes
+// put close to the foreground.
 Rectangle {
   id: root
 
   required property var summary
   required property color textColor
   required property color accentColor
+  required property color dimColor
   required property string panelFontFamily
   property bool hasCursor: false
   property bool selected: false
@@ -19,10 +20,10 @@ Rectangle {
   signal starToggled()
   signal archiveRequested()
   signal trashRequested()
+  signal menuRequested(real sceneX, real sceneY)
   signal hovered(bool isHovered)
 
   readonly property bool hot: mouse.containsMouse || hasCursor
-  readonly property color dim: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.55)
 
   width: parent ? parent.width : 0
   implicitHeight: body.implicitHeight + Style.space(14)
@@ -35,19 +36,24 @@ Rectangle {
     id: mouse
     anchors.fill: parent
     hoverEnabled: true
-    acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
     onEntered: root.hovered(true)
     onExited: root.hovered(false)
     onClicked: function(event) {
-      // Middle-click archives, which is the one triage action worth having
-      // without moving the pointer to a button.
-      if (event.button === Qt.MiddleButton) root.archiveRequested()
-      else root.activated()
+      if (event.button === Qt.RightButton) {
+        var scene = mapToGlobal(event.x, event.y)
+        root.menuRequested(scene.x, scene.y)
+      } else if (event.button === Qt.MiddleButton) {
+        // Middle-click archives: the one triage action worth having without
+        // moving the pointer to a button.
+        root.archiveRequested()
+      } else {
+        root.activated()
+      }
     }
   }
 
   Rectangle {
-    id: unreadDot
     anchors.left: parent.left
     anchors.leftMargin: Style.space(6)
     anchors.top: parent.top
@@ -90,7 +96,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.baseline: sender.baseline
         text: root.summary.time
-        color: root.dim
+        color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
       }
@@ -99,7 +105,7 @@ Rectangle {
     Text {
       width: parent.width
       text: root.summary.subject
-      color: root.summary.unread ? root.textColor : root.dim
+      color: root.summary.unread ? root.textColor : root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       font.bold: root.summary.unread
@@ -118,7 +124,7 @@ Rectangle {
     }
   }
 
-  // The row actions appear on hover or under the keyboard cursor. A starred
+  // Row actions appear on hover or under the keyboard cursor. A starred
   // message keeps its star visible either way, because that is state rather
   // than an affordance.
   Row {
@@ -126,32 +132,42 @@ Rectangle {
     anchors.right: parent.right
     anchors.rightMargin: Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
-    spacing: Style.space(2)
+    spacing: Style.space(1)
     visible: root.hot || root.summary.starred
 
-    PanelActionButton {
-      iconText: root.summary.starred ? "★" : "☆"
+    IconButton {
+      iconName: "star"
+      filled: root.summary.starred
       tooltipText: root.summary.starred ? "Unstar" : "Star"
-      foreground: root.summary.starred ? root.accentColor : root.dim
-      fontSize: Style.font.bodySmall
+      foreground: root.summary.starred ? root.accentColor : root.dimColor
+      hoverColor: root.accentColor
+      iconSize: Style.font.iconSmall
+      size: Style.space(20)
+      fontFamily: root.panelFontFamily
       onClicked: root.starToggled()
     }
 
-    PanelActionButton {
+    IconButton {
       visible: root.hot
-      iconText: "↓"
+      iconName: "archive"
       tooltipText: "Archive"
-      foreground: root.dim
-      fontSize: Style.font.bodySmall
+      foreground: root.dimColor
+      hoverColor: root.textColor
+      iconSize: Style.font.iconSmall
+      size: Style.space(20)
+      fontFamily: root.panelFontFamily
       onClicked: root.archiveRequested()
     }
 
-    PanelActionButton {
+    IconButton {
       visible: root.hot
-      iconText: "🗑"
+      iconName: "trash"
       tooltipText: "Move to trash"
-      foreground: root.dim
-      fontSize: Style.font.bodySmall
+      foreground: root.dimColor
+      hoverColor: root.textColor
+      iconSize: Style.font.iconSmall
+      size: Style.space(20)
+      fontFamily: root.panelFontFamily
       onClicked: root.trashRequested()
     }
   }
