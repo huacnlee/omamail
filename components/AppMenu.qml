@@ -58,6 +58,7 @@ Item {
   signal setupRequested()
   signal switchAccountRequested()
   signal projectRequested()
+  signal authorRequested()
 
   anchors.fill: root.showTrigger ? undefined : parent
   implicitWidth: root.showTrigger ? Style.space(24) : 0
@@ -128,6 +129,10 @@ Item {
       MenuRow {
         text: "GitHub"
         onActivated: { menu.close(); root.projectRequested() }
+      }
+      MenuRow {
+        text: "Twitter"
+        onActivated: { menu.close(); root.authorRequested() }
       }
     }
   }
