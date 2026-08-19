@@ -29,14 +29,14 @@ that is what the rest of Omarchy looks like.
 ## Add it to Omarchy
 
 ```bash
-omarchy plugin add https://github.com/huacnlee/omarchy-gmail.git --enable
+omarchy plugin add https://github.com/huacnlee/omamail.git --enable
 ```
 
 Then click the envelope in the bar. To open it from the keyboard, add this to
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-  o.bind("SUPER + SHIFT + G", "Gmail", "omarchy shell shell toggle gmail.omarchy '{}'")
+  o.bind("SUPER + SHIFT + G", "Omamail", "omarchy shell shell toggle omamail.omarchy '{}'")
 ```
 
 The target is `shell`, not the plugin id: the window is summoned by the shell,
@@ -49,16 +49,16 @@ all of which Omarchy already ships.
 To remove it:
 
 ```bash
-omarchy plugin remove gmail.omarchy
+omarchy plugin remove omamail.omarchy
 ```
 
 That takes the plugin itself. Nothing it wrote lives inside your Omarchy
 config, so removing those is separate and entirely up to you:
 
 ```bash
-secret-tool clear service omarchy-gmail    # the refresh token
-rm -rf ~/.config/omarchy-gmail             # the OAuth client and account list
-rm -rf ~/.cache/omarchy-gmail              # cached mail
+secret-tool clear service omamail    # the refresh token
+rm -rf ~/.config/omamail             # the OAuth client and account list
+rm -rf ~/.cache/omamail              # cached mail
 ```
 
 Signing out from inside the app clears the keyring entry on its own. The plugin
@@ -68,7 +68,7 @@ above is yours to add and yours to remove.
 ## Connecting your mailbox
 
 Gmail has no shared application to sign in through. Google issues API access
-per Cloud project, so Omarchy Gmail signs in with an OAuth client **you own**.
+per Cloud project, so Omamail signs in with an OAuth client **you own**.
 The window walks you through it in five steps, each with the console page one
 click away. It takes about two minutes, once.
 
@@ -96,9 +96,9 @@ and the client itself are console-only; there is no CLI for them.
 | --- | --- |
 | `j` / `k` | Move down / up |
 | `Enter` | Open the selected message |
-| `u` | Back to the list |
+| `Esc` | Back to the list; close the window from the list |
 | `e` | Archive |
-| `Del` or `#` | Move to trash |
+| `d` | Move to trash |
 | `s` | Star or unstar |
 | `Shift+I` / `Shift+U` | Mark read / unread |
 | `r` / `a` / `f` | Reply, reply all, forward |
@@ -141,7 +141,7 @@ thousand of them, evicted least-recently-used.
 
 - The refresh token goes to **GNOME Keyring**, keyed by client id, written over
   stdin so it never appears in the process table.
-- The OAuth client goes to `~/.config/omarchy-gmail/credentials.json`, mode
+- The OAuth client goes to `~/.config/omamail/credentials.json`, mode
   `0600`. Not to plugin settings — `shell.json` is world-readable.
 - The access token exists only in memory.
 - Signing out clears the keyring entry.
@@ -160,7 +160,7 @@ make validate         # node tests, source regressions, qmllint, manifest check
 Working agreements are in [AGENTS.md](AGENTS.md); the design canvas and the
 implementation plan are under [docs/](docs/).
 
-Omarchy Gmail is an independent project and is not affiliated with Google.
+Omamail is an independent project and is not affiliated with Google.
 Gmail is a trademark of Google LLC.
 
 Licensed under the [MIT License](LICENSE).

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "gmail.omarchy",
-  "name": "Omarchy Gmail",
+  "id": "omamail.omarchy",
+  "name": "Omamail",
   "version": "0.1.0",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
@@ -18,7 +18,7 @@
     "panel": "App.qml"
   },
   "barWidget": {
-    "displayName": "Omarchy Gmail",
+    "displayName": "Omamail",
     "description": "Unread count in the bar; the mailbox itself opens as its own window.",
     "category": "Communication",
     "aliases": [

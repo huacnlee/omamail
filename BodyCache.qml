@@ -30,7 +30,7 @@ Item {
   // One directory per account, named the way the account's store file is, so
   // the two can be matched by eye and neither can leave the cache directory.
   property string accountId: ""
-  readonly property string directory: cacheHome + "/omarchy-gmail/bodies/"
+  readonly property string directory: cacheHome + "/omamail/bodies/"
     + Cache.bodyDirName(accountId)
 
   readonly property string script: pluginDir + "/scripts/body-cache.sh"

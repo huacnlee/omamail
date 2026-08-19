@@ -17,7 +17,7 @@ Rectangle {
   property bool collapsed: false
 
   // Two things live in this row: which mailbox you are in, and everything
-  // else. The address switches accounts; the glyph opens the menu.
+  // else. The address switches accounts; the menu button opens app actions.
   signal switcherRequested(real sceneX, real sceneY)
   signal menuRequested(real sceneX, real sceneY)
   property int accountCount: 1
@@ -65,18 +65,6 @@ Rectangle {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     elide: Text.ElideMiddle
-  }
-
-  Text {
-    id: switchHint
-    visible: !root.collapsed && root.accountCount > 1
-    anchors.right: chevron.left
-    anchors.rightMargin: Style.space(4)
-    anchors.verticalCenter: parent.verticalCenter
-    text: "⌄"
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.bodySmall
   }
 
   Button {

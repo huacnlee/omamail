@@ -23,7 +23,7 @@ Item {
   property bool closingFromHost: false
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "gmail.omarchy"
+    ? String(manifest.id) : "omamail.omarchy"
 
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
@@ -184,7 +184,7 @@ Item {
   FloatingWindow {
     id: window
     visible: root.opened
-    title: "Omarchy Gmail"
+    title: "Omamail"
     color: root.background
     implicitWidth: Style.space(980)
     implicitHeight: Style.space(720)
@@ -233,7 +233,7 @@ Item {
           Text {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.compact
-            text: "Gmail"
+            text: "Omamail"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
@@ -648,10 +648,8 @@ Item {
             if (!root.ready) return "Not connected"
             if (root.compact)
               return root.service.accountEmail + " · " + root.service.inboxUnread + " unread"
-            var parts = []
-            if (root.service.syncedLabel !== "") parts.push(root.service.syncedLabel)
-            if (root.service.messages.length > 0) parts.push(root.service.resultSummary)
-            return parts.join("  ·  ")
+            return Model.statusSummary(root.service.syncedLabel,
+              root.service.resultSummary, root.service.listLoading)
           }
           color: root.dim
           font.family: root.fontFamily
@@ -717,10 +715,10 @@ Item {
               ({ key: "Esc", label: "close" })
             ]
             if (root.currentView === "reader") return [
-              ({ key: "u", label: "back" }),
+              ({ key: "Esc", label: "back" }),
               ({ key: "r", label: "reply" }),
               ({ key: "e", label: "archive" }),
-              ({ key: "Del", label: "trash" })
+              ({ key: "d", label: "trash" })
             ]
             return [
               ({ key: "j / k", label: "move" }),
@@ -821,14 +819,8 @@ Item {
       Shortcut { sequence: "j"; enabled: !focusScope.typing; onActivated: root.moveCursor(1) }
       Shortcut { sequence: "k"; enabled: !focusScope.typing; onActivated: root.moveCursor(-1) }
       Shortcut { sequence: "Return"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
-      Shortcut { sequence: "u"; enabled: !focusScope.typing; onActivated: root.backToList() }
       Shortcut { sequence: "e"; enabled: !focusScope.typing; onActivated: root.actOnCursor("archive") }
-      // Gmail's own key for this is "#", which nobody guesses. Delete and
-      // Backspace are what someone actually reaches for, so all three work and
-      // the one that gets advertised is Delete.
-      Shortcut { sequence: "#"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
-      Shortcut { sequence: "Del"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
-      Shortcut { sequence: "Backspace"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
+      Shortcut { sequence: "d"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
       Shortcut { sequence: "s"; enabled: !focusScope.typing; onActivated: if (root.service) root.service.toggleStar(root.cursorId) }
       Shortcut { sequence: "Shift+I"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markRead") }
       Shortcut { sequence: "Shift+U"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markUnread") }

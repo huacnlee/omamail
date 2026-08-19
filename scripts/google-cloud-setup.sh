@@ -20,7 +20,7 @@ usage() {
   cat <<'USAGE'
 Usage: google-cloud-setup.sh [--project ID] [--no-open]
 
-  --project ID   Cloud project to create or reuse. Default: omarchy-gmail-<random>
+  --project ID   Cloud project to create or reuse. Default: omamail-<random>
   --no-open      Print the console URLs instead of opening them.
 
 Needs the gcloud CLI (AUR: google-cloud-cli) and a signed-in account.
@@ -49,14 +49,14 @@ fi
 # Project ids are globally unique, so a fixed default would collide for the
 # second person who runs this.
 if [[ -z $project_id ]]; then
-  project_id="omarchy-gmail-$(tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
+  project_id="omamail-$(tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
 fi
 
 if gcloud projects describe "$project_id" >/dev/null 2>&1; then
   printf 'Reusing existing project %s\n' "$project_id"
 else
   printf 'Creating project %s…\n' "$project_id"
-  gcloud projects create "$project_id" --name="Omarchy Gmail"
+  gcloud projects create "$project_id" --name="Omamail"
 fi
 
 printf 'Enabling the Gmail API…\n'
@@ -78,7 +78,7 @@ Done with the part gcloud can do. Two steps are left, and both are console-only:
      $consent_url
 
   2. Create an OAuth client, application type "Desktop app", then paste its
-     client ID into Omarchy Gmail.
+     client ID into Omamail.
 
      $clients_url
 

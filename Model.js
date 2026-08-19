@@ -58,7 +58,7 @@ function setupHeadline(state) {
 function setupDetail(state, missingTools) {
   if (state === "tools_missing") {
     var tools = Array.isArray(missingTools) ? missingTools.join(", ") : ""
-    return "Omarchy Gmail needs " + (tools || "a few base tools")
+    return "Omamail needs " + (tools || "a few base tools")
       + " on PATH before it can sign in."
   }
   if (state === "no_credentials")
@@ -221,6 +221,15 @@ function resultSummary(list, estimate, hasMore) {
   if (!hasMore) return pluralize(shown, "message")
   var total = Math.max(shown, Math.floor(Number(estimate) || 0))
   return shown + " of about " + total
+}
+
+function statusSummary(syncLabel, resultLabel, loading) {
+  var sync = String(syncLabel || "")
+  var result = String(resultLabel || "")
+  if (loading) return sync
+  if (!sync) return result
+  if (!result) return sync
+  return sync + "  ·  " + result
 }
 
 function truncate(text, limit) {
