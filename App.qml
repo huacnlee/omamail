@@ -217,6 +217,7 @@ Item {
         // and the name say what this window is, and everything to their right
         // does something.
         Row {
+          id: headerLeft
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
@@ -280,11 +281,28 @@ Item {
           }
         }
 
-        SearchBar {
-          id: searchBar
-          anchors.centerIn: parent
-          width: Math.min(Style.space(460), parent.width - Style.space(300))
-          visible: !root.showPage
+        // The slot is whatever the two clusters leave, so the field shrinks with
+        // the window instead of running underneath Check mail. Centring it in
+        // the header and reserving a fixed width could not work: the reserve is
+        // split evenly either side, while the controls are all on the left.
+        Item {
+          id: searchSlot
+          anchors.left: headerLeft.right
+          anchors.right: headerRight.left
+          anchors.leftMargin: Style.space(12)
+          anchors.rightMargin: Style.space(12)
+          anchors.verticalCenter: parent.verticalCenter
+          height: searchBar.implicitHeight
+
+          SearchBar {
+            id: searchBar
+            anchors.centerIn: parent
+            // Centred within the gap while there is room to spare, and capped
+            // so it does not stretch across a very wide window.
+            width: Math.min(Style.space(460), parent.width)
+            // Below this it is a slot too small to type in; the shortcut still
+            // works and reopens it as the window grows.
+            visible: !root.showPage && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
@@ -300,9 +318,11 @@ Item {
             root.service.search("")
             root.backToList()
           }
+          }
         }
 
         Row {
+          id: headerRight
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
