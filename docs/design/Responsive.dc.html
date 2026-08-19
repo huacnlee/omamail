@@ -1,0 +1,257 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap">
+  <style>
+    [data-theme="macos-classic-dark"] { --bg: #131313; --fg: #DEDEDE; --accent: #077CFD; --urgent: #FF5257; --win-border: #595959; }
+    [data-theme="catppuccin"]         { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --urgent: #f38ba8; --win-border: #585b70; }
+    [data-theme="matte-black"]        { --bg: #121212; --fg: #bebebe; --accent: #e68e0d; --urgent: #D35F5F; --win-border: #333333; }
+    [data-theme="flexoki-light"]      { --bg: #FFFCF0; --fg: #100F0F; --accent: #205EA6; --urgent: #D14D41; --win-border: #CECDC3; }
+
+    .omarchy {
+      --fill-normal:   color-mix(in srgb, var(--fg) 4%, transparent);
+      --fill-hover:    color-mix(in srgb, var(--fg) 8%, transparent);
+      --fill-selected: color-mix(in srgb, var(--fg) 18%, transparent);
+      --border-normal: color-mix(in srgb, var(--fg) 40%, transparent);
+      --border-hover:  color-mix(in srgb, var(--fg) 25%, transparent);
+      --rule:          color-mix(in srgb, var(--fg) 12%, transparent);
+      --dim:           color-mix(in srgb, var(--fg) 68%, var(--bg));
+      --dimmer:        color-mix(in srgb, var(--fg) 45%, var(--bg));
+      --f-caption: 10px; --f-small: 11px; --f-body: 12px; --f-subtitle: 13px; --f-title: 14px;
+      --s-xxs: 2px; --s-sm: 4px; --s-md: 6px; --s-lg: 8px; --s-xl: 10px; --s-xxl: 12px; --s-xxxl: 14px;
+      --control-h: 28px; --control-px: 10px; --radius: 0px;
+      font-family: "CaskaydiaMono Nerd Font", "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+      font-size: var(--f-body); color: var(--fg); -webkit-font-smoothing: antialiased;
+    }
+    body { margin: 0; background: transparent; }
+    a { color: var(--accent); } a:hover { color: var(--accent); }
+    * { box-sizing: border-box; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+    .hit:hover { background: var(--fill-hover); }
+    .hit.on { background: var(--fill-selected); }
+    .ctl { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); background: var(--fill-normal); font-size: var(--f-small); display: inline-flex; align-items: center; }
+    .ctl.flat { border-color: transparent; background: transparent; }
+    .ctl:hover, .ctl.flat:hover { background: var(--fill-hover); }
+    .vrule { width: 1px; background: var(--rule); flex: none; }
+    .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .frame { border: 1px solid var(--win-border); background: var(--bg); display: flex; flex-direction: column; height: 600px; }
+    .head { height: 48px; flex: none; display: flex; align-items: center; gap: var(--s-xl); padding: 0 var(--s-xxl); border-bottom: 1px solid var(--rule); }
+    .foot { height: 28px; flex: none; display: flex; align-items: center; padding: 0 var(--s-xxl); border-top: 1px solid var(--rule); font-size: var(--f-caption); color: var(--dim); }
+    .field { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); background: var(--fill-normal); color: var(--fg); font-family: inherit; font-size: var(--f-small); outline: none; width: 100%; }
+    .field::placeholder { color: var(--dimmer); }
+    .note { font-size: var(--f-caption); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; }
+    .rowline { position: relative; padding: 7px var(--s-lg) 7px 16px; cursor: pointer; }
+  </style>
+</helmet>
+
+<div class="omarchy" data-theme="{{theme}}"
+     style="display: flex; gap: 40px; align-items: flex-start; padding: 4px">
+
+  <!-- ============================================== MEDIUM — 860px wide -->
+  <div style="width: 860px; display: flex; flex-direction: column; gap: var(--s-lg)">
+    <div class="note">Medium · 760–1000px · sidebar collapses to a strip</div>
+    <div class="frame">
+      <div class="head">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.3" stroke-linejoin="round" style="flex: none">
+          <rect x="1" y="3.5" width="14" height="9" /><path d="M1 3.5 L8 0.8 L15 3.5" />
+        </svg>
+        <div style="flex: 1 1 auto; display: flex; justify-content: center">
+          <input class="field" style="max-width: 380px" placeholder="Search mail" />
+        </div>
+        <button class="ctl" style="flex: none">Compose</button>
+      </div>
+
+      <div style="flex: 1 1 auto; min-height: 0; display: flex">
+        <!-- Collapsed to initials: the count is what this column is for, so it
+             survives the collapse and the label does not. -->
+        <div style="width: 52px; flex: none; padding: var(--s-lg) var(--s-sm); display: flex; flex-direction: column; gap: 1px; align-items: stretch">
+          <sc-for list="{{strip}}" as="s" hint-placeholder-count="6">
+            <div class="hit {{s.cls}}" title="{{s.label}}" style="height: 30px; display: flex; align-items: center; justify-content: center; position: relative">
+              <span style="font-size: var(--f-small); color: {{s.fg}}; font-weight: {{s.weight}}">{{s.initial}}</span>
+              <sc-if value="{{s.count}}" hint-placeholder-val="{{true}}">
+                <span style="position: absolute; top: 3px; right: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent)"></span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div class="vrule"></div>
+
+        <div style="width: 320px; flex: none; padding: var(--s-lg); display: flex; flex-direction: column; gap: var(--s-xxs); overflow: hidden">
+          <sc-for list="{{messages}}" as="m" hint-placeholder-count="5">
+            <div class="hit {{m.mediumCls}} rowline">
+              <sc-if value="{{m.unread}}" hint-placeholder-val="{{true}}">
+                <span style="position: absolute; left: 6px; top: 12px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent)"></span>
+              </sc-if>
+              <div style="display: flex; align-items: baseline; gap: var(--s-lg)">
+                <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); font-weight: {{m.weight}}">{{m.from}}</span>
+                <span style="font-size: var(--f-caption); color: var(--dim)">{{m.time}}</span>
+              </div>
+              <div class="ellip" style="font-size: var(--f-small); color: {{m.subjectFg}}; font-weight: {{m.weight}}; margin-top: var(--s-xxs)">{{m.subject}}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div class="vrule"></div>
+
+        <div style="flex: 1 1 auto; min-width: 0; padding: var(--s-xxxl); display: flex; flex-direction: column; gap: var(--s-md); overflow: hidden">
+          <div style="font-size: var(--f-subtitle); font-weight: 700">发票 — 2026 年 8 月</div>
+          <div class="ellip" style="font-size: var(--f-small)">张伟 &lt;wei.zhang@example.cn&gt;</div>
+          <div style="font-size: var(--f-caption); color: var(--dim)">to me · Aug 19, 2026 10:24</div>
+          <div style="font-size: var(--f-small); line-height: 1.7; margin-top: var(--s-md); white-space: pre-line">{{body}}</div>
+        </div>
+      </div>
+
+      <div class="foot">huacnlee@gmail.com · 2 unread</div>
+    </div>
+  </div>
+
+  <!-- ============================================== NARROW — 720px wide -->
+  <div style="width: 720px; display: flex; flex-direction: column; gap: var(--s-lg)">
+    <div class="note">Narrow · under 760px · one column, list ↔ reader</div>
+    <div class="frame">
+      <div class="head">
+        <sc-if value="{{reading}}" hint-placeholder-val="{{true}}">
+          <button class="hit" onClick="{{back}}" style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: var(--f-title); flex: none">←</button>
+        </sc-if>
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.3" stroke-linejoin="round" style="flex: none">
+          <rect x="1" y="3.5" width="14" height="9" /><path d="M1 3.5 L8 0.8 L15 3.5" />
+        </svg>
+        <div style="flex: 1 1 auto; display: flex; justify-content: center">
+          <input class="field" style="max-width: 300px" placeholder="Search mail" />
+        </div>
+        <button class="ctl" style="flex: none">✉</button>
+      </div>
+
+      <!-- The sidebar has nowhere to go at this width, so the same mailboxes
+           come back as a scrolling strip above the list. -->
+      <sc-if value="{{listing}}" hint-placeholder-val="{{true}}">
+        <div style="flex: none; padding: var(--s-lg) var(--s-lg) 0; display: flex; gap: var(--s-sm); overflow: hidden">
+          <sc-for list="{{tabs}}" as="t" hint-placeholder-count="6">
+            <button class="hit {{t.cls}}" style="height: 24px; padding: 0 var(--s-xl); font-size: var(--f-small); color: {{t.fg}}; font-weight: {{t.weight}}; flex: none">{{t.label}}</button>
+          </sc-for>
+        </div>
+
+        <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: var(--s-lg); display: flex; flex-direction: column; gap: var(--s-xxs)">
+          <sc-for list="{{messages}}" as="m" hint-placeholder-count="5">
+            <div class="hit rowline" onClick="{{m.open}}">
+              <sc-if value="{{m.unread}}" hint-placeholder-val="{{true}}">
+                <span style="position: absolute; left: 6px; top: 12px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent)"></span>
+              </sc-if>
+              <div style="display: flex; align-items: baseline; gap: var(--s-lg)">
+                <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); font-weight: {{m.weight}}">{{m.from}}</span>
+                <span style="font-size: var(--f-caption); color: var(--dim)">{{m.time}}</span>
+              </div>
+              <div class="ellip" style="font-size: var(--f-small); color: {{m.subjectFg}}; font-weight: {{m.weight}}; margin-top: var(--s-xxs)">{{m.subject}}</div>
+              <div class="ellip" style="font-size: var(--f-caption); color: var(--dimmer); margin-top: var(--s-xxs)">{{m.snippet}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{reading}}" hint-placeholder-val="{{false}}">
+        <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: var(--s-xxxl); display: flex; flex-direction: column; gap: var(--s-md)">
+          <div style="font-size: var(--f-subtitle); font-weight: 700">{{open.subject}}</div>
+          <div class="ellip" style="font-size: var(--f-small)">{{open.fromFull}}</div>
+          <div style="font-size: var(--f-caption); color: var(--dim)">{{open.meta}}</div>
+          <div style="font-size: var(--f-small); line-height: 1.7; margin-top: var(--s-md); white-space: pre-line">{{open.body}}</div>
+          <div style="flex: 1 1 auto"></div>
+          <div style="display: flex; gap: var(--s-md); flex-wrap: wrap">
+            <button class="ctl">Reply</button>
+            <button class="ctl flat">Archive</button>
+            <button class="ctl flat" style="color: var(--urgent)">Delete</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <div class="foot">{{footer}}</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "theme": {"editor": "enum", "default": "macos-classic-dark",
+            "options": ["macos-classic-dark", "catppuccin", "matte-black", "flexoki-light"],
+            "section": "Omarchy theme"},
+  "$preview": {"width": 1660, "height": 660}
+}'>
+class Component extends DCLogic {
+  seed() {
+    return [
+      { id: "m1", from: "张伟", fromFull: "张伟 <wei.zhang@example.cn>",
+        subject: "发票 — 2026 年 8 月", time: "10:24", unread: true,
+        meta: "to me · Aug 19, 2026 10:24",
+        snippet: "您好，附件是本月的服务发票，请查收。",
+        body: "您好，\n\n附件是 2026 年 8 月的服务发票，金额与上月一致。\n如需调整开票抬头或税号，请在本周五前回复我。\n\n张伟\n财务部" },
+      { id: "m2", from: "GitHub", fromFull: "GitHub <notifications@github.com>",
+        subject: "[huacnlee/omarchy-gmail] Run failed: CI", time: "09:41", unread: true,
+        meta: "to me · Aug 19, 2026 09:41",
+        snippet: "Run failed for master (a3f91c2) — qmllint reported 2 errors",
+        body: "CI run failed.\n\nBranch  master\nCommit  a3f91c2\n\nqmllint: components/MessageReader.qml:64" },
+      { id: "m3", from: "Linear", fromFull: "Linear <notifications@linear.app>",
+        subject: "Omarchy Gmail · 3 issues moved", time: "09:12", unread: false,
+        meta: "to me · Aug 19, 2026 09:12",
+        snippet: "OMA-142 Reader blocks remote images",
+        body: "3 issues moved to In Progress\n\nOMA-142  Reader blocks remote images" },
+      { id: "m4", from: "李娜", fromFull: "李娜 <na.li@example.cn>",
+        subject: "周会纪要 2026-08-18", time: "Mon", unread: false,
+        meta: "to team · Aug 18, 2026 17:02",
+        snippet: "本周要点：1. 插件签名流程已跑通",
+        body: "各位好，\n\n本周会议纪要：\n\n1. 插件签名流程已跑通。\n2. 主题切换的回归用例补齐。" },
+      { id: "m5", from: "Arch Security", fromFull: "Arch Linux Security <security@archlinux.org>",
+        subject: "[ASA-202608-3] qt6-declarative", time: "Aug 15", unread: false,
+        meta: "to arch-security · Aug 15, 2026 08:44",
+        snippet: "Package: qt6-declarative — CVE-2026-31337",
+        body: "Arch Linux Security Advisory ASA-202608-3\n\nUpgrade to 6.11.1-2." }
+    ];
+  }
+
+  renderVals() {
+    const s = this.state || {};
+    const openId = s.openId ?? "";
+    const all = this.seed();
+    const open = all.find((m) => m.id === openId) || all[0];
+    const boxes = [
+      { key: "inbox", label: "Inbox", initial: "I", count: 2 },
+      { key: "unread", label: "Unread", initial: "U", count: 0 },
+      { key: "starred", label: "Starred", initial: "S", count: 0 },
+      { key: "sent", label: "Sent", initial: "T", count: 0 },
+      { key: "all", label: "All mail", initial: "A", count: 0 },
+      { key: "trash", label: "Trash", initial: "D", count: 0 }
+    ];
+    const decorate = (b) => ({
+      ...b,
+      cls: b.key === "inbox" ? "on" : "",
+      fg: b.key === "inbox" ? "var(--fg)" : "var(--dim)",
+      weight: b.key === "inbox" ? "700" : "400"
+    });
+
+    return {
+      strip: boxes.map(decorate),
+      tabs: boxes.map(decorate),
+      messages: all.map((m) => ({
+        ...m,
+        weight: m.unread ? "700" : "400",
+        subjectFg: m.unread ? "var(--fg)" : "var(--dim)",
+        mediumCls: m.id === "m1" ? "on" : "",
+        open: () => this.setState({ openId: m.id })
+      })),
+      open,
+      listing: openId === "",
+      reading: openId !== "",
+      back: () => this.setState({ openId: "" }),
+      footer: openId === "" ? "huacnlee@gmail.com · 2 unread" : open.subject,
+      body: "您好，\n\n附件是 2026 年 8 月的服务发票，金额与上月一致。\n如需调整开票抬头或税号，请在本周五前回复我，逾期将按\n现有信息开具。\n\n张伟\n财务部"
+    };
+  }
+}
+</script>
+</body>
+</html>

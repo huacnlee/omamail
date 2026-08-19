@@ -1,0 +1,182 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap">
+  <style>
+    [data-theme="macos-classic-dark"] { --bg: #131313; --fg: #DEDEDE; --accent: #077CFD; --urgent: #FF5257; --win-border: #595959; }
+    [data-theme="catppuccin"]         { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --urgent: #f38ba8; --win-border: #585b70; }
+    [data-theme="matte-black"]        { --bg: #121212; --fg: #bebebe; --accent: #e68e0d; --urgent: #D35F5F; --win-border: #333333; }
+    [data-theme="flexoki-light"]      { --bg: #FFFCF0; --fg: #100F0F; --accent: #205EA6; --urgent: #D14D41; --win-border: #CECDC3; }
+
+    .omarchy {
+      --fill-normal:   color-mix(in srgb, var(--fg) 4%, transparent);
+      --fill-hover:    color-mix(in srgb, var(--fg) 8%, transparent);
+      --fill-selected: color-mix(in srgb, var(--fg) 18%, transparent);
+      --border-normal: color-mix(in srgb, var(--fg) 40%, transparent);
+      --border-hover:  color-mix(in srgb, var(--fg) 25%, transparent);
+      --rule:          color-mix(in srgb, var(--fg) 12%, transparent);
+      --dim:           color-mix(in srgb, var(--fg) 68%, var(--bg));
+      --dimmer:        color-mix(in srgb, var(--fg) 45%, var(--bg));
+      --f-caption: 10px; --f-small: 11px; --f-body: 12px; --f-subtitle: 13px; --f-title: 14px;
+      --s-xxs: 2px; --s-sm: 4px; --s-md: 6px; --s-lg: 8px; --s-xl: 10px; --s-xxl: 12px; --s-xxxl: 14px; --s-huge: 18px;
+      --control-h: 28px; --control-px: 10px; --control-py: 6px; --radius: 0px;
+      font-family: "CaskaydiaMono Nerd Font", "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+      font-size: var(--f-body); color: var(--fg); -webkit-font-smoothing: antialiased;
+    }
+    body { margin: 0; background: transparent; }
+    a { color: var(--accent); } a:hover { color: var(--accent); }
+    * { box-sizing: border-box; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+    .hit:hover { background: var(--fill-hover); }
+    .hit.on { background: var(--fill-selected); }
+    .ctl { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); border-radius: var(--radius); background: var(--fill-normal); font-size: var(--f-small); display: inline-flex; align-items: center; gap: var(--s-md); }
+    .ctl:hover { background: var(--fill-hover); border-color: var(--border-hover); }
+    .ctl.flat { border-color: transparent; background: transparent; }
+    .ctl.flat:hover { background: var(--fill-hover); }
+    .rule { height: 1px; background: var(--rule); flex: none; }
+    .cap { font-size: var(--f-caption); font-weight: 700; letter-spacing: 0.08em; color: var(--dim); }
+    .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .note { font-size: var(--f-caption); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; }
+
+    /* One field row: a fixed monospace label column, then the input. The label
+       column is what keeps To / Cc / Subject aligned without a grid per row. */
+    .frow { display: flex; align-items: center; gap: var(--s-xl); border-bottom: 1px solid var(--rule); }
+    .flabel { flex: none; width: 64px; font-size: var(--f-caption); color: var(--dim); text-align: right; }
+    .finput { flex: 1 1 auto; min-width: 0; height: 32px; border: 0; background: transparent; color: var(--fg); font-family: inherit; font-size: var(--f-small); outline: none; }
+    .finput::placeholder { color: var(--dimmer); }
+    .frow:focus-within { background: var(--fill-normal); }
+    .body { flex: 1 1 auto; min-height: 0; width: 100%; resize: none; border: 0; background: transparent; color: var(--fg); font-family: inherit; font-size: var(--f-small); line-height: 1.75; padding: var(--s-xxl) var(--s-huge); outline: none; }
+  </style>
+</helmet>
+
+<div class="omarchy" data-theme="{{theme}}" style="display: flex; flex-direction: column; gap: var(--s-lg); padding: 4px">
+
+  <div class="note">Its own window · 720×560 · Hyprland tiles it beside the mailbox</div>
+
+  <div style="width: 720px; height: 560px; border: 1px solid var(--win-border); background: var(--bg); display: flex; flex-direction: column">
+
+    <!-- Header. There is no client-side titlebar under Hyprland, so the window
+         has to say what it is itself. -->
+    <div style="height: 48px; flex: none; display: flex; align-items: center; gap: var(--s-xl); padding: 0 var(--s-huge); border-bottom: 1px solid var(--rule)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none">
+        <path d="{{icon}}" />
+      </svg>
+      <span class="cap" style="flex: none">{{title}}</span>
+      <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-caption); color: var(--dimmer)">{{context}}</span>
+      <button class="hit" title="Close" style="flex: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--dim)" stroke-width="1.4" stroke-linecap="round">
+          <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+        </svg>
+      </button>
+    </div>
+
+    <div style="flex: none">
+      <div class="frow">
+        <span class="flabel">To</span>
+        <input class="finput" value="{{to}}" onChange="{{setTo}}" placeholder="recipient@example.com" />
+        <button class="hit" onClick="{{toggleCc}}" style="flex: none; height: 32px; padding: 0 var(--s-xl); font-size: var(--f-caption); color: var(--dim)">Cc</button>
+      </div>
+      <sc-if value="{{showCc}}" hint-placeholder-val="{{true}}">
+        <div class="frow">
+          <span class="flabel">Cc</span>
+          <input class="finput" value="{{cc}}" onChange="{{setCc}}" placeholder="" />
+        </div>
+      </sc-if>
+      <div class="frow">
+        <span class="flabel">Subject</span>
+        <input class="finput" value="{{subject}}" onChange="{{setSubject}}" placeholder="Subject" />
+      </div>
+    </div>
+
+    <textarea class="body" value="{{body}}" onChange="{{setBody}}" spellcheck="false"></textarea>
+
+    <div style="flex: none; border-top: 1px solid var(--rule); padding: var(--s-xxl) var(--s-huge); display: flex; align-items: center; gap: var(--s-xl)">
+      <button class="ctl">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.5 1.5L7 9" /><path d="M14.5 1.5L10 14.5 7 9 1.5 6z" />
+        </svg>
+        <span>{{sendLabel}}</span>
+      </button>
+      <button class="ctl flat" style="color: var(--dim)">Discard</button>
+      <div style="flex: 1 1 auto"></div>
+      <span style="font-size: var(--f-caption); color: var(--dimmer)">Ctrl+Enter sends · Esc closes</span>
+    </div>
+  </div>
+
+  <div style="width: 720px; font-size: var(--f-caption); line-height: 1.7; color: var(--dim)">Plain text only, and the quote is already in the body — the reply that leaves is the text you can see. Attachments and rich formatting are not in this version, so nothing here pretends to offer them.</div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "theme": {"editor": "enum", "default": "macos-classic-dark",
+            "options": ["macos-classic-dark", "catppuccin", "matte-black", "flexoki-light"],
+            "section": "Omarchy theme"},
+  "mode": {"editor": "enum", "default": "reply", "options": ["new", "reply", "replyAll", "forward"], "section": "State"},
+  "sending": {"editor": "boolean", "default": false, "section": "State"},
+  "$preview": {"width": 760, "height": 660}
+}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.mode ?? "reply";
+    const sending = this.props.sending ?? false;
+
+    const titles = { new: "NEW MESSAGE", reply: "REPLY", replyAll: "REPLY ALL", forward: "FORWARD" };
+    // Reply and reply-all point the arrow back, forward points it on, a new
+    // message is an envelope. Same 16px grid as every other icon in the app.
+    const icons = {
+      new: "M1 3.5h14v9H1zM1 3.5L8 8.5 15 3.5",
+      reply: "M6 3.5L2 7.5l4 4M2 7.5h7a4.5 4.5 0 0 1 4.5 4.5v.5",
+      replyAll: "M6 3.5L2 7.5l4 4M9.5 3.5l-4 4 4 4M5.5 7.5h5a4.5 4.5 0 0 1 4.5 4.5v.5",
+      forward: "M10 3.5l4 4-4 4M14 7.5H7a4.5 4.5 0 0 0-4.5 4.5v.5"
+    };
+
+    const quoted = "\n\nOn Aug 19, 2026 10:24, 张伟 wrote:\n> 您好，\n> \n> 附件是 2026 年 8 月的服务发票，金额与上月一致。\n> 如需调整开票抬头或税号，请在本周五前回复我，逾期将按现有\n> 信息开具。\n> \n> 张伟";
+    const bodies = {
+      new: "",
+      reply: "张伟你好，\n\n发票收到了，开票信息不用改，按现有的开就行。" + quoted,
+      replyAll: "各位好，\n\n开票信息不用改，按现有的开。" + quoted,
+      forward: "转给财务确认一下。\n\nOn Aug 19, 2026 10:24, 张伟 wrote:\n> 您好，\n> \n> 附件是 2026 年 8 月的服务发票。"
+    };
+
+    // The mode chip reseeds every field; typing overrides it until the chip
+    // moves again, which is what makes this a prototype rather than a picture.
+    const s = this.state || {};
+    const edited = s.mode === mode ? s : {};
+    const current = {
+      to: edited.to ?? (mode === "new" || mode === "forward" ? "" : "wei.zhang@example.cn"),
+      cc: edited.cc ?? (mode === "replyAll" ? "na.li@example.cn" : ""),
+      subject: edited.subject ?? (mode === "new" ? ""
+        : (mode === "forward" ? "Fwd: 发票 — 2026 年 8 月" : "Re: 发票 — 2026 年 8 月")),
+      body: edited.body ?? bodies[mode]
+    };
+    const ccOpen = edited.ccOpen ?? (mode === "replyAll");
+    const set = (key) => (e) =>
+      this.setState({ mode, ...current, ccOpen, [key]: e.target.value });
+
+    return {
+      title: titles[mode],
+      icon: icons[mode],
+      context: mode === "new" ? "" : "在回复 · 发票 — 2026 年 8 月",
+      showCc: ccOpen,
+      toggleCc: () => this.setState({ mode, ...current, ccOpen: !ccOpen }),
+      to: current.to,
+      cc: current.cc,
+      subject: current.subject,
+      body: current.body,
+      setTo: set("to"),
+      setCc: set("cc"),
+      setSubject: set("subject"),
+      setBody: set("body"),
+      sendLabel: sending ? "Sending…" : "Send"
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,460 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap">
+  <style>
+    /* ------------------------------------------------------------------
+       OMARCHY THEME TOKENS
+
+       Four foundation values come from the active theme's colors.toml;
+       everything else is derived from them the same way qs.Commons.Style
+       derives it in QML. No element below names a colour — switch the
+       theme chip and anything that fails to move is a hard-coded value.
+       ------------------------------------------------------------------ */
+    [data-theme="macos-classic-dark"] { --bg: #131313; --fg: #DEDEDE; --accent: #077CFD; --urgent: #FF5257; --win-border: #595959; }
+    [data-theme="catppuccin"]         { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --urgent: #f38ba8; --win-border: #585b70; }
+    [data-theme="matte-black"]        { --bg: #121212; --fg: #bebebe; --accent: #e68e0d; --urgent: #D35F5F; --win-border: #333333; }
+    [data-theme="flexoki-light"]      { --bg: #FFFCF0; --fg: #100F0F; --accent: #205EA6; --urgent: #D14D41; --win-border: #CECDC3; }
+
+    .omarchy {
+      /* Derived surfaces — mirrors Style.normalFillFor / hoverFillFor /
+         selectedFillFor and PanelSeparator.strength, which are alphas over
+         the foreground, so they hold on any ground. */
+      --fill-normal:   color-mix(in srgb, var(--fg) 4%, transparent);
+      --fill-hover:    color-mix(in srgb, var(--fg) 8%, transparent);
+      --fill-selected: color-mix(in srgb, var(--fg) 18%, transparent);
+      --border-normal: color-mix(in srgb, var(--fg) 40%, transparent);
+      --border-hover:  color-mix(in srgb, var(--fg) 25%, transparent);
+      --rule:          color-mix(in srgb, var(--fg) 12%, transparent);
+
+      /* Secondary text. QML's PanelSectionHeader uses Qt.darker(fg, 1.4),
+         which on a light theme drives the label DARKER than body text.
+         Mixing toward the ground instead resolves to the same value on
+         this theme and stays correct on light ones. */
+      --dim:   color-mix(in srgb, var(--fg) 68%, var(--bg));
+      --dimmer:color-mix(in srgb, var(--fg) 45%, var(--bg));
+
+      /* Style.font.* at [font] base-size = 12 */
+      --f-caption: 10px; --f-small: 11px; --f-body: 12px;
+      --f-subtitle: 13px; --f-title: 14px;
+      /* Style.spacing.* at [spacing] scale = 1.0 */
+      --s-xxs: 2px; --s-sm: 4px; --s-md: 6px; --s-lg: 8px;
+      --s-xl: 10px; --s-xxl: 12px; --s-xxxl: 14px;
+      --control-h: 28px; --control-px: 10px; --control-py: 6px;
+      /* Style.cornerRadius mirrors Hyprland decoration:rounding, which is 0 */
+      --radius: 0px;
+
+      font-family: "CaskaydiaMono Nerd Font", "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+      font-size: var(--f-body);
+      color: var(--fg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body { margin: 0; background: transparent; }
+    a { color: var(--accent); } a:hover { color: var(--accent); }
+    * { box-sizing: border-box; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+    /* Hover/selected chrome is one vocabulary across every control. */
+    .hit { background: transparent; }
+    .hit:hover { background: var(--fill-hover); }
+    .hit.on { background: var(--fill-selected); }
+
+    .ctl {
+      height: var(--control-h);
+      padding: 0 var(--control-px);
+      border: 1px solid var(--border-normal);
+      border-radius: var(--radius);
+      background: var(--fill-normal);
+      font-size: var(--f-small);
+      display: inline-flex; align-items: center; gap: var(--s-lg);
+    }
+    .ctl:hover { background: var(--fill-hover); border-color: var(--border-hover); }
+    .ctl.flat { border-color: transparent; background: transparent; }
+    .ctl.flat:hover { background: var(--fill-hover); }
+
+    .rule { height: 1px; background: var(--rule); flex: none; }
+    .vrule { width: 1px; background: var(--rule); flex: none; }
+    .cap {
+      font-size: var(--f-caption); font-weight: 700;
+      letter-spacing: 0.08em; color: var(--dim);
+    }
+    .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  </style>
+</helmet>
+
+<div class="omarchy" data-theme="{{theme}}"
+     style="width: 1000px; height: 766px; display: flex; flex-direction: column; gap: 10px; padding: 0 10px 10px; background: {{desktop}}">
+
+  <!-- ============================================ the Omarchy bar (26px) -->
+  <div style="height: 26px; margin: 0 -10px; background: var(--bg); display: flex; align-items: center; justify-content: flex-end; gap: var(--s-xxl); padding: 0 var(--s-xxl); flex: none">
+    <span style="font-size: var(--f-small); color: var(--dim)">14:32</span>
+    <div style="display: flex; align-items: center; gap: var(--s-md)">
+      <span style="font-size: var(--f-small); color: var(--dim)">54%</span>
+      <!-- Bar widget: envelope with the unread badge, flap open when unread -->
+      <div style="position: relative; width: 27px; height: 27px; display: flex; align-items: center; justify-content: center">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linejoin="round">
+          <rect x="1" y="3.5" width="14" height="9" />
+          <path d="M1 3.5 L8 0.8 L15 3.5" />
+        </svg>
+        <span style="position: absolute; top: 1px; right: 0; min-width: 13px; height: 13px; padding: 0 3px; background: var(--urgent); color: var(--bg); font-size: 9px; font-weight: 700; line-height: 13px; text-align: center">12</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================== the application window (980×720) -->
+  <div style="flex: 1 1 auto; min-height: 0; border: 1px solid var(--win-border); background: var(--bg); display: flex; flex-direction: column">
+
+    <!-- ------------------------------------------------- header, 48px -->
+    <div style="height: 48px; flex: none; display: flex; align-items: center; gap: var(--s-xxl); padding: 0 var(--s-xxxl); border-bottom: 1px solid var(--rule)">
+      <div style="display: flex; align-items: center; gap: var(--s-lg); width: 166px; flex: none">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.3" stroke-linejoin="round">
+          <rect x="1" y="3.5" width="14" height="9" />
+          <path d="M1 3.5 L8 0.8 L15 3.5" />
+        </svg>
+        <span style="font-size: var(--f-title)">Gmail</span>
+      </div>
+
+      <div style="flex: 1 1 auto; display: flex; justify-content: center">
+        <div style="position: relative; width: 100%; max-width: 460px">
+          <input value="{{query}}" onChange="{{onQuery}}" placeholder="Search mail — from:jane has:attachment"
+                 style="width: 100%; height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); border-radius: var(--radius); background: var(--fill-normal); color: var(--fg); font-family: inherit; font-size: var(--f-small); outline: none" />
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: var(--s-sm); width: 166px; flex: none; justify-content: flex-end">
+        <button class="hit" title="Refresh" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--dim)" stroke-width="1.4" stroke-linecap="round">
+            <path d="M14 8a6 6 0 1 1-1.8-4.3" /><path d="M14 1.5V4h-2.5" />
+          </svg>
+        </button>
+        <button class="ctl">Compose</button>
+        <button class="hit" title="More" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="var(--dim)">
+            <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------- three columns -->
+    <div style="flex: 1 1 auto; min-height: 0; display: flex">
+
+      <!-- sidebar, 180px -->
+      <div style="width: 180px; flex: none; padding: var(--s-lg); display: flex; flex-direction: column; gap: 1px; overflow: hidden">
+        <sc-for list="{{mailboxes}}" as="box" hint-placeholder-count="6">
+          <button class="hit {{box.cls}}" onClick="{{box.pick}}"
+                  style="height: 30px; flex: none; display: flex; align-items: center; gap: var(--s-lg); padding: 0 var(--s-xl); border-radius: var(--radius); text-align: left">
+            <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); color: {{box.fg}}; font-weight: {{box.weight}}">{{box.label}}</span>
+            <sc-if value="{{box.count}}" hint-placeholder-val="{{true}}">
+              <span style="font-size: var(--f-caption); font-weight: 700; color: var(--accent)">{{box.count}}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+
+        <div class="rule" style="margin: var(--s-xxxl) 0 var(--s-lg)"></div>
+        <div class="cap" style="padding: 0 var(--s-xl) var(--s-sm)">LABELS</div>
+
+        <sc-for list="{{labels}}" as="lab" hint-placeholder-count="3">
+          <button class="hit" style="height: 30px; flex: none; display: flex; align-items: center; gap: var(--s-lg); padding: 0 var(--s-xl); border-radius: var(--radius); text-align: left">
+            <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); color: var(--dim)">{{lab.name}}</span>
+            <sc-if value="{{lab.count}}" hint-placeholder-val="{{true}}">
+              <span style="font-size: var(--f-caption); font-weight: 700; color: var(--accent)">{{lab.count}}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </div>
+
+      <div class="vrule"></div>
+
+      <!-- message list, 340px -->
+      <div style="width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0">
+        <div style="flex: 1 1 auto; overflow: hidden; padding: var(--s-lg); display: flex; flex-direction: column; gap: var(--s-xxs)">
+          <sc-for list="{{messages}}" as="m" hint-placeholder-count="6">
+            <div class="hit {{m.cls}}" onClick="{{m.open}}" onContextMenu="{{m.menu}}"
+                 style="position: relative; flex: none; padding: 7px var(--s-lg) 7px 16px; border-radius: var(--radius); cursor: pointer">
+              <sc-if value="{{m.unread}}" hint-placeholder-val="{{true}}">
+                <span style="position: absolute; left: 6px; top: 12px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent)"></span>
+              </sc-if>
+              <div style="display: flex; align-items: baseline; gap: var(--s-lg)">
+                <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); font-weight: {{m.weight}}">{{m.from}}</span>
+                <span style="flex: none; font-size: var(--f-caption); color: var(--dim)">{{m.time}}</span>
+                <sc-if value="{{m.starred}}" hint-placeholder-val="{{true}}">
+                  <span style="flex: none; font-size: var(--f-caption); color: var(--accent)">★</span>
+                </sc-if>
+              </div>
+              <div class="ellip" style="font-size: var(--f-small); font-weight: {{m.weight}}; color: {{m.subjectFg}}; margin-top: var(--s-xxs)">{{m.subject}}</div>
+              <div class="ellip" style="font-size: var(--f-caption); color: var(--dimmer); margin-top: var(--s-xxs)">{{m.snippet}}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="flex: none; padding: var(--s-lg) var(--s-xxl); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--rule)">
+          <span style="font-size: var(--f-caption); color: var(--dimmer)">{{resultLine}}</span>
+          <button class="hit" style="font-size: var(--f-caption); color: var(--dim); padding: 2px 6px">Load more</button>
+        </div>
+      </div>
+
+      <div class="vrule"></div>
+
+      <!-- reader -->
+      <div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column">
+        <div style="flex: none; padding: var(--s-xxxl) var(--s-xxxl) var(--s-lg); display: flex; flex-direction: column; gap: var(--s-sm)">
+          <div style="display: flex; align-items: flex-start; gap: var(--s-lg)">
+            <span style="flex: 1 1 auto; font-size: var(--f-subtitle); font-weight: 700; line-height: 1.35">{{open.subject}}</span>
+            <button class="hit" style="flex: none; width: 22px; height: 22px; color: var(--accent)">★</button>
+          </div>
+          <div class="ellip" style="font-size: var(--f-small)">{{open.fromFull}}</div>
+          <div class="ellip" style="font-size: var(--f-caption); color: var(--dim)">{{open.meta}}</div>
+        </div>
+
+        <!-- Remote images are a tracking channel: Qt's rich text engine really
+             does fetch them, so the choice is explicit and per message. -->
+        <div style="flex: none; margin: 0 var(--s-xxxl) var(--s-lg); padding: 0 var(--s-xl); height: 30px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--rule); background: var(--fill-normal)">
+          <span style="font-size: var(--f-caption); color: var(--dim)">3 remote images blocked</span>
+          <button class="hit" style="font-size: var(--f-caption); padding: 2px 6px">Show images</button>
+        </div>
+
+        <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 var(--s-xxxl); font-size: var(--f-small); line-height: 1.7; color: var(--fg); white-space: pre-line">{{open.body}}</div>
+
+        <div style="flex: none; padding: var(--s-lg) var(--s-xxxl) var(--s-xxxl); display: flex; flex-direction: column; gap: var(--s-md)">
+          <div style="display: flex; align-items: center; gap: var(--s-md); font-size: var(--f-caption); color: var(--dim)">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <path d="M13 7l-5.5 5.5a3.5 3.5 0 0 1-5-5L8 2a2.5 2.5 0 0 1 3.5 3.5L6 11a1.5 1.5 0 0 1-2-2l5-5" />
+            </svg>
+            <span>2026-08 服务发票.pdf</span>
+            <span style="color: var(--dimmer)">1.2 MB</span>
+          </div>
+          <div class="rule"></div>
+          <div style="display: flex; align-items: center; gap: var(--s-xxs)">
+            <sc-for list="{{readerActions}}" as="a" hint-placeholder-count="7">
+              <button class="iconbtn hit" title="{{a.title}}">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="{{a.tone}}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="{{a.d}}" />
+                </svg>
+              </button>
+              <sc-if value="{{a.gap}}" hint-placeholder-val="{{false}}">
+                <span style="width: 1px; height: 16px; background: var(--rule); margin: 0 var(--s-md)"></span>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right-click menu. Positioned against the artboard viewport rather
+         than the list, whose overflow would clip it — the same reason the
+         QML version is a Popup rather than a child of the row. -->
+    <sc-if value="{{menuOpen}}" hint-placeholder-val="{{true}}">
+      <div onClick="{{closeMenu}}" style="position: fixed; inset: 0; z-index: 10"></div>
+      <div style="position: fixed; left: {{menuX}}; top: {{menuY}}; z-index: 11; width: 200px; background: var(--bg); border: 1px solid var(--win-border); padding: var(--s-sm) 0">
+        <sc-for list="{{menuItems}}" as="mi" hint-placeholder-count="9">
+          <sc-if value="{{mi.divider}}" hint-placeholder-val="{{false}}">
+            <div style="height: 1px; background: var(--rule); margin: var(--s-sm) 0"></div>
+          </sc-if>
+          <sc-if value="{{mi.label}}" hint-placeholder-val="{{true}}">
+            <button class="hit" onClick="{{mi.run}}" style="width: 100%; height: 28px; padding: 0 var(--s-xl); display: flex; align-items: center; gap: var(--s-xl); text-align: left">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="{{mi.tone}}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none">
+                <path d="{{mi.d}}" />
+              </svg>
+              <span style="flex: 1 1 auto; font-size: var(--f-small); color: {{mi.tone}}">{{mi.label}}</span>
+            </button>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ------------------------------------------------- status bar, 28px -->
+    <div style="height: 28px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--s-xxxl); border-top: 1px solid var(--rule)">
+      <span style="font-size: var(--f-caption); color: var(--dim)">{{statusLeft}}</span>
+      <span style="font-size: var(--f-caption); color: var(--dim)">{{statusRight}}</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "theme": {"editor": "enum", "default": "macos-classic-dark",
+            "options": ["macos-classic-dark", "catppuccin", "matte-black", "flexoki-light"],
+            "section": "Omarchy theme"},
+  "desktop": {"editor": "color", "default": "#2a2a2e", "section": "Omarchy theme"},
+  "$preview": {"width": 1000, "height": 766}
+}'>
+class Component extends DCLogic {
+  seed() {
+    return [
+      { id: "m1", from: "张伟", fromFull: "张伟 <wei.zhang@example.cn>",
+        subject: "发票 — 2026 年 8 月", time: "10:24", unread: true, starred: false,
+        meta: "to me · Aug 19, 2026 10:24",
+        snippet: "您好，附件是本月的服务发票，请查收。如需调整开票信息请在本周五前回复。",
+        body: "您好，\n\n附件是 2026 年 8 月的服务发票，金额与上月一致。\n如需调整开票抬头或税号，请在本周五前回复我，逾期将按现有信息开具。\n\n另外，下个季度的合同续签材料我会另外发一封。\n\n张伟\n财务部" },
+      { id: "m2", from: "GitHub", fromFull: "GitHub <notifications@github.com>",
+        subject: "[huacnlee/omarchy-gmail] Run failed: CI — master", time: "09:41",
+        unread: true, starred: false, meta: "to me · Aug 19, 2026 09:41",
+        snippet: "Run failed for master (a3f91c2) — qmllint reported 2 errors",
+        body: "CI run failed.\n\nRepository  huacnlee/omarchy-gmail\nWorkflow    CI\nBranch      master\nCommit      a3f91c2\n\nqmllint: components/MessageReader.qml:64 unqualified access to \"service\"" },
+      { id: "m3", from: "Linear", fromFull: "Linear <notifications@linear.app>",
+        subject: "Omarchy Gmail · 3 issues moved to In Progress", time: "09:12",
+        unread: false, starred: true, meta: "to me · Aug 19, 2026 09:12",
+        snippet: "OMA-142 Reader blocks remote images, OMA-143 Compose quotes original",
+        body: "3 issues moved to In Progress\n\nOMA-142  Reader blocks remote images by default\nOMA-143  Compose quotes the original message\nOMA-144  Bar badge caps at 99+" },
+      { id: "m4", from: "李娜", fromFull: "李娜 <na.li@example.cn>",
+        subject: "周会纪要 2026-08-18", time: "Mon", unread: false, starred: false,
+        meta: "to team · Aug 18, 2026 17:02",
+        snippet: "本周要点：1. 插件签名流程已跑通 2. 主题切换的回归用例补齐",
+        body: "各位好，\n\n本周会议纪要：\n\n1. 插件签名流程已跑通，下周开始在 CI 上强制校验。\n2. 主题切换的回归用例补齐，浅色主题下的次级文字对比度问题已记录。\n3. 下周三评审 Gmail 客户端的首次运行引导。\n\n李娜" },
+      { id: "m5", from: "Google Cloud", fromFull: "Google Cloud <cloud-noreply@google.com>",
+        subject: "Your OAuth client is ready", time: "Mon", unread: false, starred: false,
+        meta: "to me · Aug 18, 2026 11:20",
+        snippet: "The desktop client for project omarchy-gmail-42 has been created",
+        body: "Your OAuth 2.0 client has been created.\n\nProject      omarchy-gmail-42\nType         Desktop app\nClient ID     804...apps.googleusercontent.com\n\nEnable the Gmail API on this project before signing in." },
+      { id: "m6", from: "Arch Security", fromFull: "Arch Linux Security <security@archlinux.org>",
+        subject: "[ASA-202608-3] qt6-declarative: multiple issues", time: "Aug 15",
+        unread: false, starred: false, meta: "to arch-security · Aug 15, 2026 08:44",
+        snippet: "Package: qt6-declarative — CVE-2026-31337, CVE-2026-31338",
+        body: "Arch Linux Security Advisory ASA-202608-3\n\nPackage    qt6-declarative\nSeverity   Medium\nCVE        CVE-2026-31337, CVE-2026-31338\n\nUpgrade to 6.11.1-2." }
+    ];
+  }
+
+  // One 16px grid, one stroke weight, shared by the reader row and the menu
+  // so the same action never has two drawings.
+  icons() {
+    return {
+      reply:     "M6 3.5L2 7.5l4 4M2 7.5h7a4.5 4.5 0 0 1 4.5 4.5v.5",
+      replyAll:  "M6 3.5L2 7.5l4 4M9.5 3.5l-4 4 4 4M5.5 7.5h5a4.5 4.5 0 0 1 4.5 4.5v.5",
+      forward:   "M10 3.5l4 4-4 4M14 7.5H7a4.5 4.5 0 0 0-4.5 4.5v.5",
+      archive:   "M8 1.5v9M4.5 7L8 10.5 11.5 7M2 13.5h12",
+      trash:     "M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4",
+      spam:      "M8 1.5l6 3v4c0 3-2.5 5.5-6 6.5-3.5-1-6-3.5-6-6.5v-4zM8 5.5v3.5M8 11h.01",
+      unread:    "M1 3.5h14v9H1zM1 3.5L8 8.5 15 3.5",
+      star:      "M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z",
+      browser:   "M9 2h5v5M14 2L7.5 8.5M12 9.5v4h-10v-10h4",
+      plain:     "M3 3.5h10M3 7h10M3 10.5h6"
+    };
+  }
+
+  renderVals() {
+    const s = this.state || {};
+    const box = s.mailbox ?? "inbox";
+    const query = s.query ?? "";
+    const readState = s.readState ?? {};
+    const starState = s.starState ?? {};
+    const removed = s.removed ?? {};
+    const openId = s.openId ?? "m1";
+    const menu = s.menu ?? null;
+    const I = this.icons();
+
+    const all = this.seed()
+      .filter((m) => !removed[m.id])
+      .map((m) => ({
+        ...m,
+        unread: readState[m.id] === undefined ? m.unread : !readState[m.id],
+        starred: starState[m.id] === undefined ? m.starred : starState[m.id]
+      }));
+
+    let list = all;
+    if (box === "unread") list = all.filter((m) => m.unread);
+    if (box === "starred") list = all.filter((m) => m.starred);
+    const q = query.trim().toLowerCase();
+    if (q) list = list.filter((m) =>
+      (m.from + " " + m.subject + " " + m.snippet).toLowerCase().includes(q));
+
+    const unreadTotal = all.filter((m) => m.unread).length;
+    const open = all.find((m) => m.id === openId) || all[0] || this.seed()[0];
+
+    const boxes = [
+      { key: "inbox", label: "Inbox", count: unreadTotal || "" },
+      { key: "unread", label: "Unread", count: "" },
+      { key: "starred", label: "Starred", count: "" },
+      { key: "sent", label: "Sent", count: "" },
+      { key: "all", label: "All mail", count: "" },
+      { key: "trash", label: "Trash", count: "" }
+    ];
+
+    const patch = (extra) => this.setState({
+      mailbox: box, query, readState, starState, removed, openId, menu: null, ...extra
+    });
+    const target = menu ? all.find((m) => m.id === menu.id) : null;
+
+    const menuItems = !target ? [] : [
+      { label: "Reply", d: I.reply, tone: "var(--fg)", run: () => patch({}) },
+      { label: "Reply all", d: I.replyAll, tone: "var(--fg)", run: () => patch({}) },
+      { label: "Forward", d: I.forward, tone: "var(--fg)", run: () => patch({}) },
+      { divider: true },
+      { label: "Archive", d: I.archive, tone: "var(--fg)",
+        run: () => patch({ removed: { ...removed, [target.id]: true } }) },
+      { label: "Move to trash", d: I.trash, tone: "var(--urgent)",
+        run: () => patch({ removed: { ...removed, [target.id]: true } }) },
+      { label: "Report spam", d: I.spam, tone: "var(--urgent)",
+        run: () => patch({ removed: { ...removed, [target.id]: true } }) },
+      { divider: true },
+      { label: target.unread ? "Mark as read" : "Mark as unread", d: I.unread, tone: "var(--fg)",
+        run: () => patch({ readState: { ...readState, [target.id]: target.unread } }) },
+      { label: target.starred ? "Unstar" : "Star", d: I.star, tone: "var(--fg)",
+        run: () => patch({ starState: { ...starState, [target.id]: !target.starred } }) },
+      { divider: true },
+      { label: "Open in browser...", d: I.browser, tone: "var(--dim)", run: () => patch({}) }
+    ];
+
+    return {
+      mailboxes: boxes.map((b) => ({
+        ...b,
+        cls: b.key === box ? "on" : "",
+        fg: b.key === box ? "var(--fg)" : "var(--dim)",
+        weight: b.key === box ? "700" : "400",
+        pick: () => this.setState({ mailbox: b.key, menu: null })
+      })),
+      labels: [
+        { name: "工作", count: 3 }, { name: "账单", count: "" }, { name: "Omarchy", count: "" }
+      ],
+      messages: list.map((m) => ({
+        ...m,
+        cls: m.id === openId ? "on" : "",
+        weight: m.unread ? "700" : "400",
+        subjectFg: m.unread ? "var(--fg)" : "var(--dim)",
+        // Opening a message marks it read, which is what every mail client
+        // does and what the panel's Service.select() does too.
+        open: () => this.setState({ openId: m.id, readState: { ...readState, [m.id]: true }, menu: null }),
+        menu: (e) => {
+          e.preventDefault();
+          this.setState({ menu: { id: m.id, x: e.clientX, y: e.clientY } });
+        }
+      })),
+      open,
+      query,
+      onQuery: (e) => this.setState({ query: e.target.value, menu: null }),
+      resultLine: list.length + " of about 87",
+      statusLeft: "huacnlee@gmail.com · " + unreadTotal + " unread",
+      statusRight: "Synced just now",
+
+      // The reader's row is icon-only: six actions in the space six labels
+      // could not fit, with the destructive one set apart by a rule and by
+      // taking the urgent colour.
+      readerActions: [
+        { title: "Reply", d: I.reply, tone: "var(--fg)", gap: false },
+        { title: "Reply all", d: I.replyAll, tone: "var(--fg)", gap: false },
+        { title: "Forward", d: I.forward, tone: "var(--fg)", gap: true },
+        { title: "Archive", d: I.archive, tone: "var(--fg)", gap: false },
+        { title: "Move to trash", d: I.trash, tone: "var(--urgent)", gap: true },
+        { title: "Show plain text", d: I.plain, tone: "var(--dim)", gap: false },
+        { title: "Open in browser", d: I.browser, tone: "var(--dim)", gap: false }
+      ],
+
+      menuOpen: !!target,
+      menuX: menu ? menu.x + "px" : "0px",
+      menuY: menu ? menu.y + "px" : "0px",
+      menuItems,
+      closeMenu: () => this.setState({ menu: null })
+    };
+  }
+}
+</script>
+</body>
+</html>

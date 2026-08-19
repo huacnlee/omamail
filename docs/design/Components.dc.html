@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap">
+  <style>
+    [data-theme="macos-classic-dark"] { --bg: #131313; --fg: #DEDEDE; --accent: #077CFD; --urgent: #FF5257; --win-border: #595959; }
+    [data-theme="catppuccin"]         { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --urgent: #f38ba8; --win-border: #585b70; }
+    [data-theme="matte-black"]        { --bg: #121212; --fg: #bebebe; --accent: #e68e0d; --urgent: #D35F5F; --win-border: #333333; }
+    [data-theme="flexoki-light"]      { --bg: #FFFCF0; --fg: #100F0F; --accent: #205EA6; --urgent: #D14D41; --win-border: #CECDC3; }
+
+    .omarchy {
+      --fill-normal:   color-mix(in srgb, var(--fg) 4%, transparent);
+      --fill-hover:    color-mix(in srgb, var(--fg) 8%, transparent);
+      --fill-selected: color-mix(in srgb, var(--fg) 18%, transparent);
+      --fill-pressed:  color-mix(in srgb, var(--fg) 22%, transparent);
+      --border-normal: color-mix(in srgb, var(--fg) 40%, transparent);
+      --border-hover:  color-mix(in srgb, var(--fg) 25%, transparent);
+      --rule:          color-mix(in srgb, var(--fg) 12%, transparent);
+      --dim:           color-mix(in srgb, var(--fg) 68%, var(--bg));
+      --dimmer:        color-mix(in srgb, var(--fg) 45%, var(--bg));
+      --f-caption: 10px; --f-small: 11px; --f-body: 12px; --f-subtitle: 13px; --f-title: 14px; --f-heading: 16px;
+      --s-xxs: 2px; --s-sm: 4px; --s-md: 6px; --s-lg: 8px; --s-xl: 10px; --s-xxl: 12px; --s-xxxl: 14px; --s-huge: 18px;
+      --control-h: 28px; --control-px: 10px; --control-py: 6px; --radius: 0px;
+      font-family: "CaskaydiaMono Nerd Font", "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+      font-size: var(--f-body); color: var(--fg); -webkit-font-smoothing: antialiased;
+    }
+    body { margin: 0; background: transparent; }
+    a { color: var(--accent); } a:hover { color: var(--accent); }
+    * { box-sizing: border-box; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+    .sheet { background: var(--bg); border: 1px solid var(--win-border); padding: var(--s-huge); display: flex; flex-direction: column; gap: var(--s-huge); }
+    .sec { display: flex; flex-direction: column; gap: var(--s-xxl); }
+    .cap { font-size: var(--f-caption); font-weight: 700; letter-spacing: 0.08em; color: var(--dim); }
+    .rule { height: 1px; background: var(--rule); }
+    .note { font-size: var(--f-caption); color: var(--dimmer); line-height: 1.6; max-width: 62ch; }
+    .qml { font-size: var(--f-caption); color: var(--dimmer); }
+    .lbl { font-size: var(--f-caption); color: var(--dim); }
+    .row { display: flex; align-items: center; gap: var(--s-xxl); flex-wrap: wrap; }
+    .col { display: flex; flex-direction: column; gap: var(--s-md); }
+
+    .ctl { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); border-radius: var(--radius); background: var(--fill-normal); font-size: var(--f-small); display: inline-flex; align-items: center; gap: var(--s-lg); }
+    .ctl.flat { border-color: transparent; background: transparent; }
+    .ctl.hover { background: var(--fill-hover); border-color: var(--border-hover); }
+    .ctl.sel { background: var(--fill-selected); border-color: transparent; font-weight: 700; }
+    .ctl.press { background: var(--fill-pressed); }
+    .ctl.off { opacity: 0.4; }
+
+    .field { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); background: var(--fill-normal); color: var(--fg); font-family: inherit; font-size: var(--f-small); outline: none; width: 260px; }
+    .field.focus { border-color: var(--border-hover); background: var(--fill-hover); }
+    .field::placeholder { color: var(--dimmer); }
+
+    .mrow { width: 300px; position: relative; padding: 7px var(--s-lg) 7px 16px; border: 1px dashed transparent; }
+    .mrow.hover { background: var(--fill-hover); }
+    .mrow.sel { background: var(--fill-selected); }
+    .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .swatch { width: 100%; height: 30px; border: 1px solid var(--rule); }
+    .tokens { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-xxl); }
+    .scale { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: var(--s-md) var(--s-huge); align-items: baseline; }
+  </style>
+</helmet>
+
+<div class="omarchy sheet" data-theme="{{theme}}" style="width: 1120px">
+
+  <div>
+    <div style="font-size: var(--f-heading); font-weight: 700">Omarchy Gmail · component sheet</div>
+    <div class="note" style="margin-top: var(--s-md)">Every value below is read from the active theme, never written down. Four foundation colours come from <span style="color: var(--fg)">colors.toml</span>; the fills, borders, rules and secondary text are alphas over the foreground, exactly as <span style="color: var(--fg)">qs.Commons.Style</span> derives them. Switch the theme chip above — anything that does not move is a hard-coded colour.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ============================================================ tokens -->
+  <div class="sec">
+    <div class="cap">1 · FOUNDATION — colors.toml</div>
+    <div class="tokens">
+      <sc-for list="{{foundation}}" as="t" hint-placeholder-count="4">
+        <div class="col" style="gap: var(--s-sm)">
+          <div class="swatch" style="background: {{t.value}}"></div>
+          <div style="font-size: var(--f-small)">{{t.name}}</div>
+          <div class="qml">{{t.qml}}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div class="cap" style="margin-top: var(--s-md)">2 · DERIVED — alpha over foreground</div>
+    <div class="tokens">
+      <sc-for list="{{derived}}" as="t" hint-placeholder-count="8">
+        <div class="col" style="gap: var(--s-sm)">
+          <div class="swatch" style="background: {{t.value}}"></div>
+          <div style="font-size: var(--f-small)">{{t.name}}</div>
+          <div class="qml">{{t.qml}}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div class="note">Secondary text is the one deliberate divergence. The shell's <span style="color: var(--fg)">PanelSectionHeader</span> uses <span style="color: var(--fg)">Qt.darker(foreground, 1.4)</span>, which on a light theme drives the label <em>darker</em> than body text instead of quieter. Mixing toward the background lands on the same value for dark themes and stays correct on light ones.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ======================================================== type scale -->
+  <div class="sec">
+    <div class="cap">3 · TYPE — Style.font.* at [font] base-size = 12</div>
+    <div class="scale">
+      <sc-for list="{{typeScale}}" as="t" hint-placeholder-count="6">
+        <span class="qml" style="font-variant-numeric: tabular-nums">{{t.px}}</span>
+        <span class="lbl">{{t.token}}</span>
+        <span style="font-size: {{t.css}}; font-weight: {{t.weight}}">{{t.sample}}</span>
+      </sc-for>
+    </div>
+    <div class="note">One family throughout: the fontconfig <span style="color: var(--fg)">monospace</span> alias, which <span style="color: var(--fg)">omarchy font set</span> owns. Weight carries hierarchy — there is no second family and no italic.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- =========================================================== buttons -->
+  <div class="sec">
+    <div class="cap">4 · BUTTON — qs.Ui.Button, 28px tall, 10×6 padding, 0px radius</div>
+    <div class="row" style="gap: var(--s-huge)">
+      <div class="col"><span class="lbl">bordered</span><button class="ctl">Reply</button></div>
+      <div class="col"><span class="lbl">hover / cursor</span><button class="ctl hover">Reply</button></div>
+      <div class="col"><span class="lbl">pressed</span><button class="ctl press">Reply</button></div>
+      <div class="col"><span class="lbl">selected</span><button class="ctl sel">Reply</button></div>
+      <div class="col"><span class="lbl">disabled</span><button class="ctl off">Reply</button></div>
+    </div>
+    <div class="row" style="gap: var(--s-huge)">
+      <div class="col"><span class="lbl">flat</span><button class="ctl flat">Forward</button></div>
+      <div class="col"><span class="lbl">flat hover</span><button class="ctl flat hover">Forward</button></div>
+      <div class="col"><span class="lbl">destructive</span><button class="ctl flat" style="color: var(--urgent)">Delete</button></div>
+      <div class="col"><span class="lbl">opens a page</span><button class="ctl flat" style="color: var(--accent)">Open Google Cloud...</button></div>
+    </div>
+    <div class="note">A trailing <span style="color: var(--fg)">...</span> means activating it opens a dialog, a page, a browser or a terminal workflow rather than completing the action. Hover and the keyboard cursor are the same state on purpose — the panel's cursor has to be as visible as the mouse's.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ============================================================= input -->
+  <div class="sec">
+    <div class="cap">5 · TEXT FIELD — qs.Ui.TextField, 28px tall, 10×7 padding</div>
+    <div class="row" style="gap: var(--s-huge)">
+      <div class="col"><span class="lbl">placeholder</span><input class="field" placeholder="Search mail" /></div>
+      <div class="col"><span class="lbl">focus</span><input class="field focus" value="from:张伟 has:attachment" /></div>
+      <div class="col"><span class="lbl">password</span><input class="field" type="password" value="GOCSPX-9f2a1c" style="width: 180px" /></div>
+    </div>
+    <div class="note">Search takes Gmail's own operator syntax straight through. Translating it would only take away what people already know.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ============================================================== rows -->
+  <div class="sec">
+    <div class="cap">6 · MESSAGE ROW — three lines, unread carried by weight and the dot</div>
+    <div class="row" style="gap: var(--s-huge); align-items: flex-start">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+        <div class="col" style="gap: var(--s-md)">
+          <span class="lbl">{{r.label}}</span>
+          <div class="mrow {{r.cls}}">
+            <sc-if value="{{r.unread}}" hint-placeholder-val="{{true}}">
+              <span style="position: absolute; left: 6px; top: 12px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent)"></span>
+            </sc-if>
+            <div style="display: flex; align-items: baseline; gap: var(--s-lg)">
+              <span class="ellip" style="flex: 1 1 auto; font-size: var(--f-small); font-weight: {{r.weight}}">张伟</span>
+              <span style="font-size: var(--f-caption); color: var(--dim)">10:24</span>
+              <sc-if value="{{r.actions}}" hint-placeholder-val="{{true}}">
+                <span style="display: flex; gap: var(--s-sm); color: var(--dim); font-size: var(--f-caption)">☆ ↓ ⌫</span>
+              </sc-if>
+            </div>
+            <div class="ellip" style="font-size: var(--f-small); font-weight: {{r.weight}}; color: {{r.subjectFg}}; margin-top: var(--s-xxs)">发票 — 2026 年 8 月</div>
+            <div class="ellip" style="font-size: var(--f-caption); color: var(--dimmer); margin-top: var(--s-xxs)">您好，附件是本月的服务发票，请查收。</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <div class="note">Unread never depends on colour alone: the dot, the heavier weight and the brighter subject all carry it, so it survives a theme whose accent sits close to the foreground. Star, archive and trash appear on hover or under the keyboard cursor; a star that is already set stays visible either way, because that is state rather than an affordance.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ============================================================= icons -->
+  <div class="sec">
+    <div class="cap">7 · ICONS — stroked, 16px grid, 1.4 stroke</div>
+    <div class="row" style="gap: var(--s-huge)">
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linejoin="round"><rect x="1" y="3.5" width="14" height="9" /><path d="M1 3.5 L8 0.8 L15 3.5" /></svg>
+        <span class="lbl">unread</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linejoin="round"><rect x="1" y="3.5" width="14" height="9" /><path d="M1 3.5 L8 8.5 L15 3.5" /></svg>
+        <span class="lbl">read</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round"><path d="M14 8a6 6 0 1 1-1.8-4.3" /><path d="M14 1.5V4h-2.5" /></svg>
+        <span class="lbl">refresh</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5v9" /><path d="M4.5 7L8 10.5 11.5 7" /><path d="M2 13.5h12" /></svg>
+        <span class="lbl">archive</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11" /><path d="M6 4V2.5h4V4" /><path d="M4 4l.7 9.5h6.6L12 4" /></svg>
+        <span class="lbl">trash</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" /></svg>
+        <span class="lbl">star</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L2 7.5l4 4" /><path d="M2 7.5h7a4.5 4.5 0 0 1 4.5 4.5v.5" /></svg>
+        <span class="lbl">reply</span>
+      </div>
+      <div class="col" style="align-items: center">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-linecap="round"><path d="M13 7l-5.5 5.5a3.5 3.5 0 0 1-5-5L8 2a2.5 2.5 0 0 1 3.5 3.5L6 11a1.5 1.5 0 0 1-2-2l5-5" /></svg>
+        <span class="lbl">attachment</span>
+      </div>
+    </div>
+    <div class="note">Drawn, not rasterised from SVG assets: the bar slot is 16px and Qt's SVG renderer smears strokes at that size, which is why the shell's own icons are Canvas paths. The envelope's flap direction carries unread state — it reads at bar size where a colour change alone does not.</div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- ======================================================== bar widget -->
+  <div class="sec">
+    <div class="cap">8 · BAR WIDGET — 27px slot, 16px canvas, badge caps at 99+</div>
+    <div class="row" style="gap: var(--s-huge)">
+      <sc-for list="{{badges}}" as="b" hint-placeholder-count="4">
+        <div class="col" style="align-items: center; gap: var(--s-md)">
+          <div style="width: 27px; height: 27px; position: relative; display: flex; align-items: center; justify-content: center; background: var(--fill-normal)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="{{b.stroke}}" stroke-width="1.4" stroke-linejoin="round">
+              <rect x="1" y="3.5" width="14" height="9" /><path d="{{b.flap}}" />
+            </svg>
+            <sc-if value="{{b.text}}" hint-placeholder-val="{{true}}">
+              <span style="position: absolute; top: 1px; right: 0; min-width: 13px; height: 13px; padding: 0 3px; background: var(--urgent); color: var(--bg); font-size: 9px; font-weight: 700; line-height: 13px; text-align: center">{{b.text}}</span>
+            </sc-if>
+            <sc-if value="{{b.crossed}}" hint-placeholder-val="{{false}}">
+              <span style="position: absolute; width: 20px; height: 2px; background: var(--fg); transform: rotate(-45deg)"></span>
+            </sc-if>
+          </div>
+          <span class="lbl">{{b.label}}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div class="note">Past 99 the exact number has stopped being something anyone acts on, and the bar has room for a count rather than for a number of digits.</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "theme": {"editor": "enum", "default": "macos-classic-dark",
+            "options": ["macos-classic-dark", "catppuccin", "matte-black", "flexoki-light"],
+            "section": "Omarchy theme"},
+  "$preview": {"width": 1160, "height": 1720}
+}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      foundation: [
+        { name: "background", value: "var(--bg)", qml: "Color.background" },
+        { name: "foreground", value: "var(--fg)", qml: "Color.foreground" },
+        { name: "accent", value: "var(--accent)", qml: "Color.accent" },
+        { name: "urgent", value: "var(--urgent)", qml: "Color.urgent" }
+      ],
+      derived: [
+        { name: "fill normal 4%", value: "var(--fill-normal)", qml: "Style.normalFillFor(fg, accent)" },
+        { name: "fill hover 8%", value: "var(--fill-hover)", qml: "Style.hoverFillFor(fg, accent)" },
+        { name: "fill selected 18%", value: "var(--fill-selected)", qml: "Style.selectedFillFor(fg, accent)" },
+        { name: "fill pressed 22%", value: "var(--fill-pressed)", qml: "Style.pressedFillFor(fg, accent)" },
+        { name: "border normal 40%", value: "var(--border-normal)", qml: "Border.controlSpec(\"normal\")" },
+        { name: "border hover 25%", value: "var(--border-hover)", qml: "Border.controlSpec(\"hover-cursor\")" },
+        { name: "rule 12%", value: "var(--rule)", qml: "PanelSeparator.strength" },
+        { name: "secondary text", value: "var(--dim)", qml: "see note below" }
+      ],
+      typeScale: [
+        { px: "10px", token: "font.caption", css: "10px", weight: "400", sample: "timestamps, snippets, section labels" },
+        { px: "11px", token: "font.bodySmall", css: "11px", weight: "400", sample: "list rows, controls, message body" },
+        { px: "12px", token: "font.body", css: "12px", weight: "400", sample: "default body" },
+        { px: "13px", token: "font.subtitle", css: "13px", weight: "700", sample: "开启的邮件主题 · open subject" },
+        { px: "14px", token: "font.title", css: "14px", weight: "400", sample: "window title" },
+        { px: "16px", token: "font.heading", css: "16px", weight: "700", sample: "setup headline" }
+      ],
+      rows: [
+        { label: "read", cls: "", unread: false, actions: false, weight: "400", subjectFg: "var(--dim)" },
+        { label: "unread", cls: "", unread: true, actions: false, weight: "700", subjectFg: "var(--fg)" },
+        { label: "hover / cursor", cls: "hover", unread: true, actions: true, weight: "700", subjectFg: "var(--fg)" },
+        { label: "selected", cls: "sel", unread: false, actions: true, weight: "400", subjectFg: "var(--dim)" }
+      ],
+      badges: [
+        { label: "no unread", text: "", crossed: false, stroke: "var(--fg)", flap: "M1 3.5 L8 8.5 L15 3.5" },
+        { label: "7 unread", text: "7", crossed: false, stroke: "var(--fg)", flap: "M1 3.5 L8 0.8 L15 3.5" },
+        { label: "capped", text: "99+", crossed: false, stroke: "var(--fg)", flap: "M1 3.5 L8 0.8 L15 3.5" },
+        { label: "not connected", text: "", crossed: true, stroke: "var(--dim)", flap: "M1 3.5 L8 8.5 L15 3.5" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

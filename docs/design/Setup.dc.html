@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap">
+  <style>
+    [data-theme="macos-classic-dark"] { --bg: #131313; --fg: #DEDEDE; --accent: #077CFD; --urgent: #FF5257; --win-border: #595959; }
+    [data-theme="catppuccin"]         { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --urgent: #f38ba8; --win-border: #585b70; }
+    [data-theme="matte-black"]        { --bg: #121212; --fg: #bebebe; --accent: #e68e0d; --urgent: #D35F5F; --win-border: #333333; }
+    [data-theme="flexoki-light"]      { --bg: #FFFCF0; --fg: #100F0F; --accent: #205EA6; --urgent: #D14D41; --win-border: #CECDC3; }
+
+    .omarchy {
+      --fill-normal:   color-mix(in srgb, var(--fg) 4%, transparent);
+      --fill-hover:    color-mix(in srgb, var(--fg) 8%, transparent);
+      --fill-selected: color-mix(in srgb, var(--fg) 18%, transparent);
+      --border-normal: color-mix(in srgb, var(--fg) 40%, transparent);
+      --border-hover:  color-mix(in srgb, var(--fg) 25%, transparent);
+      --rule:          color-mix(in srgb, var(--fg) 12%, transparent);
+      --dim:           color-mix(in srgb, var(--fg) 68%, var(--bg));
+      --dimmer:        color-mix(in srgb, var(--fg) 45%, var(--bg));
+      --f-caption: 10px; --f-small: 11px; --f-body: 12px; --f-subtitle: 13px; --f-title: 14px;
+      --s-xxs: 2px; --s-sm: 4px; --s-md: 6px; --s-lg: 8px; --s-xl: 10px; --s-xxl: 12px; --s-xxxl: 14px; --s-huge: 18px;
+      --control-h: 28px; --control-px: 10px; --control-py: 6px; --radius: 0px;
+      font-family: "CaskaydiaMono Nerd Font", "JetBrains Mono", "Noto Sans SC", ui-monospace, monospace;
+      font-size: var(--f-body); color: var(--fg); -webkit-font-smoothing: antialiased;
+    }
+    body { margin: 0; background: transparent; }
+    a { color: var(--accent); } a:hover { color: var(--accent); }
+    * { box-sizing: border-box; }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+    .hit:hover { background: var(--fill-hover); }
+    .ctl { height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); border-radius: var(--radius); background: var(--fill-normal); font-size: var(--f-small); display: inline-flex; align-items: center; gap: var(--s-lg); }
+    .ctl:hover { background: var(--fill-hover); border-color: var(--border-hover); }
+    .ctl.flat { border-color: transparent; background: transparent; }
+    .ctl.flat:hover { background: var(--fill-hover); }
+    .rule { height: 1px; background: var(--rule); flex: none; }
+    .cap { font-size: var(--f-caption); font-weight: 700; letter-spacing: 0.08em; color: var(--dim); }
+    .field { width: 100%; height: var(--control-h); padding: 0 var(--control-px); border: 1px solid var(--border-normal); border-radius: var(--radius); background: var(--fill-normal); color: var(--fg); font-family: inherit; font-size: var(--f-small); outline: none; }
+    .field:focus { border-color: var(--border-hover); background: var(--fill-hover); }
+  </style>
+</helmet>
+
+<div class="omarchy" data-theme="{{theme}}"
+     style="width: 980px; height: 720px; border: 1px solid var(--win-border); background: var(--bg); display: flex; flex-direction: column">
+
+  <!-- header, reduced: nothing but Compose and search is reachable yet -->
+  <div style="height: 48px; flex: none; display: flex; align-items: center; gap: var(--s-xxl); padding: 0 var(--s-xxxl); border-bottom: 1px solid var(--rule)">
+    <div style="display: flex; align-items: center; gap: var(--s-lg)">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="var(--fg)" stroke-width="1.3" stroke-linejoin="round">
+        <rect x="1" y="3.5" width="14" height="9" /><path d="M1 3.5 L8 0.8 L15 3.5" />
+      </svg>
+      <span style="font-size: var(--f-title)">Gmail</span>
+    </div>
+    <div style="flex: 1 1 auto"></div>
+    <button class="hit" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="var(--dim)">
+        <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+      </svg>
+    </button>
+  </div>
+
+  <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: var(--s-huge); display: flex; justify-content: center">
+    <div style="width: 560px; display: flex; flex-direction: column; gap: var(--s-xl)">
+
+      <div style="display: flex; align-items: center; gap: var(--s-lg)">
+        <button class="hit" style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: var(--f-title)">←</button>
+        <span class="cap">GOOGLE CLOUD OAUTH CLIENT</span>
+      </div>
+
+      <p style="margin: 0; font-size: var(--f-small); line-height: 1.7; color: var(--dim)">Google issues Gmail API access per project, so Omarchy Gmail signs in with a client you own. Nothing here is shared with anyone, and the mailbox is only ever read by this machine.</p>
+
+      <!-- Missing dependencies come first: none of the steps below can finish
+           without them, so offering the steps first would waste the user's time. -->
+      <sc-if value="{{toolsMissing}}" hint-placeholder-val="{{true}}">
+        <div style="padding: var(--s-xxl); border: 1px solid var(--border-hover); background: var(--fill-normal)">
+          <div style="font-size: var(--f-small); line-height: 1.6">Install <span style="color: var(--urgent)">socat</span>, <span style="color: var(--urgent)">secret-tool</span> before signing in. Omarchy Gmail uses them for the loopback listener and the keyring.</div>
+        </div>
+      </sc-if>
+
+      <sc-for list="{{steps}}" as="st" hint-placeholder-count="4">
+        <div style="display: flex; gap: var(--s-xxl)">
+          <span style="flex: none; width: 18px; font-size: var(--f-small); color: var(--dimmer); font-variant-numeric: tabular-nums">{{st.n}}.</span>
+          <div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--s-xs)">
+            <div style="font-size: var(--f-small); font-weight: 700">{{st.title}}</div>
+            <div style="font-size: var(--f-caption); line-height: 1.6; color: var(--dim)">{{st.detail}}</div>
+            <sc-if value="{{st.action}}" hint-placeholder-val="{{true}}">
+              <button class="hit" style="align-self: flex-start; margin-top: var(--s-xxs); font-size: var(--f-caption); color: var(--accent); padding: 2px 0">{{st.action}}</button>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+
+      <div style="display: flex; flex-direction: column; gap: var(--s-md)">
+        <span class="cap" style="letter-spacing: 0">Client ID</span>
+        <input class="field" placeholder="000000000000-xxxxxxxx.apps.googleusercontent.com" />
+        <span class="cap" style="letter-spacing: 0; margin-top: var(--s-sm)">Client secret (leave empty if your client has none)</span>
+        <input class="field" type="password" defaultValue="GOCSPX-9f2a1c" />
+      </div>
+
+      <div style="display: flex; align-items: center; gap: var(--s-lg)">
+        <button class="ctl">Save client</button>
+        <button class="ctl">Sign in with Google...</button>
+      </div>
+
+      <sc-if value="{{signingIn}}" hint-placeholder-val="{{true}}">
+        <div style="display: flex; flex-direction: column; gap: var(--s-md)">
+          <span style="font-size: var(--f-caption); color: var(--dim)">Finish the sign-in in your browser…</span>
+          <button class="hit" style="align-self: flex-start; font-size: var(--f-caption); color: var(--dim); padding: 2px 6px">Cancel sign-in</button>
+        </div>
+      </sc-if>
+
+      <div class="rule"></div>
+
+      <div style="font-size: var(--f-caption); line-height: 1.7; color: var(--dimmer)">Saved to ~/.config/omarchy-gmail/credentials.json, readable only by you. You can also copy the JSON the console downloads to that path instead of pasting.</div>
+    </div>
+  </div>
+
+  <div style="height: 28px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--s-xxxl); border-top: 1px solid var(--rule)">
+    <span style="font-size: var(--f-caption); color: var(--dim)">Not connected</span>
+    <span style="font-size: var(--f-caption); color: var(--dim)">{{statusRight}}</span>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "theme": {"editor": "enum", "default": "macos-classic-dark",
+            "options": ["macos-classic-dark", "catppuccin", "matte-black", "flexoki-light"],
+            "section": "Omarchy theme"},
+  "toolsMissing": {"editor": "boolean", "default": false, "section": "State"},
+  "signingIn": {"editor": "boolean", "default": true, "section": "State"},
+  "$preview": {"width": 980, "height": 720}
+}'>
+class Component extends DCLogic {
+  renderVals() {
+    const toolsMissing = this.props.toolsMissing ?? false;
+    const signingIn = this.props.signingIn ?? true;
+    return {
+      toolsMissing,
+      signingIn,
+      steps: [
+        { n: 1, title: "Create a Desktop app client",
+          detail: "In Google Cloud, pick or create a project, then create an OAuth client with application type Desktop app.",
+          action: "Open Google Cloud..." },
+        { n: 2, title: "Enable the Gmail API",
+          detail: "The client cannot read anything until the Gmail API is enabled on the same project.",
+          action: "Open the Gmail API page..." },
+        { n: 3, title: "Add yourself as a test user",
+          detail: "While the consent screen is in testing, only listed test users can sign in. Add the Gmail address you want to read.",
+          action: "" },
+        { n: 4, title: "Paste the client below",
+          detail: "Copy the client ID from the console. The secret is shown next to it — paste it too if your client has one.",
+          action: "" }
+      ],
+      statusRight: toolsMissing ? "Missing socat, secret-tool"
+        : (signingIn ? "Waiting for Google…" : "")
+    };
+  }
+}
+</script>
+</body>
+</html>

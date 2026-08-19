@@ -1,0 +1,84 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 766,
+      "title": "Wide — three columns"
+    },
+    {
+      "file": "Setup.dc.html",
+      "x": 1070,
+      "y": 0,
+      "w": 990,
+      "h": 730,
+      "title": "First run — OAuth client"
+    },
+    {
+      "file": "Compose.dc.html",
+      "x": 2130,
+      "y": 0,
+      "w": 780,
+      "h": 690,
+      "title": "Compose — its own window"
+    },
+    {
+      "file": "Responsive.dc.html",
+      "x": 0,
+      "y": 860,
+      "w": 1680,
+      "h": 690,
+      "title": "Breakpoints"
+    },
+    {
+      "file": "Components.dc.html",
+      "x": 1760,
+      "y": 860,
+      "w": 1180,
+      "h": 1760,
+      "title": "Component sheet"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "theme-check",
+      "x": 0,
+      "y": -150,
+      "w": 460,
+      "text": "Every artboard carries a theme chip with four real Omarchy themes.\nSwitch to flexoki-light: it is a LIGHT theme, so anything that stays dark is a hard-coded colour rather than a token."
+    },
+    {
+      "id": "wide-notes",
+      "x": 1070,
+      "y": 790,
+      "w": 400,
+      "text": "Wide layout is 180 sidebar / 340 list / rest reader, split by 1px rules at 12% foreground.\nHeader 48, status bar 28, window border is Hyprland's own active-border — there is no client-side titlebar.\n\nRight-click any row for the triage menu. The reader's actions are icons with tooltips, not labels."
+    },
+    {
+      "id": "click-me",
+      "x": 500,
+      "y": -150,
+      "w": 420,
+      "text": "Clickable: pick a mailbox, open a row (it marks read and the bar count drops), type in search to filter. On the Breakpoints board the narrow frame switches list ↔ reader."
+    },
+    {
+      "id": "sheet-note",
+      "x": 1760,
+      "y": 2650,
+      "w": 460,
+      "text": "The sheet is the hand-off surface: each token names the QML expression that produces it, so the implementation reads values off Style and Color instead of copying hex out of a picture."
+    },
+    {
+      "id": "compose-window",
+      "x": 2130,
+      "y": 760,
+      "w": 400,
+      "text": "Compose is a WINDOW, not a pane: Hyprland tiles it beside the mailbox, so the message you are answering stays on screen instead of being covered by the form."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
