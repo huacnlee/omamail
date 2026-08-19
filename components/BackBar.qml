@@ -36,7 +36,7 @@ Item {
     foreground: root.dimColor
     fontFamily: root.panelFontFamily
     fontSize: Style.font.bodySmall
-    tooltipText: "Esc"
+    tooltipText: root.label + " · Esc"
     onClicked: root.activated()
   }
 }

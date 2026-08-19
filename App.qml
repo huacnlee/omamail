@@ -250,7 +250,7 @@ Item {
             visible: !root.showSetup
             iconName: "refresh"
             tooltipText: root.service && root.service.listLoading
-              ? "Checking for mail…" : "Check mail"
+              ? "Checking for mail…" : "Check mail · F5"
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
@@ -291,7 +291,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showSetup && root.compact
             iconName: "compose"
-            tooltipText: "Compose"
+            tooltipText: "Compose · c"
             foreground: root.foreground
             fontFamily: root.fontFamily
             enabled: root.ready
@@ -396,10 +396,11 @@ Item {
 
             MessageList {
               id: list
-              x: Style.space(8)
               y: Style.space(8)
-              // A gutter on the right so a row never slides under the bar.
-              width: listFlick.width - Style.space(22)
+              // Full width, so a row's hover fill runs to the column edge the
+              // way the sidebar's does; the text inset lives inside the row.
+              // A gutter on the right keeps a row from sliding under the bar.
+              width: listFlick.width - Style.space(14)
               service: root.service
               textColor: root.foreground
               accentColor: root.accent
@@ -476,6 +477,7 @@ Item {
           dimmerColor: root.dimmer
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
+          showBack: root.compact
           forcePlainText: root.plainTextForced
           onTogglePlainTextRequested: root.plainTextForced = !root.plainTextForced
           onZoomRequested: function(step) { root.zoomBy(step) }
@@ -608,11 +610,21 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           width: Math.min(implicitWidth, parent.width / 2)
           horizontalAlignment: Text.AlignRight
-          text: root.service
-            ? (root.service.actionStatus !== "" ? root.service.actionStatus : root.service.lastError)
-            : ""
+          // Whatever the window most needs to say, and when it has nothing to
+          // report, what the keyboard can do from where you are standing.
+          text: {
+            if (!root.service) return ""
+            if (root.service.actionStatus !== "") return root.service.actionStatus
+            if (root.service.lastError !== "") return root.service.lastError
+            if (root.showSetup) return "Esc  back"
+            if (root.composing) return "Ctrl+Enter  send      Esc  close"
+            if (root.currentView === "reader")
+              return "u  back      r  reply      e  archive      #  trash"
+            return "j / k  move      Enter  open      e  archive      c  compose"
+          }
           color: root.service && root.service.lastError !== "" && root.service.actionStatus === ""
-            ? root.urgent : root.dim
+            ? root.urgent
+            : (root.service && root.service.actionStatus !== "" ? root.dim : root.dimmer)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
@@ -720,6 +732,7 @@ Item {
       Shortcut { sequence: "Ctrl+-"; onActivated: root.zoomBy(-0.1) }
       Shortcut { sequence: "Ctrl+0"; onActivated: root.bodyZoom = 1.0 }
       Shortcut { sequence: "Ctrl+/"; onActivated: root.shortcutHelpVisible = !root.shortcutHelpVisible }
+      Shortcut { sequence: "Ctrl+?"; onActivated: root.shortcutHelpVisible = !root.shortcutHelpVisible }
       Shortcut { sequence: "F5"; onActivated: if (root.service) root.service.refresh() }
     }
   }

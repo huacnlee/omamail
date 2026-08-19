@@ -81,7 +81,7 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+Enter` | Send |
 | `/` or `Ctrl+K` | Search |
 | `g` then `i` / `s` / `u` / `t` | Inbox, starred, unread, sent |
-| `Ctrl+/` | Every shortcut |
+| `Ctrl+?` | Every shortcut |
 | `Esc` | Back, or close the window |
 
 Search takes Gmail's own operator syntax straight through — `from:jane`,

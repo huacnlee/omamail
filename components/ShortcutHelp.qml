@@ -2,8 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// The reference sheet behind Ctrl+/. A plain list rather than a dialog because
-// it never needs an answer — Esc, Ctrl+/ again, or a click puts it away.
+// The reference sheet behind Ctrl+?. A plain list rather than a dialog because
+// it never needs an answer — Esc, Ctrl+? again, or a click puts it away.
 Rectangle {
   id: root
 
@@ -31,7 +31,7 @@ Rectangle {
     { keys: "Ctrl+= / Ctrl+-", action: "Zoom the message body" },
     { keys: "Ctrl+0", action: "Reset the zoom" },
     { keys: "F5", action: "Check for mail" },
-    { keys: "Ctrl+/", action: "Toggle this sheet" },
+    { keys: "Ctrl+?", action: "Toggle this sheet" },
     { keys: "Esc", action: "Back, or close the window" }
   ]
 
