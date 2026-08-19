@@ -55,6 +55,7 @@ Item {
     if (retried !== true) root.inFlight++
 
     auth.withAccessToken(function(token, tokenError) {
+      if (!root) return
       if (handle.aborted) {
         root.inFlight = Math.max(0, root.inFlight - 1)
         return
@@ -68,6 +69,9 @@ Item {
       handle.xhr = xhr
       xhr.onreadystatechange = function() {
         if (xhr.readyState !== XMLHttpRequest.DONE) return
+        // The account this client belongs to can be removed while a request is
+        // still in the air; the reply then arrives for an object that is gone.
+        if (!root) return
         if (handle.xhr === xhr) handle.xhr = null
         if (handle.aborted) {
           root.inFlight = Math.max(0, root.inFlight - 1)
