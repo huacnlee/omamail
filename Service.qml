@@ -21,13 +21,48 @@ Item {
   width: 0
   height: 0
 
-  required property string pluginDir
-  property var settings: ({})
-  property bool panelOpen: false
+  // Injected by the shell when it constructs the service singleton. Nothing
+  // else is handed over, which is why settings arrive later from the bar
+  // widget rather than as a property binding.
+  property var shell: null
+  property var manifest: null
+  property var pluginRegistry: null
+  property var barWidgetRegistry: null
+
+  readonly property string pluginId: manifest && manifest.id
+    ? String(manifest.id) : "gmail.omarchy"
+  readonly property string pluginDir: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) : ""
+
+  readonly property var defaultSettingValues: ({
+    refreshIntervalSec: 120,
+    maxMessages: 25,
+    defaultQuery: "in:inbox",
+    showUnreadCount: "On",
+    notifyNewMail: "On",
+    oauthPort: 9481
+  })
+  property var settings: defaultSettingValues
+
+  // The window drives this; the unread poll keeps running while it is false.
+  property bool windowOpen: false
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
     return value === undefined || value === null ? fallback : value
+  }
+
+  // Reassigning the whole object is what makes the readonly settings below
+  // re-evaluate. Mutating it in place would not.
+  function applySettings(values) {
+    var next = ({})
+    for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
+    var source = values || ({})
+    for (var name in source) {
+      if (source[name] === undefined || source[name] === null) continue
+      next[name] = source[name]
+    }
+    if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
   }
 
   readonly property int refreshIntervalSec: Math.max(30, Math.min(3600,
@@ -117,7 +152,7 @@ Item {
   function refresh() {
     if (!ready) return
     refreshCounts()
-    if (panelOpen || !listLoaded) loadMessages(false)
+    if (windowOpen || !listLoaded) loadMessages(false)
   }
 
   function refreshCounts() {
@@ -490,7 +525,7 @@ Item {
   // ------------------------------------------------------------- lifecycle
 
   onPanelOpenChanged: {
-    if (!panelOpen) return
+    if (!windowOpen) return
     clearNotice()
     if (!ready) return
     loadProfile()
@@ -503,7 +538,7 @@ Item {
     loadProfile()
     loadLabels()
     refreshCounts()
-    if (panelOpen && !listLoaded) loadMessages(false)
+    if (windowOpen && !listLoaded) loadMessages(false)
   }
 
   AuthManager {
@@ -546,7 +581,7 @@ Item {
     triggeredOnStart: true
     onTriggered: {
       root.refreshCounts()
-      if (root.panelOpen) root.loadMessages(false)
+      if (root.windowOpen) root.loadMessages(false)
       // A new message while the panel is closed still has to reach the
       // notification path, so the list is refreshed on the unread count going
       // up rather than on a second timer.

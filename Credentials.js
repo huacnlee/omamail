@@ -7,6 +7,26 @@
 
 var CLIENT_ID_PATTERN = /^[0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com$/
 
+// A client shipped with the plugin, so most people never see the setup at all.
+// Empty until the project completes Google's OAuth verification: gmail.modify
+// and gmail.send are RESTRICTED scopes, and an unverified project is stuck in
+// "Testing", where Google issues refresh tokens that expire after seven days.
+// Shipping a client under those terms would sign every user out weekly, which
+// is worse than asking them to make their own.
+//
+// A desktop client's secret is explicitly not confidential to Google, so both
+// values may live in this file once verification lands. Filling these in is the
+// only change needed — everything downstream already prefers them.
+var BUILTIN = { clientId: "", clientSecret: "", projectId: "" }
+
+function builtin() {
+  return { clientId: BUILTIN.clientId, clientSecret: BUILTIN.clientSecret, projectId: BUILTIN.projectId }
+}
+
+function hasBuiltin() {
+  return isValidClientId(BUILTIN.clientId)
+}
+
 function empty() {
   return { clientId: "", clientSecret: "", projectId: "" }
 }
@@ -121,6 +141,18 @@ function load(text) {
   if (!raw) return empty()
   var result = fromObject(parseJson(raw, null))
   return result.ok ? result.credentials : empty()
+}
+
+// The user's own client always wins: someone who went to the trouble of making
+// one wants their own quota and their own consent screen, not the shipped one.
+function effective(fileText) {
+  var own = load(fileText)
+  if (isConfigured(own)) return own
+  return builtin()
+}
+
+function usingBuiltin(fileText) {
+  return !isConfigured(load(fileText)) && hasBuiltin()
 }
 
 function path(home) {

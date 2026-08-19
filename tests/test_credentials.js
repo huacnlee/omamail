@@ -86,4 +86,36 @@ assert.strictEqual(credentials.describe(credentials.empty()), "")
 assert.strictEqual(
   credentials.path("/home/jason"), "/home/jason/.config/omarchy-gmail/credentials.json")
 
+// -------------------------------------------------------- built-in client
+//
+// Shipping a client is a one-constant change once the project passes Google's
+// OAuth verification. Until then BUILTIN is empty on purpose: an unverified
+// project is stuck in "Testing", where refresh tokens expire after seven days,
+// so a shipped client would sign every user out weekly.
+
+assert.strictEqual(credentials.hasBuiltin(), false, "no client is shipped yet")
+deepEqual(credentials.builtin(), { clientId: "", clientSecret: "", projectId: "" })
+
+// With no built-in and no file, there is nothing to sign in with.
+deepEqual(credentials.effective(""), { clientId: "", clientSecret: "", projectId: "" })
+assert.strictEqual(credentials.usingBuiltin(""), false)
+
+// The user's own client always wins over anything shipped: someone who made
+// one wants their own quota and their own consent screen.
+deepEqual(credentials.effective(serialized), parsed.credentials)
+assert.strictEqual(credentials.usingBuiltin(serialized), false)
+
+// Simulate the post-verification state by filling the constant the same way a
+// release would, and check the fallback actually engages.
+credentials.BUILTIN.clientId = "999-shipped.apps.googleusercontent.com"
+credentials.BUILTIN.clientSecret = "GOCSPX-shipped"
+assert.strictEqual(credentials.hasBuiltin(), true)
+assert.strictEqual(credentials.effective("").clientId, "999-shipped.apps.googleusercontent.com")
+assert.strictEqual(credentials.usingBuiltin(""), true)
+assert.strictEqual(credentials.effective(serialized).clientId, parsed.credentials.clientId,
+  "a user's own client still wins once one exists")
+assert.strictEqual(credentials.usingBuiltin(serialized), false)
+credentials.BUILTIN.clientId = ""
+credentials.BUILTIN.clientSecret = ""
+
 console.log("test_credentials.js ok")

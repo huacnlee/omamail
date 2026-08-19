@@ -1,0 +1,44 @@
+QMLLINT := /usr/lib/qt6/bin/qmllint
+QML_FILES := Service.qml BarWidget.qml App.qml \
+	AuthManager.qml GmailApiClient.qml \
+	components/GmailIcon.qml \
+	components/MailboxSidebar.qml \
+	components/MailboxTabs.qml \
+	components/MessageList.qml \
+	components/MessageRow.qml \
+	components/MessageMenu.qml \
+	components/MessageReader.qml \
+	components/ComposeWindow.qml \
+	components/SearchBar.qml \
+	components/AppMenu.qml \
+	components/SetupPage.qml \
+	components/SetupCard.qml \
+	components/ShortcutHelp.qml
+
+.PHONY: test test-js test-shell qml-check validate
+
+test: test-js test-shell
+
+# The parsing, formatting, and decision rules live in plain JS precisely so
+# they can be tested without a compositor. These run anywhere node does.
+test-js:
+	node tests/test_oauth.js
+	node tests/test_credentials.js
+	node tests/test_gmail_api.js
+	node tests/test_message.js
+	node tests/test_html.js
+	node tests/test_model.js
+
+test-shell:
+	python3 tests/test_qml_names.py
+	bash tests/test_source.sh
+	bash tests/test_service_source.sh
+	bash tests/test_install.sh
+
+# Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
+qml-check:
+	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES)
+
+validate: test qml-check
+	omarchy plugin validate .
+	git diff --check

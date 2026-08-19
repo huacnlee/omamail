@@ -5,17 +5,21 @@
   "version": "0.1.0",
   "author": "Jason Lee",
   "license": "MIT",
-  "description": "Read, triage, and reply to Gmail from the Omarchy bar, over the official Gmail API.",
+  "description": "Read, triage, and reply to Gmail in a native Omarchy window, over the official Gmail API.",
   "kinds": [
-    "bar-widget"
+    "service",
+    "bar-widget",
+    "panel"
   ],
   "activation": "on-demand",
   "entryPoints": {
-    "barWidget": "Panel.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "App.qml"
   },
   "barWidget": {
     "displayName": "Omarchy Gmail",
-    "description": "Unread count in the bar, inbox triage and replies in the panel.",
+    "description": "Unread count in the bar; the mailbox itself opens as its own window.",
     "category": "Communication",
     "aliases": [
       "gmail",
@@ -31,7 +35,8 @@
       "defaultQuery": "in:inbox",
       "showUnreadCount": "On",
       "notifyNewMail": "On",
-      "oauthPort": 9481
+      "oauthPort": 9481,
+      "openOnClick": "Window"
     },
     "schema": [
       {
@@ -90,6 +95,17 @@
         "step": 1,
         "defaultValue": 9481,
         "description": "Loopback port used once during Google sign-in. Change it only if something else already listens there."
+      },
+      {
+        "key": "openOnClick",
+        "type": "enum",
+        "label": "Clicking the bar icon opens",
+        "options": [
+          "Window",
+          "Quick preview"
+        ],
+        "defaultValue": "Window",
+        "description": "The full window, or a small card with the most recent unread mail."
       }
     ]
   }

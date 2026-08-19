@@ -29,8 +29,9 @@ Item {
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string credentialsPath: Credentials.path(home)
 
-  property var credentials: Credentials.empty()
+  property var credentials: Credentials.effective("")
   property bool credentialsChecked: false
+  property bool usingBuiltinClient: Credentials.hasBuiltin()
   readonly property bool credentialsPresent: Credentials.isConfigured(credentials)
   readonly property string clientId: credentials ? String(credentials.clientId || "") : ""
   readonly property string clientDescription: Credentials.describe(credentials)
@@ -153,8 +154,12 @@ Item {
     return true
   }
 
+  // The user's own client file wins; a client shipped with the plugin is the
+  // fallback. Today nothing is shipped, so this resolves to the file or to
+  // nothing at all — see Credentials.BUILTIN for why.
   function applyCredentials(raw) {
-    var loaded = Credentials.load(raw)
+    var loaded = Credentials.effective(raw)
+    usingBuiltinClient = Credentials.usingBuiltin(raw)
     var changed = String(loaded.clientId) !== String(credentials.clientId)
     credentials = loaded
     credentialsChecked = true
@@ -446,10 +451,9 @@ Item {
     printErrors: false
     onLoaded: root.applyCredentials(text())
     onFileChanged: reload()
-    onLoadFailed: {
-      root.credentialsChecked = true
-      if (Credentials.isConfigured(root.credentials)) root.applyCredentials("")
-    }
+    // No file is the normal first-run state, not an error: fall through to
+    // whatever client is built in.
+    onLoadFailed: root.applyCredentials("")
   }
 
   Process {
