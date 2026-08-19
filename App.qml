@@ -765,10 +765,12 @@ Item {
         textColor: root.foreground
         panelFontFamily: root.fontFamily
         signedIn: root.ready
+        accountCount: root.service ? root.service.accountCount : 1
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.shortcutHelpVisible = true
         onSetupRequested: root.settingsVisible = true
+        onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onSignOutRequested: if (root.service) root.service.signOut()
       }

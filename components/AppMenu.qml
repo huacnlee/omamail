@@ -10,6 +10,9 @@ Item {
   required property color textColor
   required property string panelFontFamily
   property bool signedIn: false
+  // The rail carries the switcher, and the rail is gone at a narrow window —
+  // so at that size this menu is the only way left to reach it.
+  property int accountCount: 1
   // The menu is opened from wherever the account lives — the sidebar's user
   // bar, or the status bar when the sidebar is hidden — so it carries no
   // trigger of its own by default.
@@ -33,6 +36,7 @@ Item {
   signal openWebRequested()
   signal shortcutsRequested()
   signal setupRequested()
+  signal switchAccountRequested()
   signal projectRequested()
   signal signOutRequested()
 
@@ -85,6 +89,11 @@ Item {
       MenuRow {
         text: "Keyboard shortcuts..."
         onActivated: { menu.close(); root.shortcutsRequested() }
+      }
+      MenuRow {
+        text: "Switch mailbox..."
+        visible: root.accountCount > 1
+        onActivated: { menu.close(); root.switchAccountRequested() }
       }
       MenuRow {
         text: "Settings..."
