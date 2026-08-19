@@ -97,16 +97,13 @@ Canvas {
       move(3, 7); line(13, 7)
       move(3, 10.5); line(9, 10.5)
     } else if (root.name === "refresh") {
-      // Two arrows chasing each other, not one circular arrow: a single arrow
-      // reads as "reload this page", and what this button does is go and ask
-      // for mail. Each arc gets an explicit start so it does not join the
-      // previous subpath with a stray chord.
-      move(3.11, 6.24)
-      arc(8, 8, 5.2, Math.PI * 1.11, Math.PI * 1.89)
-      move(11.3, 4.9); line(13.0, 6.3); line(11.4, 7.7)
-      move(12.89, 9.76)
-      arc(8, 8, 5.2, Math.PI * 0.11, Math.PI * 0.89)
-      move(4.7, 11.1); line(3.0, 9.7); line(4.6, 8.3)
+      // One circular arrow with the gap at the top right. Two arrows chasing
+      // each other were more faithful to "go and ask", but at sixteen pixels
+      // they read as a ring with two nicks taken out of it rather than as
+      // anything with direction.
+      move(13.2, 8)
+      arc(8, 8, 5.2, 0, Math.PI * 1.5)
+      move(6.5, 1.6); line(8.9, 2.8); line(6.5, 4.0)
     } else if (root.name === "send") {
       move(14.5, 1.5); line(7, 9)
       move(14.5, 1.5); line(10, 14.5); line(7, 9); line(1.5, 6); ctx.closePath()

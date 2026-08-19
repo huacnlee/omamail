@@ -256,17 +256,6 @@ Item {
             }
           }
 
-          IconButton {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact && !root.showPage
-            iconName: "sidebar"
-            tooltipText: root.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar"
-            foreground: root.sidebarCollapsed ? root.dim : root.foreground
-            hoverColor: root.foreground
-            fontFamily: root.fontFamily
-            onClicked: root.sidebarCollapsed = !root.sidebarCollapsed
-          }
-
           // Next to the mark: this is the window's own menu, not an action on
           // the mailbox. Anchored to the button's own edge so it lands in the
           // same place however the control was pressed.
@@ -308,8 +297,9 @@ Item {
             // the two clusters are not the same width.
             x: Math.max(0, Math.min(parent.width - width,
               (header.width - width) / 2 - parent.x))
-            // Capped so it does not stretch across a very wide window.
-            width: Math.min(Style.space(460), parent.width)
+            // Capped well short of the gap it is given: a search field as wide
+            // as the window looks like the window's main event, and it is not.
+            width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
             visible: !root.showPage && parent.width >= Style.space(120)
@@ -356,21 +346,11 @@ Item {
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && root.compact
-            iconName: "compose"
+            visible: !root.showPage
+            iconName: "send"
             tooltipText: "Compose · c"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            enabled: root.ready
-            onClicked: root.startCompose("new")
-          }
-
-          IconTextButton {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.compact
-            iconName: "compose"
-            text: "Compose"
-            foreground: root.foreground
+            foreground: root.dim
+            hoverColor: root.foreground
             fontFamily: root.fontFamily
             enabled: root.ready
             onClicked: root.startCompose("new")
@@ -408,6 +388,7 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
           switcherOpen: accountSwitcher.opened
+          onCollapseToggled: root.sidebarCollapsed = !root.sidebarCollapsed
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
