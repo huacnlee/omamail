@@ -7,10 +7,9 @@ import "../Model.js" as Model
 // The left column: the six built-in mailboxes, then whatever labels the user
 // has made.
 //
-// Icon-first and collapsed by default. A mail window spends its width on the
-// list and the message, not on six words that never change — so the rail keeps
-// the counts visible, names everything through tooltips, and expands only when
-// somebody asks for it.
+// Icon-first, and narrow enough to leave open: the longest mailbox name is
+// "All mail". Collapsing it to a strip of icons is one click away, and the
+// tooltips carry the names either way, so the collapsed rail stays usable.
 Item {
   id: root
 
@@ -19,7 +18,7 @@ Item {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
-  property bool collapsed: true
+  property bool collapsed: false
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)

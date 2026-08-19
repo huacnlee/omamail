@@ -60,9 +60,10 @@ Item {
   property bool plainTextForced: false
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
-  // Collapsed by default: a mail window spends its width on the list and the
-  // message, not on six words that never change.
-  property bool sidebarCollapsed: true
+  // Open by default, but narrow. The longest mailbox name is "All mail" — at
+  // 11px monospace that needs about 116px including the icon, the gaps and a
+  // count, so the rail costs little enough to leave standing.
+  property bool sidebarCollapsed: false
 
   readonly property bool ready: !!service && service.ready
   readonly property bool showSetup: setupVisible || !ready
@@ -287,7 +288,7 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(180)
+          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
           visible: !root.compact && !root.showSetup && !root.composing
           collapsed: root.sidebarCollapsed
           service: root.service

@@ -346,7 +346,7 @@ Item {
     anchors.rightMargin: Style.space(18)
     anchors.topMargin: Style.space(12)
     contentWidth: width
-    contentHeight: bodyEdit.implicitHeight
+    contentHeight: bodyEdit.height
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -354,6 +354,11 @@ Item {
     TextEdit {
       id: bodyEdit
       width: bodyFlick.width
+      // Tall enough to fill the visible area even when the draft is short.
+      // A TextEdit sized to its text leaves the space below it belonging to
+      // the Flickable, so clicking into the empty part of a mostly-empty
+      // message does nothing at all.
+      height: Math.max(implicitHeight, bodyFlick.height)
       selectByMouse: true
       wrapMode: TextEdit.Wrap
       textFormat: TextEdit.PlainText
