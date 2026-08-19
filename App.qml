@@ -71,6 +71,7 @@ Item {
   }
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
+  property bool settingsVisible: false
   // Open by default, but narrow. The longest mailbox name is "All mail" — at
   // 11px monospace that needs about 116px including the icon, the gaps and a
   // count, so the rail costs little enough to leave standing.
@@ -78,6 +79,9 @@ Item {
 
   readonly property bool ready: !!service && service.ready
   readonly property bool showSetup: setupVisible || !ready
+  readonly property bool showSettings: settingsVisible && !showSetup
+  // Anything the window goes *into*. The mail chrome stands down for all of it.
+  readonly property bool showPage: showSetup || showSettings
   readonly property bool composing: compose.opened
 
   function open(payloadJson) {
@@ -157,7 +161,13 @@ Item {
     function onReplySent() { compose.finish() }
     // A new account has no mailbox yet, so the only useful place to be is the
     // page that gives it one.
-    function onAccountAdded() { root.setupVisible = true }
+    // A new mailbox appears as a row in Settings, waiting to be signed in.
+    // Sending the window to the first-run walkthrough instead showed a setup
+    // that was already finished, for a different account.
+    function onAccountAdded() {
+      root.setupVisible = false
+      root.settingsVisible = true
+    }
   }
 
   FloatingWindow {
@@ -220,7 +230,7 @@ Item {
 
           Item {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact && !root.showSetup
+            visible: !root.compact && !root.showPage
             width: Style.space(8)
             height: Style.space(18)
 
@@ -234,7 +244,7 @@ Item {
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact && !root.showSetup
+            visible: !root.compact && !root.showPage
             iconName: "sidebar"
             tooltipText: root.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar"
             foreground: root.sidebarCollapsed ? root.dim : root.foreground
@@ -247,7 +257,7 @@ Item {
           // mailbox rather than among Compose and the account menu.
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showSetup
+            visible: !root.showPage
             iconName: "refresh"
             tooltipText: root.service && root.service.listLoading
               ? "Checking for mail…" : "Check mail · F5"
@@ -263,7 +273,7 @@ Item {
           id: searchBar
           anchors.centerIn: parent
           width: Math.min(Style.space(460), parent.width - Style.space(300))
-          visible: !root.showSetup
+          visible: !root.showPage
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
@@ -289,7 +299,7 @@ Item {
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showSetup && root.compact
+            visible: !root.showPage && root.compact
             iconName: "compose"
             tooltipText: "Compose · c"
             foreground: root.foreground
@@ -300,7 +310,7 @@ Item {
 
           IconTextButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showSetup && !root.compact
+            visible: !root.showPage && !root.compact
             iconName: "compose"
             text: "Compose"
             foreground: root.foreground
@@ -333,7 +343,7 @@ Item {
           anchors.top: parent.top
           anchors.bottom: parent.bottom
           width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
-          visible: !root.compact && !root.showSetup && !root.composing
+          visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           service: root.service
           textColor: root.foreground
@@ -357,7 +367,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.margins: Style.space(8)
-          visible: root.compact && !root.showSetup && !root.composing && root.currentView === "list"
+          visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           panelFontFamily: root.fontFamily
           current: root.service ? root.service.mailboxKey : "inbox"
@@ -380,7 +390,7 @@ Item {
                 Math.min(parent.width - Style.space(360),
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
-          visible: width > 0 && !root.showSetup && !root.composing
+          visible: width > 0 && !root.showPage && !root.composing
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -465,13 +475,12 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showSetup && !root.composing
+          visible: !root.showPage && !root.composing
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
           accentColor: root.accent
-          urgentColor: root.urgent
           linkColor: root.link
           dimColor: root.dim
           dimmerColor: root.dimmer
@@ -497,7 +506,7 @@ Item {
         ComposeView {
           id: compose
           anchors.fill: parent
-          visible: root.composing && !root.showSetup
+          visible: root.composing && !root.showPage
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
@@ -542,6 +551,53 @@ Item {
             canLeave: root.ready
             onBackRequested: root.setupVisible = false
           }
+          }
+        }
+
+        // The settings page, which is where mailboxes are added and removed.
+        Flickable {
+          id: settingsFlick
+          anchors.fill: parent
+          anchors.margins: Style.space(18)
+          visible: root.showSettings
+          contentWidth: width
+          contentHeight: settingsHolder.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+          Item {
+            id: settingsHolder
+            width: settingsFlick.width
+            implicitHeight: settings.implicitHeight
+
+            SettingsPage {
+              id: settings
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: Math.min(settingsHolder.width, Style.space(560))
+              service: root.service
+              textColor: root.foreground
+              dimColor: root.dim
+              accentColor: root.accent
+              urgentColor: root.urgent
+              panelFontFamily: root.fontFamily
+              onBackRequested: root.settingsVisible = false
+              onClientSetupRequested: root.setupVisible = true
+              onAddRequested: if (root.service) root.service.addAccount()
+              onSignInRequested: function(index) {
+                if (!root.service) return
+                root.service.switchToIndex(index)
+                root.service.signIn()
+              }
+              onSignOutRequested: function(index) {
+                if (!root.service) return
+                root.service.switchToIndex(index)
+                root.service.signOut()
+              }
+              onRemoveRequested: function(index) {
+                if (root.service) root.service.removeAccountAt(index)
+              }
+            }
           }
         }
       }
@@ -642,7 +698,7 @@ Item {
           dimColor: root.dimmer
           panelFontFamily: root.fontFamily
           hints: {
-            if (root.showSetup) return [({ key: "Esc", label: "back" })]
+            if (root.showPage) return [({ key: "Esc", label: "back" })]
             if (root.composing) return [
               ({ key: "Ctrl+Enter", label: "send" }),
               ({ key: "Esc", label: "close" })
@@ -651,7 +707,7 @@ Item {
               ({ key: "u", label: "back" }),
               ({ key: "r", label: "reply" }),
               ({ key: "e", label: "archive" }),
-              ({ key: "#", label: "trash" })
+              ({ key: "Del", label: "trash" })
             ]
             return [
               ({ key: "j / k", label: "move" }),
@@ -674,7 +730,7 @@ Item {
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.shortcutHelpVisible = true
-        onSetupRequested: root.setupVisible = true
+        onSetupRequested: root.settingsVisible = true
         onSignOutRequested: if (root.service) root.service.signOut()
       }
 
@@ -735,6 +791,7 @@ Item {
         else if (root.composing) compose.finish()
         else if (root.currentView === "reader") root.backToList()
         else if (root.setupVisible) root.setupVisible = false
+        else if (root.settingsVisible) root.settingsVisible = false
         else if (root.service && root.service.searchQuery !== "") root.service.search("")
         else root.requestClose()
         event.accepted = true
@@ -747,7 +804,12 @@ Item {
       Shortcut { sequence: "Return"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
       Shortcut { sequence: "u"; enabled: !focusScope.typing; onActivated: root.backToList() }
       Shortcut { sequence: "e"; enabled: !focusScope.typing; onActivated: root.actOnCursor("archive") }
+      // Gmail's own key for this is "#", which nobody guesses. Delete and
+      // Backspace are what someone actually reaches for, so all three work and
+      // the one that gets advertised is Delete.
       Shortcut { sequence: "#"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
+      Shortcut { sequence: "Del"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
+      Shortcut { sequence: "Backspace"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
       Shortcut { sequence: "s"; enabled: !focusScope.typing; onActivated: if (root.service) root.service.toggleStar(root.cursorId) }
       Shortcut { sequence: "Shift+I"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markRead") }
       Shortcut { sequence: "Shift+U"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markUnread") }

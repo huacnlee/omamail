@@ -19,7 +19,7 @@ Rectangle {
     { keys: "Enter", action: "Open the selected message" },
     { keys: "u", action: "Back to the list" },
     { keys: "e", action: "Archive" },
-    { keys: "#", action: "Move to trash" },
+    { keys: "Del or #", action: "Move to trash" },
     { keys: "s", action: "Star or unstar" },
     { keys: "Shift+I / Shift+U", action: "Mark read / unread" },
     { keys: "r / a / f", action: "Reply, reply all, forward" },

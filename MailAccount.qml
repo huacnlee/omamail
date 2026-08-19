@@ -201,6 +201,10 @@ Item {
     if (cacheStore.loaded && cacheStore.store.profile) profile = cacheStore.store.profile
     apiClient.getProfile(function(result, error) {
       if (error || !result) return
+      // The shell can tear this account down — a reload, a removed account —
+      // while the request is still in the air. The object outlives its methods
+      // for a moment, so the reply has to check before it uses them.
+      if (typeof cacheStore.bindAccount !== "function") return
       root.profile = result
       if (result.email !== "") root.accountIdentified(result.email)
       // A cache belongs to one mailbox. Binding the address here is what stops

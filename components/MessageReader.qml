@@ -16,7 +16,6 @@ Item {
   required property color textColor
   required property color backgroundColor
   required property color accentColor
-  required property color urgentColor
   required property color linkColor
   required property color dimColor
   required property color dimmerColor
@@ -323,8 +322,7 @@ Item {
 
     Item { width: 1; height: Style.space(2) }
 
-    // Icons rather than labels: six actions fit where six words would not, and
-    // the destructive one is set apart by the rule and by taking urgent.
+    // Icons rather than labels: six actions fit where six words would not.
     //
     // Split in two. What you do to the message — answer it, file it, throw it
     // away — sits on the left where reading ends. How you look at it is not
@@ -340,6 +338,7 @@ Item {
       spacing: Style.space(2)
 
       IconButton {
+        id: replyButton
         iconName: "reply"; tooltipText: "Reply · r"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("reply")
@@ -355,13 +354,17 @@ Item {
         onClicked: root.composeRequested("forward")
       }
 
+      // Answering a message and disposing of one are different intentions, and
+      // one of them cannot be undone from here. The gap is wide enough that a
+      // hand aiming at Forward cannot land on Archive.
+      //
       // As tall as the buttons it stands between, taken from one of them rather
       // than from a constant: IconButton sizes itself from its icon, so a hard
       // number drifts. A one-pixel-high item in a Row aligns to the row's top
       // edge, which left the rule floating above the icons instead of level
       // with them.
       Item {
-        width: Style.space(13)
+        width: Style.space(28)
         height: replyButton.height
 
         PanelSeparator {
@@ -378,8 +381,8 @@ Item {
         onClicked: root.actionRequested("archive")
       }
       IconButton {
-        iconName: "trash"; tooltipText: "Move to trash · #"
-        foreground: root.urgentColor; fontFamily: root.panelFontFamily
+        iconName: "trash"; tooltipText: "Move to trash · Del"
+        foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("trash")
       }
 
