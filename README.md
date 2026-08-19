@@ -1,4 +1,4 @@
-# Omarchy Gmail
+# Omamail
 
 **Gmail as a native Omarchy window — not a browser tab.**
 
