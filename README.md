@@ -109,10 +109,12 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `Ctrl+?` | Every shortcut |
-| `Esc` | Back, or close the window |
 
 Search takes Gmail's own operator syntax straight through — `from:jane`,
-`has:attachment`, `older_than:7d`. Right-click any row in the list for archive,
+`has:attachment`, `older_than:7d`. The Unread mailbox is scoped to Primary:
+category tabs do not remove the `INBOX` label, so an unread filter without that
+scope returns the whole promotional backlog rather than the mail you have not
+read. Right-click any row in the list for archive,
 trash, spam, star and read/unread without leaving the keyboard cursor behind.
 
 ## What it does not do
@@ -131,7 +133,9 @@ client that shows pictures without asking.
 Several mailboxes can be added and switched between; each keeps its own cache,
 its own refresh token, and its own unread count, and the bar badge counts all of
 them. They share one OAuth client, since a client belongs to a Cloud project
-rather than to an address.
+rather than to an address — so adding a second mailbox is a sign-in, not another
+trip through the console. Mailboxes are added and removed on the settings page,
+and switched from the menu or the user bar at the foot of the rail.
 
 The message list, labels and profile are cached per account so switching never
 waits on the network. Message bodies are cached one file per message — a
@@ -139,8 +143,10 @@ thousand of them, evicted least-recently-used.
 
 ## Where your credentials live
 
-- The refresh token goes to **GNOME Keyring**, keyed by client id, written over
-  stdin so it never appears in the process table.
+- The refresh token goes to **GNOME Keyring**, keyed by client *and* account,
+  written over stdin so it never appears in the process table. Two mailboxes
+  share one client, so keying by client alone would have let the second sign-in
+  overwrite the first.
 - The OAuth client goes to `~/.config/omamail/credentials.json`, mode
   `0600`. Not to plugin settings — `shell.json` is world-readable.
 - The access token exists only in memory.
