@@ -123,18 +123,50 @@ function hasRemoteImages(html) {
   return sanitize(html).blockedImages > 0
 }
 
-// Wraps the sanitised body in a document that carries the active Omarchy
-// theme. Every colour is passed in — nothing here names one.
+// PAPER and INK are the only literal colours in this project, and they are
+// content colours rather than theme colours.
+//
+// A sender's HTML arrives with its own palette and, crucially, its own text
+// colours to match. GitHub sets #24292e on white; stripping its backgrounds to
+// force the message dark would leave that text on a #131313 ground and make it
+// invisible. So a formatted message is rendered on a sheet, the way a mail
+// client has always shown one, and the window's own chrome stays themed.
+//
+// A plain-text body has no palette of its own and does take the theme — see
+// documentFor's callers.
+var PAPER = "#ffffff"
+var INK = "#1a1a1a"
+
+// Wraps the sanitised body in a document. `colors` styles the parts the sender
+// did not: the ground, the default text, links and quoted replies.
 function documentFor(bodyHtml, colors) {
   var palette = colors || {}
-  var foreground = String(palette.foreground || "")
-  var background = String(palette.background || "")
+  var foreground = String(palette.foreground || INK)
+  var background = String(palette.background || PAPER)
   var link = String(palette.link || foreground)
   var quote = String(palette.quote || foreground)
+  // Margin on body is ignored by Qt's rich text engine, so the padding lives
+  // on a wrapper the sender's markup sits inside.
+  var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
     + "a{color:" + link + ";}"
     + "blockquote{color:" + quote + ";margin-left:8px;padding-left:8px;}"
     + "td,th{padding:2px;}"
-    + "</style></head><body>" + String(bodyHtml || "") + "</body></html>"
+    + "</style></head><body>"
+    + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
+    + String(bodyHtml || "")
+    + (pad > 0 ? "</div>" : "")
+    + "</body></html>"
+}
+
+// The sheet a formatted message is printed on.
+function paperPalette(linkColor) {
+  return {
+    foreground: INK,
+    background: PAPER,
+    link: String(linkColor || "#1155cc"),
+    quote: "#5f6368",
+    padding: 18
+  }
 }
