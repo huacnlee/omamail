@@ -1,5 +1,5 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
-QML_FILES := Service.qml BarWidget.qml App.qml \
+QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
 	AuthManager.qml GmailApiClient.qml CacheStore.qml \
 	components/GmailIcon.qml \
 	components/MailboxSidebar.qml \
@@ -16,6 +16,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ComposeView.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
+	components/AccountSwitcher.qml \
 	components/BackBar.qml \
 	components/UserBar.qml \
 	components/SetupPage.qml \

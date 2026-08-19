@@ -155,6 +155,9 @@ Item {
     target: root.service
     ignoreUnknownSignals: true
     function onReplySent() { compose.finish() }
+    // A new account has no mailbox yet, so the only useful place to be is the
+    // page that gives it one.
+    function onAccountAdded() { root.setupVisible = true }
   }
 
   FloatingWindow {
@@ -264,8 +267,18 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
-          onSubmitted: function(query) { if (root.service) root.service.search(query) }
-          onCleared: if (root.service) root.service.search("")
+          // A search replaces the list, so the message still open in the
+          // reader is almost certainly not in the results any more.
+          onSubmitted: function(query) {
+            if (!root.service) return
+            root.service.search(query)
+            root.backToList()
+          }
+          onCleared: {
+            if (!root.service) return
+            root.service.search("")
+            root.backToList()
+          }
         }
 
         Row {
@@ -328,6 +341,7 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
           onMenuRequested: function(sceneX, sceneY) { appMenu.openAt(sceneX, sceneY) }
+          onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
             root.service.search("label:" + name)
@@ -620,6 +634,26 @@ Item {
         onSignOutRequested: if (root.service) root.service.signOut()
       }
 
+      // Every mailbox, with its own unread count, opened from the user bar.
+      AccountSwitcher {
+        id: accountSwitcher
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        urgentColor: root.urgent
+        dimColor: root.dim
+        panelFontFamily: root.fontFamily
+        accounts: root.service ? root.service.accountSummaries : []
+        onAccountChosen: function(id) {
+          if (root.service) root.service.switchTo(id)
+          root.backToList()
+        }
+        onAddAccountRequested: if (root.service) root.service.addAccount()
+        onRemoveAccountRequested: function(id) {
+          if (root.service) root.service.removeAccount(id)
+        }
+      }
+
       MessageMenu {
         id: rowMenu
         service: root.service
@@ -653,6 +687,7 @@ Item {
         if (root.shortcutHelpVisible) root.shortcutHelpVisible = false
         else if (rowMenu.opened) rowMenu.close()
         else if (appMenu.opened) appMenu.close()
+        else if (accountSwitcher.opened) accountSwitcher.close()
         else if (root.composing) compose.finish()
         else if (root.currentView === "reader") root.backToList()
         else if (root.setupVisible) root.setupVisible = false

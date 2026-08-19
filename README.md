@@ -30,8 +30,12 @@ Then click the envelope in the bar. To open it from the keyboard, add this to
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-  o.bind("SUPER + SHIFT + G", "Gmail", "omarchy shell -q gmail.omarchy toggle")
+  o.bind("SUPER + SHIFT + G", "Gmail", "omarchy shell shell toggle gmail.omarchy '{}'")
 ```
+
+The target is `shell`, not the plugin id: the window is summoned by the shell,
+which is what loads it in the first place. A plugin-scoped target would have to
+be registered by code that is only running once the window is already open.
 
 Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl` and `xdg-open` —
 all of which Omarchy already ships.

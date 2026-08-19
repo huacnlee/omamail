@@ -51,7 +51,7 @@ BarWidget {
     readonly property color glyphColor: connected
       ? root.foreground
       : Qt.darker(root.foreground, 1.55)
-    readonly property bool hasUnread: !!root.gmail && root.gmail.inboxUnread > 0
+    readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
     readonly property bool hasNew: !!root.gmail && root.gmail.newMailPending
 
     iconComponent: Component {
