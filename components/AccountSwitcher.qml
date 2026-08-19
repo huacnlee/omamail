@@ -64,6 +64,16 @@ Item {
     menu.y = y
   }
 
+  // Opened from a menu rather than from a click on the rail, so there is no
+  // pointer position to hang it off. Centring is the honest answer: anywhere
+  // else would be pretending it belongs to something on screen.
+  function openCentered() {
+    anchorX = Math.max(0, (root.width - menu.width) / 2)
+    anchorY = Math.max(0, (root.height - menu.implicitHeight) / 2)
+    menu.open()
+    place()
+  }
+
   function close() { menu.close() }
 
   QQC.Popup {
