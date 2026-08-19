@@ -264,4 +264,26 @@ const damaged = credentials.loadStore(JSON.stringify({
 }))
 deepEqual(credentials.accountIds(damaged), ["three@work.com"])
 
+
+// Adding a second mailbox must not send the user back through the Google Cloud
+// walkthrough: a client belongs to the project, not to the address.
+{
+  var shared = credentials.withAccount(credentials.emptyStore(), "one@gmail.com",
+    { clientId: "111-a.apps.googleusercontent.com", clientSecret: "s1" })
+  var text = credentials.serialize(shared)
+  assert.strictEqual(credentials.effective(text, "two@gmail.com").clientId,
+    "111-a.apps.googleusercontent.com", "a new account borrows the configured client")
+  assert.strictEqual(credentials.effective(text, "").clientId,
+    "111-a.apps.googleusercontent.com", "a pending account borrows it too")
+  assert.strictEqual(credentials.effective(text, "two@gmail.com").clientSecret, "s1")
+
+  var own = credentials.withAccount(shared, "two@gmail.com",
+    { clientId: "222-b.apps.googleusercontent.com", clientSecret: "s2" })
+  assert.strictEqual(credentials.effective(credentials.serialize(own), "two@gmail.com").clientId,
+    "222-b.apps.googleusercontent.com", "an account with its own client keeps it")
+
+  assert.strictEqual(credentials.effective("", "x@y.com").clientId, "",
+    "nothing configured stays nothing")
+}
+
 console.log("test_credentials.js ok")

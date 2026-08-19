@@ -11,10 +11,17 @@
 
 var VERSION = 1
 var MAX_QUERIES = 12
-var MAX_BODIES = 60
+// Bodies are the one thing worth keeping deep: a message body never changes, so
+// a hit is always correct and always saves a round trip. They live one file per
+// message rather than in this store — measured against a real mailbox a body
+// runs 5KB at the median and 35KB at the top, and a thousand of those inside
+// the store would mean re-serialising megabytes on the GUI thread every time a
+// list changed. As files they cost nothing to keep and nothing to save, and the
+// ceiling is a plain file count.
+var MAX_BODIES = 1000
 
 function emptyStore() {
-  return { version: VERSION, account: "", profile: null, labels: [], queries: {}, bodies: {} }
+  return { version: VERSION, account: "", profile: null, labels: [], queries: {} }
 }
 
 function parseJson(text, fallback) {
@@ -41,7 +48,6 @@ function load(text) {
   store.profile = isObject(raw.profile) ? raw.profile : null
   store.labels = Array.isArray(raw.labels) ? raw.labels : []
   store.queries = isObject(raw.queries) ? raw.queries : {}
-  store.bodies = isObject(raw.bodies) ? raw.bodies : {}
   return store
 }
 
@@ -101,8 +107,7 @@ function copyStore(store) {
     account: source.account || "",
     profile: source.profile || null,
     labels: source.labels || [],
-    queries: source.queries || {},
-    bodies: source.bodies || {}
+    queries: source.queries || {}
   }
 }
 
@@ -126,26 +131,9 @@ function getQuery(store, key) {
   return isObject(entry) ? entry : null
 }
 
-function putBody(store, id, body, nowMs) {
-  var next = copyStore(store)
-  var bodies = {}
-  for (var existing in next.bodies) bodies[existing] = next.bodies[existing]
-  bodies[String(id)] = {
-    text: String(body && body.text ? body.text : ""),
-    source: String(body && body.source ? body.source : ""),
-    html: String(body && body.html ? body.html : ""),
-    attachments: Array.isArray(body && body.attachments) ? body.attachments : [],
-    at: Number(nowMs) || 0
-  }
-  next.bodies = bodies
-  return next
-}
 
-function getBody(store, id) {
-  var source = store || emptyStore()
-  var entry = source.bodies ? source.bodies[String(id)] : null
-  return isObject(entry) ? entry : null
-}
+
+
 
 function putLabels(store, labels, nowMs) {
   var next = copyStore(store)
@@ -297,9 +285,47 @@ function keepNewest(bucket, limit) {
   return kept
 }
 
+
 function prune(store) {
   var next = copyStore(store)
   next.queries = keepNewest(next.queries, MAX_QUERIES)
-  next.bodies = keepNewest(next.bodies, MAX_BODIES)
   return next
+}
+
+// ------------------------------------------------------------- body files
+//
+// One file per message, under one directory per account. The name is built with
+// the same prefix-free escape the account file uses, so a message id can never
+// climb out of the directory it belongs to however strange it is.
+
+function bodyDirName(accountId) {
+  var name = fileName(accountId)
+  return name.substring(0, name.length - 5)
+}
+
+function bodyFileName(id) {
+  var key = String(id || "").trim()
+  if (!key) return ""
+  return encodeAccountId(key) + ".json"
+}
+
+function serializeBody(body) {
+  var source = isObject(body) ? body : {}
+  return JSON.stringify({
+    text: String(source.text || ""),
+    source: String(source.source || ""),
+    html: String(source.html || ""),
+    attachments: Array.isArray(source.attachments) ? source.attachments : []
+  })
+}
+
+function parseBody(text) {
+  var parsed = parseJson(String(text || "").trim(), null)
+  if (!isObject(parsed)) return null
+  return {
+    text: String(parsed.text || ""),
+    source: String(parsed.source || ""),
+    html: String(parsed.html || ""),
+    attachments: Array.isArray(parsed.attachments) ? parsed.attachments : []
+  }
 }

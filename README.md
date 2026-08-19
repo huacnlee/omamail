@@ -14,8 +14,8 @@ Three parts, one plugin:
   window is open
 - an **application window** — a real Hyprland window, tiled like any other,
   with your mailboxes, the message list, and the reader side by side
-- a **compose window** of its own, so the message you are answering stays on
-  screen instead of being covered by the form
+- **compose and reply inside that same window**, because a second window would
+  take a region of its own under Omarchy's panel mechanism
 
 Everything is monospace, square-cornered, and coloured from your theme, because
 that is what the rest of Omarchy looks like.
@@ -95,9 +95,20 @@ trash, spam, star and read/unread without leaving the keyboard cursor behind.
   written in. A browser engine cannot be embedded in a plugin at all:
   `QtWebEngineQuick::initialize()` has to run before the host process builds
   its `QGuiApplication`, and a plugin loads long after that.
-- **Remote images stay blocked** until you ask for them, per message. Qt really
-  does fetch them, so rendering one fires every tracking pixel in the message.
-- One account, no attachment downloads, no offline cache. Not yet.
+- **No attachment downloads.** Not yet.
+
+Images in a message body load by default. Qt really does fetch them, so opening
+a message fires whatever tracking pixels it carries — the same as any mail
+client that shows pictures without asking.
+
+Several mailboxes can be added and switched between; each keeps its own cache,
+its own refresh token, and its own unread count, and the bar badge counts all of
+them. They share one OAuth client, since a client belongs to a Cloud project
+rather than to an address.
+
+The message list, labels and profile are cached per account so switching never
+waits on the network. Message bodies are cached one file per message — a
+thousand of them, evicted least-recently-used.
 
 ## Where your credentials live
 

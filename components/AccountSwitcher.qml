@@ -105,9 +105,12 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
 
+            // The address, not the name derived from it. This list exists to
+            // tell two mailboxes apart, and two accounts can easily share a
+            // local part across different domains.
             Text {
               width: parent.width
-              text: row.modelData.label
+              text: row.modelData.email !== "" ? row.modelData.email : "New account"
               color: root.textColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.bodySmall
@@ -125,7 +128,9 @@ Item {
                   return row.modelData.error
                 if (!row.modelData.signedIn) return "Not signed in"
                 if (row.modelData.busy) return "Checking…"
-                return ""
+                // Only when it says something the address does not.
+                var name = String(row.modelData.label || "")
+                return name !== "" && row.modelData.email.indexOf(name) !== 0 ? name : ""
               }
               color: row.modelData.error !== undefined && row.modelData.error !== ""
                 ? root.urgentColor : root.dimColor

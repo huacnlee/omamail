@@ -78,7 +78,7 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.margins: Style.space(14)
-    implicitHeight: (backBar.visible ? backBar.implicitHeight + Style.space(6) : 0)
+    implicitHeight: (backBar.visible ? backBar.implicitHeight + Style.space(14) : 0)
       + headerColumn.implicitHeight
 
     BackBar {
@@ -96,7 +96,7 @@ Item {
       id: starButton
       anchors.right: parent.right
       anchors.top: backBar.visible ? backBar.bottom : parent.top
-      anchors.topMargin: backBar.visible ? Style.space(2) : 0
+      anchors.topMargin: backBar.visible ? Style.space(10) : 0
       iconName: "star"
       filled: !!root.summary && root.summary.starred
       tooltipText: (root.summary && root.summary.starred ? "Unstar" : "Star") + " · s"
@@ -112,7 +112,7 @@ Item {
       anchors.right: starButton.left
       anchors.rightMargin: Style.space(8)
       anchors.top: backBar.visible ? backBar.bottom : parent.top
-      anchors.topMargin: backBar.visible ? Style.space(6) : 0
+      anchors.topMargin: backBar.visible ? Style.space(14) : 0
       spacing: Style.space(4)
 
       Text {
@@ -297,6 +297,8 @@ Item {
       foreground: root.textColor
     }
 
+    Item { width: 1; height: Style.space(2) }
+
     // Icons rather than labels: six actions fit where six words would not, and
     // the destructive one is set apart by the rule and by taking urgent.
     Row {
@@ -318,11 +320,19 @@ Item {
         onClicked: root.composeRequested("forward")
       }
 
+      // As tall as the buttons it stands between, taken from one of them rather
+      // than from a constant: IconButton sizes itself from its icon, so a hard
+      // number drifts. A one-pixel-high item in a Row aligns to the row's top
+      // edge, which left the rule floating above the icons instead of level
+      // with them.
       Item {
-        width: Style.space(13); height: 1
+        width: Style.space(13)
+        height: replyButton.height
+
         PanelSeparator {
           anchors.centerIn: parent
-          width: 1; height: Style.space(16)
+          width: 1
+          height: Style.space(15)
           foreground: root.textColor
         }
       }
@@ -338,11 +348,19 @@ Item {
         onClicked: root.actionRequested("trash")
       }
 
+      // As tall as the buttons it stands between, taken from one of them rather
+      // than from a constant: IconButton sizes itself from its icon, so a hard
+      // number drifts. A one-pixel-high item in a Row aligns to the row's top
+      // edge, which left the rule floating above the icons instead of level
+      // with them.
       Item {
-        width: Style.space(13); height: 1
+        width: Style.space(13)
+        height: replyButton.height
+
         PanelSeparator {
           anchors.centerIn: parent
-          width: 1; height: Style.space(16)
+          width: 1
+          height: Style.space(15)
           foreground: root.textColor
         }
       }

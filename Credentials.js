@@ -281,16 +281,38 @@ function load(text, accountId) {
   return forAccount(loadStore(text), accountId)
 }
 
+// A Cloud OAuth client belongs to a project, not to a mailbox. One client signs
+// in every account its owner has — which is exactly why the keyring keys tokens
+// by account as well as by client — so an account with no client of its own
+// borrows the one already set up.
+//
+// Without this, adding a second mailbox drops the user back on the console
+// walkthrough they already completed, to make a second client they do not need.
+function sharedClient(store) {
+  var accounts = asStore(store).accounts
+  for (var i = 0; i < accounts.length; i++) {
+    var found = credentialsOf(accounts[i])
+    if (isConfigured(found)) return found
+  }
+  return empty()
+}
+
 // The user's own client always wins: someone who went to the trouble of making
 // one wants their own quota and their own consent screen, not the shipped one.
 function effective(fileText, accountId) {
-  var own = load(fileText, accountId)
+  var store = loadStore(fileText)
+  var own = forAccount(store, accountId)
   if (isConfigured(own)) return own
+  var shared = sharedClient(store)
+  if (isConfigured(shared)) return shared
   return builtin()
 }
 
 function usingBuiltin(fileText, accountId) {
-  return !isConfigured(load(fileText, accountId)) && hasBuiltin()
+  var store = loadStore(fileText)
+  if (isConfigured(forAccount(store, accountId))) return false
+  if (isConfigured(sharedClient(store))) return false
+  return hasBuiltin()
 }
 
 function path(home) {

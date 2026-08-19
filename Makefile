@@ -10,6 +10,7 @@ QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
 	components/IconTextButton.qml \
+  components/KeyHints.qml \
 	components/MessageReader.qml \
 	components/ReaderBlankSlate.qml \
 	components/ReaderSkeleton.qml \
