@@ -164,7 +164,7 @@ Rectangle {
     IconButton {
       visible: root.hot
       iconName: "trash"
-      tooltipText: "Move to trash · #"
+      tooltipText: "Move to trash · Del"
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall

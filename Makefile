@@ -21,6 +21,7 @@ QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
 	components/AccountSwitcher.qml \
 	components/BackBar.qml \
 	components/UserBar.qml \
+	components/SettingsPage.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml
 

@@ -8,8 +8,8 @@ import qs.Ui
 // the gaps to do two jobs at once: separate a key from its label, and separate
 // one pair from the next. Both gaps ended up the same size, so the whole line
 // read as an undifferentiated run of words, and the line took far more room
-// than it needed. Giving the key a cap separates it from its label by shape
-// instead, which is what lets the pairs sit close together.
+// than it needed. Giving the key a quiet fill separates it from its label by
+// shape instead, which is what lets the pairs sit close together.
 Row {
   id: root
 
@@ -20,7 +20,7 @@ Row {
   // [{ key: "j / k", label: "move" }, ...]
   property var hints: []
 
-  spacing: Style.space(9)
+  spacing: Style.space(7)
 
   Repeater {
     model: root.hints
@@ -28,16 +28,16 @@ Row {
     delegate: Row {
       id: pair
       required property var modelData
-      spacing: Style.space(4)
+      spacing: Style.space(3)
 
       Rectangle {
         anchors.verticalCenter: parent.verticalCenter
-        width: cap.implicitWidth + Style.space(7)
+        width: cap.implicitWidth + Style.space(5)
         height: cap.implicitHeight + Style.space(2)
         radius: Style.cornerRadius
+        // Fill only. An outline as well made these read as buttons you could
+        // press, which drew far more attention than a hint deserves.
         color: Style.normalFillFor(root.textColor, Color.accent)
-        border.width: 1
-        border.color: Style.normalBorderFor(root.textColor, Color.accent)
 
         Text {
           id: cap

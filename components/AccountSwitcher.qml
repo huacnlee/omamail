@@ -220,7 +220,7 @@ Item {
       }
 
       MenuRow {
-        text: "Add another account..."
+        text: "Add a mailbox..."
         onActivated: {
           menu.close()
           root.addAccountRequested()

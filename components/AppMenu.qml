@@ -86,7 +86,7 @@ Item {
         onActivated: { menu.close(); root.shortcutsRequested() }
       }
       MenuRow {
-        text: "OAuth client..."
+        text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }
 
