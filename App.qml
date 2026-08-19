@@ -49,13 +49,16 @@ Item {
 
   property string currentView: "list"
   property string cursorId: ""
-  property bool imagesAllowed: false
   property bool plainTextForced: false
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
+  // Collapsed by default: a mail window spends its width on the list and the
+  // message, not on six words that never change.
+  property bool sidebarCollapsed: true
 
   readonly property bool ready: !!service && service.ready
   readonly property bool showSetup: setupVisible || !ready
+  readonly property bool composing: compose.opened
 
   function open(payloadJson) {
     var payload = ({})
@@ -84,7 +87,6 @@ Item {
   // load images applies to the message it was made on, never to the next one.
   function openMessage(id) {
     if (!service) return
-    imagesAllowed = false
     plainTextForced = false
     cursorId = String(id || "")
     service.select(cursorId)
@@ -156,7 +158,7 @@ Item {
       // Every shortcut below is a bare letter, so all of them stand down while
       // text is being typed. The search field is the only input in this window
       // — compose is a window of its own — so it is the only thing to ask.
-      readonly property bool typing: searchBar.fieldFocused
+      readonly property bool typing: searchBar.fieldFocused || root.composing
 
       // ------------------------------------------------------------ header
 
@@ -173,12 +175,11 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(8)
 
-          GmailIcon {
+          ActionIcon {
             anchors.verticalCenter: parent.verticalCenter
+            name: "unread"
             iconSize: Style.font.iconLarge
             color: root.foreground
-            badgeColor: root.urgent
-            open: !!root.service && root.service.inboxUnread > 0
           }
 
           Text {
@@ -209,21 +210,33 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(4)
 
-          PanelActionButton {
+          IconButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showSetup
-            iconText: "⟳"
+            iconName: "refresh"
             tooltipText: "Refresh"
             foreground: root.dim
             hoverColor: root.foreground
+            fontFamily: root.fontFamily
             enabled: root.ready && !(root.service && root.service.listLoading)
             onClicked: if (root.service) root.service.refresh()
           }
 
+          IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showSetup && root.compact
+            iconName: "send"
+            tooltipText: "Compose"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: root.ready
+            onClicked: root.startCompose("new")
+          }
+
           Button {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showSetup
-            text: root.compact ? "✉" : "Compose"
+            visible: !root.showSetup && !root.compact
+            text: "Compose"
             foreground: root.foreground
             bordered: true
             fontSize: Style.font.bodySmall
@@ -265,14 +278,15 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.wide ? Style.space(180) : Style.space(52)
-          visible: !root.compact && !root.showSetup
-          collapsed: !root.wide
+          width: root.sidebarCollapsed ? Style.space(44) : Style.space(180)
+          visible: !root.compact && !root.showSetup && !root.composing
+          collapsed: root.sidebarCollapsed
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
+          onCollapseToggled: root.sidebarCollapsed = !root.sidebarCollapsed
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onLabelSelected: function(labelId, name) {
             root.service.search("label:" + name)
@@ -288,7 +302,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.margins: Style.space(8)
-          visible: root.compact && !root.showSetup && root.currentView === "list"
+          visible: root.compact && !root.showSetup && !root.composing && root.currentView === "list"
           textColor: root.foreground
           panelFontFamily: root.fontFamily
           current: root.service ? root.service.mailboxKey : "inbox"
@@ -302,10 +316,15 @@ Item {
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
+          // Proportional rather than fixed: at 1300px a 340px list truncates
+          // every subject while the reader sits half empty, and at 800px a
+          // wide list leaves the reader unusable. Clamped at both ends so the
+          // column never becomes a sliver or a page of its own.
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
-            : Style.space(340)
-          visible: width > 0 && !root.showSetup
+            : Math.max(Style.space(300),
+                Math.min(Style.space(460), Math.round(parent.width * 0.34)))
+          visible: width > 0 && !root.showSetup && !root.composing
 
           Flickable {
             id: listFlick
@@ -351,7 +370,8 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showSetup && (!root.compact || root.currentView === "reader")
+          visible: !root.showSetup && !root.composing
+            && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
@@ -360,10 +380,8 @@ Item {
           dimColor: root.dim
           dimmerColor: root.dimmer
           panelFontFamily: root.fontFamily
-          allowRemoteImages: root.imagesAllowed
           forcePlainText: root.plainTextForced
           showBack: root.compact
-          onLoadImagesRequested: root.imagesAllowed = true
           onTogglePlainTextRequested: root.plainTextForced = !root.plainTextForced
           onBackRequested: root.backToList()
           onComposeRequested: function(mode) { root.startCompose(mode) }
@@ -373,6 +391,21 @@ Item {
               root.actOnCursor(action)
             }
           }
+        }
+
+        // Composing takes the whole body. Omarchy's panel mechanism would give
+        // a second window its own region, which is not what a reply is.
+        ComposeView {
+          id: compose
+          anchors.fill: parent
+          visible: root.composing && !root.showSetup
+          service: root.service
+          textColor: root.foreground
+          backgroundColor: root.background
+          accentColor: root.accent
+          dimColor: root.dim
+          dimmerColor: root.dimmer
+          panelFontFamily: root.fontFamily
         }
 
         // Setup takes the whole body: there is nothing else to look at until
@@ -436,7 +469,7 @@ Item {
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
           text: root.service && root.service.accountEmail !== ""
-            ? root.service.accountEmail + " · " + Model.pluralize(root.service.inboxUnread, "unread")
+            ? root.service.accountEmail + " · " + root.service.inboxUnread + " unread"
             : "Not connected"
           color: root.dim
           font.family: root.fontFamily
@@ -496,6 +529,7 @@ Item {
       Keys.onEscapePressed: function(event) {
         if (root.shortcutHelpVisible) root.shortcutHelpVisible = false
         else if (rowMenu.opened) rowMenu.close()
+        else if (root.composing) compose.finish()
         else if (root.currentView === "reader") root.backToList()
         else if (root.setupVisible) root.setupVisible = false
         else if (root.service && root.service.searchQuery !== "") root.service.search("")
@@ -527,16 +561,4 @@ Item {
     }
   }
 
-  // Compose is its own window: Hyprland tiles it beside the mailbox, so the
-  // message being answered stays on screen.
-  ComposeWindow {
-    id: compose
-    service: root.service
-    textColor: root.foreground
-    backgroundColor: root.background
-    accentColor: root.accent
-    dimColor: root.dim
-    dimmerColor: root.dimmer
-    panelFontFamily: root.fontFamily
-  }
 }

@@ -120,7 +120,8 @@ function parse(text) {
 }
 
 // Written back in the console's own shape so the file stays interchangeable
-// with a freshly downloaded one.
+// with a freshly downloaded one. Compact rather than indented: it crosses a
+// line-oriented pipe on the way to disk.
 function serialize(credentials) {
   var value = credentials || empty()
   return JSON.stringify({
@@ -133,7 +134,7 @@ function serialize(credentials) {
       client_secret: trimmed(value.clientSecret),
       redirect_uris: ["http://localhost"]
     }
-  }, null, 2)
+  })
 }
 
 function load(text) {

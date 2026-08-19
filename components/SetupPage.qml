@@ -2,10 +2,14 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Gmail has no shared application to sign in through the way Spotify does:
-// Google issues API access per project, so every user creates their own OAuth
-// client once. This page is that walkthrough, with each step's console page one
-// click away, because the alternative is a README the window cannot show.
+// Connecting a mailbox, as two steps instead of a wall of instructions.
+//
+// Gmail has no shared application to sign in through — Google issues API
+// access per project — so there is genuinely a setup to do. The page shows one
+// step at a time: whichever is finished collapses to a single line with a
+// check, and only the one that needs the user is open. The detail most people
+// skip lives behind a disclosure, except the one piece that decides whether
+// the session lasts, which sits beside the button it affects.
 Column {
   id: root
 
@@ -14,35 +18,61 @@ Column {
   required property color dimColor
   required property string panelFontFamily
   property bool canLeave: false
+  property bool secretVisible: false
+  property bool detailVisible: false
+  // A finished step can be reopened — the client changes when somebody moves
+  // Cloud projects. Kept here rather than assigned onto the step, which would
+  // break the binding that closes it again.
+  property bool clientStepReopened: false
 
   signal backRequested()
 
   readonly property var auth: service ? service.auth : null
   readonly property bool configured: !!auth && auth.credentialsPresent
+  readonly property bool signedIn: !!auth && auth.loggedIn
   readonly property bool toolsMissing: !!auth && auth.toolsChecked && auth.missingTools.length > 0
 
-  spacing: Style.space(10)
+  spacing: Style.space(16)
 
-  function beginEdit() {
+  // The fields show what is on disk, so the page always says what the app is
+  // actually using rather than going blank after a save.
+  function syncFromStore() {
     if (!auth) return
     clientIdField.text = auth.clientId
-    clientSecretField.text = ""
-    Qt.callLater(function() { clientIdField.forceActiveFocus(); clientIdField.selectAll() })
+    clientSecretField.text = auth.credentials ? String(auth.credentials.clientSecret || "") : ""
   }
 
   function save() {
     if (!auth) return
     var secret = clientSecretField.text.trim()
-    if (auth.saveCredentials(clientIdField.text.trim() + (secret === "" ? "" : "\n" + secret)))
-      clientSecretField.text = ""
+    // The secret stays in the field. Clearing it on success looked exactly
+    // like losing it, which is a bad thing for a credential to look like.
+    auth.saveCredentials(clientIdField.text.trim() + (secret === "" ? "" : "\n" + secret))
   }
 
-  Row {
+  Component.onCompleted: syncFromStore()
+
+  Connections {
+    target: root.auth
+    ignoreUnknownSignals: true
+    function onClientIdChanged() { root.syncFromStore() }
+    function onCredentialsSaved() {
+      root.syncFromStore()
+      root.clientStepReopened = false
+    }
+  }
+
+  // ------------------------------------------------------------------ hero
+
+  Item {
     width: parent.width
-    spacing: Style.space(8)
+    implicitHeight: Math.max(heroIcon.height, heroText.implicitHeight)
 
     Button {
+      id: leaveButton
       visible: root.canLeave
+      anchors.left: parent.left
+      anchors.top: parent.top
       text: "←"
       foreground: root.textColor
       bordered: false
@@ -50,26 +80,48 @@ Column {
       onClicked: root.backRequested()
     }
 
-    PanelSectionHeader {
-      anchors.verticalCenter: parent.verticalCenter
-      text: "GOOGLE CLOUD OAUTH CLIENT"
-      foreground: root.textColor
-      fontFamily: root.panelFontFamily
+    GmailIcon {
+      id: heroIcon
+      anchors.left: leaveButton.visible ? leaveButton.right : parent.left
+      anchors.leftMargin: leaveButton.visible ? Style.space(8) : 0
+      anchors.top: parent.top
+      anchors.topMargin: Style.space(2)
+      iconSize: Style.font.displayLarge
+      color: root.textColor
+      badgeColor: Color.urgent
+      open: false
+    }
+
+    Column {
+      id: heroText
+      anchors.left: heroIcon.right
+      anchors.leftMargin: Style.space(14)
+      anchors.right: parent.right
+      anchors.top: parent.top
+      spacing: Style.space(4)
+
+      Text {
+        width: parent.width
+        text: "Connect your mailbox"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.heading
+        font.bold: true
+      }
+
+      Text {
+        width: parent.width
+        text: "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
     }
   }
 
-  Text {
-    width: parent.width
-    text: "Google issues Gmail API access per project, so Omarchy Gmail signs in with a client you own. "
-      + "Nothing here is shared with anyone, and the mailbox is only ever read by this machine."
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.bodySmall
-    wrapMode: Text.WordWrap
-  }
-
-  // Missing dependencies come first: none of the steps below can finish
-  // without them, so offering the steps first would waste the user's time.
+  // Missing dependencies come first: neither step below can finish without
+  // them, so offering the steps first would waste the user's time.
   Rectangle {
     width: parent.width
     visible: root.toolsMissing
@@ -87,7 +139,7 @@ Column {
       anchors.verticalCenter: parent.verticalCenter
       text: root.auth
         ? "Install " + root.auth.missingTools.join(", ")
-          + " before signing in. Omarchy Gmail uses them for the loopback listener and the keyring."
+          + " first — they run the sign-in listener and the keyring."
         : ""
       color: root.textColor
       font.family: root.panelFontFamily
@@ -96,220 +148,299 @@ Column {
     }
   }
 
+  // ------------------------------------------------------- step 1: client
+
   Step {
     number: "1"
-    title: "Create a Desktop app client"
-    detail: "In Google Cloud, pick or create a project, then create an OAuth client with application type Desktop app."
-    actionText: "Open Google Cloud..."
-    onActivated: root.service.openCloudConsole()
-  }
-
-  Step {
-    number: "2"
-    title: "Enable the Gmail API"
-    detail: "The client cannot read anything until the Gmail API is enabled on the same project."
-    actionText: "Open the Gmail API page..."
-    onActivated: root.service.openGmailApiPage()
-  }
-
-  Step {
-    number: "3"
-    title: "Add yourself as a test user"
-    detail: "On the consent screen, add the Gmail address you want to read."
-    actionText: "Open the consent screen..."
-    onActivated: root.service.openConsentScreen()
-  }
-
-  // The step everyone skips, and the one that decides whether the sign-in
-  // lasts. Google issues seven-day refresh tokens to projects left in Testing.
-  Step {
-    number: "4"
-    title: "Press \"Publish app\""
-    detail: "A project left in Testing is issued refresh tokens that expire after seven days, so the app would sign you out every week. Publishing your own project fixes that. You will see an \"unverified app\" warning once — expected for a client you made yourself."
-    actionText: ""
-  }
-
-  Step {
-    number: "5"
-    title: "Paste the client below"
-    detail: "Copy the client ID from the console. The secret is shown next to it — paste it too if your client has one."
-    actionText: ""
-  }
-
-  Text {
-    width: parent.width
-    text: "Steps 1 and 2 have a CLI: run scripts/google-cloud-setup.sh if you have gcloud. "
-      + "The consent screen and the client itself are console-only."
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    wrapMode: Text.WordWrap
-  }
-
-  Column {
-    width: parent.width
-    spacing: Style.space(6)
-
-    Text {
-      text: "Client ID"
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    TextField {
-      id: clientIdField
-      width: parent.width
-      foreground: root.textColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      placeholderText: "000000000000-xxxxxxxx.apps.googleusercontent.com"
-      onAccepted: clientSecretField.forceActiveFocus()
-    }
-
-    Text {
-      text: "Client secret (leave empty if your client has none)"
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    // Masked because it is a credential, even though Google is explicit that a
-    // desktop client's secret is not confidential — a shoulder-surfable window
-    // is still a worse default than a masked one.
-    TextField {
-      id: clientSecretField
-      width: parent.width
-      foreground: root.textColor
-      password: true
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      placeholderText: "GOCSPX-…"
-      onAccepted: root.save()
-    }
-  }
-
-  Row {
-    spacing: Style.space(8)
-
-    Button {
-      text: "Save client"
-      foreground: root.textColor
-      bordered: true
-      fontSize: Style.font.bodySmall
-      enabled: !!root.auth && !root.auth.credentialsWriteBusy
-      onClicked: root.save()
-    }
-
-    Button {
-      visible: root.configured
-      text: "Sign in with Google..."
-      foreground: root.textColor
-      bordered: true
-      fontSize: Style.font.bodySmall
-      enabled: !!root.auth && !root.auth.loginBusy
-      onClicked: root.service.signIn()
-    }
-
-    Button {
-      visible: !!root.auth && root.auth.loginBusy
-      text: "Cancel sign-in"
-      foreground: root.dimColor
-      bordered: false
-      fontSize: Style.font.bodySmall
-      onClicked: root.service.cancelSignIn()
-    }
-  }
-
-  Text {
-    width: parent.width
-    visible: !!root.service && root.service.signInProgress !== ""
-    text: root.service ? root.service.signInProgress : ""
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    wrapMode: Text.WordWrap
-  }
-
-  Text {
-    width: parent.width
-    visible: root.configured
-    text: root.auth ? "Connected client: " + root.auth.clientDescription : ""
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    elide: Text.ElideRight
-  }
-
-  Text {
-    width: parent.width
-    text: root.auth
-      ? "Saved to " + root.auth.credentialsPath + ", readable only by you. "
-        + "You can also copy the JSON the console downloads to that path instead of pasting."
-      : ""
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    wrapMode: Text.WordWrap
-  }
-
-  component Step: Item {
-    id: step
-    required property string number
-    required property string title
-    required property string detail
-    property string actionText: ""
-    signal activated()
-
-    width: root.width
-    implicitHeight: stepBody.implicitHeight
-
-    Text {
-      id: marker
-      anchors.left: parent.left
-      anchors.top: parent.top
-      width: Style.space(18)
-      text: step.number + "."
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-    }
+    title: "Create a client in Google Cloud"
+    done: root.configured && !root.clientStepReopened
+    doneSummary: root.auth ? "Client connected · " + root.auth.clientDescription : ""
+    reopenable: true
 
     Column {
-      id: stepBody
-      anchors.left: marker.right
-      anchors.right: parent.right
-      anchors.top: parent.top
-      spacing: Style.space(3)
+      width: parent.width
+      spacing: Style.space(10)
 
       Text {
         width: parent.width
-        text: step.title
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        font.bold: true
-        wrapMode: Text.WordWrap
-      }
-
-      Text {
-        width: parent.width
-        text: step.detail
+        text: "Create an OAuth client with application type Desktop app, and enable the Gmail API on the same project."
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
 
+      Row {
+        spacing: Style.space(8)
+
+        Button {
+          text: "Open Google Cloud..."
+          foreground: root.textColor
+          bordered: true
+          fontSize: Style.font.bodySmall
+          onClicked: root.service.openCloudConsole()
+        }
+
+        Button {
+          text: "Enable Gmail API..."
+          foreground: root.textColor
+          bordered: true
+          fontSize: Style.font.bodySmall
+          onClicked: root.service.openGmailApiPage()
+        }
+      }
+
+      TextField {
+        id: clientIdField
+        width: parent.width
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Client ID — 000000-xxxx.apps.googleusercontent.com"
+        onAccepted: clientSecretField.forceActiveFocus()
+      }
+
+      Item {
+        width: parent.width
+        implicitHeight: clientSecretField.implicitHeight
+
+        TextField {
+          id: clientSecretField
+          anchors.left: parent.left
+          anchors.right: parent.right
+          // Masked by default, because a credential on a shoulder-surfable
+          // window is a worse default — but readable on demand, so it can be
+          // checked against the console.
+          password: !root.secretVisible
+          rightPadding: horizontalPadding + Style.space(26)
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "Client secret — optional"
+          onAccepted: root.save()
+        }
+
+        IconButton {
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(4)
+          anchors.verticalCenter: clientSecretField.verticalCenter
+          visible: clientSecretField.text !== ""
+          iconName: root.secretVisible ? "eyeOff" : "eye"
+          tooltipText: root.secretVisible ? "Hide the secret" : "Show the secret"
+          foreground: root.dimColor
+          hoverColor: root.textColor
+          iconSize: Style.font.iconSmall
+          size: Style.space(22)
+          fontFamily: root.panelFontFamily
+          onClicked: root.secretVisible = !root.secretVisible
+        }
+      }
+
       Button {
-        visible: step.actionText !== ""
-        text: step.actionText
-        foreground: Color.accent
-        bordered: false
-        leftAlign: true
-        horizontalPadding: 0
-        fontSize: Style.font.caption
-        onClicked: step.activated()
+        text: "Save client"
+        foreground: root.textColor
+        bordered: true
+        fontSize: Style.font.bodySmall
+        enabled: !!root.auth && !root.auth.credentialsWriteBusy
+        onClicked: root.save()
+      }
+    }
+  }
+
+  // ------------------------------------------------------- step 2: sign in
+
+  Step {
+    number: "2"
+    title: "Sign in"
+    done: root.signedIn
+    doneSummary: root.service ? "Signed in as " + root.service.accountEmail : ""
+    waiting: !root.configured
+
+    Column {
+      width: parent.width
+      spacing: Style.space(10)
+
+      // The one piece of the walkthrough that cannot be hidden: a project left
+      // in Testing is issued seven-day refresh tokens, so the app would sign
+      // the user out every week. It belongs beside the button it affects.
+      Text {
+        width: parent.width
+        text: "Press \"Publish app\" on your project first, or Google expires the session every seven days. An \"unverified app\" warning is expected — you are the developer."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Row {
+        spacing: Style.space(8)
+
+        Button {
+          text: "Sign in with Google..."
+          foreground: root.textColor
+          bordered: true
+          fontSize: Style.font.bodySmall
+          enabled: !!root.auth && !root.auth.loginBusy
+          onClicked: root.service.signIn()
+        }
+
+        Button {
+          text: "Consent screen..."
+          foreground: root.dimColor
+          bordered: false
+          fontSize: Style.font.bodySmall
+          onClicked: root.service.openConsentScreen()
+        }
+
+        Button {
+          visible: !!root.auth && root.auth.loginBusy
+          text: "Cancel"
+          foreground: root.dimColor
+          bordered: false
+          fontSize: Style.font.bodySmall
+          onClicked: root.service.cancelSignIn()
+        }
+      }
+
+      Text {
+        width: parent.width
+        visible: !!root.service && root.service.signInProgress !== ""
+        text: root.service ? root.service.signInProgress : ""
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- footnotes
+
+  // Whatever went wrong. Without this a rejected client ID looks exactly like
+  // a button that does nothing.
+  Text {
+    width: parent.width
+    visible: !!root.auth && root.auth.lastError !== ""
+    text: root.auth ? root.auth.lastError : ""
+    color: Color.urgent
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
+  PanelSeparator {
+    width: parent.width
+    foreground: root.textColor
+  }
+
+  Button {
+    text: root.detailVisible ? "Hide the details" : "Need more detail?"
+    foreground: root.dimColor
+    bordered: false
+    leftAlign: true
+    horizontalPadding: 0
+    fontSize: Style.font.caption
+    onClicked: root.detailVisible = !root.detailVisible
+  }
+
+  Text {
+    width: parent.width
+    visible: root.detailVisible
+    text: "In Google Cloud, pick or create a project. Under APIs and Services, enable the Gmail API. "
+      + "On the consent screen add the Gmail address you want to read as a test user, then press Publish app. "
+      + "Under Credentials, create an OAuth client with application type Desktop app, and paste its client ID above.\n\n"
+      + "Steps one and two have a CLI: run scripts/google-cloud-setup.sh if you have gcloud. "
+      + "The consent screen and the client itself are console-only.\n\n"
+      + (root.auth ? "The client is saved to " + root.auth.credentialsPath + ", readable only by you. "
+        + "You can also copy the JSON the console downloads to that path instead of pasting. " : "")
+      + "The refresh token goes to GNOME Keyring; the access token never leaves memory."
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
+  // A step is a number, a title, and a body that is only present while this is
+  // the step that needs the user. Finished steps collapse to one line, so the
+  // page never shows more than one thing to do.
+  component Step: Item {
+    id: step
+    required property string number
+    required property string title
+    property bool done: false
+    property bool waiting: false
+    property bool reopenable: false
+    property string doneSummary: ""
+    default property alias content: bodyHolder.data
+
+    readonly property bool active: !done && !waiting
+
+    width: root.width
+    implicitHeight: stepColumn.implicitHeight
+    opacity: step.waiting ? 0.45 : 1.0
+
+    Item {
+      id: marker
+      anchors.left: parent.left
+      anchors.top: parent.top
+      width: Style.space(20)
+      implicitHeight: Style.space(18)
+
+      Text {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        visible: !step.done
+        text: step.number
+        color: step.active ? Color.accent : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: step.active
+      }
+
+      ActionIcon {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        visible: step.done
+        name: "check"
+        iconSize: Style.font.bodySmall
+        color: Color.accent
+      }
+    }
+
+    Button {
+      id: reopen
+      anchors.right: parent.right
+      anchors.top: parent.top
+      visible: step.done && step.reopenable
+      text: "Change..."
+      foreground: root.dimColor
+      bordered: false
+      fontSize: Style.font.caption
+      onClicked: root.clientStepReopened = true
+    }
+
+    Column {
+      id: stepColumn
+      anchors.left: marker.right
+      anchors.right: reopen.visible ? reopen.left : parent.right
+      anchors.top: parent.top
+      spacing: Style.space(8)
+
+      Text {
+        width: parent.width
+        text: step.done && step.doneSummary !== "" ? step.doneSummary : step.title
+        color: step.done ? root.dimColor : root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: !step.done
+        elide: Text.ElideRight
+      }
+
+      Item {
+        id: bodyHolder
+        width: parent.width
+        visible: step.active
+        implicitHeight: visible ? childrenRect.height : 0
       }
     }
   }

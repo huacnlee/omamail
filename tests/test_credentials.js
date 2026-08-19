@@ -68,6 +68,9 @@ assert.ok(credentials.parse("hello world").error.indexOf(".apps.googleuserconten
 // ----------------------------------------------------------- round tripping
 
 const serialized = credentials.serialize(parsed.credentials)
+// The payload crosses a line-oriented pipe into credentials-store.sh, whose
+// `read` stops at the first newline. Anything multi-line arrives truncated.
+assert.ok(serialized.indexOf("\n") < 0, "the serialized client must be one line")
 const reloaded = credentials.load(serialized)
 deepEqual(reloaded, parsed.credentials)
 assert.strictEqual(JSON.parse(serialized).installed.client_id, "1234-abc.apps.googleusercontent.com")

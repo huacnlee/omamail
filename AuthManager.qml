@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 
 import "OAuth.js" as OAuth
 import "Credentials.js" as Credentials
@@ -25,6 +26,16 @@ Item {
   required property string pluginDir
   property int oauthPort: OAuth.DEFAULT_PORT
   property var scopes: OAuth.SCOPES
+
+  // The browser page after Google redirects is the only part of this app that
+  // renders outside Quickshell, so it takes the active theme with it.
+  readonly property var callbackTheme: ({
+    background: String(Color.background),
+    foreground: String(Color.foreground),
+    accent: String(Color.accent),
+    urgent: String(Color.urgent),
+    fontFamily: Style.font.family
+  })
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string credentialsPath: Credentials.path(home)
@@ -340,14 +351,14 @@ Item {
     // A mismatched state means this response did not come from the request
     // this process started, so the code in it is not exchanged.
     if (!callback.ok || callback.state !== oauthState) {
-      callbackListener.write(OAuth.failureResponse())
+      callbackListener.write(OAuth.failureResponse(callbackTheme, callback.error))
       callbackStopTimer.restart()
       failLogin(callback.ok
         ? "Google sign-in could not be verified. Please try again"
         : callback.error, true)
       return
     }
-    callbackListener.write(OAuth.successResponse())
+    callbackListener.write(OAuth.successResponse(callbackTheme))
     callbackStopTimer.restart()
     exchangeAuthorizationCode(callback.code)
   }

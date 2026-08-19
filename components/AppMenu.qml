@@ -119,7 +119,7 @@ Item {
       elide: Text.ElideRight
     }
 
-    HoverHandler { id: hover }
+    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: row.activated() }
   }
 }

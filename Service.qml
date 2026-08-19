@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 
+import "Cache.js" as Cache
 import "GmailApi.js" as Api
 import "Message.js" as Mail
 import "Model.js" as Model
@@ -76,6 +77,11 @@ Item {
 
   readonly property alias auth: authManager
   readonly property alias api: apiClient
+  readonly property alias cache: cacheStore
+
+  // What the cache is keyed on. The page size is part of it: the same query at
+  // a different size is a different result set, not a stale one.
+  readonly property string cacheKey: Cache.queryKey(effectiveQuery, maxMessages)
 
   // ------------------------------------------------------------ mailbox
 
@@ -179,29 +185,69 @@ Item {
 
   function loadProfile() {
     if (!ready || profile) return
+    if (cacheStore.loaded && cacheStore.store.profile) profile = cacheStore.store.profile
     apiClient.getProfile(function(result, error) {
       if (error || !result) return
       root.profile = result
+      // A cache belongs to one mailbox. Binding the address here is what stops
+      // one account's mail from appearing under another's name.
+      cacheStore.bindAccount(result.email)
+      cacheStore.putProfile(result)
     })
   }
 
   function loadLabels() {
     if (!ready) return
+    if (cacheStore.loaded && cacheStore.store.labels.length > 0 && labels.length === 0)
+      labels = cacheStore.store.labels
     apiClient.getLabels(function(result, error) {
       if (error) return
       root.labels = result
+      cacheStore.putLabels(result)
     })
+  }
+
+  // Paints whatever the last visit to this query left behind. Switching
+  // mailboxes should never show an empty column while the network decides.
+  function paintFromCache() {
+    if (!cacheStore.loaded) return false
+    var entry = cacheStore.get(cacheKey)
+    if (!entry || !entry.summaries || entry.summaries.length === 0) return false
+
+    var now = new Date()
+    var restored = Cache.hydrate(entry.summaries)
+    for (var i = 0; i < restored.length; i++)
+      restored[i].time = Mail.relativeTime(restored[i].date, now)
+
+    messages = restored
+    resultEstimate = entry.estimate
+    nextPageToken = entry.nextPageToken
+    listLoaded = true
+    lastError = ""
+
+    // Cached rows count as already seen, so the first live load does not
+    // announce a mailbox the user has been looking at all along.
+    var seen = {}
+    for (var key in seenIds) seen[key] = true
+    for (var j = 0; j < restored.length; j++) seen[restored[j].id] = true
+    seenIds = seen
+    listRefreshed()
+    return true
   }
 
   function loadMessages(append) {
     if (!ready) return
     var serial = ++listSerial
     apiClient.abortRequest(listHandle)
-    listLoading = true
     if (!append) {
-      nextPageToken = ""
-      resultEstimate = 0
+      // Cache first: paint, then revalidate. The page tokens and the estimate
+      // come back with the live answer.
+      if (!paintFromCache()) {
+        nextPageToken = ""
+        resultEstimate = 0
+      }
     }
+    listLoading = true
     var token = append ? nextPageToken : ""
 
     listHandle = apiClient.listMessages(effectiveQuery, maxMessages, token,
@@ -238,6 +284,11 @@ Item {
       var summaries = []
       for (var i = 0; i < payloads.length; i++) summaries.push(Mail.summarize(payloads[i], now))
       root.applySummaries(summaries, append)
+      if (!append) cacheStore.putQuery(root.cacheKey, ({
+        summaries: summaries,
+        estimate: root.resultEstimate,
+        nextPageToken: root.nextPageToken
+      }))
     }, listHandle)
   }
 
@@ -283,6 +334,15 @@ Item {
     selectedAttachments = []
     detailLoading = true
 
+    // A message that has been opened before opens instantly; the live copy
+    // replaces it a moment later.
+    var cached = cacheStore.body(messageId)
+    if (cached) {
+      selectedBody = { text: cached.text, source: cached.source }
+      selectedHtml = cached.html
+      selectedAttachments = cached.attachments
+    }
+
     detailHandle = apiClient.getMessage(messageId, true, function(payload, error) {
       if (serial !== root.detailSerial) return
       root.detailLoading = false
@@ -295,6 +355,12 @@ Item {
       root.selectedBody = Mail.extractBody(payload.payload)
       root.selectedHtml = Mail.extractHtml(payload.payload)
       root.selectedAttachments = Mail.attachments(payload.payload)
+      cacheStore.putBody(messageId, ({
+        text: root.selectedBody.text,
+        source: root.selectedBody.source,
+        html: root.selectedHtml,
+        attachments: root.selectedAttachments
+      }))
       root.messages = Model.replaceById(root.messages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
@@ -538,6 +604,7 @@ Item {
     listLoaded = false
     seenIds = ({})
     notificationsPrimed = false
+    cacheStore.clear()
     clearSelection()
   }
 
@@ -574,12 +641,24 @@ Item {
       root.loadMessages(false)
     }
     onLoggedOut: root.clearNotice()
+    onCredentialsSaved: root.note("OAuth client saved")
     onSessionUnavailable: function(reason) { root.fail(reason) }
   }
 
   GmailApiClient {
     id: apiClient
     auth: authManager
+  }
+
+  CacheStore {
+    id: cacheStore
+    // The file lands after the window is already up, so the first paint waits
+    // for it rather than the other way round.
+    onRestored: {
+      if (!root.profile && store.profile) root.profile = store.profile
+      if (root.labels.length === 0 && store.labels.length > 0) root.labels = store.labels
+      if (root.messages.length === 0) root.paintFromCache()
+    }
   }
 
   Component.onCompleted: authManager.restoreSession()
