@@ -132,6 +132,10 @@ Item {
   // what was already there.
   property var seenIds: ({})
   property bool notificationsPrimed: false
+  // The unread count needs a baseline of its own, separate from the message
+  // cache: a mailbox that has never been opened has no cached page to prime
+  // from, and would otherwise never be allowed to announce anything.
+  property bool countPrimed: false
   // Mail that arrived since the list was last looked at. The bar shows a dot
   // for this and nothing else — an unread count that never reaches zero is a
   // permanent red mark, which stops meaning anything.
@@ -195,7 +199,23 @@ Item {
     apiClient.getLabelCounts("INBOX", function(counts, error) {
       root.countLoading = false
       if (error || !counts) return
+      var before = root.inboxUnread
       root.inboxUnread = counts.unread
+
+      // A mailbox that gains unread mail earns a look, whether or not it is the
+      // one on screen. The badge and the notification are both raised from a
+      // list load, and only the active account ever performed one — so mail
+      // arriving in any other mailbox went unannounced entirely, and mail
+      // arriving in this one while the window was shut relied on comparing the
+      // total against a single page rather than on the count actually moving.
+      //
+      // The first count of the session only sets the baseline; it rises from
+      // nothing, and announcing that would be announcing the whole backlog.
+      if (!root.countPrimed) {
+        root.countPrimed = true
+        return
+      }
+      if (counts.unread > before && !root.listLoading) root.loadMessages(false)
     })
   }
 
@@ -664,6 +684,7 @@ Item {
     listLoaded = false
     seenIds = ({})
     notificationsPrimed = false
+    countPrimed = false
     newMailPending = false
     cacheStore.clear()
     bodyCache.clear()
@@ -775,14 +796,11 @@ Item {
     repeat: true
     triggeredOnStart: true
     onTriggered: {
+      // Every account polls its count, and refreshCounts loads the list for any
+      // mailbox whose count has risen — that is what feeds the badge and the
+      // notification. An open window keeps its own list current regardless.
       root.refreshCounts()
-      if (!root.active) return
-      if (root.windowOpen) root.loadMessages(false)
-      // A new message while the panel is closed still has to reach the
-      // notification path, so the list is refreshed on the unread count going
-      // up rather than on a second timer.
-      else if (root.notifyNewMail && root.inboxUnread > Model.unreadCount(root.messages))
-        root.loadMessages(false)
+      if (root.active && root.windowOpen) root.loadMessages(false)
     }
   }
 }
