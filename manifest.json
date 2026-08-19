@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omamail",
   "name": "Omamail",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
   "description": "Read, triage, and reply to Gmail in a native Omarchy window, over the official Gmail API.",
