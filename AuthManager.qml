@@ -196,6 +196,8 @@ Item {
   // alone. Reading that once, and rewriting under the new attributes, is the
   // difference between an upgrade and a silent sign-out.
   property bool triedLegacyLookup: false
+  property int secretLookupStage: 0
+  property var renamedAttributesToClear: []
 
   // Two keyring entries are not tied to an address: the pre-multi-account one
   // keyed by client alone, and the one written for a mailbox that had not
@@ -222,16 +224,32 @@ Item {
     }
     lookupHandled = false
     triedLegacyLookup = false
+    secretLookupStage = 0
     secretLookup.command = ["secret-tool", "lookup"].concat(
       Credentials.keyringAttributes(clientId, accountId))
     secretLookup.running = true
   }
 
-  function startLegacyLookup() {
+  function startNextSecretLookup() {
     lookupHandled = false
-    triedLegacyLookup = true
-    secretLookup.command = ["secret-tool", "lookup"].concat(
-      Credentials.legacyKeyringAttributes(clientId))
+    secretLookupStage++
+    var attributes = []
+    if (secretLookupStage === 1 && mayAdoptLegacyToken) {
+      triedLegacyLookup = true
+      attributes = Credentials.legacyKeyringAttributes(clientId)
+    } else if (secretLookupStage <= 2) {
+      secretLookupStage = 2
+      triedLegacyLookup = false
+      attributes = Credentials.renamedKeyringAttributes(clientId, accountId)
+    } else if (secretLookupStage === 3 && mayAdoptLegacyToken) {
+      triedLegacyLookup = true
+      attributes = Credentials.renamedLegacyKeyringAttributes(clientId)
+    }
+    if (!attributes.length) {
+      handleSecretLookup("")
+      return
+    }
+    secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
     secretLookup.running = true
   }
 
@@ -239,8 +257,8 @@ Item {
     if (lookupHandled) return
     lookupHandled = true
     var token = String(raw || "").trim()
-    if (!token && !triedLegacyLookup && mayAdoptLegacyToken && clientId !== "") {
-      startLegacyLookup()
+    if (!token && secretLookupStage < 3 && clientId !== "") {
+      startNextSecretLookup()
       return
     }
     var purpose = lookupPurpose
@@ -251,6 +269,11 @@ Item {
       if (purpose === "request") finishWaiters("", "Sign in to Gmail first")
       return
     }
+    renamedAttributesToClear = secretLookupStage >= 2
+      ? (secretLookupStage === 3
+        ? Credentials.renamedLegacyKeyringAttributes(clientId)
+        : Credentials.renamedKeyringAttributes(clientId, accountId))
+      : []
     refreshWithToken(token, purpose)
   }
 
@@ -642,6 +665,11 @@ Item {
       root.keyringWriteToken = ""
       if (exitCode !== 0)
         root.lastError = "Signed in, but the session could not be saved. You may need to sign in again after a restart"
+      if (exitCode === 0 && root.renamedAttributesToClear.length && !keyringClear.running) {
+        keyringClear.command = ["secret-tool", "clear"].concat(root.renamedAttributesToClear)
+        root.renamedAttributesToClear = []
+        keyringClear.running = true
+      }
       if (root.logoutPendingClear) {
         root.logoutPendingClear = false
         root.clearStoredToken()

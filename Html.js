@@ -156,6 +156,50 @@ function safeHref(value) {
   return /^\s*(https?:|mailto:)/i.test(String(value || ""))
 }
 
+// Qt's rich text engine ignores display:none outright — measured: a hidden div
+// adds a full line of text to the layout. It does honour font-size, though, and
+// the standard email preheader is hidden text set at 1px, so it comes out as a
+// two-pixel smudge of unreadable characters above the message. Elements the
+// sender marked hidden are therefore removed rather than styled away.
+var HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden)/i
+var VOID_ELEMENTS = /^(img|br|hr|input|meta|link|area|base|col|embed|source|track|wbr)$/i
+
+// Counts nesting, so a hidden wrapper takes exactly its own subtree and not
+// whatever happens to close first.
+function closeIndexFor(text, name, from) {
+  var pattern = new RegExp("<(/?)" + name + "\\b[^>]*>", "gi")
+  pattern.lastIndex = from
+  var depth = 1
+  var found = pattern.exec(text)
+  while (found !== null) {
+    if (found[1] === "/") {
+      depth--
+      if (depth === 0) return pattern.lastIndex
+    } else if (found[0].charAt(found[0].length - 2) !== "/") {
+      depth++
+    }
+    found = pattern.exec(text)
+  }
+  return -1
+}
+
+function dropHidden(html) {
+  var text = String(html || "")
+  var opening = /<([a-z][a-z0-9]*)\b([^>]*)>/gi
+  var found = opening.exec(text)
+  while (found !== null) {
+    var name = found[1]
+    if (!VOID_ELEMENTS.test(name) && HIDDEN_STYLE.test(found[2] || "")) {
+      var end = closeIndexFor(text, name, opening.lastIndex)
+      if (end < 0) end = text.length
+      text = text.substring(0, found.index) + text.substring(end)
+      opening.lastIndex = found.index
+    }
+    found = opening.exec(text)
+  }
+  return text
+}
+
 function sanitize(html, options) {
   var settings = options || {}
   var text = String(html === undefined || html === null ? "" : html)
@@ -167,6 +211,7 @@ function sanitize(html, options) {
   if (settings.keepTables !== true) text = flattenTables(text, settings.keepTableDepth)
 
   text = text.replace(/<!--[\s\S]*?-->/g, "")
+  text = dropHidden(text)
   for (var i = 0; i < DROPPED_ELEMENTS.length; i++) text = stripElement(text, DROPPED_ELEMENTS[i])
   text = text.replace(/<(meta|link|base)\b[^>]*>/gi, "")
 

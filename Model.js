@@ -11,7 +11,12 @@
 // default, so a mailbox without a drawing would simply be invisible.
 var MAILBOXES = [
   { key: "inbox", label: "Inbox", query: "in:inbox", labelId: "INBOX", icon: "inbox" },
-  { key: "unread", label: "Unread", query: "in:inbox is:unread", labelId: "UNREAD", icon: "unread" },
+  // Scoped to Primary, not just to the inbox. Gmail's category tabs do not
+  // remove the INBOX label, so "in:inbox is:unread" dredges up the whole
+  // promotional backlog — measured against a real mailbox, that view came back
+  // as newsletters and offers almost end to end while the inbox itself was
+  // ordinary mail. Gmail has no standalone unread view for the same reason.
+  { key: "unread", label: "Unread", query: "in:inbox is:unread category:primary", labelId: "UNREAD", icon: "unread" },
   { key: "starred", label: "Starred", query: "is:starred", labelId: "STARRED", icon: "star" },
   { key: "sent", label: "Sent", query: "in:sent", labelId: "SENT", icon: "send" },
   { key: "all", label: "All mail", query: "in:anywhere -in:spam -in:trash", labelId: "", icon: "archive" },
@@ -58,7 +63,7 @@ function setupHeadline(state) {
 function setupDetail(state, missingTools) {
   if (state === "tools_missing") {
     var tools = Array.isArray(missingTools) ? missingTools.join(", ") : ""
-    return "Omarchy Gmail needs " + (tools || "a few base tools")
+    return "Omamail needs " + (tools || "a few base tools")
       + " on PATH before it can sign in."
   }
   if (state === "no_credentials")
@@ -221,6 +226,15 @@ function resultSummary(list, estimate, hasMore) {
   if (!hasMore) return pluralize(shown, "message")
   var total = Math.max(shown, Math.floor(Number(estimate) || 0))
   return shown + " of about " + total
+}
+
+function statusSummary(syncLabel, resultLabel, loading) {
+  var sync = String(syncLabel || "")
+  var result = String(resultLabel || "")
+  if (loading) return sync
+  if (!sync) return result
+  if (!result) return sync
+  return sync + "  ·  " + result
 }
 
 function truncate(text, limit) {

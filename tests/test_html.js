@@ -247,4 +247,29 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(relaxed.indexOf("width:640px") < 0, "declared widths too")
 }
 
+
+// ------------------------------------------------------------ hidden text
+//
+// Measured: Qt's rich text engine ignores display:none outright, but honours
+// font-size — so an email preheader, which is hidden text set at 1px, renders
+// as a two-pixel smudge of unreadable characters above the message.
+{
+  assert.strictEqual(
+    html.dropHidden('<div class=preheader style="display: none; font-size:1px">SECRET</div><p>real</p>'),
+    "<p>real</p>", "the preheader goes entirely")
+  assert.strictEqual(
+    html.dropHidden('<div style="display:none"><div>inner</div>outer</div><p>real</p>'),
+    "<p>real</p>", "nesting is counted, so the wrapper takes its own subtree")
+  assert.strictEqual(html.dropHidden('<span style="visibility:hidden">x</span>keep'), "keep")
+  assert.strictEqual(html.dropHidden('<p>before</p><div style="display:none">tail'),
+    "<p>before</p>", "an unclosed hidden element runs to the end")
+  assert.strictEqual(html.dropHidden('<div style="color:red">keep</div>'),
+    '<div style="color:red">keep</div>', "visible markup is untouched")
+  // A void element has no subtree to eat, so it must not swallow what follows.
+  assert.ok(html.dropHidden('<img src=a.png style="display:none"><p>real</p>').indexOf("<p>real</p>") >= 0)
+
+  assert.ok(html.sanitize('<div style="display:none">SECRET</div><p>real</p>').html.indexOf("SECRET") < 0,
+    "and the sanitizer applies it")
+}
+
 console.log("test_html.js ok")

@@ -29,4 +29,4 @@ if [ -z "$refresh_token" ]; then
 fi
 
 printf '%s' "$refresh_token" | secret-tool store \
-  --label='Omarchy Gmail refresh token' "$@"
+  --label='Omamail refresh token' "$@"

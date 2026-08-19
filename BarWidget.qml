@@ -9,10 +9,10 @@ import "components"
 BarWidget {
   id: root
 
-  moduleName: "gmail.omarchy"
+  moduleName: "omamail"
 
   readonly property var gmail: bar && bar.shell
-    ? bar.shell.serviceFor("gmail.omarchy") : null
+    ? bar.shell.serviceFor("omamail") : null
 
   // `barForeground` belongs to qs.Ui.Panel, not to BarWidget: reading it here
   // yields undefined, and assigning undefined to a colour leaves the icon
@@ -32,7 +32,7 @@ BarWidget {
 
   function openWindow() {
     if (bar && bar.shell && typeof bar.shell.toggle === "function")
-      bar.shell.toggle("gmail.omarchy", "{}")
+      bar.shell.toggle("omamail", "{}")
   }
 
   implicitWidth: button.implicitWidth
@@ -42,7 +42,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    tooltipText: root.gmail ? root.gmail.barTooltip : "Gmail"
+    tooltipText: root.gmail ? root.gmail.barTooltip : "Omamail"
 
     // Read from inside `iconComponent`. Both BarIconButton and GmailIcon name
     // their own root object `root`, so nothing inside a Component declared
