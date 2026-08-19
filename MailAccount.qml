@@ -209,13 +209,17 @@ Item {
       // arriving in this one while the window was shut relied on comparing the
       // total against a single page rather than on the count actually moving.
       //
-      // The first count of the session only sets the baseline; it rises from
-      // nothing, and announcing that would be announcing the whole backlog.
-      if (!root.countPrimed) {
-        root.countPrimed = true
-        return
-      }
-      if (counts.unread > before && !root.listLoading) root.loadMessages(false)
+      // The first read of a session has no previous count to compare against,
+      // but the cache does know which messages were already on screen — so it
+      // loads once and lets the arrival check decide. Treating that first read
+      // as nothing but a baseline made every shell restart a blind spot: mail
+      // that landed while the shell was down would sit inside the new baseline
+      // and never be announced at all. An account with no cache still says
+      // nothing, because there is nothing to compare against.
+      var first = !root.countPrimed
+      root.countPrimed = true
+      if ((first || counts.unread > before) && !root.listLoading)
+        root.loadMessages(false)
     })
   }
 
