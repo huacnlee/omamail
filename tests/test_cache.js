@@ -1,4 +1,5 @@
 const assert = require("assert")
+const path = require("path")
 const { load, deepEqual } = require("./load")
 
 const cache = load("Cache.js")
@@ -134,6 +135,111 @@ assert.strictEqual(different.account, "b@example.com")
 
 // An unknown account (the profile has not loaded yet) must not wipe anything.
 assert.strictEqual(cache.getQuery(cache.forAccount(owned, ""), "in:inbox|25") !== null, true)
+
+// A store read from an account's own file may not carry the address yet: the
+// rows in it were fetched for that mailbox, so claiming them is right where
+// throwing them away used to be.
+let unowned = cache.putQuery(cache.emptyStore(), "in:inbox|25",
+  { summaries: [summary("m1", NOW)], estimate: 1, nextPageToken: "" }, NOW)
+const adopted = cache.forAccount(unowned, "a@example.com")
+assert.strictEqual(adopted.account, "a@example.com")
+assert.strictEqual(cache.getQuery(adopted, "in:inbox|25") !== null, true,
+  "an unclaimed cache belongs to whoever claims it")
+
+// The profile can spell the address differently from whatever named the file.
+// One mailbox is one cache, however it is capitalised.
+const recased = cache.forAccount(owned, "A@Example.COM")
+assert.strictEqual(cache.getQuery(recased, "in:inbox|25") !== null, true,
+  "the same mailbox spelled differently is the same mailbox")
+
+// ------------------------------------------------------------- file names
+//
+// One file per account, because switching mailboxes must not throw the other
+// mailbox's cache away — that is the whole point of having a cache.
+
+const DIRECTORY = "/home/u/.cache/omarchy-gmail"
+const SAFE_NAME = /^[a-z0-9._-]+$/
+
+function checkName(id) {
+  const name = cache.fileName(id)
+  assert.ok(SAFE_NAME.test(name), "unsafe file name for " + JSON.stringify(id) + ": " + name)
+  // The only property that really matters: whatever the address contains, the
+  // name stays one component inside the cache directory.
+  assert.strictEqual(path.dirname(path.resolve(DIRECTORY, name)), DIRECTORY,
+    "file name escapes the cache directory for " + JSON.stringify(id))
+  assert.ok(Buffer.byteLength(name) <= 255, "file name too long for " + JSON.stringify(id))
+  return name
+}
+
+const nameA = checkName("a@example.com")
+const nameB = checkName("b@example.com")
+assert.notStrictEqual(nameA, nameB, "two mailboxes never share a file")
+assert.strictEqual(cache.fileName("a@example.com"), nameA, "the name is stable across calls")
+
+// Mail addresses are compared case-insensitively in practice, and a
+// case-insensitive filesystem could not hold both spellings anyway: two files
+// for one mailbox would silently halve the cache.
+assert.strictEqual(cache.fileName("A@Example.COM"), nameA)
+assert.strictEqual(cache.fileName("A@EXAMPLE.COM"), nameA)
+
+// A name built from an address must survive whatever the address contains. A
+// separator or a parent reference in a cache file name could point a write at
+// any file on the disk.
+const awkward = [
+  "a@example.com", "b@example.com", "ab@example.com", "a.b@example.com",
+  "a_b@example.com", "a-b@example.com", "a+tag@example.com",
+  "../../etc/passwd", "..", ".", "/", "a/b@example.com", "a\\b@example.com",
+  "a\u0000b@example.com", "a b@example.com", " a@example.com", "a@example.com ",
+  "\u5f20\u4f1f@example.cn", "\u0645\u062b\u0627\u0644@example.eg", "emoji\ud83d\ude42@example.com",
+  "%2e%2e@example.com", "%41@example.com", "a'b@example.com", "a*b@example.com",
+  "~root@example.com", "a!b@example.com", "a~b@example.com", "a(b)@example.com",
+  "a%b@example.com", "a\nb@example.com", "cache.json", "a__b@example.com"
+]
+const seenNames = {}
+for (const id of awkward) {
+  const name = checkName(id)
+  assert.ok(seenNames[name] === undefined,
+    "collision: " + JSON.stringify(id) + " and " + JSON.stringify(seenNames[name]) + " share " + name)
+  seenNames[name] = id
+}
+
+// An address that is missing or unusable still has to name a file, and that
+// file must not be some real mailbox's.
+const fallback = checkName("")
+assert.ok(fallback.length > 0, "an empty address still names a file")
+assert.strictEqual(cache.fileName(null), fallback)
+assert.strictEqual(cache.fileName(undefined), fallback)
+assert.strictEqual(cache.fileName(0), fallback)
+for (const id of awkward) assert.notStrictEqual(cache.fileName(id), fallback)
+assert.notStrictEqual(cache.fileName("none"), fallback)
+assert.notStrictEqual(cache.fileName("unknown"), fallback)
+assert.notStrictEqual(cache.fileName("account"), fallback)
+
+// A file name has to fit in 255 bytes while an address may be far longer than
+// that, so long names are shortened — but shortening must not merge two
+// mailboxes that share a prefix.
+const longStem = new Array(201).join("a")
+assert.notStrictEqual(cache.fileName(longStem + "1@example.com"), cache.fileName(longStem + "2@example.com"))
+checkName(longStem + "1@example.com")
+checkName(new Array(60).join("\u5f20") + "@example.cn")
+
+// Collision sweep over addresses that look like real ones, plus a batch long
+// enough to go through the shortening path, since that is where a name stops
+// being reversible and starts trusting a hash.
+const sweep = {}
+for (let i = 0; i < 5000; i++) {
+  const ids = [
+    "user" + i + "+tag@example" + (i % 7) + ".com",
+    "first.last" + i + "@gmail.com",
+    longStem + i + "@example.com"
+  ]
+  for (const id of ids) {
+    const name = cache.fileName(id)
+    assert.ok(sweep[name] === undefined,
+      "collision: " + JSON.stringify(id) + " and " + JSON.stringify(sweep[name]) + " share " + name)
+    sweep[name] = id
+  }
+}
 
 // --------------------------------------------------------------- freshness
 
