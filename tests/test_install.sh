@@ -25,4 +25,13 @@ done
 [ -x install.sh ] || fail "install.sh must be executable"
 grep -q 'plugin-backups' install.sh || fail "backups must not land inside the plugins directory"
 
+# The keyring helper takes attribute pairs now, because keying a refresh token
+# on the OAuth client alone lets two accounts sharing one client overwrite each
+# other. An empty value is a secret-tool wildcard, so it is refused outright.
+for bad in "" "a" "client-id "; do
+  if printf 'token\n' | sh scripts/keyring-store.sh $bad >/dev/null 2>&1; then
+    fail "keyring-store.sh accepted a malformed attribute list: '$bad'"
+  fi
+done
+
 printf 'test_install.sh ok\n'

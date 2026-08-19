@@ -27,6 +27,12 @@ Item {
   property int oauthPort: OAuth.DEFAULT_PORT
   property var scopes: OAuth.SCOPES
 
+  // Which mailbox this manager signs in. An OAuth client belongs to a Cloud
+  // project rather than to a mailbox, so two accounts may share one — the
+  // keyring entry has to be keyed on both or they overwrite each other and one
+  // gets signed out at random.
+  property string accountId: ""
+
   // The browser page after Google redirects is the only part of this app that
   // renders outside Quickshell, so it takes the active theme with it.
   readonly property var callbackTheme: ({
@@ -169,8 +175,8 @@ Item {
   // fallback. Today nothing is shipped, so this resolves to the file or to
   // nothing at all — see Credentials.BUILTIN for why.
   function applyCredentials(raw) {
-    var loaded = Credentials.effective(raw)
-    usingBuiltinClient = Credentials.usingBuiltin(raw)
+    var loaded = Credentials.effective(raw, accountId)
+    usingBuiltinClient = Credentials.usingBuiltin(raw, accountId)
     var changed = String(loaded.clientId) !== String(credentials.clientId)
     credentials = loaded
     credentialsChecked = true
@@ -186,18 +192,28 @@ Item {
 
   // -------------------------------------------------------------- keyring
 
+  // An install that predates multi-account stored its token under the client id
+  // alone. Reading that once, and rewriting under the new attributes, is the
+  // difference between an upgrade and a silent sign-out.
+  property bool triedLegacyLookup: false
+
   function startSecretLookup() {
     if (!clientId) {
       handleSecretLookup("")
       return
     }
     lookupHandled = false
-    secretLookup.command = [
-      "secret-tool", "lookup",
-      "service", "omarchy-gmail",
-      "kind", "refresh-token",
-      "client-id", String(clientId)
-    ]
+    triedLegacyLookup = false
+    secretLookup.command = ["secret-tool", "lookup"].concat(
+      Credentials.keyringAttributes(clientId, accountId))
+    secretLookup.running = true
+  }
+
+  function startLegacyLookup() {
+    lookupHandled = false
+    triedLegacyLookup = true
+    secretLookup.command = ["secret-tool", "lookup"].concat(
+      Credentials.legacyKeyringAttributes(clientId))
     secretLookup.running = true
   }
 
@@ -205,6 +221,10 @@ Item {
     if (lookupHandled) return
     lookupHandled = true
     var token = String(raw || "").trim()
+    if (!token && !triedLegacyLookup && clientId !== "") {
+      startLegacyLookup()
+      return
+    }
     var purpose = lookupPurpose
     lookupPurpose = ""
     if (!token) {
@@ -219,18 +239,15 @@ Item {
   function storeRefreshToken(refreshToken) {
     if (!refreshToken || keyringStore.running) return
     keyringWriteToken = String(refreshToken)
-    keyringStore.command = [pluginDir + "/scripts/keyring-store.sh", String(clientId)]
+    keyringStore.command = [pluginDir + "/scripts/keyring-store.sh"].concat(
+      Credentials.keyringAttributes(clientId, accountId))
     keyringStore.running = true
   }
 
   function clearStoredToken() {
     if (keyringClear.running || !clientId) return
-    keyringClear.command = [
-      "secret-tool", "clear",
-      "service", "omarchy-gmail",
-      "kind", "refresh-token",
-      "client-id", String(clientId)
-    ]
+    keyringClear.command = ["secret-tool", "clear"].concat(
+      Credentials.keyringAttributes(clientId, accountId))
     keyringClear.running = true
   }
 
@@ -280,6 +297,9 @@ Item {
   }
 
   function acceptToken(result) {
+    // Rewriting after a legacy read is what completes the migration; without it
+    // the old entry stays authoritative and a second account would still clash.
+    if (triedLegacyLookup && !result.refreshToken) triedLegacyLookup = false
     accessToken = result.accessToken
     accessTokenExpiresAt = Date.now() + result.expiresIn * 1000
     if (result.scope) grantedScope = result.scope

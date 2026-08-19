@@ -119,46 +119,220 @@ function parse(text) {
   }
 }
 
-// Written back in the console's own shape so the file stays interchangeable
-// with a freshly downloaded one. Compact rather than indented: it crosses a
-// line-oriented pipe on the way to disk.
-function serialize(credentials) {
-  var value = credentials || empty()
-  return JSON.stringify({
-    installed: {
-      client_id: trimmed(value.clientId),
-      project_id: trimmed(value.projectId),
-      auth_uri: "https://accounts.google.com/o/oauth2/auth",
-      token_uri: "https://oauth2.googleapis.com/token",
-      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-      client_secret: trimmed(value.clientSecret),
-      redirect_uris: ["http://localhost"]
-    }
-  })
+// ------------------------------------------------------------------- store
+//
+// Several accounts share one file, because a Cloud OAuth client belongs to a
+// project rather than to a mailbox: two accounts may legitimately run on one
+// client, and two others may each need their own.
+//
+// A lone account that has never been named keeps the console's own shape, so
+// the file stays interchangeable with a freshly downloaded one and a build
+// from before accounts existed still reads it:
+//
+//   {"installed": {...}}
+//
+// Anything else is written as:
+//
+//   {"version":2,"accounts":[{"id":"me@gmail.com","installed":{...}}, ...]}
+//
+// A list rather than an object keyed by id, because the order is the order the
+// panel shows accounts in — that is data, not an artefact of how a JSON object
+// happens to be written out.
+var FILE_VERSION = 2
+
+function emptyStore() {
+  return { accounts: [] }
 }
 
-function load(text) {
+// The id is whatever the caller knows the account by — the address once a
+// sign-in has produced one, "" for a file written before accounts had names.
+function accountEntry(accountId, credentials) {
+  var value = credentials || empty()
+  return {
+    id: trimmed(accountId),
+    clientId: trimmed(value.clientId),
+    clientSecret: trimmed(value.clientSecret),
+    projectId: trimmed(value.projectId)
+  }
+}
+
+function credentialsOf(entry) {
+  return { clientId: entry.clientId, clientSecret: entry.clientSecret, projectId: entry.projectId }
+}
+
+function isStore(value) {
+  return !!value && !!value.accounts && typeof value.accounts.length === "number"
+}
+
+// Every entry point takes either a store or a single credentials object, so
+// the single-account callers that predate this module's split keep working.
+function asStore(value) {
+  if (!isStore(value)) return { accounts: [accountEntry("", value)] }
+  var store = emptyStore()
+  for (var i = 0; i < value.accounts.length; i++) {
+    var entry = value.accounts[i]
+    if (entry) store.accounts.push(accountEntry(entry.id, entry))
+  }
+  return store
+}
+
+function accountIds(store) {
+  var accounts = asStore(store).accounts
+  var ids = []
+  for (var i = 0; i < accounts.length; i++) ids.push(accounts[i].id)
+  return ids
+}
+
+// Case folded, because an address is the usual id and a mailbox typed as
+// Me@Gmail.com is the same account as me@gmail.com — two entries for it would
+// mean two half-signed-in accounts.
+function accountKey(accountId) {
+  return trimmed(accountId).toLowerCase()
+}
+
+function indexOfAccount(accounts, accountId) {
+  var wanted = accountKey(accountId)
+  for (var i = 0; i < accounts.length; i++) {
+    if (accountKey(accounts[i].id) === wanted) return i
+  }
+  return -1
+}
+
+function forAccount(store, accountId) {
+  var accounts = asStore(store).accounts
+  var found = indexOfAccount(accounts, accountId)
+  if (found >= 0) return credentialsOf(accounts[found])
+  // The pre-accounts file holds one nameless entry. An account that has since
+  // learned its own address still has to find its client there, or the first
+  // upgrade looks exactly like a missing client and asks for setup again.
+  if (accounts.length === 1 && !accounts[0].id) return credentialsOf(accounts[0])
+  return empty()
+}
+
+// Replaces in place rather than appending, so saving a client twice for one
+// account does not push it to the end of the panel's list.
+function withAccount(store, accountId, credentials) {
+  var next = asStore(store)
+  var entry = accountEntry(accountId, credentials)
+  var found = indexOfAccount(next.accounts, accountId)
+  if (found >= 0) next.accounts[found] = entry
+  else next.accounts.push(entry)
+  return next
+}
+
+function installedBlock(value) {
+  return {
+    client_id: trimmed(value.clientId),
+    project_id: trimmed(value.projectId),
+    auth_uri: "https://accounts.google.com/o/oauth2/auth",
+    token_uri: "https://oauth2.googleapis.com/token",
+    auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+    client_secret: trimmed(value.clientSecret),
+    redirect_uris: ["http://localhost"]
+  }
+}
+
+// Compact rather than indented, and one line whether it holds one account or
+// six: it crosses a line-oriented pipe on the way to disk, whose `read` stops
+// at the first newline.
+function serialize(value) {
+  var accounts = asStore(value).accounts
+  if (accounts.length === 0) return JSON.stringify({ installed: installedBlock(empty()) })
+  if (accounts.length === 1 && !accounts[0].id)
+    return JSON.stringify({ installed: installedBlock(accounts[0]) })
+
+  var entries = []
+  for (var i = 0; i < accounts.length; i++) {
+    entries.push({ id: accounts[i].id, installed: installedBlock(accounts[i]) })
+  }
+  return JSON.stringify({ version: FILE_VERSION, accounts: entries })
+}
+
+// A single account that fails to parse leaves the rest readable: one hand-
+// edited entry should not sign every other account out.
+function storeFromObject(raw) {
+  var store = emptyStore()
+  if (!raw || typeof raw !== "object") return store
+
+  if (raw.accounts && typeof raw.accounts.length === "number") {
+    for (var i = 0; i < raw.accounts.length; i++) {
+      var entry = raw.accounts[i]
+      if (!entry || typeof entry !== "object") continue
+      var result = fromObject(entry)
+      if (!result.ok) continue
+      if (indexOfAccount(store.accounts, entry.id) >= 0) continue
+      store.accounts.push(accountEntry(entry.id, result.credentials))
+    }
+    return store
+  }
+
+  var single = fromObject(raw)
+  if (single.ok) store.accounts.push(accountEntry("", single.credentials))
+  return store
+}
+
+function loadStore(text) {
   var raw = String(text || "").trim()
-  if (!raw) return empty()
-  var result = fromObject(parseJson(raw, null))
-  return result.ok ? result.credentials : empty()
+  if (!raw) return emptyStore()
+  return storeFromObject(parseJson(raw, null))
+}
+
+function load(text, accountId) {
+  return forAccount(loadStore(text), accountId)
 }
 
 // The user's own client always wins: someone who went to the trouble of making
 // one wants their own quota and their own consent screen, not the shipped one.
-function effective(fileText) {
-  var own = load(fileText)
+function effective(fileText, accountId) {
+  var own = load(fileText, accountId)
   if (isConfigured(own)) return own
   return builtin()
 }
 
-function usingBuiltin(fileText) {
-  return !isConfigured(load(fileText)) && hasBuiltin()
+function usingBuiltin(fileText, accountId) {
+  return !isConfigured(load(fileText, accountId)) && hasBuiltin()
 }
 
 function path(home) {
   var base = trimmed(home)
   return (base || "~") + "/.config/omarchy-gmail/credentials.json"
+}
+
+// ----------------------------------------------------------------- keyring
+//
+// The refresh token is keyed by account as well as by client, because two
+// accounts may share one client: keyed by client alone, the second sign-in
+// would overwrite the first account's token and silently sign it out.
+var KEYRING_SERVICE = "omarchy-gmail"
+var KEYRING_KIND = "refresh-token"
+
+// secret-tool reads an empty attribute value as "match anything", which would
+// hand back some other account's token, so an account with no name yet gets a
+// literal one. No address can collide with it: every address has an "@".
+var UNNAMED_ACCOUNT = "default"
+
+// Alternating name, value — the form secret-tool takes on its command line.
+// An entry with no client id is not addressable at all, and asking for one
+// would be a wildcard lookup over every token this plugin ever stored.
+function keyringAttributes(clientId, accountId) {
+  var id = trimmed(clientId)
+  if (!id) return []
+  return [
+    "service", KEYRING_SERVICE,
+    "kind", KEYRING_KIND,
+    "client-id", id,
+    "account", accountKey(accountId) || UNNAMED_ACCOUNT
+  ]
+}
+
+// What a single-account install stored before accounts existed. Such an entry
+// has no "account" attribute, so the lookup above never matches it: it is read
+// once with these and written back with the ones above, rather than leaving
+// the user staring at a sign-in button that used to say they were signed in.
+function legacyKeyringAttributes(clientId) {
+  var id = trimmed(clientId)
+  if (!id) return []
+  return ["service", KEYRING_SERVICE, "kind", KEYRING_KIND, "client-id", id]
 }
 
 // Shown under the client id in the panel so a user with several Cloud projects

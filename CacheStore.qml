@@ -20,7 +20,13 @@ Item {
   readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME")
     || (Quickshell.env("HOME") + "/.cache")
   readonly property string directory: cacheHome + "/omarchy-gmail"
-  readonly property string path: directory + "/cache.json"
+
+  // One file per account. A shared file would mean every switch discarded the
+  // cache of the account being switched to, which is the whole point of having
+  // one. The name is derived from the address and can never leave the
+  // directory — see Cache.fileName.
+  property string accountId: ""
+  readonly property string path: directory + "/" + Cache.fileName(accountId)
 
   property var store: Cache.emptyStore()
   property bool loaded: false
@@ -72,6 +78,15 @@ Item {
   }
 
   Component.onCompleted: directoryMaker.running = true
+
+  // Switching accounts swaps the file underneath, so what is in memory belongs
+  // to the account that just left.
+  onAccountIdChanged: {
+    loaded = false
+    store = Cache.emptyStore()
+    if (directoryMaker.running) return
+    file.reload()
+  }
 
   Process {
     id: directoryMaker
