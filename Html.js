@@ -1,226 +1,470 @@
 .pragma library
 
-// Message HTML, reduced to what Qt's rich text engine actually renders.
+// Message HTML, reduced to what Qt's rich text engine may safely be handed.
 //
-// Qt supports a subset of HTML 4 and CSS 2.1 natively — tables, inline
-// styles, <font>, links, images — which is most of what real email uses,
-// because real email is still table-and-inline-style HTML written for
-// Outlook. What it does not support it ignores, with two exceptions this
-// module exists to handle:
+// This is not a renderer. Qt already is one: a QTextDocument behind the
+// reader's TextEdit parses HTML 4 and CSS 2.1 and lays it out, which is most of
+// what real mail needs, because real mail is still table-and-inline-style HTML
+// written for Outlook. What Qt does not give a QML plugin is any say over what
+// that renderer does while it works, and it does three things a mail client
+// cannot allow it to do unsupervised:
 //
-//   - a <style> block's CSS text is rendered as body text
-//   - <img src="https://..."> is genuinely fetched, so every tracking pixel
-//     in the message fires the moment the reader opens it
+//   - it fetches <img src="https://..."> for real, so every tracking pixel in
+//     the message fires the moment the document is set, and a source aimed at
+//     the machine itself turns reading mail into a request to whatever is
+//     listening on it
+//   - it renders a <style> block's CSS as body text
+//   - it ignores display:none, so the 1px preheader every marketing mail
+//     carries comes out as a smudge of unreadable characters
 //
-// Remote images are therefore removed by default and the count is reported so
-// the reader can offer to load them.
+// C++ could hook QTextDocument::loadResource and decide per request. QML cannot
+// — QQuickTextDocument exposes nothing of the sort — so the only control point
+// left is what the string says before it is handed over. This file is that
+// gate, and it is deliberately the whole of it: every decision about what the
+// renderer is allowed to see or fetch is made here and nowhere else.
+//
+// It works the way any HTML consumer does, and for the same reason a regex does
+// not: parse, then decide on the tree, then write back out.
+//
+//   tokenize   text -> tags, attributes, text, comments, raw-text elements,
+//              read the way the spec reads them
+//   parse      tokens -> a tree, tolerantly: elements are closed, never moved
+//   clean      the tree -> the tree, dropping and rewriting by an allow list
+//   serialise  the tree -> the HTML subset Qt renders
+//
+// The parse is not a conformant HTML5 tree builder and must not become one. A
+// browser's parser rewrites what it reads — it inserts <tbody>, hoists content
+// out of a <table>, reopens formatting across a block — and every one of those
+// is a change to mail nobody asked for. This one only ever closes what the
+// sender left open. Structure in, same structure out, minus what was removed.
 
-var DROPPED_ELEMENTS = ["script", "style", "iframe", "object", "embed", "applet", "noscript"]
+// ================================================================ tokenizer
+//
+// One pass, no backtracking. The only question it answers that a pattern could
+// not is where things end: a tag ends at the first ">" that is not inside an
+// attribute value, and a raw-text element ends at its own closing tag and at
+// nothing else.
 
-// Qt lays rich text out synchronously on the GUI thread, and this plugin lives
-// inside the shell that draws the user's whole desktop. A message heavy enough
-// to make that layout take seconds does not just stall the reader — it stalls
-// the bar, the menu and every other panel. So the reader refuses documents past
-// these bounds and shows the plain-text part instead, with a way to override.
-var MAX_RICH_TEXT = 120000
-var MAX_ELEMENTS = 2500
-var MAX_IMAGES = 24
-// Backstop for anything flattening does not tame.
-var MAX_TABLES = 60
-var MAX_TABLE_DEPTH = 4
+var RAW_TEXT_ELEMENTS = { script: true, style: true, textarea: true, title: true }
 
-// Nesting depth is the measure that matters. Qt lays tables out by resolving
-// column widths against each other, and deeply nested tables with competing
-// widths — which is exactly how notification mail is built — can keep that
-// resolution going far longer than anyone will wait. Real mail in this mailbox
-// reaches nine levels.
-function tableDepth(html) {
-  var text = String(html || "")
-  var pattern = /<(\/?)table\b/gi
-  var depth = 0
-  var deepest = 0
-  var match
-  while ((match = pattern.exec(text)) !== null) {
-    if (match[1]) depth = Math.max(0, depth - 1)
-    else {
-      depth++
-      if (depth > deepest) deepest = depth
-    }
-  }
-  return deepest
+// Elements with no closing tag and no children. An <img> that says
+// display:none has no subtree to take with it, and a <br> never closes.
+var VOID_ELEMENTS = {
+  img: true, br: true, hr: true, input: true, meta: true, link: true,
+  area: true, base: true, col: true, embed: true, source: true, track: true,
+  wbr: true, param: true, keygen: true
 }
 
-function complexity(html) {
-  var text = String(html || "")
+// By character code, not by one-character string. This is the innermost loop in
+// the file and it runs over every byte of every message body; charAt allocates
+// a string per character, charCodeAt does not.
+function isSpaceCode(code) {
+  return code === 32 || code === 9 || code === 10 || code === 13 || code === 12
+}
+
+function isNameStartCode(code) {
+  return (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
+}
+
+function isNameCode(code) {
+  return isNameStartCode(code) || (code >= 48 && code <= 57)
+    || code === 45 || code === 95 || code === 58 || code === 46
+}
+
+function matchesIgnoreCase(text, at, needle) {
+  if (at + needle.length > text.length) return false
+  return text.substr(at, needle.length).toLowerCase() === needle
+}
+
+// Reads "<name attr=value ...>" from `from`, which must be its "<".
+//
+// Returns the tag and where it ends. `terminated` is false when the source ran
+// out before the ">" — which is the case a pattern gets wrong and the case that
+// matters, because Qt swallows the remainder of the document into that tag.
+// `out` carries back where the tag ended and whether it ended at all. It is the
+// caller's, and reused: a message body is tens of thousands of tags, and an
+// object per tag to hold two numbers is an object per tag for the collector.
+function readTag(text, from, out) {
+  var length = text.length
+  var at = from + 1
+  var closing = false
+  if (text.charCodeAt(at) === 47) {
+    closing = true
+    at++
+  }
+  // A tag name starts with a letter, which is what tells "<b>" from the "<" in
+  // "3<4". Digits and dots are only allowed after that first character.
+  if (!isNameStartCode(text.charCodeAt(at))) return null
+  var nameStart = at
+  var upper = false
+  while (at < length) {
+    var nameCode = text.charCodeAt(at)
+    if (!isNameCode(nameCode)) break
+    if (nameCode >= 65 && nameCode <= 90) upper = true
+    at++
+  }
+  // Almost every tag and attribute in real mail is already lower case, and
+  // toLowerCase on a string that is already lower case still walks it and can
+  // still hand back a copy. Cheaper to have noticed while reading it.
+  var name = text.substring(nameStart, at)
+  if (upper) name = name.toLowerCase()
+
+  var attributes = []
+  var selfClosing = false
+  while (at < length) {
+    while (at < length && isSpaceCode(text.charCodeAt(at))) at++
+    if (at >= length) break
+    var code = text.charCodeAt(at)
+    if (code === 62) {
+      at++
+      out.end = at
+      out.terminated = true
+      return {
+        type: closing ? "end" : "start",
+        name: name,
+        attrs: attributes,
+        selfClosing: selfClosing
+      }
+    }
+    if (code === 47) {
+      selfClosing = text.charCodeAt(at + 1) === 62
+      at++
+      continue
+    }
+
+    var attrStart = at
+    var attrUpper = false
+    while (at < length) {
+      var attrCode = text.charCodeAt(at)
+      if (isSpaceCode(attrCode) || attrCode === 61 || attrCode === 62 || attrCode === 47) break
+      if (attrCode >= 65 && attrCode <= 90) attrUpper = true
+      at++
+    }
+    // A character that can start neither a name nor anything else: step over it
+    // rather than spinning on it.
+    if (at === attrStart) {
+      at++
+      continue
+    }
+    var attributeName = text.substring(attrStart, at)
+    if (attrUpper) attributeName = attributeName.toLowerCase()
+
+    while (at < length && isSpaceCode(text.charCodeAt(at))) at++
+    var value = null
+    if (text.charCodeAt(at) === 61) {
+      at++
+      while (at < length && isSpaceCode(text.charCodeAt(at))) at++
+      var quote = text.charCodeAt(at)
+      if (quote === 34 || quote === 39) {
+        at++
+        var close = text.indexOf(quote === 34 ? "\"" : "'", at)
+        // A quote that never closes runs to the end of the document, which is
+        // also how Qt reads it.
+        value = close < 0 ? text.substring(at) : text.substring(at, close)
+        at = close < 0 ? length : close + 1
+      } else {
+        var valueStart = at
+        while (at < length) {
+          var valueCode = text.charCodeAt(at)
+          if (isSpaceCode(valueCode) || valueCode === 62) break
+          at++
+        }
+        value = text.substring(valueStart, at)
+      }
+    }
+    attributes.push({ name: attributeName, value: value })
+  }
+
+  out.end = length
+  out.terminated = false
   return {
-    length: text.length,
-    tags: (text.match(/<[a-zA-Z]/g) || []).length,
-    images: (text.match(/<img\b/gi) || []).length,
-    tables: (text.match(/<table\b/gi) || []).length,
-    tableDepth: tableDepth(text)
+    type: closing ? "end" : "start",
+    name: name,
+    attrs: attributes,
+    selfClosing: selfClosing
   }
 }
 
-// Tables past this depth become plain blocks. Two levels covers the real
-// tabular content in mail — a status table, a receipt — while the layers above
-// it are only there to centre a card in an Outlook window.
-var KEEP_TABLE_DEPTH = 2
-var TABLE_TAG = /<(\/?)(table|thead|tbody|tfoot|tr|td|th)\b([^>]*)>/gi
-
-function keptStyle(attrs) {
-  var style = String(attrs || "").match(/\sstyle\s*=\s*("[^"]*"|'[^']*')/i)
-  return style ? " style=" + style[1] : ""
-}
-
-function flattenTables(html, keepDepth) {
-  var limit = keepDepth === undefined ? KEEP_TABLE_DEPTH : Math.max(0, keepDepth)
-  var depth = 0
-  return String(html || "").replace(TABLE_TAG, function(tag, slash, name, attrs) {
-    var lower = String(name).toLowerCase()
-    if (lower === "table") {
-      if (slash) {
-        var closing = depth > limit
-        depth = Math.max(0, depth - 1)
-        return closing ? "</div>" : tag
-      }
-      depth++
-      return depth > limit ? "<div" + keptStyle(attrs) + ">" : tag
-    }
-    if (depth > limit) return slash ? "</div>" : "<div" + keptStyle(attrs) + ">"
-    return tag
-  })
-}
-
-function tooHeavyForRichText(html) {
-  var size = complexity(html)
-  return size.length > MAX_RICH_TEXT
-    || size.tags > MAX_ELEMENTS
-    || size.tables > MAX_TABLES
-    || size.tableDepth > MAX_TABLE_DEPTH
-}
-
-// A 1x1 image is a tracking pixel, never something to look at. Dropping them
-// removes both the beacon and a layout pass per message.
-function isTrackingPixel(tag) {
-  var width = tag.match(/\swidth\s*=\s*"?(\d+)/i)
-  var height = tag.match(/\sheight\s*=\s*"?(\d+)/i)
-  if (width && Number(width[1]) <= 2) return true
-  if (height && Number(height[1]) <= 2) return true
-  return /(width|height)\s*:\s*[012](\.\d+)?px/i.test(tag)
-}
-
-// Senders ship their own palette: a background *and* the text colour that
-// suits it. Removing only the background is what makes a message unreadable —
-// GitHub's #24292e text would sit on a #131313 ground — so both go, and the
-// document stylesheet supplies the pair. Anything that survives (images,
-// borders) belongs to the sender.
-var COLOUR_DECLARATION = /(^|;)\s*(color|background|background-color|border-color|outline-color)\s*:[^;]*/gi
-
-function stripColorsFromStyle(style) {
-  return String(style || "")
-    .replace(COLOUR_DECLARATION, "$1")
-    // Removing a declaration from the middle leaves the separators on both
-    // sides of it, which Qt reads as an empty rule.
-    .replace(/;{2,}/g, ";")
-    .replace(/^[;\s]+|[;\s]+$/g, "")
-}
-
-function stripColors(html) {
-  var text = String(html || "")
-  // Presentational attributes first: bgcolor and <font color> predate CSS and
-  // still turn up in mail written for Outlook.
-  text = text.replace(/\s(bgcolor|background|bordercolor)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-  text = text.replace(/\s(color)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-  return text.replace(/\sstyle\s*=\s*("([^"]*)"|'([^']*)')/gi,
-    function(match, raw, dq, sq) {
-      var cleaned = stripColorsFromStyle(dq !== undefined ? dq : sq)
-      return cleaned === "" ? "" : " style=\"" + cleaned + "\""
-    })
-}
-
-// A url() in an inline style is a fetch wherever the engine honours it, and
-// which declarations Qt honours is not worth having to be right about: nothing
-// in mail needs one, because pictures arrive as <img>, which is where the image
-// policy lives. The declaration goes rather than the whole attribute, so the
-// padding and the font beside it survive.
-function stripStyleUrls(html) {
-  return String(html || "").replace(/\sstyle\s*=\s*("([^"]*)"|'([^']*)')/gi,
-    function(match, raw, dq, sq) {
-      var value = dq !== undefined ? dq : sq
-      if (!/url\s*\(/i.test(decodeReferences(value))) return match
-      var parts = String(value).split(";")
-      var kept = []
-      for (var i = 0; i < parts.length; i++) {
-        if (/url\s*\(/i.test(decodeReferences(parts[i]))) continue
-        if (parts[i].replace(/\s+/g, "") !== "") kept.push(parts[i])
-      }
-      var cleaned = kept.join(";").replace(/^[;\s]+|[;\s]+$/g, "")
-      return cleaned === "" ? "" : " style=\"" + cleaned + "\""
-    })
-}
-
-function stripElement(text, name) {
-  var open = new RegExp("<" + name + "\\b[^>]*>[\\s\\S]*?<\\/" + name + "\\s*>", "gi")
-  var lone = new RegExp("<\\/?" + name + "\\b[^>]*>", "gi")
-  return String(text).replace(open, "").replace(lone, "")
-}
-
-// ------------------------------------------------------------- tag boundaries
-//
-// Where a tag ends is the one thing the image policy below cannot afford to be
-// wrong about, and /<img\b[^>]*>/ is wrong about it. Qt's parser reads
-// attribute values with their quotes, so
-//
-//   <img alt="a>b" src="http://127.0.0.1/p.gif">
-//
-// is one image tag to the engine and two pieces of nothing to that regex: it
-// stops at the ">" inside the alt text, finds no src in what it took, and hands
-// the whole tag back untouched — which is a fetch. A sender only has to put a
-// ">" in an alt text to walk past the check.
-//
-// Qt has no HTML parser a QML plugin can call, so tag boundaries are scanned
-// for rather than matched. This is not a parser and does not try to be one: it
-// answers exactly one question, which is where a tag someone opened stops.
-function tagEnd(text, from) {
-  var quote = ""
-  for (var i = from; i < text.length; i++) {
-    var character = text.charAt(i)
-    if (quote !== "") {
-      if (character === quote) quote = ""
-      continue
-    }
-    if (character === "\"" || character === "'") {
-      quote = character
-      continue
-    }
-    if (character === ">") return i + 1
+// Where a raw-text element's content stops. Per the spec this is the first
+// "</name" followed by whitespace, "/" or ">" — a "</style>" inside a CSS
+// string really does end the stylesheet, which is why a <style> block cannot be
+// trusted to contain its own contents.
+function findRawTextEnd(text, from, name) {
+  var needle = "</" + name
+  for (var at = from; at < text.length; at++) {
+    if (text.charAt(at) !== "<") continue
+    if (!matchesIgnoreCase(text, at, needle)) continue
+    // NaN when the needle ran to the end of the document, which ends it too.
+    var after = text.charCodeAt(at + needle.length)
+    if (!isNaN(after) && after !== 62 && after !== 47 && !isSpaceCode(after)) continue
+    var close = text.indexOf(">", at + needle.length)
+    return { contentEnd: at, next: close < 0 ? text.length : close + 1 }
   }
-  return -1
+  return { contentEnd: text.length, next: text.length }
 }
 
-// Every <name ...> tag rewritten through `fn`, which is handed the whole tag and
-// returns what stands in its place. A tag that never closes takes the rest of
-// the document with it: Qt would swallow the remainder into the tag anyway, and
-// dropping it is the reading that cannot leave a fetch behind.
-function replaceTags(html, name, fn) {
-  var text = String(html || "")
-  var opening = new RegExp("<" + name + "\\b", "gi")
-  var out = ""
+// With a `visit`, tokens are handed over one at a time and nothing is kept;
+// without one they come back as an array. The tree builder takes the first
+// form, because a message body is tens of thousands of tokens and building a
+// list of them only to walk it once is a list nobody needed.
+function tokenize(html, visit) {
+  var text = String(html === undefined || html === null ? "" : html)
+  var tokens = visit ? null : []
+  var emit = visit || function(token) { tokens.push(token) }
+  var pending = ""
   var at = 0
-  var found
-  while ((found = opening.exec(text)) !== null) {
-    if (found.index < at) continue
-    var end = tagEnd(text, found.index + found[0].length)
-    out += text.substring(at, found.index)
-    if (end < 0) return out
-    out += fn(text.substring(found.index, end))
-    at = end
-    opening.lastIndex = end
+  var out = { end: 0, terminated: false }
+
+  function flushText() {
+    if (pending === "") return
+    emit({ type: "text", text: pending })
+    pending = ""
   }
-  return out + text.substring(at)
+
+  while (at < text.length) {
+    var open = text.indexOf("<", at)
+    if (open < 0) {
+      pending += text.substring(at)
+      break
+    }
+    pending += text.substring(at, open)
+
+    // By code: this runs at every "<" in the document, and substr+toLowerCase
+    // here allocates two strings per tag for a four-character test.
+    if (text.charCodeAt(open + 1) === 33 && text.charCodeAt(open + 2) === 45
+      && text.charCodeAt(open + 3) === 45) {
+      var commentEnd = text.indexOf("-->", open + 4)
+      flushText()
+      emit({ type: "comment" })
+      at = commentEnd < 0 ? text.length : commentEnd + 3
+      continue
+    }
+    // <!DOCTYPE ...>, <?xml ...> and anything else that is not a tag: a
+    // declaration, ending at the first ">".
+    var second = text.charCodeAt(open + 1)
+    if (second === 33 || second === 63) {
+      var declarationEnd = text.indexOf(">", open + 2)
+      flushText()
+      emit({ type: "declaration" })
+      at = declarationEnd < 0 ? text.length : declarationEnd + 1
+      continue
+    }
+
+    var token = readTag(text, open, out)
+    if (!token) {
+      // A "<" that starts no tag is a "<" the sender typed.
+      pending += "<"
+      at = open + 1
+      continue
+    }
+    flushText()
+    if (out.terminated) emit(token)
+    // An unterminated tag took the rest of the document with it, so there is
+    // nothing after it to keep and nothing about it worth keeping.
+    at = out.end
+    if (!out.terminated) break
+
+    if (token.type === "start" && !token.selfClosing
+      && RAW_TEXT_ELEMENTS[token.name] === true) {
+      var raw = findRawTextEnd(text, at, token.name)
+      emit({ type: "text", text: text.substring(at, raw.contentEnd), raw: true })
+      emit({ type: "end", name: token.name })
+      at = raw.next
+    }
+  }
+
+  flushText()
+  return tokens
 }
 
-// ------------------------------------------------------------ image sources
+// ===================================================================== tree
+//
+// Tolerant, and tolerant in one direction only: it closes what the sender left
+// open and it discards a close that matches nothing. It never moves an element,
+// never invents one, and never reopens anything — a browser's parser does all
+// three, and each of them is a change to the message that nobody asked for.
+
+// Openings that imply the close of a sibling. Mail is full of <td> and <li>
+// left unclosed, and without these each one nests inside the last until the
+// whole message is one deep staircase.
+var IMPLIED_CLOSE = {
+  li: { li: true },
+  p: { p: true },
+  dt: { dt: true, dd: true },
+  dd: { dt: true, dd: true },
+  tr: { tr: true, td: true, th: true },
+  td: { td: true, th: true },
+  th: { td: true, th: true },
+  thead: { thead: true, tbody: true, tfoot: true },
+  tbody: { thead: true, tbody: true, tfoot: true },
+  tfoot: { thead: true, tbody: true, tfoot: true },
+  option: { option: true }
+}
+
+function elementNode(token) {
+  return {
+    type: "element",
+    name: token.name,
+    attrs: token.attrs,
+    selfClosing: token.selfClosing === true,
+    children: []
+  }
+}
+
+// How deep the tree may go. Everything downstream of the parse walks it by
+// recursion, so without a ceiling a message nested a few thousand elements deep
+// is a stack overflow — inside the process that draws the whole desktop. Real
+// mail reaches nine levels of tables, which is about forty elements; past this
+// an element still keeps its content, it just stops adding a level to hold it.
+// Qt would not survive laying such a document out either, and
+// tooHeavyForRichText refuses it a step later.
+var MAX_TREE_DEPTH = 128
+
+function parse(html) {
+  var root = { type: "root", children: [] }
+  var stack = [root]
+
+  tokenize(html, function(token) {
+    var top = stack[stack.length - 1]
+
+    if (token.type === "text") {
+      if (token.text !== "")
+        top.children.push({ type: "text", text: token.text, raw: token.raw === true })
+      return
+    }
+    // A comment or a doctype has nothing a reader needs, and Qt would lay the
+    // doctype out as text.
+    if (token.type !== "start" && token.type !== "end") return
+
+    if (token.type === "start") {
+      var implied = IMPLIED_CLOSE[token.name]
+      if (implied) {
+        while (stack.length > 1 && implied[stack[stack.length - 1].name] === true) stack.pop()
+        top = stack[stack.length - 1]
+      }
+      var node = elementNode(token)
+      top.children.push(node)
+      if (VOID_ELEMENTS[token.name] !== true && !node.selfClosing
+        && stack.length < MAX_TREE_DEPTH) stack.push(node)
+      return
+    }
+
+    // An end tag closes the nearest ancestor of that name, and everything still
+    // open inside it. One that matches nothing open is noise, and dropping it
+    // is the only reading that cannot close something the sender meant to keep.
+    for (var depth = stack.length - 1; depth > 0; depth--) {
+      if (stack[depth].name === token.name) {
+        stack.length = depth
+        return
+      }
+    }
+  })
+
+  return root
+}
+
+// =============================================================== serialiser
+//
+// Back into the subset Qt renders. Attribute values keep whatever character
+// references the sender wrote — they are the value, and re-escaping them would
+// turn "&amp;" into "&amp;amp;" on every round trip — so only the quote that
+// delimits them has to go.
+
+function serializeAttributes(attrs) {
+  var out = ""
+  for (var i = 0; i < attrs.length; i++) {
+    var attr = attrs[i]
+    out += " " + attr.name
+    if (attr.value === null || attr.value === undefined) continue
+    out += "=\"" + String(attr.value).replace(/"/g, "&quot;") + "\""
+  }
+  return out
+}
+
+// Written into one array and joined once. Returning a string per level builds a
+// fresh copy of everything below it at every level, which on a document a few
+// hundred elements deep is most of the time this file spends.
+function serializeInto(node, out, fit) {
+  if (node.type === "text") {
+    out.push(node.text)
+    return
+  }
+  if (node.type !== "root") {
+    out.push("<" + node.name + serializeAttributes(fit ? fitAttributes(node, fit) : node.attrs))
+    if (VOID_ELEMENTS[node.name] === true || node.selfClosing) {
+      out.push(node.selfClosing ? "/>" : ">")
+      return
+    }
+    out.push(">")
+  }
+  for (var i = 0; i < node.children.length; i++) serializeInto(node.children[i], out, fit)
+  if (node.type !== "root") out.push("</" + node.name + ">")
+}
+
+// `fit` is applied on the way out rather than to the tree, so the tree is still
+// exactly what the parse produced and can be handed to the next width.
+function serialize(node, fit) {
+  var out = []
+  serializeInto(node, out, fit)
+  return out.join("")
+}
+
+// A tree walk that may replace a node with nothing, with itself, or with its
+// own children. Returning null drops the subtree; returning "unwrap" keeps the
+// children and drops the element around them.
+function transform(node, visit) {
+  var kept = []
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      kept.push(child)
+      continue
+    }
+    var verdict = visit(child)
+    if (verdict === null) continue
+    transform(child, visit)
+    if (verdict === "unwrap") {
+      for (var j = 0; j < child.children.length; j++) kept.push(child.children[j])
+      continue
+    }
+    kept.push(child)
+  }
+  node.children = kept
+  return node
+}
+
+function attributeOf(node, name) {
+  for (var i = 0; i < node.attrs.length; i++) {
+    if (node.attrs[i].name === name) return node.attrs[i]
+  }
+  return null
+}
+
+function attributeValue(node, name) {
+  var attr = attributeOf(node, name)
+  return attr && attr.value !== null && attr.value !== undefined ? String(attr.value) : ""
+}
+
+function removeAttribute(node, name) {
+  var kept = []
+  for (var i = 0; i < node.attrs.length; i++) {
+    if (node.attrs[i].name !== name) kept.push(node.attrs[i])
+  }
+  node.attrs = kept
+}
+
+function setStyle(node, declarations) {
+  var attr = attributeOf(node, "style")
+  var style = joinDeclarations(declarations)
+  if (style === "") {
+    if (attr) removeAttribute(node, "style")
+    return
+  }
+  if (attr) attr.value = style
+  else node.attrs.push({ name: "style", value: style })
+}
+
+// ================================================ what a source may point at
 //
 // An attribute value is not a URL until the HTML parser has resolved the
 // character references inside it. Qt does that before it fetches anything, so
@@ -228,7 +472,17 @@ function replaceTags(html, name, fn) {
 // check reading the raw attribute text sees something that starts with an "&"
 // and lets it through. Tab and newline inside a URL are dropped for the same
 // reason: they are not part of it by the time the fetch is made.
-var NAMED_REFERENCES = { amp: "&", quot: "\"", apos: "'", lt: "<", gt: ">", sol: "/", colon: ":" }
+// The named references mail actually uses. An unknown one is left as written,
+// which is what Qt does with it too.
+var NAMED_REFERENCES = {
+  amp: "&", quot: "\"", apos: "'", lt: "<", gt: ">", sol: "/", colon: ":",
+  nbsp: " ", ensp: " ", emsp: " ", thinsp: " ",
+  mdash: "\u2014", ndash: "\u2013", hellip: "\u2026", bull: "\u2022",
+  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201c", rdquo: "\u201d",
+  middot: "\u00b7", copy: "\u00a9", reg: "\u00ae", trade: "\u2122",
+  deg: "\u00b0", times: "\u00d7", laquo: "\u00ab", raquo: "\u00bb",
+  euro: "\u20ac", pound: "\u00a3", yen: "\u00a5", cent: "\u00a2", sect: "\u00a7"
+}
 
 function decodeReferences(text) {
   return String(text).replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);?/g,
@@ -370,75 +624,326 @@ function safeHref(value) {
   return /^\s*(https?:|mailto:)/i.test(String(value || ""))
 }
 
+
+// ========================================================= style declarations
+//
+// Split on ";", but not on a ";" inside a quoted string or inside url(...),
+// where it is part of the value rather than the end of one.
+
+function splitDeclarations(style) {
+  var text = String(style === undefined || style === null ? "" : style)
+  var out = []
+  var current = ""
+  var quote = ""
+  var depth = 0
+  for (var i = 0; i < text.length; i++) {
+    var character = text.charAt(i)
+    if (quote !== "") {
+      current += character
+      if (character === quote) quote = ""
+      continue
+    }
+    if (character === "\"" || character === "'") {
+      quote = character
+      current += character
+      continue
+    }
+    if (character === "(") depth++
+    else if (character === ")") depth = Math.max(0, depth - 1)
+    else if (character === ";" && depth === 0) {
+      out.push(current)
+      current = ""
+      continue
+    }
+    current += character
+  }
+  out.push(current)
+
+  var declarations = []
+  for (var j = 0; j < out.length; j++) {
+    var piece = out[j]
+    if (piece.replace(/\s+/g, "") === "") continue
+    var colon = piece.indexOf(":")
+    if (colon < 0) continue
+    declarations.push({
+      name: piece.substring(0, colon).replace(/^\s+|\s+$/g, "").toLowerCase(),
+      value: piece.substring(colon + 1).replace(/^\s+|\s+$/g, "")
+    })
+  }
+  return declarations
+}
+
+function joinDeclarations(declarations) {
+  var parts = []
+  for (var i = 0; i < declarations.length; i++) {
+    if (declarations[i].value === "") continue
+    parts.push(declarations[i].name + ":" + declarations[i].value)
+  }
+  return parts.join(";")
+}
+
+// Rewrites an element's style attribute through `decide`, which is handed each
+// declaration and returns it, a replacement, or null to drop it.
+function rewriteStyle(node, decide) {
+  var attr = attributeOf(node, "style")
+  if (!attr || attr.value === null || attr.value === undefined) return
+  var declarations = splitDeclarations(attr.value)
+  var kept = []
+  for (var i = 0; i < declarations.length; i++) {
+    var verdict = decide(declarations[i])
+    if (verdict) kept.push(verdict)
+  }
+  setStyle(node, kept)
+}
+
+// ================================================================== passes
+//
+// Each of these is a decision about the tree. They are exported one by one
+// because each encodes a fact measured against Qt's engine and each is worth
+// being able to test on its own; `sanitize` runs them in one walk rather than
+// parsing the document once per pass.
+
+// Elements whose content Qt would either lay out as text or has no business
+// seeing. <style> and <script> are the ones that matter: their CSS and their
+// source come out as body text.
+var DROPPED_ELEMENTS = {
+  script: true, style: true, iframe: true, object: true, embed: true,
+  applet: true, noscript: true, meta: true, link: true, base: true,
+  // Raw-text elements whose content is not body text and which Qt lays out as
+  // if it were. Nearly every marketing mail ships <head><title>, and it came
+  // out as a stray line above the message.
+  title: true, textarea: true
+}
+
+// Senders ship their own palette: a background *and* the text colour that
+// suits it. Removing only the background is what makes a message unreadable —
+// GitHub's #24292e text would sit on a #131313 ground — so both go, and the
+// document stylesheet supplies the pair. Anything that survives (images,
+// borders) belongs to the sender.
+var COLOUR_ATTRIBUTES = { bgcolor: true, background: true, bordercolor: true, color: true }
+var COLOUR_DECLARATIONS = {
+  color: true, background: true, "background-color": true,
+  "border-color": true, "outline-color": true
+}
+
+function stripColorsFrom(node) {
+  for (var name in COLOUR_ATTRIBUTES) removeAttribute(node, name)
+  rewriteStyle(node, function(declaration) {
+    return COLOUR_DECLARATIONS[declaration.name] === true ? null : declaration
+  })
+}
+
+// A url() in an inline style is a fetch wherever the engine honours it, and
+// which declarations Qt honours is not worth having to be right about: nothing
+// in mail needs one, because pictures arrive as <img>, which is where the image
+// policy lives.
+function stripStyleUrlsFrom(node) {
+  rewriteStyle(node, function(declaration) {
+    return /url\s*\(/i.test(decodeReferences(declaration.value)) ? null : declaration
+  })
+}
+
 // Qt's rich text engine ignores display:none outright — measured: a hidden div
 // adds a full line of text to the layout. It does honour font-size, though, and
 // the standard email preheader is hidden text set at 1px, so it comes out as a
 // two-pixel smudge of unreadable characters above the message. Elements the
 // sender marked hidden are therefore removed rather than styled away.
-var HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden)/i
-var VOID_ELEMENTS = /^(img|br|hr|input|meta|link|area|base|col|embed|source|track|wbr)$/i
-
-// Counts nesting, so a hidden wrapper takes exactly its own subtree and not
-// whatever happens to close first.
-function closeIndexFor(text, name, from) {
-  var pattern = new RegExp("<(/?)" + name + "\\b[^>]*>", "gi")
-  pattern.lastIndex = from
-  var depth = 1
-  var found = pattern.exec(text)
-  while (found !== null) {
-    if (found[1] === "/") {
-      depth--
-      if (depth === 0) return pattern.lastIndex
-    } else if (found[0].charAt(found[0].length - 2) !== "/") {
-      depth++
-    }
-    found = pattern.exec(text)
+function isHiddenBy(declarations) {
+  for (var i = 0; i < declarations.length; i++) {
+    var declaration = declarations[i]
+    if (declaration.name === "display" && /^none\b/i.test(declaration.value)) return true
+    if (declaration.name === "visibility" && /^hidden\b/i.test(declaration.value)) return true
   }
-  return -1
+  return false
 }
 
-function dropHidden(html) {
-  var text = String(html || "")
-  var opening = /<([a-z][a-z0-9]*)\b([^>]*)>/gi
-  var found = opening.exec(text)
-  while (found !== null) {
-    var name = found[1]
-    if (!VOID_ELEMENTS.test(name) && HIDDEN_STYLE.test(found[2] || "")) {
-      var end = closeIndexFor(text, name, opening.lastIndex)
-      if (end < 0) end = text.length
-      text = text.substring(0, found.index) + text.substring(end)
-      opening.lastIndex = found.index
-    }
-    found = opening.exec(text)
+function isHidden(node) {
+  if (VOID_ELEMENTS[node.name] === true) return false
+  var style = attributeValue(node, "style")
+  if (style === "") return false
+  return isHiddenBy(splitDeclarations(style))
+}
+
+// A 1x1 image is a tracking pixel, never something to look at. Dropping them
+// removes both the beacon and a layout pass per message.
+function isTrackingPixel(node) {
+  var width = Number(attributeValue(node, "width"))
+  var height = Number(attributeValue(node, "height"))
+  if (isFinite(width) && attributeValue(node, "width") !== "" && width <= 2) return true
+  if (isFinite(height) && attributeValue(node, "height") !== "" && height <= 2) return true
+  var declarations = splitDeclarations(attributeValue(node, "style"))
+  for (var i = 0; i < declarations.length; i++) {
+    if (declarations[i].name !== "width" && declarations[i].name !== "height") continue
+    if (/^[012](\.\d+)?px/i.test(declarations[i].value)) return true
   }
-  return text
+  return false
+}
+
+// Tables past this depth become plain blocks. Two levels covers the real
+// tabular content in mail — a status table, a receipt — while the layers above
+// it are only there to centre a card in an Outlook window.
+var KEEP_TABLE_DEPTH = 2
+var TABLE_PARTS = {
+  table: true, thead: true, tbody: true, tfoot: true, tr: true, td: true, th: true
+}
+
+// Depth is what matters, not count. Qt lays tables out by resolving column
+// widths against each other, and deeply nested tables with competing widths —
+// which is exactly how notification mail is built — can keep that resolution
+// going far longer than anyone will wait. Real mail in this mailbox reaches
+// nine levels.
+function flattenTablesIn(node, limit, depth) {
+  var kept = []
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      kept.push(child)
+      continue
+    }
+    var childDepth = child.name === "table" ? depth + 1 : depth
+    flattenTablesIn(child, limit, childDepth)
+    if (TABLE_PARTS[child.name] === true && childDepth > limit) {
+      // The layers above a real table exist to position it, so what is worth
+      // keeping is the styling that rode on them, not the table semantics.
+      var style = attributeValue(child, "style")
+      child.name = "div"
+      child.attrs = style === "" ? [] : [{ name: "style", value: style }]
+    }
+    kept.push(child)
+  }
+  node.children = kept
+}
+
+// ================================================================ sanitize
+//
+// Qt lays rich text out synchronously on the GUI thread, and this plugin lives
+// inside the shell that draws the user's whole desktop. A message heavy enough
+// to make that layout take seconds does not just stall the reader — it stalls
+// the bar, the menu and every other panel. So the reader refuses documents past
+// these bounds and shows the plain-text part instead, with a way to override.
+var MAX_RICH_TEXT = 120000
+var MAX_ELEMENTS = 2500
+var MAX_IMAGES = 24
+// Backstop for anything flattening does not tame.
+var MAX_TABLES = 60
+var MAX_TABLE_DEPTH = 4
+
+// One walk over one element's attributes. Doing it as four passes — colours,
+// then handlers, then hrefs, then styles — rebuilt the array four times for
+// every element in the document, which on a large message is most of the work.
+var HANDLER_ATTRIBUTE = /^on[a-z]+$/
+
+function cleanAttributes(node, keepColors, declarations) {
+  var attrs = node.attrs
+  var kept = attrs
+  var dropped = false
+
+  for (var i = 0; i < attrs.length; i++) {
+    var attr = attrs[i]
+    var name = attr.name
+    var drop = false
+    if (!keepColors && COLOUR_ATTRIBUTES[name] === true) drop = true
+    // Event handlers, which Qt ignores but which have no business surviving a
+    // trip through a mail client.
+    else if (name.charCodeAt(0) === 111 && HANDLER_ATTRIBUTE.test(name)) drop = true
+    else if (name === "href" && !safeHref(attr.value)) drop = true
+
+    if (drop && !dropped) {
+      dropped = true
+      kept = attrs.slice(0, i)
+    } else if (!drop && dropped) {
+      kept.push(attr)
+    }
+  }
+  if (dropped) node.attrs = kept
+  if (declarations === null) return
+
+  var survivors = []
+  for (var j = 0; j < declarations.length; j++) {
+    var declaration = declarations[j]
+    if (!keepColors && COLOUR_DECLARATIONS[declaration.name] === true) continue
+    if (/url\s*\(/i.test(declaration.value)
+      && /url\s*\(/i.test(decodeReferences(declaration.value))) continue
+    survivors.push(declaration)
+  }
+  setStyle(node, survivors)
+}
+
+// ----------------------------------------------------------- scaffolding
+//
+// Real mail is mostly scaffolding. A card centred in an Outlook window is six
+// or seven boxes deep, and flattening the tables past the second turns every
+// layer above that into a div with nothing on it — in a live mailbox they are
+// most of the tree.
+//
+// They are not free. Qt parses each one back out of the string, gives it a box
+// and lays the box out, and that half of the work is the half this file cannot
+// move or measure. Handing it a smaller document is the only lever on it.
+//
+// Two shapes, and only two, because both are provably the same document:
+// a box with nothing on it around a single box is that box, and an inline
+// element with nothing on it is nothing at all.
+var TRANSPARENT_INLINE = { span: true, font: true, small: true, big: true }
+// Not <center>: Qt honours it, and a card that was centred would come out
+// against the left edge. A container only counts as plain when it carries no
+// meaning of its own — which is the whole test being applied here.
+var PLAIN_CONTAINER = {
+  div: true, section: true, article: true, aside: true,
+  header: true, footer: true, main: true, nav: true
+}
+
+// The one block this element holds, or null if it holds anything else.
+// Whitespace between blocks is not content and does not count against it.
+function soleBlockChild(node) {
+  var found = null
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      if (child.text.replace(/[\s\u00a0]+/g, "") !== "") return null
+      continue
+    }
+    if (found !== null) return null
+    if (BLOCK_ELEMENTS[child.name] !== true) return null
+    found = child
+  }
+  return found
+}
+
+// Bottom up, so a stack of seven collapses to one rather than to six.
+function collapse(node) {
+  var kept = []
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      kept.push(child)
+      continue
+    }
+    collapse(child)
+    if (child.attrs.length === 0) {
+      if (TRANSPARENT_INLINE[child.name] === true) {
+        for (var j = 0; j < child.children.length; j++) kept.push(child.children[j])
+        continue
+      }
+      if (PLAIN_CONTAINER[child.name] === true) {
+        var inner = soleBlockChild(child)
+        if (inner !== null) {
+          kept.push(inner)
+          continue
+        }
+      }
+    }
+    kept.push(child)
+  }
+  node.children = kept
 }
 
 function sanitize(html, options) {
   var settings = options || {}
-  var text = String(html === undefined || html === null ? "" : html)
-  if (text === "") return { html: "", blockedImages: 0, images: 0, remoteImages: 0 }
-
-  // The message takes the window's theme, so the sender's palette comes out
-  // before anything else looks at the markup.
-  if (settings.keepColors !== true) text = stripColors(text)
-  if (settings.keepTables !== true) text = flattenTables(text, settings.keepTableDepth)
-
-  text = text.replace(/<!--[\s\S]*?-->/g, "")
-  text = stripStyleUrls(text)
-  text = dropHidden(text)
-  for (var i = 0; i < DROPPED_ELEMENTS.length; i++) text = stripElement(text, DROPPED_ELEMENTS[i])
-  text = text.replace(/<(meta|link|base)\b[^>]*>/gi, "")
-
-  // Event handlers, which Qt ignores but which have no business surviving a
-  // trip through a mail client.
-  text = text.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-
-  text = text.replace(/\shref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi,
-    function(match, raw, dq, sq, bare) {
-      var value = dq !== undefined ? dq : (sq !== undefined ? sq : bare)
-      return safeHref(value) ? match : ""
-    })
+  var source = String(html === undefined || html === null ? "" : html)
+  var keepColors = settings.keepColors === true
+  var allowImages = settings.allowRemoteImages === true
+  var limit = Math.max(0, Math.floor(
+    settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
 
   // Every remote image is a network fetch Qt performs while laying the document
   // out, and every completed fetch triggers another layout pass. Tracking
@@ -451,46 +956,187 @@ function sanitize(html, options) {
   var blocked = 0
   var kept = 0
   var loadable = 0
-  var allowImages = settings.allowRemoteImages === true
-  var limit = Math.max(0, Math.floor(
-    settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
 
-  text = replaceTags(text, "img", function(tag) {
-    var source = tag.match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
-    if (!source) return tag
-    var value = source[2] !== undefined ? source[2]
-      : (source[3] !== undefined ? source[3] : source[4])
-    var kind = imageSourceKind(value)
-    // Removed rather than emptied: an <img> with no src still reserves a
-    // broken-image box in Qt's layout, which reads as a rendering fault.
-    if (kind === "inline" || kind === "none") return tag
+  function keepImage(node) {
+    var source = attributeValue(node, "src")
+    if (attributeOf(node, "src") === null) return true
+    var kind = imageSourceKind(source)
+    // cid: and data: are the message's own bytes and never touch the network.
+    if (kind === "inline" || kind === "none") return true
     // Neither a local read nor a private-network request is something the
-    // reader can ever be offered, so these are dropped without being counted
-    // as something "show images" would bring back.
-    if (kind !== "remote") return ""
-    if (isTrackingPixel(tag)) {
+    // reader can ever be offered, so these go without being counted as
+    // something "show images" would bring back.
+    if (kind !== "remote") return false
+    if (isTrackingPixel(node)) {
       blocked++
-      return ""
+      return false
     }
     if (loadable < limit) loadable++
     if (!allowImages || kept >= limit) {
       blocked++
-      return ""
+      return false
     }
     kept++
-    return tag
-  })
+    return true
+  }
 
-  return { html: text, blockedImages: blocked, images: kept, remoteImages: loadable }
+  function clean(node) {
+    var survivors = []
+    for (var i = 0; i < node.children.length; i++) {
+      var child = node.children[i]
+      if (child.type === "text") {
+        survivors.push(child)
+        continue
+      }
+      if (DROPPED_ELEMENTS[child.name] === true) continue
+
+      // The style attribute is the only one worth parsing, and it is parsed
+      // once per element: whether the sender marked this hidden and what
+      // survives of its declarations are two questions about the same list.
+      // Most elements in real mail carry one, so asking twice was most of a
+      // second pass over the document.
+      var style = attributeOf(child, "style")
+      var declarations = style !== null && style.value !== null && style.value !== undefined
+        ? splitDeclarations(style.value)
+        : null
+      if (declarations !== null && VOID_ELEMENTS[child.name] !== true
+        && isHiddenBy(declarations)) continue
+
+      cleanAttributes(child, keepColors, declarations)
+
+      if (child.name === "img" && !keepImage(child)) continue
+
+      clean(child)
+      survivors.push(child)
+    }
+    node.children = survivors
+  }
+
+  var root = parse(source)
+
+  // Read as text before anything is dropped, and only when a caller asked: the
+  // reader wants both of these for a message with no text/plain part of its
+  // own, and the tokenize underneath is the most expensive thing this file
+  // does — paying for it twice to get two readings of one document is the
+  // whole reason this is an option rather than a second call.
+  //
+  // Before, specifically. A message's third picture is its third picture
+  // whether or not the first two were beacons, so the markers are numbered off
+  // the sender's own tree and not off what survives the image policy.
+  var plain = settings.withPlainText === true ? readTree(root) : null
+
+  clean(root)
+  if (settings.keepTables !== true) {
+    flattenTablesIn(root, settings.keepTableDepth === undefined
+      ? KEEP_TABLE_DEPTH : Math.max(0, settings.keepTableDepth), 0)
+  }
+
+  collapse(root)
+
+  // Measured off the tree that is already in hand. The reader needs to know
+  // whether this document is too heavy to lay out, and asking with the string
+  // would mean parsing the whole thing a second time to count what was just
+  // counted.
+  var text = serialize(root)
+  var size = { length: text.length, tags: 0, images: 0, tables: 0, tableDepth: 0 }
+  size.tableDepth = measure(root, 0, size)
+
+  return {
+    html: text,
+    blockedImages: blocked,
+    images: kept,
+    remoteImages: loadable,
+    complexity: size,
+    tooHeavy: isTooHeavy(size),
+    plainText: plain,
+    // The document itself, so the reader can fit it to a window without
+    // parsing back the string that was just written from it. Nothing below
+    // fitting mutates a tree, which is what makes handing this out safe.
+    document: root
+  }
 }
 
 function hasRemoteImages(html) {
   return sanitize(html).blockedImages > 0
 }
 
-// Wraps the sanitised body in a document. `colors` styles the parts the sender
-// did not: the ground, the default text, links and quoted replies.
-// ------------------------------------------------------------ fitting
+// ---------------------------------------------------------- single passes
+
+function stripColors(html) {
+  var root = parse(html)
+  transform(root, function(node) {
+    stripColorsFrom(node)
+    return node
+  })
+  return serialize(root)
+}
+
+function dropHidden(html) {
+  var root = parse(html)
+  transform(root, function(node) {
+    return isHidden(node) ? null : node
+  })
+  return serialize(root)
+}
+
+function flattenTables(html, keepDepth) {
+  var root = parse(html)
+  flattenTablesIn(root, keepDepth === undefined ? KEEP_TABLE_DEPTH : Math.max(0, keepDepth), 0)
+  return serialize(root)
+}
+
+function stripElement(html, name) {
+  var wanted = String(name || "").toLowerCase()
+  var root = parse(html)
+  transform(root, function(node) {
+    return node.name === wanted ? null : node
+  })
+  return serialize(root)
+}
+
+// =============================================================== complexity
+
+function measure(node, depth, size) {
+  var deepest = depth
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") continue
+    size.tags++
+    if (child.name === "img") size.images++
+    var childDepth = depth
+    if (child.name === "table") {
+      size.tables++
+      childDepth = depth + 1
+    }
+    var reached = measure(child, childDepth, size)
+    if (reached > deepest) deepest = reached
+  }
+  return deepest
+}
+
+function complexity(html) {
+  var text = String(html === undefined || html === null ? "" : html)
+  var size = { length: text.length, tags: 0, images: 0, tables: 0, tableDepth: 0 }
+  size.tableDepth = measure(parse(text), 0, size)
+  return size
+}
+
+function tableDepth(html) {
+  return complexity(html).tableDepth
+}
+
+function isTooHeavy(size) {
+  return size.length > MAX_RICH_TEXT
+    || size.tags > MAX_ELEMENTS
+    || size.tables > MAX_TABLES
+    || size.tableDepth > MAX_TABLE_DEPTH
+}
+
+function tooHeavyForRichText(html) {
+  return isTooHeavy(complexity(html))
+}
+
+// ============================================================ fitting to width
 //
 // Qt's rich text engine takes max-width on images, but only in pixels: a
 // percentage collapses the image to nothing at all. An explicit height
@@ -500,45 +1146,123 @@ function hasRemoteImages(html) {
 // derives the height from the aspect ratio on its own.
 var MIN_IMAGE_WIDTH = 40
 
-function stripImageHeights(html) {
-  return String(html || "").replace(/<img\b[^>]*>/gi, function(tag) {
-    return tag
-      .replace(/\sheight\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-      // The character before "height" keeps "max-height" from matching.
-      .replace(/([;"'\s])height\s*:[^;"']*/gi, "$1")
-  })
+// Which of the three fittings to apply, and the width to fit to. Kept as one
+// object because they are asked for together and because the answer for an
+// element is one pass over its attributes however many of them are on.
+function fitting(heights, sides, widths, available) {
+  return {
+    heights: heights === true,
+    sides: sides === true,
+    widths: widths === true,
+    limit: Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
+  }
 }
 
 // Senders lay their mail out for a wide window, and at a narrow one their
 // horizontal padding is most of the screen. The vertical rhythm is worth
 // keeping; the side gutters are not.
-function compactHorizontal(html) {
-  return String(html || "")
-    .replace(/([;"'\s])(padding|margin)-(left|right)\s*:[^;"']*/gi, "$1")
-    .replace(/([;"'\s])(padding|margin)\s*:\s*([^;"']*)/gi,
-      function(all, lead, prop, value) {
-        var parts = String(value).trim().split(/\s+/)
-        if (parts.length >= 4) return lead + prop + ":" + parts[0] + " 0 " + parts[2] + " 0"
-        if (parts.length === 3) return lead + prop + ":" + parts[0] + " 0 " + parts[2]
-        return lead + prop + ":" + parts[0] + " 0"
-      })
+var SIDE_SPACING = {
+  "padding-left": true, "padding-right": true,
+  "margin-left": true, "margin-right": true
+}
+
+function withoutSides(value) {
+  var parts = String(value).replace(/^\s+|\s+$/g, "").split(/\s+/)
+  if (parts.length >= 4) return parts[0] + " 0 " + parts[2] + " 0"
+  if (parts.length === 3) return parts[0] + " 0 " + parts[2]
+  return parts[0] + " 0"
 }
 
 // A table told to be 600px wide inside a 380px window is a horizontal scrollbar
 // over content that would have wrapped perfectly well.
-function relaxFixedWidths(html, available) {
-  var limit = Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
-  return String(html || "").replace(/<(table|td|th|tr|div)\b[^>]*>/gi, function(tag) {
-    return tag
-      .replace(/\swidth\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))/gi, function(match, a, b, c) {
-        return Number(a || b || c) > limit ? "" : match
-      })
-      .replace(/([;"'\s])width\s*:\s*(\d+)px/gi, function(match, lead, px) {
-        return Number(px) > limit ? lead : match
-      })
-  })
+var SIZED_ELEMENTS = { table: true, td: true, th: true, tr: true, div: true }
+
+function fitDeclaration(declaration, node, fit) {
+  var name = declaration.name
+  if (fit.heights && node.name === "img" && name === "height") return null
+  if (fit.sides) {
+    if (SIDE_SPACING[name] === true) return null
+    if (name === "padding" || name === "margin")
+      return { name: name, value: withoutSides(declaration.value) }
+  }
+  if (fit.widths && name === "width" && SIZED_ELEMENTS[node.name] === true) {
+    var pixels = declaration.value.match(/^(\d+)px$/i)
+    if (pixels && Number(pixels[1]) > fit.limit) return null
+  }
+  return declaration
 }
 
+// The attribute list an element is written with. The node keeps its own: this
+// is the reader fitting a message to the window it happens to be, and the same
+// message is fitted again at the next width.
+function fitAttributes(node, fit) {
+  var attrs = node.attrs
+  if (attrs.length === 0) return attrs
+  var isImage = fit.heights && node.name === "img"
+  var isSized = fit.widths && SIZED_ELEMENTS[node.name] === true
+  if (!isImage && !isSized && !fit.sides) return attrs
+
+  var out = null
+  for (var i = 0; i < attrs.length; i++) {
+    var attr = attrs[i]
+    var replacement = attr
+
+    // An explicit height survives the max-width clamp, so a banner scaled from
+    // 1600 to 380 keeps its original height and renders as a smear. Measured
+    // against the engine rather than assumed: strip the heights and Qt derives
+    // the height from the aspect ratio on its own.
+    if (isImage && attr.name === "height") replacement = null
+    else if (isSized && attr.name === "width" && /^\d+$/.test(String(attr.value))
+      && Number(attr.value) > fit.limit) replacement = null
+    else if (attr.name === "style" && attr.value !== null && attr.value !== undefined) {
+      var declarations = splitDeclarations(attr.value)
+      var kept = []
+      var changed = false
+      for (var j = 0; j < declarations.length; j++) {
+        var fitted = fitDeclaration(declarations[j], node, fit)
+        if (fitted !== declarations[j]) changed = true
+        if (fitted) kept.push(fitted)
+      }
+      if (changed) {
+        var style = joinDeclarations(kept)
+        replacement = style === "" ? null : { name: "style", value: style }
+      }
+    }
+
+    if (replacement === attr) {
+      if (out !== null) out.push(attr)
+      continue
+    }
+    if (out === null) out = attrs.slice(0, i)
+    if (replacement !== null) out.push(replacement)
+  }
+  return out === null ? attrs : out
+}
+
+// The reader rebuilds its document whenever the window width or the zoom
+// changes, and the body it rebuilds from has not changed at all — so it hands
+// over the document `sanitize` already built rather than the string that was
+// written from it, and a whole drag costs no parse at all. A string is still
+// accepted, because a caller that only has one should not have to care.
+function documentTree(source) {
+  if (source && source.type === "root") return source
+  return parse(source)
+}
+
+function stripImageHeights(html) {
+  return serialize(parse(html), fitting(true, false, false, 0))
+}
+
+function compactHorizontal(html) {
+  return serialize(parse(html), fitting(false, true, false, 0))
+}
+
+function relaxFixedWidths(html, available) {
+  return serialize(parse(html), fitting(false, false, true, available))
+}
+
+// Wraps the sanitised body in a document. `colors` styles the parts the sender
+// did not: the ground, the default text, links and quoted replies.
 function documentFor(bodyHtml, colors) {
   var palette = colors || {}
   var foreground = String(palette.foreground || "")
@@ -549,8 +1273,12 @@ function documentFor(bodyHtml, colors) {
   // on a wrapper the sender's markup sits inside.
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
   var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
-  var body = stripImageHeights(bodyHtml)
-  if (palette.compact) body = relaxFixedWidths(compactHorizontal(body), maxImage)
+
+  // No parse at all when the caller kept the document: this is rebuilt on every
+  // relayout, and the body it is built from has not changed.
+  var root = documentTree(bodyHtml)
+  var fit = fitting(true, palette.compact === true, palette.compact === true, maxImage)
+
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
     + "a{color:" + link + ";}"
@@ -559,43 +1287,81 @@ function documentFor(bodyHtml, colors) {
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body>"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
-    + body
+    + serialize(root, fit)
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
 }
 
-// ------------------------------------------------------- plain text bodies
+// ========================================================= plain text bodies
 //
 // The reader falls back to plain text when the user asks for it and when a
 // message is too heavy to lay out as rich text. Both cases still want the
-// images to be reachable, so the markers htmlToText leaves behind are turned
-// into links — and this document is built here rather than taken from the
-// sender, so it stays trivially cheap to lay out even for the messages that
-// were too heavy in the first place.
+// images to be reachable, so the markers `toText` leaves behind are turned into
+// links — and this document is built here rather than taken from the sender, so
+// it stays trivially cheap to lay out even for the messages that were too heavy
+// in the first place.
 
 var IMAGE_LINK_PREFIX = "omarchy-image:"
 
-// Counted off the sender's own HTML, with exactly the parts htmlToText drops
-// dropped first. The markers in the text are numbered by that same walk, so the
-// two lists line up position for position — counting these off the sanitised
-// HTML instead would drift the moment a tracking pixel was removed or the image
-// cap was reached, and every marker after it would open the wrong picture.
-function imageSources(html) {
-  var out = []
-  // The same pattern Message.htmlToText numbers the markers with, quotes and
-  // all: the two walks have to see the same tags or every marker after a
-  // disagreement opens the wrong picture. Not the scanner sanitize uses —
-  // nothing here is fetched, so a miss costs a marker rather than a request.
-  var pattern = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi
-  var tags = String(html || "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
-    .match(pattern) || []
-  for (var i = 0; i < tags.length; i++) {
-    var src = tags[i].match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
-    out.push(src ? String(src[2] || src[3] || src[4] || "") : "")
+// Closing one of these ends a line. Everything else is inline as far as a
+// plain-text reading is concerned.
+var BLOCK_ELEMENTS = {
+  p: true, div: true, tr: true, li: true, blockquote: true, section: true,
+  article: true, header: true, footer: true, table: true, ul: true, ol: true,
+  h1: true, h2: true, h3: true, h4: true, h5: true, h6: true
+}
+
+// Images become a marker rather than nothing at all. Stripped outright — which
+// is what removing every tag does — a message built around its pictures reads
+// as a long run of unexplained blank space, with no way to tell an empty
+// message from one whose contents happen not to be text. The number is what
+// lets the reader offer the image itself when the marker is clicked.
+//
+// The markers and `imageSources` are numbered by the same walk over the same
+// tree, so the two lists line up position for position. They have to: a marker
+// that disagrees with the list opens somebody else's picture.
+function flatten(node, state) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      if (!child.raw) state.text += decodeReferences(child.text)
+      continue
+    }
+    if (DROPPED_ELEMENTS[child.name] === true) continue
+    if (child.name === "img") {
+      state.images.push(imageSourceOf(child))
+      state.text += "[image " + state.images.length + "]"
+      continue
+    }
+    if (child.name === "br") {
+      state.text += "\n"
+      continue
+    }
+    if (child.name === "li") state.text += "• "
+    flatten(child, state)
+    if (BLOCK_ELEMENTS[child.name] === true) state.text += "\n"
   }
-  return out
+  return state
+}
+
+function imageSourceOf(node) {
+  var attr = attributeOf(node, "src")
+  return attr && attr.value !== null && attr.value !== undefined ? String(attr.value) : ""
+}
+
+function readTree(root) {
+  var state = flatten(root, { text: "", images: [] })
+  state.text = state.text
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s+|\s+$/g, "")
+  return state
+}
+
+// The sender's HTML as text, with a numbered marker where each picture was, and
+// the pictures those numbers point at.
+function readPlainText(html) {
+  return readTree(parse(html))
 }
 
 function escapeText(text) {

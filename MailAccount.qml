@@ -124,10 +124,17 @@ Item {
   // where it exists, which is native and skips the per-character base64 loop
   // that made this the one expensive step in opening a message.
   property string selectedHtml: ""
-  // The same document with the sender's remote images still in it. This is what
-  // the body cache holds and what `selectedHtml` is derived from, so asking for
-  // the images is a re-render rather than another trip to Gmail.
-  property string preparedHtml: ""
+  // The sender's own HTML, exactly as Gmail handed it over. This is what the
+  // body cache holds and what `selectedHtml` is derived from — so asking for the
+  // images is a re-render rather than another trip to Gmail, and a sanitiser
+  // that learns something new applies it to every message already on disk
+  // rather than only to the ones fetched afterwards.
+  property string sourceHtml: ""
+  // The parsed document behind `selectedHtml`. The reader fits it to whatever
+  // width it happens to be and rebuilds on every relayout, so handing over the
+  // tree rather than the string is the difference between one parse per message
+  // and one per drag step.
+  property var selectedDocument: null
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
@@ -477,7 +484,8 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
-    preparedHtml = ""
+    selectedDocument = null
+    sourceHtml = ""
     remoteImagesAllowed = false
     selectedBlockedImages = 0
     selectedRemoteImages = 0
@@ -493,10 +501,8 @@ Item {
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
       if (root.detailLive || !cached) return
-      // The body is already decoded here, so sanitising it costs a fraction
-      // of a millisecond — worth doing inline to paint in the same frame.
       root.selectedBody = { text: cached.text, source: cached.source }
-      root.renderPrepared(cached.html)
+      root.renderSource(cached.html)
       root.selectedAttachments = cached.attachments
       root.selectedImages = cached.images
       bodyCache.touch(messageId)
@@ -514,18 +520,26 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      // Sanitised once with the images left in, so the cache keeps a document
-      // the reader can still be shown the pictures of; what reaches the screen
-      // is derived from it below, with them out.
-      var prepared = Html.sanitize(rawHtml, ({ allowRemoteImages: true })).html
-      root.selectedBody = decoded
-      root.renderPrepared(prepared)
+      // Both readings of the body out of one parse. The markers in the
+      // plain-text one and the pictures they stand for are numbered by the same
+      // walk over the same tree, so a marker cannot open somebody else's image
+      // — and it is only asked for when the text came from the HTML, because a
+      // message that shipped its own text/plain part never had images in it.
+      // A body never changes once fetched, which is what makes the cache
+      // correct — so when the cache already painted this exact markup there is
+      // nothing here to paint again, and rendering it would be a second parse
+      // of the whole message to arrive at the document already on screen.
+      if (rawHtml !== root.sourceHtml || root.selectedDocument === null) {
+        var ready = root.renderSource(rawHtml, decoded.source === "html")
+        if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html" })
+        root.selectedBody = decoded
+        root.selectedImages = ready.plainText ? ready.plainText.images : []
+      }
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedImages = Html.imageSources(rawHtml)
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
-        html: prepared,
+        html: rawHtml,
         attachments: root.selectedAttachments,
         images: root.selectedImages
       }))
@@ -536,22 +550,29 @@ Item {
     })
   }
 
-  // The one place `selectedHtml` is set. Sanitising the prepared document again
-  // is what removes or restores the images, and it is cheap enough to do on a
-  // button press: the expensive part of opening a message is the decode above.
-  function renderPrepared(prepared) {
-    preparedHtml = String(prepared || "")
-    var ready = Html.sanitize(preparedHtml, ({ allowRemoteImages: remoteImagesAllowed }))
+  // The one place `selectedHtml` is set, and the only place the sender's markup
+  // is parsed on the way to the screen. Everything else the reader needs to
+  // know about this body comes back from the same call — how heavy it is, and
+  // its plain-text reading — because each of those asked separately is another
+  // parse of the whole message to work out what was just worked out.
+  function renderSource(source, withPlainText) {
+    sourceHtml = String(source || "")
+    var ready = Html.sanitize(sourceHtml, ({
+      allowRemoteImages: remoteImagesAllowed,
+      withPlainText: withPlainText === true
+    }))
     selectedHtml = ready.html
+    selectedDocument = ready.document
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
-    selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+    selectedTooHeavy = ready.tooHeavy
+    return ready
   }
 
   function showRemoteImages() {
-    if (remoteImagesAllowed || preparedHtml === "") return
+    if (remoteImagesAllowed || sourceHtml === "") return
     remoteImagesAllowed = true
-    renderPrepared(preparedHtml)
+    renderSource(sourceHtml)
   }
 
   function clearSelection() {
@@ -562,7 +583,8 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
-    preparedHtml = ""
+    selectedDocument = null
+    sourceHtml = ""
     remoteImagesAllowed = false
     selectedImages = []
     selectedBlockedImages = 0

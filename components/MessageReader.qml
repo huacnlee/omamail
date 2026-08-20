@@ -44,6 +44,9 @@ Item {
   // would let a crafted one aim a request at whatever is listening on this
   // machine. They come back only when the reader asks, for this message alone.
   readonly property string rawHtml: service ? service.selectedHtml : ""
+  // The parsed form of the same document. Fitting it to this window is done on
+  // the way out, so this is rebuilt on every relayout without being reparsed.
+  readonly property var bodyDocument: service ? service.selectedDocument : null
   readonly property int remoteImages: service ? service.selectedRemoteImages : 0
   readonly property bool remoteImagesAllowed: !!service && service.remoteImagesAllowed
   // Qt lays rich text out on the GUI thread, and this plugin lives inside the
@@ -301,7 +304,7 @@ Item {
       // fell back to plain text because their own markup was too heavy.
       textFormat: TextEdit.RichText
       text: root.htmlAvailable
-        ? Html.documentFor(root.rawHtml, ({
+        ? Html.documentFor(root.bodyDocument ? root.bodyDocument : root.rawHtml, ({
             foreground: root.textColor,
             background: root.backgroundColor,
             link: root.linkColor,
