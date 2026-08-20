@@ -48,11 +48,14 @@ var BINDINGS = [
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
     group: "Acting", label: "Mark unread" },
 
-  { id: "reply", keys: ["r"], contexts: ["reader"],
+  // Answering works from the list too, the way the row's own menu does: the
+  // message is opened first and the draft waits for it. Binding these to the
+  // reader only left the keyboard able to do less than a right-click.
+  { id: "reply", keys: ["r"], contexts: MAIL,
     group: "Writing", label: "Reply", hint: { reader: "reply" } },
-  { id: "replyAll", keys: ["a"], contexts: ["reader"],
+  { id: "replyAll", keys: ["a"], contexts: MAIL,
     group: "Writing", label: "Reply to all" },
-  { id: "forward", keys: ["f"], contexts: ["reader"],
+  { id: "forward", keys: ["f"], contexts: MAIL,
     group: "Writing", label: "Forward" },
   { id: "compose", keys: ["c"], contexts: MAIL,
     group: "Writing", label: "Compose", hint: { list: "compose" } },

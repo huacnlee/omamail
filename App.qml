@@ -157,6 +157,7 @@ Item {
   // per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
+    pendingComposeMode = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
     service.select(cursorId)
@@ -164,6 +165,7 @@ Item {
   }
 
   function backToList() {
+    pendingComposeMode = ""
     if (service) service.clearSelection()
     currentView = "list"
     Qt.callLater(function() { focusScope.applyContextFocus() })
@@ -196,10 +198,30 @@ Item {
     // it read without having looked at any of it. Enter and "o" open.
   }
 
+  // An answer needs the message it is answering, and opening one only starts
+  // the fetch — select() clears the summary and the body first. Beginning the
+  // draft in the same breath addressed nobody and quoted nothing, which is what
+  // the list row's own Reply menu did. Held until the fetch lands instead.
+  property string pendingComposeMode: ""
+
   function startCompose(mode) {
     if (!service) return
-    compose.begin(String(mode || "new"), service.selectedMessage,
-      service.selectedBody.text)
+    var next = String(mode || "new")
+    if (next !== "new" && !service.selectedMessage) {
+      pendingComposeMode = next
+      return
+    }
+    pendingComposeMode = ""
+    compose.begin(next, service.selectedMessage, service.selectedBody.text)
+  }
+
+  // Answering from the list opens what is being answered first, the way the
+  // row's own menu does. Anything already open is left alone: re-selecting it
+  // would throw away the body that is on screen and fetch it again.
+  function composeFromCursor(mode) {
+    if (!service || cursorId === "") return
+    if (service.selectedId !== cursorId) openMessage(cursorId)
+    startCompose(mode)
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -247,9 +269,9 @@ Item {
     }
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
-    if (id === "reply") return startCompose("reply")
-    if (id === "replyAll") return startCompose("replyAll")
-    if (id === "forward") return startCompose("forward")
+    if (id === "reply") return composeFromCursor("reply")
+    if (id === "replyAll") return composeFromCursor("replyAll")
+    if (id === "forward") return composeFromCursor("forward")
     if (id === "compose") return startCompose("new")
     if (id === "send") return compose.submit()
     if (id === "search") return searchBar.focusField()
@@ -304,6 +326,17 @@ Item {
     // search, a refresh that dropped things. A cursor whose message survived
     // keeps its place; one whose message is gone would be unfindable, and an
     // unfindable cursor sends the next j to the top of the list.
+    // The message a held draft was waiting for. Selecting one clears the body
+    // and refills it from the network, so this fires twice: the guard is the
+    // summary, which is null until the fetch lands.
+    function onSelectedBodyChanged() {
+      if (root.pendingComposeMode === "") return
+      if (!root.service || !root.service.selectedMessage) return
+      var mode = root.pendingComposeMode
+      root.pendingComposeMode = ""
+      root.startCompose(mode)
+    }
+
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
         root.service ? root.service.messages : [], root.cursorId)

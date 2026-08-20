@@ -132,16 +132,28 @@ Item {
       compare(host.lastId, "open")
     }
 
-    function test_a_reader_key_is_dead_in_the_list() {
+    // Answering works from the list as well as the reader: the row's own menu
+    // has always offered it, and the keyboard was able to do less than a
+    // right-click. What is opened first is App.qml's job.
+    function test_answering_works_from_the_list_and_the_reader() {
       keyClick(Qt.Key_R)
-      compare(host.lastId, "", "there is nothing to reply to from the list")
-    }
-
-    function test_and_live_in_the_reader() {
+      compare(host.lastId, "reply", "from the list")
       host.context = "reader"
+      host.lastId = ""
       wait(20)
       keyClick(Qt.Key_R)
-      compare(host.lastId, "reply")
+      compare(host.lastId, "reply", "and from the reader")
+    }
+
+    // Zoom is not: there is no message body to size until one is open.
+    function test_a_reader_only_key_is_dead_in_the_list() {
+      keyClick(Qt.Key_0, Qt.ControlModifier)
+      compare(host.lastId, "", "nothing to zoom from the list")
+      host.context = "reader"
+      host.lastId = ""
+      wait(20)
+      keyClick(Qt.Key_0, Qt.ControlModifier)
+      compare(host.lastId, "zoomReset")
     }
 
     // The mechanism, not a key: leaving a text-entry context has to take the

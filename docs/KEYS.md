@@ -92,9 +92,9 @@ used to exist, and they had.
 | `star` | `s` | mail | Star or unstar |
 | `markRead` | `Shift+I` | mail | Mark read |
 | `markUnread` | `Shift+U` | mail | Mark unread |
-| `reply` | `r` | reader | Reply |
-| `replyAll` | `a` | reader | Reply to all |
-| `forward` | `f` | reader | Forward |
+| `reply` | `r` | mail | Reply |
+| `replyAll` | `a` | mail | Reply to all |
+| `forward` | `f` | mail | Forward |
 | `compose` | `c` | mail | Compose |
 | `send` | `Ctrl+Return` | compose | Send |
 | `search` | `/` | mail | Search |
