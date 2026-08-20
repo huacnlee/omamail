@@ -439,7 +439,9 @@ Item {
   function select(id) { if (current) current.select(id) }
   function clearSelection() { if (current) current.clearSelection() }
   function showRemoteImages() { if (current) current.showRemoteImages() }
-  function selectOffset(delta) { return current ? current.selectOffset(delta) : "" }
+  function cursorOffset(cursorId, delta) {
+    return current ? current.cursorOffset(cursorId, delta) : ""
+  }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
   function selectLabel(name) { if (current) current.selectLabel(name) }

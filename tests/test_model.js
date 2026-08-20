@@ -181,4 +181,37 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
   assert.strictEqual(model.notificationTitle(null), "New message")
 }
 
+// ------------------------------------------------------------- list cursor
+
+// The cursor moves relative to itself. It used to be anchored to `selectedId`
+// — the message the reader has open — which pinned it: nothing is open in list
+// view, so every step resolved to row 0, and in the reader the anchor never
+// advanced, so the cursor moved once and then stopped.
+{
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]
+
+  assert.strictEqual(model.cursorAfterOffset(rows, "", 1), "a",
+    "with no cursor yet, j starts at the top")
+  assert.strictEqual(model.cursorAfterOffset(rows, "", -1), "d",
+    "with no cursor yet, k starts at the bottom")
+
+  // The regression this exists for: pressing j repeatedly keeps moving.
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", 1), "b")
+  assert.strictEqual(model.cursorAfterOffset(rows, "b", 1), "c")
+  assert.strictEqual(model.cursorAfterOffset(rows, "c", 1), "d")
+  assert.strictEqual(model.cursorAfterOffset(rows, "d", 1), "d",
+    "the last row is where moving down stops")
+
+  assert.strictEqual(model.cursorAfterOffset(rows, "c", -1), "b")
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", -1), "a",
+    "the first row is where moving up stops")
+
+  assert.strictEqual(model.cursorAfterOffset([], "a", 1), "",
+    "an empty list has nowhere to go")
+  assert.strictEqual(model.cursorAfterOffset(rows, "gone", 1), "a",
+    "a cursor whose message left the list starts over rather than sticking")
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", 0), "a",
+    "a zero step is a no-op, not a jump to the top")
+}
+
 console.log("test_model.js ok")

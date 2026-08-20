@@ -165,7 +165,7 @@ Item {
 
   function moveCursor(delta) {
     if (!service) return
-    var next = service.selectOffset(delta)
+    var next = service.cursorOffset(cursorId, delta)
     if (next === "") return
     cursorId = next
     // Moving is not opening. This used to open whatever it landed on while the
@@ -183,7 +183,7 @@ Item {
   function actOnCursor(action) {
     if (!service || cursorId === "") return
     var wasOpen = currentView === "reader" && service.selectedId === cursorId
-    var next = service.selectOffset(1)
+    var next = service.cursorOffset(cursorId, 1)
     service.act(cursorId, action)
     if (wasOpen && !Model.survivesAction(service.mailboxKey, action)) {
       if (next !== "" && next !== cursorId) openMessage(next)
@@ -201,6 +201,14 @@ Item {
     target: root.service
     ignoreUnknownSignals: true
     function onReplySent() { compose.finish() }
+    // A list with no cursor cannot be driven: the window opens, the user
+    // presses j, and there is no row to move from. The first row is where the
+    // eye already is, so that is where the cursor starts.
+    function onMessagesChanged() {
+      if (root.cursorId !== "") return
+      var rows = root.service ? root.service.messages : []
+      if (rows.length > 0) root.cursorId = rows[0].id
+    }
     // A new account has no mailbox yet, so the only useful place to be is the
     // page that gives it one.
     // A new mailbox appears as a row in Settings, waiting to be signed in.

@@ -180,6 +180,25 @@ function indexById(list, id) {
   return -1
 }
 
+// Where the list cursor lands after a step. Anchored on the cursor itself,
+// because the cursor and the open message are two different things: nothing is
+// open while the list is being walked, and walking must not move the reader.
+// Anchoring this on the open message pinned it — every step in the list
+// resolved to row 0, and in the reader the anchor never advanced.
+function cursorAfterOffset(list, cursorId, delta) {
+  var source = Array.isArray(list) ? list : []
+  if (source.length === 0) return ""
+  var step = Math.floor(Number(delta) || 0)
+  var index = indexById(source, cursorId)
+  // No cursor, or one whose message has left the list: start from the end the
+  // move is coming from, so j opens at the top and k opens at the bottom.
+  if (index < 0) return step < 0 ? source[source.length - 1].id : source[0].id
+  var next = index + step
+  if (next < 0) next = 0
+  if (next > source.length - 1) next = source.length - 1
+  return source[next].id
+}
+
 function unreadCount(list) {
   var source = Array.isArray(list) ? list : []
   var count = 0

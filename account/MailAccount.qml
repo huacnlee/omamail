@@ -597,13 +597,10 @@ Item {
     detailLoading = false
   }
 
-  function selectOffset(delta) {
-    if (messages.length === 0) return ""
-    var index = Model.indexById(messages, selectedId)
-    var next = index < 0 ? 0 : index + Math.floor(Number(delta) || 0)
-    if (next < 0) next = 0
-    if (next > messages.length - 1) next = messages.length - 1
-    return messages[next].id
+  // The cursor is the list's own position and moves relative to itself.
+  // `selectedId` keeps its separate meaning: which message the reader shows.
+  function cursorOffset(cursorId, delta) {
+    return Model.cursorAfterOffset(messages, cursorId, delta)
   }
 
   // -------------------------------------------------------------- actions
