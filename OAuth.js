@@ -246,6 +246,25 @@ function defaultTheme() {
 // this app that renders outside Quickshell, so it takes the active Omarchy
 // theme with it rather than inventing a look of its own: same monospace, same
 // square corners, same hairline border at 40% foreground.
+
+// Everything the callback carries is attacker-controlled. The loopback listener
+// answers whatever connects to it — it cannot tell Google's redirect from any
+// other request to that port — so a crafted GET can put arbitrary text in
+// error_description, and parseQuery hands it back percent-decoded. Interpolated
+// raw, that text became markup in a page served from http://127.0.0.1, which is
+// an origin the browser trusts as much as any other.
+function escapeHtml(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+// `body` is markup by design — the success page carries a script that closes the
+// tab — so it is the caller's job to have escaped anything untrusted inside it.
+// Everything else this builds is escaped here.
 function themedPage(theme, options) {
   var palette = theme || defaultTheme()
   var settings = options || {}
@@ -257,7 +276,7 @@ function themedPage(theme, options) {
 
   return "<!doctype html><html><head><meta charset=\"utf-8\">"
     + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-    + "<title>" + settings.title + "</title><style>"
+    + "<title>" + escapeHtml(settings.title) + "</title><style>"
     + "*{box-sizing:border-box}"
     + "html,body{height:100%}"
     + "body{margin:0;background:" + bg + ";color:" + fg + ";"
@@ -275,7 +294,7 @@ function themedPage(theme, options) {
     + "<rect x=\"1\" y=\"3.5\" width=\"14\" height=\"9\"/>"
     + "<path d=\"" + (settings.failed ? "M1 3.5 L8 8.5 L15 3.5" : "M1 3.5 L8 0.8 L15 3.5") + "\"/>"
     + "</svg>"
-    + "<h1>" + settings.heading + "</h1>"
+    + "<h1>" + escapeHtml(settings.heading) + "</h1>"
     + settings.body
     + "</main></body></html>"
 }
@@ -304,7 +323,7 @@ function failureResponse(theme, reason) {
     title: "Sign-in failed",
     heading: "Sign-in did not finish",
     failed: true,
-    body: "<p>" + (detail ? detail : "Google did not complete the authorization.") + "</p>"
+    body: "<p>" + (detail ? escapeHtml(detail) : "Google did not complete the authorization.") + "</p>"
       + "<p>Close this tab and try again from the Omamail window.</p>"
   }))
 }
