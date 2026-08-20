@@ -274,6 +274,11 @@ key. What matters while working:
 
 ## Verification
 
+- `make test` runs the node tests, the source regressions, and the QML tests.
+  The release workflow runs `make test-js test-shell` instead: the QML tests
+  need the Qt the plugin actually runs on, and a runner ships an older one that
+  disagrees about exactly the behaviour they exercise. They are a local gate,
+  for the same reason `qmllint` is.
 - Run `make validate` after any QML or behavior change. It runs the node tests,
   the source regressions, `qmllint`, and `omarchy plugin validate`.
 - `qmllint` cannot resolve `qs.Ui` / `qs.Commons` and reports unresolved-import

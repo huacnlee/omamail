@@ -38,34 +38,19 @@ jobs:
           fi
           echo "version $manifest"
 
-      # The QML tests run offscreen and import no theme, so they need the Qt
-      # engine but not a compositor and not the Omarchy shell. They are the only
-      # thing that can catch a component owning the focus it is not using, or a
-      # Repeater quietly building no shortcuts at all, so they run here rather
-      # than being skipped when the tooling is absent.
-      - name: Install the Qt QML test tooling
-        run: |
-          sudo apt-get update
-          # Named one by one rather than left to recommends: QtQuick pulls its
-          # companions in as Recommends, which --no-install-recommends drops,
-          # and the first run failed on QtQml.WorkerScript arriving that way.
-          sudo apt-get install -y --no-install-recommends \
-            qt6-declarative-dev-tools \
-            qml6-module-qttest \
-            qml6-module-qtqml \
-            qml6-module-qtqml-workerscript \
-            qml6-module-qtquick \
-            qml6-module-qtquick-window \
-            qml6-module-qtquick-templates \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts
-
       # The parsing, formatting and decision rules are plain JS and the source
-      # checks are shell, so those need nothing at all. Only qmllint needs the
-      # Omarchy shell on the import path, which a runner does not have — that
-      # one stays a local gate.
+      # checks are shell, so those need nothing at all and run here.
+      #
+      # Two gates stay local. qmllint needs the Omarchy shell on the import
+      # path, which a runner does not have. The QML tests need the Qt the
+      # plugin actually runs on: Ubuntu ships 6.4 and Omarchy is current, and
+      # they exercise exactly the engine behaviour that differs between them —
+      # shortcut objects rebuilt when a context changes fire on one and not the
+      # other. Running them here would report on an engine nobody uses.
+      #
+      # `make test` includes them, so it is not what runs here.
       - name: Test
-        run: make test
+        run: make test-js test-shell
 
       - name: Publish the release
         env:
