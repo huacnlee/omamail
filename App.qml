@@ -134,6 +134,10 @@ Item {
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
     if (payload.compose === true) startCompose("new")
+    // The list is usually already loaded by the time the window is summoned —
+    // the service keeps running while it is shut — so waiting for the next
+    // change to seat the cursor leaves the first j with nowhere to move from.
+    cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
     Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
@@ -201,13 +205,23 @@ Item {
   // Acting on the open message closes it: it is about to leave this list.
   function actOnCursor(action) {
     if (!service || cursorId === "") return
-    var wasOpen = currentView === "reader" && service.selectedId === cursorId
-    var next = service.cursorOffset(cursorId, 1)
-    service.act(cursorId, action)
-    if (wasOpen && !Model.survivesAction(service.mailboxKey, action)) {
-      if (next !== "" && next !== cursorId) openMessage(next)
+    var acted = cursorId
+    var wasOpen = currentView === "reader" && service.selectedId === acted
+    // Worked out before the action, while the row still has neighbours.
+    var next = Model.cursorAfterRemoval(service.messages, acted)
+    var leaves = !Model.survivesAction(service.mailboxKey, action)
+    service.act(acted, action)
+    if (!leaves) return
+    // The row is going and the cursor must not go with it: a cursor on a
+    // message that is no longer listed cannot be found, so the next j restarts
+    // at the top. Archiving one message used to send it back to the first row.
+    if (wasOpen) {
+      if (next !== "") openMessage(next)
       else backToList()
+      return
     }
+    cursorId = next
+    revealCursorRow()
   }
 
   function goMailbox(key) {
@@ -286,13 +300,13 @@ Item {
     target: root.service
     ignoreUnknownSignals: true
     function onReplySent() { compose.finish() }
-    // A list with no cursor cannot be driven: the window opens, the user
-    // presses j, and there is no row to move from. The first row is where the
-    // eye already is, so that is where the cursor starts.
+    // Every time the list is replaced — first arrival, a mailbox switch, a
+    // search, a refresh that dropped things. A cursor whose message survived
+    // keeps its place; one whose message is gone would be unfindable, and an
+    // unfindable cursor sends the next j to the top of the list.
     function onMessagesChanged() {
-      if (root.cursorId !== "") return
-      var rows = root.service ? root.service.messages : []
-      if (rows.length > 0) root.cursorId = rows[0].id
+      root.cursorId = Model.cursorAfterReload(
+        root.service ? root.service.messages : [], root.cursorId)
     }
     // A new account has no mailbox yet, so the only useful place to be is the
     // page that gives it one.

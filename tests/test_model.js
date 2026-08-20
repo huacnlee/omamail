@@ -254,4 +254,39 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     "content shorter than the viewport never scrolls")
 }
 
+
+// ------------------------------------------- the cursor outliving its message
+
+// Two ways a cursor stops pointing at anything: the row it is on is acted on
+// and leaves, or the whole list is replaced under it by a mailbox switch, a
+// search, or a refresh. Both used to leave the cursor on a message that is no
+// longer there, and cursorAfterOffset restarts at the top from that — so one
+// archive sent the next j back to the first row.
+{
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }]
+
+  // Acting on a row: the cursor takes the row's place, which is the one below.
+  assert.strictEqual(model.cursorAfterRemoval(rows, "a"), "b")
+  assert.strictEqual(model.cursorAfterRemoval(rows, "b"), "c")
+  // Except at the end, where there is nothing below and the one above is where
+  // the eye already is.
+  assert.strictEqual(model.cursorAfterRemoval(rows, "c"), "b")
+  assert.strictEqual(model.cursorAfterRemoval([{ id: "only" }], "only"), "",
+    "emptying the list leaves no cursor to hold")
+  assert.strictEqual(model.cursorAfterRemoval(rows, "gone"), "",
+    "a cursor that is already adrift has no neighbour to inherit")
+  assert.strictEqual(model.cursorAfterRemoval([], "a"), "")
+
+  // A list replaced underneath: keep the cursor if its message survived the
+  // reload, otherwise start at the top.
+  assert.strictEqual(model.cursorAfterReload(rows, "b"), "b",
+    "a refresh that kept the message keeps the cursor")
+  assert.strictEqual(model.cursorAfterReload(rows, "gone"), "a",
+    "a mailbox switch lands on the first row rather than nowhere")
+  assert.strictEqual(model.cursorAfterReload(rows, ""), "a",
+    "and so does a list arriving for the first time")
+  assert.strictEqual(model.cursorAfterReload([], "b"), "",
+    "an empty mailbox has no row to sit on")
+}
+
 console.log("test_model.js ok")

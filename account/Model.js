@@ -199,6 +199,32 @@ function cursorAfterOffset(list, cursorId, delta) {
   return source[next].id
 }
 
+// Where the cursor goes when the row it is on is about to leave the list.
+// Called with the list as it still is, so the departing row still has
+// neighbours: the one below takes its place, or the one above at the end.
+//
+// Leaving the cursor on a row that has gone is not harmless. cursorAfterOffset
+// cannot find it, so it restarts at the top — which is how archiving one
+// message sent the next j back to the first row.
+function cursorAfterRemoval(list, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  if (index + 1 < source.length) return source[index + 1].id
+  if (index > 0) return source[index - 1].id
+  return ""
+}
+
+// Where the cursor goes when the whole list is replaced under it — a mailbox
+// switch, a search, a refresh that dropped things. The message it was on keeps
+// it if it survived; otherwise the top, which is where the eye goes anyway.
+function cursorAfterReload(list, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  if (source.length === 0) return ""
+  if (indexById(source, cursorId) >= 0) return cursorId
+  return source[0].id
+}
+
 // Where the scroller has to sit for a row to be on screen. The list is a Column
 // in a Flickable rather than a ListView — the panel already owns a scroller and
 // nesting a second one gives every wheel event two plausible targets — so there
