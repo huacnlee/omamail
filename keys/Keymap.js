@@ -20,12 +20,12 @@ var ANY = ["*"]
 var BINDINGS = [
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
     group: "Moving", label: "Move down",
-    display: "j / k", hint: { list: "move" } },
+    hintKey: "j / k", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
     group: "Moving", label: "Move up" },
   { id: "open", keys: ["Return", "o"], contexts: ["list"],
     group: "Moving", label: "Open the selected message",
-    hint: { list: "open" } },
+    hintKey: "o", hint: { list: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],
     group: "Moving", label: "Back to the list" },
 
@@ -153,12 +153,37 @@ function sequencesFor(context) {
   return out
 }
 
-// How a row reads. Usually its own keys; `display` overrides it where one line
-// stands for a pair, as "j / k" does for moving.
+// Qt's sequence syntax is not the UI's. A chord is written "g,i" and read "g
+// then i"; Escape and Return are named for the keycaps people look at. Written
+// as rules rather than per-row overrides, so a chord added later reads properly
+// without anyone remembering to spell it out.
+function readableSequence(sequence) {
+  var text = String(sequence || "")
+  if (text.indexOf(",") > 0) return text.split(",").join(" then ")
+  text = text.replace("Return", "Enter")
+  if (text === "Escape") return "Esc"
+  return text
+}
+
+// How a row reads on the help sheet, which enumerates: every key that works is
+// named, separated so a slash inside a sequence is not mistaken for the
+// separator.
 function displayFor(binding) {
   if (!binding) return ""
-  if (binding.display) return binding.display
-  return (binding.keys || []).join(" / ")
+  var keys = binding.keys || []
+  var out = []
+  for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))
+  return out.join(", ")
+}
+
+// How a row reads on the status bar, which is a hint rather than a reference:
+// one short form, and sometimes one line standing for a pair, as "j / k" does
+// for moving. These are two different jobs, and one field could not do both —
+// enumerating gave the sheet "j / k  Move down", which is not true of either.
+function hintKeyFor(binding) {
+  if (!binding) return ""
+  if (binding.hintKey) return binding.hintKey
+  return displayFor(binding)
 }
 
 function hintTextFor(binding, context) {
@@ -193,7 +218,7 @@ function hintsFor(context) {
   var rows = bindingsFor(context)
   for (var i = 0; i < rows.length; i++) {
     var text = hintTextFor(rows[i], context)
-    if (text !== "") out.push(({ key: displayFor(rows[i]), label: text }))
+    if (text !== "") out.push(({ key: hintKeyFor(rows[i]), label: text }))
   }
   return out
 }

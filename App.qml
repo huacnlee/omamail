@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "keys/Keymap.js" as Keymap
 import "components"
 
 // The application window. The shell loads this entry point when the plugin is
@@ -958,25 +959,7 @@ Item {
           textColor: root.foreground
           dimColor: root.dimmer
           panelFontFamily: root.fontFamily
-          hints: {
-            if (root.showPage) return [({ key: "Esc", label: "back" })]
-            if (root.composing) return [
-              ({ key: "Ctrl+Enter", label: "send" }),
-              ({ key: "Esc", label: "close" })
-            ]
-            if (root.currentView === "reader") return [
-              ({ key: "Esc", label: "back" }),
-              ({ key: "r", label: "reply" }),
-              ({ key: "e", label: "archive" }),
-              ({ key: "d", label: "trash" })
-            ]
-            return [
-              ({ key: "j / k", label: "move" }),
-              ({ key: "o", label: "open" }),
-              ({ key: "e", label: "archive" }),
-              ({ key: "c", label: "compose" })
-            ]
-          }
+          hints: Keymap.hintsFor(focusScope.keyContext)
         }
       }
 

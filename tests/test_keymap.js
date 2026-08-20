@@ -111,15 +111,33 @@ groups.forEach(function (group) {
   })
 })
 
-assert.strictEqual(keymap.displayFor(byId("cursorUp")), "k / Up",
-  "keys read as themselves unless the row overrides it")
-assert.strictEqual(keymap.displayFor(byId("cursorDown")), "j / k",
-  "the pair reads as a pair where one line stands for both")
+// The sheet enumerates and the status bar hints; one field could not do both.
+// Enumerating put "j / k  Move down" on the sheet, which is true of neither.
+assert.strictEqual(keymap.displayFor(byId("cursorUp")), "k, Up",
+  "the sheet names every key that works")
+assert.strictEqual(keymap.displayFor(byId("cursorDown")), "j, Down")
+assert.strictEqual(keymap.displayFor(byId("search")), "/, Ctrl+K",
+  "a slash inside a sequence must not read as the separator")
+
+// Qt's sequence syntax is not the UI's.
+assert.strictEqual(keymap.readableSequence("g,i"), "g then i",
+  "a chord reads as a chord, not as Qt's comma")
+assert.strictEqual(keymap.readableSequence("Escape"), "Esc")
+assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
+assert.strictEqual(keymap.displayFor(byId("goInbox")), "g then i")
+assert.strictEqual(keymap.displayFor(byId("open")), "Enter, o")
+assert.strictEqual(keymap.displayFor(byId("back")), "Esc")
+assert.strictEqual(keymap.hintKeyFor(byId("cursorDown")), "j / k",
+  "the status bar shows one line for the pair")
+assert.strictEqual(keymap.hintKeyFor(byId("open")), "o",
+  "and the short form of a row with several keys")
+assert.strictEqual(keymap.hintKeyFor(byId("archive")), "e",
+  "falling back to the keys when there is nothing to shorten")
 
 const listHints = keymap.hintsFor("list")
-deepEqual(listHints.map(function (h) { return h.label }),
-  ["move", "open", "archive", "compose"],
-  "the status bar offers what the list can do")
+deepEqual(listHints.map(function (h) { return h.key + " " + h.label }),
+  ["j / k move", "o open", "e archive", "c compose"],
+  "the status bar offers what the list can do, in its short form")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],

@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../keys/Keymap.js" as Keymap
 
 // The reference sheet behind Ctrl+?. A plain list rather than a dialog because
 // it never needs an answer — Esc, Ctrl+? again, or a click puts it away.
@@ -14,26 +15,10 @@ Rectangle {
 
   signal dismissed()
 
-  readonly property var rows: [
-    { keys: "j / k", action: "Move down / up" },
-    { keys: "Enter or o", action: "Open the selected message" },
-    { keys: "Esc", action: "Back to the list" },
-    { keys: "e", action: "Archive" },
-    { keys: "d", action: "Move to trash" },
-    { keys: "s", action: "Star or unstar" },
-    { keys: "Shift+I / Shift+U", action: "Mark read / unread" },
-    { keys: "r / a / f", action: "Reply, reply all, forward" },
-    { keys: "c", action: "Compose" },
-    { keys: "Ctrl+Enter", action: "Send" },
-    { keys: "/ or Ctrl+K", action: "Search" },
-    { keys: "g then i / s / u / t", action: "Inbox, starred, unread, sent" },
-    { keys: "Right-click a row", action: "Archive, trash, spam, star" },
-    { keys: "Ctrl+= / Ctrl+-", action: "Zoom the message body" },
-    { keys: "Ctrl+0", action: "Reset the zoom" },
-    { keys: "F5", action: "Check for mail" },
-    { keys: "Ctrl+?", action: "Toggle this sheet" },
-    { keys: "Esc", action: "Back, or close the window" }
-  ]
+  // From the table, so this sheet cannot drift from what the keys actually do.
+  // It used to be written by hand, and had: Esc listed twice, no `u` and no
+  // `?`, and "Right-click a row" among the keyboard shortcuts.
+  readonly property var groups: Keymap.helpGroups()
 
   color: Qt.rgba(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.96)
 
@@ -44,7 +29,7 @@ Rectangle {
 
   Column {
     anchors.centerIn: parent
-    width: Math.min(parent.width - Style.space(80), Style.space(420))
+    width: Math.min(parent.width - Style.space(80), Style.space(460))
     spacing: Style.space(6)
 
     Text {
@@ -61,34 +46,58 @@ Rectangle {
     }
 
     Repeater {
-      model: root.rows
+      model: root.groups
 
-      Item {
+      Column {
+        id: group
         required property var modelData
         width: parent.width
-        implicitHeight: Style.space(20)
+        spacing: Style.space(6)
 
-        Text {
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(150)
-          text: modelData.keys
-          color: root.textColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+        Item {
+          width: parent.width
+          implicitHeight: Style.space(8)
         }
 
         Text {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(155)
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          text: modelData.action
+          text: group.modelData.name
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          font.bold: true
+        }
+
+        Repeater {
+          model: group.modelData.rows
+
+          Item {
+            required property var modelData
+            width: group.width
+            implicitHeight: Style.space(20)
+
+            Text {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(178)
+              text: modelData.keys
+              color: root.textColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Text {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(183)
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: modelData.action
+              color: root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+          }
         }
       }
     }
