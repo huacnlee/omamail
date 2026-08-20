@@ -51,4 +51,23 @@ if grep -vE '^\s*//' BarWidget.qml | grep -n 'barForeground'; then
   fail "BarWidget has no barForeground; read bar.foreground instead"
 fi
 
+# 5. Nothing tracked may be large. This plugin is installed by cloning it, so
+#    every megabyte in the tree is a megabyte between the user and a working
+#    mailbox — and the things that get big are never the source. A published
+#    design canvas with the editor bundled into it was 805 KB of the 1.4 MB a
+#    clone cost, for content that was already in the repo beside it as six
+#    small files, and an unreferenced screenshot was another 320 KB.
+#
+#    Anything genuinely large belongs somewhere a clone does not have to carry:
+#    a release asset, or GitHub's own attachment host, which is where the
+#    README's screenshots already live.
+limit=$((128 * 1024))
+oversized=$(git ls-files -z \
+  | xargs -0 -I{} sh -c 'size=$(wc -c < "{}" 2>/dev/null || echo 0); [ "$size" -gt '"$limit"' ] && printf "%s\t%s\n" "$size" "{}"' \
+  || true)
+if [ -n "$oversized" ]; then
+  printf '%s\n' "$oversized" >&2
+  fail "the files above are over 128 KB; keep large assets out of the clone"
+fi
+
 printf 'test_source.sh ok\n'
