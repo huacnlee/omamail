@@ -89,6 +89,7 @@ Item {
   // Set while a picked provider is being turned into an account row, so the
   // signal that normally lands the user in Settings leaves them on the form.
   property bool openingNewMailbox: false
+  property bool accountDraftOpen: false
   property bool settingsVisible: false
   // Something the window needs to say that no account is reporting — refusing a
   // duplicate mailbox, for one. Cleared on a timer so it cannot outlive its
@@ -247,6 +248,7 @@ Item {
         // that, adding a mailbox is what makes one.
         if (root.service && root.service.hasSavedAccounts) {
           root.openingNewMailbox = true
+          root.accountDraftOpen = true
           root.service.addAccount(providerId)
         } else if (root.service) {
           root.service.configureCurrentAccount({ provider: providerId })
@@ -300,6 +302,8 @@ Item {
   }
 
   function leaveSetup() {
+    if (accountDraftOpen && service) service.discardCurrentDraft()
+    accountDraftOpen = false
     setupVisible = false
     editingProvider = ""
   }
@@ -309,6 +313,7 @@ Item {
     var index = service.indexOfActiveAccount()
     if (index < 0) return
     service.removeAccountAt(index)
+    accountDraftOpen = false
     leaveSetup()
     settingsVisible = true
   }

@@ -25,6 +25,7 @@ Item {
   height: 0
 
   required property var auth
+  required property string email
 
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
@@ -393,7 +394,7 @@ Item {
     Qt.callLater(function() {
       if (!root) return
       callback({
-        email: username,
+        email: root.email || username,
         messagesTotal: 0,
         threadsTotal: 0,
         historyId: ""

@@ -265,6 +265,11 @@ assert.strictEqual(accounts.count(accounts.removeAt(pendingList, 99)), 3)
 assert.strictEqual(accounts.count(accounts.removeAt(pendingList, -1)), 3)
 assert.strictEqual(accounts.count(accounts.removeAt(pendingList, "nonsense")), 3)
 
+// Cancelling Add removes only the unnamed draft. Once an address has been
+// saved, Back is navigation and must not delete the account.
+assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 1)), 2)
+assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
+
 // ---------------------------------------------------------------- providers
 //
 // A mailbox is Gmail, IMAP, or HEY. The rules that matter are what an upgrade

@@ -30,6 +30,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  property string configuredEmail: ""
 
   // Which mailbox this is, and whether it is the one on screen. An inactive
   // account still counts its unread mail; it just does not fetch lists or
@@ -976,7 +977,10 @@ Item {
 
   Component {
     id: imapClientComponent
-    ImapClient { auth: authLoader.item }
+    ImapClient {
+      auth: authLoader.item
+      email: root.configuredEmail
+    }
   }
 
   CacheStore {

@@ -69,8 +69,8 @@ Column {
   function syncFromStore() {
     if (!auth || !auth.settings) return
     var settings = auth.settings
+    addressField.text = service ? service.accountAddress : ""
     if (settings.username !== "") {
-      addressField.text = settings.username
       usernameField.text = settings.username
     }
     if (settings.imapHost !== "") {

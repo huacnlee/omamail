@@ -240,6 +240,14 @@ function removeAt(list, index) {
   return source
 }
 
+function discardDraftAt(list, index) {
+  var source = copyList(list)
+  var at = Math.floor(Number(index))
+  if (!isFinite(at) || at < 0 || at >= source.accounts.length) return source
+  if (source.accounts[at].id !== "") return source
+  return removeAt(source, at)
+}
+
 function setActive(list, id) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)

@@ -138,7 +138,9 @@ Item {
       email: "", clientId: "", clientSecret: "",
       provider: provider || Provider.DEFAULT_ID
     }))
-    saveAccounts()
+    // This row is working state for the form, not an account yet. Persisting
+    // it here leaves a "New account" behind when Back cancels Add; the first
+    // successful configureAccount call is what saves it.
     // Switching to it is the whole point, and it has to happen before the page
     // opens: without this the setup page ran against whichever mailbox was
     // already on screen, so adding an account showed the *existing* account's
@@ -146,6 +148,15 @@ Item {
     activeIndex = accountCount - 1
     refreshCurrent()
     accountAdded()
+  }
+
+  function discardCurrentDraft() {
+    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var next = Accounts.discardDraftAt(accountList, index)
+    if (Accounts.count(next) === accountCount) return
+    activeIndex = -1
+    accountList = next
+    refreshCurrent()
   }
 
   function removeAccount(id) {
@@ -377,6 +388,11 @@ Item {
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
+  readonly property string accountAddress: {
+    var accounts = accountList ? accountList.accounts : []
+    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
+  }
   readonly property int inboxUnread: current ? current.inboxUnread : 0
   readonly property var messages: current ? current.messages : []
   readonly property var labels: current ? current.labels : []
@@ -509,6 +525,7 @@ Item {
 
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
+      configuredEmail: entry ? entry.email : ""
       // Which service this mailbox is, and — for the one that needs them — the
       // servers it talks to. Both come off the account entry, so changing an
       // account's provider in the file rebuilds it as that provider.

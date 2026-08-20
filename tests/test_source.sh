@@ -129,6 +129,23 @@ if grep -qE 'signal (signIn|signOut|remove)Requested' components/SettingsPage.qm
 fi
 grep -q 'signal removeRequested()' components/ImapSetupPage.qml \
   || fail "the IMAP edit page needs to own account removal"
+grep -q 'service\.discardCurrentDraft()' App.qml \
+  || fail "leaving Add account must discard its unnamed draft"
+if awk '
+  /function addAccount\(/ { in_add = 1 }
+  in_add && /saveAccounts\(\)/ { found = 1 }
+  in_add && /^  \}/ { exit found ? 0 : 1 }
+  END { exit found ? 0 : 1 }
+' Service.qml; then
+  fail "Add account must not persist its blank draft"
+fi
+
+# An IMAP address is account identity; its login username may legitimately be
+# different and must never replace it while editing or loading the profile.
+grep -q 'addressField\.text = service ? service\.accountAddress' components/ImapSetupPage.qml \
+  || fail "IMAP Edit must read the saved account address separately from username"
+grep -q 'email: root\.configuredEmail' account/MailAccount.qml \
+  || fail "the IMAP profile must preserve the configured account address"
 
 # Destructive account actions consume the semantic danger role passed from the
 # app. Calling it dim or urgent at the button loses the action's meaning.

@@ -322,10 +322,11 @@ Column {
   }
 
   Row {
-    visible: root.signedIn
+    visible: root.signedIn || root.accountCount > 1
     spacing: Style.space(8)
 
     Button {
+      visible: root.signedIn
       text: "Sign out"
       foreground: root.textColor
       bordered: true
