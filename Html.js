@@ -371,26 +371,28 @@ function serializeAttributes(attrs) {
 // Written into one array and joined once. Returning a string per level builds a
 // fresh copy of everything below it at every level, which on a document a few
 // hundred elements deep is most of the time this file spends.
-function serializeInto(node, out) {
+function serializeInto(node, out, fit) {
   if (node.type === "text") {
     out.push(node.text)
     return
   }
   if (node.type !== "root") {
-    out.push("<" + node.name + serializeAttributes(node.attrs))
+    out.push("<" + node.name + serializeAttributes(fit ? fitAttributes(node, fit) : node.attrs))
     if (VOID_ELEMENTS[node.name] === true || node.selfClosing) {
       out.push(node.selfClosing ? "/>" : ">")
       return
     }
     out.push(">")
   }
-  for (var i = 0; i < node.children.length; i++) serializeInto(node.children[i], out)
+  for (var i = 0; i < node.children.length; i++) serializeInto(node.children[i], out, fit)
   if (node.type !== "root") out.push("</" + node.name + ">")
 }
 
-function serialize(node) {
+// `fit` is applied on the way out rather than to the tree, so the tree is still
+// exactly what the parse produced and can be handed to the next width.
+function serialize(node, fit) {
   var out = []
-  serializeInto(node, out)
+  serializeInto(node, out, fit)
   return out.join("")
 }
 
@@ -1036,17 +1038,16 @@ function tooHeavyForRichText(html) {
 // derives the height from the aspect ratio on its own.
 var MIN_IMAGE_WIDTH = 40
 
-function stripImageHeightsIn(node) {
-  transform(node, function(child) {
-    if (child.name !== "img") return child
-    removeAttribute(child, "height")
-    // By name, so "max-height" is not a height: it is the clamp, and it is the
-    // one declaration that has to survive.
-    rewriteStyle(child, function(declaration) {
-      return declaration.name === "height" ? null : declaration
-    })
-    return child
-  })
+// Which of the three fittings to apply, and the width to fit to. Kept as one
+// object because they are asked for together and because the answer for an
+// element is one pass over its attributes however many of them are on.
+function fitting(heights, sides, widths, available) {
+  return {
+    heights: heights === true,
+    sides: sides === true,
+    widths: widths === true,
+    limit: Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
+  }
 }
 
 // Senders lay their mail out for a wide window, and at a narrow one their
@@ -1064,52 +1065,98 @@ function withoutSides(value) {
   return parts[0] + " 0"
 }
 
-function compactHorizontalIn(node) {
-  transform(node, function(child) {
-    rewriteStyle(child, function(declaration) {
-      if (SIDE_SPACING[declaration.name] === true) return null
-      if (declaration.name !== "padding" && declaration.name !== "margin") return declaration
-      return { name: declaration.name, value: withoutSides(declaration.value) }
-    })
-    return child
-  })
-}
-
 // A table told to be 600px wide inside a 380px window is a horizontal scrollbar
 // over content that would have wrapped perfectly well.
 var SIZED_ELEMENTS = { table: true, td: true, th: true, tr: true, div: true }
 
-function relaxFixedWidthsIn(node, available) {
-  var limit = Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
-  transform(node, function(child) {
-    if (SIZED_ELEMENTS[child.name] !== true) return child
-    var width = attributeValue(child, "width")
-    if (/^\d+$/.test(width) && Number(width) > limit) removeAttribute(child, "width")
-    rewriteStyle(child, function(declaration) {
-      if (declaration.name !== "width") return declaration
-      var pixels = declaration.value.match(/^(\d+)px$/i)
-      return pixels && Number(pixels[1]) > limit ? null : declaration
-    })
-    return child
-  })
+function fitDeclaration(declaration, node, fit) {
+  var name = declaration.name
+  if (fit.heights && node.name === "img" && name === "height") return null
+  if (fit.sides) {
+    if (SIDE_SPACING[name] === true) return null
+    if (name === "padding" || name === "margin")
+      return { name: name, value: withoutSides(declaration.value) }
+  }
+  if (fit.widths && name === "width" && SIZED_ELEMENTS[node.name] === true) {
+    var pixels = declaration.value.match(/^(\d+)px$/i)
+    if (pixels && Number(pixels[1]) > fit.limit) return null
+  }
+  return declaration
+}
+
+// The attribute list an element is written with. The node keeps its own: this
+// is the reader fitting a message to the window it happens to be, and the same
+// message is fitted again at the next width.
+function fitAttributes(node, fit) {
+  var attrs = node.attrs
+  if (attrs.length === 0) return attrs
+  var isImage = fit.heights && node.name === "img"
+  var isSized = fit.widths && SIZED_ELEMENTS[node.name] === true
+  if (!isImage && !isSized && !fit.sides) return attrs
+
+  var out = null
+  for (var i = 0; i < attrs.length; i++) {
+    var attr = attrs[i]
+    var replacement = attr
+
+    // An explicit height survives the max-width clamp, so a banner scaled from
+    // 1600 to 380 keeps its original height and renders as a smear. Measured
+    // against the engine rather than assumed: strip the heights and Qt derives
+    // the height from the aspect ratio on its own.
+    if (isImage && attr.name === "height") replacement = null
+    else if (isSized && attr.name === "width" && /^\d+$/.test(String(attr.value))
+      && Number(attr.value) > fit.limit) replacement = null
+    else if (attr.name === "style" && attr.value !== null && attr.value !== undefined) {
+      var declarations = splitDeclarations(attr.value)
+      var kept = []
+      var changed = false
+      for (var j = 0; j < declarations.length; j++) {
+        var fitted = fitDeclaration(declarations[j], node, fit)
+        if (fitted !== declarations[j]) changed = true
+        if (fitted) kept.push(fitted)
+      }
+      if (changed) {
+        var style = joinDeclarations(kept)
+        replacement = style === "" ? null : { name: "style", value: style }
+      }
+    }
+
+    if (replacement === attr) {
+      if (out !== null) out.push(attr)
+      continue
+    }
+    if (out === null) out = attrs.slice(0, i)
+    if (replacement !== null) out.push(replacement)
+  }
+  return out === null ? attrs : out
+}
+
+// The reader rebuilds its document whenever the window width or the zoom
+// changes, and the body it rebuilds from has not changed at all. One entry is
+// enough: it is always the message on screen, and the key is the body itself,
+// so a hit cannot be the wrong document. Nothing below fitting mutates a tree,
+// which is what makes keeping one safe.
+var lastParse = { source: null, tree: null }
+
+function parseForFitting(html) {
+  var text = String(html === undefined || html === null ? "" : html)
+  if (lastParse.source === text) return lastParse.tree
+  var tree = parse(text)
+  lastParse.source = text
+  lastParse.tree = tree
+  return tree
 }
 
 function stripImageHeights(html) {
-  var root = parse(html)
-  stripImageHeightsIn(root)
-  return serialize(root)
+  return serialize(parse(html), fitting(true, false, false, 0))
 }
 
 function compactHorizontal(html) {
-  var root = parse(html)
-  compactHorizontalIn(root)
-  return serialize(root)
+  return serialize(parse(html), fitting(false, true, false, 0))
 }
 
 function relaxFixedWidths(html, available) {
-  var root = parse(html)
-  relaxFixedWidthsIn(root, available)
-  return serialize(root)
+  return serialize(parse(html), fitting(false, false, true, available))
 }
 
 // Wraps the sanitised body in a document. `colors` styles the parts the sender
@@ -1125,14 +1172,11 @@ function documentFor(bodyHtml, colors) {
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
   var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
 
-  // One parse for all three fittings: this is rebuilt whenever the reader is
-  // resized, and the width it keys off is quantised for the same reason.
-  var root = parse(bodyHtml)
-  stripImageHeightsIn(root)
-  if (palette.compact) {
-    compactHorizontalIn(root)
-    relaxFixedWidthsIn(root, maxImage)
-  }
+  // Parsed once for every width the reader is dragged through, not once per
+  // width: this is rebuilt on every relayout and the body it is built from has
+  // not changed.
+  var root = parseForFitting(bodyHtml)
+  var fit = fitting(true, palette.compact === true, palette.compact === true, maxImage)
 
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
@@ -1142,7 +1186,7 @@ function documentFor(bodyHtml, colors) {
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body>"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
-    + serialize(root)
+    + serialize(root, fit)
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
 }

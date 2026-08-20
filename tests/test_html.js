@@ -455,6 +455,26 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(compact.indexOf("margin:10px 0") > 0, "vertical rhythm stays")
   assert.ok(compact.indexOf("padding:5px 0 7px 0") > 0, "all four sides handled")
 
+  // The reader rebuilds its document on every relayout from a body that has not
+  // changed, so the parse is kept between them — which is only safe as long as
+  // fitting writes the tree out rather than editing it. A narrow pass must not
+  // leave its marks on the wide one that follows.
+  // Only the table carries 600: a width on an image is the picture's own and is
+  // clamped by the stylesheet's max-width instead.
+  var fitted = "<table width=\"600\"><tr><td style=\"padding:4px 30px\">"
+    + "<img src=\"a.png\" width=\"540\" height=\"200\"></td></tr></table>"
+  var narrow = html.documentFor(fitted, { maxImageWidth: 380, compact: true })
+  var roomy = html.documentFor(fitted, { maxImageWidth: 800, compact: true })
+  assert.ok(narrow.indexOf('width="600"') < 0, "600 does not fit in 380")
+  assert.ok(roomy.indexOf('width="600"') > 0, "but it fits in 800, from the same parse")
+  assert.ok(narrow.indexOf("padding:4px 0") > 0)
+  assert.strictEqual(html.documentFor(fitted, { maxImageWidth: 380, compact: true }), narrow,
+    "and the same width twice is the same document")
+  // Uncompacted, the sender's gutters are their own again.
+  assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf("padding:4px 30px") > 0)
+  assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf('height="200"') < 0,
+    "heights come out at every width")
+
   var relaxed = html.relaxFixedWidths(
     '<table width="600"><td width="100" style="width:640px">x</td></table>', 380)
   assert.ok(relaxed.indexOf('width="600"') < 0, "a table wider than the window gives it up")
