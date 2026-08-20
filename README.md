@@ -21,8 +21,8 @@ server — including one you run yourself.
   mailbox with an address and an app password. Several accounts at once, each
   with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
-  reply, `c` to compose, `g i` for the inbox, `/` to search — Gmail's own
-  shortcuts, so there is nothing new to learn.
+  reply, `c` to compose, `g i` for the inbox, `/` to search, `?` for the rest —
+  Gmail's own shortcuts, so there is nothing new to learn.
 - **Always counting.** The unread badge keeps working while the window is shut,
   for every account, with a desktop notification when new mail lands.
 - **One window.** Read, archive, star, trash, search, and answer without a

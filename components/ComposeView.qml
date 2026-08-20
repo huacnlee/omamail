@@ -91,14 +91,20 @@ Item {
       bodyEdit.text = "\n\n" + Mail.quoteBody(summary, String(bodyText || ""))
     }
 
-    Qt.callLater(function() {
-      if (root.mode === "reply" || root.mode === "replyAll") {
-        bodyEdit.forceActiveFocus()
-        bodyEdit.cursorPosition = 0
-      } else {
-        toField.forceActiveFocus()
-      }
-    })
+    // Focus is not placed here. Opening this changes the window's key context,
+    // and the context is what moves the keyboard — one mechanism, so the two
+    // cannot disagree about where the typing goes.
+  }
+
+  // Where the keyboard goes when composing becomes the context. A reply starts
+  // in the body above the quote; a new message starts at the address.
+  function takeFocus() {
+    if (mode === "reply" || mode === "replyAll") {
+      bodyEdit.forceActiveFocus()
+      bodyEdit.cursorPosition = 0
+    } else {
+      toField.forceActiveFocus()
+    }
   }
 
   function finish() {
@@ -120,12 +126,12 @@ Item {
   }
 
   anchors.fill: parent
-  focus: true
-
-  Keys.onEscapePressed: function(event) {
-    root.finish()
-    event.accepted = true
-  }
+  // Only while it is actually in use. A component that declares `focus: true`
+  // owns the window's focus even when invisible — Qt does not exclude hidden
+  // items — and an owner that accepts keys is a sink. This swallowed every
+  // Escape in the window, which is why Esc looked intermittent: whether it
+  // worked depended on where the user had last clicked.
+  focus: root.opened
 
   // ----------------------------------------------------------- header
   //
@@ -210,7 +216,11 @@ Item {
 
     Item {
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: toField.implicitHeight + Style.space(14)
 
       Text {
         id: toLabel
@@ -262,7 +272,11 @@ Item {
     Item {
       visible: root.ccVisible
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: ccField.implicitHeight + Style.space(14)
 
       Text {
         id: ccLabel
@@ -300,7 +314,11 @@ Item {
 
     Item {
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: subjectField.implicitHeight + Style.space(14)
 
       Text {
         id: subjectLabel
@@ -425,12 +443,6 @@ Item {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
     }
-  }
-
-  Shortcut {
-    sequence: "Ctrl+Return"
-    enabled: root.opened && root.visible
-    onActivated: root.submit()
   }
 
 }

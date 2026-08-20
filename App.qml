@@ -1,18 +1,20 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import Quickshell
 import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "keys/Keymap.js" as Keymap
 import "components"
 
 // The application window. The shell loads this entry point when the plugin is
 // summoned and calls open()/close() on it; the FloatingWindow follows.
 //
-// Compose is a second window rather than a column. Hyprland tiles it beside
-// the mailbox, so the message being answered stays on screen instead of being
-// covered by the form.
+// Compose takes over the content area of this same window rather than opening
+// a second one; Omarchy's panel mechanism would give an extra window a region
+// of its own, which is not what a reply is.
 Item {
   id: root
 
@@ -132,7 +134,11 @@ Item {
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
     if (payload.compose === true) startCompose("new")
-    Qt.callLater(function() { focusScope.forceActiveFocus() })
+    // The list is usually already loaded by the time the window is summoned —
+    // the service keeps running while it is shut — so waiting for the next
+    // change to seat the cursor leaves the first j with nowhere to move from.
+    cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
+    Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
   function close() {
@@ -151,6 +157,7 @@ Item {
   // per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
+    pendingComposeMode = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
     service.select(cursorId)
@@ -158,37 +165,85 @@ Item {
   }
 
   function backToList() {
+    pendingComposeMode = ""
     if (service) service.clearSelection()
     currentView = "list"
-    Qt.callLater(function() { focusScope.forceActiveFocus() })
+    Qt.callLater(function() { focusScope.applyContextFocus() })
+  }
+
+  // Moving the cursor has to bring the row with it. The list is a Column in a
+  // Flickable rather than a ListView — the panel already owns a scroller — so
+  // there is no positionViewAtIndex and this has to be said out loud.
+  //
+  // Called from here rather than from cursorId changing, because hovering a row
+  // moves the cursor too, and scrolling a half-visible row into view under the
+  // pointer fights the mouse that is pointing at it.
+  function revealCursorRow() {
+    if (!listFlick.visible) return
+    var bounds = list.boundsFor(cursorId)
+    if (!bounds) return
+    listFlick.contentY = Model.contentYToReveal(listFlick.contentY,
+      listFlick.height, list.y + bounds.y, bounds.height,
+      listFlick.contentHeight, Style.space(8))
   }
 
   function moveCursor(delta) {
     if (!service) return
-    var next = service.selectOffset(delta)
+    var next = service.cursorOffset(cursorId, delta)
     if (next === "") return
     cursorId = next
+    revealCursorRow()
     // Moving is not opening. This used to open whatever it landed on while the
     // reader was up, which made stepping through a list a way to mark half of
     // it read without having looked at any of it. Enter and "o" open.
   }
 
+  // An answer needs the message it is answering, and opening one only starts
+  // the fetch — select() clears the summary and the body first. Beginning the
+  // draft in the same breath addressed nobody and quoted nothing, which is what
+  // the list row's own Reply menu did. Held until the fetch lands instead.
+  property string pendingComposeMode: ""
+
   function startCompose(mode) {
-    compose.begin(String(mode || "new"),
-      service ? service.selectedMessage : null,
-      service ? service.selectedBody.text : "")
+    if (!service) return
+    var next = String(mode || "new")
+    if (next !== "new" && !service.selectedMessage) {
+      pendingComposeMode = next
+      return
+    }
+    pendingComposeMode = ""
+    compose.begin(next, service.selectedMessage, service.selectedBody.text)
+  }
+
+  // Answering from the list opens what is being answered first, the way the
+  // row's own menu does. Anything already open is left alone: re-selecting it
+  // would throw away the body that is on screen and fetch it again.
+  function composeFromCursor(mode) {
+    if (!service || cursorId === "") return
+    if (service.selectedId !== cursorId) openMessage(cursorId)
+    startCompose(mode)
   }
 
   // Acting on the open message closes it: it is about to leave this list.
   function actOnCursor(action) {
     if (!service || cursorId === "") return
-    var wasOpen = currentView === "reader" && service.selectedId === cursorId
-    var next = service.selectOffset(1)
-    service.act(cursorId, action)
-    if (wasOpen && !Model.survivesAction(service.mailboxKey, action)) {
-      if (next !== "" && next !== cursorId) openMessage(next)
+    var acted = cursorId
+    var wasOpen = currentView === "reader" && service.selectedId === acted
+    // Worked out before the action, while the row still has neighbours.
+    var next = Model.cursorAfterRemoval(service.messages, acted)
+    var leaves = !Model.survivesAction(service.mailboxKey, action)
+    service.act(acted, action)
+    if (!leaves) return
+    // The row is going and the cursor must not go with it: a cursor on a
+    // message that is no longer listed cannot be found, so the next j restarts
+    // at the top. Archiving one message used to send it back to the first row.
+    if (wasOpen) {
+      if (next !== "") openMessage(next)
       else backToList()
+      return
     }
+    cursorId = next
+    revealCursorRow()
   }
 
   function goMailbox(key) {
@@ -197,10 +252,95 @@ Item {
     backToList()
   }
 
+  // One answer per key id. The ids come from keys/Keymap.js; adding a key is a
+  // row there and a case here, and nothing else.
+  function runShortcut(id) {
+    if (id === "cursorDown") return moveCursor(1)
+    if (id === "cursorUp") return moveCursor(-1)
+    if (id === "open") return openMessage(cursorId)
+    if (id === "backToList") return backToList()
+    if (id === "archive") return actOnCursor("archive")
+    if (id === "trash") return actOnCursor("trash")
+    // Through the same guard actOnCursor applies rather than around it:
+    // starring with nothing selected used to call through with an empty id.
+    if (id === "star") {
+      if (service && cursorId !== "") service.toggleStar(cursorId)
+      return
+    }
+    if (id === "markRead") return actOnCursor("markRead")
+    if (id === "markUnread") return actOnCursor("markUnread")
+    if (id === "reply") return composeFromCursor("reply")
+    if (id === "replyAll") return composeFromCursor("replyAll")
+    if (id === "forward") return composeFromCursor("forward")
+    if (id === "compose") return startCompose("new")
+    if (id === "send") return compose.submit()
+    if (id === "search") return searchBar.focusField()
+    if (id === "goInbox") return goMailbox("inbox")
+    if (id === "goStarred") return goMailbox("starred")
+    if (id === "goUnread") return goMailbox("unread")
+    if (id === "goSent") return goMailbox("sent")
+    if (id === "zoomIn") return zoomBy(0.1)
+    if (id === "zoomOut") return zoomBy(-0.1)
+    if (id === "zoomReset") { bodyZoom = 1.0; return }
+    if (id === "refresh") {
+      if (service) service.refresh()
+      return
+    }
+    if (id === "help") {
+      shortcutHelpVisible = !shortcutHelpVisible
+      return
+    }
+    if (id === "back") return goBack()
+  }
+
+  // What Escape means, in the order the window is stacked. The row menu, the
+  // app menu and the account switcher are absent on purpose: a QQC.Popup with
+  // CloseOnEscape consumes the key itself, so a branch for them here would
+  // never run.
+  function goBack() {
+    if (shortcutHelpVisible) shortcutHelpVisible = false
+    // A query being typed is the nearest thing to leave: clear it if there is
+    // one, then hand the keyboard back to the mailbox. This used to live in
+    // SearchBar as its own Keys handler, which a window Shortcut silently beats.
+    // A query being typed is the nearest thing to leave: clear it if there is
+    // one, then hand the keyboard back. Parked directly rather than through
+    // applyContextFocus, which would still read the context as "search" —
+    // the field has not lost the focus yet at this point.
+    else if (searchBar.fieldFocused) {
+      if (searchBar.queryText !== "") searchBar.clear()
+      focusScope.parkKeyboard()
+    }
+    else if (composing) compose.finish()
+    else if (currentView === "reader") backToList()
+    else if (setupVisible) setupVisible = false
+    else if (settingsVisible) settingsVisible = false
+    else if (service && service.searchQuery !== "") service.search("")
+    else requestClose()
+  }
+
   Connections {
     target: root.service
     ignoreUnknownSignals: true
     function onReplySent() { compose.finish() }
+    // Every time the list is replaced — first arrival, a mailbox switch, a
+    // search, a refresh that dropped things. A cursor whose message survived
+    // keeps its place; one whose message is gone would be unfindable, and an
+    // unfindable cursor sends the next j to the top of the list.
+    // The message a held draft was waiting for. Selecting one clears the body
+    // and refills it from the network, so this fires twice: the guard is the
+    // summary, which is null until the fetch lands.
+    function onSelectedBodyChanged() {
+      if (root.pendingComposeMode === "") return
+      if (!root.service || !root.service.selectedMessage) return
+      var mode = root.pendingComposeMode
+      root.pendingComposeMode = ""
+      root.startCompose(mode)
+    }
+
+    function onMessagesChanged() {
+      root.cursorId = Model.cursorAfterReload(
+        root.service ? root.service.messages : [], root.cursorId)
+    }
     // A new account has no mailbox yet, so the only useful place to be is the
     // page that gives it one.
     // A new mailbox appears as a row in Settings, waiting to be signed in.
@@ -336,10 +476,44 @@ Item {
       anchors.fill: parent
       focus: true
 
-      // Every shortcut below is a bare letter, so all of them stand down while
-      // text is being typed. The search field is the only input in this window
-      // — compose is a window of its own — so it is the only thing to ask.
-      readonly property bool typing: searchBar.fieldFocused || root.composing
+      // Where the window is, and the only thing that says what a key means.
+      // A page is a form before it is anything else, a draft beats reading, a
+      // query being typed beats the list underneath it.
+      readonly property string keyContext:
+          root.showPage  ? "page"
+        : root.composing ? "compose"
+        : searchBar.fieldFocused ? "search"
+        : root.currentView === "reader" ? "reader"
+        : "list"
+
+      // The context owns the keyboard. Changing it moves the focus to whatever
+      // that context types into, or parks it when the context types into
+      // nothing — so a field that has been dismissed cannot go on eating keys.
+      //
+      // Keeping these as two things is the bug this replaces: the context came
+      // from the screen while the focus stayed wherever the last click left it,
+      // and a closed compose field kept swallowing j and k. One mechanism now,
+      // and there is nothing to keep in step.
+      onKeyContextChanged: Qt.callLater(applyContextFocus)
+      function applyContextFocus() {
+        if (keyContext === "compose") compose.takeFocus()
+        else if (keyContext === "search") searchBar.focusField()
+        else parkKeyboard()
+      }
+
+      // forceActiveFocus on the scope itself is a no-op: it re-elects the
+      // scope's current focus item, which is the very field being left. It has
+      // to land on a plain Item for the field to actually let go.
+      function parkKeyboard() {
+        keyboardHome.forceActiveFocus()
+      }
+
+      // Where the keyboard lives when nothing is being typed into.
+      Item {
+        id: keyboardHome
+        width: 1
+        height: 1
+      }
 
       // ------------------------------------------------------------ header
 
@@ -583,7 +757,6 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               onMessageActivated: function(id) { root.openMessage(id) }
-              onRowHovered: function(id, isHovered) { if (isHovered) root.cursorId = id }
               onMenuRequested: function(id, sceneX, sceneY) {
                 root.cursorId = id
                 rowMenu.openAt(id, sceneX, sceneY)
@@ -875,25 +1048,7 @@ Item {
           textColor: root.foreground
           dimColor: root.dimmer
           panelFontFamily: root.fontFamily
-          hints: {
-            if (root.showPage) return [({ key: "Esc", label: "back" })]
-            if (root.composing) return [
-              ({ key: "Ctrl+Enter", label: "send" }),
-              ({ key: "Esc", label: "close" })
-            ]
-            if (root.currentView === "reader") return [
-              ({ key: "Esc", label: "back" }),
-              ({ key: "r", label: "reply" }),
-              ({ key: "e", label: "archive" }),
-              ({ key: "d", label: "trash" })
-            ]
-            return [
-              ({ key: "j / k", label: "move" }),
-              ({ key: "o", label: "open" }),
-              ({ key: "e", label: "archive" }),
-              ({ key: "c", label: "compose" })
-            ]
-          }
+          hints: Keymap.hintsFor(focusScope.keyContext)
         }
       }
 
@@ -975,48 +1130,11 @@ Item {
 
       // ---------------------------------------------------------- keyboard
 
-      Keys.onEscapePressed: function(event) {
-        if (root.shortcutHelpVisible) root.shortcutHelpVisible = false
-        else if (rowMenu.opened) rowMenu.close()
-        else if (appMenu.opened) appMenu.close()
-        else if (accountSwitcher.opened) accountSwitcher.close()
-        else if (root.composing) compose.finish()
-        else if (root.currentView === "reader") root.backToList()
-        else if (root.setupVisible) root.setupVisible = false
-        else if (root.settingsVisible) root.settingsVisible = false
-        else if (root.service && root.service.searchQuery !== "") root.service.search("")
-        else root.requestClose()
-        event.accepted = true
+      KeyRouter {
+        context: focusScope.keyContext
+        overlay: root.shortcutHelpVisible
+        onTriggered: function(id) { root.runShortcut(id) }
       }
-
-      Shortcut { sequence: "Ctrl+K"; onActivated: searchBar.focusField() }
-      Shortcut { sequence: "/"; enabled: !focusScope.typing; onActivated: searchBar.focusField() }
-      Shortcut { sequence: "j"; enabled: !focusScope.typing; onActivated: root.moveCursor(1) }
-      Shortcut { sequence: "k"; enabled: !focusScope.typing; onActivated: root.moveCursor(-1) }
-      Shortcut { sequence: "Return"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
-      // "o" for open, next to j/k on the home row, so the whole read cycle can
-      // be driven without leaving it.
-      Shortcut { sequence: "o"; enabled: !focusScope.typing && root.currentView === "list"; onActivated: root.openMessage(root.cursorId) }
-      Shortcut { sequence: "e"; enabled: !focusScope.typing; onActivated: root.actOnCursor("archive") }
-      Shortcut { sequence: "d"; enabled: !focusScope.typing; onActivated: root.actOnCursor("trash") }
-      Shortcut { sequence: "s"; enabled: !focusScope.typing; onActivated: if (root.service) root.service.toggleStar(root.cursorId) }
-      Shortcut { sequence: "Shift+I"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markRead") }
-      Shortcut { sequence: "Shift+U"; enabled: !focusScope.typing; onActivated: root.actOnCursor("markUnread") }
-      Shortcut { sequence: "r"; enabled: !focusScope.typing && root.currentView === "reader"; onActivated: root.startCompose("reply") }
-      Shortcut { sequence: "a"; enabled: !focusScope.typing && root.currentView === "reader"; onActivated: root.startCompose("replyAll") }
-      Shortcut { sequence: "f"; enabled: !focusScope.typing && root.currentView === "reader"; onActivated: root.startCompose("forward") }
-      Shortcut { sequence: "c"; enabled: !focusScope.typing; onActivated: root.startCompose("new") }
-      Shortcut { sequence: "g,i"; enabled: !focusScope.typing; onActivated: root.goMailbox("inbox") }
-      Shortcut { sequence: "g,s"; enabled: !focusScope.typing; onActivated: root.goMailbox("starred") }
-      Shortcut { sequence: "g,u"; enabled: !focusScope.typing; onActivated: root.goMailbox("unread") }
-      Shortcut { sequence: "g,t"; enabled: !focusScope.typing; onActivated: root.goMailbox("sent") }
-      Shortcut { sequence: "Ctrl++"; onActivated: root.zoomBy(0.1) }
-      Shortcut { sequence: "Ctrl+="; onActivated: root.zoomBy(0.1) }
-      Shortcut { sequence: "Ctrl+-"; onActivated: root.zoomBy(-0.1) }
-      Shortcut { sequence: "Ctrl+0"; onActivated: root.bodyZoom = 1.0 }
-      Shortcut { sequence: "Ctrl+/"; onActivated: root.shortcutHelpVisible = !root.shortcutHelpVisible }
-      Shortcut { sequence: "Ctrl+?"; onActivated: root.shortcutHelpVisible = !root.shortcutHelpVisible }
-      Shortcut { sequence: "F5"; onActivated: if (root.service) root.service.refresh() }
     }
   }
 

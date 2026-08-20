@@ -79,6 +79,53 @@ if awk '
   fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
 fi
 
+# A trigger holds a selected style while what it opened is on screen. The bar
+# icon is the only trigger the window has, so without this there is nothing on
+# screen saying which icon put it there.
+grep -q 'windowOpen' BarWidget.qml \
+  || fail "the bar icon must show an active style while the window is open"
+# As a selected fill, the way every other selected control here is drawn. The
+# bar's own `active` recolours the glyph from the theme's `bar.active`, which
+# falls back to `urgent` — a warning colour for a window simply being open.
+grep -q 'selectedFillFor' BarWidget.qml \
+  || fail "the bar icon's open state must use the selected fill, not a glyph colour"
+if grep -vE '^[[:space:]]*//' BarWidget.qml | grep -n 'activeColor'; then
+  fail "BarWidget must not paint its glyph with the bar's urgent-derived activeColor"
+fi
+
+# The mouse must not move the keyboard's cursor. Qt re-reports hover when
+# content moves under a still pointer, and the list scrolls to follow the
+# keyboard — so a hover that wrote cursorId pulled it back to whatever the mouse
+# was resting on, and j and k stuck on a few rows. A row shows its own hover
+# (MessageRow.hot); that is the whole of what hover is for here.
+if grep -n 'onRowHovered' App.qml; then
+  fail "hovering a row must not move the keyboard cursor"
+fi
+
+# The context owns the keyboard. Every context that is not text entry parks the
+# focus on a plain Item, because forceActiveFocus on the focus scope itself is a
+# no-op — it re-elects the scope's current focus item, which is the field being
+# left, so a dismissed compose field goes on swallowing every bare key. Nothing
+# warns about this: the keys simply stop arriving.
+grep -q 'onKeyContextChanged' App.qml \
+  || fail "the key context must move the keyboard when it changes"
+grep -q 'function parkKeyboard' App.qml \
+  || fail "App.qml must park the keyboard on a plain Item, not on the focus scope"
+if grep -vE '^[[:space:]]*//' App.qml | grep -n 'focusScope\.forceActiveFocus'; then
+  fail "forceActiveFocus on the focus scope re-elects the field being left; park the keyboard instead"
+fi
+
+# A component that declares `focus: true` owns the window's focus even while it
+# is invisible, and an owner that accepts keys is a sink for everything routed
+# by focus rather than by Shortcut. ComposeView is instantiated whether or not
+# anyone is writing, so an unconditional focus there swallowed every Escape in
+# the window. Focus must follow "in use".
+grep -q '^  focus: root.opened$' components/ComposeView.qml \
+  || fail "ComposeView must own the focus only while it is open"
+if grep -rn '^\s*focus: true\s*$' components/ComposeView.qml; then
+  fail "ComposeView must not hold the focus unconditionally"
+fi
+
 # The IMAP server disclosure always reserves an icon slot. Both names selected
 # by its state must have a drawing, or the slot is blank in one or both states.
 for icon in chevronRight chevronDown; do

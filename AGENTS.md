@@ -90,6 +90,42 @@ three directories away from the client that calls it.
 - A popup that would overflow flips to the other side of its trigger, then
   clamps to the window edge, then clamps to zero. All three, in that order.
 
+## Keys and focus
+
+The design and the full table are in `docs/KEYS.md`; read it before touching a
+key. What matters while working:
+
+- Every binding lives in `keys/Keymap.js` and nothing else describes one. The
+  shortcut sheet and the status hints render from it, and a test asserts
+  `docs/KEYS.md` matches it. Three hand-written copies used to exist and had
+  already drifted apart.
+- The context is the only guard. Name the contexts a key means something in;
+  there is no second question to answer. A text-entry context binds no bare key
+  but `Escape`.
+- The context owns the keyboard: changing it moves the focus, and a context that
+  types into nothing parks the keyboard on a plain `Item`. Never hand focus back
+  by calling `forceActiveFocus()` on the focus scope — that re-elects the field
+  being left, so it does nothing and the dismissed field keeps eating keys.
+- `focus: true` may not sit on a component that can be invisible while holding
+  it, and a component in a context does not place its own focus — the context
+  does. Two mechanisms for one thing is the bug this design replaces.
+- Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler: a window
+  `Shortcut` beats a focused item's `Keys` handler, so a local one looks live and
+  never runs. Anything `Escape` should do belongs in `goBack()`.
+- `KeyRouter` builds its shortcuts with an `Instantiator`. A `Repeater` builds
+  only `Item`s, so it creates no `Shortcut`s at all and every key goes dead.
+- A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself. Do not add a
+  branch for an open popup; do add one for a plain overlay like the sheet.
+- The mouse does not move the keyboard's cursor. Qt re-reports hover when
+  content moves under a still pointer and the list scrolls to follow the
+  keyboard, so a hover that wrote `cursorId` pulled it back to whatever the
+  mouse was resting on and `j` went nowhere. A row draws its own hover.
+- The list cursor and the open message are two different things. `cursorId` is
+  where the keyboard is; `selectedId` is what the reader shows. Move the cursor
+  with `Model.cursorAfterOffset`, and bring the row on screen with
+  `Model.contentYToReveal` — the list is a `Column`, so there is no
+  `positionViewAtIndex`.
+
 ## Providers
 
 - A mailbox is a **provider**: `gmail`, `imap`, or `hey`. `Provider.js` is the

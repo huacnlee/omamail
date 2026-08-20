@@ -180,6 +180,77 @@ function indexById(list, id) {
   return -1
 }
 
+// Where the list cursor lands after a step. Anchored on the cursor itself,
+// because the cursor and the open message are two different things: nothing is
+// open while the list is being walked, and walking must not move the reader.
+// Anchoring this on the open message pinned it — every step in the list
+// resolved to row 0, and in the reader the anchor never advanced.
+function cursorAfterOffset(list, cursorId, delta) {
+  var source = Array.isArray(list) ? list : []
+  if (source.length === 0) return ""
+  var step = Math.floor(Number(delta) || 0)
+  var index = indexById(source, cursorId)
+  // No cursor, or one whose message has left the list: start from the end the
+  // move is coming from, so j opens at the top and k opens at the bottom.
+  if (index < 0) return step < 0 ? source[source.length - 1].id : source[0].id
+  var next = index + step
+  if (next < 0) next = 0
+  if (next > source.length - 1) next = source.length - 1
+  return source[next].id
+}
+
+// Where the cursor goes when the row it is on is about to leave the list.
+// Called with the list as it still is, so the departing row still has
+// neighbours: the one below takes its place, or the one above at the end.
+//
+// Leaving the cursor on a row that has gone is not harmless. cursorAfterOffset
+// cannot find it, so it restarts at the top — which is how archiving one
+// message sent the next j back to the first row.
+function cursorAfterRemoval(list, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  if (index + 1 < source.length) return source[index + 1].id
+  if (index > 0) return source[index - 1].id
+  return ""
+}
+
+// Where the cursor goes when the whole list is replaced under it — a mailbox
+// switch, a search, a refresh that dropped things. The message it was on keeps
+// it if it survived; otherwise the top, which is where the eye goes anyway.
+function cursorAfterReload(list, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  if (source.length === 0) return ""
+  if (indexById(source, cursorId) >= 0) return cursorId
+  return source[0].id
+}
+
+// Where the scroller has to sit for a row to be on screen. The list is a Column
+// in a Flickable rather than a ListView — the panel already owns a scroller and
+// nesting a second one gives every wheel event two plausible targets — so there
+// is no positionViewAtIndex, and keyboard movement has to say this itself.
+//
+// Unchanged while the row is already visible. Recentring on every press would
+// drag the list under someone who is only stepping one row down it.
+function contentYToReveal(contentY, viewportHeight, itemY, itemHeight,
+                          contentHeight, margin) {
+  var top = Number(contentY) || 0
+  var view = Number(viewportHeight) || 0
+  var y = Number(itemY) || 0
+  var height = Number(itemHeight) || 0
+  var pad = Number(margin) || 0
+  var furthest = Math.max(0, (Number(contentHeight) || 0) - view)
+  var next = top
+  // A row that cannot fit shows its beginning. Aligning its bottom, which is
+  // what the off-the-bottom rule would do, pushes the part being read away.
+  if (height + pad + pad > view) next = y - pad
+  else if (y - pad < top) next = y - pad
+  else if (y + height + pad > top + view) next = y + height + pad - view
+  if (next < 0) next = 0
+  if (next > furthest) next = furthest
+  return next
+}
+
 function unreadCount(list) {
   var source = Array.isArray(list) ? list : []
   var count = 0

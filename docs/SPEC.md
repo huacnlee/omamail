@@ -70,10 +70,17 @@ guided by an in-app four-step walkthrough.
 
 ## Keyboard
 
-`j`/`k` move · `Enter` open · `u` back to list · `e` archive · `#` trash ·
-`s` star · `r` reply · `a` reply all · `f` forward · `c` compose ·
-`/` or `Ctrl+K` search · `g i` inbox · `g s` starred · `Shift+I`/`Shift+U`
-read/unread · `Ctrl+/` shortcut reference · `Esc` back or close
+The keyboard belongs to the application and the context says what a key means
+where, the way a TUI scopes its keys. Every binding lives in one table,
+`keys/Keymap.js`; the shortcut sheet, the status hints and `docs/KEYS.md` all
+render or are checked against it, so no second list is maintained by hand.
+
+`j`/`k` move · `Enter` or `o` open · `u` back to list · `e` archive · `d` trash ·
+`s` star · `r`/`a`/`f` reply, reply all, forward · `c` compose · `/` or `Ctrl+K`
+search · `g i` inbox · `?` the reference sheet · `Esc` back or close.
+
+**See `docs/KEYS.md`** for the model, the contexts, the full table, and the four
+Qt behaviours this design is shaped around.
 
 ## Constraints
 

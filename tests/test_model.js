@@ -181,4 +181,112 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
   assert.strictEqual(model.notificationTitle(null), "New message")
 }
 
+// ------------------------------------------------------------- list cursor
+
+// The cursor moves relative to itself. It used to be anchored to `selectedId`
+// — the message the reader has open — which pinned it: nothing is open in list
+// view, so every step resolved to row 0, and in the reader the anchor never
+// advanced, so the cursor moved once and then stopped.
+{
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]
+
+  assert.strictEqual(model.cursorAfterOffset(rows, "", 1), "a",
+    "with no cursor yet, j starts at the top")
+  assert.strictEqual(model.cursorAfterOffset(rows, "", -1), "d",
+    "with no cursor yet, k starts at the bottom")
+
+  // The regression this exists for: pressing j repeatedly keeps moving.
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", 1), "b")
+  assert.strictEqual(model.cursorAfterOffset(rows, "b", 1), "c")
+  assert.strictEqual(model.cursorAfterOffset(rows, "c", 1), "d")
+  assert.strictEqual(model.cursorAfterOffset(rows, "d", 1), "d",
+    "the last row is where moving down stops")
+
+  assert.strictEqual(model.cursorAfterOffset(rows, "c", -1), "b")
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", -1), "a",
+    "the first row is where moving up stops")
+
+  assert.strictEqual(model.cursorAfterOffset([], "a", 1), "",
+    "an empty list has nowhere to go")
+  assert.strictEqual(model.cursorAfterOffset(rows, "gone", 1), "a",
+    "a cursor whose message left the list starts over rather than sticking")
+  assert.strictEqual(model.cursorAfterOffset(rows, "a", 0), "a",
+    "a zero step is a no-op, not a jump to the top")
+}
+
+// --------------------------------------------------- keeping the cursor seen
+
+// The list is a Column in a Flickable rather than a ListView — the panel
+// already owns a scroller — so there is no positionViewAtIndex, and keyboard
+// movement has to say where the scroller goes itself.
+{
+  // A 100-tall viewport over 500 of content, rows 20 tall, 4px of margin.
+  const view = 100
+  const content = 500
+  const pad = 4
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 40, 20, content, pad), 0,
+    "a row already on screen does not move the list under the reader")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 90, 20, content, pad), 14,
+    "a row off the bottom scrolls just far enough, plus the margin")
+
+  assert.strictEqual(
+    model.contentYToReveal(200, view, 180, 20, content, pad), 176,
+    "a row off the top scrolls back to it, plus the margin")
+
+  assert.strictEqual(
+    model.contentYToReveal(10, view, 0, 20, content, pad), 0,
+    "the top of the list is as far up as it goes: no negative offset")
+
+  assert.strictEqual(
+    model.contentYToReveal(380, view, 480, 20, content, pad), 400,
+    "the bottom clamps to the last screenful rather than scrolling past it")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 40, 300, content, pad), 36,
+    "a row taller than the viewport shows its top rather than its bottom")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, 500, 40, 20, 400, pad), 0,
+    "content shorter than the viewport never scrolls")
+}
+
+
+// ------------------------------------------- the cursor outliving its message
+
+// Two ways a cursor stops pointing at anything: the row it is on is acted on
+// and leaves, or the whole list is replaced under it by a mailbox switch, a
+// search, or a refresh. Both used to leave the cursor on a message that is no
+// longer there, and cursorAfterOffset restarts at the top from that — so one
+// archive sent the next j back to the first row.
+{
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }]
+
+  // Acting on a row: the cursor takes the row's place, which is the one below.
+  assert.strictEqual(model.cursorAfterRemoval(rows, "a"), "b")
+  assert.strictEqual(model.cursorAfterRemoval(rows, "b"), "c")
+  // Except at the end, where there is nothing below and the one above is where
+  // the eye already is.
+  assert.strictEqual(model.cursorAfterRemoval(rows, "c"), "b")
+  assert.strictEqual(model.cursorAfterRemoval([{ id: "only" }], "only"), "",
+    "emptying the list leaves no cursor to hold")
+  assert.strictEqual(model.cursorAfterRemoval(rows, "gone"), "",
+    "a cursor that is already adrift has no neighbour to inherit")
+  assert.strictEqual(model.cursorAfterRemoval([], "a"), "")
+
+  // A list replaced underneath: keep the cursor if its message survived the
+  // reload, otherwise start at the top.
+  assert.strictEqual(model.cursorAfterReload(rows, "b"), "b",
+    "a refresh that kept the message keeps the cursor")
+  assert.strictEqual(model.cursorAfterReload(rows, "gone"), "a",
+    "a mailbox switch lands on the first row rather than nowhere")
+  assert.strictEqual(model.cursorAfterReload(rows, ""), "a",
+    "and so does a list arriving for the first time")
+  assert.strictEqual(model.cursorAfterReload([], "b"), "",
+    "an empty mailbox has no row to sit on")
+}
+
 console.log("test_model.js ok")
