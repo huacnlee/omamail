@@ -199,6 +199,32 @@ function cursorAfterOffset(list, cursorId, delta) {
   return source[next].id
 }
 
+// Where the scroller has to sit for a row to be on screen. The list is a Column
+// in a Flickable rather than a ListView — the panel already owns a scroller and
+// nesting a second one gives every wheel event two plausible targets — so there
+// is no positionViewAtIndex, and keyboard movement has to say this itself.
+//
+// Unchanged while the row is already visible. Recentring on every press would
+// drag the list under someone who is only stepping one row down it.
+function contentYToReveal(contentY, viewportHeight, itemY, itemHeight,
+                          contentHeight, margin) {
+  var top = Number(contentY) || 0
+  var view = Number(viewportHeight) || 0
+  var y = Number(itemY) || 0
+  var height = Number(itemHeight) || 0
+  var pad = Number(margin) || 0
+  var furthest = Math.max(0, (Number(contentHeight) || 0) - view)
+  var next = top
+  // A row that cannot fit shows its beginning. Aligning its bottom, which is
+  // what the off-the-bottom rule would do, pushes the part being read away.
+  if (height + pad + pad > view) next = y - pad
+  else if (y - pad < top) next = y - pad
+  else if (y + height + pad > top + view) next = y + height + pad - view
+  if (next < 0) next = 0
+  if (next > furthest) next = furthest
+  return next
+}
+
 function unreadCount(list) {
   var source = Array.isArray(list) ? list : []
   var count = 0

@@ -23,7 +23,20 @@ Column {
   width: parent ? parent.width : 0
   spacing: Style.space(2)
 
+  // Where a row sits in this column's own coordinates, so the panel's scroller
+  // can bring it into view. Found by index rather than by asking the rows which
+  // one holds the cursor: the answer must not wait on a binding to propagate.
+  function boundsFor(id) {
+    if (!root.service) return null
+    var index = Model.indexById(root.service.messages, id)
+    if (index < 0) return null
+    var item = rows.itemAt(index)
+    if (!item) return null
+    return ({ y: item.y, height: item.height })
+  }
+
   Repeater {
+    id: rows
     model: root.service.messages
 
     MessageRow {

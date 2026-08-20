@@ -165,11 +165,28 @@ Item {
     Qt.callLater(function() { focusScope.forceActiveFocus() })
   }
 
+  // Moving the cursor has to bring the row with it. The list is a Column in a
+  // Flickable rather than a ListView — the panel already owns a scroller — so
+  // there is no positionViewAtIndex and this has to be said out loud.
+  //
+  // Called from here rather than from cursorId changing, because hovering a row
+  // moves the cursor too, and scrolling a half-visible row into view under the
+  // pointer fights the mouse that is pointing at it.
+  function revealCursorRow() {
+    if (!listFlick.visible) return
+    var bounds = list.boundsFor(cursorId)
+    if (!bounds) return
+    listFlick.contentY = Model.contentYToReveal(listFlick.contentY,
+      listFlick.height, list.y + bounds.y, bounds.height,
+      listFlick.contentHeight, Style.space(8))
+  }
+
   function moveCursor(delta) {
     if (!service) return
     var next = service.cursorOffset(cursorId, delta)
     if (next === "") return
     cursorId = next
+    revealCursorRow()
     // Moving is not opening. This used to open whatever it landed on while the
     // reader was up, which made stepping through a list a way to mark half of
     // it read without having looked at any of it. Enter and "o" open.

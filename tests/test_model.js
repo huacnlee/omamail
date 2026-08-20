@@ -214,4 +214,44 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     "a zero step is a no-op, not a jump to the top")
 }
 
+// --------------------------------------------------- keeping the cursor seen
+
+// The list is a Column in a Flickable rather than a ListView — the panel
+// already owns a scroller — so there is no positionViewAtIndex, and keyboard
+// movement has to say where the scroller goes itself.
+{
+  // A 100-tall viewport over 500 of content, rows 20 tall, 4px of margin.
+  const view = 100
+  const content = 500
+  const pad = 4
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 40, 20, content, pad), 0,
+    "a row already on screen does not move the list under the reader")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 90, 20, content, pad), 14,
+    "a row off the bottom scrolls just far enough, plus the margin")
+
+  assert.strictEqual(
+    model.contentYToReveal(200, view, 180, 20, content, pad), 176,
+    "a row off the top scrolls back to it, plus the margin")
+
+  assert.strictEqual(
+    model.contentYToReveal(10, view, 0, 20, content, pad), 0,
+    "the top of the list is as far up as it goes: no negative offset")
+
+  assert.strictEqual(
+    model.contentYToReveal(380, view, 480, 20, content, pad), 400,
+    "the bottom clamps to the last screenful rather than scrolling past it")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, view, 40, 300, content, pad), 36,
+    "a row taller than the viewport shows its top rather than its bottom")
+
+  assert.strictEqual(
+    model.contentYToReveal(0, 500, 40, 20, 400, pad), 0,
+    "content shorter than the viewport never scrolls")
+}
+
 console.log("test_model.js ok")
