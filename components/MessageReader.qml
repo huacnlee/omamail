@@ -38,11 +38,14 @@ Item {
   signal actionRequested(string action)
 
   readonly property var summary: service ? service.selectedMessage : null
-  // Already sanitised by the service, on a worker thread where the decode
-  // happens. Images load: Qt's rich text engine fetches them for real, so the
-  // sender learns when the message was opened — a deliberate trade for mail
-  // that looks like mail.
+  // Already sanitised by the service, remote images and all removed. Qt's rich
+  // text engine fetches an <img src="https://..."> for real, so leaving them in
+  // would fire every tracking pixel in the message the instant it opened, and
+  // would let a crafted one aim a request at whatever is listening on this
+  // machine. They come back only when the reader asks, for this message alone.
   readonly property string rawHtml: service ? service.selectedHtml : ""
+  readonly property int remoteImages: service ? service.selectedRemoteImages : 0
+  readonly property bool remoteImagesAllowed: !!service && service.remoteImagesAllowed
   // Qt lays rich text out on the GUI thread, and this plugin lives inside the
   // shell that draws the whole desktop. A document past the bounds gets its
   // plain-text part instead, with a way to insist.
@@ -141,6 +144,10 @@ Item {
 
       Text {
         width: parent.width
+        // A stranger wrote this. Qt's default AutoText switches a string that
+        // looks like markup into rich text, and rich text with an <img> in it is
+        // a fetch — the same beacon the message body is stripped of.
+        textFormat: Text.PlainText
         text: root.summary ? root.summary.subject : ""
         color: root.textColor
         font.family: root.panelFontFamily
@@ -151,6 +158,7 @@ Item {
 
       Text {
         width: parent.width
+        textFormat: Text.PlainText
         text: root.summary
           ? root.summary.from.display + "  <" + root.summary.from.email + ">"
           : ""
@@ -162,6 +170,7 @@ Item {
 
       Text {
         width: parent.width
+        textFormat: Text.PlainText
         text: root.summary
           ? "to " + Mail.formatAddressList(root.summary.to, 3) + " · " + root.summary.fullTime
           : ""
@@ -216,9 +225,58 @@ Item {
     }
   }
 
+  // Sits under the heavy-document notice when both are up: one says why the
+  // message looks plain, the other why it looks bare, and they are different
+  // answers to different questions.
+  Rectangle {
+    id: imageNotice
+    visible: !!root.summary && root.htmlAvailable
+      && !root.remoteImagesAllowed && root.remoteImages > 0
+    anchors.top: heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.leftMargin: root.pageInset
+    anchors.rightMargin: root.pageInset
+    anchors.topMargin: Style.space(8)
+    implicitHeight: Style.space(30)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+    border.width: 1
+    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(10)
+      anchors.right: showImages.left
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      text: (root.remoteImages === 1 ? "1 image is blocked" : root.remoteImages + " images are blocked")
+        + ": loading them tells the sender this message was opened"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+    }
+
+    Button {
+      id: showImages
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      text: "Show images"
+      foreground: root.textColor
+      bordered: false
+      fontSize: Style.font.caption
+      onClicked: if (root.service) root.service.showRemoteImages()
+    }
+  }
+
   Flickable {
     id: bodyFlick
-    anchors.top: heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom
+    anchors.top: imageNotice.visible
+      ? imageNotice.bottom
+      : (heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom)
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
@@ -267,6 +325,9 @@ Item {
         var image = Html.imageLinkIndex(link)
         if (image > 0) {
           var sources = root.imageSources
+          // A marker in a plain-text body opens the picture it stands for, and
+          // "the picture" is whatever the sender wrote in the src. Opening one
+          // is a fetch, so it obeys the same rule the document does.
           if (image <= sources.length) imagePopover.show(sources[image - 1])
           return
         }
@@ -342,6 +403,7 @@ Item {
 
         Text {
           anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
           text: modelData.filename
           color: root.dimColor
           font.family: root.panelFontFamily

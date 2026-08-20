@@ -64,6 +64,7 @@ Rectangle {
     anchors.right: parent.right
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
+    textFormat: Text.PlainText
     text: root.email === "" ? "Not connected" : root.email
     color: root.dimColor
     font.family: root.panelFontFamily

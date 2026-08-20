@@ -124,6 +124,7 @@ Item {
 
             Text {
               anchors.centerIn: parent
+              textFormat: Text.PlainText
               text: row.modelData.email === ""
                 ? "+" : row.modelData.email.charAt(0).toUpperCase()
               color: root.textColor
@@ -146,6 +147,7 @@ Item {
             // local part across different domains.
             Text {
               width: parent.width
+              textFormat: Text.PlainText
               text: row.modelData.email !== "" ? row.modelData.email : "New account"
               color: root.textColor
               font.family: root.panelFontFamily
@@ -159,6 +161,7 @@ Item {
             Text {
               width: parent.width
               visible: text !== ""
+              textFormat: Text.PlainText
               text: {
                 if (row.modelData.error !== undefined && row.modelData.error !== "")
                   return row.modelData.error

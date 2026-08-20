@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
+import "../Html.js" as Html
 
 // One image, floated over the reader.
 //
@@ -17,6 +18,14 @@ Item {
   required property string panelFontFamily
 
   property string source: ""
+  // What the marker pointed at, shown whether or not it was fetched, so a
+  // refusal names the thing it refused.
+  property string requested: ""
+  // A sender's src is not a picture until something has decided it is safe to
+  // fetch. Loopback and private addresses are the network behind the user's
+  // front door, and file: is their disk; neither is a picture, and opening one
+  // is the request itself.
+  property bool refused: false
 
   anchors.fill: parent
   z: 60
@@ -24,7 +33,9 @@ Item {
   function show(url) {
     var wanted = String(url || "")
     if (wanted === "") return
-    source = wanted
+    requested = wanted
+    refused = !Html.isDisplayableImageUrl(wanted)
+    source = refused ? "" : wanted
     sheet.open()
   }
 
@@ -42,7 +53,11 @@ Item {
     width: frame.implicitWidth + padding * 2
     height: frame.implicitHeight + padding * 2
 
-    onClosed: root.source = ""
+    onClosed: {
+      root.source = ""
+      root.requested = ""
+      root.refused = false
+    }
 
     background: Rectangle {
       radius: Style.cornerRadius
@@ -72,10 +87,13 @@ Item {
 
         Text {
           anchors.centerIn: parent
-          visible: picture.status !== Image.Ready
-          text: picture.status === Image.Error
-            ? "That image could not be loaded"
-            : "Loading…"
+          width: picture.width - Style.space(20)
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.WordWrap
+          visible: root.refused || picture.status !== Image.Ready
+          text: root.refused
+            ? "That image is not on the public internet, so it was not fetched"
+            : (picture.status === Image.Error ? "That image could not be loaded" : "Loading…")
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
@@ -84,10 +102,13 @@ Item {
 
       Text {
         width: picture.width
-        text: root.source
+        text: root.requested
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
+        // The sender wrote this. Left as AutoText, a src with a tag in it is
+        // markup Qt would lay out — and an <img> in it a fetch it would make.
+        textFormat: Text.PlainText
         elide: Text.ElideMiddle
       }
     }

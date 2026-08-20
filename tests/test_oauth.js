@@ -206,4 +206,34 @@ assert.strictEqual(oauth.byteLength(""), 0)
   assert.ok(oauth.successResponse(null).indexOf("alert") < 0)
 }
 
+// The palette lands in a stylesheet, where escaping does nothing: a value
+// carrying "}" or "</style>" would close the rule and turn the rest into
+// markup. A theme is installed rather than sent, but this page is the one thing
+// here a browser renders.
+{
+  const hostile = oauth.failureResponse({
+    background: "#131313;}</style><script>alert(1)</script><style>{",
+    foreground: "red;} body{display:none",
+    urgent: "#FF5257",
+    fontFamily: 'monospace";}</style><img src=x onerror=alert(1)>'
+  }, "went wrong")
+  assert.ok(hostile.indexOf("<script") < 0, "a failure page carries no script at all")
+  assert.ok(hostile.indexOf("<img") < 0)
+  assert.ok(hostile.indexOf("display:none") < 0)
+  // One stylesheet, closed once: nothing in the palette ended it early.
+  assert.strictEqual(hostile.split("</style>").length - 1, 1)
+  // A colour that is not a colour falls back rather than disappearing, so the
+  // page is still readable.
+  assert.ok(hostile.indexOf("background:#131313;") > 0)
+  assert.ok(hostile.indexOf("#FF5257") > 0)
+
+  // A real theme still comes through untouched.
+  const normal = oauth.successResponse({
+    background: "#1d2021", foreground: "#ebdbb2", accent: "#458588",
+    urgent: "#cc241d", fontFamily: "CaskaydiaMono Nerd Font"
+  })
+  assert.ok(normal.indexOf("#1d2021") > 0)
+  assert.ok(normal.indexOf("CaskaydiaMono Nerd Font") > 0)
+}
+
 console.log("test_oauth.js ok")

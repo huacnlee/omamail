@@ -339,6 +339,9 @@ Item {
   readonly property var selectedBody: current ? current.selectedBody : ({ text: "", source: "" })
   readonly property string selectedHtml: current ? current.selectedHtml : ""
   readonly property var selectedImages: current ? current.selectedImages : []
+  readonly property int selectedBlockedImages: current ? current.selectedBlockedImages : 0
+  readonly property int selectedRemoteImages: current ? current.selectedRemoteImages : 0
+  readonly property bool remoteImagesAllowed: !!current && current.remoteImagesAllowed
   readonly property var selectedAttachments: current ? current.selectedAttachments : []
   readonly property bool selectedTooHeavy: !!current && current.selectedTooHeavy
   readonly property bool detailLoading: !!current && current.detailLoading
@@ -352,6 +355,7 @@ Item {
   function loadMore() { if (current) current.loadMore() }
   function select(id) { if (current) current.select(id) }
   function clearSelection() { if (current) current.clearSelection() }
+  function showRemoteImages() { if (current) current.showRemoteImages() }
   function selectOffset(delta) { return current ? current.selectOffset(delta) : "" }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }

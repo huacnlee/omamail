@@ -88,6 +88,7 @@ Column {
 
           Text {
             width: parent.width
+            textFormat: Text.PlainText
             text: row.modelData.email !== "" ? row.modelData.email : "New mailbox"
             color: root.textColor
             font.family: root.panelFontFamily

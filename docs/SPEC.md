@@ -22,7 +22,7 @@ Three plugin entry points (`manifest.kinds`):
 | Question | Decision |
 |---|---|
 | List granularity | **One row per message** (`messages.list`), not per thread. Thread aggregation costs an extra `threads.get` round trip per page and doubles the UI states. |
-| Body rendering | **Qt RichText by default**, with a plain-text toggle. Remote images load — the sender therefore learns when a message was opened, a deliberate trade for mail that looks like mail. No browser engine: `QtWebEngineQuick::initialize()` must run before the host process's `QGuiApplication` is constructed, which a plugin loaded later cannot do. |
+| Body rendering | **Qt RichText by default**, with a plain-text toggle. Remote images are blocked until the reader asks, per message: Qt performs the fetch for real, so rendering one fires the sender's tracking pixels and reports the read. A source aimed at loopback, a private address or a local file is never fetched at all. No browser engine: `QtWebEngineQuick::initialize()` must run before the host process's `QGuiApplication` is constructed, which a plugin loaded later cannot do. |
 | Sending | **Included.** Reply, reply-all, forward, and compose, plain-text body with quoted original. Requires the `gmail.send` scope. |
 | Bar click | **Opens the app window directly.** Middle click refreshes, right click opens a small menu. |
 | Compose surface | **The whole content area of the one window.** Omarchy's panel mechanism gives every extra window its own region, so a reply must not open one. Only a second mail account would justify a second window. |

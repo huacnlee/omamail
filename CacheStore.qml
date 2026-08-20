@@ -34,24 +34,9 @@ Item {
   signal restored()
 
   function get(key) { return Cache.getQuery(store, key) }
-  // Reading a body counts as using it, so the hit is recorded before the entry
-  // is handed back — that stamp is what the LRU evicts on.
-  function body(id) {
-    var entry = Cache.getBody(store, id)
-    if (entry) {
-      store = Cache.touchBody(store, id, Date.now())
-      scheduleSave()
-    }
-    return entry
-  }
 
   function putQuery(key, page) {
     store = Cache.putQuery(store, key, page, Date.now())
-    scheduleSave()
-  }
-
-  function putBody(id, value) {
-    store = Cache.putBody(store, id, value, Date.now())
     scheduleSave()
   }
 
@@ -97,9 +82,16 @@ Item {
     file.reload()
   }
 
+  // The store holds the subject, sender and snippet of every message that has
+  // been listed — the same mail the body files beside it are kept 0600 for. So
+  // the directory is closed to everyone else: FileView writes with whatever
+  // umask the shell process happens to have, and the directory is the only
+  // place this can set the mode itself.
   Process {
     id: directoryMaker
-    command: ["mkdir", "-p", root.directory]
+    // The path arrives as an argument rather than inside the script, so nothing
+    // in it can be read as shell.
+    command: ["sh", "-c", "umask 077; mkdir -p \"$1\" && chmod 700 \"$1\"", "sh", root.directory]
     onExited: file.reload()
   }
 

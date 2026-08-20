@@ -262,17 +262,36 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;")
 }
 
+// The palette crosses into a stylesheet rather than into text, where escaping
+// does nothing: a value carrying "}" or "</style>" would close the rule or the
+// element and everything after it would be markup. It comes from the active
+// Omarchy theme, which is a file the user installed rather than something a
+// stranger sent — but this page is the one thing here a browser renders, and a
+// colour that is not a colour has no business reaching it either way.
+function cssColor(value, fallback) {
+  var text = String(value === undefined || value === null ? "" : value).trim()
+  return /^#[0-9A-Fa-f]{3,8}$/.test(text) ? text : fallback
+}
+
+// Quoted in the stylesheet, so the quote itself is the character that must not
+// survive. What is left is what a font is actually named.
+function cssFontFamily(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+    .replace(/[^A-Za-z0-9 _-]/g, "").trim()
+  return text === "" ? "monospace" : text
+}
+
 // `body` is markup by design — the success page carries a script that closes the
 // tab — so it is the caller's job to have escaped anything untrusted inside it.
 // Everything else this builds is escaped here.
 function themedPage(theme, options) {
   var palette = theme || defaultTheme()
   var settings = options || {}
-  var fg = String(palette.foreground || "#DEDEDE")
-  var bg = String(palette.background || "#131313")
-  var mark = settings.failed ? String(palette.urgent || "#FF5257")
-    : String(palette.accent || "#077CFD")
-  var family = String(palette.fontFamily || "monospace")
+  var fg = cssColor(palette.foreground, "#DEDEDE")
+  var bg = cssColor(palette.background, "#131313")
+  var mark = settings.failed ? cssColor(palette.urgent, "#FF5257")
+    : cssColor(palette.accent, "#077CFD")
+  var family = cssFontFamily(palette.fontFamily)
 
   return "<!doctype html><html><head><meta charset=\"utf-8\">"
     + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -280,7 +299,7 @@ function themedPage(theme, options) {
     + "*{box-sizing:border-box}"
     + "html,body{height:100%}"
     + "body{margin:0;background:" + bg + ";color:" + fg + ";"
-    + "font-family:\"CaskaydiaMono Nerd Font\",\"JetBrains Mono\"," + family + ",ui-monospace,monospace;"
+    + "font-family:\"CaskaydiaMono Nerd Font\",\"JetBrains Mono\",\"" + family + "\",ui-monospace,monospace;"
     + "font-size:13px;line-height:1.7;display:flex;align-items:center;justify-content:center;padding:24px}"
     + "main{width:100%;max-width:420px;border:1px solid " + fg + "66;padding:28px 30px}"
     + "svg{display:block;margin-bottom:18px}"

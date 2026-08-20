@@ -88,6 +88,10 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: time.left
         anchors.rightMargin: Style.space(8)
+        // A stranger wrote this. Qt's default AutoText switches a string that
+        // looks like markup into rich text, and rich text with an <img> in it is
+        // a fetch — the same beacon the message body is stripped of.
+        textFormat: Text.PlainText
         text: root.summary.subject
         color: root.textColor
         font.family: root.panelFontFamily
@@ -100,6 +104,7 @@ Rectangle {
         id: time
         anchors.right: parent.right
         anchors.baseline: subject.baseline
+        textFormat: Text.PlainText
         text: root.summary.time
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -109,6 +114,7 @@ Rectangle {
 
     Text {
       width: parent.width
+      textFormat: Text.PlainText
       text: root.summary.from.display
       color: root.dimColor
       font.family: root.panelFontFamily
@@ -119,6 +125,7 @@ Rectangle {
     Text {
       width: parent.width
       visible: root.summary.snippet !== ""
+      textFormat: Text.PlainText
       text: root.summary.snippet
       color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.42)
       font.family: root.panelFontFamily

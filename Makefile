@@ -39,9 +39,11 @@ test-js:
 	node tests/test_html.js
 	node tests/test_cache.js
 	node tests/test_model.js
+	node tests/test_accounts.js
 
 test-shell:
 	python3 tests/test_qml_names.py
+	python3 tests/test_qml_text_format.py
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh

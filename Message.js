@@ -530,12 +530,30 @@ function summarize(message, now) {
 
 // ------------------------------------------------------------- composition
 
+// A header value can never carry a line break. One would end the header and let
+// whatever followed be read as the next one, which is how a Bcc gets into a
+// message nobody wrote it into. Removed rather than rejected: the values that
+// reach here are addresses and subjects, and a stray newline in one of them is
+// not worth refusing to send over.
+function headerSafe(value) {
+  return String(value === undefined || value === null ? "" : value).replace(/[\r\n]+/g, " ")
+}
+
 function foldHeader(name, value) {
-  var text = String(value || "")
+  var text = headerSafe(value)
   // Any non-ASCII in a header has to go back out as an encoded word, or Gmail
   // rejects the raw message.
   if (/^[\x20-\x7e]*$/.test(text)) return name + ": " + text
   return name + ": =?UTF-8?B?" + encodeBase64(text) + "?="
+}
+
+// In-Reply-To and References carry a Message-ID, and a Message-ID is a string
+// off a message a stranger sent — it reaches here having been read out of their
+// headers and no further. It goes back out verbatim because a reply has to
+// thread, so it is cut down to what a message id can legally be first:
+// printable ASCII, on one line, no longer than a header may run.
+function referenceValue(value) {
+  return headerSafe(value).replace(/[^\x20-\x7e]+/g, "").substring(0, 512).trim()
 }
 
 function quoteBody(summary, body) {
@@ -563,9 +581,10 @@ function buildRawMessage(fields) {
   lines.push(foldHeader("To", values.to || ""))
   if (values.cc) lines.push(foldHeader("Cc", values.cc))
   lines.push(foldHeader("Subject", values.subject || ""))
-  if (values.inReplyTo) {
-    lines.push("In-Reply-To: " + values.inReplyTo)
-    lines.push("References: " + (values.references || values.inReplyTo))
+  var inReplyTo = referenceValue(values.inReplyTo)
+  if (inReplyTo) {
+    lines.push("In-Reply-To: " + inReplyTo)
+    lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
   lines.push("MIME-Version: 1.0")
   lines.push("Content-Type: text/plain; charset=UTF-8")
