@@ -84,6 +84,14 @@ fi
 # screen saying which icon put it there.
 grep -q 'windowOpen' BarWidget.qml \
   || fail "the bar icon must show an active style while the window is open"
+# As a selected fill, the way every other selected control here is drawn. The
+# bar's own `active` recolours the glyph from the theme's `bar.active`, which
+# falls back to `urgent` — a warning colour for a window simply being open.
+grep -q 'selectedFillFor' BarWidget.qml \
+  || fail "the bar icon's open state must use the selected fill, not a glyph colour"
+if grep -vE '^[[:space:]]*//' BarWidget.qml | grep -n 'activeColor'; then
+  fail "BarWidget must not paint its glyph with the bar's urgent-derived activeColor"
+fi
 
 # The mouse must not move the keyboard's cursor. Qt re-reports hover when
 # content moves under a still pointer, and the list scrolls to follow the

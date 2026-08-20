@@ -52,21 +52,32 @@ BarWidget {
     // screen, which is what answers "which of these opened that window". The
     // service is what knows: it outlives the window and is told either way.
     readonly property bool windowOpen: !!root.gmail && root.gmail.windowOpen
-    // `activeColor` is the bar's own active token — the theme's `bar.active`,
-    // which the bar hands down under the name `urgent`. It is the colour for a
-    // widget whose thing is open, not a colour for danger.
-    readonly property color glyphColor: windowOpen
-      ? activeColor
-      : (connected ? root.foreground : Qt.darker(root.foreground, 1.55))
+    // Not `activeColor`: the bar hands that down from the theme's `bar.active`,
+    // which falls back to `urgent` — a warning colour for a window simply being
+    // open. The glyph keeps its own colour and the open state is a fill behind
+    // it, which is what a selected control looks like everywhere else here.
+    readonly property color glyphColor: connected
+      ? root.foreground
+      : Qt.darker(root.foreground, 1.55)
     readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
 
-    // Said declaratively as well as drawn: the glyph comes from iconComponent,
-    // which BarIconButton does not colour for us, so `active` alone would show
-    // nothing — but it is still the state the bar asks about.
-    active: windowOpen
+    // The bar's own `active` is left alone on purpose: it exists to recolour a
+    // glyph, and this widget draws its own.
+    readonly property color openFill: Style.selectedFillFor(root.foreground, Color.accent)
 
     iconComponent: Component {
       Item {
+        // The same fill a selected control carries anywhere else in this
+        // application, so an open window reads as open rather than as urgent.
+        Rectangle {
+          anchors.centerIn: parent
+          width: Style.space(20)
+          height: width
+          radius: Style.cornerRadius
+          visible: button.windowOpen
+          color: button.openFill
+        }
+
         GmailIcon {
           anchors.centerIn: parent
           iconSize: Style.space(12)
