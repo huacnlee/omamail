@@ -338,6 +338,7 @@ Item {
   readonly property var selectedMessage: current ? current.selectedMessage : null
   readonly property var selectedBody: current ? current.selectedBody : ({ text: "", source: "" })
   readonly property string selectedHtml: current ? current.selectedHtml : ""
+  readonly property var selectedDocument: current ? current.selectedDocument : null
   readonly property var selectedImages: current ? current.selectedImages : []
   readonly property int selectedBlockedImages: current ? current.selectedBlockedImages : 0
   readonly property int selectedRemoteImages: current ? current.selectedRemoteImages : 0

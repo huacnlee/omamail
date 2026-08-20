@@ -490,10 +490,10 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(compact.indexOf("margin:10px 0") > 0, "vertical rhythm stays")
   assert.ok(compact.indexOf("padding:5px 0 7px 0") > 0, "all four sides handled")
 
-  // The reader rebuilds its document on every relayout from a body that has not
-  // changed, so the parse is kept between them — which is only safe as long as
-  // fitting writes the tree out rather than editing it. A narrow pass must not
-  // leave its marks on the wide one that follows.
+  // The reader rebuilds its document on every relayout from the document
+  // `sanitize` already built, so a whole drag costs no parse at all — which is
+  // only safe as long as fitting writes the tree out rather than editing it. A
+  // narrow pass must not leave its marks on the wide one that follows.
   // Only the table carries 600: a width on an image is the picture's own and is
   // clamped by the stylesheet's max-width instead.
   var fitted = "<table width=\"600\"><tr><td style=\"padding:4px 30px\">"
@@ -509,6 +509,14 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf("padding:4px 30px") > 0)
   assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf('height="200"') < 0,
     "heights come out at every width")
+
+  // The document itself is accepted in place of the string written from it, and
+  // has to fit to exactly the same thing.
+  var built = html.sanitize(fitted, { allowRemoteImages: true })
+  assert.strictEqual(html.documentFor(built.document, { maxImageWidth: 380, compact: true }),
+    html.documentFor(built.html, { maxImageWidth: 380, compact: true }))
+  assert.strictEqual(html.documentFor(built.document, { maxImageWidth: 800, compact: true })
+    .indexOf('width="600"') > 0, true, "and it is still good at the next width")
 
   var relaxed = html.relaxFixedWidths(
     '<table width="600"><td width="100" style="width:640px">x</td></table>', 380)

@@ -453,8 +453,9 @@ function removeAttribute(node, name) {
   node.attrs = kept
 }
 
-function setStyle(node, style) {
+function setStyle(node, declarations) {
   var attr = attributeOf(node, "style")
+  var style = joinDeclarations(declarations)
   if (style === "") {
     if (attr) removeAttribute(node, "style")
     return
@@ -692,7 +693,7 @@ function rewriteStyle(node, decide) {
     var verdict = decide(declarations[i])
     if (verdict) kept.push(verdict)
   }
-  setStyle(node, joinDeclarations(kept))
+  setStyle(node, kept)
 }
 
 // ================================================================== passes
@@ -865,7 +866,7 @@ function cleanAttributes(node, keepColors, declarations) {
       && /url\s*\(/i.test(decodeReferences(declaration.value))) continue
     survivors.push(declaration)
   }
-  setStyle(node, joinDeclarations(survivors))
+  setStyle(node, survivors)
 }
 
 function sanitize(html, options) {
@@ -977,7 +978,11 @@ function sanitize(html, options) {
     remoteImages: loadable,
     complexity: size,
     tooHeavy: isTooHeavy(size),
-    plainText: plain
+    plainText: plain,
+    // The document itself, so the reader can fit it to a window without
+    // parsing back the string that was just written from it. Nothing below
+    // fitting mutates a tree, which is what makes handing this out safe.
+    document: root
   }
 }
 
@@ -1165,19 +1170,13 @@ function fitAttributes(node, fit) {
 }
 
 // The reader rebuilds its document whenever the window width or the zoom
-// changes, and the body it rebuilds from has not changed at all. One entry is
-// enough: it is always the message on screen, and the key is the body itself,
-// so a hit cannot be the wrong document. Nothing below fitting mutates a tree,
-// which is what makes keeping one safe.
-var lastParse = { source: null, tree: null }
-
-function parseForFitting(html) {
-  var text = String(html === undefined || html === null ? "" : html)
-  if (lastParse.source === text) return lastParse.tree
-  var tree = parse(text)
-  lastParse.source = text
-  lastParse.tree = tree
-  return tree
+// changes, and the body it rebuilds from has not changed at all — so it hands
+// over the document `sanitize` already built rather than the string that was
+// written from it, and a whole drag costs no parse at all. A string is still
+// accepted, because a caller that only has one should not have to care.
+function documentTree(source) {
+  if (source && source.type === "root") return source
+  return parse(source)
 }
 
 function stripImageHeights(html) {
@@ -1205,10 +1204,9 @@ function documentFor(bodyHtml, colors) {
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
   var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
 
-  // Parsed once for every width the reader is dragged through, not once per
-  // width: this is rebuilt on every relayout and the body it is built from has
-  // not changed.
-  var root = parseForFitting(bodyHtml)
+  // No parse at all when the caller kept the document: this is rebuilt on every
+  // relayout, and the body it is built from has not changed.
+  var root = documentTree(bodyHtml)
   var fit = fitting(true, palette.compact === true, palette.compact === true, maxImage)
 
   return "<html><head><style type=\"text/css\">"

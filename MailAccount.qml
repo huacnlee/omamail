@@ -99,6 +99,11 @@ Item {
   // that learns something new applies it to every message already on disk
   // rather than only to the ones fetched afterwards.
   property string sourceHtml: ""
+  // The parsed document behind `selectedHtml`. The reader fits it to whatever
+  // width it happens to be and rebuilds on every relayout, so handing over the
+  // tree rather than the string is the difference between one parse per message
+  // and one per drag step.
+  property var selectedDocument: null
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
@@ -409,6 +414,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    selectedDocument = null
     sourceHtml = ""
     remoteImagesAllowed = false
     selectedBlockedImages = 0
@@ -449,11 +455,17 @@ Item {
       // walk over the same tree, so a marker cannot open somebody else's image
       // — and it is only asked for when the text came from the HTML, because a
       // message that shipped its own text/plain part never had images in it.
-      var ready = root.renderSource(rawHtml, decoded.source === "html")
-      if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html" })
-      root.selectedBody = decoded
+      // A body never changes once fetched, which is what makes the cache
+      // correct — so when the cache already painted this exact markup there is
+      // nothing here to paint again, and rendering it would be a second parse
+      // of the whole message to arrive at the document already on screen.
+      if (rawHtml !== root.sourceHtml || root.selectedDocument === null) {
+        var ready = root.renderSource(rawHtml, decoded.source === "html")
+        if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html" })
+        root.selectedBody = decoded
+        root.selectedImages = ready.plainText ? ready.plainText.images : []
+      }
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedImages = ready.plainText ? ready.plainText.images : []
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
@@ -480,6 +492,7 @@ Item {
       withPlainText: withPlainText === true
     }))
     selectedHtml = ready.html
+    selectedDocument = ready.document
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
     selectedTooHeavy = ready.tooHeavy
@@ -500,6 +513,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    selectedDocument = null
     sourceHtml = ""
     remoteImagesAllowed = false
     selectedImages = []
