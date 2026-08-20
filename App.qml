@@ -253,8 +253,9 @@ Item {
   }
 
   // One answer per key id. The ids come from keys/Keymap.js; adding a key is a
-  // row there and a case here, and nothing else.
-  function runShortcut(id) {
+  // row there and a case here, and nothing else. The sequence is what a row
+  // of several keys uses to tell them apart — Alt+1 and Alt+9 share an id.
+  function runShortcut(id, sequence) {
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
     if (id === "open") return openMessage(cursorId)
@@ -279,6 +280,15 @@ Item {
     if (id === "goStarred") return goMailbox("starred")
     if (id === "goUnread") return goMailbox("unread")
     if (id === "goSent") return goMailbox("sent")
+    if (id === "switchAccount") {
+      if (!service) return
+      var index = Keymap.accountIndexFor(sequence)
+      if (index < 0) return
+      service.switchToIndex(index)
+      accountSwitcher.close()
+      backToList()
+      return
+    }
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { bodyZoom = 1.0; return }
@@ -1133,7 +1143,7 @@ Item {
       KeyRouter {
         context: focusScope.keyContext
         overlay: root.shortcutHelpVisible
-        onTriggered: function(id) { root.runShortcut(id) }
+        onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }
     }
   }

@@ -81,6 +81,14 @@ var BINDINGS = [
     group: "Going", label: "Go to unread" },
   { id: "goSent", keys: ["g,t"], contexts: MAIL,
     group: "Going", label: "Go to sent" },
+  // One row, nine sequences: the sheet reads as a range, and the key that
+  // fired is what picks the mailbox. A number past the last account is a
+  // no-op in the switch itself, not a missing binding.
+  { id: "switchAccount",
+    keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
+      "Alt+6", "Alt+7", "Alt+8", "Alt+9"],
+    contexts: MAIL, group: "Going", label: "Switch account",
+    display: "Alt+1…9" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
@@ -163,10 +171,21 @@ function readableSequence(sequence) {
 // separator.
 function displayFor(binding) {
   if (!binding) return ""
+  if (binding.display) return binding.display
   var keys = binding.keys || []
   var out = []
   for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))
   return out.join(", ")
+}
+
+// Alt+1 is the first mailbox, Alt+9 the ninth. The sequence is the only
+// thing that knows which, because one binding id covers the whole row.
+function accountIndexFor(sequence) {
+  var text = String(sequence || "")
+  if (text.length !== 5 || text.indexOf("Alt+") !== 0) return -1
+  var n = text.charCodeAt(4) - 48
+  if (n < 1 || n > 9) return -1
+  return n - 1
 }
 
 // How a row reads on the status bar, which is a hint rather than a reference:

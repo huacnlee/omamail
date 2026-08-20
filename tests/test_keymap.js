@@ -118,6 +118,29 @@ assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
 assert.strictEqual(keymap.displayFor(byId("goInbox")), "g then i")
 assert.strictEqual(keymap.displayFor(byId("open")), "Enter, o")
 assert.strictEqual(keymap.displayFor(byId("back")), "Esc")
+assert.strictEqual(keymap.displayFor(byId("switchAccount")), "Alt+1…9",
+  "nine account keys are one row on the sheet, not nine")
+{
+  const going = groups.filter(function (g) { return g.name === "Going" })[0]
+  assert.ok(going, "Switch account lives with the other go-to keys")
+  const sheet = going.rows.filter(function (r) { return r.action === "Switch account" })[0]
+  assert.strictEqual(sheet.keys, "Alt+1…9")
+  assert.strictEqual(sheet.action, "Switch account")
+}
+
+const switchAccount = byId("switchAccount")
+assert.strictEqual(keymap.isEnabled(switchAccount, "list", false), true)
+assert.strictEqual(keymap.isEnabled(switchAccount, "reader", false), true)
+assert.strictEqual(keymap.isEnabled(switchAccount, "compose", false), false,
+  "a draft is not a mailbox to leave")
+assert.strictEqual(keymap.isEnabled(switchAccount, "search", false), false)
+assert.strictEqual(keymap.isEnabled(switchAccount, "page", false), false)
+
+assert.strictEqual(keymap.accountIndexFor("Alt+1"), 0)
+assert.strictEqual(keymap.accountIndexFor("Alt+9"), 8)
+assert.strictEqual(keymap.accountIndexFor("Alt+0"), -1)
+assert.strictEqual(keymap.accountIndexFor("Ctrl+1"), -1)
+assert.strictEqual(keymap.accountIndexFor(""), -1)
 assert.strictEqual(keymap.hintKeyFor(byId("cursorDown")), "j / k",
   "the status bar shows one line for the pair")
 assert.strictEqual(keymap.hintKeyFor(byId("open")), "o",

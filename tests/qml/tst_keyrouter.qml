@@ -13,13 +13,17 @@ Item {
   width: 300; height: 200
 
   property string lastId: ""
+  property string lastSequence: ""
   property string context: "list"
   property bool overlay: false
 
   Omamail.KeyRouter {
     context: host.context
     overlay: host.overlay
-    onTriggered: function(id) { host.lastId = id }
+    onTriggered: function(id, sequence) {
+      host.lastId = id
+      host.lastSequence = sequence
+    }
   }
 
   readonly property Item focusItem: host.Window.activeFocusItem
@@ -55,6 +59,7 @@ Item {
       host.context = "list"
       host.overlay = false
       host.lastId = ""
+      host.lastSequence = ""
       compose.opened = false
       scope.applyContextFocus()
       wait(30)
@@ -146,6 +151,19 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
+    function test_alt_number_picks_a_mailbox_from_the_list() {
+      keyClick(Qt.Key_2, Qt.AltModifier)
+      compare(host.lastId, "switchAccount")
+      compare(host.lastSequence, "Alt+2")
+    }
+
+    function test_alt_number_is_dead_in_a_draft() {
+      host.context = "compose"
+      wait(20)
+      keyClick(Qt.Key_2, Qt.AltModifier)
+      compare(host.lastId, "", "switching is a mailbox action, not a draft one")
+    }
+
     function test_a_reader_only_key_is_dead_in_the_list() {
       keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "", "nothing to zoom from the list")

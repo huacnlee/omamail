@@ -23,7 +23,9 @@ for entry in service:Service.qml barWidget:BarWidget.qml panel:App.qml; do
 done
 
 [ -x install.sh ] || fail "install.sh must be executable"
+[ -x restore.sh ] || fail "restore.sh must be executable"
 grep -q 'plugin-backups' install.sh || fail "backups must not land inside the plugins directory"
+grep -q 'plugin-backups' restore.sh || fail "restore.sh must read backups from outside the plugins directory"
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT

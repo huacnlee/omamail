@@ -29,7 +29,9 @@ Item {
   // consumes its own keys, so the router never sees them.
   property bool overlay: false
 
-  signal triggered(string id)
+  // The sequence travels with the id: one row can bind several keys that
+  // mean different things, as Alt+1…9 do for which mailbox to open.
+  signal triggered(string id, string sequence)
 
   Instantiator {
     model: Keymap.sequencesFor(root.context)
@@ -38,7 +40,7 @@ Item {
       required property var modelData
       sequence: modelData.sequence
       enabled: Keymap.isEnabled(modelData.binding, root.context, root.overlay)
-      onActivated: root.triggered(modelData.id)
+      onActivated: root.triggered(modelData.id, modelData.sequence)
     }
   }
 }
