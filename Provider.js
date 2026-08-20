@@ -161,28 +161,27 @@ var IMAP = {
 
 // -------------------------------------------------------------------- HEY
 //
-// HEY is here as a provider with no client behind it, and that is a statement
-// rather than an oversight.
+// A provider with no client behind it *yet*. The entry is the plan, not an
+// apology: everything above routes through the registry below, so the day
+// there is something to connect to, HEY becomes a `capabilities` block, a
+// `Hey.js` and a `HeyClient.qml`, and no other file changes.
 //
-// 37signals ship no IMAP, no POP and no public API: the FAQ says so outright
-// ("HEY doesn't support IMAP or POP", "off-the-shelf 3rd party email apps
-// won't work with HEY"), and DHH has said IMAP will never arrive because the
-// product's changes to email depend on the vertical integration. The SMTP in
-// their docs is HEY sending *through* someone else's server, not a way in.
+// What is missing is the interface. 37signals publish no API, and no IMAP or
+// POP either — the FAQ says "HEY doesn't support IMAP or POP" and that
+// off-the-shelf apps will not work. The SMTP in their docs is HEY sending
+// *through* someone else's server rather than a way in.
 //
-// The only remaining surface is the private endpoint set app.hey.com talks to,
-// reached by driving a session cookie. That is not shippable here: it would
-// ask a user for their HEY password to replay it against an interface with no
-// compatibility promise, and it would break on a deploy nobody told us about.
-//
-// So the seam exists and the entry is honest about why it is dark. The day an
-// API appears, this becomes a `capabilities` block, a `Hey.js` and a
-// `HeyClient.qml` — every other file already routes through the registry below
-// and none of them has to change.
+// The one surface that does exist is the private endpoint set app.hey.com
+// talks to, reached by driving a session cookie. That is deliberately not used
+// here: it would ask a user for their HEY password so it could be replayed
+// against an interface carrying no compatibility promise, and it would break
+// on a deploy nobody announced. Waiting for a supported interface is the
+// difference between a provider that keeps working and one that breaks
+// silently on somebody else's release day.
 var HEY = {
   id: "hey",
   name: "HEY",
-  summary: "No IMAP and no public API. Nothing to connect to yet.",
+  summary: "No public API yet, so not supported for now — ready to add when there is one.",
   auth: "none",
   mailboxes: [
     // HEY's own three, so the shape is on record. Nothing selects them today.
@@ -194,9 +193,11 @@ var HEY = {
   searchQuery: function() { return "" },
   // What the setup page shows instead of a form, and what stops `MailAccount`
   // from ever calling a client that is not there.
-  unavailable: "HEY has no IMAP, POP or public API, so no third-party client "
-    + "can sign in to it. Forwarding HEY to a mailbox you can reach over IMAP "
-    + "is the only route that does not depend on 37signals changing their mind."
+  unavailable: "HEY does not publish an API, and offers no IMAP or POP either, "
+    + "so there is nothing for a mail client to sign in to yet. Support is "
+    + "planned and the groundwork is here — it needs an interface from "
+    + "37signals to connect to. Until then, forwarding HEY to a mailbox you "
+    + "can reach over IMAP is the way to read it here."
 }
 
 // ---------------------------------------------------------------- registry

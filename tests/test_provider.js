@@ -39,13 +39,19 @@ assert.strictEqual(provider.can("gmail", "web"), true)
 assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
 assert.strictEqual(provider.can("hey", "send"), false, "HEY has nothing behind it")
 
-// HEY is present, and present as unavailable. Both halves matter: the entry is
-// what keeps the seam, and the reason is what the setup page shows instead of
-// a form it cannot honour.
+// HEY is present, and present as not-yet-supported. Both halves matter: the
+// entry is what keeps the seam, and the reason is what the setup page shows
+// instead of a form it cannot honour.
 assert.strictEqual(provider.isConnectable("gmail"), true)
 assert.strictEqual(provider.isConnectable("imap"), true)
 assert.strictEqual(provider.isConnectable("hey"), false)
-assert.ok(/no IMAP, POP or public API/i.test(provider.unavailableReason("hey")))
+
+// The reason has to say what is missing and that it is being waited on, not
+// read as a decision this project made.
+const heyReason = provider.unavailableReason("hey")
+assert.ok(/does not publish an API/i.test(heyReason), "it names what is missing")
+assert.ok(/planned/i.test(heyReason), "and says support is planned rather than refused")
+assert.ok(/yet/i.test(provider.summary("hey")), "the chooser says the same thing in one line")
 assert.strictEqual(provider.unavailableReason("gmail"), "")
 assert.strictEqual(provider.unavailableReason("imap"), "")
 

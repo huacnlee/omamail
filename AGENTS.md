@@ -84,13 +84,18 @@
   address can legitimately be both, and a Gmail account keeping the bare address
   is what stops an upgrade from having to migrate cache directories, keyring
   entries and the active account.
-- `hey` is a real entry with no client behind it, deliberately. 37signals ship
-  no IMAP, no POP and no public API — their FAQ says so — so there is nothing to
-  connect to. The entry keeps the seam and states the reason, and the setup page
-  shows that reason instead of a form it cannot honour. Do not "fix" this by
-  driving the private endpoints app.hey.com uses: that would ask a user for
-  their HEY password so it could be replayed against an interface with no
-  compatibility promise, and it would break on a deploy nobody announced.
+- `hey` is a real entry with no client behind it *yet*, deliberately. 37signals
+  publish no API, and no IMAP or POP either — their FAQ says so — so there is
+  nothing to sign in to. The entry is the plan rather than an apology: it keeps
+  the seam, states what is missing, and the setup page shows that reason instead
+  of a form it cannot honour. Adding HEY when an interface appears is a
+  `capabilities` block, a `Hey.js` and a `HeyClient.qml`.
+- Do not fill that gap by driving the private endpoints app.hey.com uses. It
+  would ask a user for their HEY password so it could be replayed against an
+  interface carrying no compatibility promise, and it would break on a deploy
+  nobody announced. Waiting for a supported interface is the difference between
+  a provider that keeps working and one that fails silently on somebody else's
+  release day.
 
 ## Imap.js and the transport
 

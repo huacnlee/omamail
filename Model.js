@@ -36,7 +36,9 @@ function providerName(provider) {
 
 function setupHeadline(state, provider, authKind) {
   var name = providerName(provider)
-  if (state === "unavailable") return name + " cannot be connected"
+  // "Not supported yet" rather than "cannot": the difference is whether the
+  // user reads this as a decision we made or as something we are waiting on.
+  if (state === "unavailable") return name + " is not supported yet"
   if (state === "tools_missing") return "Missing system tools"
   // Only one of these sends the user to a Cloud console. The other needs a
   // server and a password, which is a form rather than a project.
