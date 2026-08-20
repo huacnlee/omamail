@@ -85,15 +85,18 @@ fi
 grep -q 'windowOpen' BarWidget.qml \
   || fail "the bar icon must show an active style while the window is open"
 
-# Quickshell's FloatingWindow is a proxy window and does not forward
-# activeFocusItem, so `window.activeFocusItem` is undefined and the typing
-# guard silently passes for every key. The attached property is the one that
-# works. This is invisible at runtime — nothing warns — so it is asserted here.
-if grep -vE '^[[:space:]]*//' App.qml | grep -n '[^A-Za-z]window\.activeFocusItem'; then
-  fail "App.qml must read Window.activeFocusItem (attached), not window.activeFocusItem"
+# The context owns the keyboard. Every context that is not text entry parks the
+# focus on a plain Item, because forceActiveFocus on the focus scope itself is a
+# no-op — it re-elects the scope's current focus item, which is the field being
+# left, so a dismissed compose field goes on swallowing every bare key. Nothing
+# warns about this: the keys simply stop arriving.
+grep -q 'onKeyContextChanged' App.qml \
+  || fail "the key context must move the keyboard when it changes"
+grep -q 'function parkKeyboard' App.qml \
+  || fail "App.qml must park the keyboard on a plain Item, not on the focus scope"
+if grep -vE '^[[:space:]]*//' App.qml | grep -n 'focusScope\.forceActiveFocus'; then
+  fail "forceActiveFocus on the focus scope re-elects the field being left; park the keyboard instead"
 fi
-grep -q 'Window\.activeFocusItem' App.qml \
-  || fail "App.qml must decide typing from the window's active focus item"
 
 # A component that declares `focus: true` owns the window's focus even while it
 # is invisible, and an owner that accepts keys is a sink for everything routed

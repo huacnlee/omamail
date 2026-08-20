@@ -125,12 +125,6 @@ Item {
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
   readonly property bool composing: compose.opened
-  // Compose holds the focus while it is up. Handing it back when it closes
-  // keeps the window's focus on something that is actually on screen; leaving
-  // it on a hidden field is the shape of bug that ate every Escape once already.
-  onComposingChanged: if (!composing) Qt.callLater(function() {
-    focusScope.forceActiveFocus()
-  })
 
   function open(payloadJson) {
     var payload = ({})
@@ -140,7 +134,7 @@ Item {
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
     if (payload.compose === true) startCompose("new")
-    Qt.callLater(function() { focusScope.forceActiveFocus() })
+    Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
   function close() {
@@ -168,7 +162,7 @@ Item {
   function backToList() {
     if (service) service.clearSelection()
     currentView = "list"
-    Qt.callLater(function() { focusScope.forceActiveFocus() })
+    Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -269,10 +263,17 @@ Item {
   // never run.
   function goBack() {
     if (shortcutHelpVisible) shortcutHelpVisible = false
-    // A query being typed is the nearest thing to leave. This used to live in
-    // SearchBar as its own Keys handler, which a window Shortcut silently beats
-    // — so the layering is stated here, where Escape is actually decided.
-    else if (searchBar.fieldFocused && searchBar.queryText !== "") searchBar.clear()
+    // A query being typed is the nearest thing to leave: clear it if there is
+    // one, then hand the keyboard back to the mailbox. This used to live in
+    // SearchBar as its own Keys handler, which a window Shortcut silently beats.
+    // A query being typed is the nearest thing to leave: clear it if there is
+    // one, then hand the keyboard back. Parked directly rather than through
+    // applyContextFocus, which would still read the context as "search" —
+    // the field has not lost the focus yet at this point.
+    else if (searchBar.fieldFocused) {
+      if (searchBar.queryText !== "") searchBar.clear()
+      focusScope.parkKeyboard()
+    }
     else if (composing) compose.finish()
     else if (currentView === "reader") backToList()
     else if (setupVisible) setupVisible = false
@@ -428,40 +429,44 @@ Item {
       anchors.fill: parent
       focus: true
 
-      // Ask the window who holds the focus rather than listing the fields, so
-      // a field added later is covered without being remembered. The old list
-      // named the search field only, while the setup, IMAP and settings forms
-      // put nine more in this same scope.
-      //
-      // This is a third line of defence, not the only one: a focused TextInput
-      // already takes bare keys for itself before a Shortcut sees them, and the
-      // key context already stands the mailbox keys down on a form. What is
-      // left for this is a focus target that is neither — a custom input, or a
-      // field that does not claim the key it is given.
-      readonly property bool typing: {
-        // The attached property, not `window.activeFocusItem`: Quickshell's
-        // FloatingWindow is a proxy and does not forward that one, so reading
-        // it off the window gives undefined and every guard silently passes.
-        var item = focusScope.Window.activeFocusItem
-        return !!item
-            && item.hasOwnProperty("cursorPosition")
-            && item.hasOwnProperty("selectedText")
-            && item.hasOwnProperty("readOnly")
-            // Nobody is typing into something they cannot see. Closing compose
-            // leaves its field holding the focus while invisible, which pinned
-            // this true and stood every bare key down for the rest of the
-            // session — j and k included.
-            && item.visible
-            && !item.readOnly
-      }
-
-      // Exactly one context at a time, by precedence: a page is a form before
-      // it is anything else, composing beats reading, reading beats the list.
+      // Where the window is, and the only thing that says what a key means.
+      // A page is a form before it is anything else, a draft beats reading, a
+      // query being typed beats the list underneath it.
       readonly property string keyContext:
           root.showPage  ? "page"
         : root.composing ? "compose"
+        : searchBar.fieldFocused ? "search"
         : root.currentView === "reader" ? "reader"
         : "list"
+
+      // The context owns the keyboard. Changing it moves the focus to whatever
+      // that context types into, or parks it when the context types into
+      // nothing — so a field that has been dismissed cannot go on eating keys.
+      //
+      // Keeping these as two things is the bug this replaces: the context came
+      // from the screen while the focus stayed wherever the last click left it,
+      // and a closed compose field kept swallowing j and k. One mechanism now,
+      // and there is nothing to keep in step.
+      onKeyContextChanged: Qt.callLater(applyContextFocus)
+      function applyContextFocus() {
+        if (keyContext === "compose") compose.takeFocus()
+        else if (keyContext === "search") searchBar.focusField()
+        else parkKeyboard()
+      }
+
+      // forceActiveFocus on the scope itself is a no-op: it re-elects the
+      // scope's current focus item, which is the very field being left. It has
+      // to land on a plain Item for the field to actually let go.
+      function parkKeyboard() {
+        keyboardHome.forceActiveFocus()
+      }
+
+      // Where the keyboard lives when nothing is being typed into.
+      Item {
+        id: keyboardHome
+        width: 1
+        height: 1
+      }
 
       // ------------------------------------------------------------ header
 
@@ -1081,7 +1086,6 @@ Item {
 
       KeyRouter {
         context: focusScope.keyContext
-        typing: focusScope.typing
         overlay: root.shortcutHelpVisible
         onTriggered: function(id) { root.runShortcut(id) }
       }

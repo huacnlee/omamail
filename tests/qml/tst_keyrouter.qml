@@ -4,52 +4,47 @@ import QtQuick.Controls as QQC
 import QtTest
 import "../../components" as Omamail
 
-// The router turns the table into Shortcuts. What matters here is that the
-// table's rules actually reach the keyboard: context gates a key, typing stands
-// bare keys down but leaves modified ones alone, and Escape arrives as a
-// Shortcut rather than travelling by focus — which is what made it depend on
-// where the user had last clicked.
+// The keyboard belongs to the application, and the context says what a key
+// means where. Two things are exercised: that a key is live only in the
+// contexts its row names, and that changing context takes the keyboard with it
+// — the part that, kept separate, let a dismissed field eat every key.
 Item {
   id: host
   width: 300; height: 200
 
   property string lastId: ""
   property string context: "list"
-  property bool typing: false
   property bool overlay: false
 
   Omamail.KeyRouter {
     context: host.context
-    typing: host.typing
     overlay: host.overlay
     onTriggered: function(id) { host.lastId = id }
   }
 
-  // The real `typing` in App.qml is answered by asking the window who holds the
-  // focus, rather than by naming the fields — the naming is what missed nine of
-  // them. This exercises that decision against real focus rather than a bool.
-  function looksLikeTextEntry(item) {
-    return !!item
-        && item.hasOwnProperty("cursorPosition")
-        && item.hasOwnProperty("selectedText")
-        && item.hasOwnProperty("readOnly")
-        && item.visible
-        && !item.readOnly
-  }
-  readonly property bool typingByFocus:
-    looksLikeTextEntry(host.Window.activeFocusItem)
+  readonly property Item focusItem: host.Window.activeFocusItem
 
-  QQC.TextField { id: someField; width: 80 }
-  QQC.Button { id: someButton; y: 40; text: "b" }
+  // Stands in for the window's focus scope: a home for the keyboard, and a
+  // field that is only on screen while its context is.
+  FocusScope {
+    id: scope
+    anchors.fill: parent
+    focus: true
 
-  // A compose that owns the focus only while it is up, exactly as App.qml has
-  // it. Closing it leaves its field holding the window's focus while invisible.
-  Item {
-    id: compose
-    property bool opened: false
-    visible: opened
-    focus: opened
-    QQC.TextField { id: composeField; width: 80 }
+    Item { id: keyboardHome; width: 1; height: 1 }
+
+    Item {
+      id: compose
+      anchors.fill: parent
+      property bool opened: false
+      visible: opened
+      QQC.TextField { id: composeField; width: 80 }
+    }
+
+    function applyContextFocus() {
+      if (host.context === "compose") composeField.forceActiveFocus()
+      else keyboardHome.forceActiveFocus()
+    }
   }
 
   TestCase {
@@ -58,13 +53,10 @@ Item {
 
     function init() {
       host.context = "list"
-      host.typing = false
       host.overlay = false
       host.lastId = ""
-      // Each case starts with the focus somewhere harmless. A field left
-      // holding it swallows the printable keys the next case presses.
       compose.opened = false
-      someButton.forceActiveFocus()
+      scope.applyContextFocus()
       wait(30)
     }
 
@@ -80,27 +72,37 @@ Item {
       compare(host.lastId, "", "e is not archive on a settings form")
     }
 
-    function test_typing_stands_bare_keys_down() {
-      host.typing = true
+    function test_a_bare_letter_is_dead_in_a_draft() {
+      host.context = "compose"
       wait(20)
       keyClick(Qt.Key_E)
-      compare(host.lastId, "", "e belongs to the field being typed in")
+      compare(host.lastId, "", "e is a letter in a sentence, not archive")
     }
 
-    function test_typing_leaves_modified_keys_alone() {
-      // The same row as the bare `/`, which is standing down at this moment.
-      host.typing = true
+    function test_a_bare_letter_is_dead_in_a_query() {
+      host.context = "search"
+      wait(20)
+      keyClick(Qt.Key_E)
+      compare(host.lastId, "", "e is a letter in a query")
+    }
+
+    function test_a_modified_key_still_reaches_a_draft() {
+      host.context = "compose"
       wait(20)
       keyClick(Qt.Key_K, Qt.ControlModifier)
-      compare(host.lastId, "search")
+      compare(host.lastId, "searchAnywhere",
+        "search is reachable from inside a draft, which is why it is bound twice")
     }
 
-    function test_escape_is_a_shortcut_not_a_focus_handler() {
-      host.typing = true
-      wait(20)
-      keyClick(Qt.Key_Escape)
-      compare(host.lastId, "back",
-        "Escape must not depend on who holds the focus")
+    function test_escape_is_the_way_out_of_every_context() {
+      var contexts = ["list", "reader", "search", "compose", "page"]
+      for (var i = 0; i < contexts.length; i++) {
+        host.context = contexts[i]
+        host.lastId = ""
+        wait(20)
+        keyClick(Qt.Key_Escape)
+        compare(host.lastId, "back", "Escape must leave " + contexts[i])
+      }
     }
 
     function test_an_overlay_stands_the_mailbox_down() {
@@ -117,32 +119,6 @@ Item {
       compare(host.lastId, "help")
     }
 
-    // A field nobody named. This is the whole point: the guard is answered by
-    // the focus, so a text field added later is covered without being listed.
-    function test_focus_on_any_text_field_counts_as_typing() {
-      someField.forceActiveFocus()
-      wait(30)
-      compare(host.typingByFocus, true,
-        "a field nobody added to a list still stands the letters down")
-      someButton.forceActiveFocus()
-      wait(30)
-      compare(host.typingByFocus, false, "a button is not a text field")
-    }
-
-    // Closing compose used to leave its field holding the focus while hidden,
-    // which pinned the typing guard true and stood every bare key down for the
-    // rest of the session — Esc out of a reply and j/k were simply gone.
-    function test_a_hidden_field_is_not_being_typed_into() {
-      compose.opened = true
-      composeField.forceActiveFocus()
-      wait(30)
-      compare(host.typingByFocus, true, "a field on screen is being typed into")
-      compose.opened = false
-      wait(30)
-      compare(host.typingByFocus, false,
-        "nobody is typing into a field they cannot see")
-    }
-
     function test_a_reader_key_is_dead_in_the_list() {
       keyClick(Qt.Key_R)
       compare(host.lastId, "", "there is nothing to reply to from the list")
@@ -153,6 +129,32 @@ Item {
       wait(20)
       keyClick(Qt.Key_R)
       compare(host.lastId, "reply")
+    }
+
+    // The mechanism, not a key: leaving a text-entry context has to take the
+    // keyboard with it. Handing it back to the focus scope does not — that
+    // re-elects the scope's current focus item, which is the field being left,
+    // so the dismissed field kept swallowing j and k for the rest of the
+    // session. It has to land on a plain Item.
+    function test_leaving_a_draft_takes_the_keyboard_with_it() {
+      host.context = "compose"
+      compose.opened = true
+      scope.applyContextFocus()
+      wait(30)
+      compare(host.focusItem, composeField, "the draft is what is typed into")
+
+      compose.opened = false
+      host.context = "list"
+      scope.applyContextFocus()
+      wait(30)
+      verify(host.focusItem !== composeField,
+        "a dismissed field must not keep the keyboard")
+      compare(host.focusItem, keyboardHome, "which parks on the home item")
+
+      host.lastId = ""
+      keyClick(Qt.Key_J)
+      compare(host.lastId, "cursorDown",
+        "and j reaches the mailbox again, which is the whole point")
     }
   }
 }

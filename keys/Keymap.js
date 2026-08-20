@@ -8,10 +8,12 @@
 // mouse gesture among the keys. Anything that shows or fires a binding now
 // reads this file, so there is nothing left to keep in step by hand.
 
-// The window is in exactly one of these at a time, resolved by precedence in
-// App.qml: a page beats composing, composing beats the reader, the reader beats
-// the list.
-var CONTEXTS = ["list", "reader", "compose", "page"]
+// The window is in exactly one of these at a time. The context is the single
+// owner of "where am I": App.qml derives it from the screen, and the keyboard
+// follows it — a context that is not text entry parks the focus rather than
+// leaving it wherever the last click put it. Keeping those two as separate
+// things is what let a dismissed compose field go on eating j and k.
+var CONTEXTS = ["list", "reader", "search", "compose", "page"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -56,8 +58,13 @@ var BINDINGS = [
   // One row holding both, because suppression is decided per key: `/` stands
   // down inside a text field and Ctrl+K, whose whole point is reaching search
   // from inside one, does not.
-  { id: "search", keys: ["/", "Ctrl+K"], contexts: ANY,
+  // Reachable from anywhere. `/` is a bare key, so it is only offered where
+  // bare keys mean anything — inside the field it is a character being typed,
+  // and Qt gives the field its keys before any Shortcut sees them.
+  { id: "search", keys: ["/"], contexts: MAIL,
     group: "Finding", label: "Search" },
+  { id: "searchAnywhere", keys: ["Ctrl+K"], contexts: ANY,
+    group: "Finding", label: "Search from anywhere" },
 
   { id: "goInbox", keys: ["g,i"], contexts: MAIL,
     group: "Going", label: "Go to the inbox" },
@@ -79,41 +86,16 @@ var BINDINGS = [
 
   { id: "refresh", keys: ["F5"], contexts: ANY,
     group: "Mailbox", label: "Check for mail" },
-  { id: "help", keys: ["?", "Ctrl+/", "Ctrl+?"], contexts: ANY,
+  // A mailbox action, not a global one: the sheet lists what the mailbox
+  // answers to, and a draft or a form is neither. Esc first, then `?`.
+  { id: "help", keys: ["?", "Ctrl+/", "Ctrl+?"], contexts: MAIL,
     survivesOverlay: true,
     group: "Mailbox", label: "Toggle this sheet" },
   { id: "back", keys: ["Escape"], contexts: ANY,
-    survivesTyping: true, survivesOverlay: true,
+    survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
-    hint: { reader: "back", page: "back", compose: "close" } }
+    hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
 ]
-
-// A sequence is bare when typing it into a text field is a thing a person would
-// do. Shift is not a modifier for this purpose: Shift+I is simply how a capital
-// I is typed. Ctrl, Alt and Meta are unreachable that way, and so are the
-// function keys.
-function isBareSequence(sequence) {
-  var text = String(sequence || "")
-  if (text.indexOf("Ctrl+") >= 0) return false
-  if (text.indexOf("Alt+") >= 0) return false
-  if (text.indexOf("Meta+") >= 0) return false
-  if (/^F[0-9]+$/.test(text)) return false
-  return true
-}
-
-// Derived, never declared. A new binding cannot forget its typing guard,
-// because there is no guard to write — the hand-written one had missed nine
-// text fields. It backs up two defences rather than standing alone: Qt gives a
-// focused TextInput the bare keys before any Shortcut sees them, and a key that
-// does not belong to a context is not live there in the first place.
-//
-// Decided per key rather than per row, so one row can hold `/` and Ctrl+K and
-// have each behave as its own shape demands.
-function suppressedByTyping(binding, sequence) {
-  if (!binding) return false
-  if (binding.survivesTyping) return false
-  return isBareSequence(sequence)
-}
 
 function matchesContext(binding, context) {
   if (!binding) return false
@@ -124,10 +106,12 @@ function matchesContext(binding, context) {
   return false
 }
 
-function isEnabled(binding, sequence, context, typing, overlay) {
+// Context decides what is live, and nothing else does. There is no "are they
+// typing" question left to get wrong: a text-entry context binds no bare keys,
+// and Qt hands a focused field its keys before any Shortcut sees them.
+function isEnabled(binding, context, overlay) {
   if (!matchesContext(binding, context)) return false
   if (overlay && !binding.survivesOverlay) return false
-  if (typing && suppressedByTyping(binding, sequence)) return false
   return true
 }
 

@@ -91,14 +91,20 @@ Item {
       bodyEdit.text = "\n\n" + Mail.quoteBody(summary, String(bodyText || ""))
     }
 
-    Qt.callLater(function() {
-      if (root.mode === "reply" || root.mode === "replyAll") {
-        bodyEdit.forceActiveFocus()
-        bodyEdit.cursorPosition = 0
-      } else {
-        toField.forceActiveFocus()
-      }
-    })
+    // Focus is not placed here. Opening this changes the window's key context,
+    // and the context is what moves the keyboard — one mechanism, so the two
+    // cannot disagree about where the typing goes.
+  }
+
+  // Where the keyboard goes when composing becomes the context. A reply starts
+  // in the body above the quote; a new message starts at the address.
+  function takeFocus() {
+    if (mode === "reply" || mode === "replyAll") {
+      bodyEdit.forceActiveFocus()
+      bodyEdit.cursorPosition = 0
+    } else {
+      toField.forceActiveFocus()
+    }
   }
 
   function finish() {

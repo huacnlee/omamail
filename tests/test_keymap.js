@@ -30,71 +30,62 @@ assert.strictEqual(new Set(ids).size, ids.length, "ids are unique")
 deepEqual(keymap.conflicts(), [],
   "no sequence is bound twice within one context")
 
-// ------------------------------------------------- standing down for typing
+// ------------------------------------------------------------ every context
 
 function byId(id) {
   return keymap.BINDINGS.filter(function (b) { return b.id === id })[0]
 }
 
-// Derived from the key, never declared. The guard that used to be written by
-// hand on every line is the guard that was forgotten on nine text fields.
-assert.strictEqual(keymap.suppressedByTyping(byId("archive"), "e"), true,
-  "a bare letter must not fire into a text field")
-assert.strictEqual(keymap.suppressedByTyping(byId("open"), "Return"), true,
-  "Return is a bare key: it belongs to the field being typed in")
-assert.strictEqual(keymap.suppressedByTyping(byId("cursorDown"), "Down"), true,
-  "the arrows move the caret while typing")
-assert.strictEqual(keymap.suppressedByTyping(byId("markRead"), "Shift+I"), true,
-  "Shift+I is what typing a capital I looks like, so Shift is not a modifier here")
-assert.strictEqual(keymap.suppressedByTyping(byId("goInbox"), "g,i"), true,
-  "a chord of bare keys is still bare")
-assert.strictEqual(keymap.suppressedByTyping(byId("refresh"), "F5"), false,
-  "F5 is not a character")
-assert.strictEqual(keymap.suppressedByTyping(byId("back"), "Escape"), false,
-  "Escape is the one bare key that must survive typing")
-
-// Per key, not per row. This is what lets one Search row hold both `/`, which
-// has to stand down inside a field, and Ctrl+K, whose whole purpose is reaching
-// search from inside one. Deciding by row would have forced them apart and put
-// two identical lines in the help sheet.
-const search = byId("search")
-assert.strictEqual(keymap.suppressedByTyping(search, "/"), true,
-  "a bare slash is a character someone is typing")
-assert.strictEqual(keymap.suppressedByTyping(search, "Ctrl+K"), false,
-  "Ctrl+K is unreachable by typing, so it stays live in the same row")
+// Context is the only thing that decides what is live. A text-entry context
+// binds no bare keys, so there is no "are they typing" question to get wrong:
+// the field is on screen and Qt gives it its own keys first.
+;["search", "compose", "page"].forEach(function (context) {
+  keymap.bindingsFor(context).forEach(function (binding) {
+    binding.keys.forEach(function (key) {
+      var bare = key.indexOf("Ctrl+") < 0 && key.indexOf("Alt+") < 0
+        && key.indexOf("Meta+") < 0 && !/^F[0-9]+$/.test(key)
+      assert.ok(!bare || key === "Escape",
+        context + " must bind no bare key but Escape, and binds " + key
+          + " for " + binding.id)
+    })
+  })
+})
 
 // ------------------------------------------------------------------ enabling
 
 const archive = byId("archive")
-assert.strictEqual(keymap.isEnabled(archive, "e", "list", false, false), true)
-assert.strictEqual(keymap.isEnabled(archive, "e", "reader", false, false), true)
-assert.strictEqual(keymap.isEnabled(archive, "e", "page", false, false), false,
+assert.strictEqual(keymap.isEnabled(archive, "list", false), true)
+assert.strictEqual(keymap.isEnabled(archive, "reader", false), true)
+assert.strictEqual(keymap.isEnabled(archive, "page", false), false,
   "a settings form is a form; e is not archive there")
-assert.strictEqual(keymap.isEnabled(archive, "e", "compose", false, false), false)
-assert.strictEqual(keymap.isEnabled(archive, "e", "list", true, false), false,
-  "typing stands it down")
-assert.strictEqual(keymap.isEnabled(archive, "e", "list", false, true), false,
+assert.strictEqual(keymap.isEnabled(archive, "compose", false), false,
+  "nor is it archive in the middle of a sentence")
+assert.strictEqual(keymap.isEnabled(archive, "search", false), false,
+  "nor in a query being typed")
+assert.strictEqual(keymap.isEnabled(archive, "list", true), false,
   "an overlay stands it down")
 
-assert.strictEqual(keymap.isEnabled(search, "/", "list", true, false), false,
-  "the bare key of a mixed row stands down")
-assert.strictEqual(keymap.isEnabled(search, "Ctrl+K", "list", true, false), true,
-  "while its modified key, in the same row, does not")
-
 const back = byId("back")
-assert.strictEqual(keymap.isEnabled(back, "Escape", "page", true, true), true,
-  "Escape dismisses the overlay and leaves the field, so it survives both")
+keymap.CONTEXTS.forEach(function (context) {
+  assert.strictEqual(keymap.isEnabled(back, context, false), true,
+    "Escape is the way out of " + context)
+})
+assert.strictEqual(keymap.isEnabled(back, "list", true), true,
+  "including out of the overlay itself")
 
 const help = byId("help")
-assert.strictEqual(keymap.isEnabled(help, "Ctrl+?", "list", false, true), true,
+assert.strictEqual(keymap.isEnabled(help, "list", true), true,
   "the sheet's own key has to close the sheet")
-assert.strictEqual(keymap.isEnabled(help, "?", "list", false, true), true,
-  "and so does the bare one: an overlay is not a text field")
 
-// The zoom keys used to be live everywhere, including on a settings form.
+// Reaching search from inside a form or a draft is the whole point of binding
+// it to a modified key as well.
+assert.strictEqual(keymap.isEnabled(byId("searchAnywhere"), "compose", false), true)
+assert.strictEqual(keymap.isEnabled(byId("search"), "compose", false), false,
+  "while the bare slash is a character in the draft")
+
 const zoomIn = byId("zoomIn")
-assert.strictEqual(keymap.isEnabled(zoomIn, "Ctrl+=", "reader", false, false), true)
-assert.strictEqual(keymap.isEnabled(zoomIn, "Ctrl+=", "page", false, false), false,
+assert.strictEqual(keymap.isEnabled(zoomIn, "reader", false), true)
+assert.strictEqual(keymap.isEnabled(zoomIn, "page", false), false,
   "there is no message body to size on a form")
 
 // ------------------------------------------------------------ what renders
@@ -116,7 +107,7 @@ groups.forEach(function (group) {
 assert.strictEqual(keymap.displayFor(byId("cursorUp")), "k, Up",
   "the sheet names every key that works")
 assert.strictEqual(keymap.displayFor(byId("cursorDown")), "j, Down")
-assert.strictEqual(keymap.displayFor(byId("search")), "/, Ctrl+K",
+assert.strictEqual(keymap.displayFor(byId("help")), "?, Ctrl+/, Ctrl+?",
   "a slash inside a sequence must not read as the separator")
 
 // Qt's sequence syntax is not the UI's.
@@ -148,18 +139,8 @@ deepEqual(keymap.hintsFor("page").map(function (h) { return h.label }),
 
 // ------------------------------------------------- one entry per sequence
 
-// A Shortcut binds one sequence, so the router needs the table flattened. It
-// also needs each sequence to carry its own row, since `enabled` is decided per
-// key: the two halves of the Search row disagree while the user is typing.
+// A Shortcut binds one sequence, so the router needs the table flattened.
 const listSequences = keymap.sequencesFor("list")
-const searchRows = listSequences.filter(function (r) { return r.id === "search" })
-assert.strictEqual(searchRows.length, 2, "/ and Ctrl+K arrive separately")
-deepEqual(searchRows.map(function (r) { return r.sequence }), ["/", "Ctrl+K"])
-assert.strictEqual(
-  keymap.isEnabled(searchRows[0].binding, searchRows[0].sequence, "list", true, false), false)
-assert.strictEqual(
-  keymap.isEnabled(searchRows[1].binding, searchRows[1].sequence, "list", true, false), true)
-
 const expectedCount = keymap.bindingsFor("list").reduce(
   function (n, b) { return n + b.keys.length }, 0)
 assert.strictEqual(listSequences.length, expectedCount,
