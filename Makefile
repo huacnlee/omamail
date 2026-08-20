@@ -59,12 +59,26 @@ test-shell:
 	bash tests/test_install.sh
 	bash tests/test_transport.sh
 
-# Focus ownership cannot be tested without a focus scope, and a focus scope
-# needs the QML engine. Offscreen, so it needs no compositor: the bug this
-# catches — a hidden component owning the focus and swallowing keys — is
-# invisible to any test that cannot instantiate one.
+# Focus ownership and key routing cannot be tested without a focus scope, and a
+# focus scope needs the QML engine. Offscreen, so it needs no compositor: the
+# bugs this catches — a hidden component owning the focus and swallowing keys, a
+# Repeater building no Shortcuts — are invisible to any test that cannot
+# instantiate one.
+#
+# Found rather than hard-coded: the binary is at /usr/lib/qt6/bin on Arch and on
+# PATH as qmltestrunner6 on Debian and Ubuntu, and pinning one of those makes
+# the suite unrunnable on the other.
+QMLTESTRUNNER := $(shell command -v qmltestrunner6 2>/dev/null \
+	|| command -v qmltestrunner 2>/dev/null \
+	|| ls /usr/lib/qt6/bin/qmltestrunner 2>/dev/null)
+
 test-qml:
-	QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+	@test -n "$(QMLTESTRUNNER)" || { \
+		echo "qmltestrunner not found: install Qt 6 QML test tooling" >&2; \
+		echo "  Arch:   qt6-declarative" >&2; \
+		echo "  Ubuntu: qt6-declarative-dev-tools qml6-module-qttest" >&2; \
+		exit 1; }
+	QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/qml
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine
