@@ -25,7 +25,7 @@ QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml
 
-.PHONY: test test-js test-shell qml-check validate
+.PHONY: test test-js test-shell qml-check validate bench
 
 test: test-js test-shell
 
@@ -47,6 +47,13 @@ test-shell:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
+
+# Both engines on the same fixtures. The QML column is the one that decides
+# anything — the shell runs that engine, not node's — so run it on the machine
+# the shell runs on. Not part of `test`: it takes a few seconds and measures
+# rather than asserts.
+bench:
+	bash tests/bench.sh
 
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:
