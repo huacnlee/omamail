@@ -327,9 +327,10 @@ function htmlToText(html) {
   return String(html || "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
-    // Quotes and all, because Html.imageSources numbers the pictures with the
-    // same walk: a ">" inside an alt text that ends the tag for one and not the
-    // other puts every marker after it on the wrong image.
+    // The reader does not use this numbering: MailAccount takes the body text
+    // and the picture list from one walk over Html.js's parse tree, so the two
+    // cannot disagree. What is left here serves decodeSnippet, where Gmail's
+    // snippet is escaped prose that never carried an image.
     .replace(/<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, function() {
       imageCount++
       return "[image " + imageCount + "]"

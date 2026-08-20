@@ -3,6 +3,116 @@ const { load, deepEqual } = require("./load")
 
 const html = load("Html.js")
 
+// =============================================================== the parser
+//
+// The gate is only as good as where it thinks a tag stops, so this is the part
+// that gets read the way Qt reads it: tags by scanning, attributes with their
+// quotes, raw-text elements by their own closing tag.
+{
+  // Structure in, same structure out. A browser's parser would insert a
+  // <tbody> here, hoist stray content out of the table and reopen formatting
+  // across a block; every one of those is a change to mail nobody asked for.
+  const untouched = [
+    "<table><tr><td>a</td><td>b</td></tr></table>",
+    "<p>plain <b>bold <i>both</i></b> tail</p>",
+    "<div><ul><li>one</li><li>two</li></ul></div>",
+    "<blockquote><p>quoted</p></blockquote>"
+  ]
+  for (const markup of untouched) assert.strictEqual(html.stripColors(markup), markup)
+
+  // Closed, never moved: mail leaves <td> and <li> open constantly, and without
+  // an implied close each one nests inside the last.
+  assert.strictEqual(html.stripColors("<ul><li>one<li>two</ul>"),
+    "<ul><li>one</li><li>two</li></ul>")
+  assert.strictEqual(html.stripColors("<table><tr><td>a<td>b</table>"),
+    "<table><tr><td>a</td><td>b</td></tr></table>")
+  assert.strictEqual(html.stripColors("<p>one<p>two"), "<p>one</p><p>two</p>")
+
+  // What the sender left open is closed at the end; what they closed twice is
+  // closed once. A stray end tag closes nothing, because the only other reading
+  // would close something they meant to keep.
+  assert.strictEqual(html.stripColors("<div><span>x"), "<div><span>x</span></div>")
+  assert.strictEqual(html.stripColors("x</div></p>"), "x")
+  // Mis-nesting comes out well-formed rather than mis-nested.
+  assert.strictEqual(html.stripColors("<b><i>x</b></i>"), "<b><i>x</i></b>")
+
+  // Attribute values are read with their quotes, so a ">" in one does not end
+  // the tag — and an unquoted value ends at whitespace.
+  assert.strictEqual(html.stripColors("<a title=\"a>b\" href=\"https://x.example.com\">t</a>"),
+    "<a title=\"a>b\" href=\"https://x.example.com\">t</a>")
+  assert.strictEqual(html.stripColors("<img src=a.png width=600>"),
+    "<img src=\"a.png\" width=\"600\">")
+  assert.strictEqual(html.stripColors("<input disabled>"), "<input disabled>")
+  // A single-quoted value is re-quoted, so the quote inside it has to go.
+  assert.strictEqual(html.stripColors("<a title='say \"hi\"'>t</a>"),
+    "<a title=\"say &quot;hi&quot;\">t</a>")
+
+  // A "<" that starts no tag is a "<" the sender typed.
+  assert.strictEqual(html.stripColors("a < b and 3<4"), "a < b and 3<4")
+
+  // A raw-text element ends at its own closing tag and at nothing else, so a
+  // stylesheet cannot hide markup from the walk that follows it.
+  assert.strictEqual(html.sanitize("<style>p::after{content:\"<img src=x>\"}</style>ok").html, "ok")
+  assert.strictEqual(html.sanitize("<script>var a = 1 < 2;</script>ok").html, "ok")
+  // ...and per the spec the first "</style" ends it, whatever it is inside.
+  assert.ok(html.sanitize("<style>a{}</style><p>after</p>").html.indexOf("<p>after</p>") >= 0)
+
+  // A tag that never closes takes the rest of the document with it, which is
+  // what Qt does with it too — and is the reading that cannot leave a fetch
+  // behind.
+  assert.strictEqual(html.sanitize("<p>kept</p><div class=\"never").html, "<p>kept</p>")
+
+  // A doctype is not text: Qt would lay it out as a line above the message.
+  assert.strictEqual(html.sanitize("<!DOCTYPE html><p>hi</p>").html, "<p>hi</p>")
+
+  // A title is not body text either, and nearly every marketing mail ships one.
+  assert.strictEqual(html.sanitize("<head><title>Newsletter</title></head><p>real</p>").html,
+    "<head></head><p>real</p>")
+}
+
+// A tree is walked by recursion everywhere downstream, so a message nested a
+// few thousand elements deep would be a stack overflow inside the process that
+// draws the whole desktop. Past the ceiling an element keeps its content, it
+// just stops adding a level to hold it.
+{
+  const deepest = "<div>".repeat(20000) + "<img src=\"http://127.0.0.1/x.png\">text"
+  const out = html.sanitize(deepest, { allowRemoteImages: true })
+  assert.ok(out.html.indexOf("127.0.0.1") < 0, "the ceiling is not a way past the image policy")
+  assert.ok(out.html.indexOf("text") > 0, "the content is still there")
+  const tables = "<table><tr><td>".repeat(4000) + "cell"
+  assert.ok(html.sanitize(tables).html.indexOf("cell") > 0)
+  assert.ok(html.tooHeavyForRichText(tables), "and it is still refused as too heavy")
+}
+
+// The reader is told how heavy the result is by the call that produced it:
+// asking separately would mean parsing the whole body again to count what was
+// just counted.
+{
+  const light = html.sanitize("<p>hi</p>")
+  assert.strictEqual(light.tooHeavy, false)
+  assert.strictEqual(light.complexity.tags, 1)
+  const heavy = html.sanitize("<div></div>".repeat(html.MAX_ELEMENTS + 1))
+  assert.strictEqual(heavy.tooHeavy, true)
+  assert.strictEqual(heavy.tooHeavy, html.tooHeavyForRichText(heavy.html),
+    "and it agrees with asking the long way round")
+}
+
+// --------------------------------------------------- html read as plain text
+//
+// The markers and the picture list come off one walk, so a marker cannot open
+// somebody else's image however strange the markup is.
+{
+  deepEqual(html.readPlainText("<div>Hello</div><img src=\"a.png\"><br><img src='b.png' width=600><p>Bye</p>"),
+    { text: "Hello\n[image 1]\n[image 2]Bye", images: ["a.png", "b.png"] })
+  assert.strictEqual(html.toText("<ul><li>one</li><li>two &amp; three</li></ul>"),
+    "• one\n• two & three")
+  assert.strictEqual(html.toText("a&nbsp;&nbsp;b"), "a  b")
+  // An <img> written inside another element's attribute is text, not a picture.
+  deepEqual(html.readPlainText("<div title=\"<img src=ghost.png>\">real</div>"),
+    { text: "real", images: [] })
+  deepEqual(html.readPlainText(""), { text: "", images: [] })
+}
+
 // ------------------------------------------------------------- stripping
 //
 // Qt's rich text engine ignores unknown tags but renders the *text content*

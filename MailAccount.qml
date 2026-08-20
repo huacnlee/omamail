@@ -93,10 +93,12 @@ Item {
   // where it exists, which is native and skips the per-character base64 loop
   // that made this the one expensive step in opening a message.
   property string selectedHtml: ""
-  // The same document with the sender's remote images still in it. This is what
-  // the body cache holds and what `selectedHtml` is derived from, so asking for
-  // the images is a re-render rather than another trip to Gmail.
-  property string preparedHtml: ""
+  // The sender's own HTML, exactly as Gmail handed it over. This is what the
+  // body cache holds and what `selectedHtml` is derived from — so asking for the
+  // images is a re-render rather than another trip to Gmail, and a sanitiser
+  // that learns something new applies it to every message already on disk
+  // rather than only to the ones fetched afterwards.
+  property string sourceHtml: ""
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
@@ -407,7 +409,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
-    preparedHtml = ""
+    sourceHtml = ""
     remoteImagesAllowed = false
     selectedBlockedImages = 0
     selectedRemoteImages = 0
@@ -423,10 +425,8 @@ Item {
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
       if (root.detailLive || !cached) return
-      // The body is already decoded here, so sanitising it costs a fraction
-      // of a millisecond — worth doing inline to paint in the same frame.
       root.selectedBody = { text: cached.text, source: cached.source }
-      root.renderPrepared(cached.html)
+      root.renderSource(cached.html)
       root.selectedAttachments = cached.attachments
       root.selectedImages = cached.images
       bodyCache.touch(messageId)
@@ -444,18 +444,23 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      // Sanitised once with the images left in, so the cache keeps a document
-      // the reader can still be shown the pictures of; what reaches the screen
-      // is derived from it below, with them out.
-      var prepared = Html.sanitize(rawHtml, ({ allowRemoteImages: true })).html
+      // The markers in the plain-text body and the pictures they stand for are
+      // numbered by one walk over one tree, so a marker cannot open somebody
+      // else's image. Only when the text came from the HTML: a message that
+      // shipped its own text/plain part never had images in it, and flattening
+      // it anyway would be a second parse of the whole body for nothing.
+      var flattened = decoded.source === "html" && rawHtml !== ""
+        ? Html.readPlainText(rawHtml)
+        : null
+      if (flattened) decoded = ({ text: flattened.text, source: "html" })
       root.selectedBody = decoded
-      root.renderPrepared(prepared)
+      root.renderSource(rawHtml)
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedImages = Html.imageSources(rawHtml)
+      root.selectedImages = flattened ? flattened.images : []
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
-        html: prepared,
+        html: rawHtml,
         attachments: root.selectedAttachments,
         images: root.selectedImages
       }))
@@ -466,22 +471,23 @@ Item {
     })
   }
 
-  // The one place `selectedHtml` is set. Sanitising the prepared document again
-  // is what removes or restores the images, and it is cheap enough to do on a
-  // button press: the expensive part of opening a message is the decode above.
-  function renderPrepared(prepared) {
-    preparedHtml = String(prepared || "")
-    var ready = Html.sanitize(preparedHtml, ({ allowRemoteImages: remoteImagesAllowed }))
+  // The one place `selectedHtml` is set, and the only place the sender's markup
+  // is parsed on the way to the screen. Whether the document is too heavy to
+  // lay out comes back from the same call: asking separately would mean parsing
+  // the whole body again to count what was just counted.
+  function renderSource(source) {
+    sourceHtml = String(source || "")
+    var ready = Html.sanitize(sourceHtml, ({ allowRemoteImages: remoteImagesAllowed }))
     selectedHtml = ready.html
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
-    selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+    selectedTooHeavy = ready.tooHeavy
   }
 
   function showRemoteImages() {
-    if (remoteImagesAllowed || preparedHtml === "") return
+    if (remoteImagesAllowed || sourceHtml === "") return
     remoteImagesAllowed = true
-    renderPrepared(preparedHtml)
+    renderSource(sourceHtml)
   }
 
   function clearSelection() {
@@ -492,7 +498,7 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
-    preparedHtml = ""
+    sourceHtml = ""
     remoteImagesAllowed = false
     selectedImages = []
     selectedBlockedImages = 0

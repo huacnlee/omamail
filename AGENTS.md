@@ -70,6 +70,34 @@
   and asking covers one message. Qt's rich text engine really does fetch them,
   so rendering one fires every tracking pixel in the message.
 
+## Html.js
+
+- Qt is the renderer; this is the gate in front of it. `TextEdit` with
+  `textFormat: RichText` is a real HTML engine and it is what draws every
+  message — what Qt gives a QML plugin no say over is what that engine does
+  while it works, and it fetches `<img src>`, lays a `<style>` block's CSS out
+  as body text, and ignores `display:none`. C++ could hook
+  `QTextDocument::loadResource`; QML cannot. The string handed over is the only
+  control point there is.
+- So it parses: **tokenize → tree → clean → serialise**. Not with patterns.
+  Where a tag ends is the one thing the image policy cannot be wrong about, and
+  `/<img\b[^>]*>/` is wrong about it the moment a sender puts a `>` in an alt
+  text.
+- The parse is deliberately **not** a conformant HTML5 tree builder and must not
+  become one. A browser's parser inserts `<tbody>`, hoists content out of a
+  `<table>` and reopens formatting across a block; every one of those is a change
+  to mail nobody asked for. This one only closes what the sender left open.
+- Everything downstream walks the tree by recursion, so `MAX_TREE_DEPTH` is
+  load-bearing: without it a deeply nested message is a stack overflow inside
+  the process that draws the whole desktop.
+- The body cache holds the sender's HTML, not the sanitiser's output. A fix here
+  then applies to every message already on disk instead of only to the ones
+  fetched afterwards.
+- This runs on the GUI thread of the shell that draws the user's whole desktop.
+  Count the parses: opening a message is one `sanitize`, plus one
+  `readPlainText` when the message had no text/plain part of its own. Anything
+  that needs to know how heavy the result is asks the call that produced it.
+
 ## Anything a stranger wrote
 
 - A message body, a subject, a sender name, a snippet, an attachment filename:
