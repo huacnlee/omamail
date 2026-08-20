@@ -216,7 +216,11 @@ Item {
 
     Item {
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: toField.implicitHeight + Style.space(14)
 
       Text {
         id: toLabel
@@ -268,7 +272,11 @@ Item {
     Item {
       visible: root.ccVisible
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: ccField.implicitHeight + Style.space(14)
 
       Text {
         id: ccLabel
@@ -306,7 +314,11 @@ Item {
 
     Item {
       width: parent.width
-      implicitHeight: Style.space(34)
+      // The field plus the same breathing room it carries inside itself, so
+      // its border is not crowded against the rules above and below. Derived
+      // rather than a fixed height: the field grows with the theme's font
+      // scale, and a fixed row would scale that growth a second time.
+      implicitHeight: subjectField.implicitHeight + Style.space(14)
 
       Text {
         id: subjectLabel
