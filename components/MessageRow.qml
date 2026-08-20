@@ -24,7 +24,6 @@ Rectangle {
   signal archiveRequested()
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
-  signal hovered(bool isHovered)
 
   readonly property bool hot: mouse.containsMouse || hasCursor
 
@@ -40,8 +39,6 @@ Rectangle {
     anchors.fill: parent
     hoverEnabled: true
     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-    onEntered: root.hovered(true)
-    onExited: root.hovered(false)
     onClicked: function(event) {
       if (event.button === Qt.RightButton) {
         var scene = mapToGlobal(event.x, event.y)

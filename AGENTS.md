@@ -116,6 +116,10 @@ key. What matters while working:
   only `Item`s, so it creates no `Shortcut`s at all and every key goes dead.
 - A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself. Do not add a
   branch for an open popup; do add one for a plain overlay like the sheet.
+- The mouse does not move the keyboard's cursor. Qt re-reports hover when
+  content moves under a still pointer and the list scrolls to follow the
+  keyboard, so a hover that wrote `cursorId` pulled it back to whatever the
+  mouse was resting on and `j` went nowhere. A row draws its own hover.
 - The list cursor and the open message are two different things. `cursorId` is
   where the keyboard is; `selectedId` is what the reader shows. Move the cursor
   with `Model.cursorAfterOffset`, and bring the row on screen with

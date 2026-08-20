@@ -757,7 +757,6 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               onMessageActivated: function(id) { root.openMessage(id) }
-              onRowHovered: function(id, isHovered) { if (isHovered) root.cursorId = id }
               onMenuRequested: function(id, sceneX, sceneY) {
                 root.cursorId = id
                 rowMenu.openAt(id, sceneX, sceneY)

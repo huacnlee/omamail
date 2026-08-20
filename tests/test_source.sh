@@ -85,6 +85,15 @@ fi
 grep -q 'windowOpen' BarWidget.qml \
   || fail "the bar icon must show an active style while the window is open"
 
+# The mouse must not move the keyboard's cursor. Qt re-reports hover when
+# content moves under a still pointer, and the list scrolls to follow the
+# keyboard — so a hover that wrote cursorId pulled it back to whatever the mouse
+# was resting on, and j and k stuck on a few rows. A row shows its own hover
+# (MessageRow.hot); that is the whole of what hover is for here.
+if grep -n 'onRowHovered' App.qml; then
+  fail "hovering a row must not move the keyboard cursor"
+fi
+
 # The context owns the keyboard. Every context that is not text entry parks the
 # focus on a plain Item, because forceActiveFocus on the focus scope itself is a
 # no-op — it re-elects the scope's current focus item, which is the field being

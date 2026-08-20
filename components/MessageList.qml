@@ -6,6 +6,13 @@ import "../account/Model.js" as Model
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
 // gives every wheel event two plausible targets.
+//
+// Hovering a row does not move the keyboard's cursor. A row reports its own
+// hover appearance (MessageRow.hot), and letting hover write `cursorId` as well
+// put the mouse and the keyboard in a fight the mouse won: pressing j scrolls
+// the list to follow the cursor, and Qt re-reports hover when content moves
+// under a pointer that has not moved — so the cursor was pulled straight back
+// to whatever the mouse happened to be resting on, and j went nowhere.
 Column {
   id: root
 
@@ -17,7 +24,6 @@ Column {
   property string cursorId: ""
 
   signal messageActivated(string id)
-  signal rowHovered(string id, bool isHovered)
   signal menuRequested(string id, real sceneX, real sceneY)
 
   width: parent ? parent.width : 0
@@ -54,7 +60,6 @@ Column {
       onStarToggled: root.service.toggleStar(modelData.id)
       onArchiveRequested: root.service.act(modelData.id, "archive")
       onTrashRequested: root.service.act(modelData.id, "trash")
-      onHovered: function(isHovered) { root.rowHovered(modelData.id, isHovered) }
       onMenuRequested: function(sceneX, sceneY) {
         root.menuRequested(modelData.id, sceneX, sceneY)
       }

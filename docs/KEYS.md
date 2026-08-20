@@ -155,6 +155,20 @@ row does not drag the list under someone reading it. It is called from
 `moveCursor`, not from `cursorId` changing, because hovering a row moves the
 cursor too and scrolling under the pointer fights the mouse.
 
+## The mouse
+
+The mouse does not move the keyboard's cursor. A row draws its own hover
+(`MessageRow.hot`), clicking one opens it, and right-clicking one sets the
+cursor explicitly before opening its menu — but hovering does nothing to
+`cursorId`.
+
+That is not a preference. Qt re-reports hover when content moves under a
+pointer that has not moved, and the list scrolls to follow the keyboard. With
+hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
+different row under the still pointer, and the cursor snapped back to it — so
+`j` and `k` stuck on whichever rows the mouse was resting near.
+`tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
+
 ## Adding a key
 
 1. Add a row to `BINDINGS` in `keys/Keymap.js`. Name the contexts it means
