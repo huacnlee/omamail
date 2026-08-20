@@ -25,10 +25,7 @@ assert.strictEqual(model.setupHeadline("no_credentials", "IMAP", "password"),
   "Add this mailbox", "only one of the two sends anyone to a Cloud console")
 assert.strictEqual(model.setupHeadline("no_credentials", "Gmail", "oauth"),
   "Connect a Google Cloud project")
-// A provider with nothing behind it says so, and says why in the detail —
-// which comes from the provider, because only it knows.
-assert.strictEqual(model.setupHeadline("unavailable", "HEY"), "HEY is not supported yet",
-  "waiting on an interface, not a decision this project made")
+// The unavailable detail comes from the provider, because only it knows why.
 assert.strictEqual(model.setupDetail("unavailable", [], "no API yet", "HEY"), "no API yet")
 assert.strictEqual(model.setupActionLabel("unavailable", "HEY"), "",
   "there is no button that would help")

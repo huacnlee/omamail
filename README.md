@@ -96,13 +96,9 @@ could not keep. Archive appears only when the server has an archive folder to
 move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
 server is set.
 
-**HEY** is listed, and listed as not supported yet. 37signals do not publish an
-API, and offer no IMAP or POP either — their own FAQ says "HEY doesn't support
-IMAP or POP" and that third-party apps will not work — so there is nothing for
-a mail client to sign in to. Support is planned and the groundwork is already
-here: HEY is a real provider entry, and the day there is an interface to talk
-to it is one provider file rather than a rewrite. Until then, forwarding HEY to
-a mailbox you can reach over IMAP is the way to read it here.
+**HEY** is listed as a future integration. A HEY CLI is reportedly in
+development; once it is ready, Omamail can support it through the provider seam
+that is already in place.
 
 To remove it:
 

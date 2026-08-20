@@ -6,22 +6,12 @@
 // `Registry.js`, so the day there is an interface to talk to, HEY gains a
 // `HeyClient.qml` and a real `CAPABILITIES` block, and nothing else changes.
 //
-// What is missing is that interface. 37signals publish no API, and no IMAP or
-// POP either — the FAQ says "HEY doesn't support IMAP or POP" and that
-// off-the-shelf apps will not work. The SMTP in their docs is HEY sending
-// *through* someone else's server rather than a way in.
-//
-// The one surface that does exist is the private endpoint set app.hey.com
-// talks to, reached by driving a session cookie. That is deliberately not used
-// here: it would ask a user for their HEY password so it could be replayed
-// against an interface carrying no compatibility promise, and it would break on
-// a deploy nobody announced. Waiting for a supported interface is the
-// difference between a provider that keeps working and one that fails silently
-// on somebody else's release day.
+// A HEY CLI is reportedly in development. Once it provides a supported way to
+// reach the service, this provider seam is ready for a client behind it.
 
 var ID = "hey"
 var NAME = "HEY"
-var SUMMARY = "No public API yet, so not supported for now — ready to add when there is one."
+var SUMMARY = "A HEY CLI is reportedly in development — support can follow when it is ready."
 var AUTH = "none"
 
 // Everything off. `Registry.capabilities` reads a missing entry as "cannot",
@@ -38,11 +28,8 @@ var MAILBOXES = [
 
 // What the setup page shows instead of a form, and what stops `MailAccount`
 // from ever building a client that is not there.
-var UNAVAILABLE = "HEY does not publish an API, and offers no IMAP or POP either, "
-  + "so there is nothing for a mail client to sign in to yet. Support is planned "
-  + "and the groundwork is here — it needs an interface from 37signals to "
-  + "connect to. Until then, forwarding HEY to a mailbox you can reach over IMAP "
-  + "is the way to read it here."
+var UNAVAILABLE = "A HEY CLI is reportedly in development. Once it is ready, "
+  + "Omamail can add HEY support through this provider integration."
 
 function searchQuery() {
   return ""
