@@ -33,6 +33,7 @@ Item {
         && item.hasOwnProperty("cursorPosition")
         && item.hasOwnProperty("selectedText")
         && item.hasOwnProperty("readOnly")
+        && item.visible
         && !item.readOnly
   }
   readonly property bool typingByFocus:
@@ -40,6 +41,16 @@ Item {
 
   QQC.TextField { id: someField; width: 80 }
   QQC.Button { id: someButton; y: 40; text: "b" }
+
+  // A compose that owns the focus only while it is up, exactly as App.qml has
+  // it. Closing it leaves its field holding the window's focus while invisible.
+  Item {
+    id: compose
+    property bool opened: false
+    visible: opened
+    focus: opened
+    QQC.TextField { id: composeField; width: 80 }
+  }
 
   TestCase {
     name: "KeyRouter"
@@ -50,7 +61,11 @@ Item {
       host.typing = false
       host.overlay = false
       host.lastId = ""
-      wait(20)
+      // Each case starts with the focus somewhere harmless. A field left
+      // holding it swallows the printable keys the next case presses.
+      compose.opened = false
+      someButton.forceActiveFocus()
+      wait(30)
     }
 
     function test_a_bare_letter_fires_in_its_context() {
@@ -112,6 +127,20 @@ Item {
       someButton.forceActiveFocus()
       wait(30)
       compare(host.typingByFocus, false, "a button is not a text field")
+    }
+
+    // Closing compose used to leave its field holding the focus while hidden,
+    // which pinned the typing guard true and stood every bare key down for the
+    // rest of the session — Esc out of a reply and j/k were simply gone.
+    function test_a_hidden_field_is_not_being_typed_into() {
+      compose.opened = true
+      composeField.forceActiveFocus()
+      wait(30)
+      compare(host.typingByFocus, true, "a field on screen is being typed into")
+      compose.opened = false
+      wait(30)
+      compare(host.typingByFocus, false,
+        "nobody is typing into a field they cannot see")
     }
 
     function test_a_reader_key_is_dead_in_the_list() {

@@ -96,6 +96,11 @@ three directories away from the client that calls it.
   one. The help sheet and the status-bar hints render from that table, so a key
   added in one place is added everywhere. Three hand-written copies used to
   exist and had already drifted apart.
+- Keys are guarded three times over, and the order matters when reasoning about
+  a report. Qt hands a focused `TextInput` the bare keys before any `Shortcut`
+  sees them; the key context stands the mailbox keys down on a form; and only
+  then does the typing guard below cover what is left — a focus target that is
+  neither a text input nor out of context.
 - Whether a key stands down while the user is typing is *derived* from the key,
   never declared: bare keys stand down, `Ctrl`/`Alt`/`Meta` and the function
   keys do not. Shift is not a modifier for this purpose — `Shift+I` is how a
@@ -107,6 +112,10 @@ three directories away from the client that calls it.
 - Qt's sequence syntax is not the UI's. `readableSequence` turns "g,i" into
   "g then i" and names Esc and Enter for the keycaps. A rule, not a per-row
   override, so a chord added later reads properly without anyone spelling it out.
+- The typing guard asks whether the focused item is *visible*. Closing compose
+  leaves its field holding the window's focus while hidden; without that check
+  the guard pins true and stands every bare key down for the rest of the
+  session, which is `j` and `k` dying after one Esc out of a reply.
 - `focus: true` may not sit on a component that can be invisible while holding
   it. Qt does not exclude hidden items from owning the focus, so a hidden owner
   that accepts keys is a key sink — this swallowed every `Escape` in the window

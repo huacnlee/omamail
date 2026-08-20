@@ -102,8 +102,10 @@ function isBareSequence(sequence) {
 }
 
 // Derived, never declared. A new binding cannot forget its typing guard,
-// because there is no guard to write — which is the whole point, since the
-// hand-written guard is what missed nine text fields.
+// because there is no guard to write — the hand-written one had missed nine
+// text fields. It backs up two defences rather than standing alone: Qt gives a
+// focused TextInput the bare keys before any Shortcut sees them, and a key that
+// does not belong to a context is not live there in the first place.
 //
 // Decided per key rather than per row, so one row can hold `/` and Ctrl+K and
 // have each behave as its own shape demands.

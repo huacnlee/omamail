@@ -125,6 +125,12 @@ Item {
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
   readonly property bool composing: compose.opened
+  // Compose holds the focus while it is up. Handing it back when it closes
+  // keeps the window's focus on something that is actually on screen; leaving
+  // it on a hidden field is the shape of bug that ate every Escape once already.
+  onComposingChanged: if (!composing) Qt.callLater(function() {
+    focusScope.forceActiveFocus()
+  })
 
   function open(payloadJson) {
     var payload = ({})
@@ -422,10 +428,16 @@ Item {
       anchors.fill: parent
       focus: true
 
-      // Ask the window who holds the focus rather than listing the fields.
-      // The list was the bug: it named the search field only, while the setup,
-      // IMAP and settings forms put nine more text fields in this same scope —
-      // so typing an IMAP host archived mail on `e` and opened compose on `c`.
+      // Ask the window who holds the focus rather than listing the fields, so
+      // a field added later is covered without being remembered. The old list
+      // named the search field only, while the setup, IMAP and settings forms
+      // put nine more in this same scope.
+      //
+      // This is a third line of defence, not the only one: a focused TextInput
+      // already takes bare keys for itself before a Shortcut sees them, and the
+      // key context already stands the mailbox keys down on a form. What is
+      // left for this is a focus target that is neither — a custom input, or a
+      // field that does not claim the key it is given.
       readonly property bool typing: {
         // The attached property, not `window.activeFocusItem`: Quickshell's
         // FloatingWindow is a proxy and does not forward that one, so reading
@@ -435,6 +447,11 @@ Item {
             && item.hasOwnProperty("cursorPosition")
             && item.hasOwnProperty("selectedText")
             && item.hasOwnProperty("readOnly")
+            // Nobody is typing into something they cannot see. Closing compose
+            // leaves its field holding the focus while invisible, which pinned
+            // this true and stood every bare key down for the rest of the
+            // session — j and k included.
+            && item.visible
             && !item.readOnly
       }
 
