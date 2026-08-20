@@ -327,7 +327,10 @@ function htmlToText(html) {
   return String(html || "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
-    .replace(/<img\b[^>]*>/gi, function() {
+    // Quotes and all, because Html.imageSources numbers the pictures with the
+    // same walk: a ">" inside an alt text that ends the tag for one and not the
+    // other puts every marker after it on the wrong image.
+    .replace(/<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, function() {
       imageCount++
       return "[image " + imageCount + "]"
     })

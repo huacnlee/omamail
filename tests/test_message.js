@@ -287,6 +287,12 @@ assert.strictEqual(message.extractHtml({
     message.htmlToText("<div>Hello</div><img src=\"a.png\"><br><img src='b.png' width=600><p>Bye</p>"),
     "Hello\n[image 1]\n[image 2]Bye")
   assert.strictEqual(message.htmlToText("<p>none</p>"), "none", "text without images is unchanged")
+  // A ">" inside an alt text does not end the tag — Html.imageSources numbers
+  // the pictures with the same walk, and a disagreement puts every marker after
+  // it on the wrong one.
+  assert.strictEqual(
+    message.htmlToText("<img alt=\"a>b\" src=\"x.png\"><p>after</p><img src='y.png'>"),
+    "[image 1]after\n[image 2]")
 }
 
 // -------------------------------------------------------- header injection

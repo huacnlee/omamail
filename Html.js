@@ -165,6 +165,61 @@ function stripElement(text, name) {
   return String(text).replace(open, "").replace(lone, "")
 }
 
+// ------------------------------------------------------------- tag boundaries
+//
+// Where a tag ends is the one thing the image policy below cannot afford to be
+// wrong about, and /<img\b[^>]*>/ is wrong about it. Qt's parser reads
+// attribute values with their quotes, so
+//
+//   <img alt="a>b" src="http://127.0.0.1/p.gif">
+//
+// is one image tag to the engine and two pieces of nothing to that regex: it
+// stops at the ">" inside the alt text, finds no src in what it took, and hands
+// the whole tag back untouched — which is a fetch. A sender only has to put a
+// ">" in an alt text to walk past the check.
+//
+// Qt has no HTML parser a QML plugin can call, so tag boundaries are scanned
+// for rather than matched. This is not a parser and does not try to be one: it
+// answers exactly one question, which is where a tag someone opened stops.
+function tagEnd(text, from) {
+  var quote = ""
+  for (var i = from; i < text.length; i++) {
+    var character = text.charAt(i)
+    if (quote !== "") {
+      if (character === quote) quote = ""
+      continue
+    }
+    if (character === "\"" || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === ">") return i + 1
+  }
+  return -1
+}
+
+// Every <name ...> tag rewritten through `fn`, which is handed the whole tag and
+// returns what stands in its place. A tag that never closes takes the rest of
+// the document with it: Qt would swallow the remainder into the tag anyway, and
+// dropping it is the reading that cannot leave a fetch behind.
+function replaceTags(html, name, fn) {
+  var text = String(html || "")
+  var opening = new RegExp("<" + name + "\\b", "gi")
+  var out = ""
+  var at = 0
+  var found
+  while ((found = opening.exec(text)) !== null) {
+    if (found.index < at) continue
+    var end = tagEnd(text, found.index + found[0].length)
+    out += text.substring(at, found.index)
+    if (end < 0) return out
+    out += fn(text.substring(found.index, end))
+    at = end
+    opening.lastIndex = end
+  }
+  return out + text.substring(at)
+}
+
 // ------------------------------------------------------------ image sources
 //
 // An attribute value is not a URL until the HTML parser has resolved the
@@ -400,7 +455,7 @@ function sanitize(html, options) {
   var limit = Math.max(0, Math.floor(
     settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
 
-  text = text.replace(/<img\b[^>]*>/gi, function(tag) {
+  text = replaceTags(text, "img", function(tag) {
     var source = tag.match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
     if (!source) return tag
     var value = source[2] !== undefined ? source[2]
@@ -527,7 +582,11 @@ var IMAGE_LINK_PREFIX = "omarchy-image:"
 // cap was reached, and every marker after it would open the wrong picture.
 function imageSources(html) {
   var out = []
-  var pattern = /<img\b[^>]*>/gi
+  // The same pattern Message.htmlToText numbers the markers with, quotes and
+  // all: the two walks have to see the same tags or every marker after a
+  // disagreement opens the wrong picture. Not the scanner sanitize uses —
+  // nothing here is fetched, so a miss costs a marker rather than a request.
+  var pattern = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi
   var tags = String(html || "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")

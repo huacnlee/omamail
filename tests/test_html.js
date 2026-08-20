@@ -154,6 +154,42 @@ assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example
 assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example.com/p.gif);padding:4px\">x</div>")
   .html.indexOf("padding:4px") > 0, "the rest of the style survives")
 
+// ---------------------------------------------------------- tag boundaries
+//
+// Qt reads an attribute value with its quotes, so a ">" inside an alt text does
+// not end the tag for the engine — and a check that stops at the first ">" it
+// sees takes half a tag, finds no src in it, and hands the whole thing back.
+// Putting a ">" in an alt text was enough to walk an image past the block.
+{
+  const hidden = "<img alt=\"a>b\" src=\"https://tracker.example.com/p.gif\" width=\"90\">"
+  assert.strictEqual(html.sanitize(hidden).blockedImages, 1)
+  assert.ok(html.sanitize(hidden).html.indexOf("tracker.example.com") < 0)
+  assert.strictEqual(html.sanitize(hidden, { allowRemoteImages: true }).images, 1)
+
+  const hiddenLocal = "<img alt='a>b' src=\"http://127.0.0.1/p.gif\" width=\"90\">"
+  assert.ok(html.sanitize(hiddenLocal, { allowRemoteImages: true }).html.indexOf("127.0.0.1") < 0)
+
+  // A quote that never closes takes the rest of the document with it: Qt would
+  // swallow the remainder into the tag anyway, and dropping it is the reading
+  // that cannot leave a fetch behind.
+  assert.ok(html.sanitize("<p>hi</p><img src=\"https://tracker.example.com/p.gif\" alt=\"oops")
+    .html.indexOf("tracker.example.com") < 0)
+
+  // Ordinary markup around an image is untouched.
+  assert.strictEqual(
+    html.sanitize("<p>hi</p><img alt=\"x\" src=\"https://cdn.example.com/a.png\" width=\"90\"><p>bye</p>").html,
+    "<p>hi</p><p>bye</p>")
+}
+
+// The markers in a plain-text body and the list of pictures they open are two
+// walks over the same tags, so they have to end a tag in the same place.
+{
+  const body = "<img alt=\"a>b\" src=\"https://cdn.example.com/one.png\"><p>x</p>"
+    + "<img src=\"https://cdn.example.com/two.png\">"
+  deepEqual(html.imageSources(body),
+    ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"])
+}
+
 // What the plain-text reader may hand to an Image element.
 assert.strictEqual(html.isDisplayableImageUrl("https://cdn.example.com/a.png"), true)
 assert.strictEqual(html.isDisplayableImageUrl("http://127.0.0.1/a.png"), false)
