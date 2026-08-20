@@ -444,19 +444,16 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      // The markers in the plain-text body and the pictures they stand for are
-      // numbered by one walk over one tree, so a marker cannot open somebody
-      // else's image. Only when the text came from the HTML: a message that
-      // shipped its own text/plain part never had images in it, and flattening
-      // it anyway would be a second parse of the whole body for nothing.
-      var flattened = decoded.source === "html" && rawHtml !== ""
-        ? Html.readPlainText(rawHtml)
-        : null
-      if (flattened) decoded = ({ text: flattened.text, source: "html" })
+      // Both readings of the body out of one parse. The markers in the
+      // plain-text one and the pictures they stand for are numbered by the same
+      // walk over the same tree, so a marker cannot open somebody else's image
+      // — and it is only asked for when the text came from the HTML, because a
+      // message that shipped its own text/plain part never had images in it.
+      var ready = root.renderSource(rawHtml, decoded.source === "html")
+      if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html" })
       root.selectedBody = decoded
-      root.renderSource(rawHtml)
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedImages = flattened ? flattened.images : []
+      root.selectedImages = ready.plainText ? ready.plainText.images : []
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
@@ -472,16 +469,21 @@ Item {
   }
 
   // The one place `selectedHtml` is set, and the only place the sender's markup
-  // is parsed on the way to the screen. Whether the document is too heavy to
-  // lay out comes back from the same call: asking separately would mean parsing
-  // the whole body again to count what was just counted.
-  function renderSource(source) {
+  // is parsed on the way to the screen. Everything else the reader needs to
+  // know about this body comes back from the same call — how heavy it is, and
+  // its plain-text reading — because each of those asked separately is another
+  // parse of the whole message to work out what was just worked out.
+  function renderSource(source, withPlainText) {
     sourceHtml = String(source || "")
-    var ready = Html.sanitize(sourceHtml, ({ allowRemoteImages: remoteImagesAllowed }))
+    var ready = Html.sanitize(sourceHtml, ({
+      allowRemoteImages: remoteImagesAllowed,
+      withPlainText: withPlainText === true
+    }))
     selectedHtml = ready.html
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
     selectedTooHeavy = ready.tooHeavy
+    return ready
   }
 
   function showRemoteImages() {

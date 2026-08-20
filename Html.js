@@ -96,8 +96,18 @@ function readTag(text, from, out) {
   // "3<4". Digits and dots are only allowed after that first character.
   if (!isNameStartCode(text.charCodeAt(at))) return null
   var nameStart = at
-  while (at < length && isNameCode(text.charCodeAt(at))) at++
-  var name = text.substring(nameStart, at).toLowerCase()
+  var upper = false
+  while (at < length) {
+    var nameCode = text.charCodeAt(at)
+    if (!isNameCode(nameCode)) break
+    if (nameCode >= 65 && nameCode <= 90) upper = true
+    at++
+  }
+  // Almost every tag and attribute in real mail is already lower case, and
+  // toLowerCase on a string that is already lower case still walks it and can
+  // still hand back a copy. Cheaper to have noticed while reading it.
+  var name = text.substring(nameStart, at)
+  if (upper) name = name.toLowerCase()
 
   var attributes = []
   var selfClosing = false
@@ -123,9 +133,11 @@ function readTag(text, from, out) {
     }
 
     var attrStart = at
+    var attrUpper = false
     while (at < length) {
-      var nameCode = text.charCodeAt(at)
-      if (isSpaceCode(nameCode) || nameCode === 61 || nameCode === 62 || nameCode === 47) break
+      var attrCode = text.charCodeAt(at)
+      if (isSpaceCode(attrCode) || attrCode === 61 || attrCode === 62 || attrCode === 47) break
+      if (attrCode >= 65 && attrCode <= 90) attrUpper = true
       at++
     }
     // A character that can start neither a name nor anything else: step over it
@@ -134,7 +146,8 @@ function readTag(text, from, out) {
       at++
       continue
     }
-    var attributeName = text.substring(attrStart, at).toLowerCase()
+    var attributeName = text.substring(attrStart, at)
+    if (attrUpper) attributeName = attributeName.toLowerCase()
 
     while (at < length && isSpaceCode(text.charCodeAt(at))) at++
     var value = null
@@ -734,17 +747,20 @@ function stripStyleUrlsFrom(node) {
 // the standard email preheader is hidden text set at 1px, so it comes out as a
 // two-pixel smudge of unreadable characters above the message. Elements the
 // sender marked hidden are therefore removed rather than styled away.
-function isHidden(node) {
-  if (VOID_ELEMENTS[node.name] === true) return false
-  var style = attributeValue(node, "style")
-  if (style === "") return false
-  var declarations = splitDeclarations(style)
+function isHiddenBy(declarations) {
   for (var i = 0; i < declarations.length; i++) {
     var declaration = declarations[i]
     if (declaration.name === "display" && /^none\b/i.test(declaration.value)) return true
     if (declaration.name === "visibility" && /^hidden\b/i.test(declaration.value)) return true
   }
   return false
+}
+
+function isHidden(node) {
+  if (VOID_ELEMENTS[node.name] === true) return false
+  var style = attributeValue(node, "style")
+  if (style === "") return false
+  return isHiddenBy(splitDeclarations(style))
 }
 
 // A 1x1 image is a tracking pixel, never something to look at. Dropping them
@@ -816,11 +832,10 @@ var MAX_TABLE_DEPTH = 4
 // every element in the document, which on a large message is most of the work.
 var HANDLER_ATTRIBUTE = /^on[a-z]+$/
 
-function cleanAttributes(node, keepColors) {
+function cleanAttributes(node, keepColors, declarations) {
   var attrs = node.attrs
   var kept = attrs
   var dropped = false
-  var style = null
 
   for (var i = 0; i < attrs.length; i++) {
     var attr = attrs[i]
@@ -831,7 +846,6 @@ function cleanAttributes(node, keepColors) {
     // trip through a mail client.
     else if (name.charCodeAt(0) === 111 && HANDLER_ATTRIBUTE.test(name)) drop = true
     else if (name === "href" && !safeHref(attr.value)) drop = true
-    else if (name === "style") style = attr
 
     if (drop && !dropped) {
       dropped = true
@@ -841,11 +855,8 @@ function cleanAttributes(node, keepColors) {
     }
   }
   if (dropped) node.attrs = kept
-  if (style === null || style.value === null || style.value === undefined) return
+  if (declarations === null) return
 
-  // The style attribute is the only one worth parsing, and most elements have
-  // none, so it is only parsed when one is there.
-  var declarations = splitDeclarations(style.value)
   var survivors = []
   for (var j = 0; j < declarations.length; j++) {
     var declaration = declarations[j]
@@ -860,8 +871,6 @@ function cleanAttributes(node, keepColors) {
 function sanitize(html, options) {
   var settings = options || {}
   var source = String(html === undefined || html === null ? "" : html)
-  if (source === "") return { html: "", blockedImages: 0, images: 0, remoteImages: 0 }
-
   var keepColors = settings.keepColors === true
   var allowImages = settings.allowRemoteImages === true
   var limit = Math.max(0, Math.floor(
@@ -911,9 +920,20 @@ function sanitize(html, options) {
         continue
       }
       if (DROPPED_ELEMENTS[child.name] === true) continue
-      if (isHidden(child)) continue
 
-      cleanAttributes(child, keepColors)
+      // The style attribute is the only one worth parsing, and it is parsed
+      // once per element: whether the sender marked this hidden and what
+      // survives of its declarations are two questions about the same list.
+      // Most elements in real mail carry one, so asking twice was most of a
+      // second pass over the document.
+      var style = attributeOf(child, "style")
+      var declarations = style !== null && style.value !== null && style.value !== undefined
+        ? splitDeclarations(style.value)
+        : null
+      if (declarations !== null && VOID_ELEMENTS[child.name] !== true
+        && isHiddenBy(declarations)) continue
+
+      cleanAttributes(child, keepColors, declarations)
 
       if (child.name === "img" && !keepImage(child)) continue
 
@@ -924,6 +944,18 @@ function sanitize(html, options) {
   }
 
   var root = parse(source)
+
+  // Read as text before anything is dropped, and only when a caller asked: the
+  // reader wants both of these for a message with no text/plain part of its
+  // own, and the tokenize underneath is the most expensive thing this file
+  // does — paying for it twice to get two readings of one document is the
+  // whole reason this is an option rather than a second call.
+  //
+  // Before, specifically. A message's third picture is its third picture
+  // whether or not the first two were beacons, so the markers are numbered off
+  // the sender's own tree and not off what survives the image policy.
+  var plain = settings.withPlainText === true ? readTree(root) : null
+
   clean(root)
   if (settings.keepTables !== true) {
     flattenTablesIn(root, settings.keepTableDepth === undefined
@@ -944,7 +976,8 @@ function sanitize(html, options) {
     images: kept,
     remoteImages: loadable,
     complexity: size,
-    tooHeavy: isTooHeavy(size)
+    tooHeavy: isTooHeavy(size),
+    plainText: plain
   }
 }
 
@@ -1248,8 +1281,8 @@ function imageSourceOf(node) {
   return attr && attr.value !== null && attr.value !== undefined ? String(attr.value) : ""
 }
 
-function readPlainText(html) {
-  var state = flatten(parse(html), { text: "", images: [] })
+function readTree(root) {
+  var state = flatten(root, { text: "", images: [] })
   state.text = state.text
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -1257,14 +1290,10 @@ function readPlainText(html) {
   return state
 }
 
-// The sender's HTML as text, with a numbered marker where each picture was.
-function toText(html) {
-  return readPlainText(html).text
-}
-
-// The pictures those numbers point at, in the same order.
-function imageSources(html) {
-  return readPlainText(html).images
+// The sender's HTML as text, with a numbered marker where each picture was, and
+// the pictures those numbers point at.
+function readPlainText(html) {
+  return readTree(parse(html))
 }
 
 function escapeText(text) {

@@ -47,6 +47,17 @@ const html = load("Html.js")
   assert.strictEqual(html.stripColors("<a title='say \"hi\"'>t</a>"),
     "<a title=\"say &quot;hi&quot;\">t</a>")
 
+  // Old mail is shouted, and names are matched folded. The reader takes the
+  // fast path when it saw no capital while scanning a name, so the shouted form
+  // is its own path and has to be checked.
+  assert.strictEqual(
+    html.sanitize("<DIV STYLE=\"COLOR:red;padding:4px\"><IMG SRC=\"https://cdn.example.com/a.png\" WIDTH=\"90\">x</DIV>",
+      { allowRemoteImages: true }).html,
+    "<div style=\"padding:4px\"><img src=\"https://cdn.example.com/a.png\" width=\"90\">x</div>")
+  assert.strictEqual(html.sanitize("<SCRIPT>bad()</SCRIPT>ok").html, "ok")
+  assert.strictEqual(html.sanitize("<P STYLE=\"DISPLAY:NONE\">secret</P><p>real</p>").html, "<p>real</p>")
+  assert.strictEqual(html.sanitize("<A HREF=\"JAVASCRIPT:x()\">t</A>").html, "<a>t</a>")
+
   // A "<" that starts no tag is a "<" the sender typed.
   assert.strictEqual(html.stripColors("a < b and 3<4"), "a < b and 3<4")
 
@@ -97,6 +108,29 @@ const html = load("Html.js")
     "and it agrees with asking the long way round")
 }
 
+// Both readings of a body out of one parse, because the tokenize underneath is
+// the most expensive thing this file does and the reader wants both.
+{
+  const body = "<img src=\"https://track.example.com/p.gif\" width=\"1\">"
+    + "<p>copy</p><img src=\"http://127.0.0.1/x.png\" width=\"90\">"
+    + "<img src=\"https://cdn.example.com/real.png\" width=\"90\">"
+  const asked = html.sanitize(body, { withPlainText: true })
+  // Numbered off the sender's own tree, before anything is dropped: a message's
+  // third picture is its third picture whether or not the first two were a
+  // beacon and a request to the machine itself.
+  assert.strictEqual(asked.plainText.text, "[image 1]copy\n[image 2][image 3]")
+  deepEqual(asked.plainText.images, [
+    "https://track.example.com/p.gif", "http://127.0.0.1/x.png",
+    "https://cdn.example.com/real.png"])
+  // ...while the document itself keeps none of them.
+  assert.strictEqual(asked.images, 0)
+  assert.ok(asked.html.indexOf("127.0.0.1") < 0)
+  // The same answer the long way round, so the shortcut cannot drift from it.
+  deepEqual(asked.plainText, html.readPlainText(body))
+  // And nothing is paid for it unless it is asked for.
+  assert.strictEqual(html.sanitize(body).plainText, null)
+}
+
 // --------------------------------------------------- html read as plain text
 //
 // The markers and the picture list come off one walk, so a marker cannot open
@@ -104,9 +138,9 @@ const html = load("Html.js")
 {
   deepEqual(html.readPlainText("<div>Hello</div><img src=\"a.png\"><br><img src='b.png' width=600><p>Bye</p>"),
     { text: "Hello\n[image 1]\n[image 2]Bye", images: ["a.png", "b.png"] })
-  assert.strictEqual(html.toText("<ul><li>one</li><li>two &amp; three</li></ul>"),
+  assert.strictEqual(html.readPlainText("<ul><li>one</li><li>two &amp; three</li></ul>").text,
     "• one\n• two & three")
-  assert.strictEqual(html.toText("a&nbsp;&nbsp;b"), "a  b")
+  assert.strictEqual(html.readPlainText("a&nbsp;&nbsp;b").text, "a  b")
   // An <img> written inside another element's attribute is text, not a picture.
   deepEqual(html.readPlainText("<div title=\"<img src=ghost.png>\">real</div>"),
     { text: "real", images: [] })
@@ -296,7 +330,7 @@ assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example
 {
   const body = "<img alt=\"a>b\" src=\"https://cdn.example.com/one.png\"><p>x</p>"
     + "<img src=\"https://cdn.example.com/two.png\">"
-  deepEqual(html.imageSources(body),
+  deepEqual(html.readPlainText(body).images,
     ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"])
 }
 
@@ -407,10 +441,11 @@ assert.ok(bare.indexOf("x</body>") > 0)
 // Stripping images outright left a message built around its pictures reading as
 // a long run of unexplained blank space.
 {
-  deepEqual(html.imageSources('<img src="a.png"><img src=\'b b.png\'><img data-x=1 src=c.png >'),
+  deepEqual(html.readPlainText('<img src="a.png"><img src=\'b b.png\'><img data-x=1 src=c.png >').images,
     ["a.png", "b b.png", "c.png"])
-  deepEqual(html.imageSources(""), [])
-  deepEqual(html.imageSources("<img alt=none>"), [""], "an image with no src still holds its place")
+  deepEqual(html.readPlainText("").images, [])
+  deepEqual(html.readPlainText("<img alt=none>").images, [""],
+    "an image with no src still holds its place")
 
   var plainDoc = html.plainTextDocument("Hi\n[image 1]  spaced\n<b>not bold</b>",
     { foreground: "#DEDEDE", background: "#131313", link: "#077CFD" }, true)
