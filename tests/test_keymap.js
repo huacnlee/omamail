@@ -150,4 +150,38 @@ listSequences.forEach(function (row) {
     "each entry carries its id, its sequence, and the row it came from")
 })
 
+// -------------------------------------------------- the doc cannot drift
+
+// docs/KEYS.md carries the table for people rather than for the engine. Three
+// hand-written copies of this list used to exist and had already drifted apart,
+// so this one is asserted against the source rather than trusted.
+{
+  const fs = require("fs")
+  const path = require("path")
+  const doc = fs.readFileSync(
+    path.join(__dirname, "..", "docs", "KEYS.md"), "utf8")
+  const body = doc.split("<!-- BEGIN BINDINGS -->")[1]
+  assert.ok(body, "docs/KEYS.md must fence its table with BEGIN/END BINDINGS")
+  const rows = body.split("<!-- END BINDINGS -->")[0]
+    .split("\n")
+    .filter(function (line) { return line.indexOf("| `") === 0 })
+
+  function shorthand(binding) {
+    return binding.contexts.join("+")
+      .replace("list+reader", "mail")
+      .replace("*", "all")
+  }
+
+  assert.strictEqual(rows.length, keymap.BINDINGS.length,
+    "docs/KEYS.md lists every binding and no others")
+
+  keymap.BINDINGS.forEach(function (binding, i) {
+    const expected = "| `" + binding.id + "` | "
+      + binding.keys.map(function (k) { return "`" + k + "`" }).join(", ")
+      + " | " + shorthand(binding) + " | " + binding.label + " |"
+    assert.strictEqual(rows[i].trim(), expected,
+      "docs/KEYS.md row " + (i + 1) + " is out of step with keys/Keymap.js")
+  })
+}
+
 console.log("test_keymap.js ok")

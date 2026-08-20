@@ -92,50 +92,35 @@ three directories away from the client that calls it.
 
 ## Keys and focus
 
-- Every keyboard shortcut lives in `keys/Keymap.js`, and nothing else describes
-  one. The help sheet and the status-bar hints render from that table, so a key
-  added in one place is added everywhere. Three hand-written copies used to
-  exist and had already drifted apart.
-- Keys are guarded three times over, and the order matters when reasoning about
-  a report. Qt hands a focused `TextInput` the bare keys before any `Shortcut`
-  sees them; the key context stands the mailbox keys down on a form; and only
-  then does the typing guard below cover what is left — a focus target that is
-  neither a text input nor out of context.
-- Whether a key stands down while the user is typing is *derived* from the key,
-  never declared: bare keys stand down, `Ctrl`/`Alt`/`Meta` and the function
-  keys do not. Shift is not a modifier for this purpose — `Shift+I` is how a
-  capital I is typed. `Escape` is the only row that overrides it. The derivation
-  is per key, so one row holds both `/` and `Ctrl+K`.
-- The sheet enumerates and the status bar hints: `displayFor` names every key
-  that works, `hintKeyFor` gives the one short form. One field doing both put
-  "j / k — Move down" on the sheet, which is true of neither key.
-- Qt's sequence syntax is not the UI's. `readableSequence` turns "g,i" into
-  "g then i" and names Esc and Enter for the keycaps. A rule, not a per-row
-  override, so a chord added later reads properly without anyone spelling it out.
-- The typing guard asks whether the focused item is *visible*. Closing compose
-  leaves its field holding the window's focus while hidden; without that check
-  the guard pins true and stands every bare key down for the rest of the
-  session, which is `j` and `k` dying after one Esc out of a reply.
+The design and the full table are in `docs/KEYS.md`; read it before touching a
+key. What matters while working:
+
+- Every binding lives in `keys/Keymap.js` and nothing else describes one. The
+  shortcut sheet and the status hints render from it, and a test asserts
+  `docs/KEYS.md` matches it. Three hand-written copies used to exist and had
+  already drifted apart.
+- The context is the only guard. Name the contexts a key means something in;
+  there is no second question to answer. A text-entry context binds no bare key
+  but `Escape`.
+- The context owns the keyboard: changing it moves the focus, and a context that
+  types into nothing parks the keyboard on a plain `Item`. Never hand focus back
+  by calling `forceActiveFocus()` on the focus scope — that re-elects the field
+  being left, so it does nothing and the dismissed field keeps eating keys.
 - `focus: true` may not sit on a component that can be invisible while holding
-  it. Qt does not exclude hidden items from owning the focus, so a hidden owner
-  that accepts keys is a key sink — this swallowed every `Escape` in the window
-  and made the key look intermittent. Bind focus to whatever means "in use":
-  `focus: root.opened`.
-- Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler. A window
-  `Shortcut` beats a focused item's `Keys` handler, so a local handler looks
-  live and never runs — `SearchBar` had one that a routed `Escape` would have
-  silently killed. Anything Escape should do belongs in `goBack()`, in the order
-  the window is stacked.
-- `KeyRouter` builds its shortcuts with an `Instantiator`. A `Shortcut` is a
-  `QtObject` and a `Repeater` builds only `Item`s, so a `Repeater` there creates
-  nothing at all and every key goes silently dead.
-- A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself, so the router
-  never sees it. Do not add a branch for an open popup; do add one for a plain
-  overlay like the shortcut sheet, which is not a Popup.
+  it, and a component in a context does not place its own focus — the context
+  does. Two mechanisms for one thing is the bug this design replaces.
+- Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler: a window
+  `Shortcut` beats a focused item's `Keys` handler, so a local one looks live and
+  never runs. Anything `Escape` should do belongs in `goBack()`.
+- `KeyRouter` builds its shortcuts with an `Instantiator`. A `Repeater` builds
+  only `Item`s, so it creates no `Shortcut`s at all and every key goes dead.
+- A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself. Do not add a
+  branch for an open popup; do add one for a plain overlay like the sheet.
 - The list cursor and the open message are two different things. `cursorId` is
   where the keyboard is; `selectedId` is what the reader shows. Move the cursor
-  with `Model.cursorAfterOffset`, anchored on the cursor — anchoring it on the
-  open message pinned it to the first row.
+  with `Model.cursorAfterOffset`, and bring the row on screen with
+  `Model.contentYToReveal` — the list is a `Column`, so there is no
+  `positionViewAtIndex`.
 
 ## Providers
 
