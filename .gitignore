@@ -1,3 +1,9 @@
 *.log
 node_modules/
 .DS_Store
+
+# Design canvases and planning notes are working material, not something a
+# user installing the plugin should have to download. They live outside the
+# repository; see AGENTS.md for what is kept and why.
+docs/design/
+docs/superpowers/

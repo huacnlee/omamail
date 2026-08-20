@@ -201,8 +201,8 @@ permanently.
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
-Working agreements are in [AGENTS.md](AGENTS.md); the design canvas and the
-implementation plan are under [docs/](docs/).
+Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
+[docs/SPEC.md](docs/SPEC.md).
 
 Omamail is an independent project and is not affiliated with Google.
 Gmail is a trademark of Google LLC.

@@ -150,6 +150,21 @@
   copied off the message being answered — lose their line breaks first, or the
   reply carries headers nobody typed.
 
+## What the repository carries
+
+- This plugin is installed by cloning it — `omarchy plugin add` runs a plain
+  `git clone` with no `--depth` — so everything tracked, and everything ever
+  tracked, is between a user and a working mailbox.
+- Only what the plugin needs to run, plus the README, AGENTS.md and
+  `docs/SPEC.md`. Design canvases and planning notes are working material and
+  live outside the repository; `.gitignore` keeps them out.
+- Screenshots go to GitHub's attachment host by dragging them into an issue or
+  a release, never into the tree. A 320 KB PNG that nothing referenced was a
+  quarter of what a clone cost.
+- `tests/test_source.sh` fails on any tracked file over 128 KB. The things that
+  get big are never the source, so the ceiling is the rule rather than a list of
+  banned paths.
+
 ## Verification
 
 - Run `make validate` after any QML or behavior change. It runs the node tests,
