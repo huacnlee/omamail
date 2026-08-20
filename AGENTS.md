@@ -90,6 +90,44 @@ three directories away from the client that calls it.
 - A popup that would overflow flips to the other side of its trigger, then
   clamps to the window edge, then clamps to zero. All three, in that order.
 
+## Keys and focus
+
+- Every keyboard shortcut lives in `keys/Keymap.js`, and nothing else describes
+  one. The help sheet and the status-bar hints render from that table, so a key
+  added in one place is added everywhere. Three hand-written copies used to
+  exist and had already drifted apart.
+- Whether a key stands down while the user is typing is *derived* from the key,
+  never declared: bare keys stand down, `Ctrl`/`Alt`/`Meta` and the function
+  keys do not. Shift is not a modifier for this purpose — `Shift+I` is how a
+  capital I is typed. `Escape` is the only row that overrides it. The derivation
+  is per key, so one row holds both `/` and `Ctrl+K`.
+- The sheet enumerates and the status bar hints: `displayFor` names every key
+  that works, `hintKeyFor` gives the one short form. One field doing both put
+  "j / k — Move down" on the sheet, which is true of neither key.
+- Qt's sequence syntax is not the UI's. `readableSequence` turns "g,i" into
+  "g then i" and names Esc and Enter for the keycaps. A rule, not a per-row
+  override, so a chord added later reads properly without anyone spelling it out.
+- `focus: true` may not sit on a component that can be invisible while holding
+  it. Qt does not exclude hidden items from owning the focus, so a hidden owner
+  that accepts keys is a key sink — this swallowed every `Escape` in the window
+  and made the key look intermittent. Bind focus to whatever means "in use":
+  `focus: root.opened`.
+- Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler. A window
+  `Shortcut` beats a focused item's `Keys` handler, so a local handler looks
+  live and never runs — `SearchBar` had one that a routed `Escape` would have
+  silently killed. Anything Escape should do belongs in `goBack()`, in the order
+  the window is stacked.
+- `KeyRouter` builds its shortcuts with an `Instantiator`. A `Shortcut` is a
+  `QtObject` and a `Repeater` builds only `Item`s, so a `Repeater` there creates
+  nothing at all and every key goes silently dead.
+- A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself, so the router
+  never sees it. Do not add a branch for an open popup; do add one for a plain
+  overlay like the shortcut sheet, which is not a Popup.
+- The list cursor and the open message are two different things. `cursorId` is
+  where the keyboard is; `selectedId` is what the reader shows. Move the cursor
+  with `Model.cursorAfterOffset`, anchored on the cursor — anchoring it on the
+  open message pinned it to the first row.
+
 ## Providers
 
 - A mailbox is a **provider**: `gmail`, `imap`, or `hey`. `Provider.js` is the
