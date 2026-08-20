@@ -869,6 +869,74 @@ function cleanAttributes(node, keepColors, declarations) {
   setStyle(node, survivors)
 }
 
+// ----------------------------------------------------------- scaffolding
+//
+// Real mail is mostly scaffolding. A card centred in an Outlook window is six
+// or seven boxes deep, and flattening the tables past the second turns every
+// layer above that into a div with nothing on it — in a live mailbox they are
+// most of the tree.
+//
+// They are not free. Qt parses each one back out of the string, gives it a box
+// and lays the box out, and that half of the work is the half this file cannot
+// move or measure. Handing it a smaller document is the only lever on it.
+//
+// Two shapes, and only two, because both are provably the same document:
+// a box with nothing on it around a single box is that box, and an inline
+// element with nothing on it is nothing at all.
+var TRANSPARENT_INLINE = { span: true, font: true, small: true, big: true }
+// Not <center>: Qt honours it, and a card that was centred would come out
+// against the left edge. A container only counts as plain when it carries no
+// meaning of its own — which is the whole test being applied here.
+var PLAIN_CONTAINER = {
+  div: true, section: true, article: true, aside: true,
+  header: true, footer: true, main: true, nav: true
+}
+
+// The one block this element holds, or null if it holds anything else.
+// Whitespace between blocks is not content and does not count against it.
+function soleBlockChild(node) {
+  var found = null
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      if (child.text.replace(/[\s\u00a0]+/g, "") !== "") return null
+      continue
+    }
+    if (found !== null) return null
+    if (BLOCK_ELEMENTS[child.name] !== true) return null
+    found = child
+  }
+  return found
+}
+
+// Bottom up, so a stack of seven collapses to one rather than to six.
+function collapse(node) {
+  var kept = []
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      kept.push(child)
+      continue
+    }
+    collapse(child)
+    if (child.attrs.length === 0) {
+      if (TRANSPARENT_INLINE[child.name] === true) {
+        for (var j = 0; j < child.children.length; j++) kept.push(child.children[j])
+        continue
+      }
+      if (PLAIN_CONTAINER[child.name] === true) {
+        var inner = soleBlockChild(child)
+        if (inner !== null) {
+          kept.push(inner)
+          continue
+        }
+      }
+    }
+    kept.push(child)
+  }
+  node.children = kept
+}
+
 function sanitize(html, options) {
   var settings = options || {}
   var source = String(html === undefined || html === null ? "" : html)
@@ -962,6 +1030,8 @@ function sanitize(html, options) {
     flattenTablesIn(root, settings.keepTableDepth === undefined
       ? KEEP_TABLE_DEPTH : Math.max(0, settings.keepTableDepth), 0)
   }
+
+  collapse(root)
 
   // Measured off the tree that is already in hand. The reader needs to know
   // whether this document is too heavy to lay out, and asking with the string

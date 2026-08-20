@@ -131,6 +131,56 @@ const html = load("Html.js")
   assert.strictEqual(html.sanitize(body).plainText, null)
 }
 
+// ------------------------------------------------------------ scaffolding
+//
+// Real mail is mostly boxes holding one box. Qt parses each one back out of the
+// string and lays it out, and that half of the cost is the half this file
+// cannot measure — so the document it is handed is made smaller, but only in
+// the two shapes that provably render the same.
+{
+  // A stack of empty wrappers is the innermost thing in it.
+  assert.strictEqual(html.sanitize("<div><div><div><p>hi</p></div></div></div>").html, "<p>hi</p>")
+  assert.strictEqual(html.sanitize("<div><table><tr><td>x</td></tr></table></div>").html,
+    "<table><tr><td>x</td></tr></table>")
+  // An inline element carrying nothing is nothing.
+  assert.strictEqual(html.sanitize("<p><span>a</span>b<font>c</font></p>").html, "<p>abc</p>")
+
+  // Anything the wrapper carries is a reason it is there.
+  assert.strictEqual(html.sanitize("<div style=\"padding:8px\"><p>hi</p></div>").html,
+    "<div style=\"padding:8px\"><p>hi</p></div>")
+  assert.strictEqual(html.sanitize("<div align=\"center\"><p>hi</p></div>").html,
+    "<div align=\"center\"><p>hi</p></div>")
+  // Qt honours <center>, so a card that was centred must not come out left.
+  assert.strictEqual(html.sanitize("<center><p>hi</p></center>").html, "<center><p>hi</p></center>")
+  // <b> is not <span>: it says something with no attributes at all.
+  assert.strictEqual(html.sanitize("<p><b>bold</b></p>").html, "<p><b>bold</b></p>")
+
+  // Two boxes are two boxes, and a box holding text as well as a box is not
+  // holding only that box.
+  assert.strictEqual(html.sanitize("<div><p>a</p><p>b</p></div>").html, "<div><p>a</p><p>b</p></div>")
+  assert.strictEqual(html.sanitize("<div>text<p>b</p></div>").html, "<div>text<p>b</p></div>")
+  // Whitespace between blocks is not text: a template's newlines do not pin a
+  // wrapper in place.
+  assert.strictEqual(html.sanitize("<div>\n  <p>a</p>\n</div>").html, "<p>a</p>")
+  // An inline child means the wrapper is what puts it on its own line.
+  assert.strictEqual(html.sanitize("<div><span style=\"font-size:9px\">a</span></div>").html,
+    "<div><span style=\"font-size:9px\">a</span></div>")
+
+  // On mail shaped like the real thing this is most of the document. Nine
+  // layout tables around a card is what this mailbox actually receives.
+  let card = "", close = ""
+  for (let d = 0; d < 9; d++) {
+    card += "<table width=\"" + (600 - d * 10) + "\" align=\"center\"><tr><td>"
+    close = "</td></tr></table>" + close
+  }
+  card += "<img src=\"https://cdn.example.com/h.png\" width=\"540\"><p>copy</p>" + close
+  const carded = html.sanitize(card, { allowRemoteImages: true })
+  assert.ok(carded.complexity.tags < 12,
+    "nine levels of scaffolding come out as a handful of elements, not thirty")
+  assert.ok(carded.html.indexOf("copy") > 0 && carded.html.indexOf("h.png") > 0,
+    "and everything that was in them is still there")
+}
+
 // --------------------------------------------------- html read as plain text
 //
 // The markers and the picture list come off one walk, so a marker cannot open
