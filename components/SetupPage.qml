@@ -325,6 +325,7 @@ Column {
   Text {
     width: parent.width
     visible: !!root.auth && root.auth.lastError !== ""
+    textFormat: Text.PlainText
     text: root.auth ? root.auth.lastError : ""
     color: Color.urgent
     font.family: root.panelFontFamily

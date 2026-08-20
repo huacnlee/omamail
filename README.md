@@ -126,9 +126,14 @@ trash, spam, star and read/unread without leaving the keyboard cursor behind.
   its `QGuiApplication`, and a plugin loads long after that.
 - **No attachment downloads.** Not yet.
 
-Images in a message body load by default. Qt really does fetch them, so opening
-a message fires whatever tracking pixels it carries — the same as any mail
-client that shows pictures without asking.
+Remote images in a message body are blocked until you ask for them, and asking
+covers that one message. Qt really does fetch an `<img src="https://…">`, so
+loading a message's pictures fires whatever tracking pixels it carries and tells
+the sender when the mail was read — which is why it is a decision rather than a
+default. Images pointed at this machine or at the network around it (loopback,
+private addresses, `.local` names, `file:`) are never fetched at all, however
+often you ask: a message must not be able to make the client knock on the door
+of something listening on your own network.
 
 Several mailboxes can be added and switched between; each keeps its own cache,
 its own refresh token, and its own unread count, and the bar badge counts all of

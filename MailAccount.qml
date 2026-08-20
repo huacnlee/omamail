@@ -93,10 +93,22 @@ Item {
   // where it exists, which is native and skips the per-character base64 loop
   // that made this the one expensive step in opening a message.
   property string selectedHtml: ""
+  // The same document with the sender's remote images still in it. This is what
+  // the body cache holds and what `selectedHtml` is derived from, so asking for
+  // the images is a re-render rather than another trip to Gmail.
+  property string preparedHtml: ""
+  // Off for every message, every time it is opened. Fetching a sender's images
+  // tells them the mail was read, from which address and when, so it happens
+  // only when the reader has asked — and asking covers this message alone.
+  property bool remoteImagesAllowed: false
   // The sender's images, in the order htmlToText numbers them, so a marker in
   // the plain-text body can be traced back to the picture it replaced.
   property var selectedImages: []
   property int selectedBlockedImages: 0
+  // How many of the blocked ones asking would actually bring back. A message
+  // whose only images are beacons or point at the local network has nothing to
+  // offer, so the reader says nothing.
+  property int selectedRemoteImages: 0
   property bool selectedTooHeavy: false
   property var selectedAttachments: []
   property bool detailLoading: false
@@ -395,6 +407,10 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    preparedHtml = ""
+    remoteImagesAllowed = false
+    selectedBlockedImages = 0
+    selectedRemoteImages = 0
     selectedImages = []
     selectedAttachments = []
     detailLoading = true
@@ -409,11 +425,8 @@ Item {
       if (root.detailLive || !cached) return
       // The body is already decoded here, so sanitising it costs a fraction
       // of a millisecond — worth doing inline to paint in the same frame.
-      var ready = Html.sanitize(cached.html, ({ allowRemoteImages: true }))
       root.selectedBody = { text: cached.text, source: cached.source }
-      root.selectedHtml = ready.html
-      root.selectedBlockedImages = ready.blockedImages
-      root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+      root.renderPrepared(cached.html)
       root.selectedAttachments = cached.attachments
       root.selectedImages = cached.images
       bodyCache.touch(messageId)
@@ -431,17 +444,18 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      var ready = Html.sanitize(rawHtml, ({ allowRemoteImages: true }))
+      // Sanitised once with the images left in, so the cache keeps a document
+      // the reader can still be shown the pictures of; what reaches the screen
+      // is derived from it below, with them out.
+      var prepared = Html.sanitize(rawHtml, ({ allowRemoteImages: true })).html
       root.selectedBody = decoded
-      root.selectedHtml = ready.html
-      root.selectedBlockedImages = ready.blockedImages
-      root.selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+      root.renderPrepared(prepared)
       root.selectedAttachments = Mail.attachments(payload.payload)
       root.selectedImages = Html.imageSources(rawHtml)
       bodyCache.put(messageId, ({
         text: decoded.text,
         source: decoded.source,
-        html: ready.html,
+        html: prepared,
         attachments: root.selectedAttachments,
         images: root.selectedImages
       }))
@@ -452,6 +466,24 @@ Item {
     })
   }
 
+  // The one place `selectedHtml` is set. Sanitising the prepared document again
+  // is what removes or restores the images, and it is cheap enough to do on a
+  // button press: the expensive part of opening a message is the decode above.
+  function renderPrepared(prepared) {
+    preparedHtml = String(prepared || "")
+    var ready = Html.sanitize(preparedHtml, ({ allowRemoteImages: remoteImagesAllowed }))
+    selectedHtml = ready.html
+    selectedBlockedImages = ready.blockedImages
+    selectedRemoteImages = ready.remoteImages
+    selectedTooHeavy = Html.tooHeavyForRichText(ready.html)
+  }
+
+  function showRemoteImages() {
+    if (remoteImagesAllowed || preparedHtml === "") return
+    remoteImagesAllowed = true
+    renderPrepared(preparedHtml)
+  }
+
   function clearSelection() {
     detailSerial++
     apiClient.abortRequest(detailHandle)
@@ -460,8 +492,11 @@ Item {
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
+    preparedHtml = ""
+    remoteImagesAllowed = false
     selectedImages = []
     selectedBlockedImages = 0
+    selectedRemoteImages = 0
     selectedTooHeavy = false
     selectedAttachments = []
     detailLoading = false
@@ -632,16 +667,19 @@ Item {
   function notify(arrivals) {
     var list = Array.isArray(arrivals) ? arrivals : []
     if (list.length === 0) return
+    // "--" before the summary and body: both are written by whoever sent the
+    // mail, and a display name of "-u" would otherwise be read by notify-send
+    // as an option rather than as a name.
     if (list.length === 1) {
-      Quickshell.execDetached(["notify-send", "-a", "Omamail",
-        "-i", "mail-unread", list[0].from.display, Model.notificationBody(list[0])])
+      Quickshell.execDetached(["notify-send", "-a", "Omamail", "-i", "mail-unread",
+        "--", Model.notificationTitle(list[0]), Model.notificationBody(list[0])])
       return
     }
     // One notification per message turns a batch sync into a wall of popups.
     var names = []
-    for (var i = 0; i < list.length && i < 3; i++) names.push(list[i].from.display)
-    Quickshell.execDetached(["notify-send", "-a", "Omamail",
-      "-i", "mail-unread", Model.pluralize(list.length, "new message"), names.join(", ")])
+    for (var i = 0; i < list.length && i < 3; i++) names.push(Model.notificationTitle(list[i]))
+    Quickshell.execDetached(["notify-send", "-a", "Omamail", "-i", "mail-unread",
+      "--", Model.pluralize(list.length, "new message"), names.join(", ")])
   }
 
   // ------------------------------------------------------------ navigation

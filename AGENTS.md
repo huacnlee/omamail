@@ -66,9 +66,25 @@
   is world-readable.
 - Anything that could carry a credential passes through `OAuth.redact` before
   it can reach a label.
-- Remote images in a message body are blocked until the reader asks for them.
-  Qt's rich text engine really does fetch them, so rendering one fires every
-  tracking pixel in the message.
+- Remote images in a message body are blocked until the reader asks for them,
+  and asking covers one message. Qt's rich text engine really does fetch them,
+  so rendering one fires every tracking pixel in the message.
+
+## Anything a stranger wrote
+
+- A message body, a subject, a sender name, a snippet, an attachment filename:
+  all of it is written by whoever sent the mail, and none of it is markup.
+- `Text` defaults to `Text.AutoText`, which promotes anything tag-shaped to rich
+  text — and Qt's rich text engine fetches `<img src>`. Every `Text` showing
+  message content therefore says `textFormat: Text.PlainText`, and
+  `tests/test_qml_text_format.py` fails the build when one forgets.
+- An image is only ever fetched from a host on the public internet. Loopback,
+  private and link-local addresses, single-label and `.local` names, `file:`
+  and relative sources are refused outright — `Html.imageSourceKind` is the one
+  place that decides, and the reader, the popover and the sanitiser all ask it.
+- Values that go back out to Google — a `To`, a `Subject`, an `In-Reply-To`
+  copied off the message being answered — lose their line breaks first, or the
+  reply carries headers nobody typed.
 
 ## Verification
 

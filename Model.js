@@ -208,10 +208,32 @@ function newArrivals(summaries, seenIds, primed) {
   return arrivals
 }
 
+// The desktop notification spec says a body may carry a small markup subset,
+// and the daemons that implement it read one out of whatever they are handed.
+// A subject is a stranger's sentence, so its angle brackets are its own — and
+// an <img> left in one is a fetch made by the notification rather than by the
+// reader, which is the same beacon by a different door.
+//
+// A leading "-" is stripped for a different reason: these values become
+// arguments to notify-send, and one that starts with a dash is read as an
+// option there.
+function notificationText(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/^[-\s]+/, "")
+}
+
+function notificationTitle(summary) {
+  var title = summary && summary.from ? notificationText(summary.from.display) : ""
+  return title === "" ? "New message" : title
+}
+
 function notificationBody(summary) {
   if (!summary) return ""
-  var subject = String(summary.subject || "").trim()
-  var snippet = String(summary.snippet || "").trim()
+  var subject = notificationText(String(summary.subject || "").trim())
+  var snippet = notificationText(String(summary.snippet || "").trim())
   if (!snippet) return subject
   return subject + "\n" + (snippet.length > 140 ? snippet.substring(0, 139) + "…" : snippet)
 }

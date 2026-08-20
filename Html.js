@@ -138,16 +138,230 @@ function stripColors(html) {
     })
 }
 
+// A url() in an inline style is a fetch wherever the engine honours it, and
+// which declarations Qt honours is not worth having to be right about: nothing
+// in mail needs one, because pictures arrive as <img>, which is where the image
+// policy lives. The declaration goes rather than the whole attribute, so the
+// padding and the font beside it survive.
+function stripStyleUrls(html) {
+  return String(html || "").replace(/\sstyle\s*=\s*("([^"]*)"|'([^']*)')/gi,
+    function(match, raw, dq, sq) {
+      var value = dq !== undefined ? dq : sq
+      if (!/url\s*\(/i.test(decodeReferences(value))) return match
+      var parts = String(value).split(";")
+      var kept = []
+      for (var i = 0; i < parts.length; i++) {
+        if (/url\s*\(/i.test(decodeReferences(parts[i]))) continue
+        if (parts[i].replace(/\s+/g, "") !== "") kept.push(parts[i])
+      }
+      var cleaned = kept.join(";").replace(/^[;\s]+|[;\s]+$/g, "")
+      return cleaned === "" ? "" : " style=\"" + cleaned + "\""
+    })
+}
+
 function stripElement(text, name) {
   var open = new RegExp("<" + name + "\\b[^>]*>[\\s\\S]*?<\\/" + name + "\\s*>", "gi")
   var lone = new RegExp("<\\/?" + name + "\\b[^>]*>", "gi")
   return String(text).replace(open, "").replace(lone, "")
 }
 
+// ------------------------------------------------------------- tag boundaries
+//
+// Where a tag ends is the one thing the image policy below cannot afford to be
+// wrong about, and /<img\b[^>]*>/ is wrong about it. Qt's parser reads
+// attribute values with their quotes, so
+//
+//   <img alt="a>b" src="http://127.0.0.1/p.gif">
+//
+// is one image tag to the engine and two pieces of nothing to that regex: it
+// stops at the ">" inside the alt text, finds no src in what it took, and hands
+// the whole tag back untouched — which is a fetch. A sender only has to put a
+// ">" in an alt text to walk past the check.
+//
+// Qt has no HTML parser a QML plugin can call, so tag boundaries are scanned
+// for rather than matched. This is not a parser and does not try to be one: it
+// answers exactly one question, which is where a tag someone opened stops.
+function tagEnd(text, from) {
+  var quote = ""
+  for (var i = from; i < text.length; i++) {
+    var character = text.charAt(i)
+    if (quote !== "") {
+      if (character === quote) quote = ""
+      continue
+    }
+    if (character === "\"" || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === ">") return i + 1
+  }
+  return -1
+}
+
+// Every <name ...> tag rewritten through `fn`, which is handed the whole tag and
+// returns what stands in its place. A tag that never closes takes the rest of
+// the document with it: Qt would swallow the remainder into the tag anyway, and
+// dropping it is the reading that cannot leave a fetch behind.
+function replaceTags(html, name, fn) {
+  var text = String(html || "")
+  var opening = new RegExp("<" + name + "\\b", "gi")
+  var out = ""
+  var at = 0
+  var found
+  while ((found = opening.exec(text)) !== null) {
+    if (found.index < at) continue
+    var end = tagEnd(text, found.index + found[0].length)
+    out += text.substring(at, found.index)
+    if (end < 0) return out
+    out += fn(text.substring(found.index, end))
+    at = end
+    opening.lastIndex = end
+  }
+  return out + text.substring(at)
+}
+
+// ------------------------------------------------------------ image sources
+//
+// An attribute value is not a URL until the HTML parser has resolved the
+// character references inside it. Qt does that before it fetches anything, so
+// src="&#104;ttps://tracker/x.png" is a real https fetch to the engine while a
+// check reading the raw attribute text sees something that starts with an "&"
+// and lets it through. Tab and newline inside a URL are dropped for the same
+// reason: they are not part of it by the time the fetch is made.
+var NAMED_REFERENCES = { amp: "&", quot: "\"", apos: "'", lt: "<", gt: ">", sol: "/", colon: ":" }
+
+function decodeReferences(text) {
+  return String(text).replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);?/g,
+    function(match, body) {
+      if (body.charAt(0) !== "#") {
+        var named = NAMED_REFERENCES[body.toLowerCase()]
+        return named === undefined ? match : named
+      }
+      var code = body.charAt(1) === "x" || body.charAt(1) === "X"
+        ? parseInt(body.substring(2), 16)
+        : parseInt(body.substring(1), 10)
+      if (!isFinite(code) || code < 0 || code > 0x10ffff) return match
+      return String.fromCharCode(code)
+    })
+}
+
+// Decoded twice, because "&amp;#104;" is one reference to Qt and two to a
+// reader looking for a scheme. Over-decoding can only make a source look more
+// remote than it is, and the answer to "remote" is to block it.
+function normalizedUrl(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+  text = decodeReferences(decodeReferences(text))
+  return text.replace(/[\t\n\r]/g, "").replace(/^[\s\u0000-\u001f]+|[\s\u0000-\u001f]+$/g, "")
+}
+
+// The host of an http(s) or protocol-relative URL, lower-cased, with the
+// userinfo, the port and everything after the authority removed. Userinfo
+// matters: "http://gmail.com@127.0.0.1/x.png" is a request to 127.0.0.1.
+function hostOf(url) {
+  var text = String(url || "").replace(/^https?:/i, "")
+  if (text.indexOf("//") !== 0) return ""
+  var authority = text.substring(2)
+  var end = authority.search(/[\/?#]/)
+  if (end >= 0) authority = authority.substring(0, end)
+  var at = authority.lastIndexOf("@")
+  if (at >= 0) authority = authority.substring(at + 1)
+  if (authority.charAt(0) === "[") {
+    var close = authority.indexOf("]")
+    return (close < 0 ? authority : authority.substring(0, close + 1)).toLowerCase()
+  }
+  var colon = authority.indexOf(":")
+  return (colon < 0 ? authority : authority.substring(0, colon)).toLowerCase()
+}
+
+var DOTTED_QUAD = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+
+function isPublicIpv4(host) {
+  var parts = String(host).match(DOTTED_QUAD)
+  if (!parts) return false
+  var octets = []
+  for (var i = 1; i <= 4; i++) {
+    // A leading zero reads as octal to some resolvers and as decimal to
+    // others, so "0177.0.0.1" is 127.0.0.1 to one of them. Neither reading is
+    // worth the risk of picking the wrong one.
+    if (parts[i].length > 1 && parts[i].charAt(0) === "0") return false
+    var value = Number(parts[i])
+    if (value > 255) return false
+    octets.push(value)
+  }
+  var a = octets[0]
+  var b = octets[1]
+  if (a === 0 || a === 10 || a === 127) return false
+  if (a === 169 && b === 254) return false
+  if (a === 172 && b >= 16 && b <= 31) return false
+  if (a === 192 && (b === 168 || b === 0)) return false
+  if (a === 198 && (b === 18 || b === 19)) return false
+  if (a === 100 && b >= 64 && b <= 127) return false
+  if (a >= 224) return false
+  return true
+}
+
+// Names that are the machine this runs on, or the network around it. The
+// reserved-but-unresolvable ones (.example, .invalid) are left out: they are
+// not internal, they simply do not exist.
+var PRIVATE_SUFFIX = /(^|\.)(localhost|home\.arpa)$|\.(local|localdomain|internal|intranet|lan|home|corp|test)$/
+var PUBLIC_TLD = /\.(xn--[a-z0-9-]+|[a-z]{2,})$/
+
+// A message must not be able to make this client talk to the machine it runs
+// on or to the network that machine sits in. A crafted <img> is a request the
+// reader never asked for, aimed at whatever the sender names — a router's
+// admin page, a printer, a service listening on loopback — and issuing it is
+// the attack whether or not the answer is ever drawn.
+//
+// So the rule is a list of what is allowed rather than a list of what is not:
+// a name whose last label is a real top-level domain, or a public IPv4
+// address. That refuses "localhost", a bare "printer", ".local" and
+// ".internal", every IPv6 literal, and an address written in octal, in hex, or
+// as one number — without having to have thought of each of them first.
+//
+// A public name that resolves to a private address is beyond what any check on
+// the URL can see. That is DNS rebinding, and stopping it needs a resolver
+// this plugin does not own.
+function isPublicHost(host) {
+  var name = String(host || "")
+  if (name === "" || name.length > 253) return false
+  if (isPublicIpv4(name)) return true
+  if (!/^[a-z0-9.-]+$/.test(name)) return false
+  if (name.indexOf("..") >= 0) return false
+  if (PRIVATE_SUFFIX.test(name)) return false
+  return PUBLIC_TLD.test(name)
+}
+
 // Protocol-relative sources are network fetches too — "//cdn/x.png" resolves
 // against the page protocol, which is exactly the tracking case.
 function isRemoteSource(value) {
-  return /^\s*(https?:)?\/\//i.test(String(value || ""))
+  return /^(https?:)?\/\//i.test(normalizedUrl(value))
+}
+
+// What an <img src> is, as far as the fetch it would cause is concerned:
+//
+//   inline  cid: and data: — the message's own bytes, no network at all
+//   remote  http(s) at a host on the public internet
+//   unsafe  anything else with a scheme, or a host that is not public. file:
+//           and qrc: are local reads; loopback and private addresses are the
+//           network behind the user's front door.
+//   local   no scheme. Qt resolves a relative source against the document's
+//           base URL, which for a TextEdit is the QML file's own directory —
+//           a read of whatever sits next to the plugin.
+function imageSourceKind(value) {
+  var url = normalizedUrl(value)
+  if (url === "") return "none"
+  if (/^cid:/i.test(url)) return "inline"
+  if (/^data:/i.test(url)) return "inline"
+  if (/^(https?:)?\/\//i.test(url)) return isPublicHost(hostOf(url)) ? "remote" : "unsafe"
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "unsafe" : "local"
+}
+
+// Whether the reader may hand a source straight to an Image element, which is
+// what opening an image marker in a plain-text body does.
+function isDisplayableImageUrl(value) {
+  var kind = imageSourceKind(value)
+  if (kind === "remote") return true
+  return kind === "inline" && /^data:image\//i.test(normalizedUrl(value))
 }
 
 // Only http(s) and mailto survive. A javascript: href does nothing in Qt's
@@ -203,7 +417,7 @@ function dropHidden(html) {
 function sanitize(html, options) {
   var settings = options || {}
   var text = String(html === undefined || html === null ? "" : html)
-  if (text === "") return { html: "", blockedImages: 0 }
+  if (text === "") return { html: "", blockedImages: 0, images: 0, remoteImages: 0 }
 
   // The message takes the window's theme, so the sender's palette comes out
   // before anything else looks at the markup.
@@ -211,6 +425,7 @@ function sanitize(html, options) {
   if (settings.keepTables !== true) text = flattenTables(text, settings.keepTableDepth)
 
   text = text.replace(/<!--[\s\S]*?-->/g, "")
+  text = stripStyleUrls(text)
   text = dropHidden(text)
   for (var i = 0; i < DROPPED_ELEMENTS.length; i++) text = stripElement(text, DROPPED_ELEMENTS[i])
   text = text.replace(/<(meta|link|base)\b[^>]*>/gi, "")
@@ -225,36 +440,48 @@ function sanitize(html, options) {
       return safeHref(value) ? match : ""
     })
 
-  // Every image is a network fetch Qt performs while laying the document out,
-  // and every completed fetch triggers another layout pass. Tracking pixels
-  // are pure cost, and past the cap the rest are decoration.
+  // Every remote image is a network fetch Qt performs while laying the document
+  // out, and every completed fetch triggers another layout pass. Tracking
+  // pixels are pure cost, and past the cap the rest are decoration.
+  //
+  // Nothing remote is fetched unless the reader asked for it. Opening a message
+  // is not asking: the fetch alone tells the sender the mail was read, from
+  // which address and at what time, and a source pointed at the machine itself
+  // turns reading mail into a request to whatever is listening on it.
   var blocked = 0
   var kept = 0
+  var loadable = 0
   var allowImages = settings.allowRemoteImages === true
   var limit = Math.max(0, Math.floor(
     settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
 
-  text = text.replace(/<img\b[^>]*>/gi, function(tag) {
+  text = replaceTags(text, "img", function(tag) {
     var source = tag.match(/\ssrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
     if (!source) return tag
     var value = source[2] !== undefined ? source[2]
       : (source[3] !== undefined ? source[3] : source[4])
-    if (!isRemoteSource(value)) return tag
+    var kind = imageSourceKind(value)
+    // Removed rather than emptied: an <img> with no src still reserves a
+    // broken-image box in Qt's layout, which reads as a rendering fault.
+    if (kind === "inline" || kind === "none") return tag
+    // Neither a local read nor a private-network request is something the
+    // reader can ever be offered, so these are dropped without being counted
+    // as something "show images" would bring back.
+    if (kind !== "remote") return ""
     if (isTrackingPixel(tag)) {
       blocked++
       return ""
     }
+    if (loadable < limit) loadable++
     if (!allowImages || kept >= limit) {
       blocked++
-      // Removed rather than emptied: an <img> with no src still reserves a
-      // broken-image box in Qt's layout, which reads as a rendering fault.
       return ""
     }
     kept++
     return tag
   })
 
-  return { html: text, blockedImages: blocked, images: kept }
+  return { html: text, blockedImages: blocked, images: kept, remoteImages: loadable }
 }
 
 function hasRemoteImages(html) {
@@ -355,7 +582,11 @@ var IMAGE_LINK_PREFIX = "omarchy-image:"
 // cap was reached, and every marker after it would open the wrong picture.
 function imageSources(html) {
   var out = []
-  var pattern = /<img\b[^>]*>/gi
+  // The same pattern Message.htmlToText numbers the markers with, quotes and
+  // all: the two walks have to see the same tags or every marker after a
+  // disagreement opens the wrong picture. Not the scanner sanitize uses —
+  // nothing here is fetched, so a miss costs a marker rather than a request.
+  var pattern = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi
   var tags = String(html || "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")

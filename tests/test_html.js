@@ -44,9 +44,9 @@ assert.ok(blocked.html.indexOf("<p>Hi</p>") === 0, "the rest of the message is u
 const allowedPixel = html.sanitize(tracked, { allowRemoteImages: true })
 assert.strictEqual(allowedPixel.images, 0)
 assert.strictEqual(allowedPixel.blockedImages, 1)
-assert.strictEqual(html.sanitize("<img src='https://a/b.gif' height=\"1\">",
+assert.strictEqual(html.sanitize("<img src='https://a.example.com/b.gif' height=\"1\">",
   { allowRemoteImages: true }).images, 0)
-assert.strictEqual(html.sanitize("<img src='https://a/b.gif' style='width:1px;height:1px'>",
+assert.strictEqual(html.sanitize("<img src='https://a.example.com/b.gif' style='width:1px;height:1px'>",
   { allowRemoteImages: true }).images, 0)
 
 // A real picture is kept.
@@ -58,7 +58,7 @@ assert.strictEqual(html.sanitize(real).images, 0, "still off unless asked for")
 // Every image is a fetch Qt performs during layout, and every completed fetch
 // triggers another layout pass, so the count is capped.
 let many = ""
-for (let i = 0; i < html.MAX_IMAGES + 8; i++) many += "<img src=\"https://cdn/" + i + ".png\" width=\"90\">"
+for (let i = 0; i < html.MAX_IMAGES + 8; i++) many += "<img src=\"https://cdn.example.com/" + i + ".png\" width=\"90\">"
 const capped = html.sanitize(many, { allowRemoteImages: true })
 assert.strictEqual(capped.images, html.MAX_IMAGES)
 assert.strictEqual(capped.blockedImages, 8)
@@ -87,11 +87,116 @@ assert.strictEqual(html.complexity(null).length, 0)
 // are already local. Neither is a network request, and neither is counted.
 assert.strictEqual(html.sanitize("<img src=\"cid:logo\">").blockedImages, 0)
 assert.strictEqual(html.sanitize("<img src=\"data:image/png;base64,AAA\">").blockedImages, 0)
-assert.strictEqual(html.sanitize("<img src='http://a/b.png'><img src='https://c/d.png'>").blockedImages, 2)
-assert.strictEqual(html.sanitize("<img src='http://a/b.png'><img src='https://c/d.png'>",
+assert.strictEqual(html.sanitize("<img src='http://a.example.com/b.png'><img src='https://c.example.com/d.png'>").blockedImages, 2)
+assert.strictEqual(html.sanitize("<img src='http://a.example.com/b.png'><img src='https://c.example.com/d.png'>",
   { allowRemoteImages: true }).images, 2, "images with no stated size are real pictures")
 // Protocol-relative sources are still network fetches.
 assert.strictEqual(html.sanitize("<img src=\"//cdn.example/x.png\">").blockedImages, 1)
+
+// ------------------------------------------------- where an image may point
+//
+// A crafted message must not be able to make the reader talk to the machine it
+// runs on. These are requests the user never asked for, aimed at whatever the
+// sender names, and issuing one is the attack whether or not anything is drawn.
+
+const localSources = [
+  "http://127.0.0.1:8080/x.png",
+  "http://localhost/x.png",
+  "http://[::1]/x.png",
+  "http://10.0.0.1/x.png",
+  "http://192.168.1.1/x.png",
+  "http://172.16.4.4/x.png",
+  "http://169.254.169.254/latest/meta-data",
+  "http://router/x.png",
+  "http://printer.local/x.png",
+  // 127.0.0.1 written so a naive check does not recognise it.
+  "http://2130706433/x.png",
+  "http://0177.0.0.1/x.png",
+  "http://0x7f000001/x.png",
+  // Userinfo, so the host is not what a reader skimming the URL sees.
+  "http://cdn.example.com@127.0.0.1/x.png"
+]
+for (const source of localSources) {
+  const asked = html.sanitize("<img src=\"" + source + "\" width=\"90\">",
+    { allowRemoteImages: true })
+  assert.strictEqual(asked.images, 0, source + " must never be fetched")
+  assert.ok(asked.html.indexOf("img") < 0, source + " must not reach the renderer")
+  assert.strictEqual(asked.remoteImages, 0, source + " is not something to offer")
+}
+
+// A public address in a URL is fine, however it is written.
+assert.strictEqual(html.sanitize("<img src=\"https://93.184.216.34/x.png\" width=\"90\">",
+  { allowRemoteImages: true }).images, 1)
+
+// Qt resolves the character references in an attribute before it fetches, so a
+// source that does not look like a URL to a reader can still be one to it.
+assert.strictEqual(
+  html.sanitize("<img src=\"&#104;ttps://track.example.com/p.gif\" width=\"90\">").blockedImages, 1)
+assert.strictEqual(
+  html.sanitize("<img src=\"&#104;ttps://127.0.0.1/p.gif\" width=\"90\">",
+    { allowRemoteImages: true }).images, 0)
+
+// A relative source has no base but the plugin's own directory, so Qt would
+// read whatever sits next to the QML.
+assert.ok(html.sanitize("<img src=\"../../../etc/hostname\">").html.indexOf("img") < 0)
+assert.ok(html.sanitize("<img src=\"file:///etc/hostname\">").html.indexOf("img") < 0)
+
+// The count the reader offers to load is the count it can actually load.
+const mixed = "<img src=\"https://cdn.example.com/a.png\" width=\"90\">"
+  + "<img src=\"http://127.0.0.1/b.png\" width=\"90\">"
+  + "<img src=\"https://cdn.example.com/pixel.gif\" width=\"1\">"
+assert.strictEqual(html.sanitize(mixed).remoteImages, 1)
+assert.strictEqual(html.sanitize(mixed, { allowRemoteImages: true }).images, 1)
+
+// A url() in an inline style is a fetch too, wherever the engine honours one.
+assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example.com/p.gif);padding:4px\">x</div>")
+  .html.indexOf("track.example.com") < 0)
+assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example.com/p.gif);padding:4px\">x</div>")
+  .html.indexOf("padding:4px") > 0, "the rest of the style survives")
+
+// ---------------------------------------------------------- tag boundaries
+//
+// Qt reads an attribute value with its quotes, so a ">" inside an alt text does
+// not end the tag for the engine — and a check that stops at the first ">" it
+// sees takes half a tag, finds no src in it, and hands the whole thing back.
+// Putting a ">" in an alt text was enough to walk an image past the block.
+{
+  const hidden = "<img alt=\"a>b\" src=\"https://tracker.example.com/p.gif\" width=\"90\">"
+  assert.strictEqual(html.sanitize(hidden).blockedImages, 1)
+  assert.ok(html.sanitize(hidden).html.indexOf("tracker.example.com") < 0)
+  assert.strictEqual(html.sanitize(hidden, { allowRemoteImages: true }).images, 1)
+
+  const hiddenLocal = "<img alt='a>b' src=\"http://127.0.0.1/p.gif\" width=\"90\">"
+  assert.ok(html.sanitize(hiddenLocal, { allowRemoteImages: true }).html.indexOf("127.0.0.1") < 0)
+
+  // A quote that never closes takes the rest of the document with it: Qt would
+  // swallow the remainder into the tag anyway, and dropping it is the reading
+  // that cannot leave a fetch behind.
+  assert.ok(html.sanitize("<p>hi</p><img src=\"https://tracker.example.com/p.gif\" alt=\"oops")
+    .html.indexOf("tracker.example.com") < 0)
+
+  // Ordinary markup around an image is untouched.
+  assert.strictEqual(
+    html.sanitize("<p>hi</p><img alt=\"x\" src=\"https://cdn.example.com/a.png\" width=\"90\"><p>bye</p>").html,
+    "<p>hi</p><p>bye</p>")
+}
+
+// The markers in a plain-text body and the list of pictures they open are two
+// walks over the same tags, so they have to end a tag in the same place.
+{
+  const body = "<img alt=\"a>b\" src=\"https://cdn.example.com/one.png\"><p>x</p>"
+    + "<img src=\"https://cdn.example.com/two.png\">"
+  deepEqual(html.imageSources(body),
+    ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"])
+}
+
+// What the plain-text reader may hand to an Image element.
+assert.strictEqual(html.isDisplayableImageUrl("https://cdn.example.com/a.png"), true)
+assert.strictEqual(html.isDisplayableImageUrl("http://127.0.0.1/a.png"), false)
+assert.strictEqual(html.isDisplayableImageUrl("file:///etc/hostname"), false)
+assert.strictEqual(html.isDisplayableImageUrl("data:image/png;base64,AAA"), true)
+assert.strictEqual(html.isDisplayableImageUrl("cid:logo"), false)
+assert.strictEqual(html.isDisplayableImageUrl(""), false)
 
 assert.strictEqual(html.hasRemoteImages(tracked), true)
 assert.strictEqual(html.hasRemoteImages("<p>none</p>"), false)

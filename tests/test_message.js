@@ -287,6 +287,47 @@ assert.strictEqual(message.extractHtml({
     message.htmlToText("<div>Hello</div><img src=\"a.png\"><br><img src='b.png' width=600><p>Bye</p>"),
     "Hello\n[image 1]\n[image 2]Bye")
   assert.strictEqual(message.htmlToText("<p>none</p>"), "none", "text without images is unchanged")
+  // A ">" inside an alt text does not end the tag — Html.imageSources numbers
+  // the pictures with the same walk, and a disagreement puts every marker after
+  // it on the wrong one.
+  assert.strictEqual(
+    message.htmlToText("<img alt=\"a>b\" src=\"x.png\"><p>after</p><img src='y.png'>"),
+    "[image 1]after\n[image 2]")
+}
+
+// -------------------------------------------------------- header injection
+//
+// In-Reply-To carries a Message-ID, and a Message-ID is whatever the sender
+// wrote in theirs. A line break in one would end the header and let the rest be
+// read as another — a Bcc in a reply the user typed no Bcc into.
+{
+  const raw = message.buildRawMessage({
+    to: "friend@example.com",
+    subject: "Re: hello",
+    inReplyTo: "<a@b>\r\nBcc: attacker@example.net",
+    body: "hi"
+  })
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  assert.ok(headerNames(raw).indexOf("Bcc") < 0, "a Message-ID must not become a second header")
+  assert.ok(raw.indexOf("In-Reply-To: <a@b> Bcc: attacker@example.net") > 0,
+    "the value survives as one header line")
+
+  const folded = message.buildRawMessage({
+    to: "friend@example.com\r\nBcc: attacker@example.net",
+    subject: "hello\nX-Injected: 1",
+    body: "hi"
+  })
+  assert.ok(headerNames(folded).indexOf("Bcc") < 0)
+  assert.ok(headerNames(folded).indexOf("X-Injected") < 0)
+  // Every header a message must carry is still there, and the body still
+  // starts after exactly one blank line.
+  assert.ok(folded.indexOf("\r\n\r\n") > 0)
+
+  // A reference that is nothing but a line break leaves the header out
+  // altogether rather than emitting an empty one.
+  assert.ok(message.buildRawMessage({ to: "a@b.com", inReplyTo: "\r\n", body: "x" })
+    .indexOf("In-Reply-To") < 0)
 }
 
 console.log("test_message.js ok")

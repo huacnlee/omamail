@@ -150,4 +150,20 @@ assert.strictEqual(model.truncate("a much longer string", 10), "a much lo…")
 assert.strictEqual(model.pluralize(1, "message"), "1 message")
 assert.strictEqual(model.pluralize(0, "message"), "0 messages")
 
+// A notification is markup to the daemons that draw it, and its two strings are
+// arguments to notify-send. Neither is a place for a sender's angle brackets or
+// for a display name that starts with a dash.
+{
+  const crafted = {
+    subject: "<img src=\"http://tracker.example.com/p.gif\">",
+    snippet: "a & b",
+    from: { display: "-u critical" }
+  }
+  assert.ok(model.notificationBody(crafted).indexOf("<img") < 0)
+  assert.ok(model.notificationBody(crafted).indexOf("&amp;") > 0)
+  assert.strictEqual(model.notificationTitle(crafted), "u critical")
+  assert.strictEqual(model.notificationTitle({ from: { display: "" } }), "New message")
+  assert.strictEqual(model.notificationTitle(null), "New message")
+}
+
 console.log("test_model.js ok")

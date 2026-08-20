@@ -717,6 +717,7 @@ Item {
           visible: statusBar.hasNotice
           width: Math.min(implicitWidth, parent.width / 2)
           horizontalAlignment: Text.AlignRight
+          textFormat: Text.PlainText
           text: {
             if (root.notice !== "") return root.notice
             if (!root.service) return ""

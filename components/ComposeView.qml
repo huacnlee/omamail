@@ -181,6 +181,7 @@ Item {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         visible: root.mode !== "new"
+        textFormat: Text.PlainText
         text: subjectField.text
         color: root.dimmerColor
         font.family: root.panelFontFamily
