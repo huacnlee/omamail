@@ -3,9 +3,10 @@ import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 import "../Model.js" as Model
+import "../Provider.js" as Provider
 
-// The left column: the six built-in mailboxes, then whatever labels the user
-// has made.
+// The left column: the mailboxes this account's provider has, then whatever
+// labels or folders the server reported.
 //
 // Icon-first, and narrow enough to leave open: the longest mailbox name is
 // "All mail". Collapsing it to a strip of icons is one click away, and the
@@ -67,7 +68,9 @@ Item {
       spacing: Style.space(1)
 
       Repeater {
-        model: Model.MAILBOXES
+        // The account's own list. A provider with no All mail must not be
+        // offered one, and an IMAP account's Flagged is not Gmail's Starred.
+        model: root.service ? root.service.mailboxes : []
 
         Entry {
           required property var modelData
@@ -80,7 +83,7 @@ Item {
           // the user built and their sizes mean something.
           count: 0
           selected: !!root.service && root.service.mailboxKey === modelData.key
-            && root.service.searchQuery === ""
+            && root.service.searchQuery === "" && root.service.rawQuery === ""
           onActivated: root.mailboxSelected(modelData.key)
         }
       }
@@ -118,8 +121,9 @@ Item {
           // readable name. The tooltip carries the name instead.
           icon: "label"
           count: modelData.unread
-          selected: !!root.service
-            && root.service.searchQuery === "label:" + modelData.rawName
+          selected: !!root.service && root.service.rawQuery !== ""
+            && root.service.rawQuery
+              === Provider.labelQuery(root.service.providerId, modelData.rawName)
           onActivated: root.labelSelected(modelData.id, modelData.rawName)
         }
       }

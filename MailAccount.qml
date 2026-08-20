@@ -6,6 +6,8 @@ import "Html.js" as Html
 import "GmailApi.js" as Api
 import "Message.js" as Mail
 import "Model.js" as Model
+import "Provider.js" as Provider
+import "Imap.js" as Imap
 import "OAuth.js" as OAuth
 
 // One mailbox: its sign-in, its cache, its messages. Service.qml owns a set of
@@ -31,6 +33,14 @@ Item {
   // account still counts its unread mail; it just does not fetch lists or
   // bodies nobody can see.
   property string accountId: ""
+
+  // Which mail service this mailbox is. Everything provider-specific hangs off
+  // this one string: which pair of objects gets built at the bottom of the
+  // file, which mailboxes the sidebar offers, and what a query means.
+  property string providerId: Provider.DEFAULT_ID
+  // Server settings for an IMAP account, straight off the account entry. Unused
+  // by the others, and normalised before anything can dial one.
+  property var imapSettings: null
   // Only the mailbox that predates multi-account may claim the old
   // client-keyed refresh token. See AuthManager.mayAdoptLegacyToken.
   property bool mayAdoptLegacyToken: true
@@ -65,9 +75,25 @@ Item {
   readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
 
-  readonly property alias auth: authManager
-  readonly property alias api: apiClient
+  // Built by the loaders at the bottom, so both are null for one frame while an
+  // account switches provider. Every use guards for that rather than assuming.
+  readonly property var auth: authLoader.item
+  readonly property var api: apiLoader.item
   readonly property alias cache: cacheStore
+
+  // The mailboxes this account has, which is a property of its provider rather
+  // than of the panel. The sidebar and the tab row draw whatever is here.
+  readonly property var mailboxes: Provider.mailboxes(providerId)
+
+  // What the panel may offer for this account. A button the service cannot
+  // honour is worse than a missing one: it fails after the user has committed
+  // to it, with the row already moved.
+  readonly property bool canArchive: Provider.can(providerId, "archive")
+  readonly property bool canReportSpam: Provider.can(providerId, "spam")
+  readonly property bool canStar: Provider.can(providerId, "star")
+  readonly property bool hasLabels: Provider.can(providerId, "labels")
+  readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
+  readonly property bool canSend: Provider.can(providerId, "send")
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.
@@ -77,6 +103,11 @@ Item {
 
   property string mailboxKey: "inbox"
   property string searchQuery: ""
+  // A query picked from a list rather than typed: a Gmail label, an IMAP
+  // folder. Kept apart from `searchQuery` because that one gets shaped into a
+  // search — an IMAP folder wrapped in a TEXT search would go looking for the
+  // folder's own name inside the inbox.
+  property string rawQuery: ""
   property var messages: []
   property var labels: []
   property string nextPageToken: ""
@@ -152,34 +183,73 @@ Item {
   // for this and nothing else — an unread count that never reaches zero is a
   // permanent red mark, which stops meaning anything.
 
-  readonly property string setupState: Model.setupState({
-    toolsPresent: authManager.toolsPresent || !authManager.toolsChecked,
-    credentialsPresent: authManager.credentialsPresent,
-    signingIn: authManager.loginBusy,
-    signedIn: authManager.loggedIn
-  })
-  readonly property bool ready: setupState === "ready"
+  readonly property string setupState: {
+    // A provider with nothing behind it can never become ready, and saying so
+    // here is what keeps every caller from having to ask separately.
+    if (!Provider.isConnectable(providerId)) return "unavailable"
+    if (!auth) return "signed_out"
+    return Model.setupState({
+      toolsPresent: auth.toolsPresent || !auth.toolsChecked,
+      credentialsPresent: auth.credentialsPresent,
+      signingIn: auth.loginBusy,
+      signedIn: auth.loggedIn
+    })
+  }
+  // `ready` gates every function that fetches, so requiring the client here is
+  // what spares each of them a null check of its own. It is not redundant with
+  // the sign-in state: the two loaders build in sequence, so there is a frame
+  // where the account is signed in and has nothing to fetch with.
+  readonly property bool ready: setupState === "ready" && !!api
   readonly property bool busy: listLoading || detailLoading || countLoading
-    || authManager.sessionBusy || sending || pendingAction !== ""
-  readonly property string effectiveQuery: searchQuery.trim() !== ""
-    ? searchQuery.trim()
-    : (mailboxKey === "inbox" && defaultQuery !== "" ? defaultQuery : Model.mailbox(mailboxKey).query)
+    || (auth ? auth.sessionBusy : false) || sending || pendingAction !== ""
+  // The provider decides what a mailbox and a typed search amount to: Gmail's
+  // are search operators, IMAP's name a folder. Opaque from here on — it is
+  // handed back to the client that produced it, and used as a cache key.
+  readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
+    : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
   readonly property bool hasMore: nextPageToken !== ""
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
-  readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread)
+  readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread,
+    Provider.badge(providerId), Provider.authKind(providerId))
+
+  // The setup card, in this provider's words. Assembled here rather than in the
+  // view so the page stays a description of the screen.
+  readonly property string setupHeadline:
+    Model.setupHeadline(setupState, Provider.badge(providerId), Provider.authKind(providerId))
+  readonly property string setupDetail: Model.setupDetail(setupState,
+    auth ? auth.missingTools : [], Provider.unavailableReason(providerId),
+    Provider.badge(providerId), Provider.authKind(providerId))
+  readonly property string setupActionLabel:
+    Model.setupActionLabel(setupState, Provider.badge(providerId), Provider.authKind(providerId))
 
   // The sign-in has three waits that look identical from outside: the helper
   // script, the browser, and Google's token endpoint. Naming which one is
   // happening is the difference between "it is working" and "it is stuck".
   readonly property string signInProgress: {
-    if (!authManager.toolsChecked) return "Checking for socat and secret-tool…"
-    if (!authManager.credentialsPresent) return ""
-    if (authManager.loginBusy) return "Finish the sign-in in your browser…"
-    if (authManager.sessionBusy) return "Restoring the saved session…"
+    if (!auth) return ""
+    if (!auth.toolsChecked)
+      return "Checking for " + auth.requiredTools.slice(0, 2).join(" and ") + "…"
+    if (!auth.credentialsPresent) return ""
+    // Only one of these waits on a browser. An IMAP sign-in is a form and a
+    // round trip, so naming a browser there would send the user looking for a
+    // window that never opened.
+    if (auth.loginBusy)
+      return Provider.usesOAuth(providerId)
+        ? "Finish the sign-in in your browser…"
+        : "Checking the mailbox…"
+    if (auth.sessionBusy) return "Restoring the saved session…"
     return ""
   }
 
   signal listRefreshed()
+
+  // Cancelling runs on teardown and on every mailbox switch, which are exactly
+  // the moments the client may already be gone — an account being removed, or
+  // a provider change swapping both loaders out. A local wrapper means none of
+  // the callers has to know that.
+  function abortRequest(handle) {
+    if (api && handle) api.abortRequest(handle)
+  }
 
   function clearNotice() {
     lastError = ""
@@ -211,7 +281,7 @@ Item {
     // label. The label counts every categorised message too, which is how this
     // reached 2483 on a real account — a number that is never zero, can only be
     // reported as "999+", and cannot tell anyone whether something is waiting.
-    apiClient.listMessages(Model.mailbox("unread").query, 1, "", function(page, error) {
+    api.listMessages(Provider.unreadQuery(providerId), 1, "", function(page, error) {
       root.countLoading = false
       if (error || !page) return
       var before = root.inboxUnread
@@ -241,7 +311,7 @@ Item {
   function loadProfile() {
     if (!ready || profile) return
     if (cacheStore.loaded && cacheStore.store.profile) profile = cacheStore.store.profile
-    apiClient.getProfile(function(result, error) {
+    api.getProfile(function(result, error) {
       if (error || !result) return
       // The shell can tear this account down — a reload, a removed account —
       // while the request is still in the air. The object outlives its methods
@@ -260,7 +330,7 @@ Item {
     if (!ready) return
     if (cacheStore.loaded && cacheStore.store.labels.length > 0 && labels.length === 0)
       labels = cacheStore.store.labels
-    apiClient.getLabels(function(result, error) {
+    api.getLabels(function(result, error) {
       if (error) return
       root.labels = result
       cacheStore.putLabels(result)
@@ -301,7 +371,7 @@ Item {
   function loadMessages(append) {
     if (!ready) return
     var serial = ++listSerial
-    apiClient.abortRequest(listHandle)
+    abortRequest(listHandle)
     if (!append) {
       // Cache first: paint, then revalidate. The page tokens and the estimate
       // come back with the live answer.
@@ -313,7 +383,7 @@ Item {
     listLoading = true
     var token = append ? nextPageToken : ""
 
-    listHandle = apiClient.listMessages(effectiveQuery, maxMessages, token,
+    listHandle = api.listMessages(effectiveQuery, maxMessages, token,
       function(page, error) {
         if (serial !== root.listSerial) return
         if (error || !page) {
@@ -348,7 +418,7 @@ Item {
   }
 
   function fetchSummaries(ids, append, serial) {
-    apiClient.getMessages(ids, false, function(payloads, error) {
+    api.getMessages(ids, false, function(payloads, error) {
       if (serial !== root.listSerial) return
       root.listLoading = false
       if (error && payloads.length === 0) {
@@ -403,7 +473,7 @@ Item {
     }
     selectedId = messageId
     var serial = ++detailSerial
-    apiClient.abortRequest(detailHandle)
+    abortRequest(detailHandle)
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
@@ -432,7 +502,7 @@ Item {
       bodyCache.touch(messageId)
     })
 
-    detailHandle = apiClient.getMessage(messageId, true, function(payload, error) {
+    detailHandle = api.getMessage(messageId, true, function(payload, error) {
       if (serial !== root.detailSerial) return
       root.detailLoading = false
       root.detailLive = true
@@ -486,7 +556,7 @@ Item {
 
   function clearSelection() {
     detailSerial++
-    apiClient.abortRequest(detailHandle)
+    abortRequest(detailHandle)
     detailHandle = null
     selectedId = ""
     selectedMessage = null
@@ -562,15 +632,15 @@ Item {
       root.refreshCounts()
     }
 
-    if (action === "trash") apiClient.trashMessage(messageId, done)
-    else if (action === "untrash") apiClient.untrashMessage(messageId, done)
+    if (action === "trash") api.trashMessage(messageId, done)
+    else if (action === "untrash") api.untrashMessage(messageId, done)
     else {
       var change = Model.labelChangesFor(action)
       if (!change) {
         pendingAction = ""
         return
       }
-      apiClient.modifyMessage(messageId, change.add, change.remove, done)
+      api.modifyMessage(messageId, change.add, change.remove, done)
     }
   }
 
@@ -610,7 +680,7 @@ Item {
     for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
     messages = Model.survivesAction(mailboxKey, "markRead") ? next : []
     pendingAction = "markRead"
-    apiClient.batchModify(ids, [], ["UNREAD"], function(payload, error) {
+    api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
       if (error) {
         root.messages = before
@@ -641,7 +711,7 @@ Item {
       return
     }
     sending = true
-    apiClient.sendMessage(Mail.buildSendPayload({
+    api.sendMessage(Mail.buildSendPayload({
       to: to,
       cc: String(values.cc || "").trim(),
       subject: String(values.subject || ""),
@@ -685,9 +755,10 @@ Item {
   // ------------------------------------------------------------ navigation
 
   function selectMailbox(key) {
-    if (mailboxKey === key && searchQuery === "") return
+    if (mailboxKey === key && searchQuery === "" && rawQuery === "") return
     mailboxKey = String(key || "inbox")
     searchQuery = ""
+    rawQuery = ""
     clearSelection()
     messages = []
     listLoaded = false
@@ -696,8 +767,23 @@ Item {
 
   function search(text) {
     var query = String(text || "").trim()
-    if (query === searchQuery) return
+    if (query === searchQuery && rawQuery === "") return
     searchQuery = query
+    // Typing in the search box leaves whatever label was selected.
+    rawQuery = ""
+    clearSelection()
+    messages = []
+    listLoaded = false
+    loadMessages(false)
+  }
+
+  // A label on Gmail, a folder on IMAP. One entry point either way, because the
+  // sidebar draws one kind of row.
+  function selectLabel(name) {
+    var query = Provider.labelQuery(providerId, name)
+    if (query === "" || query === rawQuery) return
+    searchQuery = ""
+    rawQuery = query
     clearSelection()
     messages = []
     listLoaded = false
@@ -725,11 +811,28 @@ Item {
       "https://console.cloud.google.com/apis/library/gmail.googleapis.com"])
   }
 
-  function signIn() { authManager.beginLogin() }
-  function cancelSignIn() { authManager.cancelLogin() }
+  // What both providers do once they are signed in. Named rather than repeated
+  // in each component, because the two sign-ins differ in everything except
+  // what has to happen afterwards.
+  function afterSignIn() {
+    loadProfile()
+    loadLabels()
+    refreshCounts()
+    loadMessages(false)
+  }
+
+  function signIn() { if (auth) auth.beginLogin() }
+  function cancelSignIn() { if (auth) auth.cancelLogin() }
+
+  // The setup form's entry point for a password provider. Gmail has no use for
+  // it — its sign-in is a browser — and returns false rather than pretending.
+  function signInWithPassword(secret) {
+    if (!auth || !Provider.usesPassword(providerId)) return false
+    return auth.signIn(secret)
+  }
 
   function signOut() {
-    authManager.logout()
+    if (auth) auth.logout()
     messages = []
     labels = []
     profile = null
@@ -779,29 +882,75 @@ Item {
 
   signal accountIdentified(string email)
 
-  AuthManager {
-    id: authManager
-    pluginDir: root.pluginDir
-    accountId: root.accountId
-    mayAdoptLegacyToken: root.mayAdoptLegacyToken
-    oauthPort: root.oauthPort
-    loginHint: root.accountEmail
-
-    onLoginSucceeded: {
-      root.lastError = authManager.lastError
-      root.loadProfile()
-      root.loadLabels()
-      root.refreshCounts()
-      root.loadMessages(false)
-    }
-    onLoggedOut: root.clearNotice()
-    onCredentialsSaved: root.note("OAuth client saved")
-    onSessionUnavailable: function(reason) { root.fail(reason) }
+  // Which pair of objects this account actually runs on. Both loaders build the
+  // same two shapes — something that signs in, and something that fetches — and
+  // everything above this point calls them without knowing which it holds.
+  //
+  // Loaders rather than one of each kept side by side: an AuthManager probes
+  // for socat and reads the keyring the moment it exists, and an IMAP account
+  // has no business doing either.
+  Loader {
+    id: authLoader
+    sourceComponent: root.providerId === "imap" ? imapAuthComponent : gmailAuthComponent
   }
 
-  GmailApiClient {
-    id: apiClient
-    auth: authManager
+  // The client takes the manager as a required property, so it cannot be built
+  // until there is one.
+  Loader {
+    id: apiLoader
+    active: !!authLoader.item
+    sourceComponent: root.providerId === "imap" ? imapClientComponent : gmailClientComponent
+  }
+
+  Component {
+    id: gmailAuthComponent
+
+    AuthManager {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      mayAdoptLegacyToken: root.mayAdoptLegacyToken
+      oauthPort: root.oauthPort
+      loginHint: root.accountEmail
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("OAuth client saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
+    id: imapAuthComponent
+
+    ImapAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      // Normalised here rather than trusted from the file: a host that arrived
+      // in a hand-edited accounts.json has to pass the same check as one the
+      // user typed into the form.
+      settings: Imap.normalizeSettings(root.imapSettings)
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
+    id: gmailClientComponent
+    GmailApiClient { auth: authLoader.item }
+  }
+
+  Component {
+    id: imapClientComponent
+    ImapClient { auth: authLoader.item }
   }
 
   CacheStore {
@@ -822,7 +971,9 @@ Item {
     accountId: root.accountId
   }
 
-  Component.onCompleted: authManager.restoreSession()
+  // The loader has to have built the manager first, which it has not when this
+  // component completes.
+  onAuthChanged: if (auth) auth.restoreSession()
 
   // Only ages the "synced" label; nothing else depends on it.
   Timer {

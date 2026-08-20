@@ -1,6 +1,9 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
 	AuthManager.qml GmailApiClient.qml CacheStore.qml \
+	ImapAuth.qml ImapClient.qml \
+	components/ImapSetupPage.qml \
+	components/ProviderPicker.qml \
 	components/GmailIcon.qml \
 	components/MailboxSidebar.qml \
 	components/MailboxTabs.qml \
@@ -40,6 +43,8 @@ test-js:
 	node tests/test_cache.js
 	node tests/test_model.js
 	node tests/test_accounts.js
+	node tests/test_provider.js
+	node tests/test_imap.js
 
 test-shell:
 	python3 tests/test_qml_names.py
@@ -47,6 +52,7 @@ test-shell:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
+	bash tests/test_transport.sh
 
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:

@@ -3,28 +3,8 @@ const { load, deepEqual } = require("./load")
 
 const model = load("Model.js")
 
-// ------------------------------------------------------------- mailboxes
-
-assert.strictEqual(model.mailbox("inbox").query, "in:inbox")
-assert.strictEqual(model.mailbox("unread").query, "in:inbox is:unread category:primary")
-assert.strictEqual(model.mailbox("nonsense").key, "inbox", "an unknown key falls back to the inbox")
-assert.strictEqual(model.mailboxIndex("starred"), 2)
-
-// The sidebar is icon-first, so every mailbox needs a glyph that ActionIcon
-// actually draws. A missing one renders as nothing at all.
-const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash"]
-for (const box of model.MAILBOXES) {
-  assert.ok(DRAWN.indexOf(box.icon) >= 0, box.key + " has no drawable icon: " + box.icon)
-  assert.ok(box.label.length > 0, box.key + " needs a label for its tooltip")
-}
-assert.strictEqual(model.mailboxIndex(""), 0)
-
-// A typed search replaces the mailbox query outright rather than being ANDed
-// onto it: searching from the Trash view should search all mail, the way
-// Gmail's own search box does.
-assert.strictEqual(model.mailboxQuery("inbox", ""), "in:inbox")
-assert.strictEqual(model.mailboxQuery("trash", "from:jane"), "from:jane")
-assert.strictEqual(model.mailboxQuery("inbox", "   "), "in:inbox")
+// The mailboxes moved to Provider.js along with everything else that differs
+// between mail services; tests/test_provider.js covers them there.
 
 // ------------------------------------------------------------ setup state
 
@@ -38,10 +18,27 @@ assert.strictEqual(model.setupState(null), "tools_missing")
 // Missing tools have to be named. "Something is missing" is not actionable.
 assert.ok(model.setupDetail("tools_missing", ["socat", "secret-tool"]).indexOf("socat, secret-tool") > 0)
 assert.strictEqual(model.setupHeadline("ready"), "")
+assert.strictEqual(model.setupHeadline("signed_out"), "Sign in to Gmail",
+  "an account with no provider recorded is a Gmail account")
+assert.strictEqual(model.setupHeadline("signed_out", "IMAP"), "Sign in to IMAP")
+assert.strictEqual(model.setupHeadline("no_credentials", "IMAP", "password"),
+  "Add this mailbox", "only one of the two sends anyone to a Cloud console")
+assert.strictEqual(model.setupHeadline("no_credentials", "Gmail", "oauth"),
+  "Connect a Google Cloud project")
+// A provider with nothing behind it says so, and says why in the detail —
+// which comes from the provider, because only it knows.
+assert.strictEqual(model.setupHeadline("unavailable", "HEY"), "HEY cannot be connected")
+assert.strictEqual(model.setupDetail("unavailable", [], "no API yet", "HEY"), "no API yet")
+assert.strictEqual(model.setupActionLabel("unavailable", "HEY"), "",
+  "there is no button that would help")
 assert.strictEqual(model.setupActionLabel("ready"), "")
 // The label opens a multi-step page, which is what the trailing ellipsis says.
 assert.ok(model.setupActionLabel("no_credentials").endsWith("..."))
 assert.strictEqual(model.setupActionLabel("signing_in"), "Cancel")
+assert.ok(model.setupActionLabel("no_credentials", "IMAP", "password").endsWith("..."))
+// An IMAP sign-in never opens a browser, so it must not say it will.
+assert.ok(model.setupDetail("signing_in", [], "", "IMAP", "password").indexOf("browser") < 0)
+assert.ok(model.setupDetail("signing_in", [], "", "Gmail", "oauth").indexOf("browser") > 0)
 
 // ------------------------------------------------------- list consistency
 //
@@ -106,6 +103,9 @@ assert.strictEqual(model.barTooltip("ready", "me@example.com", 1), "me@example.c
 assert.strictEqual(model.barTooltip("ready", "me@example.com", 4), "me@example.com · 4 unread messages")
 assert.strictEqual(model.barTooltip("ready", "", 2), "Gmail · 2 unread messages")
 assert.strictEqual(model.barTooltip("signed_out", "me@example.com", 9), "Gmail · Sign in to Gmail")
+assert.strictEqual(model.barTooltip("signed_out", "me@example.com", 9, "IMAP"),
+  "IMAP · Sign in to IMAP")
+assert.strictEqual(model.barTooltip("ready", "", 2, "IMAP"), "IMAP · 2 unread messages")
 
 // --------------------------------------------------------------- new mail
 //

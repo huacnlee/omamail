@@ -59,6 +59,65 @@
 - A popup that would overflow flips to the other side of its trigger, then
   clamps to the window edge, then clamps to zero. All three, in that order.
 
+## Providers
+
+- A mailbox is a **provider**: `gmail`, `imap`, or `hey`. `Provider.js` is the
+  only place that knows the differences — which mailboxes exist, what a query
+  string means, what the service can be asked to do, and how it signs in.
+  Nothing above it branches on a provider id.
+- Two objects make a provider work: something that signs in (`AuthManager`,
+  `ImapAuth`) and something that fetches (`GmailApiClient`, `ImapClient`).
+  `MailAccount` builds one pair through a `Loader` and drives them through an
+  identical interface — same method names, same arguments, same callback shape.
+  Adding a provider is those two files and a registry entry.
+- **Both clients hand back Gmail's message resource**: a headers array, a MIME
+  tree, part bodies in base64url. That is what lets one list, one reader, one
+  cache and one set of actions serve every provider. `Message.parseRfc822` is
+  the adapter that rebuilds that shape from the wire format, and it is worth
+  keeping even where IMAP's own structures would have been more natural.
+- A capability the provider does not declare is a **button the panel does not
+  draw**. Offering one that fails is worse than omitting it: it fails after the
+  user has committed to it, with the row already moved. IMAP therefore has no
+  "report spam" — moving a message to a Junk folder teaches a server nothing,
+  and a button that quietly meant that is a promise the provider cannot keep.
+- An account id is the address for Gmail and `imap:<address>` for IMAP. One
+  address can legitimately be both, and a Gmail account keeping the bare address
+  is what stops an upgrade from having to migrate cache directories, keyring
+  entries and the active account.
+- `hey` is a real entry with no client behind it, deliberately. 37signals ship
+  no IMAP, no POP and no public API — their FAQ says so — so there is nothing to
+  connect to. The entry keeps the seam and states the reason, and the setup page
+  shows that reason instead of a form it cannot honour. Do not "fix" this by
+  driving the private endpoints app.hey.com uses: that would ask a user for
+  their HEY password so it could be replayed against an interface with no
+  compatibility promise, and it would break on a deploy nobody announced.
+
+## Imap.js and the transport
+
+- `Imap.js` is the protocol and nothing else: every string sent to a server and
+  every decision about what came back. No transport, and no message format —
+  an RFC 822 message is `Message.js`'s subject.
+- The transport is `scripts/mail-transport.sh`, which is curl. Fields cross to
+  it base64-encoded on one line of stdin, so a password never reaches the
+  process table and nothing needs escaping on the way; the config carrying it
+  goes to curl's own stdin rather than to a file that would be on disk.
+- **The response comes back base64 too, and that is load-bearing.** IMAP
+  measures a literal in octets. Read as UTF-8 text, 2048 octets of a message
+  with an accent in it is fewer than 2048 characters, and the parser walks off
+  the end of one response into the middle of the next — which is also how a
+  message body could forge a response of its own. Base64 keeps one character
+  per octet, so counting characters is counting octets.
+- `BODY.PEEK`, never `BODY`. Reading a list must not mark the mailbox seen, and
+  that is the most common way a hand-rolled IMAP client ruins a mailbox.
+- `UID EXPUNGE`, never bare `EXPUNGE`: the latter removes every `\Deleted`
+  message in the folder, including ones another client marked — somebody else's
+  mail disappearing because this one archived.
+- A message id is `<uid>:<folder>`. A UID is unique only within its folder, so a
+  bare one collides between folders in the list and in the body cache on disk.
+- Folder names are never guessed. `LIST` reports them and SPECIAL-USE names
+  them: "Sent" is "Sent Items" on Exchange and "[Gmail]/Sent Mail" on Gmail, and
+  a client that guessed would create folders rather than find them.
+
 ## Secrets
 
 - Refresh tokens go to GNOME Keyring over stdin, never through a command line.

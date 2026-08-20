@@ -41,25 +41,85 @@ function isValidEmail(value) {
   return EMAIL_PATTERN.test(trimmed(value))
 }
 
-// Addresses are case-insensitive in practice and Google echoes the profile
-// address back in whatever case it was typed, so it is normalised once here
-// and everything downstream compares ids rather than emails.
-function accountId(email) {
-  return isValidEmail(email) ? trimmed(email).toLowerCase() : ""
+// Addresses are case-insensitive in practice and a server echoes the address
+// back in whatever case it was typed, so it is normalised once here and
+// everything downstream compares ids rather than emails.
+//
+// One address can also legitimately be two mailboxes: a Gmail account reached
+// through Google's API, and the same address reached over IMAP with an app
+// password. Keyed on the address alone they would be one entry, each sign-in
+// overwriting the other's.
+//
+// A Gmail account keeps the bare address as its id, so nothing already on disk
+// — its cache directory, its keyring entry, the activeId in accounts.json —
+// has to be migrated. Only the providers that did not exist before carry a
+// prefix.
+function accountId(email, provider) {
+  if (!isValidEmail(email)) return ""
+  var address = trimmed(email).toLowerCase()
+  var kind = normalizeProvider(provider)
+  return kind === DEFAULT_PROVIDER ? address : kind + ":" + address
 }
 
-// The address arrives with the first successful sign-in, so an account exists
-// for a while with no id at all. Such an entry is kept — it holds the OAuth
-// client the sign-in needs — but it is not addressable, and the guard in
-// indexOfId is what keeps it out of every lookup.
+// Which service this mailbox is. Anything unrecognised — and, importantly,
+// anything written before providers existed — is Gmail: that is what every
+// account in an upgraded install actually is, and defaulting to it is what
+// stops an upgrade from presenting a working mailbox as unconfigured.
+var PROVIDERS = ["gmail", "imap", "hey"]
+var DEFAULT_PROVIDER = "gmail"
+
+function normalizeProvider(value) {
+  var name = trimmed(value).toLowerCase()
+  for (var i = 0; i < PROVIDERS.length; i++) {
+    if (PROVIDERS[i] === name) return name
+  }
+  return DEFAULT_PROVIDER
+}
+
+// The server settings an IMAP account needs. Kept on the account rather than
+// in the credentials file because none of it is secret — the password is the
+// secret, and that lives in the keyring. A host here is not trusted: `Imap.js`
+// validates it again before it can reach a URL.
+// A port out of range falls back to the default rather than being clamped into
+// range. Clamping turns 999999 into 65535 — a port that is valid, reachable and
+// not the one anybody meant, which fails as a connection nobody can explain.
+// The same rule as `Imap.normalizedPort`, deliberately: two normalisers that
+// disagree about the same field is a bug waiting for the one caller that uses
+// the other one.
+function portOr(value, fallback) {
+  var port = Math.floor(Number(value))
+  if (!isFinite(port) || port < 1 || port > 65535) return fallback
+  return port
+}
+
+function makeImapSettings(raw) {
+  var values = raw || {}
+  return {
+    imapHost: trimmed(values.imapHost),
+    imapPort: portOr(values.imapPort, 993),
+    smtpHost: trimmed(values.smtpHost),
+    smtpPort: portOr(values.smtpPort, 465),
+    username: trimmed(values.username),
+    insecure: values.insecure === true
+  }
+}
+
+// The address arrives with the first successful sign-in for Gmail, and is
+// typed by hand for IMAP, so an account exists for a while with no id at all.
+// Such an entry is kept — it holds the OAuth client or the server settings the
+// sign-in needs — but it is not addressable, and the guard in indexOfId is what
+// keeps it out of every lookup.
 function makeAccount(account) {
   var raw = account || {}
   var email = trimmed(raw.email)
+  var provider = normalizeProvider(raw.provider)
   return {
-    id: accountId(email),
+    id: accountId(email, provider),
     email: email,
+    provider: provider,
     clientId: trimmed(raw.clientId),
     clientSecret: trimmed(raw.clientSecret),
+    imap: makeImapSettings(raw.imap),
     label: trimmed(raw.label)
   }
 }

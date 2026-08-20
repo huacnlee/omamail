@@ -474,7 +474,11 @@ Item {
         }
       }
 
+      // No archive button where the account has nowhere to archive to. On
+      // IMAP that is a move to a folder, and a server without one would have
+      // this quietly do nothing — or worse, delete.
       IconButton {
+        visible: !root.service || root.service.canArchive
         iconName: "archive"; tooltipText: "Archive · e"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("archive")
@@ -503,7 +507,9 @@ Item {
         fontFamily: root.panelFontFamily
         onClicked: root.togglePlainTextRequested()
       }
+      // Only Gmail has a web mailbox this plugin knows the address of.
       IconButton {
+        visible: !root.service || root.service.canOpenOnWeb
         iconName: "browser"; tooltipText: "Open in browser"
         foreground: root.dimColor; hoverColor: root.textColor
         fontFamily: root.panelFontFamily

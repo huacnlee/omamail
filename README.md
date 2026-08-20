@@ -1,10 +1,11 @@
 # Omamail
 
-**Gmail as a native Omarchy window — not a browser tab.**
+**Your mail as a native Omarchy window — not a browser tab.**
 
-A Quickshell plugin that reads, triages, and answers your mail over the
-official Gmail API. It runs inside the `omarchy-shell` process you already
-have, follows your active theme, and puts an unread count in the bar.
+A Quickshell plugin that reads, triages, and answers your mail — over the
+official Gmail API, or over IMAP for everything else. It runs inside the
+`omarchy-shell` process you already have, follows your active theme, and puts
+an unread count in the bar.
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
@@ -43,8 +44,38 @@ The target is `shell`, not the plugin id: the window is summoned by the shell,
 which is what loads it in the first place. A plugin-scoped target would have to
 be registered by code that is only running once the window is already open.
 
-Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl` and `xdg-open` —
-all of which Omarchy already ships.
+Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
+`curl` — all of which Omarchy already ships.
+
+## Mailboxes it can open
+
+Adding a mailbox asks which kind first, because the two setups have nothing in
+common.
+
+**Gmail** signs in with Google directly. Google issues Gmail API access per
+project, so this route needs an OAuth client you create once — the setup page
+walks through it. In exchange it gets labels, conversations, Gmail's own search
+syntax, and a "report spam" that Google actually learns from.
+
+**IMAP** is an address and a password. Fastmail, iCloud, Zoho, Outlook, GMX,
+Proton via its Bridge, or a server of your own: the servers are filled in from
+the address for the ones this knows, and shown behind a disclosure so they can
+be corrected for the ones it does not. Most providers want an *app password*
+rather than the one you sign in to their website with, and the form says so
+before you find out the hard way.
+
+What IMAP does not have, the panel does not offer: no labels, no server-side
+conversations, no "report spam" — moving a message to a Junk folder teaches a
+server nothing, and a button that quietly meant that would be a promise this
+could not keep. Archive appears only when the server has an archive folder to
+move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
+server is set.
+
+**HEY** is listed, and listed as unavailable. 37signals ship no IMAP, no POP
+and no public API — their own FAQ says "HEY doesn't support IMAP or POP" and
+that third-party apps will not work — so there is nothing for a client to
+connect to. The entry is there so the answer is findable, and so the day an API
+appears it is one provider file rather than a rewrite.
 
 To remove it:
 
@@ -56,7 +87,7 @@ That takes the plugin itself. Nothing it wrote lives inside your Omarchy
 config, so removing those is separate and entirely up to you:
 
 ```bash
-secret-tool clear service omamail    # the refresh token
+secret-tool clear service omamail    # the refresh token and IMAP passwords
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
 ```

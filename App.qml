@@ -71,6 +71,16 @@ Item {
   }
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
+  // Which kind of mailbox is being added. Asked before either form, because the
+  // two have nothing in common and guessing from the address would be worse
+  // than asking — a Gmail address is a legitimate IMAP account too.
+  property bool pickingProvider: false
+  // Latched once the question has been answered, so the chooser does not come
+  // back every time a half-finished setup re-renders.
+  property bool providerChosen: false
+  // Set while a picked provider is being turned into an account row, so the
+  // signal that normally lands the user in Settings leaves them on the form.
+  property bool openingNewMailbox: false
   property bool settingsVisible: false
   // Something the window needs to say that no account is reporting — refusing a
   // duplicate mailbox, for one. Cleared on a timer so it cannot outlive its
@@ -94,6 +104,12 @@ Item {
   // added but not signed in yet belongs in settings, next to the ones that are.
   readonly property bool anyReady: !!service && service.anyAccountReady
   readonly property bool showSetup: setupVisible || !anyReady
+  // A setup already part-done answers the question by itself: an account with
+  // credentials has had its kind chosen, whether or not this window asked.
+  readonly property bool setupUnderway: !!service && !!service.auth
+    && service.auth.credentialsPresent
+  readonly property bool showPicker: showSetup
+    && (pickingProvider || (!providerChosen && !anyReady && !setupUnderway))
   readonly property bool showSettings: settingsVisible && !showSetup
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
@@ -185,8 +201,73 @@ Item {
       root.notice = email + " is already added"
     }
     function onAccountAdded() {
+      // A mailbox added through the chooser goes straight to its own form; the
+      // user has already said what they want and asking them to find the new
+      // row in Settings would be a step backwards. One added any other way
+      // still appears there, waiting to be signed in.
+      if (root.openingNewMailbox) {
+        root.openingNewMailbox = false
+        root.settingsVisible = false
+        root.setupVisible = true
+        return
+      }
       root.setupVisible = false
       root.settingsVisible = true
+    }
+  }
+
+  // The three setup pages. Built by the Loader above, one at a time, so the two
+  // not in use hold no half-typed fields and no state to go stale.
+  Component {
+    id: providerPickerPage
+
+    ProviderPicker {
+      textColor: root.foreground
+      dimColor: root.dim
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      onBackRequested: {
+        root.pickingProvider = false
+        root.setupVisible = false
+      }
+      onChosen: function(providerId) {
+        root.pickingProvider = false
+        root.providerChosen = true
+        // On first run the row already exists and only needs its kind; after
+        // that, adding a mailbox is what makes one.
+        if (root.anyReady) {
+          root.openingNewMailbox = true
+          if (root.service) root.service.addAccount(providerId)
+        } else if (root.service) {
+          root.service.configureCurrentAccount({ provider: providerId })
+        }
+      }
+    }
+  }
+
+  Component {
+    id: gmailSetupPage
+
+    SetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      onBackRequested: root.setupVisible = false
+    }
+  }
+
+  Component {
+    id: imapSetupPage
+
+    ImapSetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      onBackRequested: root.setupVisible = false
     }
   }
 
@@ -383,8 +464,10 @@ Item {
           switcherOpen: accountSwitcher.opened
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
+          // Not a search: the provider decides what selecting a label means,
+          // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
-            root.service.search("label:" + name)
+            root.service.selectLabel(name)
             root.backToList()
           }
         }
@@ -400,6 +483,9 @@ Item {
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           panelFontFamily: root.fontFamily
+          // The account's own mailboxes, not a fixed set: this row and the
+          // sidebar it replaces on a narrow window must offer the same ones.
+          allMailboxes: root.service ? root.service.mailboxes : []
           current: root.service ? root.service.mailboxKey : "inbox"
           unread: root.service ? root.service.inboxUnread : 0
           onSelected: function(key) { root.goMailbox(key) }
@@ -570,18 +656,19 @@ Item {
             width: setupFlick.width
             implicitHeight: setup.implicitHeight
 
-          SetupPage {
+          // Three setups that share nothing but their place on screen: a
+          // chooser for a mailbox whose kind is not settled yet, then whichever
+          // of the two forms that kind needs. A Loader rather than three
+          // visibilities, so the page not in use holds no fields and no state.
+          Loader {
             id: setup
             // A measure this long is unreadable across a wide window, so it is
             // capped rather than stretched.
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(setupHolder.width, Style.space(560))
-            service: root.service
-            textColor: root.foreground
-            dimColor: root.dim
-            panelFontFamily: root.fontFamily
-            canLeave: root.anyReady
-            onBackRequested: root.setupVisible = false
+            sourceComponent: root.showPicker
+              ? providerPickerPage
+              : (root.service && root.service.providerId === "imap" ? imapSetupPage : gmailSetupPage)
           }
           }
         }
@@ -615,7 +702,11 @@ Item {
               panelFontFamily: root.fontFamily
               onBackRequested: root.settingsVisible = false
               onClientSetupRequested: root.setupVisible = true
-              onAddRequested: if (root.service) root.service.addAccount()
+              // Which kind first, then the form for it.
+              onAddRequested: {
+                root.pickingProvider = true
+                root.setupVisible = true
+              }
               onSignInRequested: function(index) {
                 if (!root.service) return
                 root.service.switchToIndex(index)
@@ -801,7 +892,10 @@ Item {
           if (root.service) root.service.switchToIndex(index)
           root.backToList()
         }
-        onAddAccountRequested: if (root.service) root.service.addAccount()
+        onAddAccountRequested: {
+          root.pickingProvider = true
+          root.setupVisible = true
+        }
         onRemoveAccountRequested: function(index) {
           if (root.service) root.service.removeAccountAt(index)
         }
