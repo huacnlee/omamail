@@ -23,7 +23,7 @@ fi
 
 # MailAccount is constructed by Service, not by the shell, so it is allowed to
 # require what it needs — and it needs the plugin directory to find its scripts.
-grep -q 'required property string pluginDir' MailAccount.qml \
+grep -q 'required property string pluginDir' core/MailAccount.qml \
   || fail "MailAccount must require the plugin directory it runs scripts from"
 
 # The window drives this; the unread poll keeps running while it is false.

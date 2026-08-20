@@ -2,8 +2,8 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-import "Imap.js" as Imap
-import "Message.js" as Mail
+import "../lib/Imap.js" as Imap
+import "../lib/Message.js" as Mail
 
 // An IMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //

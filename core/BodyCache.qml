@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-import "Cache.js" as Cache
+import "../lib/Cache.js" as Cache
 
 // Message bodies on disk, one file per message.
 //

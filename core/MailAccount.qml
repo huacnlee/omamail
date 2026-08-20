@@ -1,14 +1,15 @@
 import QtQuick
 import Quickshell
+import "../providers"
 
-import "Cache.js" as Cache
-import "Html.js" as Html
-import "GmailApi.js" as Api
-import "Message.js" as Mail
-import "Model.js" as Model
-import "Provider.js" as Provider
-import "Imap.js" as Imap
-import "OAuth.js" as OAuth
+import "../lib/Cache.js" as Cache
+import "../lib/Html.js" as Html
+import "../lib/GmailApi.js" as Api
+import "../lib/Message.js" as Mail
+import "../lib/Model.js" as Model
+import "../lib/Provider.js" as Provider
+import "../lib/Imap.js" as Imap
+import "../lib/OAuth.js" as OAuth
 
 // One mailbox: its sign-in, its cache, its messages. Service.qml owns a set of
 // these and puts whichever is on screen in front of the views.

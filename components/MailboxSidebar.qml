@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
-import "../Model.js" as Model
-import "../Provider.js" as Provider
+import "../lib/Model.js" as Model
+import "../lib/Provider.js" as Provider
 
 // The left column: the mailboxes this account's provider has, then whatever
 // labels or folders the server reported.

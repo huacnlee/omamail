@@ -1,9 +1,10 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "core"
 
-import "Accounts.js" as Accounts
-import "Provider.js" as Provider
+import "lib/Accounts.js" as Accounts
+import "lib/Provider.js" as Provider
 
 // Every mailbox on this machine, and whichever one is on screen.
 //

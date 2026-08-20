@@ -1,6 +1,6 @@
 import QtQuick
 
-import "GmailApi.js" as Api
+import "../lib/GmailApi.js" as Api
 
 // Authenticated transport. It holds no state about the mailbox — only about
 // requests in flight — so the service can cancel a page load without having to

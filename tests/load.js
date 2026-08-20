@@ -8,9 +8,13 @@ const ROOT = path.dirname(__dirname)
 // only the QML engine understands. Stripping it leaves ordinary JavaScript,
 // which runs in a vm context so the tests exercise exactly the file the shell
 // loads rather than a copy.
+//
+// Resolved against lib/, because that is where all of them live: these are the
+// files with no QML in them, which is exactly why the tests can reach them
+// without a compositor.
 function load(relativePath) {
   const source = fs
-    .readFileSync(path.join(ROOT, relativePath), "utf8")
+    .readFileSync(path.join(ROOT, "lib", relativePath), "utf8")
     .replace(/^\.pragma library\s*$/m, "")
   const context = {}
   vm.createContext(context)

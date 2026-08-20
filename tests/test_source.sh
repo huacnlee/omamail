@@ -11,17 +11,17 @@ fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 # gmailRed in ActionIcon is the single declared exception: the M inside the
 # Gmail mark is a brand asset, the same carve-out this author's other plugins
 # make for an official logo. Everything else takes the theme.
-if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- *.qml components/*.qml \
+if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- *.qml core/*.qml providers/*.qml components/*.qml \
    | grep -v 'gmailRed'; then
   fail "hard-coded colour in QML: use Color.* or a colour passed in from App.qml"
 fi
-if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- *.qml components/*.qml; then
+if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- *.qml core/*.qml providers/*.qml components/*.qml; then
   fail "named display colour in QML: use Color.* instead"
 fi
 
 # 2. The JS libraries are read by the QML engine, which does not accept ES6.
 #    tests/ is node-only and exempt.
-for file in OAuth.js Credentials.js GmailApi.js Message.js Model.js Html.js; do
+for file in lib/*.js; do
   head -1 "$file" | grep -q '^\.pragma library$' || fail "$file must start with .pragma library"
   # Comments quote code with backticks and say things like "a => b", so the
   # check runs on code lines only.
@@ -35,14 +35,14 @@ done
 # Html.js is the one exception, and a narrow one: PAPER and INK are the sheet a
 # sender's HTML is printed on. They are content colours, not chrome — a
 # message that sets #24292e text needs a light ground under it or it vanishes.
-for file in Model.js GmailApi.js Message.js; do
+for file in lib/Model.js lib/GmailApi.js lib/Message.js; do
   if grep -vE '^\s*(//|\*|/\*)' "$file" | grep -nE '#[0-9A-Fa-f]{6}'; then
     fail "$file names a colour: pass it in from QML instead"
   fi
 done
-if grep -vE '^\s*(//|\*|/\*)' Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
+if grep -vE '^\s*(//|\*|/\*)' lib/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
    | grep -vE 'PAPER|INK|paperPalette|#1155cc|#5f6368'; then
-  fail "Html.js may only name the PAPER/INK sheet colours"
+  fail "lib/Html.js may only name the PAPER/INK sheet colours"
 fi
 
 # 4. barForeground is a qs.Ui.Panel property. A BarWidget that reads it gets

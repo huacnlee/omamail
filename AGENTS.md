@@ -14,13 +14,33 @@
 - `tests/test_source.sh` enforces the no-literal-colors rule. Keep it updated
   rather than working around it.
 
+## Layout
+
+Four places, and which one a file belongs in is decided by what it talks to:
+
+| Where | What lives there |
+|--------------|-------------------------------------------------------|
+| root | `Service.qml`, `BarWidget.qml`, `App.qml` — and nothing else. These three are named in `manifest.json` and loaded by the shell at that path. |
+| `lib/` | The `.js` libraries. No QML in any of them, which is why the node tests can reach them. |
+| `providers/` | One pair per mail service: something that signs in, something that fetches. |
+| `core/` | `MailAccount.qml` and the two caches it owns. |
+| `components/` | Views. They draw what they are given and decide nothing. |
+
+- `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any
+  QML file the Makefile does not list — a file `qmllint` never sees is a file
+  nobody checks.
+- QML resolves a type by name from its own directory, so a file that builds a
+  type from another one imports that directory: `Service.qml` has
+  `import "core"`, `core/MailAccount.qml` has `import "../providers"`.
+
 ## JavaScript libraries
 
-- Files at the repository root ending in `.js` are read by the QML engine.
-  They start with `.pragma library` and use `var` and `function` only — no
-  `const`, `let`, arrow functions, or template literals.
+- The files under `lib/` are read by the QML engine. They start with
+  `.pragma library` and use `var` and `function` only — no `const`, `let`,
+  arrow functions, or template literals.
 - Everything that parses, formats, or decides lives in one of them, so the node
   tests can reach it without a compositor. QML holds no logic worth testing.
+- `tests/load.js` resolves against `lib/`, so a test says `load("Cache.js")`.
 
 ## Entry points
 

@@ -1,16 +1,39 @@
 # Omamail — a Gmail and IMAP email client for Omarchy
 
-**Your mail as a native Linux window — not a browser tab.**
+**Your mail as a native Omarchy window — not a browser tab.**
 
-Omamail is a desktop email client that lives in [Omarchy](https://omarchy.org):
-a Quickshell plugin that reads, triages, and answers your mail over the official
-Gmail API, or over IMAP and SMTP for every other mailbox. It runs inside the
-`omarchy-shell` process you already have, follows your active theme, and puts an
-unread count in the bar.
+Omamail is an Omarchy desktop email client: a Quickshell plugin that reads,
+triages, and answers your mail over the official Gmail API, or over IMAP and
+SMTP for every other mailbox. It runs inside the `omarchy-shell` process you
+already have, follows your active theme, and puts an unread count in the bar.
 
 Works with **Gmail**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yahoo**,
 **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any other IMAP
 server — including one you run yourself.
+
+## Features
+
+- **Designed, not assembled.** Monospace, square-cornered, and built to sit
+  inside Omarchy rather than to look like a web app in a window. Three columns
+  when there is room, one when there is not, and nothing on screen that is not
+  your mail.
+- **Gmail and IMAP.** Sign in to Gmail with Google directly, or add any IMAP
+  mailbox with an address and an app password. Several accounts at once, each
+  with its own inbox, cache and unread count.
+- **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
+  reply, `c` to compose, `g i` for the inbox, `/` to search — Gmail's own
+  shortcuts, so there is nothing new to learn.
+- **Always counting.** The unread badge keeps working while the window is shut,
+  for every account, with a desktop notification when new mail lands.
+- **One window.** Read, archive, star, trash, search, and answer without a
+  second window taking a region of its own.
+- **Images stay blocked.** Loading a sender's pictures tells them the mail was
+  read, from which address and when. They load when you ask, for that one
+  message.
+- **Your theme.** Every colour comes from the active Omarchy theme, so the
+  mailbox changes the moment the desktop does.
+- **Keyring-backed.** The Gmail refresh token and every IMAP password live in
+  GNOME Keyring — never in a config file, never on a command line.
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
@@ -28,9 +51,6 @@ Three parts, one plugin:
   with your mailboxes, the message list, and the reader side by side
 - **compose and reply inside that same window**, because a second window would
   take a region of its own under Omarchy's panel mechanism
-
-Everything is monospace, square-cornered, and coloured from your theme, because
-that is what the rest of Omarchy looks like.
 
 ## Add it to Omarchy
 

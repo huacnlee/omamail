@@ -44,7 +44,11 @@ def blocks(source):
 
 def main():
     failures = []
-    files = sorted(ROOT.glob("*.qml")) + sorted((ROOT / "components").glob("*.qml"))
+    files = [
+        p
+        for d in ("", "core", "providers", "components")
+        for p in sorted((ROOT / d).glob("*.qml"))
+    ]
     for path in files:
         source = path.read_text(encoding="utf-8")
         for name, body in blocks(source):

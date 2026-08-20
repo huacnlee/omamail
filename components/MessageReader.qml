@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
-import "../Html.js" as Html
-import "../Message.js" as Mail
+import "../lib/Html.js" as Html
+import "../lib/Message.js" as Mail
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
