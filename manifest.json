@@ -5,7 +5,7 @@
   "version": "0.1.1",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
-  "description": "Read, triage, and reply to mail in a native Omarchy window — over the official Gmail API, or over IMAP.",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
   "kinds": [
     "service",
     "bar-widget",
@@ -19,13 +19,17 @@
   },
   "barWidget": {
     "displayName": "Omamail",
-    "description": "Unread count in the bar; the mailbox itself opens as its own window.",
+    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail and any IMAP mail server.",
     "category": "Communication",
     "aliases": [
-      "gmail",
       "mail",
       "email",
-      "inbox"
+      "gmail",
+      "imap",
+      "inbox",
+      "e-mail",
+      "mailbox",
+      "smtp"
     ],
     "allowMultiple": false,
     "defaultSection": "right",

@@ -1,11 +1,16 @@
-# Omamail
+# Omamail — a Gmail and IMAP email client for Omarchy
 
-**Your mail as a native Omarchy window — not a browser tab.**
+**Your mail as a native Linux window — not a browser tab.**
 
-A Quickshell plugin that reads, triages, and answers your mail — over the
-official Gmail API, or over IMAP for everything else. It runs inside the
-`omarchy-shell` process you already have, follows your active theme, and puts
-an unread count in the bar.
+Omamail is a desktop email client that lives in [Omarchy](https://omarchy.org):
+a Quickshell plugin that reads, triages, and answers your mail over the official
+Gmail API, or over IMAP and SMTP for every other mailbox. It runs inside the
+`omarchy-shell` process you already have, follows your active theme, and puts an
+unread count in the bar.
+
+Works with **Gmail**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yahoo**,
+**Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any other IMAP
+server — including one you run yourself.
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
