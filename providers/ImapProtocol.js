@@ -482,6 +482,14 @@ function splitResponse(text) {
       var payload = input.substr(index, size)
       index += size
       current += line + "\r\n" + payload
+      // curl removes the tagged completion and closing syntax around a custom
+      // IMAP request. With --next, another untagged FETCH can therefore begin
+      // at the exact byte after the literal. The literal size is the boundary;
+      // do not fold that next response into this one.
+      if (input.substr(index, 2) === "* ") {
+        lines.push(current)
+        current = ""
+      }
       continue
     }
 
@@ -806,7 +814,8 @@ function responseError(status, detail, fallback) {
   if (code === 6) return "Could not find that mail server. Check the server address"
   if (code === 7) return "Could not reach the mail server. Check the address, the port, and the network"
   if (code === 28) return "The mail server did not answer in time"
-  if (code === 35 || code === 60 || code === 51)
+  if (code === 35) return "A secure connection to the mail server could not be established"
+  if (code === 60 || code === 51)
     return "The mail server's security certificate could not be verified"
   if (code === 67 || /AUTHENTICATIONFAILED|invalid credentials|login failed/i.test(text))
     return "The server rejected that username or password"

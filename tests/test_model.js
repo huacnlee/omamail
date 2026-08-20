@@ -37,6 +37,12 @@ assert.strictEqual(model.setupActionLabel("ready"), "")
 assert.ok(model.setupActionLabel("no_credentials").endsWith("..."))
 assert.strictEqual(model.setupActionLabel("signing_in"), "Cancel")
 assert.ok(model.setupActionLabel("no_credentials", "IMAP", "password").endsWith("..."))
+
+// Rebuilding an account briefly leaves the service with no current host. The
+// edit page keeps the provider it opened for instead of following the
+// service's temporary Gmail fallback.
+assert.strictEqual(model.setupProvider("imap", "gmail"), "imap")
+assert.strictEqual(model.setupProvider("", "imap"), "imap")
 // An IMAP sign-in never opens a browser, so it must not say it will.
 assert.ok(model.setupDetail("signing_in", [], "", "IMAP", "password").indexOf("browser") < 0)
 assert.ok(model.setupDetail("signing_in", [], "", "Gmail", "oauth").indexOf("browser") > 0)
@@ -79,6 +85,17 @@ assert.strictEqual(model.applyLabelChange(row, "archive").inInbox, false)
 assert.strictEqual(model.applyLabelChange(null, "star"), null)
 
 // ------------------------------------------------------------ list edits
+
+assert.strictEqual(model.showInitialListSkeleton(true, 0), true,
+  "an empty initial fetch uses rows shaped like the list")
+assert.strictEqual(model.showInitialListSkeleton(true, 3), false,
+  "pagination keeps the messages already on screen")
+assert.strictEqual(model.showInitialListSkeleton(false, 0), false,
+  "an empty result is not still loading")
+assert.strictEqual(model.showListFooter(0), false,
+  "an empty state must not compete with pagination controls")
+assert.strictEqual(model.showListFooter(1), true,
+  "loaded messages retain their result summary and pagination")
 
 const list = [{ id: "a", unread: true }, { id: "b", unread: false }, { id: "c", unread: true }]
 deepEqual(model.removeById(list, "b").map(entry => entry.id), ["a", "c"])

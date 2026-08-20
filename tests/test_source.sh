@@ -67,6 +67,98 @@ if grep -vE '^\s*//' BarWidget.qml | grep -n 'barForeground'; then
   fail "BarWidget has no barForeground; read bar.foreground instead"
 fi
 
+# IconTextButton has no separate hover glyph colour. Assigning one makes the
+# whole component type unavailable at runtime, and App.qml then cannot be
+# instantiated when the bar icon asks the shell to open it.
+if awk '
+  /^[[:space:]]*IconTextButton[[:space:]]*\{/ { in_button = 1; next }
+  in_button && /^[[:space:]]*hoverColor:/ { print NR ":" $0; found = 1 }
+  in_button && /^[[:space:]]*\}/ { in_button = 0 }
+  END { exit !found }
+' components/ImapSetupPage.qml; then
+  fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
+fi
+
+# The IMAP server disclosure always reserves an icon slot. Both names selected
+# by its state must have a drawing, or the slot is blank in one or both states.
+for icon in chevronRight chevronDown; do
+  if ! grep -q "root.name === \"$icon\"" components/ActionIcon.qml; then
+    fail "ActionIcon does not draw ImapSetupPage's $icon icon"
+  fi
+done
+
+# Row fills reach the list/reader divider; content padding belongs inside a
+# row, not in a gutter that cuts every selected background short.
+grep -q 'width: listFlick\.width$' App.qml \
+  || fail "message rows must reach the list column edge"
+awk '
+  /id: listSplitter/ { in_splitter = 1 }
+  in_splitter && /PanelSeparator[[:space:]]*\{/ { in_separator = 1 }
+  in_separator && /anchors\.left: parent\.left/ { found = 1 }
+  in_separator && /^[[:space:]]*\}/ { exit !found }
+  END { exit !found }
+' App.qml || fail "the list divider must sit on the splitter edge beside row fills"
+
+# Initial loading is represented by rows shaped like the content that will
+# arrive, rather than a lone Loading label that makes the column jump.
+grep -q 'ListSkeleton {' components/MessageList.qml \
+  || fail "an initially empty message list needs its skeleton"
+grep -q 'Model\.showInitialListSkeleton' components/MessageList.qml \
+  || fail "the list skeleton must only replace an empty initial fetch"
+if grep -q 'implicitHeight: childrenRect\.height' components/ListSkeleton.qml; then
+  fail "Column.implicitHeight is read-only and makes ListSkeleton unavailable"
+fi
+
+# New-mail notifications use the application's own mark, not the desktop's
+# generic unread-mail glyph.
+grep -q 'root\.pluginDir + "/assets/omamail\.svg"' account/MailAccount.qml \
+  || fail "new-mail notifications need the Omamail app icon"
+[ -f assets/omamail.svg ] || fail "the notification app icon is missing"
+
+# Account actions live on the account's edit page. The switcher only changes
+# accounts and leads to management; the management list only leads to editing.
+grep -q 'text: "Manage accounts\.\.\."' components/AccountSwitcher.qml \
+  || fail "the account switcher needs a Manage accounts... entry"
+if grep -q 'removeAccountRequested' components/AccountSwitcher.qml; then
+  fail "the account switcher must not remove accounts directly"
+fi
+grep -q 'signal editRequested(int index)' components/SettingsPage.qml \
+  || fail "the account list needs an edit action"
+if grep -qE 'signal (signIn|signOut|remove)Requested' components/SettingsPage.qml; then
+  fail "sign-in, sign-out and removal belong on the account edit page"
+fi
+grep -q 'signal removeRequested()' components/ImapSetupPage.qml \
+  || fail "the IMAP edit page needs to own account removal"
+
+# Destructive account actions consume the semantic danger role passed from the
+# app. Calling it dim or urgent at the button loses the action's meaning.
+for page in components/SetupPage.qml components/ImapSetupPage.qml; do
+  grep -q 'required property color dangerColor' "$page" \
+    || fail "$page must receive the semantic danger colour"
+  awk '
+    /text: "Remove account"/ { in_remove = 1 }
+    in_remove && /foreground: root\.dangerColor/ { found = 1 }
+    in_remove && /^[[:space:]]*\}/ { exit !found }
+    END { if (!in_remove) exit 1; exit !found }
+  ' "$page" || fail "$page Remove account must be a danger button"
+done
+
+# Sign out and removal are peer account actions. Removal stays last in the
+# action row instead of falling onto a detached row beneath it.
+awk '
+  /text: "Sign out"/ { saw_sign_out = 1 }
+  saw_sign_out && /text: "Remove account"/ { saw_remove_after = 1 }
+  saw_remove_after && /bordered: false/ { ghost = 1 }
+  END { exit !(saw_sign_out && saw_remove_after && ghost) }
+' components/ImapSetupPage.qml \
+  || fail "IMAP Remove account must be the trailing danger ghost beside Sign out"
+awk '
+  /^  Button \{/ { top_button = 1; next }
+  top_button && /text: "Remove account"/ { exit 1 }
+  top_button && /^  \}/ { top_button = 0 }
+' components/ImapSetupPage.qml \
+  || fail "IMAP Remove account must not be detached from the account action row"
+
 # 5. Nothing tracked may be large. This plugin is installed by cloning it, so
 #    every megabyte in the tree is a megabyte between the user and a working
 #    mailbox — and the things that get big are never the source. A published

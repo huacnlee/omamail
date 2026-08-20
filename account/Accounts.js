@@ -160,6 +160,20 @@ function count(list) {
   return Array.isArray(source.accounts) ? source.accounts.length : 0
 }
 
+// A pending row is implementation detail, not an account. In particular this
+// must not be inferred from whether a host is signed in: sessions are restored
+// asynchronously, and signed-out accounts still exist and must never be
+// overwritten by Add account.
+function hasSavedAccounts(list) {
+  var source = list || {}
+  var values = Array.isArray(source.accounts) ? source.accounts : []
+  for (var i = 0; i < values.length; i++) {
+    var entry = values[i] || {}
+    if (trimmed(entry.id) !== "" || trimmed(entry.email) !== "") return true
+  }
+  return false
+}
+
 // Shown in the switcher. A pending account has neither a label nor an address
 // yet and still needs a name, or its row is an empty strip nobody can aim at.
 function label(account) {

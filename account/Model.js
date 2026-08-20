@@ -15,6 +15,15 @@
 
 // ------------------------------------------------------------ setup state
 
+// A setup page opened for a known provider must not change type while saving
+// rebuilds the service's current account. During that one frame the service
+// reports its compatibility fallback (Gmail), not a user choice.
+function setupProvider(chosen, live) {
+  var stable = String(chosen === undefined || chosen === null ? "" : chosen).trim()
+  if (stable !== "") return stable
+  return String(live === undefined || live === null ? "" : live).trim() || "gmail"
+}
+
 // One value the panel can switch on, in the order a new user meets them.
 function setupState(status) {
   var value = status || {}
@@ -134,6 +143,16 @@ function applyLabelChange(summary, action) {
   next.starred = labels.indexOf("STARRED") >= 0
   next.inInbox = labels.indexOf("INBOX") >= 0
   return next
+}
+
+// Skeleton rows replace only an empty list's first fetch. Loading another page
+// leaves useful messages in place and reports its progress at the list foot.
+function showInitialListSkeleton(loading, messageCount) {
+  return !!loading && Math.max(0, Number(messageCount) || 0) === 0
+}
+
+function showListFooter(messageCount) {
+  return Math.max(0, Number(messageCount) || 0) > 0
 }
 
 function removeById(list, id) {

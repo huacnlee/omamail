@@ -29,6 +29,10 @@ Item {
   readonly property color background: Color.background
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
+  // Destructive controls consume a role named for their meaning. Omarchy's
+  // foundational palette currently calls that source `urgent`; keeping the
+  // mapping here stops account pages from confusing urgency with danger.
+  readonly property color danger: Color.urgent
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
@@ -78,6 +82,10 @@ Item {
   // Latched once the question has been answered, so the chooser does not come
   // back every time a half-finished setup re-renders.
   property bool providerChosen: false
+  // Latched while a setup or edit page is open. Service.providerId briefly
+  // falls back to Gmail while an account host is rebuilt after saving; that is
+  // transport lifecycle, not a request to replace an IMAP page with Gmail's.
+  property string editingProvider: ""
   // Set while a picked provider is being turned into an account row, so the
   // signal that normally lands the user in Settings leaves them on the form.
   property bool openingNewMailbox: false
@@ -228,16 +236,18 @@ Item {
       canLeave: root.anyReady
       onBackRequested: {
         root.pickingProvider = false
+        root.editingProvider = ""
         root.setupVisible = false
       }
       onChosen: function(providerId) {
         root.pickingProvider = false
         root.providerChosen = true
+        root.editingProvider = providerId
         // On first run the row already exists and only needs its kind; after
         // that, adding a mailbox is what makes one.
-        if (root.anyReady) {
+        if (root.service && root.service.hasSavedAccounts) {
           root.openingNewMailbox = true
-          if (root.service) root.service.addAccount(providerId)
+          root.service.addAccount(providerId)
         } else if (root.service) {
           root.service.configureCurrentAccount({ provider: providerId })
         }
@@ -252,9 +262,12 @@ Item {
       service: root.service
       textColor: root.foreground
       dimColor: root.dim
+      dangerColor: root.danger
       panelFontFamily: root.fontFamily
       canLeave: root.anyReady
-      onBackRequested: root.setupVisible = false
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
   }
 
@@ -265,10 +278,39 @@ Item {
       service: root.service
       textColor: root.foreground
       dimColor: root.dim
+      dangerColor: root.danger
       panelFontFamily: root.fontFamily
       canLeave: root.anyReady
-      onBackRequested: root.setupVisible = false
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
+  }
+
+  function editAccount(index) {
+    if (!service) return
+    var accounts = service.accountSummaries || []
+    editingProvider = index >= 0 && index < accounts.length
+      ? String(accounts[index].provider || "gmail") : "gmail"
+    service.switchToIndex(index)
+    providerChosen = true
+    pickingProvider = false
+    settingsVisible = false
+    setupVisible = true
+  }
+
+  function leaveSetup() {
+    setupVisible = false
+    editingProvider = ""
+  }
+
+  function removeCurrentAccountFromEditor() {
+    if (!service || service.accountCount <= 1) return
+    var index = service.indexOfActiveAccount()
+    if (index < 0) return
+    service.removeAccountAt(index)
+    leaveSetup()
+    settingsVisible = true
   }
 
   FloatingWindow {
@@ -525,10 +567,10 @@ Item {
             MessageList {
               id: list
               y: Style.space(8)
-              // Full width, so a row's hover fill runs to the column edge the
-              // way the sidebar's does; the text inset lives inside the row.
-              // A gutter on the right keeps a row from sliding under the bar.
-              width: listFlick.width - Style.space(14)
+              // Full width, so selected and hovered rows meet the splitter.
+              // Text and action breathing room belongs inside MessageRow;
+              // shrinking the whole list leaves a conspicuous dead strip.
+              width: listFlick.width
               service: root.service
               textColor: root.foreground
               accentColor: root.accent
@@ -559,7 +601,9 @@ Item {
           z: 5
 
           PanelSeparator {
-            anchors.horizontalCenter: parent.horizontalCenter
+            // The visible rule meets the list edge. The rest of the splitter's
+            // width remains to its right as an easy drag target.
+            anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
@@ -668,7 +712,9 @@ Item {
             width: Math.min(setupHolder.width, Style.space(560))
             sourceComponent: root.showPicker
               ? providerPickerPage
-              : (root.service && root.service.providerId === "imap" ? imapSetupPage : gmailSetupPage)
+              : (Model.setupProvider(root.editingProvider,
+                  root.service ? root.service.providerId : "") === "imap"
+                ? imapSetupPage : gmailSetupPage)
           }
           }
         }
@@ -701,25 +747,17 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onBackRequested: root.settingsVisible = false
-              onClientSetupRequested: root.setupVisible = true
+              onClientSetupRequested: {
+                root.editingProvider = "gmail"
+                root.setupVisible = true
+              }
               // Which kind first, then the form for it.
               onAddRequested: {
+                root.editingProvider = ""
                 root.pickingProvider = true
                 root.setupVisible = true
               }
-              onSignInRequested: function(index) {
-                if (!root.service) return
-                root.service.switchToIndex(index)
-                root.service.signIn()
-              }
-              onSignOutRequested: function(index) {
-                if (!root.service) return
-                root.service.switchToIndex(index)
-                root.service.signOut()
-              }
-              onRemoveRequested: function(index) {
-                if (root.service) root.service.removeAccountAt(index)
-              }
+              onEditRequested: function(index) { root.editAccount(index) }
             }
           }
         }
@@ -893,11 +931,13 @@ Item {
           root.backToList()
         }
         onAddAccountRequested: {
+          root.editingProvider = ""
           root.pickingProvider = true
           root.setupVisible = true
         }
-        onRemoveAccountRequested: function(index) {
-          if (root.service) root.service.removeAccountAt(index)
+        onManageRequested: {
+          root.setupVisible = false
+          root.settingsVisible = true
         }
       }
 

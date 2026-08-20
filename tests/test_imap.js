@@ -228,6 +228,14 @@ assert.strictEqual(split.length, 2, "a literal holding CRLFs is still one respon
 assert.ok(split[0].indexOf("line1\r\nline2") >= 0)
 assert.ok(/^\* 2 FETCH/.test(split[1]), "the next response starts where the literal ended")
 
+// curl strips each custom IMAP request's tagged completion and closing syntax
+// from stdout. With --next, the following FETCH therefore starts immediately
+// after the previous literal rather than after a closing ')' line.
+const curlJoined =
+  "* 1 FETCH (UID 3 BODY[] {4}\r\none\r" +
+  "* 2 FETCH (UID 4 BODY[] {4}\r\ntwo\r"
+deepEqual(imap.parseFetch(curlJoined).map((m) => m.uid), [3, 4])
+
 // A literal whose content contains something that looks like another response
 // must not be read as one — this is the injection the octet count prevents.
 const spoofed =
@@ -436,6 +444,8 @@ deepEqual(imap.flagPlanForLabels(null, null, null), { add: [], remove: [], move:
 
 assert.strictEqual(imap.responseError(7, "", ""),
   "Could not reach the mail server. Check the address, the port, and the network")
+assert.strictEqual(imap.responseError(35, "TLS connect error: unexpected eof", ""),
+  "A secure connection to the mail server could not be established")
 assert.strictEqual(imap.responseError(6, "", ""),
   "Could not find that mail server. Check the server address")
 assert.strictEqual(imap.responseError(67, "", ""),

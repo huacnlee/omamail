@@ -17,12 +17,15 @@ Column {
   required property var service
   required property color textColor
   required property color dimColor
+  required property color dangerColor
   required property string panelFontFamily
   property bool canLeave: false
+  property int accountCount: 1
   property bool passwordVisible: false
   property bool serversVisible: false
 
   signal backRequested()
+  signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
   readonly property bool signedIn: !!auth && auth.loggedIn
@@ -38,9 +41,9 @@ Column {
   function currentSettings() {
     return {
       imapHost: imapHostField.text.trim(),
-      imapPort: Number(imapPortField.text.trim()) || 993,
+      imapPort: imapPortField.text.trim() === "" ? 993 : Number(imapPortField.text.trim()),
       smtpHost: smtpHostField.text.trim(),
-      smtpPort: Number(smtpPortField.text.trim()) || 465,
+      smtpPort: smtpPortField.text.trim() === "" ? 465 : Number(smtpPortField.text.trim()),
       username: (usernameField.text.trim() || addressField.text.trim()),
       insecure: false
     }
@@ -53,10 +56,14 @@ Column {
 
   function applySuggestion() {
     if (serversTouched) return
-    imapHostField.text = suggestion.imapHost
-    imapPortField.text = String(suggestion.imapPort)
-    smtpHostField.text = suggestion.smtpHost
-    smtpPortField.text = String(suggestion.smtpPort)
+    // onTextChanged runs before the readonly binding above is guaranteed to
+    // have observed the last keystroke. Derive from the field here, or typing
+    // the final "m" in .com can leave the server suggestion ending in .co.
+    var current = Imap.suggestedSettings(addressField.text)
+    imapHostField.text = current.imapHost
+    imapPortField.text = String(current.imapPort)
+    smtpHostField.text = current.smtpHost
+    smtpPortField.text = String(current.smtpPort)
   }
 
   function syncFromStore() {
@@ -95,11 +102,18 @@ Column {
   }
 
   function signIn() {
-    save()
-    if (errorText.text !== "") return
-    if (!service || !service.signInWithPassword(passwordField.text)) {
-      if (auth && auth.lastError !== "") errorText.text = auth.lastError
+    if (!service) return
+    var check = Imap.validateSettings(currentSettings())
+    if (!check.ok) {
+      errorText.text = check.error
+      return
     }
+    errorText.text = ""
+    service.configureCurrentAccountAndSignIn({
+      provider: "imap",
+      email: addressField.text.trim(),
+      imap: check.settings
+    }, passwordField.text)
   }
 
   Component.onCompleted: syncFromStore()
@@ -262,57 +276,64 @@ Column {
       iconName: root.serversVisible ? "chevronDown" : "chevronRight"
       text: root.serversVisible ? "Hide the server settings" : "Server settings"
       foreground: root.dimColor
-      hoverColor: root.textColor
       fontFamily: root.panelFontFamily
       fontSize: Style.font.caption
       onClicked: root.serversVisible = !root.serversVisible
     }
 
-    Grid {
+    Column {
       width: parent.width
       visible: root.serversVisible
-      columns: 2
-      columnSpacing: Style.space(8)
-      rowSpacing: Style.space(8)
+      spacing: Style.space(8)
 
-      TextField {
-        id: imapHostField
-        width: (parent.width - Style.space(8)) * 0.7
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "IMAP server"
-        onTextEdited: root.serversTouched = true
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+
+        TextField {
+          id: imapHostField
+          width: parent.width - imapPortField.width - parent.spacing
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "IMAP server"
+          onTextEdited: root.serversTouched = true
+        }
+
+        TextField {
+          id: imapPortField
+          width: Style.space(90)
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "IMAP port"
+          onTextEdited: root.serversTouched = true
+        }
       }
 
-      TextField {
-        id: imapPortField
-        width: (parent.width - Style.space(8)) * 0.3
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "993"
-        onTextEdited: root.serversTouched = true
-      }
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
 
-      TextField {
-        id: smtpHostField
-        width: (parent.width - Style.space(8)) * 0.7
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "SMTP server — leave empty to read only"
-        onTextEdited: root.serversTouched = true
-      }
+        TextField {
+          id: smtpHostField
+          width: parent.width - smtpPortField.width - parent.spacing
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "SMTP server — leave empty to read only"
+          onTextEdited: root.serversTouched = true
+        }
 
-      TextField {
-        id: smtpPortField
-        width: (parent.width - Style.space(8)) * 0.3
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "465"
-        onTextEdited: root.serversTouched = true
+        TextField {
+          id: smtpPortField
+          width: Style.space(90)
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "SMTP port"
+          onTextEdited: root.serversTouched = true
+        }
       }
 
       // Only for the servers where the login name is not the address, which is
@@ -343,6 +364,7 @@ Column {
     spacing: Style.space(8)
 
     Button {
+      visible: !root.signedIn
       text: root.busy ? "Checking…" : "Connect the mailbox"
       enabled: !root.busy && addressField.text.trim() !== "" && passwordField.text !== ""
       foreground: root.textColor
@@ -353,11 +375,29 @@ Column {
 
     Button {
       visible: root.signedIn
+      text: "Save changes"
+      foreground: root.textColor
+      bordered: true
+      fontSize: Style.font.bodySmall
+      onClicked: root.save()
+    }
+
+    Button {
+      visible: root.signedIn
       text: "Sign out"
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall
       onClicked: if (root.service) root.service.signOut()
+    }
+
+    Button {
+      visible: root.accountCount > 1
+      text: "Remove account"
+      foreground: root.dangerColor
+      bordered: false
+      fontSize: Style.font.bodySmall
+      onClicked: root.removeRequested()
     }
   }
 }

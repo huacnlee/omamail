@@ -179,6 +179,11 @@ function query(id, mailboxKey, searchText, defaultQuery) {
   if (text !== "") return provider.searchQuery(text)
 
   var custom = String(defaultQuery === undefined || defaultQuery === null ? "" : defaultQuery).trim()
+  // The manifest's shipped default predates providers and is Gmail syntax.
+  // Applying it to IMAP produces `UID SEARCH in:inbox`, which no IMAP server
+  // understands. A user-supplied IMAP criterion still passes through; only
+  // the inherited Gmail default gives way to the provider's Inbox query.
+  if (provider.id === "imap" && custom === "in:inbox") custom = ""
   if (custom !== "" && String(mailboxKey) === "inbox") return custom
 
   return mailboxFor(id, mailboxKey).query

@@ -122,6 +122,10 @@ assert.strictEqual(provider.query("gmail", "inbox", "urgent", "in:inbox -categor
   "urgent", "a typed search beats the default")
 assert.strictEqual(provider.query("gmail", "inbox", "   ", ""), "in:inbox",
   "whitespace is not a search")
+// The plugin-wide default is Gmail syntax. It must not become an IMAP SEARCH
+// command after a password-provider account signs in, or the first list
+// request is rejected and the mailbox stays empty.
+assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBOX")
 
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.

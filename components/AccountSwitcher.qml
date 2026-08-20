@@ -26,7 +26,6 @@ Item {
 
   signal accountChosen(int index)
   signal addAccountRequested()
-  signal removeAccountRequested(int index)
   signal manageRequested()
 
   anchors.fill: parent
@@ -181,8 +180,8 @@ Item {
 
           Text {
             id: rowCount
-            anchors.right: rowRemove.left
-            anchors.rightMargin: Style.space(4)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             visible: row.modelData.unread > 0
             text: row.modelData.unread > 999 ? "999+" : row.modelData.unread
@@ -190,25 +189,6 @@ Item {
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
-          }
-
-          IconButton {
-            id: rowRemove
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(4)
-            anchors.verticalCenter: parent.verticalCenter
-            visible: rowHover.hovered && root.accounts.length > 1
-            iconName: "close"
-            tooltipText: "Remove this account"
-            foreground: root.dimColor
-            hoverColor: root.urgentColor
-            iconSize: Style.font.iconSmall
-            size: Style.space(20)
-            fontFamily: root.panelFontFamily
-            onClicked: {
-              menu.close()
-              root.removeAccountRequested(row.index)
-            }
           }
 
           HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
@@ -237,6 +217,14 @@ Item {
         onActivated: {
           menu.close()
           root.addAccountRequested()
+        }
+      }
+
+      MenuRow {
+        text: "Manage accounts..."
+        onActivated: {
+          menu.close()
+          root.manageRequested()
         }
       }
     }

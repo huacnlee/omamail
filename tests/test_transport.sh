@@ -15,7 +15,22 @@ trap 'rm -rf "$work"' EXIT INT TERM HUP
 mkdir -p "$work/bin"
 cat > "$work/bin/curl" <<'STUB'
 #!/bin/sh
-cat
+header_file=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--dump-header" ]; then
+    header_file=$2
+    shift 2
+  else
+    shift
+  fi
+done
+if [ -n "${CURL_STUB_HEADER:-}" ] && [ -n "$header_file" ]; then
+  printf '%s' "$CURL_STUB_HEADER" > "$header_file"
+  cat >/dev/null
+  printf '%s' "${CURL_STUB_BODY:-}"
+else
+  cat
+fi
 exit "${CURL_STUB_EXIT:-0}"
 STUB
 chmod +x "$work/bin/curl"
@@ -68,6 +83,37 @@ config=$(config_for "$request")
 check "the URL reaches curl" "$config" 'url = "imaps://imap.example.org:993/INBOX"'
 check "the credentials reach curl" "$config" 'user = "jane@example.org:hunter2"'
 check "the command reaches curl" "$config" 'request = "UID SEARCH UNSEEN"'
+check "mail transport bypasses desktop HTTP/SOCKS proxies" "$config" 'noproxy = "*"'
+
+# libcurl puts a custom multi-UID FETCH in its protocol-header callback rather
+# than stdout. The transport returns that channel when present, or the client
+# sees a successful request with an empty message list.
+header_reply='* 1 FETCH (UID 7 FLAGS ())'
+out=$(printf '%s\n' "$request" \
+  | CURL_STUB_HEADER="$header_reply" \
+    PATH="$work/bin:$PATH" sh "$script")
+decoded=$(printf '%s\n' "$out" | sed -n '2p' | base64 -d)
+if [ "$decoded" = "$header_reply" ]; then
+  printf '  ok   IMAP protocol headers are returned when curl puts FETCH there\n'
+else
+  printf '  FAIL IMAP protocol headers did not replace curl stdout\n'
+  failures=$(( failures + 1 ))
+fi
+
+# A single BODY FETCH is recognised by libcurl: its complete RFC822 resource
+# is stdout while the protocol-header callback holds only a partial preamble.
+body_reply='* 1 FETCH (UID 7 BODY[] {4}
+mail'
+out=$(printf '%s\n' "$request" \
+  | CURL_STUB_HEADER='partial protocol preamble' CURL_STUB_BODY="$body_reply" \
+    PATH="$work/bin:$PATH" sh "$script")
+decoded=$(printf '%s\n' "$out" | sed -n '2p' | base64 -d)
+if [ "$decoded" = "$body_reply" ]; then
+  printf '  ok   IMAP stdout wins when curl returns a complete BODY FETCH there\n'
+else
+  printf '  FAIL IMAP stdout did not replace the partial protocol header\n'
+  failures=$(( failures + 1 ))
+fi
 
 # Several commands share one connection, which is what makes a list load one
 # TLS handshake rather than one per message.

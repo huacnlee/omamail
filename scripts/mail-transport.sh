@@ -108,6 +108,7 @@ if [ "$mode" = "smtp" ]; then
   shift 2
 
   printf 'url = "%s"\n' "$escaped_url"
+  printf 'noproxy = "*"\n'
   printf 'user = "%s"\n' "$escaped_credentials"
   printf 'mail-from = "%s"\n' "$(escape "$sender")"
   for recipient in "$@"; do
@@ -129,6 +130,12 @@ else
     [ "$first" = "1" ] || printf 'next\n'
     first=0
     printf 'url = "%s"\n' "$escaped_url"
+    # Desktop HTTP/SOCKS proxy settings are for web traffic. In particular,
+    # Omarchy's local SOCKS proxy accepts the IMAPS socket and then drops its
+    # TLS handshake, which curl reports as error 35. Direct mail transport also
+    # keeps account credentials from being offered through an unrelated proxy.
+    # Repeated because `next` resets this curl option with the rest.
+    printf 'noproxy = "*"\n'
     printf 'user = "%s"\n' "$escaped_credentials"
     printf 'request = "%s"\n' "$(escape "$(decode "$argument")")"
   done
@@ -149,6 +156,7 @@ build_config "$@" | curl \
   --config - \
   --silent \
   --show-error \
+  --dump-header "$work/headers" \
   --max-time 60 \
   --connect-timeout 20 \
   > "$work/out" 2> "$work/err"
@@ -156,7 +164,17 @@ status=$?
 set -e
 
 printf '%s\n' "$status"
-encode "$work/out"
+if [ "$mode" = "imap" ] && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
+  # libcurl recognises only a single numeric UID as a BODY FETCH. A legal IMAP
+  # sequence-set is treated as a generic custom request, whose response is
+  # delivered through curl's protocol-header callback instead of stdout.
+  # A single UID BODY FETCH is recognised by libcurl and its complete response
+  # stays on stdout; prefer that whenever it exists because the header channel
+  # then contains only a partial protocol preamble.
+  encode "$work/headers"
+else
+  encode "$work/out"
+fi
 printf '\n'
 encode "$work/err"
 printf '\n'

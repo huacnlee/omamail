@@ -10,6 +10,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/MailboxSidebar.qml \
 	components/MailboxTabs.qml \
 	components/MessageList.qml \
+	components/ListSkeleton.qml \
 	components/MessageRow.qml \
 	components/MessageMenu.qml \
 	components/ActionIcon.qml \

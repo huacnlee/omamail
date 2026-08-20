@@ -64,6 +64,7 @@ Item {
   property string accountsWritePayload: ""
 
   readonly property int accountCount: Accounts.count(accountList)
+  readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
 
   // The instance whose mailbox is on screen. Everything below forwards to it.
@@ -356,6 +357,7 @@ Item {
       out.push({
         id: accounts[i].id,
         email: accounts[i].email,
+        provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
@@ -444,6 +446,15 @@ Item {
   // that has no address yet — which is exactly the row being filled in.
   function configureCurrentAccount(values) {
     configureAccount(activeIndex >= 0 ? activeIndex : indexOfActiveAccount(), values)
+  }
+
+  // Saving a new address rebuilds the account host. Wait for that replacement
+  // before asking it to sign in; calling through immediately targets the host
+  // that the save has just retired, which made a failed attempt knock the user
+  // out of the add flow on the next click.
+  function configureCurrentAccountAndSignIn(values, secret) {
+    configureCurrentAccount(values)
+    Qt.callLater(function() { root.signInWithPassword(secret) })
   }
 
   function indexOfActiveAccount() {

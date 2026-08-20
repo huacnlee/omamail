@@ -48,22 +48,28 @@ Column {
     }
   }
 
+  ListSkeleton {
+    width: parent.width
+    visible: Model.showInitialListSkeleton(root.service.listLoading,
+      root.service.messages.length)
+    textColor: root.textColor
+  }
+
   // Three states share this slot, and only one of them is an error: still
   // loading, loaded and empty, or nothing loaded yet.
   Item {
     width: parent.width
     visible: root.service.messages.length === 0
+      && !Model.showInitialListSkeleton(root.service.listLoading, 0)
     implicitHeight: Style.space(70)
 
     Text {
       anchors.centerIn: parent
       width: parent.width - Style.space(20)
       horizontalAlignment: Text.AlignHCenter
-      text: root.service.listLoading
-        ? "Loading…"
-        : (root.service.listLoaded
+      text: root.service.listLoaded
           ? (root.service.searchQuery !== "" ? "Nothing matches that search" : "Nothing here")
-          : "")
+          : ""
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
@@ -73,7 +79,7 @@ Column {
 
   Item {
     width: parent.width
-    visible: root.service.hasMore || root.service.messages.length > 0
+    visible: Model.showListFooter(root.service.messages.length)
     implicitHeight: Style.space(30)
 
     Text {

@@ -18,6 +18,16 @@ function frozen(list) {
 deepEqual(accounts.emptyList(), { version: accounts.VERSION, accounts: [], activeId: "" })
 assert.strictEqual(accounts.VERSION, 1)
 assert.strictEqual(accounts.count(accounts.emptyList()), 0)
+
+// Signed-in state is not account existence. Adding while every saved account
+// is signed out must append; only a list made entirely of pending placeholders
+// may reuse one instead of creating another row.
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "saved@example.com", email: "saved@example.com" }
+] }), true)
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "", email: "" }
+] }), false)
 assert.strictEqual(accounts.active(accounts.emptyList()), null)
 assert.strictEqual(accounts.find(accounts.emptyList(), "a@example.com"), null)
 
