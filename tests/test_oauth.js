@@ -175,4 +175,35 @@ assert.strictEqual(oauth.byteLength("Gmail\u2026"), 8, "an ellipsis is three byt
 assert.strictEqual(oauth.byteLength("\u4f60\u597d"), 6)
 assert.strictEqual(oauth.byteLength(""), 0)
 
+
+// ------------------------------------------------- the callback's own page
+//
+// The loopback listener answers whatever connects to it — it cannot tell
+// Google's redirect from any other request to that port — so everything the
+// callback carries is attacker-controlled, and parseQuery hands it back
+// percent-decoded.
+{
+  var hostile = "<img src=x onerror=alert(1)><script>alert(2)</" + "script>"
+  var line = "GET /oauth2callback?error=x&error_description="
+    + encodeURIComponent(hostile) + " HTTP/1.1"
+  var parsed = oauth.parseCallbackRequestLine(line, "/oauth2callback")
+  assert.strictEqual(parsed.ok, false)
+  assert.strictEqual(parsed.error, hostile, "the description arrives decoded")
+
+  var page = oauth.failureResponse(null, parsed.error)
+  assert.ok(page.indexOf("<img") < 0, "no element survives into the page")
+  assert.ok(page.toLowerCase().indexOf("<script") < 0, "and no script does either")
+  assert.ok(page.indexOf("&lt;img src=x onerror=alert(1)&gt;") > 0, "it is shown as text")
+
+  // Escaping lengthens the body, and a Content-Length that disagrees with it
+  // truncates the page in the browser.
+  var split = page.indexOf("\r\n\r\n")
+  var declared = Number(page.match(/Content-Length: (\d+)/)[1])
+  assert.strictEqual(declared, oauth.byteLength(page.substring(split + 4)))
+
+  // The success page carries no callback text at all, which is why only the
+  // failure path could ever have echoed anything.
+  assert.ok(oauth.successResponse(null).indexOf("alert") < 0)
+}
+
 console.log("test_oauth.js ok")
