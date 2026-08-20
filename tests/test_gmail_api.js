@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const api = load("GmailApi.js")
+const api = load("providers/GmailApi.js")
 
 // ----------------------------------------------------------------- URLs
 //

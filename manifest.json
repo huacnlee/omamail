@@ -5,7 +5,7 @@
   "version": "0.1.1",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
-  "description": "Read, triage, and reply to Gmail in a native Omarchy window, over the official Gmail API.",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
   "kinds": [
     "service",
     "bar-widget",
@@ -19,13 +19,17 @@
   },
   "barWidget": {
     "displayName": "Omamail",
-    "description": "Unread count in the bar; the mailbox itself opens as its own window.",
+    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail and any IMAP mail server.",
     "category": "Communication",
     "aliases": [
-      "gmail",
       "mail",
       "email",
-      "inbox"
+      "gmail",
+      "imap",
+      "inbox",
+      "e-mail",
+      "mailbox",
+      "smtp"
     ],
     "allowMultiple": false,
     "defaultSection": "right",
@@ -62,7 +66,7 @@
         "type": "string",
         "label": "Default search",
         "defaultValue": "in:inbox",
-        "description": "Any Gmail search operator, for example `in:inbox -category:promotions`."
+        "description": "Applies to the inbox only. Gmail accounts take any Gmail search operator, for example `in:inbox -category:promotions`; IMAP accounts take IMAP SEARCH criteria."
       },
       {
         "key": "notifyNewMail",
@@ -83,7 +87,7 @@
         "max": 65535,
         "step": 1,
         "defaultValue": 9481,
-        "description": "Loopback port used once during Google sign-in. Change it only if something else already listens there."
+        "description": "Loopback port used once during Google sign-in. IMAP accounts never use it. Change it only if something else already listens there."
       },
       {
         "key": "openOnClick",

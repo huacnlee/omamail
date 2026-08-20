@@ -1,7 +1,8 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../Model.js" as Model
+import "../account/Model.js" as Model
+import "../providers/Registry.js" as Provider
 
 // What the reader shows before a message is picked.
 //
@@ -22,7 +23,7 @@ Item {
   readonly property bool searching: !!service && service.searchQuery !== ""
   readonly property string mailboxName: searching
     ? "Search"
-    : (service ? Model.mailbox(service.mailboxKey).label : "Inbox")
+    : (service ? Provider.mailboxFor(service.providerId, service.mailboxKey).label : "Inbox")
   readonly property bool empty: !!service && service.listLoaded && service.messages.length === 0
 
   // The legend is the first thing to go when the pane gets tight: the heading

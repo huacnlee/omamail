@@ -440,6 +440,228 @@ function formatSize(bytes) {
   return (value / (1024 * 1024)).toFixed(value < 10485760 ? 1 : 0) + " MB"
 }
 
+// ------------------------------------------------------ RFC 822 → payload
+//
+// Gmail hands back a message already taken apart: a headers array, a MIME
+// tree, part bodies in base64url. An IMAP server hands back the message.
+//
+// So this rebuilds Gmail's shape from the wire format, and everything above —
+// `extractBody`, `extractHtml`, `attachments`, `summarize`, the whole reader —
+// goes on working without learning a second vocabulary. It is the single
+// adapter that lets one panel drive two very different services.
+//
+// The input is a *byte string*: one character per octet, which is what
+// `Imap.decodeResponse` produces. Anything else and a Content-Length or a
+// literal count would be measured in the wrong unit.
+
+var MAX_MIME_DEPTH = 12
+
+function latin1Bytes(text) {
+  var input = String(text || "")
+  var bytes = []
+  for (var i = 0; i < input.length; i++) bytes.push(input.charCodeAt(i) & 0xff)
+  return bytes
+}
+
+// The body form of quoted-printable, which differs from the encoded-word form
+// above in two ways that matter: "_" is a literal underscore rather than a
+// space, and a "=" at the end of a line is a soft break that disappears.
+function decodeQuotedPrintableBytes(text) {
+  var input = String(text || "").replace(/=\r?\n/g, "")
+  var bytes = []
+  for (var i = 0; i < input.length; i++) {
+    if (input.charAt(i) === "=" && i + 2 < input.length) {
+      var hex = input.substr(i + 1, 2)
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16))
+        i += 2
+        continue
+      }
+    }
+    bytes.push(input.charCodeAt(i) & 0xff)
+  }
+  return bytes
+}
+
+// A header may be folded across several lines, each continuation beginning
+// with a space or a tab. Unfolding has to happen before anything looks for a
+// ":", or a long Subject becomes a header called "of the meeting".
+function unfoldHeaders(text) {
+  return String(text || "").replace(/\r?\n[ \t]+/g, " ")
+}
+
+function parseHeaderBlock(text) {
+  var lines = unfoldHeaders(text).split(/\r?\n/)
+  var headers = []
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (line === "") continue
+    var colon = line.indexOf(":")
+    // A line with no colon is not a header. It is what the first line of a
+    // message looks like when a server included the "From " envelope line, and
+    // keeping it would give every message a header with an empty name.
+    if (colon <= 0) continue
+    headers.push({
+      name: line.substring(0, colon).trim(),
+      value: line.substring(colon + 1).trim()
+    })
+  }
+  return headers
+}
+
+function headerFrom(headers, name) {
+  var list = Array.isArray(headers) ? headers : []
+  var wanted = String(name || "").toLowerCase()
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].name || "").toLowerCase() === wanted) return String(list[i].value || "")
+  }
+  return ""
+}
+
+// A Content-Type parameter, quoted or bare. RFC 2231 continuations
+// (name*0=, name*1=) are not handled: they appear on long filenames, and a
+// truncated filename is a smaller loss than a parser that guesses.
+function contentTypeParam(value, name) {
+  var pattern = new RegExp(name + "\\s*=\\s*(\"([^\"]*)\"|([^;\\s]+))", "i")
+  var match = String(value || "").match(pattern)
+  if (!match) return ""
+  return (match[2] !== undefined ? match[2] : match[3] || "").trim()
+}
+
+function mimeTypeOf(contentType) {
+  var value = String(contentType || "").split(";")[0].trim().toLowerCase()
+  // No Content-Type at all means text/plain, which is what the RFC says and
+  // what a message from a script that forgot the header actually is.
+  return value === "" ? "text/plain" : value
+}
+
+// Splits a multipart body on its boundary. Everything before the first
+// delimiter is the preamble and everything after the closing one is the
+// epilogue; both are for clients that do not understand MIME, and neither is
+// part of the message.
+function splitMultipart(body, boundary) {
+  var text = String(body || "")
+  var marker = "--" + String(boundary || "")
+  if (boundary === "" || boundary === undefined || boundary === null) return []
+
+  var parts = []
+  var index = text.indexOf(marker)
+  if (index < 0) return []
+
+  while (index >= 0) {
+    var afterMarker = index + marker.length
+    // The closing delimiter is the boundary followed by "--".
+    if (text.substr(afterMarker, 2) === "--") break
+    var start = text.indexOf("\n", afterMarker)
+    if (start < 0) break
+    start += 1
+    var next = text.indexOf(marker, start)
+    var end = next < 0 ? text.length : next
+    // The CRLF that precedes the next delimiter belongs to the delimiter, not
+    // to the part — a body that keeps it gains a trailing blank line, and a
+    // base64 part gains bytes that were never in the attachment.
+    var chunk = text.substring(start, end).replace(/\r?\n$/, "")
+    parts.push(chunk)
+    index = next
+  }
+  return parts
+}
+
+// Only ever asked about a body whose own Content-Type has already been shown
+// to be wrong, so a guess is the best information there is. Deliberately
+// narrow: a plain-text message that happens to mention <brackets> should stay
+// plain text, and only a document that opens like markup is treated as markup.
+function looksLikeHtml(body) {
+  return /^\s*(<!doctype\s+html|<html\b|<head\b|<body\b|<div\b|<table\b|<p\b)/i
+    .test(String(body || ""))
+}
+
+function decodeTransfer(body, encoding) {
+  var name = String(encoding || "").trim().toLowerCase()
+  if (name === "base64") return base64ToBytes(body)
+  if (name === "quoted-printable") return decodeQuotedPrintableBytes(body)
+  // 7bit, 8bit, binary, and anything unrecognised: the octets as they stand.
+  return latin1Bytes(body)
+}
+
+// One MIME entity — headers, and either a body or children. `partId` is the
+// RFC 3501 part path ("1", "1.2"), which is what an attachment would be
+// fetched by if this plugin ever fetches one separately.
+function parseMimeEntity(raw, partId, depth) {
+  var text = String(raw || "")
+  // The first blank line ends the headers. CRLF is the standard; bare LF is
+  // what a surprising number of senders actually emit.
+  var split = text.search(/\r?\n\r?\n/)
+  var headerText = split < 0 ? text : text.substring(0, split)
+  var body = ""
+  if (split >= 0) {
+    var blank = text.match(/\r?\n\r?\n/)
+    body = text.substring(split + blank[0].length)
+  }
+
+  var headers = parseHeaderBlock(headerText)
+  var contentType = headerFrom(headers, "Content-Type")
+  var mimeType = mimeTypeOf(contentType)
+  var disposition = headerFrom(headers, "Content-Disposition")
+  var filename = contentTypeParam(disposition, "filename") || contentTypeParam(contentType, "name")
+
+  var entity = {
+    partId: String(partId || ""),
+    mimeType: mimeType,
+    filename: filename ? decodeHeaderValue(filename) : "",
+    headers: headers,
+    body: { size: 0 },
+    parts: []
+  }
+
+  var boundary = contentTypeParam(contentType, "boundary")
+  if (mimeType.indexOf("multipart/") === 0 && boundary !== "" && depth < MAX_MIME_DEPTH) {
+    var chunks = splitMultipart(body, boundary)
+    for (var i = 0; i < chunks.length; i++) {
+      var childId = entity.partId === "" ? String(i + 1) : entity.partId + "." + String(i + 1)
+      entity.parts.push(parseMimeEntity(chunks[i], childId, depth + 1))
+    }
+    // A multipart whose boundary never appeared is not a container at all.
+    // Falling through decodes its body, but that is only half the repair:
+    // `extractBody` dispatches on `mimeType`, so an entity still labelled
+    // multipart is skipped by every reader and the message shows as blank.
+    // Relabelling is what makes those octets reachable.
+    if (entity.parts.length > 0) return entity
+    entity.mimeType = looksLikeHtml(body) ? "text/html" : "text/plain"
+  }
+
+  var bytes = decodeTransfer(body, headerFrom(headers, "Content-Transfer-Encoding"))
+  entity.body.size = bytes.length
+  // base64url, because that is the shape `decodePart` decodes and the shape
+  // Gmail would have sent. Encoded from the byte array rather than from the
+  // string, so a Latin-1 body does not get re-encoded as UTF-8 on the way in.
+  entity.body.data = bytesToBase64(bytes, true)
+
+  // An attachment needs an id before `attachments()` will list it. The part
+  // path is the honest one: it is what a later FETCH would ask for.
+  if (entity.filename !== "" || /attachment/i.test(disposition))
+    entity.body.attachmentId = "part:" + entity.partId
+
+  return entity
+}
+
+// The whole message. Returns the `payload` half of a Gmail message resource —
+// the caller supplies the id, the labels and the internal date, because those
+// come from the IMAP response rather than from the message itself.
+function parseRfc822(raw) {
+  return parseMimeEntity(raw, "", 0)
+}
+
+// A list row's preview. Gmail sends one; IMAP has no equivalent, so it is made
+// from the body once the body is here. Long enough to be useful, short enough
+// that the cache is not storing the message twice.
+function buildSnippet(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .substring(0, 200)
+}
+
 // ------------------------------------------------------------------- dates
 
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",

@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../Model.js" as Model
+import "../account/Model.js" as Model
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
@@ -36,6 +36,7 @@ Column {
       panelFontFamily: root.panelFontFamily
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
+      canArchive: root.service.canArchive
       onActivated: root.messageActivated(modelData.id)
       onStarToggled: root.service.toggleStar(modelData.id)
       onArchiveRequested: root.service.act(modelData.id, "archive")
@@ -47,22 +48,28 @@ Column {
     }
   }
 
+  ListSkeleton {
+    width: parent.width
+    visible: Model.showInitialListSkeleton(root.service.listLoading,
+      root.service.messages.length)
+    textColor: root.textColor
+  }
+
   // Three states share this slot, and only one of them is an error: still
   // loading, loaded and empty, or nothing loaded yet.
   Item {
     width: parent.width
     visible: root.service.messages.length === 0
+      && !Model.showInitialListSkeleton(root.service.listLoading, 0)
     implicitHeight: Style.space(70)
 
     Text {
       anchors.centerIn: parent
       width: parent.width - Style.space(20)
       horizontalAlignment: Text.AlignHCenter
-      text: root.service.listLoading
-        ? "Loading…"
-        : (root.service.listLoaded
+      text: root.service.listLoaded
           ? (root.service.searchQuery !== "" ? "Nothing matches that search" : "Nothing here")
-          : "")
+          : ""
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
@@ -72,7 +79,7 @@ Column {
 
   Item {
     width: parent.width
-    visible: root.service.hasMore || root.service.messages.length > 0
+    visible: Model.showListFooter(root.service.messages.length)
     implicitHeight: Style.space(30)
 
     Text {

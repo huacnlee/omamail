@@ -2,7 +2,7 @@ const assert = require("assert")
 const path = require("path")
 const { load, deepEqual } = require("./load")
 
-const cache = load("Cache.js")
+const cache = load("cache/Cache.js")
 
 const NOW = 1755600000000
 

@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
-import "../Html.js" as Html
-import "../Message.js" as Mail
+import "../message/Html.js" as Html
+import "../message/Message.js" as Mail
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -477,7 +477,11 @@ Item {
         }
       }
 
+      // No archive button where the account has nowhere to archive to. On
+      // IMAP that is a move to a folder, and a server without one would have
+      // this quietly do nothing — or worse, delete.
       IconButton {
+        visible: !root.service || root.service.canArchive
         iconName: "archive"; tooltipText: "Archive · e"
         foreground: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("archive")
@@ -506,7 +510,9 @@ Item {
         fontFamily: root.panelFontFamily
         onClicked: root.togglePlainTextRequested()
       }
+      // Only Gmail has a web mailbox this plugin knows the address of.
       IconButton {
+        visible: !root.service || root.service.canOpenOnWeb
         iconName: "browser"; tooltipText: "Open in browser"
         foreground: root.dimColor; hoverColor: root.textColor
         fontFamily: root.panelFontFamily

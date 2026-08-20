@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const html = load("Html.js")
+const html = load("message/Html.js")
 
 // =============================================================== the parser
 //

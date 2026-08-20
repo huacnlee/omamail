@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
-import "../Html.js" as Html
+import "../message/Html.js" as Html
 
 // One image, floated over the reader.
 //

@@ -1,10 +1,39 @@
-# Omamail
+# Omamail — a Gmail and IMAP email client for Omarchy
 
-**Gmail as a native Omarchy window — not a browser tab.**
+**Your mail as a native Omarchy window — not a browser tab.**
 
-A Quickshell plugin that reads, triages, and answers your mail over the
-official Gmail API. It runs inside the `omarchy-shell` process you already
-have, follows your active theme, and puts an unread count in the bar.
+Omamail is an Omarchy desktop email client: a Quickshell plugin that reads,
+triages, and answers your mail over the official Gmail API, or over IMAP and
+SMTP for every other mailbox. It runs inside the `omarchy-shell` process you
+already have, follows your active theme, and puts an unread count in the bar.
+
+Works with **Gmail**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yahoo**,
+**Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any other IMAP
+server — including one you run yourself.
+
+## Features
+
+- **Designed, not assembled.** Monospace, square-cornered, and built to sit
+  inside Omarchy rather than to look like a web app in a window. Three columns
+  when there is room, one when there is not, and nothing on screen that is not
+  your mail.
+- **Gmail and IMAP.** Sign in to Gmail with Google directly, or add any IMAP
+  mailbox with an address and an app password. Several accounts at once, each
+  with its own inbox, cache and unread count.
+- **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
+  reply, `c` to compose, `g i` for the inbox, `/` to search — Gmail's own
+  shortcuts, so there is nothing new to learn.
+- **Always counting.** The unread badge keeps working while the window is shut,
+  for every account, with a desktop notification when new mail lands.
+- **One window.** Read, archive, star, trash, search, and answer without a
+  second window taking a region of its own.
+- **Images stay blocked.** Loading a sender's pictures tells them the mail was
+  read, from which address and when. They load when you ask, for that one
+  message.
+- **Your theme.** Every colour comes from the active Omarchy theme, so the
+  mailbox changes the moment the desktop does.
+- **Keyring-backed.** The Gmail refresh token and every IMAP password live in
+  GNOME Keyring — never in a config file, never on a command line.
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
@@ -23,9 +52,6 @@ Three parts, one plugin:
 - **compose and reply inside that same window**, because a second window would
   take a region of its own under Omarchy's panel mechanism
 
-Everything is monospace, square-cornered, and coloured from your theme, because
-that is what the rest of Omarchy looks like.
-
 ## Add it to Omarchy
 
 ```bash
@@ -43,8 +69,36 @@ The target is `shell`, not the plugin id: the window is summoned by the shell,
 which is what loads it in the first place. A plugin-scoped target would have to
 be registered by code that is only running once the window is already open.
 
-Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl` and `xdg-open` —
-all of which Omarchy already ships.
+Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
+`curl` — all of which Omarchy already ships.
+
+## Mailboxes it can open
+
+Adding a mailbox asks which kind first, because the two setups have nothing in
+common.
+
+**Gmail** signs in with Google directly. Google issues Gmail API access per
+project, so this route needs an OAuth client you create once — the setup page
+walks through it. In exchange it gets labels, conversations, Gmail's own search
+syntax, and a "report spam" that Google actually learns from.
+
+**IMAP** is an address and a password. Fastmail, iCloud, Zoho, Outlook, GMX,
+Proton via its Bridge, or a server of your own: the servers are filled in from
+the address for the ones this knows, and shown behind a disclosure so they can
+be corrected for the ones it does not. Most providers want an *app password*
+rather than the one you sign in to their website with, and the form says so
+before you find out the hard way.
+
+What IMAP does not have, the panel does not offer: no labels, no server-side
+conversations, no "report spam" — moving a message to a Junk folder teaches a
+server nothing, and a button that quietly meant that would be a promise this
+could not keep. Archive appears only when the server has an archive folder to
+move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
+server is set.
+
+**HEY** is listed as a future integration. A HEY CLI is reportedly in
+development; once it is ready, Omamail can support it through the provider seam
+that is already in place.
 
 To remove it:
 
@@ -56,7 +110,7 @@ That takes the plugin itself. Nothing it wrote lives inside your Omarchy
 config, so removing those is separate and entirely up to you:
 
 ```bash
-secret-tool clear service omamail    # the refresh token
+secret-tool clear service omamail    # the refresh token and IMAP passwords
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
 ```
@@ -168,8 +222,8 @@ permanently.
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
-Working agreements are in [AGENTS.md](AGENTS.md); the design canvas and the
-implementation plan are under [docs/](docs/).
+Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
+[docs/SPEC.md](docs/SPEC.md).
 
 Omamail is an independent project and is not affiliated with Google.
 Gmail is a trademark of Google LLC.

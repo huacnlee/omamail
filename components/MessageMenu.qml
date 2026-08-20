@@ -84,9 +84,22 @@ Item {
 
       Separator {}
 
-      MenuRow { text: "Archive"; onActivated: root.run("archive") }
+      // Hidden rather than disabled where the provider has no such verb. IMAP
+      // archives by moving to a folder that may not exist, and has no junk
+      // verb the server learns anything from — a "Report spam" that quietly
+      // meant "move to a folder" would be a promise this cannot keep.
+      MenuRow {
+        visible: !root.service || root.service.canArchive
+        text: "Archive"
+        onActivated: root.run("archive")
+      }
       MenuRow { text: "Move to trash"; tone: root.urgentColor; onActivated: root.run("trash") }
-      MenuRow { text: "Report spam"; tone: root.urgentColor; onActivated: root.run("spam") }
+      MenuRow {
+        visible: !root.service || root.service.canReportSpam
+        text: "Report spam"
+        tone: root.urgentColor
+        onActivated: root.run("spam")
+      }
 
       Separator {}
 
@@ -95,13 +108,17 @@ Item {
         onActivated: root.run(root.summary && root.summary.unread ? "markRead" : "markUnread")
       }
       MenuRow {
+        visible: !root.service || root.service.canStar
         text: root.summary && root.summary.starred ? "Unstar" : "Star"
         onActivated: root.run(root.summary && root.summary.starred ? "unstar" : "star")
       }
 
       Separator {}
 
+      // Only where there is a web mailbox to open. An IMAP account has no
+      // address this plugin could know.
       MenuRow {
+        visible: !root.service || root.service.canOpenOnWeb
         text: "Open in browser..."
         tone: root.dimColor
         onActivated: {

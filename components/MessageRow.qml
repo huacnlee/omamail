@@ -13,6 +13,9 @@ Rectangle {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
+  // Passed down rather than read off a service: a row draws one message and
+  // has no other use for one.
+  property bool canArchive: true
   property bool hasCursor: false
   property bool selected: false
 
@@ -159,7 +162,10 @@ Rectangle {
     }
 
     IconButton {
-      visible: root.hot
+      // No archive button where the account has nowhere to archive to. On IMAP
+      // that is a move to a folder, and a server without one would have this
+      // quietly do nothing.
+      visible: root.hot && root.canArchive
       iconName: "archive"
       tooltipText: "Archive · e"
       foreground: root.dimColor

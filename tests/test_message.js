@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const message = load("Message.js")
+const message = load("message/Message.js")
 
 function b64url(text) {
   return Buffer.from(text, "utf8").toString("base64")
@@ -328,6 +328,227 @@ assert.strictEqual(message.extractHtml({
   // altogether rather than emitting an empty one.
   assert.ok(message.buildRawMessage({ to: "a@b.com", inReplyTo: "\r\n", body: "x" })
     .indexOf("In-Reply-To") < 0)
+}
+
+// ------------------------------------------------------ RFC 822 → payload
+//
+// The adapter that lets an IMAP message drive the same reader a Gmail message
+// does. Everything here is checked through the *existing* readers —
+// extractBody, extractHtml, attachments, summarize — because "the shape is
+// right" only means anything if those still work on it.
+{
+  // A byte string: one character per octet, the shape Imap.decodeResponse
+  // produces and the only shape these counts are correct in.
+  const bytes = (text) => Buffer.from(text, "utf8").toString("latin1")
+
+  // --- the simplest possible message
+
+  const plain = message.parseRfc822(bytes(
+    "From: Jane <jane@example.org>\r\n" +
+    "Subject: Hello\r\n" +
+    "\r\n" +
+    "Just a line.\r\n"))
+
+  assert.strictEqual(plain.mimeType, "text/plain",
+    "no Content-Type at all is text/plain, which is what the RFC says")
+  deepEqual(message.extractBody(plain), { text: "Just a line.\n", source: "plain" })
+  assert.strictEqual(message.headerValue({ payload: plain }, "Subject"), "Hello")
+
+  // Bare LF, which a surprising number of senders emit, has to parse too.
+  const bareLf = message.parseRfc822("Subject: X\n\nbody text\n")
+  assert.strictEqual(message.extractBody(bareLf).text, "body text\n")
+
+  // --- folded headers
+  //
+  // Unfolding must happen before anything looks for a ":", or a wrapped
+  // Subject becomes a header named after its own second line.
+
+  const foldedHeaders = message.parseRfc822(bytes(
+    "Subject: a very long subject that the sender\r\n" +
+    " wrapped across two lines\r\n" +
+    "From: jane@example.org\r\n" +
+    "\r\n" +
+    "x"))
+  assert.strictEqual(
+    message.headerValue({ payload: foldedHeaders }, "Subject"),
+    "a very long subject that the sender wrapped across two lines")
+  assert.strictEqual(message.headerValue({ payload: foldedHeaders }, "From"), "jane@example.org",
+    "the header after a folded one is still found")
+
+  // --- transfer encodings
+
+  const quotedPrintable = message.parseRfc822(bytes(
+    "Content-Type: text/plain; charset=UTF-8\r\n" +
+    "Content-Transfer-Encoding: quoted-printable\r\n" +
+    "\r\n" +
+    "Caf=C3=A9 cr=C3=A8me and a soft=\r\n break\r\n"))
+  assert.strictEqual(message.extractBody(quotedPrintable).text, "Café crème and a soft break\n",
+    "=XX decodes, a trailing = is a soft break that disappears, and an underscore is literal")
+
+  // The encoded-word form of quoted-printable turns "_" into a space; the body
+  // form must not, or every snake_case word in a message loses its underscores.
+  const underscores = message.parseRfc822(bytes(
+    "Content-Transfer-Encoding: quoted-printable\r\n\r\nsnake_case_name\r\n"))
+  assert.strictEqual(message.extractBody(underscores).text, "snake_case_name\n")
+
+  const base64Body = message.parseRfc822(bytes(
+    "Content-Type: text/plain; charset=UTF-8\r\n" +
+    "Content-Transfer-Encoding: base64\r\n" +
+    "\r\n" +
+    Buffer.from("你好，世界", "utf8").toString("base64") + "\r\n"))
+  assert.strictEqual(message.extractBody(base64Body).text, "你好，世界")
+
+  // A charset that is not UTF-8 still has to come out right.
+  const latin1 = message.parseRfc822(
+    "Content-Type: text/plain; charset=ISO-8859-1\r\n\r\n" +
+    Buffer.from("Café", "latin1").toString("latin1"))
+  assert.strictEqual(message.extractBody(latin1).text, "Café",
+    "the declared charset decides, not a guess")
+
+  // --- multipart/alternative: plain wins, html is the fallback
+
+  const alternative = message.parseRfc822(bytes(
+    "Content-Type: multipart/alternative; boundary=\"XYZ\"\r\n" +
+    "\r\n" +
+    "This is the preamble, for clients that predate MIME.\r\n" +
+    "--XYZ\r\n" +
+    "Content-Type: text/plain; charset=UTF-8\r\n" +
+    "\r\n" +
+    "the plain one\r\n" +
+    "--XYZ\r\n" +
+    "Content-Type: text/html; charset=UTF-8\r\n" +
+    "\r\n" +
+    "<p>the html one</p>\r\n" +
+    "--XYZ--\r\n" +
+    "This is the epilogue.\r\n"))
+
+  assert.strictEqual(alternative.mimeType, "multipart/alternative")
+  assert.strictEqual(alternative.parts.length, 2, "preamble and epilogue are not parts")
+  deepEqual(message.extractBody(alternative), { text: "the plain one", source: "plain" })
+  assert.strictEqual(message.extractHtml(alternative), "<p>the html one</p>")
+  // The CRLF before a delimiter belongs to the delimiter. A part that keeps it
+  // gains a trailing blank line — and a base64 part gains bytes.
+  assert.ok(!/\n$/.test(message.extractHtml(alternative)))
+
+  // --- nested multipart/mixed → alternative, which is the everyday newsletter
+
+  const nested = message.parseRfc822(bytes(
+    "Content-Type: multipart/mixed; boundary=OUTER\r\n\r\n" +
+    "--OUTER\r\n" +
+    "Content-Type: multipart/alternative; boundary=INNER\r\n\r\n" +
+    "--INNER\r\n" +
+    "Content-Type: text/plain\r\n\r\n" +
+    "nested plain\r\n" +
+    "--INNER\r\n" +
+    "Content-Type: text/html\r\n\r\n" +
+    "<b>nested html</b>\r\n" +
+    "--INNER--\r\n" +
+    "--OUTER\r\n" +
+    "Content-Type: application/pdf; name=\"invoice.pdf\"\r\n" +
+    "Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n" +
+    "Content-Transfer-Encoding: base64\r\n\r\n" +
+    Buffer.from("%PDF-1.4 fake", "utf8").toString("base64") + "\r\n" +
+    "--OUTER--\r\n"))
+
+  assert.strictEqual(message.extractBody(nested).text, "nested plain")
+  assert.strictEqual(message.extractHtml(nested), "<b>nested html</b>")
+
+  const found = message.attachments(nested)
+  assert.strictEqual(found.length, 1, "the attachment is listed and the text parts are not")
+  assert.strictEqual(found[0].filename, "invoice.pdf")
+  assert.strictEqual(found[0].mimeType, "application/pdf")
+  assert.strictEqual(found[0].size, 13, "the size is the decoded size, not the base64 size")
+  assert.strictEqual(found[0].attachmentId, "part:2",
+    "the id is the IMAP part path, which is what a later FETCH would ask for")
+
+  // An attachment must never be mistaken for the body.
+  assert.ok(message.extractBody(nested).text.indexOf("PDF") < 0)
+
+  // --- an encoded filename
+
+  const encodedName = message.parseRfc822(bytes(
+    "Content-Type: multipart/mixed; boundary=B\r\n\r\n" +
+    "--B\r\n" +
+    "Content-Disposition: attachment; filename=\"=?UTF-8?B?5oql5ZGKLnBkZg==?=\"\r\n\r\n" +
+    "x\r\n" +
+    "--B--\r\n"))
+  assert.strictEqual(message.attachments(encodedName)[0].filename, "报告.pdf")
+
+  // --- a multipart whose boundary never appears
+  //
+  // Broken, and sent every day. Falling through to the body keeps the message
+  // readable instead of showing an empty reader.
+
+  const brokenBoundary = message.parseRfc822(bytes(
+    "Content-Type: multipart/alternative; boundary=NOPE\r\n\r\nthe body anyway\r\n"))
+  assert.strictEqual(message.extractBody(brokenBoundary).text, "the body anyway\n")
+
+  // The same repair has to reach the reader, not just the text: a broken
+  // multipart carrying markup is relabelled html so the reader still renders
+  // it, while one carrying prose stays plain and keeps its angle brackets.
+  const brokenHtml = message.parseRfc822(bytes(
+    "Content-Type: multipart/alternative; boundary=NOPE\r\n\r\n" +
+    "<p>markup anyway</p>\r\n"))
+  assert.strictEqual(message.extractHtml(brokenHtml), "<p>markup anyway</p>\r\n")
+  assert.strictEqual(
+    message.extractHtml(message.parseRfc822(bytes(
+      "Content-Type: multipart/mixed; boundary=NOPE\r\n\r\n" +
+      "a < b and c > d\r\n"))),
+    "", "prose that merely contains brackets is not promoted to markup")
+
+  // --- depth is bounded
+  //
+  // Everything downstream walks this tree by recursion, in the process that
+  // draws the whole desktop.
+
+  let deep = "deep body"
+  for (let i = 0; i < 40; i++) {
+    deep = "Content-Type: multipart/mixed; boundary=B" + i + "\r\n\r\n" +
+      "--B" + i + "\r\n" + deep + "\r\n--B" + i + "--\r\n"
+  }
+  const bounded = message.parseRfc822(bytes(deep))
+  let depth = 0
+  let node = bounded
+  while (node && node.parts && node.parts.length > 0) {
+    node = node.parts[0]
+    depth++
+  }
+  assert.ok(depth <= 12, "a deeply nested message is not an unbounded recursion (was " + depth + ")")
+
+  // --- the whole round trip, as summarize sees it
+
+  const summary = message.summarize({
+    id: "42",
+    labelIds: ["UNREAD", "INBOX"],
+    internalDate: Date.UTC(2026, 6, 17, 9, 0, 0),
+    payload: message.parseRfc822(bytes(
+      "From: =?UTF-8?B?55Sw5Lit?= <tanaka@example.jp>\r\n" +
+      "To: jane@example.org\r\n" +
+      "Subject: =?UTF-8?Q?Re=3A_caf=C3=A9?=\r\n" +
+      "Message-ID: <abc@example.jp>\r\n" +
+      "\r\n" +
+      "body"))
+  }, new Date(Date.UTC(2026, 6, 17, 9, 5, 0)))
+
+  assert.strictEqual(summary.from.name, "田中", "an encoded display name decodes")
+  assert.strictEqual(summary.from.email, "tanaka@example.jp")
+  assert.strictEqual(summary.subject, "Re: café")
+  assert.strictEqual(summary.messageId, "<abc@example.jp>")
+  assert.strictEqual(summary.unread, true)
+  assert.strictEqual(summary.inInbox, true)
+  assert.strictEqual(summary.time, "5m")
+
+  // --- snippets, which IMAP does not send and this has to make
+
+  assert.strictEqual(message.buildSnippet("  lots   of\n\nwhitespace  "), "lots of whitespace")
+  assert.strictEqual(message.buildSnippet("x".repeat(400)).length, 200)
+  assert.strictEqual(message.buildSnippet(""), "")
+  assert.strictEqual(message.buildSnippet(null), "")
+
+  // --- nothing at all
+
+  deepEqual(message.extractBody(message.parseRfc822("")), { text: "", source: "" })
+  deepEqual(message.attachments(message.parseRfc822("")), [])
 }
 
 console.log("test_message.js ok")

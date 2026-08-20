@@ -14,13 +14,44 @@
 - `tests/test_source.sh` enforces the no-literal-colors rule. Keep it updated
   rather than working around it.
 
+## Layout
+
+**Grouped by module, not by file type.** A module holds whatever doing its job
+takes — the rules in `.js`, the object in `.qml`, side by side. There is no
+directory of "all the JavaScript": that arrangement puts a provider's parsing
+three directories away from the client that calls it.
+
+| Module | What it is |
+|-----------------|--------------------------------------------------------|
+| root | `Service.qml`, `BarWidget.qml`, `App.qml`, and nothing else. `manifest.json` names these three and the shell loads them at that path. |
+| `providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
+| `account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
+| `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
+| `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
+| `components/` | Views. They draw what they are given and decide nothing. |
+
+- `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML
+  file the Makefile does not list — a file `qmllint` never sees is a file nobody
+  checks.
+- QML resolves a type by name from its own directory, so a file that builds a
+  type from another module imports that directory: `Service.qml` has
+  `import "account"`, `account/MailAccount.qml` has `import "../providers"` and
+  `import "../cache"`.
+
 ## JavaScript libraries
 
-- Files at the repository root ending in `.js` are read by the QML engine.
-  They start with `.pragma library` and use `var` and `function` only — no
-  `const`, `let`, arrow functions, or template literals.
+- The `.js` files are read by the QML engine. They start with `.pragma library`
+  and use `var` and `function` only — no `const`, `let`, arrow functions, or
+  template literals. `tests/test_source.sh` finds them wherever they are, so a
+  new module is covered without being added to a list.
 - Everything that parses, formats, or decides lives in one of them, so the node
   tests can reach it without a compositor. QML holds no logic worth testing.
+- One JS resource may build on others with QML's `.import "Other.js" as Other`,
+  which is how `providers/Registry.js` is assembled out of `Gmail.js`,
+  `Imap.js` and `Hey.js`. `tests/load.js` resolves those the same way the engine
+  does, so the tests exercise the real file.
+- Tests name the module path: `load("cache/Cache.js")`. A bare filename would no
+  longer say where the thing lives.
 
 ## Entry points
 
@@ -58,6 +89,70 @@
   bug this rule exists to prevent.
 - A popup that would overflow flips to the other side of its trigger, then
   clamps to the window edge, then clamps to zero. All three, in that order.
+
+## Providers
+
+- A mailbox is a **provider**: `gmail`, `imap`, or `hey`. `Provider.js` is the
+  only place that knows the differences — which mailboxes exist, what a query
+  string means, what the service can be asked to do, and how it signs in.
+  Nothing above it branches on a provider id.
+- Two objects make a provider work: something that signs in (`AuthManager`,
+  `ImapAuth`) and something that fetches (`GmailApiClient`, `ImapClient`).
+  `MailAccount` builds one pair through a `Loader` and drives them through an
+  identical interface — same method names, same arguments, same callback shape.
+  Adding a provider is those two files and a registry entry.
+- **Both clients hand back Gmail's message resource**: a headers array, a MIME
+  tree, part bodies in base64url. That is what lets one list, one reader, one
+  cache and one set of actions serve every provider. `Message.parseRfc822` is
+  the adapter that rebuilds that shape from the wire format, and it is worth
+  keeping even where IMAP's own structures would have been more natural.
+- A capability the provider does not declare is a **button the panel does not
+  draw**. Offering one that fails is worse than omitting it: it fails after the
+  user has committed to it, with the row already moved. IMAP therefore has no
+  "report spam" — moving a message to a Junk folder teaches a server nothing,
+  and a button that quietly meant that is a promise the provider cannot keep.
+- An account id is the address for Gmail and `imap:<address>` for IMAP. One
+  address can legitimately be both, and a Gmail account keeping the bare address
+  is what stops an upgrade from having to migrate cache directories, keyring
+  entries and the active account.
+- `hey` is a real entry with no client behind it *yet*, deliberately. 37signals
+  publish no API, and no IMAP or POP either — their FAQ says so — so there is
+  nothing to sign in to. The entry is the plan rather than an apology: it keeps
+  the seam, states what is missing, and the setup page shows that reason instead
+  of a form it cannot honour. Adding HEY when an interface appears is a
+  `capabilities` block, a `Hey.js` and a `HeyClient.qml`.
+- Do not fill that gap by driving the private endpoints app.hey.com uses. It
+  would ask a user for their HEY password so it could be replayed against an
+  interface carrying no compatibility promise, and it would break on a deploy
+  nobody announced. Waiting for a supported interface is the difference between
+  a provider that keeps working and one that fails silently on somebody else's
+  release day.
+
+## Imap.js and the transport
+
+- `Imap.js` is the protocol and nothing else: every string sent to a server and
+  every decision about what came back. No transport, and no message format —
+  an RFC 822 message is `Message.js`'s subject.
+- The transport is `scripts/mail-transport.sh`, which is curl. Fields cross to
+  it base64-encoded on one line of stdin, so a password never reaches the
+  process table and nothing needs escaping on the way; the config carrying it
+  goes to curl's own stdin rather than to a file that would be on disk.
+- **The response comes back base64 too, and that is load-bearing.** IMAP
+  measures a literal in octets. Read as UTF-8 text, 2048 octets of a message
+  with an accent in it is fewer than 2048 characters, and the parser walks off
+  the end of one response into the middle of the next — which is also how a
+  message body could forge a response of its own. Base64 keeps one character
+  per octet, so counting characters is counting octets.
+- `BODY.PEEK`, never `BODY`. Reading a list must not mark the mailbox seen, and
+  that is the most common way a hand-rolled IMAP client ruins a mailbox.
+- `UID EXPUNGE`, never bare `EXPUNGE`: the latter removes every `\Deleted`
+  message in the folder, including ones another client marked — somebody else's
+  mail disappearing because this one archived.
+- A message id is `<uid>:<folder>`. A UID is unique only within its folder, so a
+  bare one collides between folders in the list and in the body cache on disk.
+- Folder names are never guessed. `LIST` reports them and SPECIAL-USE names
+  them: "Sent" is "Sent Items" on Exchange and "[Gmail]/Sent Mail" on Gmail, and
+  a client that guessed would create folders rather than find them.
 
 ## Secrets
 
@@ -113,6 +208,21 @@
 - Values that go back out to Google — a `To`, a `Subject`, an `In-Reply-To`
   copied off the message being answered — lose their line breaks first, or the
   reply carries headers nobody typed.
+
+## What the repository carries
+
+- This plugin is installed by cloning it — `omarchy plugin add` runs a plain
+  `git clone` with no `--depth` — so everything tracked, and everything ever
+  tracked, is between a user and a working mailbox.
+- Only what the plugin needs to run, plus the README, AGENTS.md and
+  `docs/SPEC.md`. Design canvases and planning notes are working material and
+  live outside the repository; `.gitignore` keeps them out.
+- Screenshots go to GitHub's attachment host by dragging them into an issue or
+  a release, never into the tree. A 320 KB PNG that nothing referenced was a
+  quarter of what a clone cost.
+- `tests/test_source.sh` fails on any tracked file over 128 KB. The things that
+  get big are never the source, so the ceiling is the rule rather than a list of
+  banned paths.
 
 ## Verification
 

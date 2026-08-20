@@ -1,17 +1,21 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../Model.js" as Model
+import "../account/Model.js" as Model
 
-// The mailboxes, as one row of chips. They are searches rather than labels —
-// see Model.MAILBOXES — so "Unread" and "All mail" sit next to "Inbox" without
-// needing a different mechanism.
+// The mailboxes, as one row of chips. What they are depends on the provider —
+// Gmail's are searches, so "Unread" and "All mail" sit next to "Inbox" without
+// needing a different mechanism; an IMAP account's are folders. The account
+// hands the list down already resolved, so this only draws it.
 Flickable {
   id: root
 
   required property color textColor
   required property string panelFontFamily
   property string current: "inbox"
+  // Provider-specific, and handed down rather than looked up: this row must
+  // never offer a mailbox the account on screen does not have.
+  property var allMailboxes: []
   property int unread: 0
   property int cursorIndex: -1
 
@@ -24,7 +28,7 @@ Flickable {
   // mailbox in view is never dropped, however rarely it is used.
   readonly property bool crowded: measure.implicitWidth > width && width > 0
   readonly property var mailboxes: {
-    var all = Model.MAILBOXES
+    var all = Array.isArray(root.allMailboxes) ? root.allMailboxes : []
     if (!crowded) return all
     var out = []
     for (var i = 0; i < all.length; i++) {
@@ -53,7 +57,7 @@ Flickable {
     visible: false
     spacing: 0
     Repeater {
-      model: Model.MAILBOXES
+      model: root.allMailboxes
       Button {
         required property var modelData
         text: modelData.label

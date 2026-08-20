@@ -1,8 +1,10 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "account"
 
-import "Accounts.js" as Accounts
+import "account/Accounts.js" as Accounts
+import "providers/Registry.js" as Provider
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -62,6 +64,7 @@ Item {
   property string accountsWritePayload: ""
 
   readonly property int accountCount: Accounts.count(accountList)
+  readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
 
   // The instance whose mailbox is on screen. Everything below forwards to it.
@@ -127,9 +130,17 @@ Item {
     refreshCurrent()
   }
 
-  function addAccount() {
-    accountList = Accounts.add(accountList, ({ email: "", clientId: "", clientSecret: "" }))
-    saveAccounts()
+  // The provider is chosen before the row exists, because it decides which
+  // setup page the new row opens into — and, for Gmail, whether it can borrow
+  // the OAuth client an existing account already set up.
+  function addAccount(provider) {
+    accountList = Accounts.add(accountList, ({
+      email: "", clientId: "", clientSecret: "",
+      provider: provider || Provider.DEFAULT_ID
+    }))
+    // This row is working state for the form, not an account yet. Persisting
+    // it here leaves a "New account" behind when Back cancels Add; the first
+    // successful configureAccount call is what saves it.
     // Switching to it is the whole point, and it has to happen before the page
     // opens: without this the setup page ran against whichever mailbox was
     // already on screen, so adding an account showed the *existing* account's
@@ -137,6 +148,15 @@ Item {
     activeIndex = accountCount - 1
     refreshCurrent()
     accountAdded()
+  }
+
+  function discardCurrentDraft() {
+    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var next = Accounts.discardDraftAt(accountList, index)
+    if (Accounts.count(next) === accountCount) return
+    activeIndex = -1
+    accountList = next
+    refreshCurrent()
   }
 
   function removeAccount(id) {
@@ -158,7 +178,10 @@ Item {
   function nameAccount(index, email) {
     var accounts = accountList.accounts
     if (index < 0 || index >= accounts.length) return
-    var named = Accounts.accountId(email)
+    // The id depends on the provider as well as the address — one address may
+    // be a Gmail account and an IMAP account at once — so the entry's own
+    // provider decides what it is about to be called.
+    var named = Accounts.accountId(email, accounts[index].provider)
     if (accounts[index].id === named) return
 
     // Two rows cannot hold one address. Rebuilding the list would fold them
@@ -178,16 +201,55 @@ Item {
     var updated = Accounts.emptyList()
     updated.activeId = accountList.activeId
     for (var i = 0; i < accounts.length; i++) {
+      // Everything but the address is carried over rather than listed field by
+      // field: a rebuild that names the fields it keeps silently drops the ones
+      // added afterwards, which is how an IMAP account would come back as a
+      // Gmail one the first time it learned its own name.
       updated = Accounts.add(updated, i === index
-        ? ({ email: email, clientId: accounts[i].clientId,
-             clientSecret: accounts[i].clientSecret, label: accounts[i].label })
-        : accounts[i])
+        ? withEmail(accounts[i], email) : accounts[i])
     }
     if (updated.activeId === "" || activeIndex === index)
-      updated = Accounts.setActive(updated, Accounts.accountId(email))
+      updated = Accounts.setActive(updated, named)
     if (activeIndex === index) activeIndex = -1
     accountList = updated
     saveAccounts()
+  }
+
+  function withEmail(entry, email) {
+    var next = {}
+    for (var key in entry) next[key] = entry[key]
+    next.email = email
+    return next
+  }
+
+  // What the IMAP setup form saves: the address, the servers, and which
+  // provider this row is. Written before the password is tried, so a mailbox
+  // that fails to sign in still has its settings to correct rather than an
+  // empty form to fill in again.
+  function configureAccount(index, values) {
+    var accounts = accountList.accounts
+    if (index < 0 || index >= accounts.length) return
+    var raw = values || ({})
+
+    var entry = {}
+    for (var key in accounts[index]) entry[key] = accounts[index][key]
+    if (raw.provider !== undefined) entry.provider = raw.provider
+    if (raw.email !== undefined) entry.email = raw.email
+    if (raw.imap !== undefined) entry.imap = raw.imap
+    if (raw.label !== undefined) entry.label = raw.label
+
+    var updated = Accounts.emptyList()
+    updated.activeId = accountList.activeId
+    for (var i = 0; i < accounts.length; i++)
+      updated = Accounts.add(updated, i === index ? entry : accounts[i])
+
+    var id = Accounts.accountId(entry.email, entry.provider)
+    if (id !== "" && (updated.activeId === "" || activeIndex === index))
+      updated = Accounts.setActive(updated, id)
+    if (activeIndex === index) activeIndex = -1
+    accountList = updated
+    saveAccounts()
+    refreshCurrent()
   }
 
   // A save that arrives while one is already running is queued, never dropped.
@@ -306,6 +368,7 @@ Item {
       out.push({
         id: accounts[i].id,
         email: accounts[i].email,
+        provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
@@ -325,11 +388,30 @@ Item {
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
+  readonly property string accountAddress: {
+    var accounts = accountList ? accountList.accounts : []
+    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
+  }
   readonly property int inboxUnread: current ? current.inboxUnread : 0
   readonly property var messages: current ? current.messages : []
   readonly property var labels: current ? current.labels : []
+
+  // Which service the mailbox on screen is, what mailboxes it has, and what it
+  // can be asked to do. Forwarded like everything else so a view never has to
+  // reach past `service` to find out.
+  readonly property string providerId: current ? current.providerId : Provider.DEFAULT_ID
+  readonly property var mailboxes: current
+    ? current.mailboxes : Provider.mailboxes(Provider.DEFAULT_ID)
+  readonly property bool canArchive: !current || current.canArchive
+  readonly property bool canReportSpam: !current || current.canReportSpam
+  readonly property bool canStar: !current || current.canStar
+  readonly property bool hasLabels: !current || current.hasLabels
+  readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
+  readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
+  readonly property string rawQuery: current ? current.rawQuery : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool hasMore: !!current && current.hasMore
@@ -360,6 +442,7 @@ Item {
   function selectOffset(delta) { return current ? current.selectOffset(delta) : "" }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
+  function selectLabel(name) { if (current) current.selectLabel(name) }
   function act(id, action, quiet) { if (current) current.act(id, action, quiet) }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
@@ -367,6 +450,42 @@ Item {
   function signIn() { if (current) current.signIn() }
   function cancelSignIn() { if (current) current.cancelSignIn() }
   function signOut() { if (current) current.signOut() }
+
+  // The password providers' sign-in. Gmail's is a browser and answers false,
+  // which is what lets one setup page ask without checking first.
+  function signInWithPassword(secret) {
+    return !!current && current.signInWithPassword(secret)
+  }
+
+  // The setup form writes back to the account row it is editing, which is the
+  // one on screen. Addressed by index because that is the only handle on a row
+  // that has no address yet — which is exactly the row being filled in.
+  function configureCurrentAccount(values) {
+    configureAccount(activeIndex >= 0 ? activeIndex : indexOfActiveAccount(), values)
+  }
+
+  // Saving a new address rebuilds the account host. Wait for that replacement
+  // before asking it to sign in; calling through immediately targets the host
+  // that the save has just retired, which made a failed attempt knock the user
+  // out of the add flow on the next click.
+  function configureCurrentAccountAndSignIn(values, secret) {
+    configureCurrentAccount(values)
+    Qt.callLater(function() { root.signInWithPassword(secret) })
+  }
+
+  function indexOfActiveAccount() {
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      if (accounts[i].id !== "" && accounts[i].id === accountList.activeId) return i
+    }
+    // Nothing matched by id, which is what a row still being filled in looks
+    // like: it has no address yet, so it has no id to match on. The first such
+    // row is the one the form is editing.
+    for (var j = 0; j < accounts.length; j++) {
+      if (accounts[j].id === "") return j
+    }
+    return -1
+  }
   function openInBrowser(id) { if (current) current.openInBrowser(id) }
   function openWebInbox() { if (current) current.openWebInbox() }
   function openCloudConsole() { if (current) current.openCloudConsole() }
@@ -406,7 +525,15 @@ Item {
 
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
-      mayAdoptLegacyToken: index === 0
+      configuredEmail: entry ? entry.email : ""
+      // Which service this mailbox is, and — for the one that needs them — the
+      // servers it talks to. Both come off the account entry, so changing an
+      // account's provider in the file rebuilds it as that provider.
+      providerId: entry ? entry.provider : Provider.DEFAULT_ID
+      imapSettings: entry ? entry.imap : null
+      // Only a Gmail account has a client-keyed refresh token to inherit, and
+      // only the first one may claim it.
+      mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
       settings: root.settings
 
       onAccountIdentified: function(email) { root.nameAccount(index, email) }

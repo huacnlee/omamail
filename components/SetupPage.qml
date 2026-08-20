@@ -16,8 +16,10 @@ Column {
   required property var service
   required property color textColor
   required property color dimColor
+  required property color dangerColor
   required property string panelFontFamily
   property bool canLeave: false
+  property int accountCount: 1
   property bool secretVisible: false
   property bool detailVisible: false
   // A finished step can be reopened — the client changes when somebody moves
@@ -26,6 +28,7 @@ Column {
   property bool clientStepReopened: false
 
   signal backRequested()
+  signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
   readonly property bool configured: !!auth && auth.credentialsPresent
@@ -315,6 +318,29 @@ Column {
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
+    }
+  }
+
+  Row {
+    visible: root.signedIn || root.accountCount > 1
+    spacing: Style.space(8)
+
+    Button {
+      visible: root.signedIn
+      text: "Sign out"
+      foreground: root.textColor
+      bordered: true
+      fontSize: Style.font.bodySmall
+      onClicked: if (root.service) root.service.signOut()
+    }
+
+    Button {
+      visible: root.accountCount > 1
+      text: "Remove account"
+      foreground: root.dangerColor
+      bordered: false
+      fontSize: Style.font.bodySmall
+      onClicked: root.removeRequested()
     }
   }
 

@@ -1,10 +1,16 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
-QML_FILES := Service.qml MailAccount.qml BarWidget.qml App.qml \
-	AuthManager.qml GmailApiClient.qml CacheStore.qml \
+QML_FILES := Service.qml BarWidget.qml App.qml \
+	account/MailAccount.qml \
+	cache/CacheStore.qml cache/BodyCache.qml \
+	providers/AuthManager.qml providers/GmailApiClient.qml \
+	providers/ImapAuth.qml providers/ImapClient.qml \
+	components/ImapSetupPage.qml \
+	components/ProviderPicker.qml \
 	components/GmailIcon.qml \
 	components/MailboxSidebar.qml \
 	components/MailboxTabs.qml \
 	components/MessageList.qml \
+	components/ListSkeleton.qml \
 	components/MessageRow.qml \
 	components/MessageMenu.qml \
 	components/ActionIcon.qml \
@@ -40,6 +46,8 @@ test-js:
 	node tests/test_cache.js
 	node tests/test_model.js
 	node tests/test_accounts.js
+	node tests/test_provider.js
+	node tests/test_imap.js
 
 test-shell:
 	python3 tests/test_qml_names.py
@@ -47,6 +55,7 @@ test-shell:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
+	bash tests/test_transport.sh
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine

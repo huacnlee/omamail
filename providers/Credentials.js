@@ -358,6 +358,21 @@ function legacyKeyringAttributes(clientId) {
   return ["service", KEYRING_SERVICE, "kind", KEYRING_KIND, "client-id", id]
 }
 
+// An IMAP account has no OAuth client to key on — it has a server and a
+// password. The attributes therefore key on the account alone, under a kind of
+// their own so an IMAP password and a Gmail refresh token for the same address
+// are two entries rather than one overwriting the other.
+var IMAP_KEYRING_KIND = "imap-password"
+
+function imapKeyringAttributes(accountId) {
+  var id = accountKey(accountId)
+  // As above: an empty attribute value is a wildcard to secret-tool, which
+  // would hand back some other account's password. An account with no name yet
+  // gets the literal placeholder, which no address can collide with.
+  return ["service", KEYRING_SERVICE, "kind", IMAP_KEYRING_KIND,
+    "account", id || UNNAMED_ACCOUNT]
+}
+
 // Entries from before the Omamail rename are read once and rewritten under
 // the new service name, so an upgrade keeps the user's signed-in session.
 function renamedKeyringAttributes(clientId, accountId) {

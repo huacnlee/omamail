@@ -4,7 +4,7 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-import "Model.js" as Model
+import "account/Model.js" as Model
 import "components"
 
 // The application window. The shell loads this entry point when the plugin is
@@ -29,6 +29,10 @@ Item {
   readonly property color background: Color.background
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
+  // Destructive controls consume a role named for their meaning. Omarchy's
+  // foundational palette currently calls that source `urgent`; keeping the
+  // mapping here stops account pages from confusing urgency with danger.
+  readonly property color danger: Color.urgent
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
@@ -71,6 +75,21 @@ Item {
   }
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
+  // Which kind of mailbox is being added. Asked before either form, because the
+  // two have nothing in common and guessing from the address would be worse
+  // than asking — a Gmail address is a legitimate IMAP account too.
+  property bool pickingProvider: false
+  // Latched once the question has been answered, so the chooser does not come
+  // back every time a half-finished setup re-renders.
+  property bool providerChosen: false
+  // Latched while a setup or edit page is open. Service.providerId briefly
+  // falls back to Gmail while an account host is rebuilt after saving; that is
+  // transport lifecycle, not a request to replace an IMAP page with Gmail's.
+  property string editingProvider: ""
+  // Set while a picked provider is being turned into an account row, so the
+  // signal that normally lands the user in Settings leaves them on the form.
+  property bool openingNewMailbox: false
+  property bool accountDraftOpen: false
   property bool settingsVisible: false
   // Something the window needs to say that no account is reporting — refusing a
   // duplicate mailbox, for one. Cleared on a timer so it cannot outlive its
@@ -94,6 +113,12 @@ Item {
   // added but not signed in yet belongs in settings, next to the ones that are.
   readonly property bool anyReady: !!service && service.anyAccountReady
   readonly property bool showSetup: setupVisible || !anyReady
+  // A setup already part-done answers the question by itself: an account with
+  // credentials has had its kind chosen, whether or not this window asked.
+  readonly property bool setupUnderway: !!service && !!service.auth
+    && service.auth.credentialsPresent
+  readonly property bool showPicker: showSetup
+    && (pickingProvider || (!providerChosen && !anyReady && !setupUnderway))
   readonly property bool showSettings: settingsVisible && !showSetup
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
@@ -185,9 +210,112 @@ Item {
       root.notice = email + " is already added"
     }
     function onAccountAdded() {
+      // A mailbox added through the chooser goes straight to its own form; the
+      // user has already said what they want and asking them to find the new
+      // row in Settings would be a step backwards. One added any other way
+      // still appears there, waiting to be signed in.
+      if (root.openingNewMailbox) {
+        root.openingNewMailbox = false
+        root.settingsVisible = false
+        root.setupVisible = true
+        return
+      }
       root.setupVisible = false
       root.settingsVisible = true
     }
+  }
+
+  // The three setup pages. Built by the Loader above, one at a time, so the two
+  // not in use hold no half-typed fields and no state to go stale.
+  Component {
+    id: providerPickerPage
+
+    ProviderPicker {
+      textColor: root.foreground
+      dimColor: root.dim
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      onBackRequested: {
+        root.pickingProvider = false
+        root.editingProvider = ""
+        root.setupVisible = false
+      }
+      onChosen: function(providerId) {
+        root.pickingProvider = false
+        root.providerChosen = true
+        root.editingProvider = providerId
+        // On first run the row already exists and only needs its kind; after
+        // that, adding a mailbox is what makes one.
+        if (root.service && root.service.hasSavedAccounts) {
+          root.openingNewMailbox = true
+          root.accountDraftOpen = true
+          root.service.addAccount(providerId)
+        } else if (root.service) {
+          root.service.configureCurrentAccount({ provider: providerId })
+        }
+      }
+    }
+  }
+
+  Component {
+    id: gmailSetupPage
+
+    SetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
+  Component {
+    id: imapSetupPage
+
+    ImapSetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
+  function editAccount(index) {
+    if (!service) return
+    var accounts = service.accountSummaries || []
+    editingProvider = index >= 0 && index < accounts.length
+      ? String(accounts[index].provider || "gmail") : "gmail"
+    service.switchToIndex(index)
+    providerChosen = true
+    pickingProvider = false
+    settingsVisible = false
+    setupVisible = true
+  }
+
+  function leaveSetup() {
+    if (accountDraftOpen && service) service.discardCurrentDraft()
+    accountDraftOpen = false
+    setupVisible = false
+    editingProvider = ""
+  }
+
+  function removeCurrentAccountFromEditor() {
+    if (!service || service.accountCount <= 1) return
+    var index = service.indexOfActiveAccount()
+    if (index < 0) return
+    service.removeAccountAt(index)
+    accountDraftOpen = false
+    leaveSetup()
+    settingsVisible = true
   }
 
   FloatingWindow {
@@ -383,8 +511,10 @@ Item {
           switcherOpen: accountSwitcher.opened
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
+          // Not a search: the provider decides what selecting a label means,
+          // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
-            root.service.search("label:" + name)
+            root.service.selectLabel(name)
             root.backToList()
           }
         }
@@ -400,6 +530,9 @@ Item {
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           panelFontFamily: root.fontFamily
+          // The account's own mailboxes, not a fixed set: this row and the
+          // sidebar it replaces on a narrow window must offer the same ones.
+          allMailboxes: root.service ? root.service.mailboxes : []
           current: root.service ? root.service.mailboxKey : "inbox"
           unread: root.service ? root.service.inboxUnread : 0
           onSelected: function(key) { root.goMailbox(key) }
@@ -439,10 +572,10 @@ Item {
             MessageList {
               id: list
               y: Style.space(8)
-              // Full width, so a row's hover fill runs to the column edge the
-              // way the sidebar's does; the text inset lives inside the row.
-              // A gutter on the right keeps a row from sliding under the bar.
-              width: listFlick.width - Style.space(14)
+              // Full width, so selected and hovered rows meet the splitter.
+              // Text and action breathing room belongs inside MessageRow;
+              // shrinking the whole list leaves a conspicuous dead strip.
+              width: listFlick.width
               service: root.service
               textColor: root.foreground
               accentColor: root.accent
@@ -473,7 +606,9 @@ Item {
           z: 5
 
           PanelSeparator {
-            anchors.horizontalCenter: parent.horizontalCenter
+            // The visible rule meets the list edge. The rest of the splitter's
+            // width remains to its right as an easy drag target.
+            anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
@@ -570,18 +705,21 @@ Item {
             width: setupFlick.width
             implicitHeight: setup.implicitHeight
 
-          SetupPage {
+          // Three setups that share nothing but their place on screen: a
+          // chooser for a mailbox whose kind is not settled yet, then whichever
+          // of the two forms that kind needs. A Loader rather than three
+          // visibilities, so the page not in use holds no fields and no state.
+          Loader {
             id: setup
             // A measure this long is unreadable across a wide window, so it is
             // capped rather than stretched.
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(setupHolder.width, Style.space(560))
-            service: root.service
-            textColor: root.foreground
-            dimColor: root.dim
-            panelFontFamily: root.fontFamily
-            canLeave: root.anyReady
-            onBackRequested: root.setupVisible = false
+            sourceComponent: root.showPicker
+              ? providerPickerPage
+              : (Model.setupProvider(root.editingProvider,
+                  root.service ? root.service.providerId : "") === "imap"
+                ? imapSetupPage : gmailSetupPage)
           }
           }
         }
@@ -614,21 +752,17 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onBackRequested: root.settingsVisible = false
-              onClientSetupRequested: root.setupVisible = true
-              onAddRequested: if (root.service) root.service.addAccount()
-              onSignInRequested: function(index) {
-                if (!root.service) return
-                root.service.switchToIndex(index)
-                root.service.signIn()
+              onClientSetupRequested: {
+                root.editingProvider = "gmail"
+                root.setupVisible = true
               }
-              onSignOutRequested: function(index) {
-                if (!root.service) return
-                root.service.switchToIndex(index)
-                root.service.signOut()
+              // Which kind first, then the form for it.
+              onAddRequested: {
+                root.editingProvider = ""
+                root.pickingProvider = true
+                root.setupVisible = true
               }
-              onRemoveRequested: function(index) {
-                if (root.service) root.service.removeAccountAt(index)
-              }
+              onEditRequested: function(index) { root.editAccount(index) }
             }
           }
         }
@@ -801,9 +935,14 @@ Item {
           if (root.service) root.service.switchToIndex(index)
           root.backToList()
         }
-        onAddAccountRequested: if (root.service) root.service.addAccount()
-        onRemoveAccountRequested: function(index) {
-          if (root.service) root.service.removeAccountAt(index)
+        onAddAccountRequested: {
+          root.editingProvider = ""
+          root.pickingProvider = true
+          root.setupVisible = true
+        }
+        onManageRequested: {
+          root.setupVisible = false
+          root.settingsVisible = true
         }
       }
 

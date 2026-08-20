@@ -23,9 +23,7 @@ Column {
   signal backRequested()
   signal clientSetupRequested()
   signal addRequested()
-  signal signInRequested(int index)
-  signal signOutRequested(int index)
-  signal removeRequested(int index)
+  signal editRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
   readonly property var auth: service ? service.auth : null
@@ -124,33 +122,11 @@ Column {
           spacing: Style.space(6)
 
           IconTextButton {
-            visible: !row.modelData.signedIn
-            iconName: "gmail"
-            text: "Sign in"
+            text: "Edit..."
             foreground: root.textColor
             fontFamily: root.panelFontFamily
-            tooltipText: "Sign this mailbox in with Google"
-            onClicked: root.signInRequested(row.index)
-          }
-
-          IconTextButton {
-            visible: row.modelData.signedIn
-            text: "Sign out"
-            foreground: root.dimColor
-            fontFamily: root.panelFontFamily
-            onClicked: root.signOutRequested(row.index)
-          }
-
-          // The last mailbox has no Remove: taking it away would leave the
-          // window with nothing to show and no way to get anything back.
-          IconTextButton {
-            visible: root.accounts.length > 1
-            text: "Remove"
-            foreground: root.dimColor
-            accent: root.urgentColor
-            fontFamily: root.panelFontFamily
-            tooltipText: "Forget this mailbox on this machine"
-            onClicked: root.removeRequested(row.index)
+            tooltipText: "Edit this mailbox"
+            onClicked: root.editRequested(row.index)
           }
         }
       }

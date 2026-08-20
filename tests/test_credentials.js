@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const credentials = load("Credentials.js")
+const credentials = load("providers/Credentials.js")
 
 // ------------------------------------------------------------ client ids
 

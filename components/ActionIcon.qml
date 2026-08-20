@@ -120,6 +120,10 @@ Canvas {
     } else if (root.name === "back") {
       move(9, 3); line(4, 8); line(9, 13)
       move(4, 8); line(14, 8)
+    } else if (root.name === "chevronRight") {
+      move(5.5, 3); line(10.5, 8); line(5.5, 13)
+    } else if (root.name === "chevronDown") {
+      move(3, 5.5); line(8, 10.5); line(13, 5.5)
     } else if (root.name === "eye" || root.name === "eyeOff") {
       // Almond outline, then the pupil as its own subpath so the two do not
       // join, and a slash for the hidden state.
