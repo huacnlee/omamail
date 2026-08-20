@@ -120,7 +120,12 @@ Item {
   }
 
   anchors.fill: parent
-  focus: true
+  // Only while it is actually in use. A component that declares `focus: true`
+  // owns the window's focus even when invisible — Qt does not exclude hidden
+  // items — and an owner that accepts keys is a sink. This swallowed every
+  // Escape in the window, which is why Esc looked intermittent: whether it
+  // worked depended on where the user had last clicked.
+  focus: root.opened
 
   Keys.onEscapePressed: function(event) {
     root.finish()

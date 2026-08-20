@@ -31,9 +31,9 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml
 
-.PHONY: test test-js test-shell qml-check validate bench
+.PHONY: test test-js test-shell test-qml qml-check validate bench
 
-test: test-js test-shell
+test: test-js test-shell test-qml
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
@@ -56,6 +56,13 @@ test-shell:
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
 	bash tests/test_transport.sh
+
+# Focus ownership cannot be tested without a focus scope, and a focus scope
+# needs the QML engine. Offscreen, so it needs no compositor: the bug this
+# catches — a hidden component owning the focus and swallowing keys — is
+# invisible to any test that cannot instantiate one.
+test-qml:
+	QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/qml
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine

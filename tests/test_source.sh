@@ -79,6 +79,17 @@ if awk '
   fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
 fi
 
+# A component that declares `focus: true` owns the window's focus even while it
+# is invisible, and an owner that accepts keys is a sink for everything routed
+# by focus rather than by Shortcut. ComposeView is instantiated whether or not
+# anyone is writing, so an unconditional focus there swallowed every Escape in
+# the window. Focus must follow "in use".
+grep -q '^  focus: root.opened$' components/ComposeView.qml \
+  || fail "ComposeView must own the focus only while it is open"
+if grep -rn '^\s*focus: true\s*$' components/ComposeView.qml; then
+  fail "ComposeView must not hold the focus unconditionally"
+fi
+
 # The IMAP server disclosure always reserves an icon slot. Both names selected
 # by its state must have a drawing, or the slot is blank in one or both states.
 for icon in chevronRight chevronDown; do
