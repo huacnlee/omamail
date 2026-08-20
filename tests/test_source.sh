@@ -79,6 +79,16 @@ if awk '
   fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
 fi
 
+# Quickshell's FloatingWindow is a proxy window and does not forward
+# activeFocusItem, so `window.activeFocusItem` is undefined and the typing
+# guard silently passes for every key. The attached property is the one that
+# works. This is invisible at runtime — nothing warns — so it is asserted here.
+if grep -vE '^[[:space:]]*//' App.qml | grep -n '[^A-Za-z]window\.activeFocusItem'; then
+  fail "App.qml must read Window.activeFocusItem (attached), not window.activeFocusItem"
+fi
+grep -q 'Window\.activeFocusItem' App.qml \
+  || fail "App.qml must decide typing from the window's active focus item"
+
 # A component that declares `focus: true` owns the window's focus even while it
 # is invisible, and an owner that accepts keys is a sink for everything routed
 # by focus rather than by Shortcut. ComposeView is instantiated whether or not

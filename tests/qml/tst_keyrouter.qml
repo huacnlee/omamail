@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Window
+import QtQuick.Controls as QQC
 import QtTest
 import "../../components" as Omamail
 
@@ -22,6 +24,22 @@ Item {
     overlay: host.overlay
     onTriggered: function(id) { host.lastId = id }
   }
+
+  // The real `typing` in App.qml is answered by asking the window who holds the
+  // focus, rather than by naming the fields — the naming is what missed nine of
+  // them. This exercises that decision against real focus rather than a bool.
+  function looksLikeTextEntry(item) {
+    return !!item
+        && item.hasOwnProperty("cursorPosition")
+        && item.hasOwnProperty("selectedText")
+        && item.hasOwnProperty("readOnly")
+        && !item.readOnly
+  }
+  readonly property bool typingByFocus:
+    looksLikeTextEntry(host.Window.activeFocusItem)
+
+  QQC.TextField { id: someField; width: 80 }
+  QQC.Button { id: someButton; y: 40; text: "b" }
 
   TestCase {
     name: "KeyRouter"
@@ -82,6 +100,18 @@ Item {
       wait(20)
       keyClick(Qt.Key_Question)
       compare(host.lastId, "help")
+    }
+
+    // A field nobody named. This is the whole point: the guard is answered by
+    // the focus, so a text field added later is covered without being listed.
+    function test_focus_on_any_text_field_counts_as_typing() {
+      someField.forceActiveFocus()
+      wait(30)
+      compare(host.typingByFocus, true,
+        "a field nobody added to a list still stands the letters down")
+      someButton.forceActiveFocus()
+      wait(30)
+      compare(host.typingByFocus, false, "a button is not a text field")
     }
 
     function test_a_reader_key_is_dead_in_the_list() {

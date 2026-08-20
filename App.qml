@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -409,7 +410,10 @@ Item {
       // IMAP and settings forms put nine more text fields in this same scope —
       // so typing an IMAP host archived mail on `e` and opened compose on `c`.
       readonly property bool typing: {
-        var item = window.activeFocusItem
+        // The attached property, not `window.activeFocusItem`: Quickshell's
+        // FloatingWindow is a proxy and does not forward that one, so reading
+        // it off the window gives undefined and every guard silently passes.
+        var item = focusScope.Window.activeFocusItem
         return !!item
             && item.hasOwnProperty("cursorPosition")
             && item.hasOwnProperty("selectedText")
