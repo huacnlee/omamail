@@ -46,7 +46,7 @@ def main():
     failures = []
     files = [
         p
-        for d in ("", "core", "providers", "components")
+        for d in ("", "account", "cache", "message", "providers", "components")
         for p in sorted((ROOT / d).glob("*.qml"))
     ]
     for path in files:

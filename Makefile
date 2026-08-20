@@ -1,6 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := Service.qml BarWidget.qml App.qml \
-	core/MailAccount.qml core/CacheStore.qml core/BodyCache.qml \
+	account/MailAccount.qml \
+	cache/CacheStore.qml cache/BodyCache.qml \
 	providers/AuthManager.qml providers/GmailApiClient.qml \
 	providers/ImapAuth.qml providers/ImapClient.qml \
 	components/ImapSetupPage.qml \

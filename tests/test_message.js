@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const message = load("Message.js")
+const message = load("message/Message.js")
 
 function b64url(text) {
   return Buffer.from(text, "utf8").toString("base64")

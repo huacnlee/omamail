@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-import "../lib/Cache.js" as Cache
+import "Cache.js" as Cache
 
 // The cache's file. Cache.js decides what the cache contains; this decides
 // when it touches the disk.

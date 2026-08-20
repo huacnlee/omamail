@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../lib/Model.js" as Model
+import "../account/Model.js" as Model
 
 // The mailboxes, as one row of chips. What they are depends on the provider —
 // Gmail's are searches, so "Unread" and "All mail" sit next to "Inbox" without

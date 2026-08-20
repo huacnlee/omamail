@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../lib/Provider.js" as Provider
+import "../providers/Registry.js" as Provider
 
 // Which kind of mailbox is being added, asked once and before anything else.
 //

@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../lib/Imap.js" as Imap
+import "../providers/ImapProtocol.js" as Imap
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
 // guess was wrong — the servers.

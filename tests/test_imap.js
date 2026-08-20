@@ -1,8 +1,8 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const imap = load("Imap.js")
-const mail = load("Message.js")
+const imap = load("providers/ImapProtocol.js")
+const mail = load("message/Message.js")
 
 // ------------------------------------------------------------------ servers
 

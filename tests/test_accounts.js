@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const accounts = load("Accounts.js")
+const accounts = load("account/Accounts.js")
 
 function account(email, extra) {
   return Object.assign({ email: email, clientId: "cid", clientSecret: "secret", label: "" }, extra || {})

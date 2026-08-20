@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const provider = load("Provider.js")
+const provider = load("providers/Registry.js")
 
 // ------------------------------------------------------------- the registry
 //

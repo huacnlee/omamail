@@ -16,7 +16,7 @@ components = sorted(p.name for p in (root / "components").glob("*.qml"))
 
 # Every directory holding QML, so "is this type instantiated anywhere" has the
 # whole tree to answer from rather than the two directories that existed first.
-QML_DIRS = ("", "core", "providers", "components")
+QML_DIRS = ("", "account", "cache", "message", "providers", "components")
 qml_files = [p for d in QML_DIRS for p in sorted((root / d).glob("*.qml"))]
 sources = "\n".join(p.read_text(encoding="utf-8") for p in qml_files)
 
@@ -44,7 +44,7 @@ for entry in ("Service.qml", "BarWidget.qml", "App.qml"):
 # fourth entry point nobody declared, or a file that was meant to be filed.
 for stray in sorted(root.glob("*.qml")):
     if stray.name not in ("Service.qml", "BarWidget.qml", "App.qml"):
-        failures.append(f"{stray.name} sits at the root; move it to core/, providers/ or components/")
+        failures.append(f"{stray.name} sits at the root; it belongs in a module directory")
 
 # The Makefile drives qmllint, so a file it does not list is a file nobody
 # checks. Components have their own check above; these are the rest.

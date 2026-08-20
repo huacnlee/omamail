@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const oauth = load("OAuth.js")
+const oauth = load("providers/OAuth.js")
 
 // ------------------------------------------------------------------ ports
 //

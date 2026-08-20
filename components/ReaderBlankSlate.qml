@@ -1,8 +1,8 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../lib/Model.js" as Model
-import "../lib/Provider.js" as Provider
+import "../account/Model.js" as Model
+import "../providers/Registry.js" as Provider
 
 // What the reader shows before a message is picked.
 //

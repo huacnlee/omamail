@@ -16,31 +16,42 @@
 
 ## Layout
 
-Four places, and which one a file belongs in is decided by what it talks to:
+**Grouped by module, not by file type.** A module holds whatever doing its job
+takes — the rules in `.js`, the object in `.qml`, side by side. There is no
+directory of "all the JavaScript": that arrangement puts a provider's parsing
+three directories away from the client that calls it.
 
-| Where | What lives there |
-|--------------|-------------------------------------------------------|
-| root | `Service.qml`, `BarWidget.qml`, `App.qml` — and nothing else. These three are named in `manifest.json` and loaded by the shell at that path. |
-| `lib/` | The `.js` libraries. No QML in any of them, which is why the node tests can reach them. |
-| `providers/` | One pair per mail service: something that signs in, something that fetches. |
-| `core/` | `MailAccount.qml` and the two caches it owns. |
+| Module | What it is |
+|-----------------|--------------------------------------------------------|
+| root | `Service.qml`, `BarWidget.qml`, `App.qml`, and nothing else. `manifest.json` names these three and the shell loads them at that path. |
+| `providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
+| `account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
+| `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
+| `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
 | `components/` | Views. They draw what they are given and decide nothing. |
 
-- `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any
-  QML file the Makefile does not list — a file `qmllint` never sees is a file
-  nobody checks.
+- `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML
+  file the Makefile does not list — a file `qmllint` never sees is a file nobody
+  checks.
 - QML resolves a type by name from its own directory, so a file that builds a
-  type from another one imports that directory: `Service.qml` has
-  `import "core"`, `core/MailAccount.qml` has `import "../providers"`.
+  type from another module imports that directory: `Service.qml` has
+  `import "account"`, `account/MailAccount.qml` has `import "../providers"` and
+  `import "../cache"`.
 
 ## JavaScript libraries
 
-- The files under `lib/` are read by the QML engine. They start with
-  `.pragma library` and use `var` and `function` only — no `const`, `let`,
-  arrow functions, or template literals.
+- The `.js` files are read by the QML engine. They start with `.pragma library`
+  and use `var` and `function` only — no `const`, `let`, arrow functions, or
+  template literals. `tests/test_source.sh` finds them wherever they are, so a
+  new module is covered without being added to a list.
 - Everything that parses, formats, or decides lives in one of them, so the node
   tests can reach it without a compositor. QML holds no logic worth testing.
-- `tests/load.js` resolves against `lib/`, so a test says `load("Cache.js")`.
+- One JS resource may build on others with QML's `.import "Other.js" as Other`,
+  which is how `providers/Registry.js` is assembled out of `Gmail.js`,
+  `Imap.js` and `Hey.js`. `tests/load.js` resolves those the same way the engine
+  does, so the tests exercise the real file.
+- Tests name the module path: `load("cache/Cache.js")`. A bare filename would no
+  longer say where the thing lives.
 
 ## Entry points
 

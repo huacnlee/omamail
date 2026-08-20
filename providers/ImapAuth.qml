@@ -2,8 +2,8 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-import "../lib/Imap.js" as Imap
-import "../lib/Credentials.js" as Credentials
+import "ImapProtocol.js" as Imap
+import "Credentials.js" as Credentials
 
 // An IMAP account's sign-in, which is a server address and a password.
 //

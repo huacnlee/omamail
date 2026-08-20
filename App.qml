@@ -4,7 +4,7 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-import "lib/Model.js" as Model
+import "account/Model.js" as Model
 import "components"
 
 // The application window. The shell loads this entry point when the plugin is

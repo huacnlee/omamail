@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const model = load("Model.js")
+const model = load("account/Model.js")
 
 // The mailboxes moved to Provider.js along with everything else that differs
 // between mail services; tests/test_provider.js covers them there.

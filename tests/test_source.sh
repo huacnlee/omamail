@@ -6,22 +6,38 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
+# Found rather than globbed: the layout groups by module, and a module with no
+# QML in it (message/, today) turns a literal glob into a grep error that hides
+# whatever the check was meant to say.
+#
+# A read loop rather than `mapfile`, which is bash 4 and absent from the bash
+# 3.2 that macOS still ships — a check that only runs on the deployment target
+# is a check nobody runs while writing the code. NUL-separated either way, so a
+# path with a space in it stays one path.
+QML_FILES=()
+while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
+  < <(find . -name '*.qml' -not -path './.git/*' -print0)
+
+JS_FILES=()
+while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
+  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
+
 # 1. No hard-coded colours in QML. Every colour comes from the active Omarchy
 #    theme, or a light theme renders unreadable text.
 # gmailRed in ActionIcon is the single declared exception: the M inside the
 # Gmail mark is a brand asset, the same carve-out this author's other plugins
 # make for an official logo. Everything else takes the theme.
-if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- *.qml core/*.qml providers/*.qml components/*.qml \
+if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- "${QML_FILES[@]}" \
    | grep -v 'gmailRed'; then
   fail "hard-coded colour in QML: use Color.* or a colour passed in from App.qml"
 fi
-if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- *.qml core/*.qml providers/*.qml components/*.qml; then
+if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- "${QML_FILES[@]}"; then
   fail "named display colour in QML: use Color.* instead"
 fi
 
 # 2. The JS libraries are read by the QML engine, which does not accept ES6.
 #    tests/ is node-only and exempt.
-for file in lib/*.js; do
+for file in "${JS_FILES[@]}"; do
   head -1 "$file" | grep -q '^\.pragma library$' || fail "$file must start with .pragma library"
   # Comments quote code with backticks and say things like "a => b", so the
   # check runs on code lines only.
@@ -35,14 +51,14 @@ done
 # Html.js is the one exception, and a narrow one: PAPER and INK are the sheet a
 # sender's HTML is printed on. They are content colours, not chrome — a
 # message that sets #24292e text needs a light ground under it or it vanishes.
-for file in lib/Model.js lib/GmailApi.js lib/Message.js; do
+for file in account/Model.js providers/GmailApi.js message/Message.js; do
   if grep -vE '^\s*(//|\*|/\*)' "$file" | grep -nE '#[0-9A-Fa-f]{6}'; then
     fail "$file names a colour: pass it in from QML instead"
   fi
 done
-if grep -vE '^\s*(//|\*|/\*)' lib/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
+if grep -vE '^\s*(//|\*|/\*)' message/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
    | grep -vE 'PAPER|INK|paperPalette|#1155cc|#5f6368'; then
-  fail "lib/Html.js may only name the PAPER/INK sheet colours"
+  fail "message/Html.js may only name the PAPER/INK sheet colours"
 fi
 
 # 4. barForeground is a qs.Ui.Panel property. A BarWidget that reads it gets

@@ -3,8 +3,8 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 
-import "../lib/OAuth.js" as OAuth
-import "../lib/Credentials.js" as Credentials
+import "OAuth.js" as OAuth
+import "Credentials.js" as Credentials
 
 // Google sign-in and token storage. Nothing else in the plugin needs to know
 // what a refresh token looks like: callers ask for `withAccessToken` and get a
