@@ -25,9 +25,13 @@ var BINDINGS = [
     hintKey: "j / k", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
     group: "Moving", label: "Move up" },
-  { id: "open", keys: ["Return", "o"], contexts: ["list"],
+  // Live in the reader as well as the list. Moving is deliberately not opening
+  // — stepping through with j used to mark half a mailbox read without anyone
+  // looking at it — so with the reader up there has to be a key that says open,
+  // or the only way to read the next message is to leave and come back.
+  { id: "open", keys: ["Return", "o"], contexts: MAIL,
     group: "Moving", label: "Open the selected message",
-    hintKey: "o", hint: { list: "open" } },
+    hintKey: "o", hint: { list: "open", reader: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],
     group: "Moving", label: "Back to the list" },
 

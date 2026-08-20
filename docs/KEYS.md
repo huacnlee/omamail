@@ -36,7 +36,7 @@ readonly property string keyContext:
 | Context | What it is | What it binds |
 |---|---|---|
 | `list` | The message list | The mailbox keys |
-| `reader` | A message open | The mailbox keys, plus reply/forward and zoom |
+| `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor without opening; `o` or `Enter` opens what they landed on |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
@@ -85,7 +85,7 @@ used to exist, and they had.
 |---|---|---|---|
 | `cursorDown` | `j`, `Down` | mail | Move down |
 | `cursorUp` | `k`, `Up` | mail | Move up |
-| `open` | `Return`, `o` | list | Open the selected message |
+| `open` | `Return`, `o` | mail | Open the selected message |
 | `backToList` | `u` | reader | Back to the list |
 | `archive` | `e` | mail | Archive |
 | `trash` | `d` | mail | Move to trash |
@@ -120,6 +120,40 @@ answers to, and a draft is not a mailbox.
 `Escape` is the only bare key bound everywhere, because it is the way out of
 everywhere. What it means in each place is one list in `goBack()`, in the order
 the window is stacked.
+
+## The cursor
+
+`cursorId` is where the keyboard is. `selectedId` is what the reader shows.
+They are two different things, and conflating them was the first bug in this
+area: movement was anchored on the opened message, so in the list — where
+nothing is open — every step resolved to the first row, and `j` moved once and
+then stopped.
+
+Three rules, all in `account/Model.js` so the node tests reach them:
+
+- **`cursorAfterOffset`** — moving. Anchored on the cursor itself, clamped at
+  both ends, and starting from the end the move came from when there is no
+  cursor yet, so `j` opens at the top and `k` at the bottom.
+- **`cursorAfterRemoval`** — the row the cursor is on is about to leave, because
+  it was archived or trashed. The cursor takes its place: the row below, or the
+  row above at the end. Worked out *before* the action, while the row still has
+  neighbours.
+- **`cursorAfterReload`** — the whole list was replaced, by a mailbox switch, a
+  search, or a refresh. A cursor whose message survived keeps its place; one
+  whose message is gone starts at the top.
+
+The last two exist because a cursor pointing at a message that is not listed
+cannot be found, and `cursorAfterOffset` restarts at the top from there. Every
+"the cursor jumped back to the first row" report is that.
+
+The list is a `Column` of rows inside a `Flickable`, not a `ListView` — the
+panel already owns a scroller, and nesting a second gives every wheel event two
+plausible targets. So there is no `positionViewAtIndex`, and keyboard movement
+has to scroll the list itself: **`Model.contentYToReveal`** decides where the
+scroller goes, leaving it alone while the row is already visible so stepping one
+row does not drag the list under someone reading it. It is called from
+`moveCursor`, not from `cursorId` changing, because hovering a row moves the
+cursor too and scrolling under the pointer fights the mouse.
 
 ## Adding a key
 

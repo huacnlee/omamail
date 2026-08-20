@@ -119,6 +119,19 @@ Item {
       compare(host.lastId, "help")
     }
 
+    // Moving is deliberately not opening, so with a message up there has to be
+    // a key that says open — otherwise reading the next one means leaving the
+    // reader and coming back.
+    function test_open_works_from_the_reader_too() {
+      host.context = "reader"
+      wait(20)
+      keyClick(Qt.Key_O)
+      compare(host.lastId, "open")
+      host.lastId = ""
+      keyClick(Qt.Key_Return)
+      compare(host.lastId, "open")
+    }
+
     function test_a_reader_key_is_dead_in_the_list() {
       keyClick(Qt.Key_R)
       compare(host.lastId, "", "there is nothing to reply to from the list")
