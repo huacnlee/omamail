@@ -403,6 +403,24 @@ Item {
     return newHandle()
   }
 
+  // IMAP has no send-as settings endpoint. Its one sender is the mailbox
+  // address the user configured, returned in the same shape as Gmail aliases
+  // so everything above the provider boundary can stay provider-neutral.
+  function getSendAs(callback) {
+    if (typeof callback !== "function") return newHandle()
+    var address = String(root.email || "")
+    Qt.callLater(function() {
+      if (!root) return
+      callback(address === "" ? [] : [{
+        email: address,
+        displayName: "",
+        isPrimary: true,
+        isDefault: true
+      }], "")
+    })
+    return newHandle()
+  }
+
   // --------------------------------------------------------------- writes
 
   // `MailAccount` asks in Gmail's vocabulary whichever provider it holds, so

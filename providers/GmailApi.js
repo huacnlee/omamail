@@ -122,6 +122,7 @@ function threadPath(id) { return "/users/me/threads/" + encode(id) }
 function labelsPath() { return "/users/me/labels" }
 function labelPath(id) { return "/users/me/labels/" + encode(id) }
 function profilePath() { return "/users/me/profile" }
+function sendAsPath() { return "/users/me/settings/sendAs" }
 function attachmentPath(messageId, attachmentId) {
   return "/users/me/messages/" + encode(messageId) + "/attachments/" + encode(attachmentId)
 }
@@ -215,6 +216,63 @@ function parseProfile(payload) {
     threadsTotal: Math.max(0, Math.floor(Number(body.threadsTotal) || 0)),
     historyId: String(body.historyId || "")
   }
+}
+
+// Gmail's send-as collection includes the primary address and every custom
+// address configured under "Send mail as". Pending custom addresses cannot be
+// used yet, so they must not appear as choices in a compose window.
+function parseSendAs(payload) {
+  var entries = arrayValues(payload && payload.sendAs)
+  var aliases = []
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i] || {}
+    var email = String(entry.sendAsEmail || "").trim()
+    var primary = entry.isPrimary === true
+    var status = String(entry.verificationStatus || "").toLowerCase()
+    if (!email || (!primary && status !== "accepted")) continue
+    aliases.push({
+      email: email,
+      displayName: String(entry.displayName || "").trim(),
+      isPrimary: primary,
+      isDefault: entry.isDefault === true
+    })
+  }
+  return aliases
+}
+
+function aliasEmail(alias) {
+  if (alias && typeof alias === "object")
+    return String(alias.email || alias.sendAsEmail || "").trim().toLowerCase()
+  return String(alias || "").trim().toLowerCase()
+}
+
+function preferredSendAs(aliases, recipients) {
+  var choices = Array.isArray(aliases) ? aliases : []
+  var addressed = Array.isArray(recipients) ? recipients : []
+  for (var i = 0; i < addressed.length; i++) {
+    var recipient = aliasEmail(addressed[i])
+    if (!recipient) continue
+    for (var j = 0; j < choices.length; j++) {
+      if (aliasEmail(choices[j]) === recipient) return choices[j]
+    }
+  }
+  for (var k = 0; k < choices.length; k++) {
+    if (choices[k] && choices[k].isDefault === true) return choices[k]
+  }
+  for (var p = 0; p < choices.length; p++) {
+    if (choices[p] && choices[p].isPrimary === true) return choices[p]
+  }
+  return choices.length > 0 ? choices[0] : null
+}
+
+function isSendAsAllowed(aliases, email) {
+  var wanted = aliasEmail(email)
+  if (!wanted) return false
+  var choices = Array.isArray(aliases) ? aliases : []
+  for (var i = 0; i < choices.length; i++) {
+    if (aliasEmail(choices[i]) === wanted) return true
+  }
+  return false
 }
 
 // --------------------------------------------------------------- browsing

@@ -388,6 +388,7 @@ Item {
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
+  readonly property var sendAsAliases: current ? current.availableSendAsAliases : []
   readonly property string accountAddress: {
     var accounts = accountList ? accountList.accounts : []
     var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
@@ -449,6 +450,9 @@ Item {
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
   function send(fields) { if (current) current.send(fields) }
+  function preferredSendAs(recipients) {
+    return current ? current.preferredSendAs(recipients) : null
+  }
   function signIn() { if (current) current.signIn() }
   function cancelSignIn() { if (current) current.cancelSignIn() }
   function signOut() { if (current) current.signOut() }

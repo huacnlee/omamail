@@ -238,12 +238,14 @@ assert.strictEqual(message.replySubject("RE: Invoice"), "RE: Invoice")
 assert.strictEqual(message.replySubject(""), "Re: (no subject)")
 
 const raw = message.buildRawMessage({
+  from: "work@example.net",
   to: "jane@example.com",
   subject: "你好",
   body: "Hi Jane,\n\nThanks!",
   inReplyTo: "<abc@mail.gmail.com>"
 })
 
+assert.ok(raw.indexOf("From: work@example.net\r\n") === 0)
 assert.ok(raw.indexOf("To: jane@example.com\r\n") >= 0)
 // A non-ASCII subject has to go back out as an encoded word or Gmail rejects
 // the whole raw message.
@@ -314,6 +316,7 @@ assert.strictEqual(message.extractHtml({
     "the value survives as one header line")
 
   const folded = message.buildRawMessage({
+    from: "me@example.com\r\nBcc: attacker@example.net",
     to: "friend@example.com\r\nBcc: attacker@example.net",
     subject: "hello\nX-Injected: 1",
     body: "hi"

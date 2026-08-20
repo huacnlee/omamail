@@ -242,4 +242,18 @@ if [ -n "$oversized" ]; then
   fail "the files above are over 128 KB; keep large assets out of the clone"
 fi
 
+# The compose form, account boundary and raw-message builder must keep the
+# selected send-as address all the way to the provider. A missing link silently
+# falls back to a default address and makes the selector lie.
+grep -q 'from: root.fromEmail' components/ComposeView.qml \
+  || fail "ComposeView must submit the selected From address"
+grep -q 'from: from' account/MailAccount.qml \
+  || fail "MailAccount must pass the selected From address to Message.js"
+grep -q 'foldHeader("From", values.from)' message/Message.js \
+  || fail "Message.js must write the selected From header"
+for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
+  grep -q 'function getSendAs' "$client" \
+    || fail "$client must implement the provider-neutral sender-list operation"
+done
+
 printf 'test_source.sh ok\n'
