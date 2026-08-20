@@ -79,6 +79,12 @@ if awk '
   fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
 fi
 
+# A trigger holds a selected style while what it opened is on screen. The bar
+# icon is the only trigger the window has, so without this there is nothing on
+# screen saying which icon put it there.
+grep -q 'windowOpen' BarWidget.qml \
+  || fail "the bar icon must show an active style while the window is open"
+
 # Quickshell's FloatingWindow is a proxy window and does not forward
 # activeFocusItem, so `window.activeFocusItem` is undefined and the typing
 # guard silently passes for every key. The attached property is the one that

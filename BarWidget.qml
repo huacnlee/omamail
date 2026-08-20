@@ -48,10 +48,22 @@ BarWidget {
     // their own root object `root`, so nothing inside a Component declared
     // here refers to `root` — it would be ambiguous about which one it meant.
     readonly property bool connected: !!root.gmail && root.gmail.ready
-    readonly property color glyphColor: connected
-      ? root.foreground
-      : Qt.darker(root.foreground, 1.55)
+    // A trigger holds a selected style for as long as what it opened is on
+    // screen, which is what answers "which of these opened that window". The
+    // service is what knows: it outlives the window and is told either way.
+    readonly property bool windowOpen: !!root.gmail && root.gmail.windowOpen
+    // `activeColor` is the bar's own active token — the theme's `bar.active`,
+    // which the bar hands down under the name `urgent`. It is the colour for a
+    // widget whose thing is open, not a colour for danger.
+    readonly property color glyphColor: windowOpen
+      ? activeColor
+      : (connected ? root.foreground : Qt.darker(root.foreground, 1.55))
     readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
+
+    // Said declaratively as well as drawn: the glyph comes from iconComponent,
+    // which BarIconButton does not colour for us, so `active` alone would show
+    // nothing — but it is still the state the bar asks about.
+    active: windowOpen
 
     iconComponent: Component {
       Item {
