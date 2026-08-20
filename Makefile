@@ -45,6 +45,7 @@ test-js:
 	node tests/test_html.js
 	node tests/test_cache.js
 	node tests/test_model.js
+	node tests/test_keymap.js
 	node tests/test_accounts.js
 	node tests/test_provider.js
 	node tests/test_imap.js
