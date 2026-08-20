@@ -137,6 +137,22 @@ function bindingsFor(context) {
   return out
 }
 
+// One entry per sequence rather than per row, because that is the shape a
+// Shortcut needs: each sequence is its own object, and each decides its own
+// `enabled` — a row holding both `/` and Ctrl+K has them disagree while the
+// user is typing.
+function sequencesFor(context) {
+  var out = []
+  var rows = bindingsFor(context)
+  for (var i = 0; i < rows.length; i++) {
+    var keys = rows[i].keys || []
+    for (var k = 0; k < keys.length; k++) {
+      out.push(({ id: rows[i].id, sequence: keys[k], binding: rows[i] }))
+    }
+  }
+  return out
+}
+
 // How a row reads. Usually its own keys; `display` overrides it where one line
 // stands for a pair, as "j / k" does for moving.
 function displayFor(binding) {

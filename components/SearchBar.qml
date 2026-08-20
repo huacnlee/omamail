@@ -16,6 +16,10 @@ Item {
 
   // The window's single-letter shortcuts stand down while this has focus.
   readonly property bool fieldFocused: field.activeFocus
+  // What Escape has to decide between clearing and leaving alone. The window
+  // owns that decision now: a window Shortcut beats a focused item's Keys
+  // handler, so a local one here would look live and never run.
+  readonly property string queryText: field.text
 
   implicitHeight: field.implicitHeight
 
@@ -63,14 +67,6 @@ Item {
       border.color: field.activeFocus
         ? Style.hoverBorderFor(root.textColor, root.accentColor)
         : Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.12)
-    }
-
-    // Escape clears the query before it reaches the window, where the same key
-    // would close the whole thing.
-    Keys.onEscapePressed: function(event) {
-      if (text === "") return
-      root.clear()
-      event.accepted = true
     }
   }
 

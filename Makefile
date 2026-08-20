@@ -13,6 +13,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ListSkeleton.qml \
 	components/MessageRow.qml \
 	components/MessageMenu.qml \
+	components/KeyRouter.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
 	components/IconTextButton.qml \

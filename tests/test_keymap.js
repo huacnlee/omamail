@@ -128,4 +128,27 @@ deepEqual(keymap.hintsFor("page").map(function (h) { return h.label }),
   ["back"],
   "a form's whole keyboard contract is leaving it")
 
+// ------------------------------------------------- one entry per sequence
+
+// A Shortcut binds one sequence, so the router needs the table flattened. It
+// also needs each sequence to carry its own row, since `enabled` is decided per
+// key: the two halves of the Search row disagree while the user is typing.
+const listSequences = keymap.sequencesFor("list")
+const searchRows = listSequences.filter(function (r) { return r.id === "search" })
+assert.strictEqual(searchRows.length, 2, "/ and Ctrl+K arrive separately")
+deepEqual(searchRows.map(function (r) { return r.sequence }), ["/", "Ctrl+K"])
+assert.strictEqual(
+  keymap.isEnabled(searchRows[0].binding, searchRows[0].sequence, "list", true, false), false)
+assert.strictEqual(
+  keymap.isEnabled(searchRows[1].binding, searchRows[1].sequence, "list", true, false), true)
+
+const expectedCount = keymap.bindingsFor("list").reduce(
+  function (n, b) { return n + b.keys.length }, 0)
+assert.strictEqual(listSequences.length, expectedCount,
+  "every key of every row in the context is present")
+listSequences.forEach(function (row) {
+  assert.ok(row.id && row.sequence && row.binding,
+    "each entry carries its id, its sequence, and the row it came from")
+})
+
 console.log("test_keymap.js ok")

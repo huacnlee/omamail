@@ -127,11 +127,6 @@ Item {
   // worked depended on where the user had last clicked.
   focus: root.opened
 
-  Keys.onEscapePressed: function(event) {
-    root.finish()
-    event.accepted = true
-  }
-
   // ----------------------------------------------------------- header
   //
   // There is no client-side titlebar under Hyprland, so the window has to
@@ -430,12 +425,6 @@ Item {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
     }
-  }
-
-  Shortcut {
-    sequence: "Ctrl+Return"
-    enabled: root.opened && root.visible
-    onActivated: root.submit()
   }
 
 }
