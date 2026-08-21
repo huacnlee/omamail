@@ -213,9 +213,15 @@ key. What matters while working:
   is world-readable.
 - Anything that could carry a credential passes through `OAuth.redact` before
   it can reach a label.
-- Remote images in a message body are blocked until the reader asks for them,
-  and asking covers one message. Qt's rich text engine really does fetch them,
-  so rendering one fires every tracking pixel in the message.
+- Remote images in a message body are blocked until the reader asks for them.
+  Qt's rich text engine really does fetch them, so rendering one fires every
+  tracking pixel in the message, and the fetch tells the host that this address
+  opened this message at this moment.
+- The answer is a standing one, off until it is given. Asking per message meant
+  answering the same question on every newsletter and remembering none of it,
+  so the cost of asking fell on somebody who had already decided. The notice's
+  button says "Always show", because that is what it does, and Settings is the
+  one place that turns it back off.
 
 ## Html.js
 

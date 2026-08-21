@@ -95,13 +95,19 @@ Column {
     }
   }
 
+  // The count and the way to more of them. Inset like a row's own text rather
+  // than flush to the column: the list's left edge belongs to the selected
+  // row's fill, and a footer sitting on it reads as a row that lost its
+  // padding. The height is what puts air above and below the pair, because the
+  // column's spacing between children is two pixels.
   Item {
     width: parent.width
     visible: Model.showListFooter(root.service.messages.length)
-    implicitHeight: Style.space(30)
+    implicitHeight: Style.space(44)
 
     Text {
       anchors.left: parent.left
+      anchors.leftMargin: Style.space(14)
       anchors.verticalCenter: parent.verticalCenter
       text: root.service.resultSummary
       color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.42)
@@ -111,6 +117,7 @@ Column {
 
     Button {
       anchors.right: parent.right
+      anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
       visible: root.service.hasMore
       text: root.service.listLoading ? "Loading…" : "Load more"

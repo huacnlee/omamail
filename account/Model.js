@@ -145,6 +145,37 @@ function applyLabelChange(summary, action) {
 
 // Skeleton rows replace only an empty list's first fetch. Loading another page
 // leaves useful messages in place and reports its progress at the list foot.
+// ------------------------------------------------------------- reading zoom
+//
+// The body's zoom is the one size in the window that belongs to the reader
+// rather than to the theme: Omarchy sets the font scale the chrome follows,
+// and this is somebody leaning in to one message. It is kept because it is not
+// about one message — somebody who needed the text bigger needs it bigger for
+// their mail.
+//
+// A twentieth per step, so Ctrl+scroll lands on values it can land on again
+// and a saved one reads back as what was set. The bounds are where a message
+// stops being a message: a smudge below, a poster above.
+var ZOOM_MIN = 0.6
+var ZOOM_MAX = 2.5
+var ZOOM_STEPS_PER_UNIT = 20
+
+// What a zoom read back off disk means. Anything that is not a number is a
+// file that was hand-edited or never written, and the answer to both is the
+// size it shipped at.
+function clampZoom(value) {
+  if (value === null || value === undefined || value === "") return 1
+  var zoom = Number(value)
+  if (!isFinite(zoom)) return 1
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
+    Math.round(zoom * ZOOM_STEPS_PER_UNIT) / ZOOM_STEPS_PER_UNIT))
+}
+
+function zoomAfterStep(zoom, step) {
+  var by = Number(step)
+  return clampZoom(clampZoom(zoom) + (isFinite(by) ? by : 0))
+}
+
 function showInitialListSkeleton(loading, messageCount) {
   return !!loading && Math.max(0, Number(messageCount) || 0) === 0
 }

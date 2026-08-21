@@ -154,9 +154,15 @@ Item {
     }
   }
 
+  // Every way out of a draft: this view's own Back, Discard, the window's
+  // Escape, and the send that succeeded. The window is told because only the
+  // window knows where the draft was raised from.
+  signal closed()
+
   function finish() {
     reset()
     opened = false
+    closed()
   }
 
   function submit() {

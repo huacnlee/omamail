@@ -115,13 +115,13 @@ const html = load("message/Html.js")
     + "<p>copy</p><img src=\"http://127.0.0.1/x.png\" width=\"90\">"
     + "<img src=\"https://cdn.example.com/real.png\" width=\"90\">"
   const asked = html.sanitize(body, { withPlainText: true })
-  // Numbered off the sender's own tree, before anything is dropped: a message's
-  // third picture is its third picture whether or not the first two were a
-  // beacon and a request to the machine itself.
-  assert.strictEqual(asked.plainText.text, "[image 1]copy\n[image 2][image 3]")
+  // Numbered off the sender's own tree, before the image policy is applied: a
+  // message's second picture is its second picture whether or not the first was
+  // a request to the machine itself. A beacon is the one thing not counted —
+  // it is not a picture, and a marker offering to open one would fire it.
+  assert.strictEqual(asked.plainText.text, "copy\n[image 1][image 2]")
   deepEqual(asked.plainText.images, [
-    "https://track.example.com/p.gif", "http://127.0.0.1/x.png",
-    "https://cdn.example.com/real.png"])
+    "http://127.0.0.1/x.png", "https://cdn.example.com/real.png"])
   // ...while the document itself keeps none of them.
   assert.strictEqual(asked.images, 0)
   assert.ok(asked.html.indexOf("127.0.0.1") < 0)
@@ -140,18 +140,31 @@ const html = load("message/Html.js")
 {
   // A stack of empty wrappers is the innermost thing in it.
   assert.strictEqual(html.sanitize("<div><div><div><p>hi</p></div></div></div>").html, "<p>hi</p>")
-  assert.strictEqual(html.sanitize("<div><table><tr><td>x</td></tr></table></div>").html,
-    "<table><tr><td>x</td></tr></table>")
+  const table = "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>"
+  assert.strictEqual(html.sanitize("<div>" + table + "</div>").html, table)
   // An inline element carrying nothing is nothing.
   assert.strictEqual(html.sanitize("<p><span>a</span>b<font>c</font></p>").html, "<p>abc</p>")
 
   // Anything the wrapper carries is a reason it is there.
   assert.strictEqual(html.sanitize("<div style=\"padding:8px\"><p>hi</p></div>").html,
     "<div style=\"padding:8px\"><p>hi</p></div>")
-  assert.strictEqual(html.sanitize("<div align=\"center\"><p>hi</p></div>").html,
-    "<div align=\"center\"><p>hi</p></div>")
-  // Qt honours <center>, so a card that was centred must not come out left.
-  assert.strictEqual(html.sanitize("<center><p>hi</p></center>").html, "<center><p>hi</p></center>")
+  // Centring is not one of those reasons. The sender centres a 600px card in
+  // the middle of a wide window; the reader is a panel of left-aligned text
+  // beside a left-aligned list, and a newsletter kept centred there comes out
+  // as a column of short lines adrift in it.
+  assert.strictEqual(html.sanitize("<div align=\"center\"><p>hi</p></div>").html, "<p>hi</p>")
+  assert.strictEqual(html.sanitize("<center><p>hi</p></center>").html, "<p>hi</p>")
+  assert.strictEqual(html.sanitize("<p style=\"text-align:center;font-size:9px\">hi</p>").html,
+    "<p style=\"font-size:9px\">hi</p>")
+  // Every other alignment is the sender saying something the panel can honour:
+  // a column of numbers reads right, and Arabic reads from the other end.
+  assert.ok(html.sanitize("<p style=\"text-align:right\">9.00</p>").html
+    .indexOf("text-align:right") > 0)
+  // And a cell keeps even centring: a column lining up is the one thing a grid
+  // is kept for.
+  assert.ok(html.sanitize("<table><tr><th align=\"center\">a</th><th>b</th></tr>"
+    + "<tr><td style=\"text-align:center\">c</td><td>d</td></tr></table>").html
+    .indexOf("text-align:center") > 0)
   // <b> is not <span>: it says something with no attributes at all.
   assert.strictEqual(html.sanitize("<p><b>bold</b></p>").html, "<p><b>bold</b></p>")
 
@@ -195,6 +208,37 @@ const html = load("message/Html.js")
   deepEqual(html.readPlainText("<div title=\"<img src=ghost.png>\">real</div>"),
     { text: "real", images: [] })
   deepEqual(html.readPlainText(""), { text: "", images: [] })
+
+  // HTML collapses a run of whitespace and so does this: a template's
+  // indentation is not the sender spacing anything out, and kept it arrives as
+  // gaps in the middle of sentences.
+  assert.strictEqual(html.readPlainText("<p>Dear\n     Sir,\n  hello</p>").text,
+    "Dear Sir, hello")
+  // A non-breaking space is spacing the sender asked for, and survives.
+  assert.strictEqual(html.readPlainText("a&nbsp;&nbsp;b").text, "a  b")
+
+  // A cell ends a line. Without that a statement's labels and its figures come
+  // out run together on one line each, which is the shape the fallback exists
+  // to avoid.
+  assert.strictEqual(
+    html.readPlainText("<table><tr><td>Period</td><td>2026/07</td></tr>"
+      + "<tr><td>Due</td><td>2026/08/03</td></tr></table>").text,
+    "Period\n2026/07\n\nDue\n2026/08/03")
+
+  // A line does not start where the markup was indented. Every nested tag a
+  // block sits inside contributes a space of its own, so a heading four boxes
+  // down arrived four spaces in — and a run of two is two non-breaking spaces
+  // by the time the fallback is drawn, which is a ragged left edge down the
+  // whole message. The sender indented markup, not text.
+  assert.strictEqual(
+    html.readPlainText("<div>\n  <div>\n    <p>\n      Heading\n    </p>\n  </div>\n</div>").text,
+    "Heading")
+  assert.strictEqual(html.readPlainText("<p>a</p>\n\n   <p>  b</p>").text, "a\nb")
+
+  // A beacon is not a picture, and a marker offering to open one is noise in
+  // the middle of the message it was hidden inside.
+  deepEqual(html.readPlainText("<img src=\"p.gif\" width=\"1\"><img src=\"a.png\">"),
+    { text: "[image 1]", images: ["a.png"] })
 }
 
 // ------------------------------------------------------------- stripping
@@ -215,7 +259,8 @@ assert.strictEqual(html.sanitize("<meta charset='utf-8'>body").html, "body")
 // mail is still table-and-inline-style HTML written for Outlook, which is
 // exactly the subset Qt renders.
 // Layout survives; the sender's palette does not (see the theming block).
-const table = "<table><tr><td style=\"padding:6px\"><b>Total</b></td></tr></table>"
+const table = "<table><tr><td>Item</td><td style=\"padding:6px\"><b>Total</b></td></tr>"
+  + "<tr><td>Tea</td><td>2.00</td></tr></table>"
 assert.strictEqual(html.sanitize(table).html, table)
 assert.strictEqual(html.sanitize("<a href=\"https://example.com\">link</a>").html,
   "<a href=\"https://example.com\">link</a>")
@@ -443,22 +488,41 @@ assert.strictEqual(html.tableDepth(null), 0)
 // Sibling tables are not nesting.
 assert.strictEqual(html.tableDepth("<table></table><table></table>"), 1)
 
-// A shallow table is real tabular content and survives untouched.
-const shallow = "<table><tr><td>Status</td><td>Job</td></tr></table>"
-assert.strictEqual(html.flattenTables(shallow, 2), shallow)
+// A grid survives untouched however deep it sits: two rows that each hold more
+// than one cell is the sender saying "these line up", and nothing else in the
+// message says it.
+const grid = "<table><tr><th>Status</th><th>Job</th></tr><tr><td>ok</td><td>build</td></tr></table>"
+assert.strictEqual(html.flattenTables(grid, 2), grid)
+assert.strictEqual(html.flattenTables("<table><tr><td><table><tr><td>"
+  + grid + "</td></tr></table></td></tr></table>").indexOf("<th>Status</th>") > 0, true,
+  "a grid three tables down is still the message")
 
-// Past the limit the structure becomes plain blocks, keeping the content and
-// whatever styling rode on it.
+// A row of cells is not a grid: one row is how mail lays a logo out beside a
+// nav, and how GitHub centres a card. It becomes plain blocks.
+const strip = "<table><tr><td>logo</td><td>nav</td></tr></table>"
+assert.strictEqual(html.flattenTables(strip, 2).indexOf("<table"), -1)
+assert.ok(html.flattenTables(strip, 2).indexOf("logo") > 0, "the content stays")
+
+// So does a single cell, which is a box and nothing more — with whatever
+// styling rode on it.
 const deep = "<table><tr><td><table><tr><td><table><tr><td style=\"padding:4px\">deep</td></tr></table></td></tr></table></td></tr></table>"
 const flat = html.flattenTables(deep, 2)
-assert.strictEqual(html.tableDepth(flat), 2, "nothing survives past the limit")
+assert.strictEqual(html.tableDepth(flat), 0, "no layout table survives at any depth")
 assert.ok(flat.indexOf("deep") > 0, "the content stays")
 assert.ok(flat.indexOf("padding:4px") > 0, "and so does its styling")
 // Tags balance, or Qt renders the rest of the message inside a stray block.
 assert.strictEqual((flat.match(/<div/g) || []).length, (flat.match(/<\/div>/g) || []).length)
 
+// The depth cap is still the backstop, and it counts the grids that were kept
+// rather than every box on the way down.
+const grids = "<table><tr><td>a</td><td>b</td></tr><tr><td><table><tr><td>c</td><td>d</td></tr>"
+  + "<tr><td><table><tr><td>e</td><td>f</td></tr><tr><td>g</td><td>h</td></tr></table></td></tr>"
+  + "</table></td><td>i</td></tr></table>"
+assert.strictEqual(html.tableDepth(grids), 3)
+assert.strictEqual(html.tableDepth(html.flattenTables(grids, 2)), 2, "nothing survives past the limit")
+
 // sanitize flattens by default; a caller can ask for the original.
-assert.strictEqual(html.complexity(html.sanitize(deep).html).tableDepth, 2)
+assert.strictEqual(html.complexity(html.sanitize(deep).html).tableDepth, 0)
 assert.strictEqual(html.complexity(html.sanitize(deep, { keepTables: true }).html).tableDepth, 3)
 
 // The backstop still catches anything flattening cannot tame.
@@ -504,6 +568,25 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(plainDoc.indexOf("&nbsp;&nbsp;spaced") > 0, "hand-made alignment survives")
   assert.ok(plainDoc.indexOf("Hi<br>") > 0, "line breaks survive")
 
+  // A sender pads the inbox's preview line with characters that draw nothing —
+  // soft hyphens and combining grapheme joiners, hundreds of them — so the list
+  // shows one sentence and stops. Linear's text/plain is fifty lines, and
+  // thirty-one of them hold nothing but that padding: rendered honestly, a page
+  // of blank between the greeting and the message.
+  var padded = "Lead sentence.\n\n\u034f \u00ad\u034f\u2007\u00a0\u00ad\u034f\n \u00ad\u034f\n\nBody."
+  assert.strictEqual(html.readableText(padded), "Lead sentence.\n\nBody.")
+  assert.ok(html.plainTextDocument(padded, {}, false).indexOf("Lead sentence.<br><br>Body.") > 0)
+  // One blank line is a paragraph break and stays one.
+  assert.strictEqual(html.readableText("a\n\nb"), "a\n\nb")
+  assert.strictEqual(html.readableText("a\n\n\n\n\nb"), "a\n\nb")
+  // A line the sender indented is still indented, and a single break is single.
+  assert.strictEqual(html.readableText("a\n  b"), "a\n  b")
+  // Spacing inside a line that says something is the sender aligning it.
+  assert.strictEqual(html.readableText("Name\u00a0\u00a0Jane"), "Name\u00a0\u00a0Jane")
+  // A zero-width space inside a word is padding too, and the word closes up.
+  assert.strictEqual(html.readableText("un\u200bsubscribe"), "unsubscribe")
+  assert.strictEqual(html.readableText(null), "")
+
   // A message that shipped its own text/plain part never had images in it.
   assert.ok(html.plainTextDocument("[image 1]", {}, false).indexOf("<a ") < 0,
     "markers are left alone when the text is the sender's own")
@@ -546,8 +629,9 @@ assert.ok(bare.indexOf("x</body>") > 0)
   // narrow pass must not leave its marks on the wide one that follows.
   // Only the table carries 600: a width on an image is the picture's own and is
   // clamped by the stylesheet's max-width instead.
-  var fitted = "<table width=\"600\"><tr><td style=\"padding:4px 30px\">"
-    + "<img src=\"a.png\" width=\"540\" height=\"200\"></td></tr></table>"
+  var fitted = "<table width=\"600\"><tr><td>a</td><td>b</td></tr>"
+    + "<tr><td style=\"padding:4px 30px\">"
+    + "<img src=\"a.png\" width=\"540\" height=\"200\"></td><td>c</td></tr></table>"
   var narrow = html.documentFor(fitted, { maxImageWidth: 380, compact: true })
   var roomy = html.documentFor(fitted, { maxImageWidth: 800, compact: true })
   assert.ok(narrow.indexOf('width="600"') < 0, "600 does not fit in 380")
@@ -557,6 +641,11 @@ assert.ok(bare.indexOf("x</body>") > 0)
     "and the same width twice is the same document")
   // Uncompacted, the sender's gutters are their own again.
   assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf("padding:4px 30px") > 0)
+  // A width the window cannot hold is given up at every window, though: the
+  // reader has no horizontal scroll, so what overflows is simply not read.
+  assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf('width="600"') < 0)
+  assert.ok(html.documentFor(fitted, { maxImageWidth: 800 }).indexOf('width="600"') > 0,
+    "and one that fits is the sender's own")
   assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf('height="200"') < 0,
     "heights come out at every width")
 
@@ -567,6 +656,16 @@ assert.ok(bare.indexOf("x</body>") > 0)
     html.documentFor(built.html, { maxImageWidth: 380, compact: true }))
   assert.strictEqual(html.documentFor(built.document, { maxImageWidth: 800, compact: true })
     .indexOf('width="600"') > 0, true, "and it is still good at the next width")
+
+  // Qt honours white-space:nowrap, and the reader has nowhere to scroll to. A
+  // heading the sender promised would stay on one line is a heading cut off at
+  // the panel's edge — Cloudflare's Chinese subject ran a third of the way past
+  // it. Wrapping is what the reader can honour.
+  var nowrap = "<p style=\"white-space:nowrap;font-size:28px\">a long heading</p>"
+  assert.ok(html.relaxFixedWidths(nowrap, 380).indexOf("nowrap") < 0)
+  assert.ok(html.relaxFixedWidths(nowrap, 380).indexOf("font-size:28px") > 0,
+    "and nothing else about the line changes")
+  assert.ok(html.documentFor(nowrap, { maxImageWidth: 380 }).indexOf("nowrap") < 0)
 
   var relaxed = html.relaxFixedWidths(
     '<table width="600"><td width="100" style="width:640px">x</td></table>', 380)

@@ -779,39 +779,91 @@ function isTrackingPixel(node) {
   return false
 }
 
-// Tables past this depth become plain blocks. Two levels covers the real
-// tabular content in mail — a status table, a receipt — while the layers above
-// it are only there to centre a card in an Outlook window.
+// Grids past this depth become plain blocks. Two levels covers the real
+// tabular content in mail — a status table, a receipt — and past it Qt is
+// resolving column widths against column widths for no one's benefit.
 var KEEP_TABLE_DEPTH = 2
 var TABLE_PARTS = {
   table: true, thead: true, tbody: true, tfoot: true, tr: true, td: true, th: true
 }
 
-// Depth is what matters, not count. Qt lays tables out by resolving column
-// widths against each other, and deeply nested tables with competing widths —
-// which is exactly how notification mail is built — can keep that resolution
-// going far longer than anyone will wait. Real mail in this mailbox reaches
-// nine levels.
-function flattenTablesIn(node, limit, depth) {
-  var kept = []
+// A table in mail is either the sender's content or the sender's layout, and
+// almost all of them are the layout: a box centring a card in an Outlook
+// window. Depth cannot tell the two apart, because the layout is what wraps
+// the content — counting from the outside kept the scaffolding and flattened
+// the table that meant something. GitHub's build-status table sits three
+// tables down, and its header row came out as "Status", "Job", "Annotations"
+// on three lines of their own.
+//
+// So the question asked of a table is whether it is a **grid**: two rows that
+// each hold more than one cell. That is the whole of what a table can say that
+// a stack of blocks cannot — these cells line up with those. One row of cells
+// is a logo beside a nav, one cell is a box, and neither loses anything by
+// becoming what it already was.
+function rowsOf(node, out) {
   for (var i = 0; i < node.children.length; i++) {
     var child = node.children[i]
-    if (child.type === "text") {
-      kept.push(child)
+    if (child.type === "text") continue
+    // A nested table's rows are its own. They answer this question for it.
+    if (child.name === "table") continue
+    if (child.name === "tr") out.push(child)
+    rowsOf(child, out)
+  }
+  return out
+}
+
+function isGrid(node) {
+  var rows = rowsOf(node, [])
+  var lines = 0
+  for (var i = 0; i < rows.length; i++) {
+    var cells = 0
+    for (var j = 0; j < rows[i].children.length; j++) {
+      var cell = rows[i].children[j]
+      if (cell.type === "text") continue
+      if (cell.name === "td" || cell.name === "th") cells++
+    }
+    if (cells >= 2 && ++lines >= 2) return true
+  }
+  return false
+}
+
+// What is worth keeping off a table that was the layout is the styling that
+// rode on it, not the table semantics.
+function asBlock(node) {
+  var style = attributeValue(node, "style")
+  node.name = "div"
+  node.attrs = style === "" ? [] : [{ name: "style", value: style }]
+}
+
+// The parts belonging to this table, which stops at a nested one: that table
+// has been asked its own question already, and those rows and cells are its.
+function flattenPartsOf(node) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text" || child.name === "table") continue
+    flattenPartsOf(child)
+    if (TABLE_PARTS[child.name] === true) asBlock(child)
+  }
+}
+
+// Depth is what the limit counts, and it counts grids: the boxes on the way
+// down are not tables by the time this returns, and charging them against a
+// budget meant for competing column widths is what put the budget on the
+// wrong two levels in the first place.
+function flattenTablesIn(node, limit, depth) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") continue
+    if (child.name !== "table") {
+      flattenTablesIn(child, limit, depth)
       continue
     }
-    var childDepth = child.name === "table" ? depth + 1 : depth
-    flattenTablesIn(child, limit, childDepth)
-    if (TABLE_PARTS[child.name] === true && childDepth > limit) {
-      // The layers above a real table exist to position it, so what is worth
-      // keeping is the styling that rode on them, not the table semantics.
-      var style = attributeValue(child, "style")
-      child.name = "div"
-      child.attrs = style === "" ? [] : [{ name: "style", value: style }]
-    }
-    kept.push(child)
+    var keep = depth < limit && isGrid(child)
+    flattenTablesIn(child, limit, keep ? depth + 1 : depth)
+    if (keep) continue
+    flattenPartsOf(child)
+    asBlock(child)
   }
-  node.children = kept
 }
 
 // ================================================================ sanitize
@@ -833,7 +885,19 @@ var MAX_TABLE_DEPTH = 4
 // every element in the document, which on a large message is most of the work.
 var HANDLER_ATTRIBUTE = /^on[a-z]+$/
 
+// The sender centres a 600px card in the middle of a wide window. This reader
+// is a panel of left-aligned text beside a left-aligned list, and the same
+// mail kept centred in it comes out as a column of short lines adrift — the
+// window is the card. Every other alignment is something the panel can honour:
+// a column of numbers reads right, and Arabic reads from the other end.
+//
+// A cell is the exception, because a column lining up is the one thing a grid
+// is kept for.
+var CENTRED = /^center\b/i
+var ALIGNED_BY_COLUMN = { td: true, th: true }
+
 function cleanAttributes(node, keepColors, declarations) {
+  var uncentre = ALIGNED_BY_COLUMN[node.name] !== true
   var attrs = node.attrs
   var kept = attrs
   var dropped = false
@@ -847,6 +911,7 @@ function cleanAttributes(node, keepColors, declarations) {
     // trip through a mail client.
     else if (name.charCodeAt(0) === 111 && HANDLER_ATTRIBUTE.test(name)) drop = true
     else if (name === "href" && !safeHref(attr.value)) drop = true
+    else if (uncentre && name === "align" && CENTRED.test(String(attr.value))) drop = true
 
     if (drop && !dropped) {
       dropped = true
@@ -862,6 +927,7 @@ function cleanAttributes(node, keepColors, declarations) {
   for (var j = 0; j < declarations.length; j++) {
     var declaration = declarations[j]
     if (!keepColors && COLOUR_DECLARATIONS[declaration.name] === true) continue
+    if (uncentre && declaration.name === "text-align" && CENTRED.test(declaration.value)) continue
     if (/url\s*\(/i.test(declaration.value)
       && /url\s*\(/i.test(decodeReferences(declaration.value))) continue
     survivors.push(declaration)
@@ -884,9 +950,10 @@ function cleanAttributes(node, keepColors, declarations) {
 // a box with nothing on it around a single box is that box, and an inline
 // element with nothing on it is nothing at all.
 var TRANSPARENT_INLINE = { span: true, font: true, small: true, big: true }
-// Not <center>: Qt honours it, and a card that was centred would come out
-// against the left edge. A container only counts as plain when it carries no
-// meaning of its own — which is the whole test being applied here.
+// <center> is here because it arrives as a <div>: `clean` renames it, on the
+// same grounds that take `text-align:center` off everything but a cell. A
+// container only counts as plain when it carries no meaning of its own — which
+// is the whole test being applied here.
 var PLAIN_CONTAINER = {
   div: true, section: true, article: true, aside: true,
   header: true, footer: true, main: true, nav: true
@@ -989,6 +1056,9 @@ function sanitize(html, options) {
         continue
       }
       if (DROPPED_ELEMENTS[child.name] === true) continue
+      // <center> is the same instruction spelled as an element, and Qt honours
+      // it. As a plain box it is one more wrapper for `collapse` to fold away.
+      if (child.name === "center") child.name = "div"
 
       // The style attribute is the only one worth parsing, and it is parsed
       // once per element: whether the sender marked this hidden and what
@@ -1185,12 +1255,25 @@ function fitDeclaration(declaration, node, fit) {
     if (name === "padding" || name === "margin")
       return { name: name, value: withoutSides(declaration.value) }
   }
-  if (fit.widths && name === "width" && SIZED_ELEMENTS[node.name] === true) {
-    var pixels = declaration.value.match(/^(\d+)px$/i)
-    if (pixels && Number(pixels[1]) > fit.limit) return null
+  if (fit.widths) {
+    if (name === "width" && SIZED_ELEMENTS[node.name] === true) {
+      var pixels = declaration.value.match(/^(\d+)px$/i)
+      if (pixels && Number(pixels[1]) > fit.limit) return null
+    }
+    // Qt honours this and the reader has nowhere to scroll to, so a line the
+    // sender promised would not wrap is a line that runs off the panel and is
+    // not read. Wrapping is the half of that promise the reader can keep.
+    if (name === "white-space" && /^nowrap\b/i.test(declaration.value)) return null
   }
   return declaration
 }
+
+// Splitting an element's declarations to fit them is most of what a relayout
+// costs, and a relayout happens on every drag of the splitter. Everything the
+// width pass can change says one of two words, so the string is asked before
+// it is parsed. The gutter pass has no such tell — padding, margin and their
+// four sides — and skips the question.
+var FITTABLE_DECLARATION = /width|nowrap/i
 
 // The attribute list an element is written with. The node keeps its own: this
 // is the reader fitting a message to the window it happens to be, and the same
@@ -1200,7 +1283,15 @@ function fitAttributes(node, fit) {
   if (attrs.length === 0) return attrs
   var isImage = fit.heights && node.name === "img"
   var isSized = fit.widths && SIZED_ELEMENTS[node.name] === true
-  if (!isImage && !isSized && !fit.sides) return attrs
+  if (!isImage && !isSized && !fit.sides) {
+    if (!fit.widths) return attrs
+    // Anything can carry white-space:nowrap, so the fast path out of here has
+    // to ask every element about it — and asks with a substring test, because
+    // splitting the declarations of a document that has none is the whole cost
+    // of a relayout for nothing.
+    var carried = attributeOf(node, "style")
+    if (carried === null || String(carried.value).indexOf("nowrap") < 0) return attrs
+  }
 
   var out = null
   for (var i = 0; i < attrs.length; i++) {
@@ -1214,7 +1305,8 @@ function fitAttributes(node, fit) {
     if (isImage && attr.name === "height") replacement = null
     else if (isSized && attr.name === "width" && /^\d+$/.test(String(attr.value))
       && Number(attr.value) > fit.limit) replacement = null
-    else if (attr.name === "style" && attr.value !== null && attr.value !== undefined) {
+    else if (attr.name === "style" && attr.value !== null && attr.value !== undefined
+      && (fit.sides || FITTABLE_DECLARATION.test(String(attr.value)))) {
       var declarations = splitDeclarations(attr.value)
       var kept = []
       var changed = false
@@ -1277,7 +1369,11 @@ function documentFor(bodyHtml, colors) {
   // No parse at all when the caller kept the document: this is rebuilt on every
   // relayout, and the body it is built from has not changed.
   var root = documentTree(bodyHtml)
-  var fit = fitting(true, palette.compact === true, palette.compact === true, maxImage)
+  // The gutters go only when the window is too narrow to spare them, because a
+  // wide one reads better with the sender's own spacing. A width the window
+  // cannot hold goes at every width: there is no horizontal scroll here, so
+  // what overflows is not read at all.
+  var fit = fitting(true, palette.compact === true, maxImage >= MIN_IMAGE_WIDTH, maxImage)
 
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
@@ -1320,15 +1416,34 @@ var BLOCK_ELEMENTS = {
 // The markers and `imageSources` are numbered by the same walk over the same
 // tree, so the two lists line up position for position. They have to: a marker
 // that disagrees with the list opens somebody else's picture.
+// A run of spaces, tabs and newlines in the source is one space, which is what
+// HTML says it is and what the renderer would have done with it. Kept as
+// written, a template's indentation arrives as gaps in the middle of a
+// sentence — a bank statement came out with its greeting a hand's width from
+// the name it greeted.
+var SOURCE_WHITESPACE = /[ \t\r\n\f]+/g
+
+// A cell ends a line the way a paragraph does, even though a cell is not a
+// block. Without it a row's label and its figure run together into one word,
+// and a statement is nothing but rows.
+var CELL_ELEMENTS = { td: true, th: true }
+
 function flatten(node, state) {
   for (var i = 0; i < node.children.length; i++) {
     var child = node.children[i]
     if (child.type === "text") {
-      if (!child.raw) state.text += decodeReferences(child.text)
+      // Collapsed before the references are decoded, not after: the run in the
+      // source is the template's formatting, while &nbsp;&nbsp; is the sender
+      // spacing something out by hand and decodes to spaces of its own.
+      if (!child.raw) state.text += decodeReferences(child.text.replace(SOURCE_WHITESPACE, " "))
       continue
     }
     if (DROPPED_ELEMENTS[child.name] === true) continue
     if (child.name === "img") {
+      // A beacon is not a picture. Numbered, it becomes a marker offering to
+      // open a 1x1 gif in the middle of the message it was hidden inside — and
+      // the statements that fall back to text are the ones carrying dozens.
+      if (isTrackingPixel(child)) continue
       state.images.push(imageSourceOf(child))
       state.text += "[image " + state.images.length + "]"
       continue
@@ -1339,7 +1454,9 @@ function flatten(node, state) {
     }
     if (child.name === "li") state.text += "• "
     flatten(child, state)
-    if (BLOCK_ELEMENTS[child.name] === true) state.text += "\n"
+    if (BLOCK_ELEMENTS[child.name] === true || CELL_ELEMENTS[child.name] === true) {
+      state.text += "\n"
+    }
   }
   return state
 }
@@ -1352,7 +1469,13 @@ function imageSourceOf(node) {
 function readTree(root) {
   var state = flatten(root, { text: "", images: [] })
   state.text = state.text
-    .replace(/[ \t]+\n/g, "\n")
+    .replace(/[^\S\n]+\n/g, "\n")
+    // A line does not start where the markup was indented. Every box a block
+    // sits inside contributes a space of its own on the way down, so a heading
+    // four tables deep arrived four spaces in — and two spaces are two
+    // non-breaking spaces by the time this is drawn, which is a ragged left
+    // edge down the whole message. The sender indented markup, not text.
+    .replace(/\n[^\S\n]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^\s+|\s+$/g, "")
   return state
@@ -1362,6 +1485,35 @@ function readTree(root) {
 // the pictures those numbers point at.
 function readPlainText(html) {
   return readTree(parse(html))
+}
+
+// Mail is padded with characters that draw nothing. A sender wants the inbox's
+// preview line to end where their first sentence does, so they fill the rest of
+// it with soft hyphens, combining grapheme joiners and zero-width spaces —
+// Linear ships three hundred and sixty of them. Every mail client's list stops
+// there, which is the point; a reader that draws them honestly gets thirty-one
+// blank lines between the greeting and the message.
+//
+// Not U+00A0: a non-breaking space is a space, and spacing is the one thing
+// somebody reading in plain text asked to see.
+var UNDRAWN_CHARACTERS = /[\u00ad\u034f\u061c\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g
+
+// The rest of that padding is whitespace that does draw: figure spaces and
+// non-breaking spaces, twenty-five of each to the line. A line holding nothing
+// else holds nothing — there is no alignment to keep in a line with nothing on
+// it — so it is emptied, and then it is one of a run of blank lines rather than
+// twenty-five columns of nothing.
+var BLANK_LINE = /^[^\S\n]+$/gm
+var BLANK_RUN = /\n{3,}/g
+
+// What the sender wrote, less what nothing draws. One blank line survives a run
+// of them, because that one is a paragraph break.
+function readableText(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(UNDRAWN_CHARACTERS, "")
+    .replace(BLANK_LINE, "")
+    .replace(BLANK_RUN, "\n\n")
+    .replace(/^\s+|\s+$/g, "")
 }
 
 function escapeText(text) {
@@ -1385,7 +1537,7 @@ function plainTextDocument(text, colors, linkImages) {
   var foreground = String(palette.foreground || "")
   var background = String(palette.background || "")
   var link = String(palette.link || foreground)
-  var body = preserveSpacing(escapeText(text))
+  var body = preserveSpacing(escapeText(readableText(text)))
   if (linkImages) {
     body = body.replace(/\[image (\d+)\]/g, function(match, index) {
       return "<a href=\"" + IMAGE_LINK_PREFIX + index + "\">" + match + "</a>"

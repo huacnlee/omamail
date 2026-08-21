@@ -4,6 +4,7 @@ import Quickshell.Io
 import "account"
 
 import "account/Accounts.js" as Accounts
+import "account/Model.js" as Model
 import "providers/Registry.js" as Provider
 
 // Every mailbox on this machine, and whichever one is on screen.
@@ -299,20 +300,51 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // Somebody who needed the text bigger needs it bigger for their mail, not for
+  // the message that made them reach for it. The same goes for reading it as
+  // plain text: that is a way of reading mail, not a way of reading one.
+  property real bodyZoom: 1.0
+  property bool plainTextForced: false
+  // Off until somebody says otherwise, and then it stays said. Loading a
+  // remote image tells its host that this address opened this message, at this
+  // moment — the reason the answer was once asked for one message at a time.
+  // Asked for every message, it is a decision somebody makes once and should
+  // not be asked to make again on the next one; the switch that turns it on is
+  // in Settings, which is also the only place that can turn it back off.
+  property bool alwaysShowImages: false
   property bool windowPrefsLoaded: false
   property string windowWritePayload: ""
 
   function applyWindowPrefs(raw) {
     var parsed = null
     try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-    if (parsed && typeof parsed === "object")
+    if (parsed && typeof parsed === "object") {
       sidebarCollapsed = parsed.sidebarCollapsed === true
+      bodyZoom = Model.clampZoom(parsed.bodyZoom)
+      plainTextForced = parsed.plainTextForced === true
+      alwaysShowImages = parsed.alwaysShowImages === true
+    }
     windowPrefsLoaded = true
   }
 
+  // A toggle is written the moment it is made; a zoom is dragged, and Ctrl and
+  // the wheel walk through a dozen values in a second. So the first change goes
+  // out immediately and anything arriving while that write is still running
+  // waits for the scrolling to stop — dropping those, which is what a bare
+  // `running` guard does, loses the one value the user settled on.
   function saveWindowPrefs() {
-    if (!windowPrefsLoaded || windowWriter.running) return
-    windowWritePayload = JSON.stringify({ sidebarCollapsed: sidebarCollapsed })
+    if (!windowPrefsLoaded) return
+    if (windowWriter.running) {
+      windowPrefsSettling.restart()
+      return
+    }
+    windowPrefsSettling.stop()
+    windowWritePayload = JSON.stringify({
+      sidebarCollapsed: sidebarCollapsed,
+      bodyZoom: bodyZoom,
+      plainTextForced: plainTextForced,
+      alwaysShowImages: alwaysShowImages
+    })
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
     windowWriter.running = true
   }
@@ -322,6 +354,30 @@ Item {
     if (next === sidebarCollapsed) return
     sidebarCollapsed = next
     saveWindowPrefs()
+  }
+
+  function setBodyZoom(value) {
+    var next = Model.clampZoom(value)
+    if (next === bodyZoom) return
+    bodyZoom = next
+    saveWindowPrefs()
+  }
+
+  function setPlainTextForced(value) {
+    var next = value === true
+    if (next === plainTextForced) return
+    plainTextForced = next
+    saveWindowPrefs()
+  }
+
+  function setAlwaysShowImages(value) {
+    var next = value === true
+    if (next === alwaysShowImages) return
+    alwaysShowImages = next
+    saveWindowPrefs()
+    // The message on screen is the one the answer was given about, so it
+    // answers now rather than at the next message.
+    if (next && current) current.showRemoteImages()
   }
   signal duplicateAccount(string email)
 
@@ -449,7 +505,9 @@ Item {
   function loadMore() { if (current) current.loadMore() }
   function select(id) { if (current) current.select(id) }
   function clearSelection() { if (current) current.clearSelection() }
-  function showRemoteImages() { if (current) current.showRemoteImages() }
+  // The notice's own button, which is the switch: what it turns on is every
+  // message, and it says so.
+  function showRemoteImages() { setAlwaysShowImages(true) }
   function rsvp(response) { if (current) current.rsvp(response) }
   function unsubscribe() { if (current) current.unsubscribe() }
   function cursorOffset(cursorId, delta) {
@@ -553,6 +611,9 @@ Item {
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
       settings: root.settings
+      // Every mailbox obeys the one answer: it is about what the reader is
+      // willing to tell a sender, not about which account the mail came to.
+      alwaysShowImages: root.alwaysShowImages
 
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
       onReadyChanged: root.recount()
@@ -577,6 +638,12 @@ Item {
     onLoaded: root.applyWindowPrefs(text())
     // No file yet is the ordinary first-run state, not an error.
     onLoadFailed: root.applyWindowPrefs("")
+  }
+
+  Timer {
+    id: windowPrefsSettling
+    interval: 500
+    onTriggered: root.saveWindowPrefs()
   }
 
   Process {

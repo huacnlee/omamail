@@ -146,6 +146,10 @@ Item {
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
+  // The window's standing answer about remote images, which is where a
+  // message starts. Off, and every message begins blocked and is asked about
+  // one at a time.
+  property bool alwaysShowImages: false
   property bool remoteImagesAllowed: false
   // The sender's images, in the order htmlToText numbers them, so a marker in
   // the plain-text body can be traced back to the picture it replaced.
@@ -589,7 +593,7 @@ Item {
     selectedHtml = ""
     selectedDocument = null
     sourceHtml = ""
-    remoteImagesAllowed = false
+    remoteImagesAllowed = alwaysShowImages
     selectedBlockedImages = 0
     selectedRemoteImages = 0
     selectedImages = []
@@ -607,10 +611,19 @@ Item {
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
       if (root.detailLive || !cached) return
-      root.selectedBody = { text: cached.text, source: cached.source }
-      root.renderSource(cached.html)
+      // The text is read out of the cached markup rather than taken off the
+      // disk beside it, on the same grounds the document is: what the cache
+      // holds is the sender's HTML, so a fix to how a message reads reaches
+      // every message already there instead of only the ones fetched after it.
+      // Both readings come off the one parse, and the picture list comes with
+      // them — a marker and the list it points into have to be numbered by the
+      // same walk or a marker opens somebody else's picture.
+      var reread = root.renderSource(cached.html, cached.source === "html")
+      root.selectedBody = reread.plainText
+        ? ({ text: reread.plainText.text, source: "html" })
+        : ({ text: cached.text, source: cached.source })
       root.selectedAttachments = cached.attachments
-      root.selectedImages = cached.images
+      root.selectedImages = reread.plainText ? reread.plainText.images : cached.images
       // The invitation and the unsubscribe offer are read out of the same
       // fetch as the body and never change either, so a message opened before
       // shows its card at the same moment it shows its text rather than a
@@ -650,9 +663,13 @@ Item {
       root.selectedAttachments = Mail.attachments(payload.payload)
       root.selectedInvite = Calendar.fromPayload(payload.payload)
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
+      // What the reader is showing, which is not `decoded` when the cache had
+      // already painted this markup: that text came from `Mail.extractBody`'s
+      // own flattening, and its images are numbered by a different walk than
+      // the list beside it here.
       var record = ({
-        text: decoded.text,
-        source: decoded.source,
+        text: root.selectedBody.text,
+        source: root.selectedBody.source,
         html: rawHtml,
         attachments: root.selectedAttachments,
         images: root.selectedImages,
