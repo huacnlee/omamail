@@ -78,7 +78,7 @@ render or are checked against it, so no second list is maintained by hand.
 
 `j`/`k` move · `Enter` or `o` open · `u` back to list · `e` archive · `d` trash ·
 `s` star · `r`/`a`/`f` reply, reply all, forward · `c` compose · `/` or `Ctrl+K`
-search · `g i` inbox · `Alt+A` switch account · `?` the reference sheet ·
+search · `Alt+1`…`0` the mailboxes · `Alt+A` switch account · `?` the reference sheet ·
 `Esc` back or close.
 
 **See `docs/KEYS.md`** for the model, the contexts, the full table, and the four

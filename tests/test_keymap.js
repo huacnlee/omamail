@@ -115,7 +115,16 @@ assert.strictEqual(keymap.readableSequence("g,i"), "g then i",
   "a chord reads as a chord, not as Qt's comma")
 assert.strictEqual(keymap.readableSequence("Escape"), "Esc")
 assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
-assert.strictEqual(keymap.displayFor(byId("goInbox")), "g then i")
+assert.strictEqual(keymap.displayFor(byId("goMailbox")), "Alt+1…0",
+  "ten mailbox keys are one row on the sheet, not ten")
+
+// Which key of the row fired, read off the row's own list rather than parsed.
+assert.strictEqual(keymap.slotFor("goMailbox", "Alt+1"), 0)
+assert.strictEqual(keymap.slotFor("goMailbox", "Alt+9"), 8)
+assert.strictEqual(keymap.slotFor("goMailbox", "Alt+0"), 9, "the tenth row, not the zeroth")
+assert.strictEqual(keymap.slotFor("goMailbox", "Ctrl+1"), -1)
+assert.strictEqual(keymap.slotFor("goMailbox", ""), -1)
+assert.strictEqual(keymap.slotFor("nothing", "Alt+1"), -1)
 assert.strictEqual(keymap.displayFor(byId("open")), "Enter, o")
 assert.strictEqual(keymap.displayFor(byId("back")), "Esc")
 assert.strictEqual(keymap.displayFor(byId("switchAccount")), "Alt+A")

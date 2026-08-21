@@ -252,9 +252,26 @@ Item {
     backToList()
   }
 
+  // The rail as the keys see it: one numbered list, the same one the badges
+  // are drawn from, so the number beside a row and the row a number opens are
+  // the same fact rather than two.
+  readonly property var sidebarSlots: service
+    ? Model.sidebarSlots(service.mailboxes, service.labels, 10) : []
+
+  function goSlot(index) {
+    if (!service || index < 0 || index >= sidebarSlots.length) return
+    var slot = sidebarSlots[index]
+    if (slot.kind === "mailbox") return goMailbox(slot.key)
+    // Not a search: the provider decides what selecting a label means, and on
+    // IMAP it is a folder rather than a term to look for.
+    service.selectLabel(slot.name)
+    backToList()
+  }
+
   // One answer per key id. The ids come from keys/Keymap.js; adding a key is a
-  // row there and a case here, and nothing else.
-  function runShortcut(id) {
+  // row there and a case here, and nothing else. The sequence says which key of
+  // a row fired, for the rows that bind more than one meaning.
+  function runShortcut(id, sequence) {
     // The sheet is on top, so moving moves it. It is a plain overlay rather
     // than a popup, which is why its keys can come from here at all — the
     // switcher's cannot, and answers them itself.
@@ -282,10 +299,7 @@ Item {
     if (id === "compose") return startCompose("new")
     if (id === "send") return compose.submit()
     if (id === "search") return searchBar.focusField()
-    if (id === "goInbox") return goMailbox("inbox")
-    if (id === "goStarred") return goMailbox("starred")
-    if (id === "goUnread") return goMailbox("unread")
-    if (id === "goSent") return goMailbox("sent")
+    if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
@@ -487,6 +501,27 @@ Item {
       // Where the window is, and the only thing that says what a key means.
       // A page is a form before it is anything else, a draft beats reading, a
       // query being typed beats the list underneath it.
+      // Holding Alt names every row on the rail, so the digits are read rather
+      // than remembered. A `Keys` handler, which bindings may not use — but a
+      // modifier on its own cannot be a `Shortcut`, so there is no binding to
+      // route and nothing for `KeyRouter` to own. It accepts nothing: whatever
+      // follows Alt still goes exactly where it went before.
+      //
+      // `activeFocus` is what clears it. Alt+Tab leaves the window with Alt
+      // down and the release lands somewhere else, so waiting for a release
+      // that is never coming would paint the numbers on permanently.
+      property bool altDown: false
+      readonly property bool altHeld: altDown && activeFocus
+        && (keyContext === "list" || keyContext === "reader")
+
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Alt) focusScope.altDown = true
+      }
+      Keys.onReleased: function(event) {
+        if (event.key === Qt.Key_Alt) focusScope.altDown = false
+      }
+      onActiveFocusChanged: if (!activeFocus) altDown = false
+
       readonly property string keyContext:
           root.showPage  ? "page"
         : root.composing ? "compose"
@@ -691,6 +726,8 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
           switcherOpen: accountSwitcher.opened
+          slots: root.sidebarSlots
+          numbersVisible: focusScope.altHeld
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           // Not a search: the provider decides what selecting a label means,
@@ -1142,7 +1179,7 @@ Item {
       KeyRouter {
         context: focusScope.keyContext
         overlay: root.shortcutHelpVisible
-        onTriggered: function(id) { root.runShortcut(id) }
+        onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }
     }
   }

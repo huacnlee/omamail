@@ -13,13 +13,17 @@ Item {
   width: 300; height: 200
 
   property string lastId: ""
+  property string lastSequence: ""
   property string context: "list"
   property bool overlay: false
 
   Omamail.KeyRouter {
     context: host.context
     overlay: host.overlay
-    onTriggered: function(id) { host.lastId = id }
+    onTriggered: function(id, sequence) {
+      host.lastId = id
+      host.lastSequence = sequence
+    }
   }
 
   readonly property Item focusItem: host.Window.activeFocusItem
@@ -55,6 +59,7 @@ Item {
       host.context = "list"
       host.overlay = false
       host.lastId = ""
+      host.lastSequence = ""
       compose.opened = false
       scope.applyContextFocus()
       wait(30)
@@ -156,6 +161,28 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
+    // A row of ten keys, told apart by which one fired. No chord: Qt puts a
+    // 400ms deadline on an unfinished sequence, which is what the mailboxes
+    // used to be reached through and why half the presses did nothing.
+    function test_a_digit_names_the_mailbox_it_opens() {
+      keyClick(Qt.Key_3, Qt.AltModifier)
+      compare(host.lastId, "goMailbox")
+      compare(host.lastSequence, "Alt+3")
+    }
+
+    function test_the_tenth_mailbox_is_the_zero_key() {
+      keyClick(Qt.Key_0, Qt.AltModifier)
+      compare(host.lastId, "goMailbox")
+      compare(host.lastSequence, "Alt+0")
+    }
+
+    function test_a_digit_is_dead_in_a_draft() {
+      host.context = "compose"
+      wait(20)
+      keyClick(Qt.Key_3, Qt.AltModifier)
+      compare(host.lastId, "", "typing a number into a reply is not going anywhere")
+    }
+
     // One press, not a chord: it opens a list the keyboard then walks, so
     // getting to it should not itself be a sequence.
     function test_the_switcher_opens_on_one_press() {
