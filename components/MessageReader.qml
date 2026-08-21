@@ -233,7 +233,10 @@ Item {
         && !root.remoteImagesAllowed && root.remoteImages > 0
       text: (root.remoteImages === 1 ? "1 image is blocked" : root.remoteImages + " images are blocked")
         + ": loading them tells the sender this message was opened"
-      actionLabel: "Show images"
+      // What the button does is turn them on for every message, and Settings
+      // is where that is turned back off — so it says "always" rather than
+      // letting somebody find out afterwards.
+      actionLabel: "Always show"
       textColor: root.textColor
       dimColor: root.dimColor
       accentColor: root.accentColor

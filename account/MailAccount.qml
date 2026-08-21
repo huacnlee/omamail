@@ -146,6 +146,10 @@ Item {
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
+  // The window's standing answer about remote images, which is where a
+  // message starts. Off, and every message begins blocked and is asked about
+  // one at a time.
+  property bool alwaysShowImages: false
   property bool remoteImagesAllowed: false
   // The sender's images, in the order htmlToText numbers them, so a marker in
   // the plain-text body can be traced back to the picture it replaced.
@@ -589,7 +593,7 @@ Item {
     selectedHtml = ""
     selectedDocument = null
     sourceHtml = ""
-    remoteImagesAllowed = false
+    remoteImagesAllowed = alwaysShowImages
     selectedBlockedImages = 0
     selectedRemoteImages = 0
     selectedImages = []

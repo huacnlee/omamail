@@ -45,6 +45,65 @@ Column {
     font.bold: true
   }
 
+  // --------------------------------------------------------------- reading
+
+  Text {
+    text: "READING"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(imagesText.implicitHeight, imagesSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: imagesText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: imagesSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Always show remote images"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        // The cost, in the words of what it actually tells whom. Off, the
+        // reader asks about each message and the answer covers that one.
+        text: "Loading an image tells its host that this address opened the "
+          + "message, and when"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: imagesSwitch
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.alwaysShowImages
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setAlwaysShowImages(!root.service.alwaysShowImages)
+    }
+  }
+
   // ------------------------------------------------------------- mailboxes
 
   Text {
