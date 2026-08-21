@@ -216,10 +216,7 @@ Item {
 
     Row {
       id: titleRow
-      anchors.left: backBar.right
-      anchors.leftMargin: Style.space(16)
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(18)
+      anchors.horizontalCenter: parent.horizontalCenter
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(10)
 
@@ -283,9 +280,11 @@ Item {
         text: root.fromEmail
         foreground: root.textColor
         accent: root.accentColor
+        background: Style.normalFillFor(root.textColor, root.accentColor)
         bordered: true
         fontFamily: root.panelFontFamily
         fontSize: Style.font.bodySmall
+        verticalPadding: Style.spacing.inputPaddingY
         leftAlign: true
         selected: fromMenu.opened
         enabled: root.fromAliases.length > 1

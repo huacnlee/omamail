@@ -327,8 +327,14 @@ grep -q 'anchors.top: header.visible ? header.bottom : parent.top' App.qml \
 if grep -q 'text: subjectField.text' components/ComposeView.qml; then
   fail "the Compose header must not repeat the Subject field"
 fi
-grep -q 'anchors.left: backBar.right' components/ComposeView.qml \
-  || fail "the Compose title must follow the rendered Back control instead of colliding with it"
+awk '
+  /id: titleRow/ { in_title = 1 }
+  in_title && /anchors.horizontalCenter: parent.horizontalCenter/ { centered = 1 }
+  in_title && /anchors.left: backBar.right/ { follows_back = 1 }
+  in_title && /^    }/ { exit !(centered && !follows_back) }
+  END { exit !(centered && !follows_back) }
+' components/ComposeView.qml \
+  || fail "the Compose title must stay centered independently of the Back control"
 awk '
   /id: fromButton/ { in_from = 1 }
   in_from && /bordered: true/ { found = 1 }
@@ -336,6 +342,14 @@ awk '
   END { exit !found }
 ' components/ComposeView.qml \
   || fail "the From dropdown must use an outline treatment"
+awk '
+  /id: fromButton/ { in_from = 1 }
+  in_from && /background: Style.normalFillFor\(root.textColor, root.accentColor\)/ { fill = 1 }
+  in_from && /verticalPadding: Style.spacing.inputPaddingY/ { padding = 1 }
+  in_from && /^      }/ { exit !(fill && padding) }
+  END { exit !(fill && padding) }
+' components/ComposeView.qml \
+  || fail "the From dropdown must share the TextField fill and vertical sizing"
 
 # Sign out and removal are peer account actions. Removal stays last in the
 # action row instead of falling onto a detached row beneath it.
