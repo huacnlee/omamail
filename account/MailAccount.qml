@@ -607,10 +607,19 @@ Item {
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
       if (root.detailLive || !cached) return
-      root.selectedBody = { text: cached.text, source: cached.source }
-      root.renderSource(cached.html)
+      // The text is read out of the cached markup rather than taken off the
+      // disk beside it, on the same grounds the document is: what the cache
+      // holds is the sender's HTML, so a fix to how a message reads reaches
+      // every message already there instead of only the ones fetched after it.
+      // Both readings come off the one parse, and the picture list comes with
+      // them — a marker and the list it points into have to be numbered by the
+      // same walk or a marker opens somebody else's picture.
+      var reread = root.renderSource(cached.html, cached.source === "html")
+      root.selectedBody = reread.plainText
+        ? ({ text: reread.plainText.text, source: "html" })
+        : ({ text: cached.text, source: cached.source })
       root.selectedAttachments = cached.attachments
-      root.selectedImages = cached.images
+      root.selectedImages = reread.plainText ? reread.plainText.images : cached.images
       // The invitation and the unsubscribe offer are read out of the same
       // fetch as the body and never change either, so a message opened before
       // shows its card at the same moment it shows its text rather than a
@@ -650,9 +659,13 @@ Item {
       root.selectedAttachments = Mail.attachments(payload.payload)
       root.selectedInvite = Calendar.fromPayload(payload.payload)
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
+      // What the reader is showing, which is not `decoded` when the cache had
+      // already painted this markup: that text came from `Mail.extractBody`'s
+      // own flattening, and its images are numbered by a different walk than
+      // the list beside it here.
       var record = ({
-        text: decoded.text,
-        source: decoded.source,
+        text: root.selectedBody.text,
+        source: root.selectedBody.source,
         html: rawHtml,
         attachments: root.selectedAttachments,
         images: root.selectedImages,
