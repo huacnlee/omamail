@@ -289,4 +289,53 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     "an empty mailbox has no row to sit on")
 }
 
+// One numbered list over the rail: mailboxes first, then the labels the server
+// reported, and no number at all past the tenth row.
+{
+  const boxes = [
+    { key: "inbox", label: "Inbox" },
+    { key: "unread", label: "Unread" },
+    { key: "sent", label: "Sent" }
+  ]
+  const labels = [
+    { id: "SYS", name: "Category", rawName: "Category", system: true },
+    { id: "L1", name: "Work", rawName: "Work" },
+    { id: "L2", name: "Bills", rawName: "Bills" }
+  ]
+  const slots = model.sidebarSlots(boxes, labels, 10)
+  assert.strictEqual(slots.length, 5, "system labels are not rows and get no number")
+  assert.strictEqual(slots[0].kind, "mailbox")
+  assert.strictEqual(slots[0].key, "inbox")
+  assert.strictEqual(slots[3].kind, "label")
+  assert.strictEqual(slots[3].id, "L1")
+  assert.strictEqual(slots[3].name, "Work", "the name a provider selects a label by")
+
+  assert.strictEqual(model.slotNumberOf(slots, "mailbox", "inbox"), 1)
+  assert.strictEqual(model.slotNumberOf(slots, "mailbox", "sent"), 3)
+  assert.strictEqual(model.slotNumberOf(slots, "label", "L2"), 5)
+  assert.strictEqual(model.slotNumberOf(slots, "label", "SYS"), 0)
+  assert.strictEqual(model.slotNumberOf(slots, "mailbox", "L1"), 0,
+    "a key and an id are not the same handle")
+  assert.strictEqual(model.slotNumberOf([], "mailbox", "inbox"), 0)
+
+  // The ceiling is where a row stops having a key, not where the rail stops.
+  const many = []
+  for (let i = 0; i < 14; i++) many.push({ id: "L" + i, name: "n" + i, rawName: "n" + i })
+  assert.strictEqual(model.sidebarSlots(boxes, many, 10).length, 10)
+  assert.strictEqual(model.slotNumberOf(model.sidebarSlots(boxes, many, 10), "label", "L7"), 0,
+    "past the tenth row there is no digit left to offer")
+  assert.strictEqual(model.sidebarSlots(null, null, 10).length, 0)
+}
+
+// The switcher's cursor wraps where the message list clamps: a menu of two or
+// three rows that stopped at the bottom would make `j` do nothing on the row
+// you use most.
+assert.strictEqual(model.wrappedIndex(0, 1, 3), 1)
+assert.strictEqual(model.wrappedIndex(2, 1, 3), 0, "past the last row comes back to the first")
+assert.strictEqual(model.wrappedIndex(0, -1, 3), 2, "and backwards off the top wraps too")
+assert.strictEqual(model.wrappedIndex(1, 0, 3), 1)
+assert.strictEqual(model.wrappedIndex(0, 1, 1), 0, "one mailbox has nowhere to go")
+assert.strictEqual(model.wrappedIndex(0, 1, 0), 0, "and no mailboxes must not divide by zero")
+assert.strictEqual(model.wrappedIndex(-1, 1, 3), 0)
+
 console.log("test_model.js ok")

@@ -180,6 +180,57 @@ function indexById(list, id) {
   return -1
 }
 
+// The rail as one numbered list, in the order it is drawn: the provider's
+// mailboxes first, then the labels or folders the server reported. Both the
+// sidebar's badges and the keys that jump read this, so the number beside a row
+// and the row a number opens cannot disagree — describing the order twice is
+// how they would.
+//
+// Ten because the keys are digits. Past that a row simply has no number: a
+// mailbox nobody can reach by keyboard is honest, and renumbering the rail
+// every time the server reports a label would not be.
+function sidebarSlots(mailboxes, labels, limit) {
+  var max = Math.max(0, Math.floor(Number(limit) || 0))
+  var out = []
+  var boxes = Array.isArray(mailboxes) ? mailboxes : []
+  for (var i = 0; i < boxes.length && out.length < max; i++) {
+    if (!boxes[i] || !boxes[i].key) continue
+    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || "") })
+  }
+  var all = Array.isArray(labels) ? labels : []
+  for (var j = 0; j < all.length && out.length < max; j++) {
+    if (!all[j] || all[j].system) continue
+    out.push({ kind: "label", id: String(all[j].id || ""),
+      name: String(all[j].rawName || all[j].name || "") })
+  }
+  return out
+}
+
+// What a row's badge says, and 0 for a row past the tenth. One-based, because
+// the badge is read by a person rather than indexed by anything.
+function slotNumberOf(slots, kind, handle) {
+  var list = Array.isArray(slots) ? slots : []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind !== kind) continue
+    if (String(kind === "mailbox" ? list[i].key : list[i].id) !== String(handle)) continue
+    return i + 1
+  }
+  return 0
+}
+
+// Where the switcher's cursor lands after a step. It wraps where the message
+// list clamps, and the difference is the shape of the two things: a mailbox
+// list is long and scrolls, so running off the end has to feel like an end,
+// while a menu of two or three accounts that stopped at the bottom would make
+// `j` do nothing on the row you use most.
+function wrappedIndex(index, delta, count) {
+  var total = Math.max(0, Math.floor(Number(count) || 0))
+  if (total === 0) return 0
+  var from = Math.floor(Number(index) || 0)
+  var step = Math.floor(Number(delta) || 0)
+  return ((from + step) % total + total) % total
+}
+
 // Where the list cursor lands after a step. Anchored on the cursor itself,
 // because the cursor and the open message are two different things: nothing is
 // open while the list is being walked, and walking must not move the reader.

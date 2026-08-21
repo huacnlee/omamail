@@ -112,10 +112,26 @@ key. What matters while working:
 - Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler: a window
   `Shortcut` beats a focused item's `Keys` handler, so a local one looks live and
   never runs. Anything `Escape` should do belongs in `goBack()`.
+- **No chords.** Qt puts a deadline on an unfinished key sequence —
+  `styleHints.keyboardInputInterval`, 400ms — so `g` then `i` half a second
+  later does nothing at all and says nothing about why. The mailboxes were
+  reached that way and are numbered now. A modifier has no deadline.
+- A held modifier is the one thing `KeyRouter` cannot own, because a modifier
+  alone cannot be a `Shortcut`. `App.qml` watches `Key_Alt` with a `Keys`
+  handler to name the rail's rows, accepts nothing, and clears on `activeFocus`
+  rather than on the release — Alt+Tab takes the release to another window.
 - `KeyRouter` builds its shortcuts with an `Instantiator`. A `Repeater` builds
   only `Item`s, so it creates no `Shortcut`s at all and every key goes dead.
 - A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself. Do not add a
   branch for an open popup; do add one for a plain overlay like the sheet.
+- **An open `QQC.Popup` consumes every other key too**, and that is the one
+  place the rule above inverts. It takes the key before the shortcut map sees
+  it — `focus` true or false, bare or modified — so inside a popup a `KeyRouter`
+  binding is what looks live and never runs, and a `Keys` handler on the
+  popup's `contentItem` is the only thing that works. The account switcher is
+  the one component that answers keys itself, for this reason.
+  `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
+  be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when
   content moves under a still pointer and the list scrolls to follow the
   keyboard, so a hover that wrote `cursorId` pulled it back to whatever the

@@ -25,7 +25,7 @@ Three plugin entry points (`manifest.kinds`):
 | Body rendering | **Qt RichText by default**, with a plain-text toggle. Remote images are blocked until the reader asks, per message: Qt performs the fetch for real, so rendering one fires the sender's tracking pixels and reports the read. A source aimed at loopback, a private address or a local file is never fetched at all. No browser engine: `QtWebEngineQuick::initialize()` must run before the host process's `QGuiApplication` is constructed, which a plugin loaded later cannot do. |
 | Sending | **Included.** Reply, reply-all, forward, and compose, plain-text body with quoted original. Requires the `gmail.send` scope. |
 | Bar click | **Opens the app window directly.** Middle click refreshes, right click opens a small menu. |
-| Compose surface | **The whole content area of the one window.** Omarchy's panel mechanism gives every extra window its own region, so a reply must not open one. Only a second mail account would justify a second window. |
+| Compose surface | **The whole content area of the one window.** Omarchy's panel mechanism gives every extra window its own region, so a reply must not open one. Several accounts share that window; a second mailbox is not a second window. |
 | List triage | **Right-click context menu** on any row: reply / reply all / forward, archive / trash / spam, mark read-unread, star, open in browser. |
 | Reader actions | **Icons with tooltips**, not labelled buttons — six actions fit where six labels would not, with the destructive one set apart by a rule and the urgent colour. Icons are Canvas paths on one 16px grid, because Qt's SVG renderer smears strokes at this size. |
 | Invitations | **Read from the message's own `text/calendar` part, answered as an RFC 5546 reply.** No calendar API and no second OAuth scope: an RSVP is a mail to the organiser carrying `METHOD:REPLY` and this account's `ATTENDEE` line, which is what every calendar server already listens for — so it works identically on IMAP. Times are resolved through the `VTIMEZONE` the sender ships rather than a timezone database; a zone that arrives without one keeps the organiser's wall clock and names it, instead of showing a conversion nothing backs. |
@@ -44,7 +44,7 @@ guided by an in-app four-step walkthrough.
 - Listener is a single-shot `socat`; the browser does the rest
 - Scopes: `gmail.modify` (read, label, archive, trash — cannot permanently
   delete) and `gmail.send`
-- Refresh token → GNOME Keyring via `secret-tool`, keyed by client id
+- Refresh token → GNOME Keyring via `secret-tool`, keyed by client and account
 - Client id/secret → `~/.config/omamail/credentials.json`, mode 0600.
   Not plugin settings: `shell.json` is world-readable.
 - Access token → process memory only
@@ -64,11 +64,12 @@ guided by an in-app four-step walkthrough.
 - Unread badge in the bar; merged desktop notification for new mail
 - CJK correctness: RFC 2047 encoded-word headers, hand-rolled base64 + UTF-8
 - Full keyboard operation with Gmail's key bindings
+- Several accounts at once, each with its own cache and unread count, switched
+  from the sidebar, the menu, or `Alt+A`
 
 **Explicitly out of scope**
 
 - Embedded browser engine (see above)
-- Multiple accounts (v2)
 - Attachment download (v1.1)
 - Offline cache
 
@@ -81,7 +82,8 @@ render or are checked against it, so no second list is maintained by hand.
 
 `j`/`k` move · `Enter` or `o` open · `u` back to list · `e` archive · `d` trash ·
 `s` star · `r`/`a`/`f` reply, reply all, forward · `c` compose · `/` or `Ctrl+K`
-search · `g i` inbox · `?` the reference sheet · `Esc` back or close.
+search · `Alt+1`…`0` the mailboxes · `Alt+A` switch account · `?` the reference sheet ·
+`Esc` back or close.
 
 **See `docs/KEYS.md`** for the model, the contexts, the full table, and the four
 Qt behaviours this design is shaped around.

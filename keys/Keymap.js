@@ -20,10 +20,18 @@ var MAIL = ["list", "reader"]
 var ANY = ["*"]
 
 var BINDINGS = [
+  // These two survive the shortcut sheet, and they are the only mailbox keys
+  // that do: behind the sheet they scroll it. A reference sheet taller than the
+  // window that could only be read with a mouse would be the one screen here
+  // that contradicts the rest. The account switcher is not on this list — it is
+  // a popup, and a popup takes every key before the shortcut map sees it, so it
+  // answers `j`/`k` itself.
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move down",
     hintKey: "j / k", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move up" },
   // Live in the reader as well as the list. Moving is deliberately not opening
   // — stepping through with j used to mark half a mailbox read without anyone
@@ -73,14 +81,26 @@ var BINDINGS = [
   { id: "searchAnywhere", keys: ["Ctrl+K"], contexts: ANY,
     group: "Finding", label: "Search from anywhere" },
 
-  { id: "goInbox", keys: ["g,i"], contexts: MAIL,
-    group: "Going", label: "Go to the inbox" },
-  { id: "goStarred", keys: ["g,s"], contexts: MAIL,
-    group: "Going", label: "Go to starred" },
-  { id: "goUnread", keys: ["g,u"], contexts: MAIL,
-    group: "Going", label: "Go to unread" },
-  { id: "goSent", keys: ["g,t"], contexts: MAIL,
-    group: "Going", label: "Go to sent" },
+  // The rail by number, and nothing to remember: hold Alt and every row says
+  // which digit opens it. This replaced `g i` / `g s` / `g u` / `g t`, which
+  // were two problems in one row — a chord nobody recalls under pressure, and
+  // Qt's own 400ms deadline on an unfinished sequence, so half of them did
+  // nothing and said nothing about why. A modifier has no deadline.
+  //
+  // One row, ten sequences: `slotFor` reads which one fired off this row's own
+  // key list, so the `Alt+` prefix is not written down a second time.
+  { id: "goMailbox",
+    keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
+      "Alt+6", "Alt+7", "Alt+8", "Alt+9", "Alt+0"],
+    contexts: MAIL, group: "Going", label: "Go to that mailbox",
+    display: "Alt+1…0" },
+
+  // One key, not nine, and modified rather than bare. Switching mailboxes is
+  // not frequent enough to spend a letter on — the bare ones are the scarce
+  // thing here — and not a chord either, because it opens a list the keyboard
+  // then walks: `j`/`k` to move, `Enter` or `o` to take one.
+  { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
+    group: "Going", label: "Switch account" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
@@ -103,6 +123,22 @@ var BINDINGS = [
     group: "Mailbox", label: "Back, or close the window",
     hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
 ]
+
+function byId(id) {
+  for (var i = 0; i < BINDINGS.length; i++) {
+    if (BINDINGS[i].id === id) return BINDINGS[i]
+  }
+  return null
+}
+
+// Which of a row's keys fired, as a zero-based position in the row's own list.
+// Derived rather than parsed: `Alt+3` is the fourth entry because the table
+// says so, and changing the row to `Ctrl+1…0` would need nothing here.
+function slotFor(id, sequence) {
+  var row = byId(id)
+  var keys = row ? row.keys || [] : []
+  return keys.indexOf(String(sequence || ""))
+}
 
 function matchesContext(binding, context) {
   if (!binding) return false
@@ -163,6 +199,9 @@ function readableSequence(sequence) {
 // separator.
 function displayFor(binding) {
   if (!binding) return ""
+  // A row of ten keys reads as a range. Enumerating them would be ten lines of
+  // sheet for one idea.
+  if (binding.display) return binding.display
   var keys = binding.keys || []
   var out = []
   for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))
