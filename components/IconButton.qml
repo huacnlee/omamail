@@ -5,7 +5,7 @@ import qs.Ui
 // A drawn icon on the kit's shared hover/cursor surface. qs.Ui's
 // PanelActionButton takes a font glyph, and this app's icons are Canvas paths,
 // so this is that button with the glyph swapped for an ActionIcon.
-Rectangle {
+Item {
   id: root
 
   property string iconName: ""
@@ -21,6 +21,7 @@ Rectangle {
   property bool selected: false
   property real iconSize: Style.font.icon
   property real size: Math.max(Style.space(24), iconSize + Style.spacing.sm * 2)
+  property real visualInset: Style.space(2)
   property string fontFamily: Style.font.family
 
   signal clicked()
@@ -31,11 +32,16 @@ Rectangle {
   implicitHeight: size
   width: size
   height: size
-  radius: Style.cornerRadius
   opacity: enabled ? 1.0 : 0.4
-  color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
-    : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
-      : (hot ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
+
+  Rectangle {
+    anchors.fill: parent
+    anchors.margins: root.visualInset
+    radius: Style.cornerRadius
+    color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
+      : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
+        : (root.hot ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
+  }
 
   ActionIcon {
     anchors.centerIn: parent
@@ -49,7 +55,6 @@ Rectangle {
     id: mouse
     anchors.fill: parent
     hoverEnabled: true
-    cursorShape: Qt.PointingHandCursor
     onClicked: root.clicked()
   }
 

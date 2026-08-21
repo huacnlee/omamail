@@ -17,6 +17,7 @@ Column {
   required property color textColor
   required property color dimColor
   required property color dangerColor
+  required property color accentColor
   required property string panelFontFamily
   property bool canLeave: false
   property int accountCount: 1
@@ -134,9 +135,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, Color.accent)
+    color: Style.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, Color.accent)
+    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -353,7 +354,7 @@ Column {
     visible: !!root.auth && root.auth.lastError !== ""
     textFormat: Text.PlainText
     text: root.auth ? root.auth.lastError : ""
-    color: Color.urgent
+    color: root.dangerColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     wrapMode: Text.WordWrap
@@ -422,7 +423,7 @@ Column {
         anchors.top: parent.top
         visible: !step.done
         text: step.number
-        color: step.active ? Color.accent : root.dimColor
+        color: step.active ? root.accentColor : root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         font.bold: step.active
@@ -434,7 +435,7 @@ Column {
         visible: step.done
         name: "check"
         iconSize: Style.font.bodySmall
-        color: Color.accent
+        color: root.accentColor
       }
     }
 

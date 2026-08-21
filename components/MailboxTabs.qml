@@ -11,6 +11,7 @@ Flickable {
   id: root
 
   required property color textColor
+  required property color accentColor
   required property string panelFontFamily
   property string current: "inbox"
   // Provider-specific, and handed down rather than looked up: this row must
@@ -79,7 +80,7 @@ Flickable {
     radius: Style.cornerRadius
     color: "transparent"
     border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, Color.accent)
+    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
 
     Row {
       id: chips

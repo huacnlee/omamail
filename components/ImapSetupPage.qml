@@ -18,6 +18,7 @@ Column {
   required property color textColor
   required property color dimColor
   required property color dangerColor
+  required property color accentColor
   required property string panelFontFamily
   property bool canLeave: false
   property int accountCount: 1
@@ -164,9 +165,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, Color.accent)
+    color: Style.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, Color.accent)
+    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -256,7 +257,7 @@ Column {
       width: parent.width
       visible: text !== ""
       text: ""
-      color: Color.urgent
+      color: root.dangerColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
@@ -365,7 +366,7 @@ Column {
 
     Button {
       visible: !root.signedIn
-      text: root.busy ? "Checking…" : "Connect the mailbox"
+      text: root.busy ? "Checking" : "Connect the mailbox"
       enabled: !root.busy && addressField.text.trim() !== "" && passwordField.text !== ""
       foreground: root.textColor
       bordered: true

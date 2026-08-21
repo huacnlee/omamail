@@ -55,12 +55,17 @@ Rectangle {
     visible: root.actionLabel !== ""
     enabled: !root.busy
     anchors.right: parent.right
-    anchors.rightMargin: Style.space(6)
+    anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
+    width: implicitWidth
+    height: implicitHeight
     text: root.busy && root.busyLabel !== "" ? root.busyLabel : root.actionLabel
     foreground: root.textColor
     bordered: false
     fontSize: Style.font.caption
+    horizontalPadding: Style.space(8)
+    verticalPadding: Style.space(2)
+    focusable: true
     onClicked: root.activated()
   }
 }

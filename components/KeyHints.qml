@@ -15,6 +15,7 @@ Row {
 
   required property color textColor
   required property color dimColor
+  required property color accentColor
   required property string panelFontFamily
 
   // [{ key: "j / k", label: "move" }, ...]
@@ -37,7 +38,7 @@ Row {
         radius: Style.cornerRadius
         // Fill only. An outline as well made these read as buttons you could
         // press, which drew far more attention than a hint deserves.
-        color: Style.normalFillFor(root.textColor, Color.accent)
+        color: Style.normalFillFor(root.textColor, root.accentColor)
 
         Text {
           id: cap

@@ -426,13 +426,8 @@ function resultSummary(list, estimate, hasMore) {
   return shown + " of about " + total
 }
 
-function statusSummary(syncLabel, resultLabel, loading) {
-  var sync = String(syncLabel || "")
-  var result = String(resultLabel || "")
-  if (loading) return sync
-  if (!sync) return result
-  if (!result) return sync
-  return sync + "  ·  " + result
+function statusSummary(syncLabel) {
+  return String(syncLabel || "")
 }
 
 function truncate(text, limit) {

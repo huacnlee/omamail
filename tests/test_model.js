@@ -154,11 +154,9 @@ assert.strictEqual(model.resultSummary([{}, {}], 87, true), "2 of about 87")
 // Gmail's estimate can come back lower than the page it just returned.
 assert.strictEqual(model.resultSummary([{}, {}, {}], 1, true), "3 of about 3")
 
-assert.strictEqual(model.statusSummary("Checking for mail…", "25 of about 80", true),
-  "Checking for mail…", "loading status must not compete with stale pagination")
-assert.strictEqual(model.statusSummary("Synced just now", "25 messages", false),
-  "Synced just now  ·  25 messages")
-assert.strictEqual(model.statusSummary("", "No messages", false), "No messages")
+assert.strictEqual(model.statusSummary("Checking for mail"), "Checking for mail")
+assert.strictEqual(model.statusSummary("Synced just now"), "Synced just now")
+assert.strictEqual(model.statusSummary(""), "")
 
 assert.strictEqual(model.truncate("short", 20), "short")
 assert.strictEqual(model.truncate("a much longer string", 10), "a much lo…")

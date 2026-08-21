@@ -73,9 +73,9 @@ Item {
       horizontalAlignment: Text.AlignHCenter
       text: {
         if (!root.service) return ""
-        if (root.service.listLoading && root.service.messages.length === 0) return "Fetching the mailbox…"
+        if (root.service.listLoading && root.service.messages.length === 0) return "Fetching the mailbox"
         if (root.empty) return root.searching ? "Nothing matches that search" : "Nothing here"
-        return root.service.resultSummary + " · pick one to read it"
+        return "Pick a message to read it"
       }
       color: root.dimColor
       font.family: root.panelFontFamily

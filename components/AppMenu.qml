@@ -2,12 +2,15 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
+import "Menu.js" as Menu
 
 // Links out, plus the handful of actions that have no natural home on screen.
 Item {
   id: root
 
   required property color textColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property string panelFontFamily
   property bool signedIn: false
   // The rail carries the switcher, and the rail is gone at a narrow window —
@@ -24,6 +27,9 @@ Item {
   // Where the menu was asked to appear, kept because it cannot be placed yet.
   property real anchorX: 0
   property real anchorY: 0
+  property int cursorIndex: -1
+  readonly property var menuRows: [markRow, webRow, switchRow, settingsRow,
+    shortcutsRow, projectRow, authorRow]
 
   function openAt(sceneX, sceneY) {
     var local = root.mapFromGlobal(sceneX, sceneY)
@@ -41,14 +47,20 @@ Item {
   function place() {
     if (!menu.visible) return
     var tall = menu.height > 0 ? menu.height : menu.implicitHeight
-    var x = Math.max(0, Math.min(anchorX, root.width - menu.width))
-    var y = anchorY
-    if (y + tall > root.height) y = anchorY - tall
-    if (y + tall > root.height) y = root.height - tall
-    if (y < 0) y = 0
-    menu.x = x
-    menu.y = y
+    var placed = Menu.position(anchorX, anchorY, menu.width, tall, root.width, root.height)
+    menu.x = placed.x
+    menu.y = placed.y
   }
+
+  function selectableRows() {
+    var values = []
+    for (var i = 0; i < menuRows.length; i++) values.push({
+      selectable: true, visible: menuRows[i].visible, enabled: menuRows[i].enabled
+    })
+    return values
+  }
+  function moveCursor(step) { cursorIndex = Menu.nextSelectable(selectableRows(), cursorIndex, step) }
+  function runCursor() { if (cursorIndex >= 0) menuRows[cursorIndex].activated() }
 
   function close() { menu.close() }
 
@@ -84,18 +96,34 @@ Item {
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
-    onOpened: root.place()
+    onOpened: {
+      root.cursorIndex = Menu.firstSelectable(root.selectableRows())
+      root.place()
+    }
     background: Rectangle {
       radius: Style.cornerRadius
-      color: Color.popups.background
+      color: root.popupBackgroundColor
       border.width: 1
-      border.color: Color.popups.border
+      border.color: root.popupBorderColor
     }
     contentItem: Column {
       id: menuItems
       spacing: Style.space(2)
 
+      focus: true
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_J || event.key === Qt.Key_Down) {
+          root.moveCursor(1); event.accepted = true
+        } else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) {
+          root.moveCursor(-1); event.accepted = true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_O) {
+          root.runCursor(); event.accepted = true
+        }
+      }
+
       MenuRow {
+        id: markRow
         // "These" and not "all": it marks the messages that are loaded, which
         // is what you are looking at, not every message the mailbox holds.
         text: "Mark these read"
@@ -103,79 +131,59 @@ Item {
         onActivated: { menu.close(); root.markAllReadRequested() }
       }
       MenuRow {
-        text: "Open in Gmail"
+        id: webRow
+        text: "Open web inbox..."
         enabled: root.signedIn
         onActivated: { menu.close(); root.openWebRequested() }
       }
 
-      Separator {}
+      MenuSeparatorLine {
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
 
       MenuRow {
+        id: switchRow
         text: "Switch account..."
         visible: root.accountCount > 1
         onActivated: { menu.close(); root.switchAccountRequested() }
       }
       MenuRow {
+        id: settingsRow
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }
 
-      Separator {}
+      MenuSeparatorLine {
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
 
       MenuRow {
-        text: "Shortcuts"
+        id: shortcutsRow
+        text: "Keyboard shortcuts..."
         onActivated: { menu.close(); root.shortcutsRequested() }
       }
       MenuRow {
-        text: "GitHub"
+        id: projectRow
+        text: "Project on GitHub..."
         onActivated: { menu.close(); root.projectRequested() }
       }
       MenuRow {
-        text: "Twitter"
+        id: authorRow
+        text: "Author on X..."
         onActivated: { menu.close(); root.authorRequested() }
       }
     }
   }
 
-  component Separator: Item {
-    width: menu.width - menu.leftPadding - menu.rightPadding
-    implicitHeight: Style.space(7)
-    PanelSeparator {
-      anchors.verticalCenter: parent.verticalCenter
-      width: parent.width
-      foreground: root.textColor
-    }
-  }
-
   // `enabled` is Item's own, and it already stops the handlers below from
   // firing, so a disabled row only has to look disabled.
-  component MenuRow: Rectangle {
-    id: row
-    required property string text
-    signal activated()
-
+  component MenuRow: MenuActionRow {
     width: menu.width - menu.leftPadding - menu.rightPadding
-    implicitHeight: Style.spacing.popupRowHeight
-    radius: Style.cornerRadius
-    opacity: row.enabled ? 1.0 : 0.4
-    color: hover.hovered
-      ? Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.08)
-      : "transparent"
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(9)
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(9)
-      anchors.verticalCenter: parent.verticalCenter
-      text: row.text
-      color: root.textColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      elide: Text.ElideRight
-    }
-
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: row.activated() }
+    textColor: root.textColor
+    panelFontFamily: root.panelFontFamily
+    collection: root.menuRows
+    cursorIndex: root.cursorIndex
   }
 }

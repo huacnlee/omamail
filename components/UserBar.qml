@@ -72,11 +72,11 @@ Rectangle {
     elide: Text.ElideMiddle
   }
 
-  HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+  HoverHandler { id: hover }
 
   TapHandler {
-    onTapped: function(point) {
-      var scene = root.mapToGlobal(point.position.x, point.position.y)
+    onTapped: {
+      var scene = root.mapToGlobal(0, 0)
       root.switcherRequested(scene.x, scene.y)
     }
   }

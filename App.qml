@@ -6,6 +6,7 @@ import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "account/Accounts.js" as Accounts
 import "keys/Keymap.js" as Keymap
 import "components"
 
@@ -35,6 +36,8 @@ Item {
   // foundational palette currently calls that source `urgent`; keeping the
   // mapping here stops account pages from confusing urgency with danger.
   readonly property color danger: Color.urgent
+  readonly property color popupBackground: Color.popups.background
+  readonly property color popupBorder: Color.popups.border
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
@@ -430,6 +433,7 @@ Item {
     ProviderPicker {
       textColor: root.foreground
       dimColor: root.dim
+      accentColor: root.accent
       panelFontFamily: root.fontFamily
       canLeave: root.anyReady
       onBackRequested: {
@@ -462,6 +466,7 @@ Item {
       textColor: root.foreground
       dimColor: root.dim
       dangerColor: root.danger
+      accentColor: root.accent
       panelFontFamily: root.fontFamily
       canLeave: root.anyReady
       accountCount: root.service ? root.service.accountCount : 1
@@ -478,6 +483,7 @@ Item {
       textColor: root.foreground
       dimColor: root.dim
       dangerColor: root.danger
+      accentColor: root.accent
       panelFontFamily: root.fontFamily
       canLeave: root.anyReady
       accountCount: root.service ? root.service.accountCount : 1
@@ -508,6 +514,15 @@ Item {
   function removeCurrentAccountFromEditor() {
     if (!service || service.accountCount <= 1) return
     var index = service.indexOfActiveAccount()
+    if (index < 0) return
+    var values = service.accountSummaries || []
+    var request = Accounts.removalRequest({ accounts: values }, index)
+    if (request) accountRemovalDialog.openFor(request)
+  }
+
+  function confirmAccountRemoval(request) {
+    if (!service) return
+    var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
     service.removeAccountAt(index)
     accountDraftOpen = false
@@ -601,6 +616,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: Style.space(48)
+        visible: !root.composing
 
         // Identity first, controls after, with a rule between them: the mark
         // and the name say what this window is, and everything to their right
@@ -675,7 +691,8 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && parent.width >= Style.space(120)
+            visible: !root.showPage && !root.composing
+              && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
@@ -706,10 +723,10 @@ Item {
           // own, and it stays on the left with the mark.
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage
+            visible: !root.showPage && !root.composing
             iconName: "refresh"
             tooltipText: root.service && root.service.listLoading
-              ? "Checking for mail…" : "Check mail · F5"
+              ? "Checking for mail" : "Check mail · F5"
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
@@ -719,7 +736,7 @@ Item {
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage
+            visible: !root.showPage && !root.composing
             iconName: "send"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -745,7 +762,7 @@ Item {
 
       Item {
         id: body
-        anchors.top: header.bottom
+        anchors.top: header.visible ? header.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusBar.top
@@ -786,6 +803,7 @@ Item {
           anchors.margins: Style.space(14)
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
+          accentColor: root.accent
           panelFontFamily: root.fontFamily
           // The account's own mailboxes, not a fixed set: this row and the
           // sidebar it replaces on a narrow window must offer the same ones.
@@ -907,6 +925,9 @@ Item {
           linkColor: root.link
           dimColor: root.dim
           dimmerColor: root.dimmer
+          popupBackgroundColor: root.popupBackground
+          popupBorderColor: root.popupBorder
+          leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
           showBack: root.compact
@@ -940,6 +961,8 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           dimmerColor: root.dimmer
+          popupBackgroundColor: root.popupBackground
+          popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           onClosed: root.leaveCompose()
         }
@@ -1062,7 +1085,7 @@ Item {
           foreground: root.dim
           hoverColor: root.foreground
           iconSize: Style.font.iconSmall
-          size: Style.space(20)
+          size: Style.space(24)
           fontFamily: root.fontFamily
           onClicked: root.toggleSidebar()
         }
@@ -1085,10 +1108,8 @@ Item {
           text: {
             if (!root.service) return "Not connected"
             if (!root.ready) return "Not connected"
-            if (root.compact)
-              return root.service.accountEmail + " · " + root.service.inboxUnread + " unread"
-            return Model.statusSummary(root.service.syncedLabel,
-              root.service.resultSummary, root.service.listLoading)
+            if (root.compact) return root.service.accountEmail
+            return Model.statusSummary(root.service.syncedLabel)
           }
           color: root.dim
           font.family: root.fontFamily
@@ -1135,6 +1156,7 @@ Item {
           visible: !statusBar.hasNotice && !root.compact
           textColor: root.foreground
           dimColor: root.dimmer
+          accentColor: root.accent
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext)
         }
@@ -1146,6 +1168,8 @@ Item {
         id: appMenu
         anchors.fill: parent
         textColor: root.foreground
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         signedIn: root.ready
         accountCount: root.service ? root.service.accountCount : 1
@@ -1172,6 +1196,8 @@ Item {
         accentColor: root.accent
         urgentColor: root.urgent
         dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
         onAccountChosen: function(index) {
@@ -1189,12 +1215,26 @@ Item {
         }
       }
 
+      AccountRemovalDialog {
+        id: accountRemovalDialog
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        dangerColor: root.danger
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onConfirmed: function(request) { root.confirmAccountRemoval(request) }
+      }
+
       MessageMenu {
         id: rowMenu
         service: root.service
         textColor: root.foreground
         urgentColor: root.urgent
         dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onComposeRequested: function(mode, id) {
           root.composeReturnView = root.currentView
