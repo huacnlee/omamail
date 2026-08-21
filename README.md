@@ -21,9 +21,8 @@ server — including one you run yourself.
   mailbox with an address and an app password. Several accounts at once, each
   with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
-  reply, `c` to compose, `g i` for the inbox, `Alt+1`…`9` to switch mailbox,
-  `/` to search, `?` for the rest — Gmail's own shortcuts, so there is nothing
-  new to learn.
+  reply, `c` to compose, `g i` for the inbox, `g a` to switch mailbox, `/` to search,
+  `?` for the rest — Gmail's own shortcuts, so there is nothing new to learn.
 - **Always counting.** The unread badge keeps working while the window is shut,
   for every account, with a desktop notification when new mail lands.
 - **One window.** Read, archive, star, trash, search, and answer without a
@@ -161,7 +160,7 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+Enter` | Send |
 | `/` or `Ctrl+K` | Search |
 | `g` then `i` / `s` / `u` / `t` | Inbox, starred, unread, sent |
-| `Alt+1` … `Alt+9` | Switch to that mailbox |
+| `g` then `a` | Switch mailbox |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `Ctrl+?` | Every shortcut |
@@ -196,9 +195,8 @@ its own refresh token, and its own unread count, and the bar badge counts all of
 them. They share one OAuth client, since a client belongs to a Cloud project
 rather than to an address — so adding a second mailbox is a sign-in, not another
 trip through the console. Mailboxes are added and removed on the settings page,
-and switched from the menu, the user bar at the foot of the rail, or `Alt+1`…`9`
-in the same order the switcher lists them. A number past the last mailbox does
-nothing.
+and switched from the menu, the user bar at the foot of the rail, or `g a` —
+which opens the same switcher with the keyboard on the mailbox you are in.
 
 The message list, labels and profile are cached per account so switching never
 waits on the network. Message bodies are cached one file per message — a

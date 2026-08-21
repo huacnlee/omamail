@@ -24,6 +24,12 @@ Item {
 
   readonly property bool opened: menu.opened
 
+  // Where the keyboard is standing, which is not where the mouse is: hover is
+  // drawn by the row itself and never written here. Qt re-reports hover when
+  // content moves under a still pointer, and a hover that moved this would drag
+  // the cursor back to whatever the pointer happened to rest on.
+  property int cursorIndex: 0
+
   signal accountChosen(int index)
   signal addAccountRequested()
   signal manageRequested()
@@ -75,6 +81,32 @@ Item {
 
   function close() { menu.close() }
 
+  // Driven from `runShortcut`, never from a `Keys` handler here: a window
+  // `Shortcut` beats a focused item's handler, so a local one would look live
+  // and never run. See AGENTS.md.
+  function moveCursor(delta) {
+    var count = root.accounts ? root.accounts.length : 0
+    if (count === 0) return
+    cursorIndex = ((cursorIndex + delta) % count + count) % count
+  }
+
+  function chooseCursor() {
+    var count = root.accounts ? root.accounts.length : 0
+    if (cursorIndex < 0 || cursorIndex >= count) return
+    menu.close()
+    root.accountChosen(cursorIndex)
+  }
+
+  // Opening puts the keyboard on the mailbox you are already in, so the first
+  // `j` is one step away from it rather than back at the top of the list.
+  function restCursorOnActive() {
+    var accounts = root.accounts || []
+    for (var i = 0; i < accounts.length; i++) {
+      if (accounts[i].active) { cursorIndex = i; return }
+    }
+    cursorIndex = 0
+  }
+
   QQC.Popup {
     id: menu
     width: Style.space(250)
@@ -84,7 +116,10 @@ Item {
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
-    onOpened: root.place()
+    onOpened: {
+      root.restCursorOnActive()
+      root.place()
+    }
     background: Rectangle {
       radius: Style.cornerRadius
       color: Color.popups.background
@@ -104,12 +139,20 @@ Item {
           required property var modelData
           required property int index
 
+          readonly property bool hasCursor: root.cursorIndex === row.index
+
           width: menu.width - menu.leftPadding - menu.rightPadding
           implicitHeight: Style.space(40)
           radius: Style.cornerRadius
           color: modelData.active
             ? Style.selectedFillFor(root.textColor, root.accentColor)
-            : (rowHover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+            : (rowHover.hovered || hasCursor
+              ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+          // A border rather than a third fill: the mailbox you are in already
+          // owns the selected one, and the keyboard has to be visible standing
+          // on that row too.
+          border.width: hasCursor ? Style.normalBorderWidth : 0
+          border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
 
           Rectangle {
             id: rowAvatar

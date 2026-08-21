@@ -14,8 +14,7 @@ Everything follows from that:
 - Every binding lives in one table, `keys/Keymap.js`. Nothing else describes a
   key. The shortcut sheet and the status-bar hints render from that table.
 - `components/KeyRouter.qml` turns the table into `Shortcut` objects and reports
-  what was pressed by id, and the sequence when one row binds several keys.
-  `App.qml` answers with one `runShortcut` function.
+  what was pressed by id. `App.qml` answers with one `runShortcut` function.
 - `Escape` is a binding like any other, not a `Keys.onEscapePressed` handler, so
   it does not depend on who holds the focus.
 
@@ -104,7 +103,7 @@ used to exist, and they had.
 | `goStarred` | `g,s` | mail | Go to starred |
 | `goUnread` | `g,u` | mail | Go to unread |
 | `goSent` | `g,t` | mail | Go to sent |
-| `switchAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9` | mail | Switch account |
+| `switchAccount` | `g,a` | mail | Switch account |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+0` | reader | Reset the zoom |
@@ -122,6 +121,19 @@ answers to, and a draft is not a mailbox.
 `Escape` is the only bare key bound everywhere, because it is the way out of
 everywhere. What it means in each place is one list in `goBack()`, in the order
 the window is stacked.
+
+## What survives an overlay
+
+The shortcut sheet and the account switcher sit on top of the mailbox, and
+`survivesOverlay` is the whole guard: without it a row goes dead while either
+is up, which is why `e` cannot archive behind the sheet.
+
+Five rows carry it. `help` and `back` keep their own meaning — they are how the
+overlay goes away. `cursorDown`, `cursorUp` and `open` are handed to whatever is
+on top instead: they walk the switcher and pick a mailbox, or scroll the sheet.
+`runShortcut` is where that redirection lives, in the order the window is
+stacked, and a key an overlay has no answer for stops there rather than falling
+through to the mailbox underneath.
 
 ## The cursor
 
@@ -174,11 +186,8 @@ different row under the still pointer, and the cursor snapped back to it — so
 ## Adding a key
 
 1. Add a row to `BINDINGS` in `keys/Keymap.js`. Name the contexts it means
-   something in — that is the guard, and there is no other. A `display` string
-   is how the sheet shows a range instead of enumerating every key.
-2. Add a case to `runShortcut` in `App.qml`. The second argument is the
-   sequence that fired, which is what a row of several keys uses to tell
-   them apart.
+   something in — that is the guard, and there is no other.
+2. Add a case to `runShortcut` in `App.qml`.
 3. Add the row to the table above. The test will tell you if you forget.
 
 That is all. The shortcut sheet and the status hints pick it up on their own.

@@ -118,15 +118,23 @@ assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
 assert.strictEqual(keymap.displayFor(byId("goInbox")), "g then i")
 assert.strictEqual(keymap.displayFor(byId("open")), "Enter, o")
 assert.strictEqual(keymap.displayFor(byId("back")), "Esc")
-assert.strictEqual(keymap.displayFor(byId("switchAccount")), "Alt+1…9",
-  "nine account keys are one row on the sheet, not nine")
+assert.strictEqual(keymap.displayFor(byId("switchAccount")), "g then a")
 {
   const going = groups.filter(function (g) { return g.name === "Going" })[0]
   assert.ok(going, "Switch account lives with the other go-to keys")
   const sheet = going.rows.filter(function (r) { return r.action === "Switch account" })[0]
-  assert.strictEqual(sheet.keys, "Alt+1…9")
-  assert.strictEqual(sheet.action, "Switch account")
+  assert.strictEqual(sheet.keys, "g then a")
 }
+
+// Only these, and only for the sheet they scroll.
+assert.strictEqual(keymap.isEnabled(byId("cursorDown"), "list", true), true)
+assert.strictEqual(keymap.isEnabled(byId("cursorUp"), "list", true), true)
+// `open` survives too, for the switcher, where it picks the mailbox under the
+// keyboard. App.qml is what stops it doing anything behind the sheet.
+assert.strictEqual(keymap.isEnabled(byId("open"), "list", true), true)
+assert.strictEqual(keymap.isEnabled(byId("archive"), "list", true), false,
+  "nothing acts on mail behind an overlay")
+assert.strictEqual(keymap.isEnabled(byId("compose"), "list", true), false)
 
 const switchAccount = byId("switchAccount")
 assert.strictEqual(keymap.isEnabled(switchAccount, "list", false), true)
@@ -136,11 +144,6 @@ assert.strictEqual(keymap.isEnabled(switchAccount, "compose", false), false,
 assert.strictEqual(keymap.isEnabled(switchAccount, "search", false), false)
 assert.strictEqual(keymap.isEnabled(switchAccount, "page", false), false)
 
-assert.strictEqual(keymap.accountIndexFor("Alt+1"), 0)
-assert.strictEqual(keymap.accountIndexFor("Alt+9"), 8)
-assert.strictEqual(keymap.accountIndexFor("Alt+0"), -1)
-assert.strictEqual(keymap.accountIndexFor("Ctrl+1"), -1)
-assert.strictEqual(keymap.accountIndexFor(""), -1)
 assert.strictEqual(keymap.hintKeyFor(byId("cursorDown")), "j / k",
   "the status bar shows one line for the pair")
 assert.strictEqual(keymap.hintKeyFor(byId("open")), "o",

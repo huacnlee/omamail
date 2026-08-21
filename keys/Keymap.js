@@ -20,16 +20,27 @@ var MAIL = ["list", "reader"]
 var ANY = ["*"]
 
 var BINDINGS = [
+  // These two survive the shortcut sheet, and they are the only mailbox keys
+  // that do: behind the sheet they scroll it. A reference sheet taller than the
+  // window that could only be read with a mouse would be the one screen here
+  // that contradicts the rest.
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move down",
     hintKey: "j / k", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move up" },
   // Live in the reader as well as the list. Moving is deliberately not opening
   // — stepping through with j used to mark half a mailbox read without anyone
   // looking at it — so with the reader up there has to be a key that says open,
   // or the only way to read the next message is to leave and come back.
   { id: "open", keys: ["Return", "o"], contexts: MAIL,
+    // Survives for the switcher, where it picks the mailbox the keyboard is
+    // standing on. Behind the shortcut sheet it does nothing — but it has to
+    // reach `runShortcut` to be stopped there, or the mailbox underneath opens
+    // a message nobody can see.
+    survivesOverlay: true,
     group: "Moving", label: "Open the selected message",
     hintKey: "o", hint: { list: "open", reader: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],
@@ -81,14 +92,11 @@ var BINDINGS = [
     group: "Going", label: "Go to unread" },
   { id: "goSent", keys: ["g,t"], contexts: MAIL,
     group: "Going", label: "Go to sent" },
-  // One row, nine sequences: the sheet reads as a range, and the key that
-  // fired is what picks the mailbox. A number past the last account is a
-  // no-op in the switch itself, not a missing binding.
-  { id: "switchAccount",
-    keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
-      "Alt+6", "Alt+7", "Alt+8", "Alt+9"],
-    contexts: MAIL, group: "Going", label: "Switch account",
-    display: "Alt+1…9" },
+  // One key, not nine. Switching mailboxes is not a frequent enough action to
+  // spend a row of top-level keys on, and the switcher it opens is a list the
+  // keyboard can walk — which is a thing the window needed anyway.
+  { id: "switchAccount", keys: ["g,a"], contexts: MAIL,
+    group: "Going", label: "Switch account" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
@@ -171,21 +179,10 @@ function readableSequence(sequence) {
 // separator.
 function displayFor(binding) {
   if (!binding) return ""
-  if (binding.display) return binding.display
   var keys = binding.keys || []
   var out = []
   for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))
   return out.join(", ")
-}
-
-// Alt+1 is the first mailbox, Alt+9 the ninth. The sequence is the only
-// thing that knows which, because one binding id covers the whole row.
-function accountIndexFor(sequence) {
-  var text = String(sequence || "")
-  if (text.length !== 5 || text.indexOf("Alt+") !== 0) return -1
-  var n = text.charCodeAt(4) - 48
-  if (n < 1 || n > 9) return -1
-  return n - 1
 }
 
 // How a row reads on the status bar, which is a hint rather than a reference:

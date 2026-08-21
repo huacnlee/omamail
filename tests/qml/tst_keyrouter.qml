@@ -13,17 +13,13 @@ Item {
   width: 300; height: 200
 
   property string lastId: ""
-  property string lastSequence: ""
   property string context: "list"
   property bool overlay: false
 
   Omamail.KeyRouter {
     context: host.context
     overlay: host.overlay
-    onTriggered: function(id, sequence) {
-      host.lastId = id
-      host.lastSequence = sequence
-    }
+    onTriggered: function(id) { host.lastId = id }
   }
 
   readonly property Item focusItem: host.Window.activeFocusItem
@@ -59,7 +55,6 @@ Item {
       host.context = "list"
       host.overlay = false
       host.lastId = ""
-      host.lastSequence = ""
       compose.opened = false
       scope.applyContextFocus()
       wait(30)
@@ -124,6 +119,23 @@ Item {
       compare(host.lastId, "help")
     }
 
+    // A sheet taller than the window is the reason: behind it, moving moves
+    // the sheet. App.qml is what sends it there; the router only has to keep
+    // the keys alive.
+    function test_moving_survives_an_overlay_so_it_can_walk_one() {
+      host.overlay = true
+      wait(20)
+      keyClick(Qt.Key_J)
+      compare(host.lastId, "cursorDown")
+    }
+
+    function test_choosing_survives_an_overlay_for_the_switcher() {
+      host.overlay = true
+      wait(20)
+      keyClick(Qt.Key_Return)
+      compare(host.lastId, "open")
+    }
+
     // Moving is deliberately not opening, so with a message up there has to be
     // a key that says open — otherwise reading the next one means leaving the
     // reader and coming back.
@@ -151,16 +163,17 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
-    function test_alt_number_picks_a_mailbox_from_the_list() {
-      keyClick(Qt.Key_2, Qt.AltModifier)
+    function test_the_switcher_opens_from_the_going_chord() {
+      keyClick(Qt.Key_G)
+      keyClick(Qt.Key_A)
       compare(host.lastId, "switchAccount")
-      compare(host.lastSequence, "Alt+2")
     }
 
-    function test_alt_number_is_dead_in_a_draft() {
+    function test_the_switcher_chord_is_dead_in_a_draft() {
       host.context = "compose"
       wait(20)
-      keyClick(Qt.Key_2, Qt.AltModifier)
+      keyClick(Qt.Key_G)
+      keyClick(Qt.Key_A)
       compare(host.lastId, "", "switching is a mailbox action, not a draft one")
     }
 
