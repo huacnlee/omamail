@@ -288,6 +288,74 @@ assert.strictEqual(
   Buffer.from(payload.raw, "base64url").toString("utf8").indexOf("To: a@b.com"), 0)
 assert.strictEqual(message.buildSendPayload({ to: "a@b.com" }).threadId, undefined)
 
+// ------------------------------------------------------------- a calendar
+//
+// An RSVP is an ordinary mail with a `text/calendar` part beside the sentence
+// a person would read. Checked by parsing the message back with the adapter
+// the IMAP client uses, because "the shape is right" only means anything if
+// the readers agree.
+{
+  const ics = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:u1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+  const raw = message.buildRawMessage({
+    from: "me@example.com",
+    to: "organiser@example.com",
+    subject: "Accepted: Weekly sync",
+    body: "Jason has accepted this invitation.",
+    calendar: { method: "REPLY", text: ics },
+    boundary: "TESTBOUNDARY"
+  })
+
+  assert.ok(raw.indexOf('Content-Type: multipart/alternative; boundary="TESTBOUNDARY"') > 0)
+  assert.ok(raw.indexOf("From: me@example.com\r\n") >= 0,
+    "a reply names the address it answers for, which is the one the ATTENDEE line claims")
+  assert.ok(raw.indexOf("Content-Type: text/calendar; charset=UTF-8; method=REPLY") > 0)
+  assert.ok(raw.indexOf("--TESTBOUNDARY--") > 0, "the closing boundary is there")
+
+  const parsed = message.parseRfc822(raw)
+  assert.strictEqual(parsed.mimeType, "multipart/alternative")
+  assert.strictEqual(parsed.parts.length, 2)
+  assert.strictEqual(parsed.parts[0].mimeType, "text/plain")
+  assert.strictEqual(message.decodePart(parsed.parts[0]), "Jason has accepted this invitation.")
+  assert.strictEqual(parsed.parts[1].mimeType, "text/calendar")
+  assert.strictEqual(message.decodePart(parsed.parts[1]), ics)
+
+  // The transfer encoding is base64, so no part body can contain the boundary
+  // however long the calendar file gets.
+  const bigRaw = message.buildRawMessage({
+    to: "a@b.com", body: "x",
+    calendar: { method: "REPLY", text: "BEGIN:VCALENDAR\r\nX-PAD:" + "y".repeat(5000) + "\r\nEND:VCALENDAR\r\n" },
+    boundary: "TESTBOUNDARY"
+  })
+  assert.strictEqual(bigRaw.split("--TESTBOUNDARY").length - 1, 3,
+    "two openers and one closer, and nothing that looks like a third opener")
+
+  // The method comes out of a file somebody else wrote, so it may not end the
+  // header early or add one of its own.
+  const hostile = message.buildRawMessage({
+    to: "a@b.com", body: "x",
+    calendar: { method: 'REPLY"\r\nBcc: attacker@example.net', text: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n" },
+    boundary: "TESTBOUNDARY"
+  })
+  assert.ok(hostile.indexOf("Bcc") < 0)
+  const methodLine = hostile.split("\r\n").filter(function(line) {
+    return line.indexOf("Content-Type: text/calendar") === 0
+  })[0]
+  assert.ok(/^Content-Type: text\/calendar; charset=UTF-8; method=[A-Z]+$/.test(methodLine),
+    "the method is letters only: " + JSON.stringify(methodLine))
+
+  // No calendar, no change: an ordinary reply is still one flat text/plain.
+  assert.strictEqual(message.parseRfc822(
+    message.buildRawMessage({ to: "a@b.com", body: "hi" })).mimeType, "text/plain")
+
+  // A boundary the caller did not name is generated, and is still a boundary
+  // the message parses against.
+  const generated = message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "hi", calendar: { method: "REPLY", text: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n" }
+  }))
+  assert.strictEqual(generated.mimeType, "multipart/alternative")
+  assert.strictEqual(generated.parts.length, 2)
+}
+
 const quoted = message.quoteBody(summary, "line one\nline two")
 assert.ok(quoted.indexOf("> line one\n> line two") > 0)
 assert.ok(quoted.indexOf("李四 wrote:") > 0)

@@ -56,6 +56,14 @@ Item {
     && !root.forceRichAnyway
   readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText && !root.tooHeavy
 
+  // Empty for everything that is not a mailing list. The label carries its own
+  // trailing "..." when the only way off this list is a page in a browser,
+  // because that is the same decision as which way off it there is — and the
+  // service is where it is made.
+  readonly property string unsubscribeLabel: service ? service.unsubscribeLabel : ""
+  readonly property string unsubscribeDetail: service ? service.unsubscribeDetail : ""
+  readonly property bool unsubscribing: !!service && service.unsubscribing
+
   // Image markers only mean something when the plain text was made from the
   // HTML: a message that shipped its own text/plain part never had images in
   // it, and anything looking like a marker there is the sender's own words.
@@ -185,115 +193,123 @@ Item {
     }
   }
 
-  // ------------------------------------------------------------------ body
+  // --------------------------------------------------------------- notices
 
-  Rectangle {
-    id: heavyNotice
-    visible: root.tooHeavy
+  // Why this message does not look the way its sender meant it to, and the one
+  // thing that would change that. A column rather than a chain of anchors:
+  // three of these can be up at once, and each anchoring to whichever of the
+  // others happened to be visible is a rule that has to be rewritten every
+  // time a fourth is added.
+  Column {
+    id: notices
     anchors.top: headerBlock.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.leftMargin: root.pageInset
     anchors.rightMargin: root.pageInset
-    anchors.topMargin: Style.space(8)
-    implicitHeight: Style.space(30)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-    border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+    // No gap where there is nothing to separate. An empty Column is zero high,
+    // and a margin above it would still push the message down.
+    anchors.topMargin: height > 0 ? Style.space(8) : 0
+    spacing: Style.space(6)
 
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(10)
-      anchors.right: showAnyway.left
-      anchors.rightMargin: Style.space(6)
-      anchors.verticalCenter: parent.verticalCenter
+    ReaderNotice {
+      width: parent.width
+      visible: root.tooHeavy
       text: "Showing the plain text: this message is heavy enough to stall the shell"
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-      elide: Text.ElideRight
+      actionLabel: "Show anyway"
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: root.forceRichAnyway = true
     }
 
-    Button {
-      id: showAnyway
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(6)
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Show anyway"
-      foreground: root.textColor
-      bordered: false
-      fontSize: Style.font.caption
-      onClicked: root.forceRichAnyway = true
-    }
-  }
-
-  // Sits under the heavy-document notice when both are up: one says why the
-  // message looks plain, the other why it looks bare, and they are different
-  // answers to different questions.
-  Rectangle {
-    id: imageNotice
-    visible: !!root.summary && root.htmlAvailable
-      && !root.remoteImagesAllowed && root.remoteImages > 0
-    anchors.top: heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.leftMargin: root.pageInset
-    anchors.rightMargin: root.pageInset
-    anchors.topMargin: Style.space(8)
-    implicitHeight: Style.space(30)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-    border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(10)
-      anchors.right: showImages.left
-      anchors.rightMargin: Style.space(6)
-      anchors.verticalCenter: parent.verticalCenter
+    // Under the heavy-document notice when both are up: one says why the
+    // message looks plain, the other why it looks bare, and they are different
+    // answers to different questions.
+    ReaderNotice {
+      width: parent.width
+      visible: !!root.summary && root.htmlAvailable
+        && !root.remoteImagesAllowed && root.remoteImages > 0
       text: (root.remoteImages === 1 ? "1 image is blocked" : root.remoteImages + " images are blocked")
         + ": loading them tells the sender this message was opened"
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-      textFormat: Text.PlainText
-      elide: Text.ElideRight
+      actionLabel: "Show images"
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: if (root.service) root.service.showRemoteImages()
     }
 
-    Button {
-      id: showImages
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(6)
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Show images"
-      foreground: root.textColor
-      bordered: false
-      fontSize: Style.font.caption
-      onClicked: if (root.service) root.service.showRemoteImages()
+    // Last of the three, because it is the only one that is not about how the
+    // message is being drawn. The label carries its own "..." when what it
+    // opens is a browser — the service decides that, since it is the same
+    // decision as which of the three ways off a list this sender offers.
+    ReaderNotice {
+      width: parent.width
+      // Stays up after the deed is done, saying what was done. A control that
+      // vanishes under the pointer reads as a misclick, and "did that work?"
+      // is a question the user may come back to this message to ask.
+      visible: !!root.summary && root.unsubscribeDetail !== ""
+      text: root.unsubscribeDetail
+      actionLabel: root.unsubscribeLabel
+      busy: root.unsubscribing
+      busyLabel: "Unsubscribing..."
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: if (root.service) root.service.unsubscribe()
     }
   }
+
+  // ------------------------------------------------------------------ body
 
   Flickable {
     id: bodyFlick
-    anchors.top: imageNotice.visible
-      ? imageNotice.bottom
-      : (heavyNotice.visible ? heavyNotice.bottom : headerBlock.bottom)
+    anchors.top: notices.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
     contentWidth: width
-    contentHeight: bodyText.implicitHeight + Style.space(28)
+    contentHeight: bodyText.y + bodyText.implicitHeight + Style.space(28)
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     visible: !!root.summary
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+    // The meeting in the message, drawn as a meeting. Inside the flickable
+    // rather than pinned above it: a recurring invitation with a dozen guests
+    // is taller than the panel, and a card that cannot scroll would leave the
+    // message itself with nowhere to be.
+    InviteCard {
+      id: inviteCard
+      x: root.bodyInset
+      y: Style.space(14)
+      width: root.bodyWidth
+      invite: root.service ? root.service.selectedInvite : null
+      response: root.service ? root.service.selectedResponse : ""
+      canRespond: !!root.service && root.service.canRespondToInvite
+      sending: !!root.service && root.service.rsvpSending
+      textColor: root.textColor
+      accentColor: root.accentColor
+      dimColor: root.dimColor
+      dimmerColor: root.dimmerColor
+      panelFontFamily: root.panelFontFamily
+      onRespondRequested: function(answer) {
+        if (root.service) root.service.rsvp(answer)
+      }
+      // The same rule the body's own links obey: this leaves the app, and it
+      // leaves it through the desktop's browser rather than anything here.
+      onOpenRequested: function(url) { Qt.openUrlExternally(url) }
+    }
+
     TextEdit {
       id: bodyText
       x: root.bodyInset
-      y: Style.space(14)
+      y: inviteCard.visible
+        ? inviteCard.y + inviteCard.height + Style.space(14)
+        : Style.space(14)
       width: root.bodyWidth
       readOnly: true
       selectByMouse: true

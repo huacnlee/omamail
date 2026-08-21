@@ -667,6 +667,8 @@ function buildSnippet(text) {
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
 function messageDate(message) {
   var internal = Number(message && message.internalDate)
   if (isFinite(internal) && internal > 0) return new Date(internal)
@@ -697,7 +699,7 @@ function relativeTime(date, now) {
     && date.getDate() === reference.getDate()
   if (sameDay) return pad(date.getHours()) + ":" + pad(date.getMinutes())
   var days = Math.floor(elapsed / 86400000)
-  if (days < 7) return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
+  if (days < 7) return WEEKDAYS[date.getDay()]
   if (date.getFullYear() === reference.getFullYear())
     return MONTHS[date.getMonth()] + " " + date.getDate()
   return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear()
@@ -822,6 +824,33 @@ function replySubject(subject) {
 
 // A minimal RFC 5322 message. Gmail wants the whole thing base64url encoded in
 // a single `raw` field, so this returns the string ready for that.
+// Base64 body lines are wrapped at 76 characters as the RFC requires; Gmail
+// accepts longer lines but other receiving servers do not.
+function base64Body(text) {
+  var encoded = encodeBase64(String(text || ""))
+  var wrapped = []
+  for (var i = 0; i < encoded.length; i += 76) wrapped.push(encoded.substr(i, 76))
+  return wrapped.join("\r\n")
+}
+
+// The separator only has to be a string the parts do not contain, and every
+// part here is base64 — an alphabet with no "_" in it, so a boundary carrying
+// one cannot occur inside a body however long it is. The caller may name it,
+// which is what lets a test read the message it built.
+function mimeBoundary(given) {
+  var stated = String(given || "").replace(/[^A-Za-z0-9'()+_,\-.\/:=?]/g, "")
+  if (stated !== "") return stated.substring(0, 60)
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "=_Omamail_" + (new Date()).getTime().toString(36) + "_" + random
+}
+
+// One method name, and nothing that could end the header early: this string
+// arrives from a calendar file somebody else wrote.
+function calendarMethod(value) {
+  var text = String(value || "").toUpperCase().replace(/[^A-Z]/g, "")
+  return text === "" ? "REPLY" : text.substring(0, 20)
+}
+
 function buildRawMessage(fields) {
   var values = fields || {}
   var lines = []
@@ -835,15 +864,36 @@ function buildRawMessage(fields) {
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
   lines.push("MIME-Version: 1.0")
+
+  var calendar = values.calendar && String(values.calendar.text || "") !== ""
+    ? values.calendar : null
+  if (!calendar) {
+    lines.push("Content-Type: text/plain; charset=UTF-8")
+    lines.push("Content-Transfer-Encoding: base64")
+    lines.push("")
+    return lines.join("\r\n") + "\r\n" + base64Body(values.body) + "\r\n"
+  }
+
+  // `multipart/alternative`, not `mixed`: the calendar part and the sentence
+  // beside it are two readings of one answer, and a client that understands
+  // the first should not also show the second as a file to open. It is also
+  // the shape every calendar server recognises a reply in.
+  var boundary = mimeBoundary(values.boundary)
+  lines.push("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"")
+  lines.push("")
+  lines.push("--" + boundary)
   lines.push("Content-Type: text/plain; charset=UTF-8")
   lines.push("Content-Transfer-Encoding: base64")
   lines.push("")
-  // Base64 body lines are wrapped at 76 characters as the RFC requires;
-  // Gmail accepts longer lines but other receiving servers do not.
-  var encoded = encodeBase64(String(values.body || ""))
-  var wrapped = []
-  for (var i = 0; i < encoded.length; i += 76) wrapped.push(encoded.substr(i, 76))
-  return lines.join("\r\n") + "\r\n" + wrapped.join("\r\n") + "\r\n"
+  lines.push(base64Body(values.body))
+  lines.push("--" + boundary)
+  lines.push("Content-Type: text/calendar; charset=UTF-8; method="
+    + calendarMethod(calendar.method))
+  lines.push("Content-Transfer-Encoding: base64")
+  lines.push("")
+  lines.push(base64Body(calendar.text))
+  lines.push("--" + boundary + "--")
+  return lines.join("\r\n") + "\r\n"
 }
 
 function buildSendPayload(fields) {
