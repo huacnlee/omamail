@@ -268,6 +268,14 @@ A large commit may use short sections such as `Why`, `What replaces it`, and `Ve
 
 Keep one architectural argument per commit where practical. A supporting fix belongs in the same commit when the primary change exposes it and cannot be correct without it; unrelated cleanup does not.
 
+## Pull request design
+
+A pull request title follows the GPUI Component form `<scope>: <Imperative outcome>`. The lowercase scope names the stable module or subsystem that owns the result; use `app` for one application-level change that honestly spans several UI modules. The outcome describes what the complete change makes true rather than the work performed or the file touched.
+
+Derive the title from the final `base...HEAD` diff, not from the first commit. Later review fixes can change the actual scope, and a title that remains attached to the opening implementation gives reviewers the wrong boundary.
+
+The description is a current explanation of the complete diff rather than a chronology. It covers the user-visible results, the architectural reason and invariants, and the verification actually performed. Rewrite it when later commits materially change any of those; do not append corrections to a stale description.
+
 ## Documentation source
 
 Markdown prose uses one source line per paragraph. Do not hard-wrap prose to a column width. Use line breaks only for semantic structure such as headings, paragraphs, lists, tables, blockquotes, and code blocks.
