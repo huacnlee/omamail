@@ -36,6 +36,7 @@ assert.strictEqual(api.messagePath("a/b"), "/users/me/messages/a%2Fb")
 assert.strictEqual(api.modifyPath("18f3a"), "/users/me/messages/18f3a/modify")
 assert.strictEqual(api.trashPath("18f3a"), "/users/me/messages/18f3a/trash")
 assert.strictEqual(api.labelPath("INBOX"), "/users/me/labels/INBOX")
+assert.strictEqual(api.sendAsPath(), "/users/me/settings/sendAs")
 assert.strictEqual(api.attachmentPath("m1", "a1"), "/users/me/messages/m1/attachments/a1")
 
 deepEqual(api.listQuery("in:inbox", 25, ""), { q: "in:inbox", maxResults: 25, pageToken: "" })
@@ -118,6 +119,53 @@ const profile = api.parseProfile({ emailAddress: "me@example.com", messagesTotal
 assert.strictEqual(profile.email, "me@example.com")
 assert.strictEqual(profile.historyId, "9912")
 assert.strictEqual(api.parseProfile(null).email, "")
+
+const aliases = api.parseSendAs({
+  sendAs: [
+    {
+      sendAsEmail: "me@example.com", displayName: "Me", isPrimary: true,
+      isDefault: false, verificationStatus: "accepted"
+    },
+    {
+      sendAsEmail: "work@example.net", displayName: "Me at work", isPrimary: false,
+      isDefault: true, verificationStatus: "accepted"
+    },
+    {
+      sendAsEmail: "waiting@example.org", displayName: "Waiting", isPrimary: false,
+      isDefault: false, verificationStatus: "pending"
+    },
+    // A Workspace alternate address needs no verification, so Gmail sends the
+    // field back unset. Requiring "accepted" hid exactly these.
+    { sendAsEmail: "alt@example.net", displayName: "Alternate", isPrimary: false },
+    { displayName: "missing address", verificationStatus: "accepted" }
+  ]
+})
+assert.strictEqual(aliases.length, 3, "pending and malformed aliases are not selectable")
+assert.strictEqual(aliases[0].email, "me@example.com")
+assert.strictEqual(aliases[1].displayName, "Me at work")
+assert.strictEqual(aliases[2].email, "alt@example.net",
+  "an alias that never needed verifying is still a choice")
+assert.strictEqual(api.parseSendAs(null).length, 0)
+
+assert.strictEqual(api.preferredSendAs(aliases, [{ email: "WORK@example.net" }]).email,
+  "work@example.net", "a reply uses the alias to which the original was addressed")
+assert.strictEqual(api.preferredSendAs(aliases, []).email, "work@example.net",
+  "new mail uses Gmail's default send-as address")
+assert.strictEqual(api.preferredSendAs([
+  { email: "first@example.com" }, { email: "primary@example.com", isPrimary: true }
+], []).email, "primary@example.com")
+assert.strictEqual(api.preferredSendAs([{ email: "only@example.com" }], []).email,
+  "only@example.com")
+assert.strictEqual(api.preferredSendAs([], []), null)
+assert.strictEqual(api.isSendAsAllowed(aliases, "WORK@example.net"), true)
+assert.strictEqual(api.isSendAsAllowed(aliases, "waiting@example.org"), false)
+
+// The display name that goes on the message is read back off the list, so it
+// is looked up by address and never carried alongside it.
+assert.strictEqual(api.sendAsFor(aliases, "WORK@example.net").displayName, "Me at work")
+assert.strictEqual(api.sendAsFor(aliases, "waiting@example.org"), null)
+assert.strictEqual(api.sendAsFor(aliases, ""), null)
+assert.strictEqual(api.sendAsFor(null, "me@example.com"), null)
 
 // -------------------------------------------------------------- browsing
 

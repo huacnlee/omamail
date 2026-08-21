@@ -738,6 +738,7 @@ function summarize(message, now) {
     replyTo: parseAddress(headerValue(message, "Reply-To")),
     messageId: headerValue(message, "Message-ID"),
     to: parseAddressList(headerValue(message, "To")),
+    cc: parseAddressList(headerValue(message, "Cc")),
     subject: subject || "(no subject)",
     snippet: decodeSnippet(message && message.snippet),
     date: date,
@@ -763,6 +764,27 @@ function summarize(message, now) {
 // not worth refusing to send over.
 function headerSafe(value) {
   return String(value === undefined || value === null ? "" : value).replace(/[\r\n]+/g, " ")
+}
+
+// A display name is a phrase, not a header value: an encoded word may not sit
+// inside quotes, and an ASCII name carrying a comma or a dot is only legal
+// quoted. `foldHeader` cannot do this, because it encodes the whole value as
+// one word — `=?UTF-8?B?...?=` wrapped around `"Name" <a@b>` is not an address.
+function encodedPhrase(text) {
+  var value = headerSafe(text).trim()
+  if (value === "") return ""
+  if (!/^[\x20-\x7e]*$/.test(value))
+    return "=?UTF-8?B?" + encodeBase64(value) + "?="
+  return '"' + value.replace(/([\\"])/g, "\\$1") + '"'
+}
+
+// Written by hand rather than through `foldHeader` for the reason above. The
+// address still loses its line breaks, so a display name cannot smuggle a
+// second header in either.
+function fromHeader(email, displayName) {
+  var address = headerSafe(email).trim()
+  var phrase = encodedPhrase(displayName)
+  return "From: " + (phrase === "" ? address : phrase + " <" + address + ">")
 }
 
 function foldHeader(name, value) {
@@ -803,7 +825,7 @@ function replySubject(subject) {
 function buildRawMessage(fields) {
   var values = fields || {}
   var lines = []
-  if (values.from) lines.push(foldHeader("From", values.from))
+  if (values.from) lines.push(fromHeader(values.from, values.fromName))
   lines.push(foldHeader("To", values.to || ""))
   if (values.cc) lines.push(foldHeader("Cc", values.cc))
   lines.push(foldHeader("Subject", values.subject || ""))

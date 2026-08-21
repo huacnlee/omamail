@@ -113,6 +113,9 @@ Item {
   property string rawQuery: ""
   property var messages: []
   property var labels: []
+  property var sendAsAliases: []
+  property bool sendAsLoading: false
+  property bool sendAsLoaded: false
   property string nextPageToken: ""
   property int resultEstimate: 0
   property bool listLoading: false
@@ -161,6 +164,11 @@ Item {
 
   property var profile: null
   readonly property string accountEmail: profile ? String(profile.email || "") : ""
+  readonly property var availableSendAsAliases: {
+    if (sendAsAliases.length > 0) return sendAsAliases
+    if (accountEmail === "") return []
+    return [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }]
+  }
   property int inboxUnread: 0
   property bool countLoading: false
 
@@ -345,6 +353,35 @@ Item {
       root.labels = result
       cacheStore.putLabels(result)
     })
+  }
+
+  // Every provider exposes the same sender-list operation. Gmail reads its
+  // configured send-as aliases; an IMAP mailbox returns its one account
+  // address. Keeping that distinction below this object lets the compose view
+  // draw one honest From control for either provider.
+  function loadSendAs() {
+    if (!ready || sendAsLoading || sendAsLoaded) return
+    sendAsLoading = true
+    api.getSendAs(function(result, error) {
+      root.sendAsLoading = false
+      // Not a notice: a sender list that did not arrive costs the user a menu,
+      // not a mailbox, and a banner over the inbox would be out of proportion.
+      // It is not silent either — failing quietly here is indistinguishable
+      // from "this account has one address", which is a question nobody could
+      // answer from the window. `sendAsLoaded` stays false, so the next time
+      // this account becomes ready or active it tries again.
+      if (error) {
+        console.warn("omamail: could not read the send-as addresses:",
+          OAuth.redact(String(error)))
+        return
+      }
+      root.sendAsAliases = result
+      root.sendAsLoaded = true
+    })
+  }
+
+  function preferredSendAs(recipients) {
+    return Api.preferredSendAs(availableSendAsAliases, recipients)
   }
 
   // Paints whatever the last visit to this query left behind. Switching
@@ -732,8 +769,19 @@ Item {
       fail("Add a recipient first")
       return
     }
+    // The display name is read back off the alias list rather than taken from
+    // the compose form: the list is what `isSendAsAllowed` just checked, so the
+    // name on the message cannot disagree with the address that was allowed.
+    var from = String(values.from || "").trim()
+    var alias = from === "" ? null : Api.sendAsFor(availableSendAsAliases, from)
+    if (from !== "" && !alias) {
+      fail("Choose a valid From address")
+      return
+    }
     sending = true
     api.sendMessage(Mail.buildSendPayload({
+      from: from,
+      fromName: alias ? String(alias.displayName || "") : "",
       to: to,
       cc: String(values.cc || "").trim(),
       subject: String(values.subject || ""),
@@ -841,6 +889,7 @@ Item {
   function afterSignIn() {
     loadProfile()
     loadLabels()
+    loadSendAs()
     refreshCounts()
     loadMessages(false)
   }
@@ -859,6 +908,9 @@ Item {
     if (auth) auth.logout()
     messages = []
     labels = []
+    sendAsAliases = []
+    sendAsLoading = false
+    sendAsLoaded = false
     profile = null
     inboxUnread = 0
     listLoaded = false
@@ -877,6 +929,7 @@ Item {
     clearNotice()
     if (!ready) return
     loadProfile()
+    loadSendAs()
     if (!listLoaded) loadMessages(false)
     else refresh()
   }
@@ -884,6 +937,7 @@ Item {
   onReadyChanged: {
     if (!ready) return
     loadProfile()
+    loadSendAs()
     refreshCounts()
     if (!active) return
     loadLabels()
@@ -894,6 +948,7 @@ Item {
   onActiveChanged: {
     if (!active || !ready) return
     loadLabels()
+    loadSendAs()
     if (!listLoaded) loadMessages(false)
     else refresh()
   }

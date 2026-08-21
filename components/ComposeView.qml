@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../message/Message.js" as Mail
@@ -28,6 +29,14 @@ Item {
   property string threadId: ""
   property string inReplyTo: ""
   property bool ccVisible: false
+  property string fromEmail: ""
+  property var replyRecipients: []
+  property bool fromWasChosen: false
+
+  readonly property var fromAliases: {
+    if (!root.service || !Array.isArray(root.service.sendAsAliases)) return []
+    return root.service.sendAsAliases
+  }
 
   readonly property string title: {
     if (mode === "reply") return "REPLY"
@@ -43,6 +52,7 @@ Item {
   }
 
   function reset() {
+    fromMenu.close()
     toField.text = ""
     ccField.text = ""
     subjectField.text = ""
@@ -51,6 +61,34 @@ Item {
     threadId = ""
     inReplyTo = ""
     ccVisible = false
+    fromEmail = ""
+    replyRecipients = []
+    fromWasChosen = false
+  }
+
+  function selectPreferredFrom() {
+    var choice = root.service ? root.service.preferredSendAs(replyRecipients) : null
+    fromEmail = choice ? String(choice.email || "") : ""
+  }
+
+  function chooseFrom(email) {
+    fromEmail = String(email || "")
+    fromWasChosen = true
+    fromMenu.close()
+  }
+
+  function placeFromMenu() {
+    if (!fromMenu.visible) return
+    var global = fromButton.mapToGlobal(0, 0)
+    var at = root.mapFromGlobal(global.x, global.y)
+    var tall = fromMenu.height > 0 ? fromMenu.height : fromMenu.implicitHeight
+    var x = Math.max(0, Math.min(at.x, root.width - fromMenu.width))
+    var y = at.y + fromButton.height
+    if (y + tall > root.height) y = at.y - tall
+    if (y + tall > root.height) y = root.height - tall
+    if (y < 0) y = 0
+    fromMenu.x = x
+    fromMenu.y = y
   }
 
   // Everyone on the original except this mailbox: replying to yourself is
@@ -77,6 +115,13 @@ Item {
         ? summary.replyTo.email : summary.from.email
       threadId = summary.threadId
       inReplyTo = summary.messageId
+      // Cc as well as To: an alias is just as often the address a thread
+      // copied you on as the one it was sent to, and answering from the
+      // account's default instead is how a thread ends up split in two.
+      if (mode === "reply" || mode === "replyAll") {
+        replyRecipients = (Array.isArray(summary.to) ? summary.to : [])
+          .concat(Array.isArray(summary.cc) ? summary.cc : [])
+      }
 
       if (mode === "forward") {
         subjectField.text = "Fwd: " + summary.subject
@@ -90,6 +135,8 @@ Item {
       }
       bodyEdit.text = "\n\n" + Mail.quoteBody(summary, String(bodyText || ""))
     }
+
+    selectPreferredFrom()
 
     // Focus is not placed here. Opening this changes the window's key context,
     // and the context is what moves the keyboard — one mechanism, so the two
@@ -115,6 +162,7 @@ Item {
   function submit() {
     if (!service) return
     service.send(({
+      from: root.fromEmail,
       to: toField.text,
       cc: ccField.text,
       subject: subjectField.text,
@@ -132,6 +180,10 @@ Item {
   // Escape in the window, which is why Esc looked intermittent: whether it
   // worked depended on where the user had last clicked.
   focus: root.opened
+
+  onFromAliasesChanged: {
+    if (opened && !fromWasChosen) selectPreferredFrom()
+  }
 
   // ----------------------------------------------------------- header
   //
@@ -213,6 +265,68 @@ Item {
     anchors.top: head.bottom
     anchors.left: parent.left
     anchors.right: parent.right
+
+    Item {
+      width: parent.width
+      implicitHeight: fromButton.implicitHeight + Style.space(14)
+
+      Text {
+        id: fromLabel
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(18)
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(52)
+        horizontalAlignment: Text.AlignRight
+        text: "From"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      // Sized to the address rather than to the row: a full-width trigger puts
+      // the chevron a screen away from the name it belongs to. The extra width
+      // is the room the chevron is drawn into, over the button's own trailing
+      // padding, so the two read as one control.
+      Button {
+        id: fromButton
+        readonly property real trailing: root.fromAliases.length > 1
+          ? Style.font.iconSmall + Style.spacing.controlGap : 0
+
+        anchors.left: fromLabel.right
+        anchors.leftMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth + trailing,
+          parent.width - fromLabel.width - Style.space(46))
+        text: root.fromEmail
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        leftAlign: true
+        selected: fromMenu.opened
+        enabled: root.fromAliases.length > 1
+        onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
+
+        // The kit's own chevron is a font glyph, which at this size renders
+        // thinner than every other mark in the window. This is the app's drawn
+        // set, at the size the rest of the icons use.
+        ActionIcon {
+          anchors.right: parent.right
+          anchors.rightMargin: fromButton.horizontalPadding
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.fromAliases.length > 1
+          name: "chevronDown"
+          iconSize: Style.font.iconSmall
+          color: root.dimColor
+        }
+      }
+
+      PanelSeparator {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        foreground: root.textColor
+      }
+    }
 
     Item {
       width: parent.width
@@ -352,6 +466,80 @@ Item {
         anchors.bottom: parent.bottom
         width: parent.width
         foreground: root.textColor
+      }
+    }
+  }
+
+  QQC.Popup {
+    id: fromMenu
+    width: Math.min(Style.space(360), root.width - Style.space(36))
+    implicitHeight: Math.min(fromRows.implicitHeight + Style.space(8), Style.space(260))
+    padding: Style.space(4)
+    modal: false
+    focus: opened
+    z: 50
+    closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
+    onHeightChanged: root.placeFromMenu()
+    onOpened: root.placeFromMenu()
+    background: Rectangle {
+      radius: Style.cornerRadius
+      color: Color.popups.background
+      border.width: 1
+      border.color: Color.popups.border
+    }
+
+    contentItem: ListView {
+      id: fromRows
+      implicitHeight: contentHeight
+      clip: true
+      model: root.fromAliases
+
+      delegate: Rectangle {
+        id: fromRow
+        required property var modelData
+
+        width: fromMenu.width - fromMenu.leftPadding - fromMenu.rightPadding
+        implicitHeight: Style.space(42)
+        radius: Style.cornerRadius
+        color: root.fromEmail.toLowerCase() === String(modelData.email || "").toLowerCase()
+          ? Style.selectedFillFor(root.textColor, root.accentColor)
+          : (fromHover.hovered
+            ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+
+        Column {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(9)
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(9)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: String(fromRow.modelData.email || "")
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: root.fromEmail.toLowerCase()
+              === String(fromRow.modelData.email || "").toLowerCase()
+            elide: Text.ElideMiddle
+          }
+
+          Text {
+            width: parent.width
+            visible: text !== ""
+            textFormat: Text.PlainText
+            text: String(fromRow.modelData.displayName || "")
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        HoverHandler { id: fromHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: root.chooseFrom(fromRow.modelData.email) }
       }
     }
   }

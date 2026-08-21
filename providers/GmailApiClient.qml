@@ -187,6 +187,14 @@ Item {
       })
   }
 
+  function getSendAs(callback) {
+    return request("GET", Api.sendAsPath(), null, null,
+      function(status, payload, error) {
+        if (typeof callback !== "function") return
+        callback(error ? [] : Api.parseSendAs(payload), error)
+      })
+  }
+
   // --------------------------------------------------------------- writes
 
   function modifyMessage(id, addLabelIds, removeLabelIds, callback) {
