@@ -27,6 +27,18 @@ server — including one you run yourself.
   for every account, with a desktop notification when new mail lands.
 - **One window.** Read, archive, star, trash, search, and answer without a
   second window taking a region of its own.
+- **Invitations you can answer.** A meeting invitation is read out of the
+  message's own calendar part and drawn as a meeting: when it runs, in your
+  clock rather than the organiser's, how long for, where, whether it repeats,
+  and who else has said yes. **Yes**, **Maybe** and **No** answer the
+  organiser, and a Google Meet link joins in one click. It works on every
+  mailbox here, not only Gmail — the answer is an ordinary reply, which is
+  what every calendar server is already listening for.
+- **Off a list in one click.** A newsletter that supports one-click
+  unsubscribing is unsubscribed from without leaving the window. One that only
+  offers an address gets a message; one that only offers a page says so before
+  it opens your browser. Nothing is ever fetched from a sender's address until
+  you ask.
 - **Images stay blocked.** Loading a sender's pictures tells them the mail was
   read, from which address and when. They load when you ask, for that one
   message.

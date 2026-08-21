@@ -309,6 +309,11 @@ function bodyFileName(id) {
   return encodeAccountId(key) + ".json"
 }
 
+// The invitation and the unsubscribe offer are read out of the same fetch as
+// the body and are as unchanging as it is, so they are kept beside it: a
+// message opened a second time draws its card from the file rather than
+// waiting for the network to say the same thing again. Both are plain values —
+// no Date in either — which is what lets them go through JSON untouched.
 function serializeBody(body) {
   var source = isObject(body) ? body : {}
   return JSON.stringify({
@@ -316,7 +321,9 @@ function serializeBody(body) {
     source: String(source.source || ""),
     html: String(source.html || ""),
     attachments: Array.isArray(source.attachments) ? source.attachments : [],
-    images: Array.isArray(source.images) ? source.images : []
+    images: Array.isArray(source.images) ? source.images : [],
+    invite: isObject(source.invite) ? source.invite : null,
+    unsubscribe: isObject(source.unsubscribe) ? source.unsubscribe : null
   })
 }
 
@@ -328,6 +335,10 @@ function parseBody(text) {
     source: String(parsed.source || ""),
     html: String(parsed.html || ""),
     attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
-    images: Array.isArray(parsed.images) ? parsed.images : []
+    images: Array.isArray(parsed.images) ? parsed.images : [],
+    // Absent from every file written before these existed, which is a hit with
+    // no card rather than a miss: the live fetch fills both in a moment later.
+    invite: isObject(parsed.invite) ? parsed.invite : null,
+    unsubscribe: isObject(parsed.unsubscribe) ? parsed.unsubscribe : null
   }
 }

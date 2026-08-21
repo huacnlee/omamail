@@ -20,6 +20,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
   components/ImagePopover.qml \
   components/KeyHints.qml \
 	components/MessageReader.qml \
+	components/ReaderNotice.qml \
+	components/InviteCard.qml \
 	components/ReaderBlankSlate.qml \
 	components/ReaderSkeleton.qml \
 	components/ComposeView.qml \
@@ -43,6 +45,8 @@ test-js:
 	node tests/test_credentials.js
 	node tests/test_gmail_api.js
 	node tests/test_message.js
+	node tests/test_calendar.js
+	node tests/test_unsubscribe.js
 	node tests/test_html.js
 	node tests/test_cache.js
 	node tests/test_model.js

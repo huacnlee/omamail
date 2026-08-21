@@ -259,11 +259,24 @@ assert.strictEqual(reloaded.version, cache.VERSION)
   var hostile = cache.bodyFileName("../../etc/passwd")
   assert.ok(hostile.indexOf("/") < 0, "a traversal cannot survive the escape")
 
-  var body = { text: "t", source: "plain", html: "<p>x</p>", attachments: [{ name: "a" }], images: ["a.png"] }
-  deepEqual(cache.parseBody(cache.serializeBody(body)), body)
+  var body = {
+    text: "t", source: "plain", html: "<p>x</p>",
+    attachments: [{ name: "a" }], images: ["a.png"],
+    invite: { uid: "u1", summary: "Weekly sync", start: { ms: 1, allDay: false } },
+    unsubscribe: { available: true, oneClick: true, url: "https://l.example.com/u/1",
+      postUrl: "https://l.example.com/u/1", mail: null }
+  }
+  deepEqual(cache.parseBody(cache.serializeBody(body)), body,
+    "the invitation and the unsubscribe offer survive the round trip whole")
   assert.strictEqual(cache.parseBody("not json"), null, "a truncated file reads as a miss")
   deepEqual(cache.parseBody(cache.serializeBody({})),
-    { text: "", source: "", html: "", attachments: [], images: [] })
+    { text: "", source: "", html: "", attachments: [], images: [],
+      invite: null, unsubscribe: null })
+  // Files written before these two fields existed are hits with no card, not
+  // misses: the live fetch fills them in a moment later either way.
+  deepEqual(cache.parseBody('{"text":"t","source":"plain","html":"","attachments":[],"images":[]}'),
+    { text: "t", source: "plain", html: "", attachments: [], images: [],
+      invite: null, unsubscribe: null })
 }
 
 console.log("test_cache.js ok")

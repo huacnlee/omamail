@@ -7,6 +7,8 @@ import "../cache/Cache.js" as Cache
 import "../message/Html.js" as Html
 import "../providers/GmailApi.js" as Api
 import "../message/Message.js" as Mail
+import "../message/Calendar.js" as Calendar
+import "../message/Unsubscribe.js" as Unsub
 import "Model.js" as Model
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
@@ -155,11 +157,65 @@ Item {
   property int selectedRemoteImages: 0
   property bool selectedTooHeavy: false
   property var selectedAttachments: []
+  // The meeting this message carries, if it carries one. Null for nearly every
+  // message, which is what makes the card cost nothing to have.
+  property var selectedInvite: null
+  property bool rsvpSending: false
+  // What the message's own headers offer by way of getting off this list.
+  property var selectedUnsubscribe: null
+  property bool unsubscribing: false
+  // What was actually done about this list, once something was. Non-empty is
+  // also the flag that it has been: the button goes, the sentence stays, and
+  // pressing it twice stops being a thing that can happen. A `note` would not
+  // do — those clear themselves after a few seconds, and this is the answer to
+  // a question the user may look back at the message to ask.
+  property string unsubscribeDone: ""
+
+  // Which of this account's own addresses this message arrived at.
+  //
+  // A mailbox with aliases is invited as one of them, and the invitation's
+  // ATTENDEE line names that one — so looking for the answer under the primary
+  // address finds nothing, and sending one from it would be answering for
+  // somebody the organiser never invited. An unsubscribe wants the same
+  // address for the same reason: a list that only ever knew the alias has no
+  // reason to honour a request from an address it has never seen.
+  //
+  // `Api.preferredSendAs` is called rather than the `preferredSendAs` method
+  // beside it so that `availableSendAsAliases` is read inside this binding,
+  // where the dependency is unmistakable. It falls back to the default address
+  // when the message names none of them, which is the right answer for an
+  // invitation that was forwarded by hand.
+  readonly property var receivedAsAlias: {
+    if (!selectedMessage) return null
+    var addressed = (selectedMessage.to || []).concat(selectedMessage.cc || [])
+    return Api.preferredSendAs(availableSendAsAliases, addressed)
+  }
+  readonly property string receivedAsAddress: {
+    var chosen = receivedAsAlias ? String(receivedAsAlias.email || "") : ""
+    return chosen !== "" ? chosen : ownAddress
+  }
+  readonly property string receivedAsName: receivedAsAlias
+    ? String(receivedAsAlias.displayName || "") : ""
+
+  // Read back out of the invitation rather than remembered separately. An
+  // answer that is sent rewrites this account's ATTENDEE line in the copy kept
+  // on disk, so the card and the file agree — see `rememberResponse`.
+  readonly property string selectedResponse: selectedInvite
+    ? Calendar.responseOf(selectedInvite, receivedAsAddress) : ""
+  readonly property bool canRespondToInvite: !!selectedInvite && canSend
+    && Calendar.canRespond(selectedInvite, receivedAsAddress)
+
+  readonly property string unsubscribeLabel: unsubscribeDone !== "" ? ""
+    : Unsub.label(selectedUnsubscribe, canSend)
+  readonly property string unsubscribeDetail: unsubscribeDone !== "" ? unsubscribeDone
+    : Unsub.explanation(selectedUnsubscribe, canSend)
   property bool detailLoading: false
   // Set once Gmail's own copy has landed, so a slower cache read knows not to
   // paint over it.
   property bool detailLive: false
   property var detailHandle: null
+  // The invitation's own request, which only a message carrying one ever makes.
+  property var inviteHandle: null
   property int detailSerial: 0
 
   property var profile: null
@@ -169,6 +225,11 @@ Item {
     if (accountEmail === "") return []
     return [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }]
   }
+  // The address this mailbox answers as when nothing more specific applies.
+  // The profile is authoritative once it has loaded; until then the address the
+  // account was configured with is what the user signed in as, and an RSVP sent
+  // in that gap still has to name somebody.
+  readonly property string ownAddress: accountEmail !== "" ? accountEmail : configuredEmail
   property int inboxUnread: 0
   property bool countLoading: false
 
@@ -521,6 +582,8 @@ Item {
     selectedId = messageId
     var serial = ++detailSerial
     abortRequest(detailHandle)
+    abortRequest(inviteHandle)
+    inviteHandle = null
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
@@ -531,6 +594,9 @@ Item {
     selectedRemoteImages = 0
     selectedImages = []
     selectedAttachments = []
+    selectedInvite = null
+    selectedUnsubscribe = null
+    unsubscribeDone = ""
     detailLoading = true
 
     // A message that has been opened before opens from its file, usually well
@@ -545,6 +611,12 @@ Item {
       root.renderSource(cached.html)
       root.selectedAttachments = cached.attachments
       root.selectedImages = cached.images
+      // The invitation and the unsubscribe offer are read out of the same
+      // fetch as the body and never change either, so a message opened before
+      // shows its card at the same moment it shows its text rather than a
+      // second later when the network agrees.
+      root.selectedInvite = cached.invite
+      root.selectedUnsubscribe = cached.unsubscribe
       bodyCache.touch(messageId)
     })
 
@@ -576,18 +648,48 @@ Item {
         root.selectedImages = ready.plainText ? ready.plainText.images : []
       }
       root.selectedAttachments = Mail.attachments(payload.payload)
-      bodyCache.put(messageId, ({
+      root.selectedInvite = Calendar.fromPayload(payload.payload)
+      root.selectedUnsubscribe = Unsub.fromMessage(payload)
+      var record = ({
         text: decoded.text,
         source: decoded.source,
         html: rawHtml,
         attachments: root.selectedAttachments,
-        images: root.selectedImages
-      }))
+        images: root.selectedImages,
+        invite: root.selectedInvite,
+        unsubscribe: root.selectedUnsubscribe
+      })
+      bodyCache.put(messageId, record)
+      // Gmail describes the calendar part rather than sending it whenever the
+      // organiser's calendar named the file, which Google's own does — so the
+      // meeting is one request away, and the card lands a moment after the
+      // message it belongs to. The cache is written again with it, so it is
+      // there at once the next time this message is opened.
+      root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
       root.messages = Model.replaceById(root.messages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
       if (summary.unread) root.act(messageId, "markRead", true)
     })
+  }
+
+  // The invitation the message pointed at. Nothing happens for the messages
+  // that are not one — `pendingPart` is null unless a calendar part arrived
+  // with an id in place of its octets — and the file is asked for once, at the
+  // size the part already declared.
+  function loadInvite(messageId, serial, part, record) {
+    if (!part) return
+    inviteHandle = api.getAttachment(messageId, String(part.body.attachmentId),
+      function(data, error) {
+        if (serial !== root.detailSerial) return
+        root.inviteHandle = null
+        if (error || !data) return
+        var invite = Calendar.fromAttachment(part, data)
+        if (!invite) return
+        root.selectedInvite = invite
+        record.invite = invite
+        bodyCache.put(messageId, record)
+      })
   }
 
   // The one place `selectedHtml` is set, and the only place the sender's markup
@@ -619,6 +721,8 @@ Item {
     detailSerial++
     abortRequest(detailHandle)
     detailHandle = null
+    abortRequest(inviteHandle)
+    inviteHandle = null
     selectedId = ""
     selectedMessage = null
     selectedBody = { text: "", source: "" }
@@ -631,6 +735,9 @@ Item {
     selectedRemoteImages = 0
     selectedTooHeavy = false
     selectedAttachments = []
+    selectedInvite = null
+    selectedUnsubscribe = null
+    unsubscribeDone = ""
     detailLoading = false
   }
 
@@ -801,6 +908,168 @@ Item {
   }
 
   signal replySent()
+
+  // ------------------------------------------------------------------ RSVP
+
+  // Answering an invitation is sending a mail, which is the whole reason this
+  // needs no calendar API, no second OAuth scope, and works the same on IMAP
+  // as on Gmail: an RFC 5546 REPLY addressed to the organiser is what every
+  // calendar server is already listening for.
+  //
+  // Not routed through `send`: that one is the compose window's, and finishing
+  // emits `replySent`, which closes it. This finishes with a card that has
+  // changed its mind.
+  function rsvp(response) {
+    if (!ready || rsvpSending || !canRespondToInvite) return
+    var answer = String(response || "")
+    // The alias the invitation was addressed to, not the account's primary
+    // address: the ATTENDEE line has to name the person who was invited.
+    var answeringAs = receivedAsAddress
+    var answeringName = receivedAsName
+    var fields = Calendar.replyFields(selectedInvite,
+      ({ email: answeringAs, name: answeringName }), answer)
+    if (!fields) {
+      fail("This invitation names no organiser to answer")
+      return
+    }
+
+    // The message the answer belongs to, held so a reply that lands after the
+    // reader has moved on does not mark a different message answered.
+    var messageId = selectedId
+    var invited = selectedInvite
+    var summary = selectedMessage
+    rsvpSending = true
+    clearNotice()
+
+    api.sendMessage(Mail.buildSendPayload({
+      // The ATTENDEE line claims this address; the envelope has to agree, or a
+      // strict organiser drops the reply as somebody answering for a third
+      // party. Gmail fills a From in for itself, and the IMAP client puts the
+      // account on the envelope rather than in the headers — so neither of
+      // them would have written this one.
+      from: answeringAs,
+      fromName: answeringName,
+      to: fields.to,
+      subject: fields.subject,
+      body: fields.body,
+      calendar: fields.calendar,
+      // Threaded with the invitation it answers, the way a calendar's own
+      // reply is. An answer that starts a conversation of its own is one the
+      // organiser reads as a second, unrelated mail.
+      inReplyTo: summary ? summary.messageId : "",
+      threadId: summary ? summary.threadId : ""
+    }), function(payload, error) {
+      root.rsvpSending = false
+      if (error) {
+        root.fail(error)
+        return
+      }
+      root.note("Answer sent to " + fields.to)
+      if (root.selectedId !== messageId) return
+      root.rememberResponse(messageId, invited, answeringAs, answer)
+    })
+  }
+
+  // The answer, written back into the copy of the invitation on disk.
+  //
+  // The `text/calendar` part is the organiser's document and this does not
+  // rewrite it — but a message reopened tomorrow reading its own file would
+  // otherwise show its buttons unanswered, after the answer had been sent and
+  // had worked. Everything else in the row is what is already on screen, which
+  // is what was cached a moment ago.
+  function rememberResponse(messageId, invited, answeringAs, answer) {
+    var updated = Calendar.withResponse(invited, answeringAs, answer)
+    selectedInvite = updated
+    bodyCache.put(messageId, ({
+      text: selectedBody.text,
+      source: selectedBody.source,
+      html: sourceHtml,
+      attachments: selectedAttachments,
+      images: selectedImages,
+      invite: updated,
+      unsubscribe: selectedUnsubscribe
+    }))
+  }
+
+  // ----------------------------------------------------------- unsubscribe
+
+  // Three ways off a list, and `Unsubscribe.plan` picks between them so that
+  // nothing here branches on a header. In order of how little the user has to
+  // do: a POST the sender has promised is enough, a message to the address
+  // they nominated, or their page in a browser.
+  function unsubscribe() {
+    if (unsubscribing || unsubscribeDone !== "") return
+    var info = selectedUnsubscribe
+    var how = Unsub.plan(info, canSend)
+    if (how === "") return
+    clearNotice()
+
+    if (how === "browser") {
+      Qt.openUrlExternally(info.url)
+      // What happened is that a page opened. Whether the list acted on it is
+      // between the user and that page, and saying "unsubscribed" here would
+      // be this panel taking credit for work it cannot see.
+      unsubscribeDone = "The unsubscribe page is open in your browser"
+      return
+    }
+
+    if (how === "mail") {
+      if (!ready) {
+        fail("Sign in before unsubscribing")
+        return
+      }
+      unsubscribing = true
+      api.sendMessage(Mail.buildSendPayload({
+        // The address the newsletter was sent to. A list that only ever knew
+        // an alias has no reason to act on a request from anywhere else.
+        from: receivedAsAddress,
+        fromName: receivedAsName,
+        to: info.mail.to,
+        subject: info.mail.subject,
+        body: info.mail.body
+      }), function(payload, error) {
+        root.unsubscribing = false
+        if (error) {
+          root.fail(error)
+          return
+        }
+        root.unsubscribeDone = "Unsubscribe request sent to " + info.mail.to
+      })
+      return
+    }
+
+    postUnsubscribe(info.postUrl)
+  }
+
+  // The RFC 8058 one-click request: a fixed body, to an https address on the
+  // public internet that this sender put in a header saying a single POST
+  // would do it. `Unsubscribe.isPostableUrl` is where both of those conditions
+  // are checked, and it borrows the judgement that decides whether a message
+  // may load a picture.
+  //
+  // The reply is never read beyond its status. It is a document from whoever
+  // sent the mail, and the only question being asked of it is whether the
+  // address is off the list.
+  function postUnsubscribe(url) {
+    unsubscribing = true
+    var request = new XMLHttpRequest()
+    request.onreadystatechange = function() {
+      if (request.readyState !== XMLHttpRequest.DONE) return
+      if (!root) return
+      root.unsubscribing = false
+      var status = Number(request.status) || 0
+      if (status >= 200 && status < 400) {
+        root.unsubscribeDone = "Unsubscribed from this list"
+        return
+      }
+      root.fail(status === 0
+        ? "The unsubscribe request could not be sent"
+        : "This list refused the unsubscribe request (" + status + ")")
+    }
+    request.open("POST", url)
+    request.setRequestHeader("Content-Type", Unsub.postContentType())
+    request.send(Unsub.postBody())
+  }
 
   // -------------------------------------------------------- notifications
 

@@ -428,6 +428,16 @@ Item {
   readonly property bool remoteImagesAllowed: !!current && current.remoteImagesAllowed
   readonly property var selectedAttachments: current ? current.selectedAttachments : []
   readonly property bool selectedTooHeavy: !!current && current.selectedTooHeavy
+  // The meeting inside the message, and this account's answer to it.
+  readonly property var selectedInvite: current ? current.selectedInvite : null
+  readonly property string selectedResponse: current ? current.selectedResponse : ""
+  readonly property bool canRespondToInvite: !!current && current.canRespondToInvite
+  readonly property bool rsvpSending: !!current && current.rsvpSending
+  // Empty when this message offers no way off a list, which is the answer for
+  // everything that is not a newsletter.
+  readonly property string unsubscribeLabel: current ? current.unsubscribeLabel : ""
+  readonly property string unsubscribeDetail: current ? current.unsubscribeDetail : ""
+  readonly property bool unsubscribing: !!current && current.unsubscribing
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool sending: !!current && current.sending
   readonly property string lastError: current ? current.lastError : ""
@@ -440,6 +450,8 @@ Item {
   function select(id) { if (current) current.select(id) }
   function clearSelection() { if (current) current.clearSelection() }
   function showRemoteImages() { if (current) current.showRemoteImages() }
+  function rsvp(response) { if (current) current.rsvp(response) }
+  function unsubscribe() { if (current) current.unsubscribe() }
   function cursorOffset(cursorId, delta) {
     return current ? current.cursorOffset(cursorId, delta) : ""
   }

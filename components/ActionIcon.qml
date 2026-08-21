@@ -166,6 +166,26 @@ Canvas {
       move(13, 7); line(7.5, 12.5)
       arc(5, 10, 3.5, Math.PI / 4, Math.PI * 1.25)
       move(8, 2); line(11.5, 5.5)
+    } else if (root.name === "calendar") {
+      // The rule under the header is what tells this apart from "inbox" at
+      // 13px, where the two hangers alone are a couple of pixels each.
+      ctx.rect(1.5 * s, 3 * s, 13 * s, 11.5 * s)
+      move(1.5, 7); line(14.5, 7)
+      move(5, 1.5); line(5, 4.5)
+      move(11, 1.5); line(11, 4.5)
+    } else if (root.name === "video") {
+      ctx.rect(1.5 * s, 4 * s, 9 * s, 8 * s)
+      move(10.5, 7.2); line(14.5, 4.8); line(14.5, 11.2); ctx.closePath()
+    } else if (root.name === "pin") {
+      move(5.45, 8.55)
+      arc(8, 6, 3.6, Math.PI * 0.75, Math.PI * 2.25)
+      line(8, 13.8); ctx.closePath()
+      move(9.3, 6); arc(8, 6, 1.3, 0, Math.PI * 2)
+    } else if (root.name === "people") {
+      move(8.4, 5.2); arc(6, 5.2, 2.4, 0, Math.PI * 2)
+      move(1.8, 13); arc(6, 13, 4.2, Math.PI, Math.PI * 2)
+      move(13.4, 5.8); arc(11.5, 5.8, 1.9, 0, Math.PI * 2)
+      move(12.4, 13); arc(11.5, 12.8, 3.4, Math.PI * 1.75, Math.PI * 2)
     }
 
     // Star is the only filled glyph, and only when it is set — a filled star

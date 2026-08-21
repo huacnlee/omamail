@@ -17,6 +17,12 @@ Rectangle {
   property color foreground: Color.foreground
   property color accent: Color.accent
   property bool bordered: true
+  // Held while this button is the chosen one of a set — the RSVP row, where
+  // three buttons stand for three answers and one of them is the answer given.
+  // Never the only sign of it: the caller shows a check glyph too, because a
+  // theme can put the selected fill close enough to the normal one that
+  // colour alone says nothing.
+  property bool selected: false
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall
 
@@ -29,10 +35,11 @@ Rectangle {
   radius: Style.cornerRadius
   opacity: enabled ? 1.0 : 0.4
   color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
-    : (hot ? Style.hoverFillFor(root.foreground, root.accent)
-      : (bordered ? Style.normalFillFor(root.foreground, root.accent) : "transparent"))
-  border.width: bordered || hot ? Style.normalBorderWidth : 0
-  border.color: hot
+    : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
+      : (hot ? Style.hoverFillFor(root.foreground, root.accent)
+        : (bordered ? Style.normalFillFor(root.foreground, root.accent) : "transparent")))
+  border.width: bordered || hot || root.selected ? Style.normalBorderWidth : 0
+  border.color: hot || root.selected
     ? Style.hoverBorderFor(root.foreground, root.accent)
     : Style.normalBorderFor(root.foreground, root.accent)
 
