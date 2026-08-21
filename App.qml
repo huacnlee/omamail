@@ -75,8 +75,11 @@ Item {
   // service holds it because it is written to disk: a size somebody reached for
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
-  // 0 means "proportional"; anything else is a width somebody dragged to.
-  property real listWidth: 0
+  // 0 means "default"; anything else is a width somebody dragged to. The
+  // service owns these because a pane size is a window preference, not a single
+  // App instance's temporary state.
+  readonly property real sidebarWidth: service ? service.sidebarWidth : 0
+  readonly property real listWidth: service ? service.listWidth : 0
 
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
@@ -114,6 +117,22 @@ Item {
   readonly property bool sidebarCollapsed: !!service && service.sidebarCollapsed
   function toggleSidebar() {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
+  }
+
+  function setSidebarWidth(width) {
+    if (service) service.setSidebarWidth(width)
+  }
+
+  function resetSidebarWidth() {
+    if (service) service.setSidebarWidth(0)
+  }
+
+  function setListWidth(width) {
+    if (service) service.setListWidth(width)
+  }
+
+  function resetListWidth() {
+    if (service) service.setListWidth(0)
   }
 
   readonly property bool ready: !!service && service.ready
@@ -767,12 +786,52 @@ Item {
         anchors.right: parent.right
         anchors.bottom: statusBar.top
 
+        readonly property real collapsedSidebarWidth: Style.space(44)
+        readonly property real defaultSidebarWidth: Style.space(148)
+        readonly property real minSidebarWidth: Style.space(116)
+        readonly property real maxSidebarPreference: Style.space(280)
+        readonly property real minListWidth: Style.space(100)
+        readonly property real minReaderWidth: Style.space(360)
+        readonly property real sidebarSplitterWidth: Style.space(7)
+        readonly property real listSplitterWidth: Style.space(5)
+
+        function maxSidebarWidth() {
+          var reserved = minListWidth + minReaderWidth + listSplitterWidth
+          return Math.max(minSidebarWidth,
+            Math.min(maxSidebarPreference, width - reserved))
+        }
+
+        function clampedSidebarWidth(value) {
+          var next = Number(value)
+          if (!isFinite(next) || next <= 0) next = defaultSidebarWidth
+          return Math.max(minSidebarWidth, Math.min(maxSidebarWidth(), next))
+        }
+
+        function listColumnLeft() {
+          if (!sidebar.visible) return 0
+          return sidebar.width
+        }
+
+        function maxListWidth() {
+          var reserved = listColumnLeft() + listSplitterWidth + minReaderWidth
+          return Math.max(minListWidth, width - reserved)
+        }
+
+        function clampedListWidth(value) {
+          var next = Number(value)
+          if (!isFinite(next) || next <= 0)
+            next = Math.min(Style.space(460), Math.round(width * 0.34))
+          return Math.max(minListWidth, Math.min(maxListWidth(), next))
+        }
+
         MailboxSidebar {
           id: sidebar
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
+          width: root.sidebarCollapsed
+            ? body.collapsedSidebarWidth
+            : body.clampedSidebarWidth(root.sidebarWidth)
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           service: root.service
@@ -790,6 +849,46 @@ Item {
           onLabelSelected: function(labelId, name) {
             root.service.selectLabel(name)
             root.backToList()
+          }
+        }
+
+        // Resizes the mailbox rail. The rail is fixed while collapsed because
+        // that state is an icon strip, not a narrow text column.
+        Item {
+          id: sidebarSplitter
+          anchors.left: sidebar.right
+          anchors.leftMargin: -Math.round(width / 2)
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: body.sidebarSplitterWidth
+          visible: sidebar.visible && !root.sidebarCollapsed
+          z: 5
+
+          Rectangle {
+            anchors.fill: parent
+            color: sidebarSplitterMouse.containsMouse || sidebarSplitterMouse.pressed
+              ? Style.hoverFillFor(root.foreground, root.accent)
+              : "transparent"
+          }
+
+          MouseArea {
+            id: sidebarSplitterMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = sidebar.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.setSidebarWidth(body.clampedSidebarWidth(grabbedWidth + moved))
+            }
+            onDoubleClicked: root.resetSidebarWidth()
           }
         }
 
@@ -826,10 +925,7 @@ Item {
           // there was the app deciding how someone else should use their screen.
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
-            : Math.max(Style.space(100),
-                Math.min(parent.width - Style.space(360),
-                  root.listWidth > 0 ? root.listWidth
-                    : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
+            : body.clampedListWidth(root.listWidth)
           visible: width > 0 && !root.showPage && !root.composing
 
           // The scroller fills the column so its bar sits on the column edge;
@@ -875,9 +971,16 @@ Item {
           anchors.left: listColumn.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: Style.space(5)
+          width: body.listSplitterWidth
           visible: listColumn.visible && !root.compact
           z: 5
+
+          Rectangle {
+            anchors.fill: parent
+            color: listSplitterMouse.containsMouse || listSplitterMouse.pressed
+              ? Style.hoverFillFor(root.foreground, root.accent)
+              : "transparent"
+          }
 
           PanelSeparator {
             // The visible rule meets the list edge. The rest of the splitter's
@@ -886,11 +989,14 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
-            foreground: root.foreground
+            foreground: listSplitterMouse.containsMouse || listSplitterMouse.pressed
+              ? root.accent : root.foreground
           }
 
           MouseArea {
+            id: listSplitterMouse
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.SplitHCursor
             property real grabbedAt: 0
             property real grabbedWidth: 0
@@ -902,11 +1008,11 @@ Item {
             onPositionChanged: function(mouse) {
               if (!pressed) return
               var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
-              root.listWidth = grabbedWidth + moved
+              root.setListWidth(body.clampedListWidth(grabbedWidth + moved))
             }
             // Back to the proportional default, which is what most people
             // want after one bad drag.
-            onDoubleClicked: root.listWidth = 0
+            onDoubleClicked: root.resetListWidth()
           }
         }
 
