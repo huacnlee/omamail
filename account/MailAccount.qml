@@ -364,7 +364,17 @@ Item {
     sendAsLoading = true
     api.getSendAs(function(result, error) {
       root.sendAsLoading = false
-      if (error) return
+      // Not a notice: a sender list that did not arrive costs the user a menu,
+      // not a mailbox, and a banner over the inbox would be out of proportion.
+      // It is not silent either — failing quietly here is indistinguishable
+      // from "this account has one address", which is a question nobody could
+      // answer from the window. `sendAsLoaded` stays false, so the next time
+      // this account becomes ready or active it tries again.
+      if (error) {
+        console.warn("omamail: could not read the send-as addresses:",
+          OAuth.redact(String(error)))
+        return
+      }
       root.sendAsAliases = result
       root.sendAsLoaded = true
     })
@@ -759,14 +769,19 @@ Item {
       fail("Add a recipient first")
       return
     }
+    // The display name is read back off the alias list rather than taken from
+    // the compose form: the list is what `isSendAsAllowed` just checked, so the
+    // name on the message cannot disagree with the address that was allowed.
     var from = String(values.from || "").trim()
-    if (from !== "" && !Api.isSendAsAllowed(availableSendAsAliases, from)) {
+    var alias = from === "" ? null : Api.sendAsFor(availableSendAsAliases, from)
+    if (from !== "" && !alias) {
       fail("Choose a valid From address")
       return
     }
     sending = true
     api.sendMessage(Mail.buildSendPayload({
       from: from,
+      fromName: alias ? String(alias.displayName || "") : "",
       to: to,
       cc: String(values.cc || "").trim(),
       subject: String(values.subject || ""),

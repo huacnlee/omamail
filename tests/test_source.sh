@@ -249,8 +249,8 @@ grep -q 'from: root.fromEmail' components/ComposeView.qml \
   || fail "ComposeView must submit the selected From address"
 grep -q 'from: from' account/MailAccount.qml \
   || fail "MailAccount must pass the selected From address to Message.js"
-grep -q 'foldHeader("From", values.from)' message/Message.js \
-  || fail "Message.js must write the selected From header"
+grep -q 'fromHeader(values.from, values.fromName)' message/Message.js \
+  || fail "Message.js must write the selected From header, display name and all"
 for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
   grep -q 'function getSendAs' "$client" \
     || fail "$client must implement the provider-neutral sender-list operation"

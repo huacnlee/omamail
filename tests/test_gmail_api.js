@@ -134,12 +134,17 @@ const aliases = api.parseSendAs({
       sendAsEmail: "waiting@example.org", displayName: "Waiting", isPrimary: false,
       isDefault: false, verificationStatus: "pending"
     },
+    // A Workspace alternate address needs no verification, so Gmail sends the
+    // field back unset. Requiring "accepted" hid exactly these.
+    { sendAsEmail: "alt@example.net", displayName: "Alternate", isPrimary: false },
     { displayName: "missing address", verificationStatus: "accepted" }
   ]
 })
-assert.strictEqual(aliases.length, 2, "pending and malformed aliases are not selectable")
+assert.strictEqual(aliases.length, 3, "pending and malformed aliases are not selectable")
 assert.strictEqual(aliases[0].email, "me@example.com")
 assert.strictEqual(aliases[1].displayName, "Me at work")
+assert.strictEqual(aliases[2].email, "alt@example.net",
+  "an alias that never needed verifying is still a choice")
 assert.strictEqual(api.parseSendAs(null).length, 0)
 
 assert.strictEqual(api.preferredSendAs(aliases, [{ email: "WORK@example.net" }]).email,
@@ -154,6 +159,13 @@ assert.strictEqual(api.preferredSendAs([{ email: "only@example.com" }], []).emai
 assert.strictEqual(api.preferredSendAs([], []), null)
 assert.strictEqual(api.isSendAsAllowed(aliases, "WORK@example.net"), true)
 assert.strictEqual(api.isSendAsAllowed(aliases, "waiting@example.org"), false)
+
+// The display name that goes on the message is read back off the list, so it
+// is looked up by address and never carried alongside it.
+assert.strictEqual(api.sendAsFor(aliases, "WORK@example.net").displayName, "Me at work")
+assert.strictEqual(api.sendAsFor(aliases, "waiting@example.org"), null)
+assert.strictEqual(api.sendAsFor(aliases, ""), null)
+assert.strictEqual(api.sendAsFor(null, "me@example.com"), null)
 
 // -------------------------------------------------------------- browsing
 

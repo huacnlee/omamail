@@ -221,6 +221,12 @@ function parseProfile(payload) {
 // Gmail's send-as collection includes the primary address and every custom
 // address configured under "Send mail as". Pending custom addresses cannot be
 // used yet, so they must not appear as choices in a compose window.
+//
+// Only `pending` is excluded, never "everything that is not `accepted`":
+// verification applies to custom addresses alone, so an alias that never
+// needed it — a Workspace alternate address, an alias domain — comes back with
+// the field absent, and requiring `accepted` dropped exactly the addresses
+// that were always usable.
 function parseSendAs(payload) {
   var entries = arrayValues(payload && payload.sendAs)
   var aliases = []
@@ -229,7 +235,7 @@ function parseSendAs(payload) {
     var email = String(entry.sendAsEmail || "").trim()
     var primary = entry.isPrimary === true
     var status = String(entry.verificationStatus || "").toLowerCase()
-    if (!email || (!primary && status !== "accepted")) continue
+    if (!email || (!primary && status === "pending")) continue
     aliases.push({
       email: email,
       displayName: String(entry.displayName || "").trim(),
@@ -265,14 +271,18 @@ function preferredSendAs(aliases, recipients) {
   return choices.length > 0 ? choices[0] : null
 }
 
-function isSendAsAllowed(aliases, email) {
+function sendAsFor(aliases, email) {
   var wanted = aliasEmail(email)
-  if (!wanted) return false
+  if (!wanted) return null
   var choices = Array.isArray(aliases) ? aliases : []
   for (var i = 0; i < choices.length; i++) {
-    if (aliasEmail(choices[i]) === wanted) return true
+    if (aliasEmail(choices[i]) === wanted) return choices[i]
   }
-  return false
+  return null
+}
+
+function isSendAsAllowed(aliases, email) {
+  return sendAsFor(aliases, email) !== null
 }
 
 // --------------------------------------------------------------- browsing

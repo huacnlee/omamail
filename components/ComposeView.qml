@@ -115,8 +115,13 @@ Item {
         ? summary.replyTo.email : summary.from.email
       threadId = summary.threadId
       inReplyTo = summary.messageId
-      if (mode === "reply" || mode === "replyAll")
-        replyRecipients = Array.isArray(summary.to) ? summary.to : []
+      // Cc as well as To: an alias is just as often the address a thread
+      // copied you on as the one it was sent to, and answering from the
+      // account's default instead is how a thread ends up split in two.
+      if (mode === "reply" || mode === "replyAll") {
+        replyRecipients = (Array.isArray(summary.to) ? summary.to : [])
+          .concat(Array.isArray(summary.cc) ? summary.cc : [])
+      }
 
       if (mode === "forward") {
         subjectField.text = "Fwd: " + summary.subject
@@ -278,14 +283,21 @@ Item {
         font.pixelSize: Style.font.caption
       }
 
+      // Sized to the address rather than to the row: a full-width trigger puts
+      // the chevron a screen away from the name it belongs to. The extra width
+      // is the room the chevron is drawn into, over the button's own trailing
+      // padding, so the two read as one control.
       Button {
         id: fromButton
+        readonly property real trailing: root.fromAliases.length > 1
+          ? Style.font.iconSmall + Style.spacing.controlGap : 0
+
         anchors.left: fromLabel.right
         anchors.leftMargin: Style.space(10)
-        anchors.right: parent.right
-        anchors.rightMargin: Style.space(18)
         anchors.verticalCenter: parent.verticalCenter
-        text: root.fromEmail + (root.fromAliases.length > 1 ? "  ▾" : "")
+        width: Math.min(implicitWidth + trailing,
+          parent.width - fromLabel.width - Style.space(46))
+        text: root.fromEmail
         foreground: root.textColor
         accent: root.accentColor
         fontFamily: root.panelFontFamily
@@ -294,6 +306,19 @@ Item {
         selected: fromMenu.opened
         enabled: root.fromAliases.length > 1
         onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
+
+        // The kit's own chevron is a font glyph, which at this size renders
+        // thinner than every other mark in the window. This is the app's drawn
+        // set, at the size the rest of the icons use.
+        ActionIcon {
+          anchors.right: parent.right
+          anchors.rightMargin: fromButton.horizontalPadding
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.fromAliases.length > 1
+          name: "chevronDown"
+          iconSize: Style.font.iconSmall
+          color: root.dimColor
+        }
       }
 
       PanelSeparator {

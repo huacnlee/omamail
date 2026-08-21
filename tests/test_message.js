@@ -183,6 +183,7 @@ const resource = {
     headers: [
       { name: "From", value: "=?UTF-8?B?" + Buffer.from("李四", "utf8").toString("base64") + "?= <li@example.com>" },
       { name: "To", value: "me@example.com" },
+      { name: "Cc", value: "team@example.com, work@example.net" },
       { name: "Subject", value: "  Invoice   for   August  " },
       { name: "Date", value: "Wed, 19 Aug 2026 14:50:00 +0000" }
     ]
@@ -195,6 +196,9 @@ assert.strictEqual(summary.threadId, "18f39")
 assert.strictEqual(summary.from.display, "李四")
 assert.strictEqual(summary.from.email, "li@example.com")
 assert.strictEqual(summary.subject, "Invoice for August", "runs of whitespace collapse")
+assert.strictEqual(summary.cc.length, 2, "Cc is carried: a reply picks its alias out of it")
+assert.strictEqual(summary.cc[1].email, "work@example.net")
+assert.strictEqual(message.summarize({ payload: { headers: [] } }, now).cc.length, 0)
 assert.strictEqual(summary.snippet, "Your receipt is attached & ready")
 assert.strictEqual(summary.time, "10m")
 assert.strictEqual(summary.unread, true)
@@ -246,6 +250,24 @@ const raw = message.buildRawMessage({
 })
 
 assert.ok(raw.indexOf("From: work@example.net\r\n") === 0)
+
+// A display name is a phrase and encodes as one. Quoted when it is ASCII —
+// an unquoted comma or dot would split the address list — and an encoded word
+// when it is not, which may never be wrapped in quotes of its own.
+assert.ok(message.buildRawMessage({
+  from: "work@example.net", fromName: "Jason Lee", to: "jane@example.com"
+}).indexOf('From: "Jason Lee" <work@example.net>\r\n') === 0)
+assert.ok(message.buildRawMessage({
+  from: "work@example.net", fromName: 'Lee, Jason "JL"', to: "jane@example.com"
+}).indexOf('From: "Lee, Jason \\"JL\\"" <work@example.net>\r\n') === 0,
+  "a quote inside the name is escaped rather than ending it")
+assert.ok(message.buildRawMessage({
+  from: "work@example.net", fromName: "李四", to: "jane@example.com"
+}).indexOf("From: =?UTF-8?B?" + Buffer.from("李四", "utf8").toString("base64")
+  + "?= <work@example.net>\r\n") === 0)
+assert.ok(message.buildRawMessage({
+  from: "work@example.net", fromName: "   ", to: "jane@example.com"
+}).indexOf("From: work@example.net\r\n") === 0, "an empty name leaves a bare address")
 assert.ok(raw.indexOf("To: jane@example.com\r\n") >= 0)
 // A non-ASCII subject has to go back out as an encoded word or Gmail rejects
 // the whole raw message.
@@ -317,6 +339,7 @@ assert.strictEqual(message.extractHtml({
 
   const folded = message.buildRawMessage({
     from: "me@example.com\r\nBcc: attacker@example.net",
+    fromName: "Me\r\nBcc: attacker@example.net",
     to: "friend@example.com\r\nBcc: attacker@example.net",
     subject: "hello\nX-Injected: 1",
     body: "hi"
