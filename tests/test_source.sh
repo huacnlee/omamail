@@ -223,6 +223,18 @@ awk '
 ' components/ImapSetupPage.qml \
   || fail "IMAP Remove account must not be detached from the account action row"
 
+# A mailbox row is the selected one only when no search is standing on top of
+# it, and that guard is a continuation line. Inserting a binding between the two
+# lines silently reparented the guard onto the new property — every row on the
+# rail then numbered itself 1, and nothing failed.
+awk '
+  /selected: !!root.service && root.service.mailboxKey/ {
+    getline
+    if ($0 !~ /searchQuery/) exit 1
+  }
+' components/MailboxSidebar.qml \
+  || fail "the mailbox row's selected guard lost its search continuation line"
+
 # 5. Nothing tracked may be large. This plugin is installed by cloning it, so
 #    every megabyte in the tree is a megabyte between the user and a working
 #    mailbox — and the things that get big are never the source. A published

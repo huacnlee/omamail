@@ -81,14 +81,20 @@ var BINDINGS = [
   { id: "searchAnywhere", keys: ["Ctrl+K"], contexts: ANY,
     group: "Finding", label: "Search from anywhere" },
 
-  { id: "goInbox", keys: ["g,i"], contexts: MAIL,
-    group: "Going", label: "Go to the inbox" },
-  { id: "goStarred", keys: ["g,s"], contexts: MAIL,
-    group: "Going", label: "Go to starred" },
-  { id: "goUnread", keys: ["g,u"], contexts: MAIL,
-    group: "Going", label: "Go to unread" },
-  { id: "goSent", keys: ["g,t"], contexts: MAIL,
-    group: "Going", label: "Go to sent" },
+  // The rail by number, and nothing to remember: hold Alt and every row says
+  // which digit opens it. This replaced `g i` / `g s` / `g u` / `g t`, which
+  // were two problems in one row — a chord nobody recalls under pressure, and
+  // Qt's own 400ms deadline on an unfinished sequence, so half of them did
+  // nothing and said nothing about why. A modifier has no deadline.
+  //
+  // One row, ten sequences: `slotFor` reads which one fired off this row's own
+  // key list, so the `Alt+` prefix is not written down a second time.
+  { id: "goMailbox",
+    keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
+      "Alt+6", "Alt+7", "Alt+8", "Alt+9", "Alt+0"],
+    contexts: MAIL, group: "Going", label: "Go to that mailbox",
+    display: "Alt+1…0" },
+
   // One key, not nine, and modified rather than bare. Switching mailboxes is
   // not frequent enough to spend a letter on — the bare ones are the scarce
   // thing here — and not a chord either, because it opens a list the keyboard
@@ -117,6 +123,22 @@ var BINDINGS = [
     group: "Mailbox", label: "Back, or close the window",
     hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
 ]
+
+function byId(id) {
+  for (var i = 0; i < BINDINGS.length; i++) {
+    if (BINDINGS[i].id === id) return BINDINGS[i]
+  }
+  return null
+}
+
+// Which of a row's keys fired, as a zero-based position in the row's own list.
+// Derived rather than parsed: `Alt+3` is the fourth entry because the table
+// says so, and changing the row to `Ctrl+1…0` would need nothing here.
+function slotFor(id, sequence) {
+  var row = byId(id)
+  var keys = row ? row.keys || [] : []
+  return keys.indexOf(String(sequence || ""))
+}
 
 function matchesContext(binding, context) {
   if (!binding) return false
@@ -177,6 +199,9 @@ function readableSequence(sequence) {
 // separator.
 function displayFor(binding) {
   if (!binding) return ""
+  // A row of ten keys reads as a range. Enumerating them would be ten lines of
+  // sheet for one idea.
+  if (binding.display) return binding.display
   var keys = binding.keys || []
   var out = []
   for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))

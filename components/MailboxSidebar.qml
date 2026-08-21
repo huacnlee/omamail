@@ -24,6 +24,11 @@ Item {
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
 
+  // The numbered list App.qml also gives the keys, so a badge and the key that
+  // opens the row it sits on cannot disagree.
+  property var slots: []
+  property bool numbersVisible: false
+
   // Forwarded to the user bar, which is the control those popups hang off.
   property bool switcherOpen: false
   signal switcherRequested(real sceneX, real sceneY)
@@ -84,6 +89,7 @@ Item {
           count: 0
           selected: !!root.service && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
+          slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
           onActivated: root.mailboxSelected(modelData.key)
         }
       }
@@ -120,6 +126,7 @@ Item {
           // put a single hanzi in a 16px slot, which is neither an icon nor a
           // readable name. The tooltip carries the name instead.
           icon: "label"
+          slotNumber: Model.slotNumberOf(root.slots, "label", modelData.id)
           count: modelData.unread
           selected: !!root.service && root.service.rawQuery !== ""
             && root.service.rawQuery
@@ -168,7 +175,13 @@ Item {
     property string icon: ""
     property int count: 0
     property bool selected: false
+    property int slotNumber: 0
     signal activated()
+
+    // The badge names the key, not the position: the tenth row is opened by
+    // Alt+0, so it says 0. A row past the tenth has no key and no badge.
+    readonly property bool showsNumber: root.numbersVisible && slotNumber > 0
+    readonly property string numberText: slotNumber === 10 ? "0" : String(slotNumber)
 
     width: column.width
     implicitHeight: Style.space(28)
@@ -186,13 +199,41 @@ Item {
       name: entry.icon
       iconSize: Style.font.icon
       color: entry.selected ? root.textColor : root.dimColor
+      visible: !(entry.showsNumber && root.collapsed)
+    }
+
+    // Held Alt names every row. Collapsed there is no room beside the glyph, so
+    // it stands where the glyph was; open it takes the count's place, because a
+    // 148px rail cannot hold both and the count is the one you can get back by
+    // letting go.
+    Rectangle {
+      id: slotChip
+      visible: entry.showsNumber
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.horizontalCenter: root.collapsed ? parent.horizontalCenter : undefined
+      anchors.right: root.collapsed ? undefined : parent.right
+      anchors.rightMargin: root.collapsed ? 0 : Style.space(6)
+      width: Style.space(16)
+      height: width
+      radius: Style.cornerRadius
+      color: Style.selectedFillFor(root.textColor, root.accentColor)
+
+      Text {
+        anchors.centerIn: parent
+        text: entry.numberText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
     }
 
     Text {
       visible: !root.collapsed
       anchors.left: glyph.right
       anchors.leftMargin: Style.space(9)
-      anchors.right: badge.visible ? badge.left : parent.right
+      anchors.right: slotChip.visible ? slotChip.left
+        : (badge.visible ? badge.left : parent.right)
       anchors.rightMargin: Style.space(6)
       anchors.verticalCenter: parent.verticalCenter
       text: entry.label
@@ -205,7 +246,7 @@ Item {
 
     Text {
       id: badge
-      visible: entry.count > 0 && !root.collapsed
+      visible: entry.count > 0 && !root.collapsed && !entry.showsNumber
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
@@ -217,7 +258,7 @@ Item {
     }
 
     Rectangle {
-      visible: entry.count > 0 && root.collapsed
+      visible: entry.count > 0 && root.collapsed && !entry.showsNumber
       anchors.right: parent.right
       anchors.rightMargin: Style.space(3)
       anchors.top: parent.top

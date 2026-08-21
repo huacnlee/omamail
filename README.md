@@ -21,8 +21,8 @@ server — including one you run yourself.
   mailbox with an address and an app password. Several accounts at once, each
   with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
-  reply, `c` to compose, `g i` for the inbox, `Alt+A` to switch mailbox, `/` to search,
-  `?` for the rest — Gmail's own shortcuts, so there is nothing new to learn.
+  reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
+  which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
 - **Always counting.** The unread badge keeps working while the window is shut,
   for every account, with a desktop notification when new mail lands.
 - **One window.** Read, archive, star, trash, search, and answer without a
@@ -159,8 +159,8 @@ and the client itself are console-only; there is no CLI for them.
 | `c` | Compose |
 | `Ctrl+Enter` | Send |
 | `/` or `Ctrl+K` | Search |
-| `g` then `i` / `s` / `u` / `t` | Inbox, starred, unread, sent |
-| `Alt+A` | Switch mailbox |
+| `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
+| `Alt+A` | Switch account |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `Ctrl+?` | Every shortcut |

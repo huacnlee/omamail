@@ -99,10 +99,7 @@ used to exist, and they had.
 | `send` | `Ctrl+Return` | compose | Send |
 | `search` | `/` | mail | Search |
 | `searchAnywhere` | `Ctrl+K` | all | Search from anywhere |
-| `goInbox` | `g,i` | mail | Go to the inbox |
-| `goStarred` | `g,s` | mail | Go to starred |
-| `goUnread` | `g,u` | mail | Go to unread |
-| `goSent` | `g,t` | mail | Go to sent |
+| `goMailbox` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail | Go to that mailbox |
 | `switchAccount` | `Alt+A` | mail | Switch account |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
@@ -117,6 +114,34 @@ Two rows are split on purpose. `search` keeps the bare `/` in the mailbox while
 cannot live in a text-entry context, and the modified one should. `help` is a
 mailbox action rather than a global one: the sheet lists what the mailbox
 answers to, and a draft is not a mailbox.
+
+## Why the rail is numbered and not chorded
+
+`g i`, `g s`, `g u` and `g t` used to open the mailboxes, and they were two
+problems in one row.
+
+They were a chord, and Qt puts a deadline on an unfinished one:
+`styleHints.keyboardInputInterval`, 400ms here. Press `g`, think for half a
+second, press `i`, and nothing happens — no mailbox, no error, no hint that a
+clock had been running. Measured, not guessed:
+`0ms → fires · 300ms → fires · 500ms → dead · 800ms → dead`.
+
+And they had to be memorised. Four bindings that look like nothing on screen,
+for the four places you actually go.
+
+`Alt+1`…`Alt+0` replaces both. A modifier has no deadline, and **holding Alt
+puts the digit on every row of the rail**, so there is nothing to remember —
+the rail says which key opens it. The numbers run down the rail as it is drawn,
+mailboxes first and then the server's labels, from `Model.sidebarSlots`, which
+is the same list the badges are drawn from: the number beside a row and the row
+a number opens are one fact rather than two. Past the tenth row there is simply
+no number, because there is no digit left to offer.
+
+Held Alt is the one `Keys` handler in `App.qml`, and it is not a binding — a
+modifier alone cannot be a `Shortcut`, so there is nothing to route. It accepts
+no event, so what follows Alt still goes where it always went, and it clears on
+`activeFocus` rather than on the release: Alt+Tab takes the release with it, and
+waiting for one that is not coming would paint the numbers on permanently.
 
 `Escape` is the only bare key bound everywhere, because it is the way out of
 everywhere. What it means in each place is one list in `goBack()`, in the order
@@ -194,8 +219,11 @@ different row under the still pointer, and the cursor snapped back to it — so
 ## Adding a key
 
 1. Add a row to `BINDINGS` in `keys/Keymap.js`. Name the contexts it means
-   something in — that is the guard, and there is no other.
-2. Add a case to `runShortcut` in `App.qml`.
+   something in — that is the guard, and there is no other. A `display` string
+   is how the sheet shows a range instead of enumerating every key.
+2. Add a case to `runShortcut` in `App.qml`. The second argument is the
+   sequence that fired, which is how a row of several keys tells them apart —
+   read it with `slotFor`, never by parsing the string.
 3. Add the row to the table above. The test will tell you if you forget.
 
 That is all. The shortcut sheet and the status hints pick it up on their own.
