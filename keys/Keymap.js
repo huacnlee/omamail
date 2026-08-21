@@ -92,10 +92,11 @@ var BINDINGS = [
     group: "Going", label: "Go to unread" },
   { id: "goSent", keys: ["g,t"], contexts: MAIL,
     group: "Going", label: "Go to sent" },
-  // One key, not nine. Switching mailboxes is not a frequent enough action to
-  // spend a row of top-level keys on, and the switcher it opens is a list the
-  // keyboard can walk — which is a thing the window needed anyway.
-  { id: "switchAccount", keys: ["g,a"], contexts: MAIL,
+  // One key, not nine, and modified rather than bare. Switching mailboxes is
+  // not frequent enough to spend a letter on — the bare ones are the scarce
+  // thing here — and not a chord either, because it opens a list the keyboard
+  // then walks: `j`/`k` to move, `Enter` or `o` to take one.
+  { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
 
   // Only where there is a message body to size. These carried no context at

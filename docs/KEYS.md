@@ -103,7 +103,7 @@ used to exist, and they had.
 | `goStarred` | `g,s` | mail | Go to starred |
 | `goUnread` | `g,u` | mail | Go to unread |
 | `goSent` | `g,t` | mail | Go to sent |
-| `switchAccount` | `g,a` | mail | Switch account |
+| `switchAccount` | `Alt+A` | mail | Switch account |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+0` | reader | Reset the zoom |

@@ -118,12 +118,12 @@ assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
 assert.strictEqual(keymap.displayFor(byId("goInbox")), "g then i")
 assert.strictEqual(keymap.displayFor(byId("open")), "Enter, o")
 assert.strictEqual(keymap.displayFor(byId("back")), "Esc")
-assert.strictEqual(keymap.displayFor(byId("switchAccount")), "g then a")
+assert.strictEqual(keymap.displayFor(byId("switchAccount")), "Alt+A")
 {
   const going = groups.filter(function (g) { return g.name === "Going" })[0]
   assert.ok(going, "Switch account lives with the other go-to keys")
   const sheet = going.rows.filter(function (r) { return r.action === "Switch account" })[0]
-  assert.strictEqual(sheet.keys, "g then a")
+  assert.strictEqual(sheet.keys, "Alt+A")
 }
 
 // Only these, and only for the sheet they scroll.

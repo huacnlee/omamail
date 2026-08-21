@@ -61,7 +61,7 @@ guided by an in-app four-step walkthrough.
 - CJK correctness: RFC 2047 encoded-word headers, hand-rolled base64 + UTF-8
 - Full keyboard operation with Gmail's key bindings
 - Several accounts at once, each with its own cache and unread count, switched
-  from the sidebar, the menu, or `g a`
+  from the sidebar, the menu, or `Alt+A`
 
 **Explicitly out of scope**
 
@@ -78,7 +78,7 @@ render or are checked against it, so no second list is maintained by hand.
 
 `j`/`k` move · `Enter` or `o` open · `u` back to list · `e` archive · `d` trash ·
 `s` star · `r`/`a`/`f` reply, reply all, forward · `c` compose · `/` or `Ctrl+K`
-search · `g i` inbox · `g a` switch account · `?` the reference sheet ·
+search · `g i` inbox · `Alt+A` switch account · `?` the reference sheet ·
 `Esc` back or close.
 
 **See `docs/KEYS.md`** for the model, the contexts, the full table, and the four

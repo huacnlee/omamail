@@ -163,17 +163,22 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
-    function test_the_switcher_opens_from_the_going_chord() {
-      keyClick(Qt.Key_G)
-      keyClick(Qt.Key_A)
+    // One press, not a chord: it opens a list the keyboard then walks, so
+    // getting to it should not itself be a sequence.
+    function test_the_switcher_opens_on_one_press() {
+      keyClick(Qt.Key_A, Qt.AltModifier)
       compare(host.lastId, "switchAccount")
     }
 
-    function test_the_switcher_chord_is_dead_in_a_draft() {
+    function test_the_bare_letter_still_means_reply_all() {
+      keyClick(Qt.Key_A)
+      compare(host.lastId, "replyAll", "Alt+A did not take the letter with it")
+    }
+
+    function test_the_switcher_key_is_dead_in_a_draft() {
       host.context = "compose"
       wait(20)
-      keyClick(Qt.Key_G)
-      keyClick(Qt.Key_A)
+      keyClick(Qt.Key_A, Qt.AltModifier)
       compare(host.lastId, "", "switching is a mailbox action, not a draft one")
     }
 
