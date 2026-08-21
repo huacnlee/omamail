@@ -23,7 +23,9 @@ var BINDINGS = [
   // These two survive the shortcut sheet, and they are the only mailbox keys
   // that do: behind the sheet they scroll it. A reference sheet taller than the
   // window that could only be read with a mouse would be the one screen here
-  // that contradicts the rest.
+  // that contradicts the rest. The account switcher is not on this list — it is
+  // a popup, and a popup takes every key before the shortcut map sees it, so it
+  // answers `j`/`k` itself.
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move down",
@@ -36,11 +38,6 @@ var BINDINGS = [
   // looking at it — so with the reader up there has to be a key that says open,
   // or the only way to read the next message is to leave and come back.
   { id: "open", keys: ["Return", "o"], contexts: MAIL,
-    // Survives for the switcher, where it picks the mailbox the keyboard is
-    // standing on. Behind the shortcut sheet it does nothing — but it has to
-    // reach `runShortcut` to be stopped there, or the mailbox underneath opens
-    // a message nobody can see.
-    survivesOverlay: true,
     group: "Moving", label: "Open the selected message",
     hintKey: "o", hint: { list: "open", reader: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],

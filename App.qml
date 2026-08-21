@@ -255,18 +255,12 @@ Item {
   // One answer per key id. The ids come from keys/Keymap.js; adding a key is a
   // row there and a case here, and nothing else.
   function runShortcut(id) {
-    // Something is on top of the mailbox, and it owns the few keys that
-    // survived the overlay to reach here. `help` and `back` are not among
-    // these: they still mean what they always meant.
-    if (accountSwitcher.opened) {
-      if (id === "cursorDown") return accountSwitcher.moveCursor(1)
-      if (id === "cursorUp") return accountSwitcher.moveCursor(-1)
-      if (id === "open") return accountSwitcher.chooseCursor()
-    } else if (shortcutHelpVisible) {
+    // The sheet is on top, so moving moves it. It is a plain overlay rather
+    // than a popup, which is why its keys can come from here at all — the
+    // switcher's cannot, and answers them itself.
+    if (shortcutHelpVisible) {
       if (id === "cursorDown") return shortcutHelp.scrollBy(1)
       if (id === "cursorUp") return shortcutHelp.scrollBy(-1)
-      // Nothing on the sheet opens, and the mailbox behind it must not.
-      if (id === "open") return
     }
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
@@ -1147,7 +1141,7 @@ Item {
 
       KeyRouter {
         context: focusScope.keyContext
-        overlay: root.shortcutHelpVisible || accountSwitcher.opened
+        overlay: root.shortcutHelpVisible
         onTriggered: function(id) { root.runShortcut(id) }
       }
     }

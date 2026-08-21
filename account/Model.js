@@ -180,6 +180,19 @@ function indexById(list, id) {
   return -1
 }
 
+// Where the switcher's cursor lands after a step. It wraps where the message
+// list clamps, and the difference is the shape of the two things: a mailbox
+// list is long and scrolls, so running off the end has to feel like an end,
+// while a menu of two or three accounts that stopped at the bottom would make
+// `j` do nothing on the row you use most.
+function wrappedIndex(index, delta, count) {
+  var total = Math.max(0, Math.floor(Number(count) || 0))
+  if (total === 0) return 0
+  var from = Math.floor(Number(index) || 0)
+  var step = Math.floor(Number(delta) || 0)
+  return ((from + step) % total + total) % total
+}
+
 // Where the list cursor lands after a step. Anchored on the cursor itself,
 // because the cursor and the open message are two different things: nothing is
 // open while the list is being walked, and walking must not move the reader.

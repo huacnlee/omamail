@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
+import "../account/Model.js" as Model
 
 // The list of mailboxes, opened from the user bar.
 //
@@ -81,13 +82,10 @@ Item {
 
   function close() { menu.close() }
 
-  // Driven from `runShortcut`, never from a `Keys` handler here: a window
-  // `Shortcut` beats a focused item's handler, so a local one would look live
-  // and never run. See AGENTS.md.
   function moveCursor(delta) {
     var count = root.accounts ? root.accounts.length : 0
     if (count === 0) return
-    cursorIndex = ((cursorIndex + delta) % count + count) % count
+    cursorIndex = Model.wrappedIndex(cursorIndex, delta, count)
   }
 
   function chooseCursor() {
@@ -127,9 +125,35 @@ Item {
       border.color: Color.popups.border
     }
 
+    // The one place in this window that answers keys itself, and the reason is
+    // the opposite of the rule it breaks. `Keys` handlers are banned everywhere
+    // else because a window `Shortcut` beats them, so a local one looks live
+    // and never runs. Inside an open `QQC.Popup` it is the other way round: the
+    // popup takes every key before the shortcut map sees it — with `focus` true
+    // or false, bare or modified — so a `KeyRouter` binding is the thing that
+    // would look live and never run. `tst_account_switcher.qml` holds both
+    // halves of that, so the next person to reach for `survivesOverlay` finds
+    // out from a test rather than from a menu that does not move.
     contentItem: Column {
       id: rows
+      focus: true
       spacing: Style.space(2)
+
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_J || event.key === Qt.Key_Down) {
+          root.moveCursor(1)
+          event.accepted = true
+        } else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) {
+          root.moveCursor(-1)
+          event.accepted = true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_O) {
+          root.chooseCursor()
+          event.accepted = true
+        }
+        // Escape is not here: the popup's own CloseOnEscape is already the one
+        // mechanism that closes it, and a second would be one too many.
+      }
 
       Repeater {
         model: root.accounts

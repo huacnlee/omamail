@@ -129,11 +129,9 @@ assert.strictEqual(keymap.displayFor(byId("switchAccount")), "Alt+A")
 // Only these, and only for the sheet they scroll.
 assert.strictEqual(keymap.isEnabled(byId("cursorDown"), "list", true), true)
 assert.strictEqual(keymap.isEnabled(byId("cursorUp"), "list", true), true)
-// `open` survives too, for the switcher, where it picks the mailbox under the
-// keyboard. App.qml is what stops it doing anything behind the sheet.
-assert.strictEqual(keymap.isEnabled(byId("open"), "list", true), true)
 assert.strictEqual(keymap.isEnabled(byId("archive"), "list", true), false,
-  "nothing acts on mail behind an overlay")
+  "nothing acts on mail behind the sheet")
+assert.strictEqual(keymap.isEnabled(byId("open"), "list", true), false)
 assert.strictEqual(keymap.isEnabled(byId("compose"), "list", true), false)
 
 const switchAccount = byId("switchAccount")

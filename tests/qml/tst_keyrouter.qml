@@ -129,13 +129,6 @@ Item {
       compare(host.lastId, "cursorDown")
     }
 
-    function test_choosing_survives_an_overlay_for_the_switcher() {
-      host.overlay = true
-      wait(20)
-      keyClick(Qt.Key_Return)
-      compare(host.lastId, "open")
-    }
-
     // Moving is deliberately not opening, so with a message up there has to be
     // a key that says open — otherwise reading the next one means leaving the
     // reader and coming back.
