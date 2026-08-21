@@ -221,7 +221,6 @@ permanently.
 
 ```bash
 ./install.sh          # symlink this checkout into ~/.config/omarchy/plugins
-./restore.sh          # put the marketplace clone back
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
