@@ -116,6 +116,14 @@ key. What matters while working:
   only `Item`s, so it creates no `Shortcut`s at all and every key goes dead.
 - A `QQC.Popup` with `CloseOnEscape` consumes `Escape` itself. Do not add a
   branch for an open popup; do add one for a plain overlay like the sheet.
+- **An open `QQC.Popup` consumes every other key too**, and that is the one
+  place the rule above inverts. It takes the key before the shortcut map sees
+  it — `focus` true or false, bare or modified — so inside a popup a `KeyRouter`
+  binding is what looks live and never runs, and a `Keys` handler on the
+  popup's `contentItem` is the only thing that works. The account switcher is
+  the one component that answers keys itself, for this reason.
+  `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
+  be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when
   content moves under a still pointer and the list scrolls to follow the
   keyboard, so a hover that wrote `cursorId` pulled it back to whatever the

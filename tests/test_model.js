@@ -289,4 +289,15 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     "an empty mailbox has no row to sit on")
 }
 
+// The switcher's cursor wraps where the message list clamps: a menu of two or
+// three rows that stopped at the bottom would make `j` do nothing on the row
+// you use most.
+assert.strictEqual(model.wrappedIndex(0, 1, 3), 1)
+assert.strictEqual(model.wrappedIndex(2, 1, 3), 0, "past the last row comes back to the first")
+assert.strictEqual(model.wrappedIndex(0, -1, 3), 2, "and backwards off the top wraps too")
+assert.strictEqual(model.wrappedIndex(1, 0, 3), 1)
+assert.strictEqual(model.wrappedIndex(0, 1, 1), 0, "one mailbox has nowhere to go")
+assert.strictEqual(model.wrappedIndex(0, 1, 0), 0, "and no mailboxes must not divide by zero")
+assert.strictEqual(model.wrappedIndex(-1, 1, 3), 0)
+
 console.log("test_model.js ok")

@@ -20,10 +20,18 @@ var MAIL = ["list", "reader"]
 var ANY = ["*"]
 
 var BINDINGS = [
+  // These two survive the shortcut sheet, and they are the only mailbox keys
+  // that do: behind the sheet they scroll it. A reference sheet taller than the
+  // window that could only be read with a mouse would be the one screen here
+  // that contradicts the rest. The account switcher is not on this list — it is
+  // a popup, and a popup takes every key before the shortcut map sees it, so it
+  // answers `j`/`k` itself.
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move down",
     hintKey: "j / k", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
+    survivesOverlay: true,
     group: "Moving", label: "Move up" },
   // Live in the reader as well as the list. Moving is deliberately not opening
   // — stepping through with j used to mark half a mailbox read without anyone
@@ -81,6 +89,12 @@ var BINDINGS = [
     group: "Going", label: "Go to unread" },
   { id: "goSent", keys: ["g,t"], contexts: MAIL,
     group: "Going", label: "Go to sent" },
+  // One key, not nine, and modified rather than bare. Switching mailboxes is
+  // not frequent enough to spend a letter on — the bare ones are the scarce
+  // thing here — and not a chord either, because it opens a list the keyboard
+  // then walks: `j`/`k` to move, `Enter` or `o` to take one.
+  { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
+    group: "Going", label: "Switch account" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.

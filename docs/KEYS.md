@@ -103,6 +103,7 @@ used to exist, and they had.
 | `goStarred` | `g,s` | mail | Go to starred |
 | `goUnread` | `g,u` | mail | Go to unread |
 | `goSent` | `g,t` | mail | Go to sent |
+| `switchAccount` | `Alt+A` | mail | Switch account |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+0` | reader | Reset the zoom |
@@ -120,6 +121,27 @@ answers to, and a draft is not a mailbox.
 `Escape` is the only bare key bound everywhere, because it is the way out of
 everywhere. What it means in each place is one list in `goBack()`, in the order
 the window is stacked.
+
+## What survives an overlay
+
+The shortcut sheet sits on top of the mailbox, and `survivesOverlay` is the
+whole guard: without it a row goes dead while the sheet is up, which is why `e`
+cannot archive behind it.
+
+Four rows carry it. `help` and `back` keep their own meaning — they are how the
+sheet goes away. `cursorDown` and `cursorUp` are handed to the sheet instead, to
+scroll it, in `runShortcut`. A sheet taller than the window that could only be
+read with a mouse would be the one screen here that contradicts the rest.
+
+**The account switcher is not on that list, and cannot be.** It is a
+`QQC.Popup`, and an open popup takes every key before the shortcut map sees it —
+`focus` true or false, bare key or modified. So `Alt+A` opens it through the
+table like any other key, and from there `j`, `k`, `Enter` and `o` come from a
+`Keys` handler on the popup's own `contentItem`: the one place in this window
+where the rule at the top of this document runs backwards.
+`tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
+`Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
+message list clamps.
 
 ## The cursor
 

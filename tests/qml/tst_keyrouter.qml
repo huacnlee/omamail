@@ -119,6 +119,16 @@ Item {
       compare(host.lastId, "help")
     }
 
+    // A sheet taller than the window is the reason: behind it, moving moves
+    // the sheet. App.qml is what sends it there; the router only has to keep
+    // the keys alive.
+    function test_moving_survives_an_overlay_so_it_can_walk_one() {
+      host.overlay = true
+      wait(20)
+      keyClick(Qt.Key_J)
+      compare(host.lastId, "cursorDown")
+    }
+
     // Moving is deliberately not opening, so with a message up there has to be
     // a key that says open — otherwise reading the next one means leaving the
     // reader and coming back.
@@ -146,6 +156,25 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
+    // One press, not a chord: it opens a list the keyboard then walks, so
+    // getting to it should not itself be a sequence.
+    function test_the_switcher_opens_on_one_press() {
+      keyClick(Qt.Key_A, Qt.AltModifier)
+      compare(host.lastId, "switchAccount")
+    }
+
+    function test_the_bare_letter_still_means_reply_all() {
+      keyClick(Qt.Key_A)
+      compare(host.lastId, "replyAll", "Alt+A did not take the letter with it")
+    }
+
+    function test_the_switcher_key_is_dead_in_a_draft() {
+      host.context = "compose"
+      wait(20)
+      keyClick(Qt.Key_A, Qt.AltModifier)
+      compare(host.lastId, "", "switching is a mailbox action, not a draft one")
+    }
+
     function test_a_reader_only_key_is_dead_in_the_list() {
       keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "", "nothing to zoom from the list")

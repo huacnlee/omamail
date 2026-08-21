@@ -255,6 +255,13 @@ Item {
   // One answer per key id. The ids come from keys/Keymap.js; adding a key is a
   // row there and a case here, and nothing else.
   function runShortcut(id) {
+    // The sheet is on top, so moving moves it. It is a plain overlay rather
+    // than a popup, which is why its keys can come from here at all — the
+    // switcher's cannot, and answers them itself.
+    if (shortcutHelpVisible) {
+      if (id === "cursorDown") return shortcutHelp.scrollBy(1)
+      if (id === "cursorUp") return shortcutHelp.scrollBy(-1)
+    }
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
     if (id === "open") return openMessage(cursorId)
@@ -279,6 +286,7 @@ Item {
     if (id === "goStarred") return goMailbox("starred")
     if (id === "goUnread") return goMailbox("unread")
     if (id === "goSent") return goMailbox("sent")
+    if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { bodyZoom = 1.0; return }
@@ -1119,6 +1127,7 @@ Item {
       }
 
       ShortcutHelp {
+        id: shortcutHelp
         anchors.fill: parent
         visible: root.shortcutHelpVisible
         textColor: root.foreground
