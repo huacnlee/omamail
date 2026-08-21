@@ -339,3 +339,23 @@ assert.strictEqual(model.wrappedIndex(0, 1, 0), 0, "and no mailboxes must not di
 assert.strictEqual(model.wrappedIndex(-1, 1, 3), 0)
 
 console.log("test_model.js ok")
+
+// ------------------------------------------------------------- reading zoom
+
+// A step lands on a twentieth, so the same scroll back returns to where it was
+// and a saved zoom reads back as the one that was set.
+assert.strictEqual(model.zoomAfterStep(1, 0.1), 1.1)
+assert.strictEqual(model.zoomAfterStep(1.1, -0.1), 1)
+assert.strictEqual(model.zoomAfterStep(1.37, 0), 1.35)
+// The bounds hold however hard the wheel is turned.
+assert.strictEqual(model.zoomAfterStep(2.5, 0.1), 2.5)
+assert.strictEqual(model.zoomAfterStep(0.6, -0.1), 0.6)
+assert.strictEqual(model.zoomAfterStep(99, 0), 2.5)
+
+// What comes back off disk is a file somebody could have edited by hand, and
+// the answer to anything that is not a number is the size it shipped at.
+assert.strictEqual(model.clampZoom(undefined), 1)
+assert.strictEqual(model.clampZoom(null), 1)
+assert.strictEqual(model.clampZoom("nonsense"), 1)
+assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
+assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")

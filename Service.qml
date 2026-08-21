@@ -4,6 +4,7 @@ import Quickshell.Io
 import "account"
 
 import "account/Accounts.js" as Accounts
+import "account/Model.js" as Model
 import "providers/Registry.js" as Provider
 
 // Every mailbox on this machine, and whichever one is on screen.
@@ -299,20 +300,38 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // Somebody who needed the text bigger needs it bigger for their mail, not for
+  // the message that made them reach for it.
+  property real bodyZoom: 1.0
   property bool windowPrefsLoaded: false
   property string windowWritePayload: ""
 
   function applyWindowPrefs(raw) {
     var parsed = null
     try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-    if (parsed && typeof parsed === "object")
+    if (parsed && typeof parsed === "object") {
       sidebarCollapsed = parsed.sidebarCollapsed === true
+      bodyZoom = Model.clampZoom(parsed.bodyZoom)
+    }
     windowPrefsLoaded = true
   }
 
+  // A toggle is written the moment it is made; a zoom is dragged, and Ctrl and
+  // the wheel walk through a dozen values in a second. So the first change goes
+  // out immediately and anything arriving while that write is still running
+  // waits for the scrolling to stop — dropping those, which is what a bare
+  // `running` guard does, loses the one value the user settled on.
   function saveWindowPrefs() {
-    if (!windowPrefsLoaded || windowWriter.running) return
-    windowWritePayload = JSON.stringify({ sidebarCollapsed: sidebarCollapsed })
+    if (!windowPrefsLoaded) return
+    if (windowWriter.running) {
+      windowPrefsSettling.restart()
+      return
+    }
+    windowPrefsSettling.stop()
+    windowWritePayload = JSON.stringify({
+      sidebarCollapsed: sidebarCollapsed,
+      bodyZoom: bodyZoom
+    })
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
     windowWriter.running = true
   }
@@ -321,6 +340,13 @@ Item {
     var next = value === true
     if (next === sidebarCollapsed) return
     sidebarCollapsed = next
+    saveWindowPrefs()
+  }
+
+  function setBodyZoom(value) {
+    var next = Model.clampZoom(value)
+    if (next === bodyZoom) return
+    bodyZoom = next
     saveWindowPrefs()
   }
   signal duplicateAccount(string email)
@@ -577,6 +603,12 @@ Item {
     onLoaded: root.applyWindowPrefs(text())
     // No file yet is the ordinary first-run state, not an error.
     onLoadFailed: root.applyWindowPrefs("")
+  }
+
+  Timer {
+    id: windowPrefsSettling
+    interval: 500
+    onTriggered: root.saveWindowPrefs()
   }
 
   Process {

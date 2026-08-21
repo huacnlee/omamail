@@ -67,13 +67,15 @@ Item {
   // mail, not for one message.
   property bool plainTextForced: false
   // Reading zoom for the message body only. The window's own chrome follows
-  // the theme's font scale, which is Omarchy's to set, not this app's.
-  property real bodyZoom: 1.0
+  // the theme's font scale, which is Omarchy's to set, not this app's. The
+  // service holds it because it is written to disk: a size somebody reached for
+  // is theirs until they change it, not until they close the window.
+  readonly property real bodyZoom: service ? service.bodyZoom : 1.0
   // 0 means "proportional"; anything else is a width somebody dragged to.
   property real listWidth: 0
 
   function zoomBy(step) {
-    bodyZoom = Math.max(0.6, Math.min(2.5, Math.round((bodyZoom + step) * 20) / 20))
+    if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
   }
   property bool shortcutHelpVisible: false
   property bool setupVisible: false
@@ -303,7 +305,7 @@ Item {
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
-    if (id === "zoomReset") { bodyZoom = 1.0; return }
+    if (id === "zoomReset") { if (service) service.setBodyZoom(1.0); return }
     if (id === "refresh") {
       if (service) service.refresh()
       return

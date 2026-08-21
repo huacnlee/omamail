@@ -339,7 +339,12 @@ Item {
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
-      font.pixelSize: Math.max(7, Math.round(Style.font.bodySmall * root.zoom))
+      // Body text, where the chrome around it is bodySmall: this is the one
+      // long-form thing in the window and the only one that is read rather than
+      // scanned. At bodySmall it was 11px against the 9pt — twelve — of the
+      // terminal beside it, so the message was the smallest text on a screen
+      // whose owner had already said what size they read at.
+      font.pixelSize: Math.max(7, Math.round(Style.font.body * root.zoom))
       onLinkActivated: function(link) {
         var image = Html.imageLinkIndex(link)
         if (image > 0) {
