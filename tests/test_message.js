@@ -154,7 +154,13 @@ assert.strictEqual(message.formatSize(2 * 1024 * 1024), "2.0 MB")
 
 // -------------------------------------------------------------------- time
 
-const now = new Date("2026-08-19T15:00:00Z")
+// Local, not UTC. relativeTime reads local calendar fields to decide whether a
+// message arrived today, so a UTC-anchored fixture is only "15:00 on the 19th"
+// for a reader west of UTC+9. From UTC+9 to UTC+11 it is already past local
+// midnight, three hours before it falls on the previous local day, and the
+// clock-time assertion below sees a weekday instead. Anchoring the fixture the
+// same way the function reads it makes the day boundary the same everywhere.
+const now = new Date(2026, 7, 19, 15, 0, 0)
 function ago(ms) { return new Date(now.getTime() - ms) }
 
 assert.strictEqual(message.relativeTime(ago(30 * 1000), now), "now")
