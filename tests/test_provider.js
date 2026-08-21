@@ -163,6 +163,37 @@ assert.strictEqual(provider.unreadQuery("gmail"), "in:inbox is:unread category:p
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
 
+// A second unread search, for a provider whose scoped one can come back empty
+// on an account that still has unread mail. Only Gmail has one: IMAP's unread
+// search is already the inbox, and HEY's is the Imbox less what has been seen.
+assert.strictEqual(provider.unreadFallbackQuery("gmail"), "in:inbox is:unread")
+assert.strictEqual(provider.unreadFallbackQuery("imap"), "",
+  "IMAP unread is already the inbox; there is no second query")
+assert.strictEqual(provider.unreadFallbackQuery("hey"), "",
+  "HEY counts unseen postings in the Imbox; there is nothing narrower to widen")
+
+assert.strictEqual(provider.needsUnreadFallbackProbe("gmail", 4), false,
+  "Primary unread found mail; stay there")
+assert.strictEqual(provider.needsUnreadFallbackProbe("gmail", 0), true)
+assert.strictEqual(provider.needsUnreadFallbackProbe("imap", 0), false,
+  "IMAP never probes a second unread query")
+assert.strictEqual(provider.needsUnreadFallbackProbe("hey", 0), false,
+  "and neither does HEY, whose probe is already a scan of the whole Imbox")
+
+assert.strictEqual(provider.unreadQueryAfterCounts("gmail", 3, 20),
+  "in:inbox is:unread category:primary",
+  "tabs in use: keep Primary even if the inbox is larger")
+assert.strictEqual(provider.unreadQueryAfterCounts("gmail", 0, 7),
+  "in:inbox is:unread",
+  "no Primary label, but the inbox has unread mail")
+assert.strictEqual(provider.unreadQueryAfterCounts("gmail", 0, 0),
+  "in:inbox is:unread category:primary",
+  "nothing waiting; do not flip the query")
+assert.strictEqual(provider.unreadQueryAfterCounts("imap", 0, 9),
+  "folder:INBOX UNSEEN")
+assert.strictEqual(provider.unreadQueryAfterCounts("hey", 0, 9),
+  "box:imbox unseen")
+
 // Selecting a label in the sidebar is a different act from typing in the search
 // box, even though both end in a query. Routing it through `query` would wrap an
 // IMAP folder in a TEXT search — which looks for the folder's own name inside

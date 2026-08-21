@@ -308,8 +308,17 @@ Item {
   // The provider decides what a mailbox and a typed search amount to: Gmail's
   // are search operators, IMAP's name a folder. Opaque from here on — it is
   // handed back to the client that produced it, and used as a cache key.
-  readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
-    : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
+  // After a Primary unread probe comes back empty, this holds the inbox
+  // unread query instead. Empty means the provider's own unread query.
+  property string unreadQueryUsed: ""
+  readonly property string effectiveQuery: {
+    if (rawQuery !== "") return rawQuery
+    var text = String(searchQuery || "").replace(/^\s+|\s+$/g, "")
+    if (text !== "")
+      return Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
+    if (mailboxKey === "unread" && unreadQueryUsed !== "") return unreadQueryUsed
+    return Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
+  }
   readonly property bool hasMore: nextPageToken !== ""
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
   readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread,
@@ -384,31 +393,60 @@ Item {
     // label. The label counts every categorised message too, which is how this
     // reached 2483 on a real account — a number that is never zero, can only be
     // reported as "999+", and cannot tell anyone whether something is waiting.
-    api.listMessages(Provider.unreadQuery(providerId), 1, "", function(page, error) {
-      root.countLoading = false
-      if (error || !page) return
-      var before = root.inboxUnread
-      root.inboxUnread = page.estimate
-
-      // A mailbox that gains unread mail earns a look, whether or not it is the
-      // one on screen. The badge and the notification are both raised from a
-      // list load, and only the active account ever performed one — so mail
-      // arriving in any other mailbox went unannounced entirely, and mail
-      // arriving in this one while the window was shut relied on comparing the
-      // total against a single page rather than on the count actually moving.
-      //
-      // The first read of a session has no previous count to compare against,
-      // but the cache does know which messages were already on screen — so it
-      // loads once and lets the arrival check decide. Treating that first read
-      // as nothing but a baseline made every shell restart a blind spot: mail
-      // that landed while the shell was down would sit inside the new baseline
-      // and never be announced at all. An account with no cache still says
-      // nothing, because there is nothing to compare against.
-      var first = !root.countPrimed
-      root.countPrimed = true
-      if ((first || page.estimate > before) && !root.listLoading)
-        root.loadMessages(false)
+    var scoped = Provider.unreadQuery(providerId)
+    api.listMessages(scoped, 1, "", function(page, error) {
+      if (error || !page) {
+        root.countLoading = false
+        return
+      }
+      if (!Provider.needsUnreadFallbackProbe(providerId, page.estimate)) {
+        root.finishUnreadCount(scoped, page.estimate)
+        return
+      }
+      // Primary unread was empty. One more probe, the unscoped inbox, tells
+      // us whether the account simply has no unread mail or does not use
+      // category tabs at all.
+      api.listMessages(Provider.unreadFallbackQuery(providerId), 1, "",
+        function(unscoped, unscopedError) {
+          if (unscopedError || !unscoped) {
+            root.finishUnreadCount(scoped, page.estimate)
+            return
+          }
+          var query = Provider.unreadQueryAfterCounts(providerId,
+            page.estimate, unscoped.estimate)
+          var estimate = query === scoped ? page.estimate : unscoped.estimate
+          root.finishUnreadCount(query, estimate)
+        })
     })
+  }
+
+  function finishUnreadCount(query, estimate) {
+    var before = root.inboxUnread
+    var queryChanged = root.unreadQueryUsed !== query
+    root.unreadQueryUsed = query
+    root.inboxUnread = estimate
+    root.countLoading = false
+
+    // A mailbox that gains unread mail earns a look, whether or not it is the
+    // one on screen. The badge and the notification are both raised from a
+    // list load, and only the active account ever performed one — so mail
+    // arriving in any other mailbox went unannounced entirely, and mail
+    // arriving in this one while the window was shut relied on comparing the
+    // total against a single page rather than on the count actually moving.
+    //
+    // The first read of a session has no previous count to compare against,
+    // but the cache does know which messages were already on screen — so it
+    // loads once and lets the arrival check decide. Treating that first read
+    // as nothing but a baseline made every shell restart a blind spot: mail
+    // that landed while the shell was down would sit inside the new baseline
+    // and never be announced at all. An account with no cache still says
+    // nothing, because there is nothing to compare against.
+    var first = !root.countPrimed
+    root.countPrimed = true
+    if (queryChanged && root.mailboxKey === "unread" && !root.listLoading)
+      root.loadMessages(false)
+    else if ((first || estimate > before) && !root.listLoading)
+      root.loadMessages(false)
   }
 
   function loadProfile() {
@@ -1344,6 +1382,7 @@ Item {
     sendAsLoaded = false
     profile = null
     inboxUnread = 0
+    unreadQueryUsed = ""
     listLoaded = false
     seenIds = ({})
     notificationsPrimed = false

@@ -109,7 +109,10 @@ function define(source) {
     webHomeUrl: typeof raw.webHomeUrl === "function" ? raw.webHomeUrl : function() { return "" },
     // Where the program a provider runs on lives, for the providers that run on
     // one. Only HEY does: the other two are spoken to directly.
-    clientUrl: String(raw.CLIENT_URL || "")
+    clientUrl: String(raw.CLIENT_URL || ""),
+    // A second unread search, for a provider whose scoped one can come back
+    // empty on an account that still has unread mail.
+    unreadFallbackQuery: String(raw.UNREAD_FALLBACK_QUERY || "")
   }
 }
 
@@ -228,6 +231,35 @@ function labelQuery(id, name) {
 // could drift from the first.
 function unreadQuery(id) {
   return mailboxFor(id, "unread").query
+}
+
+// An unscoped unread search, for a provider whose scoped one can come back
+// empty on an account that still has unread mail. Empty when there is no
+// second query — IMAP's unread search already is the inbox.
+function unreadFallbackQuery(id) {
+  return String(get(id).unreadFallbackQuery || "")
+}
+
+function countOf(value) {
+  return Math.max(0, Math.floor(Number(value) || 0))
+}
+
+// Whether the scoped unread probe found nothing and there is another query
+// worth asking. The account asks; it does not decide what "scoped" means.
+function needsUnreadFallbackProbe(id, scopedEstimate) {
+  var fallback = unreadFallbackQuery(id)
+  if (fallback === "" || fallback === unreadQuery(id)) return false
+  return countOf(scopedEstimate) === 0
+}
+
+// Primary unread when the account categorises that way; the inbox unread
+// query when Primary is empty and the inbox is not. Both empty keeps the
+// scoped query, so a mailbox with nothing waiting does not flip.
+function unreadQueryAfterCounts(id, scopedEstimate, unscopedEstimate) {
+  var scoped = unreadQuery(id)
+  if (!needsUnreadFallbackProbe(id, scopedEstimate)) return scoped
+  if (countOf(unscopedEstimate) > 0) return unreadFallbackQuery(id)
+  return scoped
 }
 
 // ------------------------------------------------------------------ naming

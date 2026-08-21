@@ -223,10 +223,12 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+?` | Every shortcut |
 
 Search takes Gmail's own operator syntax straight through — `from:jane`,
-`has:attachment`, `older_than:7d`. The Unread mailbox is scoped to Primary:
-category tabs do not remove the `INBOX` label, so an unread filter without that
-scope returns the whole promotional backlog rather than the mail you have not
-read. Right-click any row in the list for archive,
+`has:attachment`, `older_than:7d`. The Unread mailbox prefers Primary, because
+category tabs do not remove the `INBOX` label and an unscoped unread search
+comes back as the promotional backlog. Accounts that do not use those tabs
+(Workspace, or an inbox type without Primary) never get that label, so Unread
+falls back to `in:inbox is:unread` when Primary is empty and the inbox is not.
+Right-click any row in the list for archive,
 trash, spam, star and read/unread without leaving the keyboard cursor behind.
 
 ## What it does not do
