@@ -616,6 +616,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: Style.space(48)
+        visible: !root.composing
 
         // Identity first, controls after, with a rule between them: the mark
         // and the name say what this window is, and everything to their right
@@ -690,7 +691,8 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && parent.width >= Style.space(120)
+            visible: !root.showPage && !root.composing
+              && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
@@ -721,7 +723,7 @@ Item {
           // own, and it stays on the left with the mark.
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage
+            visible: !root.showPage && !root.composing
             iconName: "refresh"
             tooltipText: root.service && root.service.listLoading
               ? "Checking for mail" : "Check mail · F5"
@@ -734,7 +736,7 @@ Item {
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage
+            visible: !root.showPage && !root.composing
             iconName: "send"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -760,7 +762,7 @@ Item {
 
       Item {
         id: body
-        anchors.top: header.bottom
+        anchors.top: header.visible ? header.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusBar.top
@@ -925,6 +927,7 @@ Item {
           dimmerColor: root.dimmer
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
+          leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
           showBack: root.compact

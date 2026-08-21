@@ -26,6 +26,11 @@ Item {
   required property color popupBorderColor
   required property string panelFontFamily
 
+  readonly property int formInset: Style.space(18)
+  readonly property int formLabelWidth: Style.space(52)
+  readonly property int formLabelGap: Style.space(10)
+  readonly property int fieldContentInset: formInset + formLabelWidth + formLabelGap
+
   property bool opened: false
   property string mode: "new"
   property string threadId: ""
@@ -41,16 +46,10 @@ Item {
   }
 
   readonly property string title: {
-    if (mode === "reply") return "REPLY"
-    if (mode === "replyAll") return "REPLY ALL"
-    if (mode === "forward") return "FORWARD"
-    return "NEW MESSAGE"
-  }
-  readonly property string iconName: {
-    if (mode === "reply") return "reply"
-    if (mode === "replyAll") return "replyAll"
-    if (mode === "forward") return "forward"
-    return "unread"
+    if (mode === "reply") return "Reply"
+    if (mode === "replyAll") return "Reply all"
+    if (mode === "forward") return "Forward"
+    return "New message"
   }
 
   function reset() {
@@ -195,25 +194,21 @@ Item {
 
   // ----------------------------------------------------------- header
   //
-  // There is no client-side titlebar under Hyprland, so the window has to
-  // say what it is itself.
+  // One compact title band. Back is the exit path and the title names the
+  // draft; splitting them into two stacked bands gave one short decision the
+  // hierarchy of a whole settings page.
   Item {
     id: head
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
-    height: backBar.implicitHeight + Style.space(14) + titleRow.implicitHeight
-      + Style.space(24)
+    height: Style.space(44)
 
-    // Its own line, level with the reader's and the setup page's. Sharing a
-    // line with the title made it read as part of the title on this page and
-    // as a page control on the others.
     BackBar {
       id: backBar
       anchors.left: parent.left
       anchors.leftMargin: Style.space(14)
-      anchors.top: parent.top
-      anchors.topMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
       textColor: root.textColor
       dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
@@ -223,36 +218,17 @@ Item {
     Row {
       id: titleRow
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(14)
+      anchors.leftMargin: root.fieldContentInset
       anchors.right: parent.right
       anchors.rightMargin: Style.space(18)
-      anchors.top: backBar.bottom
-      anchors.topMargin: Style.space(14)
+      anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(10)
-
-      ActionIcon {
-        anchors.verticalCenter: parent.verticalCenter
-        name: root.iconName
-        iconSize: Style.font.icon
-        color: root.textColor
-      }
 
       PanelSectionHeader {
         anchors.verticalCenter: parent.verticalCenter
         text: root.title
         foreground: root.textColor
         fontFamily: root.panelFontFamily
-      }
-
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        visible: root.mode !== "new"
-        textFormat: Text.PlainText
-        text: subjectField.text
-        color: root.dimmerColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
       }
     }
 
@@ -281,9 +257,9 @@ Item {
       Text {
         id: fromLabel
         anchors.left: parent.left
-        anchors.leftMargin: Style.space(18)
+        anchors.leftMargin: root.formInset
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(52)
+        width: root.formLabelWidth
         horizontalAlignment: Text.AlignRight
         text: "From"
         color: root.dimColor
@@ -301,7 +277,7 @@ Item {
           ? Style.font.iconSmall + Style.spacing.controlGap : 0
 
         anchors.left: fromLabel.right
-        anchors.leftMargin: Style.space(10)
+        anchors.leftMargin: root.formLabelGap
         anchors.verticalCenter: parent.verticalCenter
         width: Math.min(implicitWidth + trailing,
           parent.width - fromLabel.width - Style.space(46))
@@ -347,9 +323,9 @@ Item {
       Text {
         id: toLabel
         anchors.left: parent.left
-        anchors.leftMargin: Style.space(18)
+        anchors.leftMargin: root.formInset
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(52)
+        width: root.formLabelWidth
         horizontalAlignment: Text.AlignRight
         text: "To"
         color: root.dimColor
@@ -372,7 +348,7 @@ Item {
       TextField {
         id: toField
         anchors.left: toLabel.right
-        anchors.leftMargin: Style.space(10)
+        anchors.leftMargin: root.formLabelGap
         anchors.right: ccToggle.left
         anchors.rightMargin: Style.space(8)
         anchors.verticalCenter: parent.verticalCenter
@@ -403,9 +379,9 @@ Item {
       Text {
         id: ccLabel
         anchors.left: parent.left
-        anchors.leftMargin: Style.space(18)
+        anchors.leftMargin: root.formInset
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(52)
+        width: root.formLabelWidth
         horizontalAlignment: Text.AlignRight
         text: "Cc"
         color: root.dimColor
@@ -416,7 +392,7 @@ Item {
       TextField {
         id: ccField
         anchors.left: ccLabel.right
-        anchors.leftMargin: Style.space(10)
+        anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
         anchors.rightMargin: Style.space(18)
         anchors.verticalCenter: parent.verticalCenter
@@ -445,9 +421,9 @@ Item {
       Text {
         id: subjectLabel
         anchors.left: parent.left
-        anchors.leftMargin: Style.space(18)
+        anchors.leftMargin: root.formInset
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(52)
+        width: root.formLabelWidth
         horizontalAlignment: Text.AlignRight
         text: "Subject"
         color: root.dimColor
@@ -458,7 +434,7 @@ Item {
       TextField {
         id: subjectField
         anchors.left: subjectLabel.right
-        anchors.leftMargin: Style.space(10)
+        anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
         anchors.rightMargin: Style.space(18)
         anchors.verticalCenter: parent.verticalCenter
@@ -630,15 +606,6 @@ Item {
       }
     }
 
-    Text {
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(18)
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Ctrl+Enter sends · Esc closes"
-      color: root.dimmerColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-    }
   }
 
 }

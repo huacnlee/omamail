@@ -156,6 +156,10 @@ done
 # row, not in a gutter that cuts every selected background short.
 grep -q 'width: listFlick\.width$' App.qml \
   || fail "message rows must reach the list column edge"
+grep -q 'leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0' App.qml \
+  || fail "the reader toolbar boundary must cross the splitter hit area to meet its visible rule"
+grep -q 'anchors.leftMargin: -root.leadingBoundaryOverlap' components/MessageReader.qml \
+  || fail "the reader toolbar boundary must meet the list/reader divider"
 awk '
   /id: listSplitter/ { in_splitter = 1 }
   in_splitter && /PanelSeparator[[:space:]]*\{/ { in_separator = 1 }
@@ -300,6 +304,28 @@ done
 # Row actions must meet the compact desktop hit-target floor.
 if grep -n 'size: Style\.space(20)' components/MessageRow.qml; then
   fail "message row actions need at least a 24px hit target"
+fi
+grep -q 'anchors.margins: root.visualInset' components/IconButton.qml \
+  || fail "IconButton hover fill must sit inside its hit target"
+grep -q 'verticalPadding: Style.space(2)' components/ReaderNotice.qml \
+  || fail "ReaderNotice actions must keep their visual surface inside the notice"
+grep -q 'width: implicitWidth' components/ReaderNotice.qml \
+  || fail "ReaderNotice actions need a trailing intrinsic-width lane"
+if grep -q 'Ctrl+Enter sends' components/ComposeView.qml; then
+  fail "Compose must render shortcut hints from Keymap instead of hand-writing a second copy"
+fi
+grep -q 'visible: !root.showPage && !root.composing' App.qml \
+  || fail "mailbox header commands must stand down while Compose owns the task"
+awk '
+  /id: header$/ { in_header = 1 }
+  in_header && /visible: !root.composing/ { found = 1 }
+  in_header && /id: body$/ { exit !found }
+  END { exit !found }
+' App.qml || fail "Compose must replace the mailbox header instead of stacking another one below it"
+grep -q 'anchors.top: header.visible ? header.bottom : parent.top' App.qml \
+  || fail "Compose must reclaim the space of the hidden mailbox header"
+if grep -q 'text: subjectField.text' components/ComposeView.qml; then
+  fail "the Compose header must not repeat the Subject field"
 fi
 
 # Sign out and removal are peer account actions. Removal stays last in the

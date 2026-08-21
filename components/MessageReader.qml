@@ -20,6 +20,7 @@ Item {
   required property color dimColor
   required property color popupBackgroundColor
   required property color popupBorderColor
+  required property real leadingBoundaryOverlap
   required property color dimmerColor
   required property string panelFontFamily
   property bool forcePlainText: false
@@ -389,6 +390,11 @@ Item {
   Rectangle {
     id: footerBackdrop
     anchors.left: parent.left
+    // The reader begins after the splitter's forgiving hit target, while its
+    // visible rule sits at that target's leading edge. Extend only the surface
+    // boundary across the gap so the two rules meet; footer content remains
+    // aligned inside the reader and the splitter stays above it for input.
+    anchors.leftMargin: -root.leadingBoundaryOverlap
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     height: footer.implicitHeight + Style.space(10)
