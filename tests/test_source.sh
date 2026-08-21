@@ -327,6 +327,15 @@ grep -q 'anchors.top: header.visible ? header.bottom : parent.top' App.qml \
 if grep -q 'text: subjectField.text' components/ComposeView.qml; then
   fail "the Compose header must not repeat the Subject field"
 fi
+grep -q 'anchors.left: backBar.right' components/ComposeView.qml \
+  || fail "the Compose title must follow the rendered Back control instead of colliding with it"
+awk '
+  /id: fromButton/ { in_from = 1 }
+  in_from && /bordered: true/ { found = 1 }
+  in_from && /^      }/ { exit !found }
+  END { exit !found }
+' components/ComposeView.qml \
+  || fail "the From dropdown must use an outline treatment"
 
 # Sign out and removal are peer account actions. Removal stays last in the
 # action row instead of falling onto a detached row beneath it.

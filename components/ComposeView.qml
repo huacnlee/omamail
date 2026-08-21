@@ -29,7 +29,6 @@ Item {
   readonly property int formInset: Style.space(18)
   readonly property int formLabelWidth: Style.space(52)
   readonly property int formLabelGap: Style.space(10)
-  readonly property int fieldContentInset: formInset + formLabelWidth + formLabelGap
 
   property bool opened: false
   property string mode: "new"
@@ -217,8 +216,8 @@ Item {
 
     Row {
       id: titleRow
-      anchors.left: parent.left
-      anchors.leftMargin: root.fieldContentInset
+      anchors.left: backBar.right
+      anchors.leftMargin: Style.space(16)
       anchors.right: parent.right
       anchors.rightMargin: Style.space(18)
       anchors.verticalCenter: parent.verticalCenter
@@ -284,6 +283,7 @@ Item {
         text: root.fromEmail
         foreground: root.textColor
         accent: root.accentColor
+        bordered: true
         fontFamily: root.panelFontFamily
         fontSize: Style.font.bodySmall
         leftAlign: true
