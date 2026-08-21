@@ -233,13 +233,27 @@ awk '
 #    Anything genuinely large belongs somewhere a clone does not have to carry:
 #    a release asset, or GitHub's own attachment host, which is where the
 #    README's screenshots already live.
+#
+#    preview.png is the one exception, and it is named rather than waved
+#    through by raising the ceiling. The marketplace catalog rebuilds from
+#    branch HEAD and takes a plugin's card image from a root file, so this one
+#    has to be in the tree or the card falls back to a placeholder. It gets a
+#    ceiling of its own instead of none: a card image that grew to a megabyte
+#    would still be a megabyte every user clones.
 limit=$((128 * 1024))
+preview_limit=$((384 * 1024))
 oversized=$(git ls-files -z \
-  | xargs -0 -I{} sh -c 'size=$(wc -c < "{}" 2>/dev/null || echo 0); [ "$size" -gt '"$limit"' ] && printf "%s\t%s\n" "$size" "{}"' \
+  | xargs -0 -I{} sh -c '
+      case "{}" in
+        preview.png) ceiling='"$preview_limit"' ;;
+        *) ceiling='"$limit"' ;;
+      esac
+      size=$(wc -c < "{}" 2>/dev/null || echo 0)
+      [ "$size" -gt "$ceiling" ] && printf "%s\t%s\n" "$size" "{}"' \
   || true)
 if [ -n "$oversized" ]; then
   printf '%s\n' "$oversized" >&2
-  fail "the files above are over 128 KB; keep large assets out of the clone"
+  fail "the files above are over their size ceiling; keep large assets out of the clone"
 fi
 
 # The compose form, account boundary and raw-message builder must keep the
