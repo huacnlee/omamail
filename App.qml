@@ -63,9 +63,10 @@ Item {
 
   property string currentView: "list"
   property string cursorId: ""
-  // Kept across messages: somebody who wants plain text wants it for their
-  // mail, not for one message.
-  property bool plainTextForced: false
+  // Kept across messages, and across the window being closed: somebody who
+  // wants plain text wants it for their mail, not for one message. The service
+  // holds it because that is what writes it to disk.
+  readonly property bool plainTextForced: !!service && service.plainTextForced
   // Reading zoom for the message body only. The window's own chrome follows
   // the theme's font scale, which is Omarchy's to set, not this app's. The
   // service holds it because it is written to disk: a size somebody reached for
@@ -135,7 +136,10 @@ Item {
     opened = true
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
-    if (payload.compose === true) startCompose("new")
+    if (payload.compose === true) {
+      composeReturnView = currentView
+      startCompose("new")
+    }
     // The list is usually already loaded by the time the window is summoned —
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
@@ -205,6 +209,12 @@ Item {
   // draft in the same breath addressed nobody and quoted nothing, which is what
   // the list row's own Reply menu did. Held until the fetch lands instead.
   property string pendingComposeMode: ""
+  // Where the draft was raised from, so that leaving it goes back there.
+  // Answering from the list opens the message being answered — that is the
+  // reply's doing, not somewhere the reader asked to be — so closing the draft
+  // has to leave the message with it. Anything raised while reading stays in
+  // the reader, which is where it came from.
+  property string composeReturnView: ""
 
   function startCompose(mode) {
     if (!service) return
@@ -217,13 +227,29 @@ Item {
     compose.begin(next, service.selectedMessage, service.selectedBody.text)
   }
 
+  function resumeHeldCompose() {
+    if (pendingComposeMode === "" || !service || !service.selectedMessage) return
+    var mode = pendingComposeMode
+    pendingComposeMode = ""
+    startCompose(mode)
+  }
+
   // Answering from the list opens what is being answered first, the way the
   // row's own menu does. Anything already open is left alone: re-selecting it
   // would throw away the body that is on screen and fetch it again.
   function composeFromCursor(mode) {
     if (!service || cursorId === "") return
+    composeReturnView = currentView
     if (service.selectedId !== cursorId) openMessage(cursorId)
     startCompose(mode)
+  }
+
+  // A draft closed by its own Back, by Escape, by Discard, or by having been
+  // sent. All four are the same question: where was this raised from.
+  function leaveCompose() {
+    var from = composeReturnView
+    composeReturnView = ""
+    if (from === "list" && currentView === "reader") backToList()
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -298,7 +324,10 @@ Item {
     if (id === "reply") return composeFromCursor("reply")
     if (id === "replyAll") return composeFromCursor("replyAll")
     if (id === "forward") return composeFromCursor("forward")
-    if (id === "compose") return startCompose("new")
+    if (id === "compose") {
+      composeReturnView = currentView
+      return startCompose("new")
+    }
     if (id === "send") return compose.submit()
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
@@ -350,16 +379,20 @@ Item {
     // search, a refresh that dropped things. A cursor whose message survived
     // keeps its place; one whose message is gone would be unfindable, and an
     // unfindable cursor sends the next j to the top of the list.
-    // The message a held draft was waiting for. Selecting one clears the body
-    // and refills it from the network, so this fires twice: the guard is the
-    // summary, which is null until the fetch lands.
-    function onSelectedBodyChanged() {
-      if (root.pendingComposeMode === "") return
-      if (!root.service || !root.service.selectedMessage) return
-      var mode = root.pendingComposeMode
-      root.pendingComposeMode = ""
-      root.startCompose(mode)
-    }
+    // The message a held draft was waiting for. Both halves have to have
+    // landed: the summary carries the addresses and the subject, and the body
+    // is what gets quoted — so whichever of them arrives last is what starts
+    // the draft, and `Qt.callLater` is what lets the fetch finish assigning the
+    // rest before either is believed.
+    //
+    // Watching the body alone was not enough, and the case it missed was every
+    // message that had been opened before. Those paint from the cache, so the
+    // body changes while the summary is still null; when the summary lands the
+    // markup has not changed, so the body is not written a second time and
+    // nothing fires again. Reply, reply-all and forward raised from the list
+    // opened the message and stopped there.
+    function onSelectedBodyChanged() { Qt.callLater(root.resumeHeldCompose) }
+    function onSelectedMessageChanged() { Qt.callLater(root.resumeHeldCompose) }
 
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
@@ -693,7 +726,10 @@ Item {
             hoverColor: root.foreground
             fontFamily: root.fontFamily
             enabled: root.ready
-            onClicked: root.startCompose("new")
+            onClicked: {
+              root.composeReturnView = root.currentView
+              root.startCompose("new")
+            }
           }
 
         }
@@ -875,11 +911,15 @@ Item {
           zoom: root.bodyZoom
           showBack: root.compact
           forcePlainText: root.plainTextForced
-          onTogglePlainTextRequested: root.plainTextForced = !root.plainTextForced
+          onTogglePlainTextRequested: if (root.service)
+            root.service.setPlainTextForced(!root.service.plainTextForced)
           onZoomRequested: function(step) { root.zoomBy(step) }
-          onZoomResetRequested: root.bodyZoom = 1.0
+          onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
           onBackRequested: root.backToList()
-          onComposeRequested: function(mode) { root.startCompose(mode) }
+          onComposeRequested: function(mode) {
+            root.composeReturnView = root.currentView
+            root.startCompose(mode)
+          }
           onActionRequested: function(action) {
             if (root.service && root.service.selectedId !== "") {
               root.cursorId = root.service.selectedId
@@ -901,6 +941,7 @@ Item {
           dimColor: root.dim
           dimmerColor: root.dimmer
           panelFontFamily: root.fontFamily
+          onClosed: root.leaveCompose()
         }
 
         // Setup takes the whole body: there is nothing else to look at until
@@ -1156,6 +1197,7 @@ Item {
         dimColor: root.dim
         panelFontFamily: root.fontFamily
         onComposeRequested: function(mode, id) {
+          root.composeReturnView = root.currentView
           root.openMessage(id)
           root.startCompose(mode)
         }
