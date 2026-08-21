@@ -310,6 +310,26 @@ Item {
     })
   }
 
+  // The same call Gmail answers with a second request. Here there is nothing
+  // to fetch that was not fetched already: this client is handed the whole
+  // message and `parseRfc822` decodes every part of it on the way in, so an
+  // attachment id is a part path into a message that is already complete.
+  function getAttachment(messageId, attachmentId, callback) {
+    return getMessage(messageId, true, function(message, error) {
+      if (typeof callback !== "function") return
+      if (error || !message) {
+        callback("", error || "That message is no longer in the mailbox")
+        return
+      }
+      var part = Mail.partForAttachment(message.payload, attachmentId)
+      if (!part) {
+        callback("", "That attachment is not in the message")
+        return
+      }
+      callback(part.body ? String(part.body.data || "") : "", "")
+    })
+  }
+
   // One FETCH result, as a Gmail message resource. This is the seam the whole
   // provider turns on: past this point nothing can tell the two services apart.
   function toMessage(entry, folder, full) {

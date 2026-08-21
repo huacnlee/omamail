@@ -608,11 +608,14 @@ function normalizedMethod(value) {
 
 // The MIME part carrying the invitation, if the message has one.
 //
-// Preferred in the order that gets a usable one: an inline `text/calendar`
-// carries its own octets, while the `invite.ics` Google attaches beside it is
-// listed by id only and would need a second round trip to say the same thing.
+// Preferred in the order that gets a usable one: a part that came with its own
+// octets first, because the whole invitation is already here. A part that came
+// as an id is the fallback, and not a rare one — Gmail withholds the octets of
+// every part the sender named, and Google Calendar names both of the two it
+// sends, so on Gmail this is how a Google invitation always arrives.
 function calendarPart(payload) {
-  var best = null
+  var carried = null
+  var promised = null
 
   function walk(part, depth) {
     if (!part || depth > 12) return
@@ -621,18 +624,24 @@ function calendarPart(payload) {
     var isCalendar = mimeType === "text/calendar" || mimeType === "application/ics"
       || (mimeType === "application/octet-stream" && /\.ics$/i.test(filename))
     var data = part.body && part.body.data ? String(part.body.data) : ""
+    var attachmentId = part.body && part.body.attachmentId
+      ? String(part.body.attachmentId) : ""
     // Measured before it is decoded, not after. This runs on the thread that
     // draws the whole desktop, and a part that would be refused for its size
     // anyway should not be turned into five megabytes of string first.
     var size = Math.max(Math.floor(Number(part.body && part.body.size) || 0),
       Math.floor(data.length * 3 / 4))
-    if (isCalendar && data !== "" && size <= MAX_ICS_BYTES && best === null) best = part
+    if (isCalendar && size <= MAX_ICS_BYTES) {
+      if (data !== "") {
+        if (carried === null) carried = part
+      } else if (attachmentId !== "" && promised === null) promised = part
+    }
     var children = Array.isArray(part.parts) ? part.parts : []
     for (var i = 0; i < children.length; i++) walk(children[i], depth + 1)
   }
 
   walk(payload, 0)
-  return best
+  return carried !== null ? carried : promised
 }
 
 // The Content-Type of the part states the method too, and it is the one a
@@ -719,14 +728,42 @@ function timezoneBlocks(calendar) {
   return out
 }
 
-// The one call the reader makes. Null when the message carried no invitation,
-// which is almost every message.
+// The first call the reader makes. Null when the message carried no
+// invitation, which is almost every message — and null too when it carried one
+// the server did not send the octets of, which `pendingPart` below is for.
 function fromPayload(payload) {
-  var part = calendarPart(payload)
+  return fromPart(calendarPart(payload))
+}
+
+function fromPart(part) {
   if (!part) return null
   var text = Mail.decodePart(part)
   if (String(text || "").indexOf("BEGIN:VCALENDAR") < 0) return null
   return invitationFrom(text, partMethod(part))
+}
+
+// The part the reader has to ask for before there is anything to draw: a
+// calendar part described but not sent. Null when the message either carried
+// its invitation or carried none, so the second request is only ever made for
+// a message that has an invitation in it.
+function pendingPart(payload) {
+  var part = calendarPart(payload)
+  if (!part) return null
+  return part.body && part.body.data ? null : part
+}
+
+// The same part, now that the octets it named have arrived. Read through the
+// part rather than on its own so the charset the sender declared still decides
+// how the file is read — an invitation whose SUMMARY is not ASCII is the
+// ordinary case, not the exotic one.
+function fromAttachment(part, data) {
+  if (!part) return null
+  return fromPart({
+    mimeType: part.mimeType,
+    filename: part.filename,
+    headers: part.headers,
+    body: { data: String(data || "") }
+  })
 }
 
 // ------------------------------------------------------------- formatting

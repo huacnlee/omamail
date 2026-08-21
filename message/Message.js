@@ -433,6 +433,28 @@ function attachments(payload) {
   return found
 }
 
+// The part an attachment id names, or null. Gmail describes a part it will not
+// send — an id, a type and a size — and this is how the caller gets back to
+// what it was told about it once the octets arrive.
+function partForAttachment(payload, attachmentId) {
+  var wanted = String(attachmentId || "")
+  if (wanted === "") return null
+  var found = null
+
+  function walk(part, depth) {
+    if (!part || depth > 12 || found !== null) return
+    if (part.body && String(part.body.attachmentId || "") === wanted) {
+      found = part
+      return
+    }
+    var children = Array.isArray(part.parts) ? part.parts : []
+    for (var i = 0; i < children.length; i++) walk(children[i], depth + 1)
+  }
+
+  walk(payload, 0)
+  return found
+}
+
 function formatSize(bytes) {
   var value = Math.max(0, Math.floor(Number(bytes) || 0))
   if (value < 1024) return value + " B"

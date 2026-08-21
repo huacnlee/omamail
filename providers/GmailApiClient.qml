@@ -124,6 +124,18 @@ Item {
       })
   }
 
+  // The octets of a part Gmail described but did not send. Every part the
+  // sender named comes back that way — an id, a type and a size — and the
+  // reader asks for one of them: the invitation, whose file has to be read
+  // before a meeting can be drawn or answered.
+  function getAttachment(messageId, attachmentId, callback) {
+    return request("GET", Api.attachmentPath(messageId, attachmentId), null, null,
+      function(status, payload, error) {
+        if (typeof callback !== "function") return
+        callback(error || !payload ? "" : String(payload.data || ""), error)
+      })
+  }
+
   // Fetches every id at once and calls back once, with the results in the
   // order the ids were given rather than the order Google answered in.
   function getMessages(ids, full, callback, existingHandle) {

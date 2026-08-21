@@ -458,6 +458,65 @@ assert.strictEqual(calendar.fromPayload({
 }), null)
 assert.strictEqual(calendar.fromPayload(null), null)
 
+// An inline part wins over one that would have to be fetched, even when the
+// fetchable one comes first in the tree: the file is already here.
+assert.strictEqual(calendar.pendingPart(message.payload), null,
+  "nothing to ask for when the invitation arrived with the message")
+
+// ------------------------------------------------- the invitation as a file
+//
+// What Gmail actually hands back for a Google Calendar invitation: both
+// calendar parts named `invite.ics`, and so both listed by id with no octets
+// on either. Read as it stood, the message has a meeting in it and no way to
+// see one — which is what this shape is here to keep fixed.
+const promised = {
+  mimeType: "multipart/mixed",
+  parts: [
+    {
+      mimeType: "multipart/alternative",
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("You are invited") } },
+        {
+          mimeType: 'text/calendar; charset="UTF-8"; method=REQUEST',
+          filename: "invite.ics",
+          body: { size: 2984, attachmentId: "att-calendar" }
+        }
+      ]
+    },
+    {
+      mimeType: "application/ics",
+      filename: "invite.ics",
+      body: { size: 2984, attachmentId: "att-ics" }
+    }
+  ]
+}
+
+assert.strictEqual(calendar.fromPayload(promised), null,
+  "there is nothing to read yet")
+const wanted = calendar.pendingPart(promised)
+assert.ok(wanted, "but there is something to ask for")
+assert.strictEqual(wanted.body.attachmentId, "att-calendar",
+  "and it is the text/calendar part, whose Content-Type states the method")
+
+const fetched = calendar.fromAttachment(wanted, b64url(GOOGLE_INVITE))
+assert.strictEqual(fetched.uid, "abc123@google.com")
+assert.strictEqual(fetched.method, "REQUEST")
+assert.strictEqual(calendar.canRespond(fetched, "jason@example.com"), true,
+  "and it can be answered like any other")
+
+// A part too big to parse is not worth a round trip either.
+assert.strictEqual(calendar.pendingPart({
+  mimeType: "text/calendar", filename: "invite.ics",
+  body: { size: 4 * 1024 * 1024, attachmentId: "att-huge" }
+}), null)
+// Neither is one the server described but gave no way to ask for.
+assert.strictEqual(calendar.pendingPart({
+  mimeType: "text/calendar", filename: "invite.ics", body: { size: 900 }
+}), null)
+assert.strictEqual(calendar.fromAttachment(null, b64url(GOOGLE_INVITE)), null)
+assert.strictEqual(calendar.fromAttachment(wanted, ""), null)
+assert.strictEqual(calendar.fromAttachment(wanted, b64url("not a calendar")), null)
+
 // The Content-Type states the method too, for a file that left the property out.
 const methodFromHeader = calendar.fromPayload({
   mimeType: "text/calendar; method=REQUEST",

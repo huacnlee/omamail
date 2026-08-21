@@ -139,6 +139,13 @@ const withAttachment = {
 assert.strictEqual(message.extractBody(withAttachment).text, "real body")
 deepEqual(message.attachments(withAttachment),
   [{ filename: "notes.txt", mimeType: "text/plain", size: 2048, attachmentId: "att1" }])
+// And the way back: an id names the part it was listed from, which is how a
+// caller holding only an id gets at what the server said about it.
+assert.strictEqual(message.partForAttachment(withAttachment, "att1"),
+  withAttachment.parts[0])
+assert.strictEqual(message.partForAttachment(withAttachment, "nosuch"), null)
+assert.strictEqual(message.partForAttachment(withAttachment, ""), null)
+assert.strictEqual(message.partForAttachment(null, "att1"), null)
 deepEqual(message.extractBody({ mimeType: "image/png", body: {} }), { text: "", source: "" })
 deepEqual(message.extractBody(null), { text: "", source: "" })
 

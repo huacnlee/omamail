@@ -214,6 +214,8 @@ Item {
   // paint over it.
   property bool detailLive: false
   property var detailHandle: null
+  // The invitation's own request, which only a message carrying one ever makes.
+  property var inviteHandle: null
   property int detailSerial: 0
 
   property var profile: null
@@ -580,6 +582,8 @@ Item {
     selectedId = messageId
     var serial = ++detailSerial
     abortRequest(detailHandle)
+    abortRequest(inviteHandle)
+    inviteHandle = null
     selectedMessage = null
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
@@ -646,7 +650,7 @@ Item {
       root.selectedAttachments = Mail.attachments(payload.payload)
       root.selectedInvite = Calendar.fromPayload(payload.payload)
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
-      bodyCache.put(messageId, ({
+      var record = ({
         text: decoded.text,
         source: decoded.source,
         html: rawHtml,
@@ -654,12 +658,38 @@ Item {
         images: root.selectedImages,
         invite: root.selectedInvite,
         unsubscribe: root.selectedUnsubscribe
-      }))
+      })
+      bodyCache.put(messageId, record)
+      // Gmail describes the calendar part rather than sending it whenever the
+      // organiser's calendar named the file, which Google's own does — so the
+      // meeting is one request away, and the card lands a moment after the
+      // message it belongs to. The cache is written again with it, so it is
+      // there at once the next time this message is opened.
+      root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
       root.messages = Model.replaceById(root.messages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
       if (summary.unread) root.act(messageId, "markRead", true)
     })
+  }
+
+  // The invitation the message pointed at. Nothing happens for the messages
+  // that are not one — `pendingPart` is null unless a calendar part arrived
+  // with an id in place of its octets — and the file is asked for once, at the
+  // size the part already declared.
+  function loadInvite(messageId, serial, part, record) {
+    if (!part) return
+    inviteHandle = api.getAttachment(messageId, String(part.body.attachmentId),
+      function(data, error) {
+        if (serial !== root.detailSerial) return
+        root.inviteHandle = null
+        if (error || !data) return
+        var invite = Calendar.fromAttachment(part, data)
+        if (!invite) return
+        root.selectedInvite = invite
+        record.invite = invite
+        bodyCache.put(messageId, record)
+      })
   }
 
   // The one place `selectedHtml` is set, and the only place the sender's markup
@@ -691,6 +721,8 @@ Item {
     detailSerial++
     abortRequest(detailHandle)
     detailHandle = null
+    abortRequest(inviteHandle)
+    inviteHandle = null
     selectedId = ""
     selectedMessage = null
     selectedBody = { text: "", source: "" }
