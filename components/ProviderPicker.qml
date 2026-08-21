@@ -19,6 +19,7 @@ Column {
 
   required property color textColor
   required property color dimColor
+  required property color accentColor
   required property string panelFontFamily
   property bool canLeave: false
 
@@ -75,10 +76,10 @@ Column {
         implicitHeight: cardText.implicitHeight + Style.space(24)
         radius: Style.cornerRadius
         color: card.connectable && hover.hovered
-          ? Style.hoverFillFor(root.textColor, Color.accent)
-          : Style.normalFillFor(root.textColor, Color.accent)
+          ? Style.hoverFillFor(root.textColor, root.accentColor)
+          : Style.normalFillFor(root.textColor, root.accentColor)
         border.width: 1
-        border.color: Style.hoverBorderFor(root.textColor, Color.accent)
+        border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
         // Not greyed out with a literal colour — the theme owns those. Reduced
         // opacity says "not available" without inventing a grey that some
         // themes render as ordinary body text.
@@ -120,7 +121,6 @@ Column {
         HoverHandler {
           id: hover
           enabled: card.connectable
-          cursorShape: Qt.PointingHandCursor
         }
 
         TapHandler {

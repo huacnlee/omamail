@@ -15,6 +15,8 @@ Item {
 
   required property color textColor
   required property color dimColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property string panelFontFamily
 
   property string source: ""
@@ -61,9 +63,9 @@ Item {
 
     background: Rectangle {
       radius: Style.cornerRadius
-      color: Color.popups.background
+      color: root.popupBackgroundColor
       border.width: 1
-      border.color: Color.popups.border
+      border.color: root.popupBorderColor
     }
 
     Column {
@@ -93,7 +95,7 @@ Item {
           visible: root.refused || picture.status !== Image.Ready
           text: root.refused
             ? "That image is not on the public internet, so it was not fetched"
-            : (picture.status === Image.Error ? "That image could not be loaded" : "Loading…")
+            : (picture.status === Image.Error ? "That image could not be loaded" : "Loading")
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall

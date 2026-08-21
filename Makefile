@@ -13,6 +13,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ListSkeleton.qml \
 	components/MessageRow.qml \
 	components/MessageMenu.qml \
+	components/MenuActionRow.qml components/MenuSeparatorLine.qml \
 	components/KeyRouter.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
@@ -28,6 +29,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
 	components/AccountSwitcher.qml \
+	components/AccountRemovalDialog.qml \
 	components/BackBar.qml \
 	components/UserBar.qml \
 	components/SettingsPage.qml \
@@ -52,6 +54,7 @@ test-js:
 	node tests/test_model.js
 	node tests/test_keymap.js
 	node tests/test_accounts.js
+	node tests/test_menu.js
 	node tests/test_provider.js
 	node tests/test_imap.js
 

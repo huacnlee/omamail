@@ -18,6 +18,8 @@ Item {
   required property color accentColor
   required property color linkColor
   required property color dimColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property color dimmerColor
   required property string panelFontFamily
   property bool forcePlainText: false
@@ -408,8 +410,11 @@ Item {
     anchors.bottom: parent.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.leftMargin: root.pageInset
-    anchors.rightMargin: root.pageInset
+    // Control frames share the status bar's eight-pixel chrome inset. The
+    // page content keeps its wider reading inset; applying that to buttons as
+    // well made their glyphs sit visibly farther inward than the chrome below.
+    anchors.leftMargin: Style.space(8)
+    anchors.rightMargin: Style.space(8)
     anchors.bottomMargin: Style.space(4)
     spacing: Style.space(4)
     visible: !!root.summary
@@ -466,17 +471,17 @@ Item {
       IconButton {
         id: replyButton
         iconName: "reply"; tooltipText: "Reply · r"
-        foreground: root.textColor; fontFamily: root.panelFontFamily
+        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("reply")
       }
       IconButton {
         iconName: "replyAll"; tooltipText: "Reply all · a"
-        foreground: root.textColor; fontFamily: root.panelFontFamily
+        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("replyAll")
       }
       IconButton {
         iconName: "forward"; tooltipText: "Forward · f"
-        foreground: root.textColor; fontFamily: root.panelFontFamily
+        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.composeRequested("forward")
       }
 
@@ -497,7 +502,7 @@ Item {
           anchors.centerIn: parent
           width: 1
           height: Style.space(15)
-          foreground: root.textColor
+          foreground: root.dimColor
         }
       }
 
@@ -507,12 +512,12 @@ Item {
       IconButton {
         visible: !root.service || root.service.canArchive
         iconName: "archive"; tooltipText: "Archive · e"
-        foreground: root.textColor; fontFamily: root.panelFontFamily
+        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("archive")
       }
       IconButton {
         iconName: "trash"; tooltipText: "Move to trash · d"
-        foreground: root.textColor; fontFamily: root.panelFontFamily
+        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
         onClicked: root.actionRequested("trash")
       }
 
@@ -550,6 +555,8 @@ Item {
     id: imagePopover
     textColor: root.textColor
     dimColor: root.dimColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
     panelFontFamily: root.panelFontFamily
   }
 }

@@ -269,7 +269,7 @@ Item {
       color: root.accentColor
     }
 
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+    HoverHandler { id: hover }
     TapHandler { onTapped: entry.activated() }
 
     // The tooltip is how the rail stays usable while collapsed, and it carries

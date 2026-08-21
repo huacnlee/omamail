@@ -153,7 +153,7 @@ Rectangle {
       foreground: root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       iconSize: Style.font.iconSmall
-      size: Style.space(20)
+      size: Style.space(24)
       fontFamily: root.panelFontFamily
       onClicked: root.starToggled()
     }
@@ -168,7 +168,7 @@ Rectangle {
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall
-      size: Style.space(20)
+      size: Style.space(24)
       fontFamily: root.panelFontFamily
       onClicked: root.archiveRequested()
     }
@@ -180,7 +180,7 @@ Rectangle {
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall
-      size: Style.space(20)
+      size: Style.space(24)
       fontFamily: root.panelFontFamily
       onClicked: root.trashRequested()
     }

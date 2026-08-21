@@ -240,6 +240,29 @@ function removeAt(list, index) {
   return source
 }
 
+// The request is an immutable description of the row the user saw. Keeping
+// both its id and position lets confirmation reject a stale request instead of
+// deleting whichever account later moved into the same row.
+function removalRequest(list, index) {
+  var values = Array.isArray((list || {}).accounts) ? list.accounts : []
+  if (values.length <= 1) return null
+  var at = Math.floor(Number(index))
+  if (!isFinite(at) || at < 0 || at >= values.length) return null
+  var entry = values[at] || {}
+  if (!entry.id) return null
+  return { id: String(entry.id || ""), email: String(entry.email || ""), index: at }
+}
+
+function confirmRemoval(list, request) {
+  if (!request) return -1
+  var values = Array.isArray((list || {}).accounts) ? list.accounts : []
+  var at = Math.floor(Number(request.index))
+  if (!isFinite(at) || at < 0 || at >= values.length) return -1
+  var entry = values[at] || {}
+  var id = String(request.id || "")
+  return id !== "" && String(entry.id || "") === id ? at : -1
+}
+
 function discardDraftAt(list, index) {
   var source = copyList(list)
   var at = Math.floor(Number(index))

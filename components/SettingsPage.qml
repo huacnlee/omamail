@@ -159,7 +159,7 @@ Column {
             text: {
               if (row.modelData.error !== undefined && row.modelData.error !== "")
                 return row.modelData.error
-              if (!row.modelData.signedIn) return "Not signed in yet"
+              if (!row.modelData.signedIn) return "Signed out"
               var count = row.modelData.unread
               var unread = count === 0 ? "No unread mail"
                 : (count === 1 ? "1 unread message" : count + " unread messages")
@@ -194,10 +194,10 @@ Column {
 
   IconTextButton {
     iconName: "plus"
-    text: "Add a mailbox"
+    text: "Add a mailbox..."
     foreground: root.textColor
     fontFamily: root.panelFontFamily
-    tooltipText: "Sign in to another Gmail account"
+    tooltipText: "Add another mail account"
     onClicked: root.addRequested()
   }
 

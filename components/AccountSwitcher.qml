@@ -3,14 +3,14 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
+import "Menu.js" as Menu
 
 // The list of mailboxes, opened from the user bar.
 //
 // Switching is meant to be instant, which it is because every account keeps its
-// own cache — so this shows each one's unread count even while you are looking
-// at another, and says which is being checked right now. An account that has
-// not finished signing in is listed too, because otherwise a half-added
-// mailbox becomes invisible and unfixable.
+// own cache. It says which is being checked right now and keeps a mailbox that
+// has not finished signing in visible, because otherwise a half-added mailbox
+// becomes invisible and unfixable.
 Item {
   id: root
 
@@ -18,6 +18,8 @@ Item {
   required property color accentColor
   required property color urgentColor
   required property color dimColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property string panelFontFamily
 
   // [{ id, email, label, unread, active, signedIn, busy, error }]
@@ -59,15 +61,9 @@ Item {
   function place() {
     if (!menu.visible) return
     var tall = menu.height > 0 ? menu.height : menu.implicitHeight
-    var x = Math.max(0, Math.min(anchorX, root.width - menu.width))
-    var y = anchorY
-    // Below the click by preference, above it if that would overflow, and
-    // pinned to the bottom edge if the menu is taller than the room either way.
-    if (y + tall > root.height) y = anchorY - tall
-    if (y + tall > root.height) y = root.height - tall
-    if (y < 0) y = 0
-    menu.x = x
-    menu.y = y
+    var placed = Menu.position(anchorX, anchorY, menu.width, tall, root.width, root.height)
+    menu.x = placed.x
+    menu.y = placed.y
   }
 
   // Opened from a menu rather than from a click on the rail, so there is no
@@ -120,9 +116,9 @@ Item {
     }
     background: Rectangle {
       radius: Style.cornerRadius
-      color: Color.popups.background
+      color: root.popupBackgroundColor
       border.width: 1
-      border.color: Color.popups.border
+      border.color: root.popupBorderColor
     }
 
     // The one place in this window that answers keys itself, and the reason is
@@ -203,8 +199,8 @@ Item {
           Column {
             anchors.left: rowAvatar.right
             anchors.leftMargin: Style.space(9)
-            anchors.right: rowCount.left
-            anchors.rightMargin: Style.space(6)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
 
@@ -231,8 +227,8 @@ Item {
               text: {
                 if (row.modelData.error !== undefined && row.modelData.error !== "")
                   return row.modelData.error
-                if (!row.modelData.signedIn) return "Not signed in"
-                if (row.modelData.busy) return "Checking…"
+                if (!row.modelData.signedIn) return "Signed out"
+                if (row.modelData.busy) return "Checking"
                 // Only when it says something the address does not.
                 var name = String(row.modelData.label || "")
                 return name !== "" && row.modelData.email.indexOf(name) !== 0 ? name : ""
@@ -245,20 +241,7 @@ Item {
             }
           }
 
-          Text {
-            id: rowCount
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(10)
-            anchors.verticalCenter: parent.verticalCenter
-            visible: row.modelData.unread > 0
-            text: row.modelData.unread > 999 ? "999+" : row.modelData.unread
-            color: root.accentColor
-            font.family: root.panelFontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
+          HoverHandler { id: rowHover }
           TapHandler {
             onTapped: {
               menu.close()
@@ -322,7 +305,7 @@ Item {
       elide: Text.ElideRight
     }
 
-    HoverHandler { id: plainHover; cursorShape: Qt.PointingHandCursor }
+    HoverHandler { id: plainHover }
     TapHandler { onTapped: plainRow.activated() }
   }
 }

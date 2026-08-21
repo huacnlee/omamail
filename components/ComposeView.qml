@@ -22,6 +22,8 @@ Item {
   required property color accentColor
   required property color dimColor
   required property color dimmerColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property string panelFontFamily
 
   property bool opened: false
@@ -489,9 +491,9 @@ Item {
     onOpened: root.placeFromMenu()
     background: Rectangle {
       radius: Style.cornerRadius
-      color: Color.popups.background
+      color: root.popupBackgroundColor
       border.width: 1
-      border.color: Color.popups.border
+      border.color: root.popupBorderColor
     }
 
     contentItem: ListView {
@@ -544,7 +546,7 @@ Item {
           }
         }
 
-        HoverHandler { id: fromHover; cursorShape: Qt.PointingHandCursor }
+        HoverHandler { id: fromHover }
         TapHandler { onTapped: root.chooseFrom(fromRow.modelData.email) }
       }
     }
@@ -612,7 +614,7 @@ Item {
       IconTextButton {
         iconName: "send"
         tooltipText: "Send · Ctrl+Enter"
-        text: root.service && root.service.sending ? "Sending…" : "Send"
+        text: root.service && root.service.sending ? "Sending" : "Send"
         foreground: root.textColor
         fontFamily: root.panelFontFamily
         enabled: !!root.service && !root.service.sending

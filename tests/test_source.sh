@@ -78,6 +78,24 @@ if awk '
 ' components/ImapSetupPage.qml; then
   fail "ImapSetupPage assigns the non-existent IconTextButton.hoverColor property"
 fi
+for file in components/MessageList.qml components/ReaderBlankSlate.qml; do
+  if grep -n 'resultSummary' "$file"; then
+    fail "$file must not expose result-count estimates in the interface"
+  fi
+done
+if grep -n 'modelData\.unread' components/AccountSwitcher.qml; then
+  fail "the account switcher must identify mailboxes without count badges"
+fi
+grep -q 'mapToGlobal(0, 0)' components/UserBar.qml \
+  || fail "the account switcher must anchor to the user bar, not the click position"
+awk '
+  /id: footer$/ { in_footer = 1 }
+  in_footer && /anchors.leftMargin: Style.space\(8\)/ { left = 1 }
+  in_footer && /anchors.rightMargin: Style.space\(8\)/ { right = 1 }
+  in_footer && /spacing: Style.space\(4\)/ { exit !(left && right) }
+  END { exit !(left && right) }
+' components/MessageReader.qml \
+  || fail "the reader toolbar control frames must share the status-bar inset"
 
 # A trigger holds a selected style while what it opened is on screen. The bar
 # icon is the only trigger the window has, so without this there is nothing on
@@ -206,6 +224,83 @@ for page in components/SetupPage.qml components/ImapSetupPage.qml; do
     END { if (!in_remove) exit 1; exit !found }
   ' "$page" || fail "$page Remove account must be a danger button"
 done
+
+# Removing a mailbox is destructive. The edit pages may request it, but only a
+# confirmation owned by App may call the service after naming the target.
+grep -q 'AccountRemovalDialog {' App.qml \
+  || fail "account removal needs a confirmation dialog"
+if awk '
+  /function removeCurrentAccountFromEditor\(/ { in_remove = 1 }
+  in_remove && /service\.removeAccountAt/ { exit 0 }
+  in_remove && /^  }/ { exit 1 }
+  END { exit 1 }
+' App.qml; then
+  fail "requesting account removal must not remove it immediately"
+fi
+
+# Native desktop controls retain the arrow cursor. A pointing hand is reserved
+# for actual links such as URLs inside the message reader.
+for file in components/IconButton.qml components/IconTextButton.qml components/AppMenu.qml \
+  components/MessageMenu.qml components/AccountSwitcher.qml components/ProviderPicker.qml \
+  components/MailboxSidebar.qml components/UserBar.qml; do
+  if grep -n 'PointingHandCursor' "$file"; then
+    fail "$file uses a web-link cursor for a native control"
+  fi
+done
+
+# Labels say when an action leaves the app and use three periods for the
+# established workflow suffix. Busy state is status, not decorative prose.
+if grep -rnE 'Checking…|Fetching the mailbox…|Not signed in yet|Open in Gmail|text: "(Shortcuts|GitHub|Twitter)"' \
+  App.qml components; then
+  fail "UI copy does not follow the project action and status vocabulary"
+fi
+if grep -rnE '^[[:space:]]*(text|tooltipText):.*…' App.qml components; then
+  fail "UI labels use the project ellipsis convention (...), while progress uses state"
+fi
+grep -q 'text: "Add a mailbox\.\.\."' components/SettingsPage.qml \
+  || fail "Add a mailbox opens a workflow and needs an ellipsis"
+grep -q 'tooltipText: "Add another mail account"' components/SettingsPage.qml \
+  || fail "the add-account tooltip must be provider-neutral"
+if awk '
+  /id: accountLine/ { in_status = 1 }
+  in_status && /resultSummary/ { exit 0 }
+  in_status && /^        }/ { exit 1 }
+  END { exit 1 }
+' App.qml; then
+  fail "the window status line must not repeat the list result count"
+fi
+
+# Both action menus own navigation locally because Qt popups intercept window
+# shortcuts. Placement happens after opening and whenever content is measured.
+for file in components/AppMenu.qml components/MessageMenu.qml; do
+  grep -q 'Keys.onPressed' "$file" \
+    || fail "$file needs popup-local keyboard navigation"
+  grep -q 'onOpened:' "$file" \
+    || fail "$file must place itself after its contents exist"
+  grep -q 'onHeightChanged: root.place()' "$file" \
+    || fail "$file must re-place itself when its measured height changes"
+  grep -q 'MenuActionRow {' "$file" \
+    || fail "$file must use the shared menu-row contract"
+  if grep -q 'component MenuRow: Rectangle' "$file"; then
+    fail "$file duplicates the shared menu-row presentation"
+  fi
+done
+
+# Feature views receive semantic colours from App. Reading theme roles locally
+# makes the same concept drift between pages and prevents App from naming it.
+for file in components/AppMenu.qml components/MessageMenu.qml components/AccountSwitcher.qml \
+  components/ProviderPicker.qml components/MailboxTabs.qml components/SetupPage.qml \
+  components/ImapSetupPage.qml components/KeyHints.qml components/ImagePopover.qml \
+  components/ComposeView.qml; do
+  if grep -nE '(^|[^A-Za-z])Color\.' "$file"; then
+    fail "$file reads theme colours instead of receiving semantic roles"
+  fi
+done
+
+# Row actions must meet the compact desktop hit-target floor.
+if grep -n 'size: Style\.space(20)' components/MessageRow.qml; then
+  fail "message row actions need at least a 24px hit target"
+fi
 
 # Sign out and removal are peer account actions. Removal stays last in the
 # action row instead of falling onto a detached row beneath it.
