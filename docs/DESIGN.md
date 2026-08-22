@@ -186,7 +186,7 @@ Selected and pressed are not synonyms. A menu trigger stays selected from open u
 
 Icon-only actions require tooltips. The tooltip describes the action and may include the shortcut when the shortcut comes from `Keymap.js`; it must not create a second hand-maintained binding description.
 
-A control that opens another surface uses `...` in its label. An action that completes immediately does not. External navigation uses an honest label such as `Open in browser...` and may carry an external-link icon when space permits.
+A control that opens another surface uses `...` in its label. An action that completes immediately does not. An external destination that is already unambiguous uses its proper name plus the suffix—`GitHub...`, not `Open GitHub...`—and may carry an external-link icon when space permits. Use a verb only when the destination name alone does not predict the result, such as `View invoice in browser...`.
 
 ## Menus
 
