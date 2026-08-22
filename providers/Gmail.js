@@ -48,6 +48,11 @@ var MAILBOXES = [
   // remove the INBOX label, so "in:inbox is:unread" dredges up the whole
   // promotional backlog — measured against a real mailbox, that view came back
   // as newsletters and offers almost end to end.
+  //
+  // Accounts that do not use those tabs never get CATEGORY_PERSONAL, so this
+  // query is empty while Inbox still shows unread rows. Registry falls back
+  // to UNREAD_FALLBACK_QUERY when a Primary probe returns nothing and the
+  // inbox still has unread mail.
   { key: "unread", label: "Unread", icon: "unread", query: "in:inbox is:unread category:primary" },
   { key: "starred", label: "Starred", icon: "star", query: "is:starred" },
   { key: "sent", label: "Sent", icon: "send", query: "in:sent" },
@@ -57,6 +62,11 @@ var MAILBOXES = [
   { key: "all", label: "All mail", icon: "archive", query: "in:anywhere -in:spam -in:trash", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "in:trash", optional: true }
 ]
+
+// Used only when Primary unread is empty. Workspace and an inbox type
+// without tabs never categorise mail as Primary; this is then the honest
+// unread query. A mailbox that does use tabs never reaches it.
+var UNREAD_FALLBACK_QUERY = "in:inbox is:unread"
 
 // Free text goes to Gmail verbatim: its search syntax is the one the user
 // already knows from the web UI, and mangling it would be a downgrade.
