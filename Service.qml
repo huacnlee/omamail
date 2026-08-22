@@ -465,6 +465,8 @@ Item {
   readonly property bool canStar: !current || current.canStar
   readonly property bool hasLabels: !current || current.hasLabels
   readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
+  readonly property bool canOpenWebInbox: !!current && current.canOpenWebInbox
+  readonly property var unavailableActions: current ? current.unavailableActions : []
   readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
@@ -564,6 +566,25 @@ Item {
   }
   function openInBrowser(id) { if (current) current.openInBrowser(id) }
   function openWebInbox() { if (current) current.openWebInbox() }
+
+  // The service's own website, from the setup page's hero — where everything
+  // this window deliberately does not do still lives: HEY's Screener, Gmail's
+  // filters and forwarding.
+  //
+  // Asked for by provider rather than by account: the page that offers it is
+  // about a kind of mailbox, and during an add it is about one that has no
+  // address yet.
+  function openProviderWebsite(id) {
+    var url = Provider.webHomeUrl(id)
+    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+  }
+
+  // The program a provider runs on, which is a different address from the
+  // service — HEY is hey.com, and the client that reaches it is a repository.
+  function openProviderClient(id) {
+    var url = Provider.clientUrl(id)
+    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+  }
   function openCloudConsole() { if (current) current.openCloudConsole() }
   function openGmailApiPage() { if (current) current.openGmailApiPage() }
 

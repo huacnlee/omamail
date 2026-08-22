@@ -658,4 +658,16 @@ assert.strictEqual(message.extractHtml({
   deepEqual(message.attachments(message.parseRfc822("")), [])
 }
 
+// A header value is not a header line. `fromHeader` writes the whole `From:`
+// field; a provider composing a `To:` needs the address on its own, and pasting
+// one into the other produced `To: From: "Name" <a@b.com>` — which parses back
+// as a display name of `From: "Name"`.
+assert.strictEqual(message.addressHeader("jane@example.com", "Jane Roe"),
+  '"Jane Roe" <jane@example.com>')
+assert.strictEqual(message.addressHeader("jane@example.com", ""), "jane@example.com")
+assert.strictEqual(message.fromHeader("jane@example.com", "Jane Roe"),
+  'From: "Jane Roe" <jane@example.com>')
+assert.strictEqual(message.parseAddress(message.addressHeader("jane@example.com", "Jane Roe")).name,
+  "Jane Roe", "what is written comes back")
+
 console.log("test_message.js ok")

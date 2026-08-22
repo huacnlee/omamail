@@ -5,7 +5,7 @@
   "version": "0.3.0",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
-  "description": "Email client for Omarchy: read, triage, and reply to Gmail and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
   "kinds": [
     "service",
     "bar-widget",
@@ -19,12 +19,13 @@
   },
   "barWidget": {
     "displayName": "Omamail",
-    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail and any IMAP mail server.",
+    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail, HEY and any IMAP mail server.",
     "category": "Communication",
     "aliases": [
       "mail",
       "email",
       "gmail",
+      "hey",
       "imap",
       "inbox",
       "e-mail",
@@ -66,7 +67,7 @@
         "type": "string",
         "label": "Default search",
         "defaultValue": "in:inbox",
-        "description": "Applies to the inbox only. Gmail accounts take any Gmail search operator, for example `in:inbox -category:promotions`; IMAP accounts take IMAP SEARCH criteria."
+        "description": "Applies to the inbox only, and to Gmail and IMAP accounts. Gmail takes any Gmail search operator, for example `in:inbox -category:promotions`; IMAP takes IMAP SEARCH criteria. HEY accounts always open their Imbox."
       },
       {
         "key": "notifyNewMail",
@@ -87,7 +88,7 @@
         "max": 65535,
         "step": 1,
         "defaultValue": 9481,
-        "description": "Loopback port used once during Google sign-in. IMAP accounts never use it. Change it only if something else already listens there."
+        "description": "Loopback port used once during Google sign-in. HEY and IMAP accounts never use it. Change it only if something else already listens there."
       },
       {
         "key": "openOnClick",

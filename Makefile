@@ -4,9 +4,14 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	cache/CacheStore.qml cache/BodyCache.qml \
 	providers/AuthManager.qml providers/GmailApiClient.qml \
 	providers/ImapAuth.qml providers/ImapClient.qml \
+	providers/HeyAuth.qml providers/HeyClient.qml \
 	components/ImapSetupPage.qml \
+	components/HeySetupPage.qml \
 	components/ProviderPicker.qml \
 	components/GmailIcon.qml \
+	components/ProviderLogo.qml \
+	components/ProviderHero.qml \
+	components/LinkLabel.qml \
 	components/MailboxSidebar.qml \
 	components/MailboxTabs.qml \
 	components/MessageList.qml \
@@ -57,6 +62,7 @@ test-js:
 	node tests/test_menu.js
 	node tests/test_provider.js
 	node tests/test_imap.js
+	node tests/test_hey.js
 
 test-shell:
 	python3 tests/test_qml_names.py

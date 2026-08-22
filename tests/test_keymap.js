@@ -217,4 +217,50 @@ listSequences.forEach(function (row) {
   })
 }
 
+// A hint row must not offer what the provider refuses: that is the promise the
+// button rule exists to stop, made one line lower down. The table itself stays
+// whole — what a key means is a property of the application, and only whether
+// it is on offer depends on which mailbox is open.
+const offered = keymap.hintsFor("list")
+const withoutBoth = keymap.hintsFor("list", ["archive", "star"])
+assert.ok(offered.length > withoutBoth.length, "two hints go")
+assert.ok(offered.some(h => h.label === "archive"))
+assert.ok(!withoutBoth.some(h => h.label === "archive"))
+assert.ok(!withoutBoth.some(h => h.label === "star"))
+deepEqual(keymap.hintsFor("list", []), offered, "nothing missing changes nothing")
+deepEqual(keymap.hintsFor("list", null), offered)
+
+// ------------------------------------------------------------ the sheet
+//
+// The reference sheet is laid out in columns because one column was taller than
+// a short window — and the Flickable that answered that put a scrollbar down
+// the middle of the screen, since it was only as wide as the column.
+
+const all = keymap.helpGroups().map(g => g.name)
+const weight = g => g.rows.length + 1
+const totalWeight = keymap.helpGroups().reduce((sum, g) => sum + weight(g), 0)
+
+for (const count of [1, 2, 3, 4]) {
+  const columns = keymap.helpColumns(count)
+  assert.strictEqual(columns.length, Math.min(count, all.length),
+    count + ": one list per column")
+  // In order, and every group exactly once: a reader who knows the sheet finds
+  // a group where it has always been, and none of them may go missing.
+  deepEqual([].concat(...columns).map(g => g.name), all,
+    count + ": the declared order survives the split")
+  for (const column of columns) {
+    assert.ok(column.length > 0, count + ": no column is left empty")
+  }
+  // Balanced enough to look like columns rather than a list with an appendix.
+  // A heading counts as a line, which is what `helpWeight` exists to say.
+  const heaviest = Math.max(...columns.map(c => c.reduce((sum, g) => sum + weight(g), 0)))
+  assert.ok(heaviest <= Math.ceil(totalWeight / count) + 6,
+    count + ": no column runs away with the sheet (" + heaviest + ")")
+}
+
+// A count that is not a count still has to draw something.
+deepEqual(keymap.helpColumns(0), [keymap.helpGroups()])
+deepEqual(keymap.helpColumns(-3), [keymap.helpGroups()])
+deepEqual(keymap.helpColumns(99).length, all.length, "never more columns than groups")
+
 console.log("test_keymap.js ok")

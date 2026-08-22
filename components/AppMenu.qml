@@ -13,6 +13,9 @@ Item {
   required property color popupBorderColor
   required property string panelFontFamily
   property bool signedIn: false
+  // Whether this mailbox has a web address for what is on screen. Off, the row
+  // goes rather than opening something else's inbox.
+  property bool canOpenWebInbox: false
   // The rail carries the switcher, and the rail is gone at a narrow window —
   // so at that size this menu is the only way left to reach it.
   property int accountCount: 1
@@ -133,6 +136,7 @@ Item {
       MenuRow {
         id: webRow
         text: "Open web inbox..."
+        visible: root.canOpenWebInbox
         enabled: root.signedIn
         onActivated: { menu.close(); root.openWebRequested() }
       }
@@ -161,17 +165,17 @@ Item {
 
       MenuRow {
         id: shortcutsRow
-        text: "Keyboard shortcuts..."
+        text: "Keyboard..."
         onActivated: { menu.close(); root.shortcutsRequested() }
       }
       MenuRow {
         id: projectRow
-        text: "Project on GitHub..."
+        text: "GitHub..."
         onActivated: { menu.close(); root.projectRequested() }
       }
       MenuRow {
         id: authorRow
-        text: "Author on X..."
+        text: "Twitter..."
         onActivated: { menu.close(); root.authorRequested() }
       }
     }

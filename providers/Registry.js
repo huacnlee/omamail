@@ -46,6 +46,13 @@ function capabilities(values) {
     batch: raw.batch === true,
     // A web UI worth opening a message in.
     web: raw.web === true,
+    // And one whose addresses can express the mailbox *currently on screen*.
+    // Not the same question: HEY gives every thread an address of its own, but
+    // a search, a label or a filtered view has no URL — so "Open web inbox"
+    // there would open the Imbox whatever you were looking at, which is the
+    // "close enough" this whole file exists to refuse. Gmail's search URL
+    // carries any query, so it keeps the row.
+    webBox: raw.webBox === true,
     // Free-text search the server runs.
     search: raw.search === true,
     // Sends mail. A read-only provider still shows a reader; it just cannot
@@ -81,18 +88,38 @@ function define(source) {
     name: String(raw.NAME || ""),
     summary: String(raw.SUMMARY || ""),
     auth: String(raw.AUTH || "none"),
+    // Two file names in `assets/`, or "" for a provider with no artwork of its
+    // own. `mark` is the square icon a list row wants; `logo` is the lockup a
+    // setup page opens with, which for HEY is a wordmark twice as wide as it is
+    // tall. A provider with only one has the one used for both.
+    mark: String(raw.MARK || ""),
+    logo: String(raw.LOGO || raw.MARK || ""),
     unavailable: String(raw.UNAVAILABLE || ""),
     capabilities: capabilities(raw.CAPABILITIES),
     mailboxes: boxes,
     searchQuery: typeof raw.searchQuery === "function" ? raw.searchQuery : function() { return "" },
-    labelQuery: typeof raw.labelQuery === "function" ? raw.labelQuery : function() { return "" }
+    labelQuery: typeof raw.labelQuery === "function" ? raw.labelQuery : function() { return "" },
+    // Where a message and a mailbox live on the web, for the provider that has
+    // a web UI worth opening. A provider that declares no `web` capability
+    // never reaches these, and answers "" if something asks anyway.
+    webMessageUrl: typeof raw.webMessageUrl === "function" ? raw.webMessageUrl : function() { return "" },
+    webBoxUrl: typeof raw.webBoxUrl === "function" ? raw.webBoxUrl : function() { return "" },
+    // The service's front door. A provider with no web UI at all has none, and
+    // that empty string is what removes the link from a mailbox's settings row.
+    webHomeUrl: typeof raw.webHomeUrl === "function" ? raw.webHomeUrl : function() { return "" },
+    // Where the program a provider runs on lives, for the providers that run on
+    // one. Only HEY does: the other two are spoken to directly.
+    clientUrl: String(raw.CLIENT_URL || "")
   }
 }
 
 // ---------------------------------------------------------------- registry
 
-// The order the provider chooser lists them in.
-var ALL = [define(Gmail), define(Imap), define(Hey)]
+// The order the provider chooser lists them in: the two hosted mailboxes with a
+// service of their own first, then the one that is every other mailbox. IMAP is
+// last because it is the answer for a server this list does not name, and a
+// chooser that opened with it would ask the question backwards.
+var ALL = [define(Gmail), define(Hey), define(Imap)]
 
 var DEFAULT_ID = "gmail"
 
@@ -181,9 +208,10 @@ function query(id, mailboxKey, searchText, defaultQuery) {
   var custom = String(defaultQuery === undefined || defaultQuery === null ? "" : defaultQuery).trim()
   // The manifest's shipped default predates providers and is Gmail syntax.
   // Applying it to IMAP produces `UID SEARCH in:inbox`, which no IMAP server
-  // understands. A user-supplied IMAP criterion still passes through; only
-  // the inherited Gmail default gives way to the provider's Inbox query.
-  if (provider.id === "imap" && custom === "in:inbox") custom = ""
+  // understands, and to HEY a search for the words. A user-supplied criterion
+  // still passes through; only the inherited Gmail default gives way to the
+  // provider's own Inbox query.
+  if (provider.id !== "gmail" && custom === "in:inbox") custom = ""
   if (custom !== "" && String(mailboxKey) === "inbox") return custom
 
   return mailboxFor(id, mailboxKey).query
@@ -214,6 +242,20 @@ function summary(id) {
   return String(get(id).summary || "")
 }
 
+// The file in `assets/` that shows what this service is, or "" for one with no
+// artwork of its own. A name rather than a path: where `assets/` sits is the
+// view's business, and it differs between a component and the notifier.
+//
+// `mark` is the square one, for a row in a list. `logo` is what a page about
+// this service opens with, and is the same file where a service has only one.
+function mark(id) {
+  return String(get(id).mark || "")
+}
+
+function logo(id) {
+  return String(get(id).logo || "")
+}
+
 function authKind(id) {
   return String(get(id).auth || "none")
 }
@@ -224,4 +266,33 @@ function usesOAuth(id) {
 
 function usesPassword(id) {
   return authKind(id) === "password"
+}
+
+// A sign-in this plugin does not perform itself: the provider's own program
+// owns the browser, the token and where it is kept. Nothing is asked of the
+// user here but the press of a button.
+function usesCli(id) {
+  return authKind(id) === "cli"
+}
+
+// ------------------------------------------------------------------- the web
+
+// The one place a message id or a query becomes an address for the browser.
+// It used to be a Gmail call in `MailAccount`, which is exactly the kind of
+// provider knowledge nothing above this file is supposed to hold — and it meant
+// a second provider with a web UI opened Gmail.
+function webMessageUrl(id, messageId) {
+  return get(id).webMessageUrl(messageId)
+}
+
+function webBoxUrl(id, query) {
+  return get(id).webBoxUrl(query)
+}
+
+function webHomeUrl(id) {
+  return get(id).webHomeUrl()
+}
+
+function clientUrl(id) {
+  return String(get(id).clientUrl || "")
 }

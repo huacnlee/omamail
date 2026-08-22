@@ -10,6 +10,7 @@ import "../message/Message.js" as Mail
 import "../message/Calendar.js" as Calendar
 import "../message/Unsubscribe.js" as Unsub
 import "Model.js" as Model
+import "Accounts.js" as Accounts
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -98,7 +99,16 @@ Item {
   readonly property bool canStar: Provider.can(providerId, "star")
   readonly property bool hasLabels: Provider.can(providerId, "labels")
   readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
+  // A different question from the one above: whether *this mailbox*, as it is
+  // filtered right now, has an address in the provider's web app at all.
+  readonly property bool canOpenWebInbox: Provider.can(providerId, "webBox")
   readonly property bool canSend: Provider.can(providerId, "send")
+  // The key-bound actions this mailbox cannot honour, for the hint row. The
+  // buttons are hidden by the three properties above; the keys are bound
+  // whatever provider is open, so the row that says what the keyboard does here
+  // has to be told as well.
+  readonly property var unavailableActions: Model.unavailableActions({
+    archive: canArchive, star: canStar, spam: canReportSpam })
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.
@@ -641,7 +651,12 @@ Item {
         root.fail(error || "Could not open that message")
         return
       }
-      var summary = Mail.summarize(payload, new Date())
+      // Merged with the row rather than replacing it: a provider whose detail
+      // read carries no subject line of its own — HEY reads a conversation, not
+      // a message — would otherwise blank the one the list had drawn.
+      var known = Model.indexById(root.messages, messageId)
+      var summary = Model.detailSummary(known >= 0 ? root.messages[known] : null,
+        Mail.summarize(payload, new Date()))
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
@@ -772,6 +787,16 @@ Item {
   function act(id, action, quiet) {
     var messageId = String(id || "")
     if (!ready || messageId === "") return
+    // Before the optimistic update, not after it. A key is not a button: `e`
+    // and `s` are bound in every mail context, so an action the provider cannot
+    // honour reaches here even though the panel drew no button for it — and the
+    // row would be moved, and the note would say "Archived", for a request no
+    // server ever saw.
+    var needs = Model.actionCapability(action)
+    if (needs !== "" && !Provider.can(providerId, needs)) {
+      note(Model.actionUnavailable(action, Provider.badge(providerId)))
+      return
+    }
     var index = Model.indexById(messages, messageId)
     if (index < 0) return
     var before = messages[index]
@@ -1148,12 +1173,17 @@ Item {
     loadMessages(false)
   }
 
+  // Which web UI, and where in it, is the provider's answer rather than this
+  // file's. It used to be a Gmail call, which meant the day a second provider
+  // declared a web UI it would have opened Gmail's.
   function openInBrowser(id) {
-    Quickshell.execDetached(["xdg-open", Api.webMessageUrl(id, 0)])
+    var url = Provider.webMessageUrl(providerId, id)
+    if (url !== "") Quickshell.execDetached(["xdg-open", url])
   }
 
   function openWebInbox() {
-    Quickshell.execDetached(["xdg-open", Api.webSearchUrl(effectiveQuery, 0)])
+    var url = Provider.webBoxUrl(providerId, effectiveQuery)
+    if (url !== "") Quickshell.execDetached(["xdg-open", url])
   }
 
   function openCloudConsole() {
@@ -1240,9 +1270,19 @@ Item {
   }
 
   // The address is only known after the first profile read, and it is what the
-  // cache file and the keyring entry are named after.
+  // cache file and the keyring entry are named after — so the id is filled in
+  // here rather than waiting for the account list to be rewritten with it.
+  //
+  // **Named the way the list names it**, through the one function that decides.
+  // An id is the bare address only for the default provider; every other one
+  // carries its provider in front. Assigning the address alone is an assignment
+  // rather than a binding, so it also *replaced* the id the list had given —
+  // and `Service.findAccount` compares the two. A HEY mailbox therefore called
+  // itself `you@hey.com` while the list called it `hey:you@hey.com`, nothing
+  // matched, and switching to it silently fell back to the first mailbox.
   onAccountEmailChanged: {
-    if (accountEmail !== "" && accountId === "") accountId = accountEmail
+    if (accountEmail !== "" && accountId === "")
+      accountId = Accounts.accountId(accountEmail, providerId)
   }
 
   signal accountIdentified(string email)
@@ -1256,7 +1296,8 @@ Item {
   // has no business doing either.
   Loader {
     id: authLoader
-    sourceComponent: root.providerId === "imap" ? imapAuthComponent : gmailAuthComponent
+    sourceComponent: root.providerId === "imap" ? imapAuthComponent
+      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -1264,7 +1305,8 @@ Item {
   Loader {
     id: apiLoader
     active: !!authLoader.item
-    sourceComponent: root.providerId === "imap" ? imapClientComponent : gmailClientComponent
+    sourceComponent: root.providerId === "imap" ? imapClientComponent
+      : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
   }
 
   Component {
@@ -1309,8 +1351,30 @@ Item {
   }
 
   Component {
+    id: heyAuthComponent
+
+    HeyAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: gmailClientComponent
     GmailApiClient { auth: authLoader.item }
+  }
+
+  Component {
+    id: heyClientComponent
+    HeyClient { auth: authLoader.item }
   }
 
   Component {
