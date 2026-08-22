@@ -61,7 +61,7 @@ Item {
   property bool loginBusy: false
   property bool refreshBusy: false
   property bool credentialsWriteBusy: false
-  readonly property bool sessionBusy: refreshBusy || secretLookup.running
+  readonly property bool sessionBusy: refreshBusy || lookupRunning
   property string lastError: ""
 
   // Everything the sign-in needs that Omarchy does not guarantee is present.
@@ -73,6 +73,8 @@ Item {
   property var tokenWaiters: []
   property string lookupPurpose: ""
   property bool lookupHandled: false
+  // One lookup at a time, whichever of the two processes is carrying it.
+  readonly property bool lookupRunning: secretLookup.running || legacySearch.running
   property string keyringWriteToken: ""
   property string credentialsWritePayload: ""
 
@@ -136,7 +138,7 @@ Item {
     var next = tokenWaiters.slice()
     next.push(callback)
     tokenWaiters = next
-    if (refreshBusy || secretLookup.running) return
+    if (refreshBusy || lookupRunning) return
 
     lookupPurpose = "request"
     startSecretLookup()
@@ -149,7 +151,7 @@ Item {
       resetMemorySession()
       return
     }
-    if (secretLookup.running || refreshBusy) return
+    if (lookupRunning || refreshBusy) return
     lookupPurpose = "restore"
     startSecretLookup()
   }
@@ -198,6 +200,7 @@ Item {
   property bool triedLegacyLookup: false
   property int secretLookupStage: 0
   property var renamedAttributesToClear: []
+  property var legacyAttributes: []
 
   // Two keyring entries are not tied to an address: the pre-multi-account one
   // keyed by client alone, and the one written for a mailbox that had not
@@ -249,7 +252,36 @@ Item {
       handleSecretLookup("")
       return
     }
+    // A legacy read looks before it leaps. Its attributes are a wildcard over
+    // "account", so asking for the token outright can answer with a named
+    // mailbox's. See Credentials.hasLoneLegacyEntry.
+    if (triedLegacyLookup) {
+      legacySearch.reset()
+      legacyAttributes = attributes
+      legacySearch.command = ["secret-tool", "search", "--all"].concat(attributes)
+      legacySearch.running = true
+      return
+    }
     secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
+    secretLookup.running = true
+  }
+
+  // The legacy entry's token, asked for only once the search has said that
+  // entry is the one a lookup would answer with. Refusing is not an error:
+  // what a mailbox with no token of its own gets is the next stage, and then
+  // the sign-in button.
+  //
+  // A search that did not exit cleanly is refused as well. Fail-closed covers
+  // the ordinary failures on its own, since a search that found nothing counts
+  // no matches, but a killed one can leave a whole record on stdout with its
+  // attributes cut short.
+  function readLegacyToken(exitCode, matches, attributed, named) {
+    if (exitCode !== 0 || !Credentials.hasLoneLegacyEntry(matches, attributed, named)) {
+      handleSecretLookup("")
+      return
+    }
+    lookupHandled = false
+    secretLookup.command = ["secret-tool", "lookup"].concat(legacyAttributes)
     secretLookup.running = true
   }
 
@@ -649,6 +681,45 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
       if (!root.lookupHandled) root.handleSecretLookup("")
+    }
+  }
+
+  // Whether a legacy entry is there at all. The matches come back on stdout
+  // and their attributes on stderr, so the two are counted apart and neither
+  // is read as the other's.
+  //
+  // Counted line by line rather than collected: a search keyed on the client
+  // alone loads every matching mailbox's token, and stdout carries all of
+  // them. Nothing here needs a secret, only how many of each line there were,
+  // so none is held.
+  Process {
+    id: legacySearch
+    property int matchCount: 0
+    property int attributedCount: 0
+    property int namedCount: 0
+
+    function reset() {
+      matchCount = 0
+      attributedCount = 0
+      namedCount = 0
+    }
+
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        if (Credentials.isKeyringMatchLine(line)) legacySearch.matchCount++
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        if (Credentials.isKeyringAttributedLine(line)) legacySearch.attributedCount++
+        if (Credentials.isKeyringNamedLine(line)) legacySearch.namedCount++
+      }
+    }
+    onExited: function(exitCode) {
+      root.readLegacyToken(exitCode, matchCount, attributedCount, namedCount)
+      reset()
     }
   }
 

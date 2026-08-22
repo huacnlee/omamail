@@ -194,6 +194,101 @@ deepEqual(credentials.renamedLegacyKeyringAttributes(sharedClient), [
   "client-id", sharedClient
 ])
 
+// --------------------------------------------- looking before the leap
+//
+// Why the legacy read counts before it asks is in Credentials.js. What it has
+// to get right is here: two mailboxes on one Cloud client, where the wildcard
+// over "account" matches both.
+
+function recordLines(count) {
+  var lines = []
+  for (var i = 0; i < count; i++) {
+    lines.push("[/" + (i + 10) + "]")
+    lines.push("label = Omamail refresh token")
+    lines.push("secret = token-" + i)
+    lines.push("created = 2026-08-21 13:01:00")
+    lines.push("modified = 2026-08-21 13:01:00")
+    lines.push("schema = org.freedesktop.Secret.Generic")
+  }
+  return lines
+}
+
+function attributeLines(accounts) {
+  var lines = []
+  for (var i = 0; i < accounts.length; i++) {
+    lines.push("attribute.service = omamail")
+    lines.push("attribute.kind = refresh-token")
+    lines.push("attribute.client-id = " + sharedClient)
+    if (accounts[i] !== null) lines.push("attribute.account = " + accounts[i])
+  }
+  return lines
+}
+
+// The counting the QML does, line by line, so it is never holding a stream of
+// secrets to count.
+function countWith(predicate, lines) {
+  var found = 0
+  for (var i = 0; i < lines.length; i++) {
+    if (predicate(lines[i])) found++
+  }
+  return found
+}
+
+function searchFound(records, accounts) {
+  return credentials.hasLoneLegacyEntry(
+    countWith(credentials.isKeyringMatchLine, recordLines(records)),
+    countWith(credentials.isKeyringAttributedLine, attributeLines(accounts)),
+    countWith(credentials.isKeyringNamedLine, attributeLines(accounts)))
+}
+
+assert.strictEqual(searchFound(1, [null]), true,
+  "one match, and no account attribute in it, is the entry the legacy read is for")
+
+// The regression. Both matches answer the legacy lookup and neither is this
+// account's to take.
+assert.strictEqual(searchFound(2, ["one@gmail.com", "two@gmail.com"]), false,
+  "two mailboxes on one client are not a legacy entry")
+assert.strictEqual(searchFound(1, ["one@gmail.com"]), false,
+  "a single named mailbox is not one either")
+
+// A nameless entry beside named ones: which one the lookup answers with cannot
+// be asked, so it is left where it is.
+assert.strictEqual(searchFound(2, [null, "two@gmail.com"]), false,
+  "a legacy entry with named siblings is ambiguous, and ambiguous is refused")
+
+// The stand-in a mailbox with no address yet is stored under has an "account"
+// attribute and still no name, so it stays adoptable. Reading it once is what
+// an install from before the hold on unnamed tokens needs.
+assert.strictEqual(searchFound(1, ["default"]), true,
+  "the literal stand-in is not a named mailbox")
+assert.strictEqual(searchFound(2, ["default", "two@gmail.com"]), false,
+  "the stand-in beside a named mailbox is ambiguous like any other")
+
+// The stand-in is the whole literal value and nothing else. An address that
+// merely starts with it, or differs in case, is a mailbox with a name: read
+// any looser, this is the line that makes a real account look nameless and
+// hands its token to another one.
+assert.strictEqual(credentials.isKeyringNamedLine("attribute.account = default"), false)
+assert.strictEqual(credentials.isKeyringNamedLine("attribute.account = default@x.com"), true)
+assert.strictEqual(credentials.isKeyringNamedLine("attribute.account = defaults"), true)
+assert.strictEqual(credentials.isKeyringNamedLine("attribute.account = Default"), true)
+assert.strictEqual(credentials.isKeyringNamedLine("attribute.account = "), true)
+
+assert.strictEqual(credentials.hasLoneLegacyEntry(0, 0, 0), false, "no match is not an entry")
+
+// Fail closed on a stream that says nothing about the match it belongs to. An
+// attribute that was never read is not an attribute that is absent, and the
+// difference between the two is whose mailbox opens.
+assert.strictEqual(credentials.hasLoneLegacyEntry(1, 0, 0), false,
+  "an attribute stream that accounts for no match is not an account-less entry")
+
+// Neither stream may be read as the other's: the record lines carry no
+// attributes, and the attribute lines carry no records.
+assert.strictEqual(countWith(credentials.isKeyringMatchLine, recordLines(3)), 3)
+assert.strictEqual(countWith(credentials.isKeyringMatchLine, attributeLines([null, null])), 0)
+assert.strictEqual(countWith(credentials.isKeyringAttributedLine, recordLines(1)), 0)
+assert.strictEqual(countWith(credentials.isKeyringNamedLine, recordLines(2)), 0)
+
 // ------------------------------------------------------------ the store
 //
 // The file written before accounts existed holds one client in the console's
