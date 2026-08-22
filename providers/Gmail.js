@@ -1,5 +1,7 @@
 .pragma library
 
+.import "GmailApi.js" as Api
+
 // What Gmail is, as far as the panel is concerned.
 //
 // Not how to talk to it — that is `GmailApi.js` for the strings and
@@ -17,6 +19,14 @@ var SUMMARY = "Google's own API. Needs an OAuth client you create once."
 
 var AUTH = "oauth"
 
+// The service's own mark, in `assets/`. Drawn on the provider chooser and on
+// the setup page, where the question being answered is "which mailbox am I
+// adding" — and a mark answers that before any of the words do.
+//
+// One file for both, because Google's mark is square and reads at either size.
+// HEY has a second, wider one; see `Hey.LOGO`.
+var MARK = "gmail.png"
+
 var CAPABILITIES = {
   labels: true,
   threads: true,
@@ -25,6 +35,7 @@ var CAPABILITIES = {
   star: true,
   batch: true,
   web: true,
+  webBox: true,
   search: true,
   send: true
 }
@@ -58,4 +69,26 @@ function searchQuery(text) {
 function labelQuery(name) {
   var value = String(name === undefined || name === null ? "" : name).trim()
   return value === "" ? "" : "label:" + value
+}
+
+// Where a message and the current query live in Gmail's own web UI. The
+// addresses are `GmailApi.js`'s, because that is the file that knows how one is
+// built; this is the seam `Registry.js` reaches them through, so nothing above
+// the provider boundary has to know whose web UI it is opening.
+//
+// Account zero: this plugin has no way to learn which of several signed-in
+// Google profiles a browser will pick, and /u/0 is the one every browser has.
+function webMessageUrl(messageId) {
+  return Api.webMessageUrl(messageId, 0)
+}
+
+function webBoxUrl(query) {
+  return Api.webSearchUrl(query, 0)
+}
+
+// The service's own front door, for the link out of a mailbox's settings row.
+// Neither of the two above: not a message, and not the mailbox as it is
+// filtered right now — just "open this account on the web".
+function webHomeUrl() {
+  return Api.webHomeUrl(0)
 }

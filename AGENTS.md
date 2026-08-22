@@ -48,8 +48,10 @@ three directories away from the client that calls it.
   tests can reach it without a compositor. QML holds no logic worth testing.
 - One JS resource may build on others with QML's `.import "Other.js" as Other`,
   which is how `providers/Registry.js` is assembled out of `Gmail.js`,
-  `Imap.js` and `Hey.js`. `tests/load.js` resolves those the same way the engine
-  does, so the tests exercise the real file.
+  `Hey.js` and `Imap.js` — and those out of `GmailApi.js` and `HeyCli.js` in
+  turn, because where a message lives on the web is a fact about the service
+  rather than about the registry. `tests/load.js` resolves the chain the same
+  way the engine does, so the tests exercise the real files.
 - Tests name the module path: `load("cache/Cache.js")`. A bare filename would no
   longer say where the thing lives.
 
@@ -112,6 +114,13 @@ key. What matters while working:
 - Route keys through `KeyRouter`, never a `Keys.on...Pressed` handler: a window
   `Shortcut` beats a focused item's `Keys` handler, so a local one looks live and
   never runs. Anything `Escape` should do belongs in `goBack()`.
+- **A key is not a button.** A capability the provider does not declare loses
+  its button, but `e` and `s` are bound in every mail context whatever mailbox
+  is open — so the same action has to be refused in `MailAccount.act` *before*
+  the optimistic update, and the status row's hints are filtered by
+  `Keymap.hintsFor`'s second argument. Without both, HEY — which has neither an
+  archive nor a star — moved the row out of the Imbox and said "Archived" for a
+  request no server ever saw.
 - **No chords.** Qt puts a deadline on an unfinished key sequence —
   `styleHints.keyboardInputInterval`, 400ms — so `g` then `i` half a second
   later does nothing at all and says nothing about why. The mailboxes were
@@ -144,41 +153,87 @@ key. What matters while working:
 
 ## Providers
 
-- A mailbox is a **provider**: `gmail`, `imap`, or `hey`. `Provider.js` is the
-  only place that knows the differences — which mailboxes exist, what a query
+- A mailbox is a **provider**: `gmail`, `hey`, or `imap`, listed in that order
+  because IMAP is the answer for a server the other two do not name and a
+  chooser that opened with it would ask the question backwards. `Provider.js` is
+  the only place that knows the differences — which mailboxes exist, what a query
   string means, what the service can be asked to do, and how it signs in.
   Nothing above it branches on a provider id.
 - Two objects make a provider work: something that signs in (`AuthManager`,
-  `ImapAuth`) and something that fetches (`GmailApiClient`, `ImapClient`).
+  `HeyAuth`, `ImapAuth`) and something that fetches (`GmailApiClient`,
+  `HeyClient`, `ImapClient`).
   `MailAccount` builds one pair through a `Loader` and drives them through an
   identical interface — same method names, same arguments, same callback shape.
   Adding a provider is those two files and a registry entry.
-- **Both clients hand back Gmail's message resource**: a headers array, a MIME
+- **Every client hands back Gmail's message resource**: a headers array, a MIME
   tree, part bodies in base64url. That is what lets one list, one reader, one
   cache and one set of actions serve every provider. `Message.parseRfc822` is
   the adapter that rebuilds that shape from the wire format, and it is worth
   keeping even where IMAP's own structures would have been more natural.
+  HEY never serves an RFC 822 message at all, so `HeyClient.toMessage`
+  *composes* the resource from a posting and a thread read rather than parsing
+  one — same shape, no parse.
+- A detail read is authoritative about what it carries and silent about the
+  rest, which is `Model.detailSummary`. HEY reads a conversation rather than a
+  message and so answers with no subject line of its own; replacing the row
+  wholesale blanked the subject the list had drawn.
 - A capability the provider does not declare is a **button the panel does not
   draw**. Offering one that fails is worse than omitting it: it fails after the
   user has committed to it, with the row already moved. IMAP therefore has no
   "report spam" — moving a message to a Junk folder teaches a server nothing,
   and a button that quietly meant that is a promise the provider cannot keep.
-- An account id is the address for Gmail and `imap:<address>` for IMAP. One
-  address can legitimately be both, and a Gmail account keeping the bare address
-  is what stops an upgrade from having to migrate cache directories, keyring
-  entries and the active account.
-- `hey` is a real entry with no client behind it *yet*, deliberately. 37signals
-  publish no API, and no IMAP or POP either — their FAQ says so — so there is
-  nothing to sign in to. The entry is the plan rather than an apology: it keeps
-  the seam, states what is missing, and the setup page shows that reason instead
-  of a form it cannot honour. Adding HEY when an interface appears is a
-  `capabilities` block, a `Hey.js` and a `HeyClient.qml`.
-- Do not fill that gap by driving the private endpoints app.hey.com uses. It
-  would ask a user for their HEY password so it could be replayed against an
-  interface carrying no compatibility promise, and it would break on a deploy
-  nobody announced. Waiting for a supported interface is the difference between
-  a provider that keeps working and one that fails silently on somebody else's
-  release day.
+- An account id is the address for Gmail and `<provider>:<address>` for the
+  others. One address can legitimately be more than one mailbox, and a Gmail
+  account keeping the bare address is what stops an upgrade from having to
+  migrate cache directories, keyring entries and the active account.
+- Where a message and a mailbox live on the web is a provider question, not
+  `MailAccount`'s. `Registry.webMessageUrl` and `webBoxUrl` are that seam; the
+  Gmail call that used to sit in `MailAccount` would have opened Gmail for the
+  second provider that declared a web UI.
+
+## HEY and the `hey` client
+
+- HEY publishes no API, no IMAP and no POP, so the interface is `hey`, the
+  command line client 37signals ship. **Do not fill that gap by driving the
+  private endpoints app.hey.com uses**, which is what this provider waited for
+  `hey` rather than doing: it would ask a user for their HEY password so it
+  could be replayed against an interface carrying no compatibility promise, and
+  it would break on a deploy nobody announced.
+- `hey` owns the whole credential. It performs the OAuth flow, keeps the token
+  in the keyring and refreshes it; `HeyAuth` holds a yes or a no and the path to
+  the program, and has nothing worth redacting. Signing out is `hey auth
+  logout`, which signs the machine's HEY client out of everything that uses it —
+  the setup page says so next to the button, because a sign-out that only forgot
+  locally would be undone by the next status read.
+- `HeyCli.js` is the argument vectors and the answers, the way `Imap.js` is the
+  protocol: no process, no message format. Every command asks for `--json`, so
+  nothing ever parses a rendered table, and the envelope's `ok` is the check
+  rather than the exit status — the CLI reports some refusals in JSON and still
+  exits 0.
+- **A thread answers to two numbers.** The posting id is its place in a box and
+  is what `seen`, `move`, `trash` and `spam` take; the topic id is the
+  conversation and is what `threads` and `reply` take. A message id here is
+  `<posting>:<topic>` for that reason, the way an IMAP one carries its folder.
+- **Unseen is the absence of a seen.** HEY's JSON omits an empty field, so a
+  posting nobody has read carries no `seen` key at all. There is no unseen count
+  and no unseen box either, so the badge is a listing and a tally — which is why
+  the unread query is the one that names a `--limit`.
+- **`--limit` and paging cannot both be had.** The CLI reads pages until it has
+  the number asked for, then truncates *and drops the cursor*, so a limited
+  listing can never be continued. Ordinary listings therefore ask for no limit
+  and take HEY's own page, and the page size the user configured is applied in
+  `HeyCli.pageOf` — its token is an offset into that page plus HEY's cursor for
+  it.
+- An optional flag the installed `hey` has never heard of fails the whole
+  command, and the release most people have is older than `--allow-partial`.
+  `HeyClient` drops the flag the usage error names and asks again, then
+  remembers — which is also how `--html` upgrades a HEY mailbox from text
+  bodies to the sender's own markup with nothing here to change. Every flag
+  dropped this way must be boolean; dropping one that took a value would leave
+  its value behind as a positional argument.
+- HEY has no star and no archive, and neither is faked. A star that quietly
+  moved a thread to Set Aside, or an archive that filed it in Paper Trail, is
+  exactly the promise `Registry.capabilities` exists to stop being made.
 
 ## Imap.js and the transport
 
@@ -278,6 +333,18 @@ key. What matters while working:
 - Screenshots go to GitHub's attachment host by dragging them into an issue or
   a release, never into the tree. A 320 KB PNG that nothing referenced was a
   quarter of what a clone cost.
+- `assets/` holds what the running plugin draws, which includes the provider
+  artwork — a few kilobytes each, at 128px, reached through `Registry.mark` and
+  `Registry.logo`. Those are two different questions: `mark` is the square icon
+  a list row wants, `logo` is the lockup a page about the service opens with,
+  and a provider with one file uses it for both. They are the services' own
+  artwork and the one thing here that does **not** take a colour from the theme:
+  a recoloured logo is not the logo. A provider with no artwork draws the
+  themed envelope instead — that is what IMAP is, a mailbox somewhere and no
+  brand to name.
+- **HEY is a brand word.** It is upper case in every sentence; `hey` in lower
+  case is the command, and only ever appears where a command is what is meant.
+  The program in prose is "the HEY CLI".
 - `tests/test_source.sh` fails on any tracked file over 128 KB. The things that
   get big are never the source, so the ceiling is the rule rather than a list of
   banned paths.

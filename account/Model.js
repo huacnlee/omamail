@@ -46,13 +46,23 @@ function providerName(provider) {
 function setupHeadline(state, provider, authKind) {
   var name = providerName(provider)
   if (state === "unavailable") return name + " integration is coming later"
-  if (state === "tools_missing") return "Missing system tools"
-  // Only one of these sends the user to a Cloud console. The other needs a
-  // server and a password, which is a form rather than a project.
-  if (state === "no_credentials")
-    return authKind === "password" ? "Add this mailbox" : "Connect a Google Cloud project"
-  if (state === "signing_in")
-    return authKind === "password" ? "Checking the mailbox…" : "Waiting for Google…"
+  // A provider whose sign-in is a program of its own says which program: the
+  // generic sentence sends somebody looking through Omarchy for a package this
+  // plugin never named.
+  if (state === "tools_missing")
+    return authKind === "cli" ? "Install the HEY CLI" : "Missing system tools"
+  // Three sign-ins, three first steps: a Cloud console, a server and a
+  // password, or nothing at all because the provider's own program holds it.
+  if (state === "no_credentials") {
+    if (authKind === "password") return "Add this mailbox"
+    if (authKind === "cli") return "Sign in to " + name
+    return "Connect a Google Cloud project"
+  }
+  if (state === "signing_in") {
+    if (authKind === "password") return "Checking the mailbox…"
+    if (authKind === "cli") return "Waiting for " + name + "…"
+    return "Waiting for Google…"
+  }
   if (state === "signed_out") return "Sign in to " + name
   return ""
 }
@@ -65,30 +75,49 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
   if (state === "unavailable") return String(reason || "")
   if (state === "tools_missing") {
     var tools = Array.isArray(missingTools) ? missingTools.join(", ") : ""
+    if (authKind === "cli")
+      return "HEY does not speak IMAP or POP, so Omamail reads it through the "
+        + "HEY CLI, the client 37signals publish for exactly this. Install it, "
+        + "then come back — nothing else here needs setting up."
     return "Omamail needs " + (tools || "a few base tools")
       + " on PATH before it can sign in."
   }
-  if (state === "no_credentials")
-    return authKind === "password"
-      ? "Enter the server and the password for this mailbox. Most providers want an app password rather than the one you sign in to the website with."
-      : "Gmail has no shared app to sign in through, so this plugin uses an OAuth client you own. It takes about two minutes to create."
-  if (state === "signing_in")
-    return authKind === "password"
-      ? "Trying the server with those details."
-      : "Finish the sign-in in your browser. This window updates by itself."
-  if (state === "signed_out")
-    return authKind === "password"
-      ? "This mailbox is set up. Enter its password to let it read your mail."
-      : "Your OAuth client is ready. Sign in to let it read this mailbox."
+  if (state === "no_credentials") {
+    if (authKind === "password")
+      return "Enter the server and the password for this mailbox. Most providers want an app password rather than the one you sign in to the website with."
+    if (authKind === "cli")
+      return "The HEY CLI is installed. Signing in opens HEY in your browser; the token it comes back with is the CLI's own, and Omamail never sees it."
+    return "Gmail has no shared app to sign in through, so this plugin uses an OAuth client you own. It takes about two minutes to create."
+  }
+  if (state === "signing_in") {
+    if (authKind === "password") return "Trying the server with those details."
+    if (authKind === "cli")
+      return "Finish the sign-in in your browser. This window updates by itself."
+    return "Finish the sign-in in your browser. This window updates by itself."
+  }
+  if (state === "signed_out") {
+    if (authKind === "password")
+      return "This mailbox is set up. Enter its password to let it read your mail."
+    if (authKind === "cli")
+      return "The HEY CLI is installed but signed out. Sign in to let it read this mailbox."
+    return "Your OAuth client is ready. Sign in to let it read this mailbox."
+  }
   return ""
 }
 
 function setupActionLabel(state, provider, authKind) {
   // Nothing to press: there is no form that would help and no browser to open.
   if (state === "unavailable") return ""
-  if (state === "tools_missing") return "See what is missing..."
-  if (state === "no_credentials")
-    return authKind === "password" ? "Add the mailbox..." : "Set up the OAuth client..."
+  // The CLI page prints the one line to run rather than offering a button that
+  // would pipe a script from the internet into a shell on the user's behalf.
+  if (state === "tools_missing")
+    return authKind === "cli" ? "Check again" : "See what is missing..."
+  if (state === "no_credentials") {
+    if (authKind === "password") return "Add the mailbox..."
+    // Nothing to configure before signing in: hey holds the whole credential.
+    if (authKind === "cli") return "Sign in to " + providerName(provider) + "..."
+    return "Set up the OAuth client..."
+  }
   if (state === "signing_in") return "Cancel"
   if (state === "signed_out") return "Sign in to " + providerName(provider) + "..."
   return ""
@@ -120,6 +149,44 @@ function labelChangesFor(action) {
   if (action === "unarchive") return { add: ["INBOX"], remove: [] }
   if (action === "spam") return { add: ["SPAM"], remove: ["INBOX"] }
   return null
+}
+
+// Which capability an action needs, or "" for the ones every provider has.
+//
+// The panel hides the *buttons* a provider cannot honour, and for two providers
+// that was the whole of it. A key is not a button: `e` and `s` are bound in
+// every mail context, so on a provider with neither archive nor star they
+// reached `act` regardless — where the optimistic update removed the row from
+// the Imbox and the note said "Archived", for a request no server ever saw.
+function actionCapability(action) {
+  var verb = String(action || "")
+  if (verb === "archive" || verb === "unarchive") return "archive"
+  if (verb === "star" || verb === "unstar") return "star"
+  if (verb === "spam") return "spam"
+  return ""
+}
+
+// What to say instead of doing it. Named after the thing the service does not
+// have rather than after the key, because "e does nothing here" answers a
+// question nobody asked.
+function actionUnavailable(action, provider) {
+  var name = providerName(provider)
+  var needs = actionCapability(action)
+  if (needs === "archive") return name + " has no archive"
+  if (needs === "star") return name + " has no star"
+  if (needs === "spam") return name + " has no junk verb to report to"
+  return ""
+}
+
+// The key-bound actions this provider cannot honour, for the hint row. A hint
+// that offers what the provider refuses is the same promise the button rule
+// exists to stop, made one line lower down.
+function unavailableActions(capabilities) {
+  var caps = capabilities || {}
+  var out = []
+  if (caps.archive !== true) out.push("archive")
+  if (caps.star !== true) out.push("star")
+  return out
 }
 
 function applyLabelChange(summary, action) {
@@ -201,6 +268,35 @@ function replaceById(list, summary) {
     out.push(source[i] && summary && source[i].id === summary.id ? summary : source[i])
   }
   return out
+}
+
+// The row a message becomes once it has been opened.
+//
+// A detail read is authoritative about everything it carries and silent about
+// the rest, so it replaces a field rather than blanking one. HEY is where this
+// stopped being theoretical: its thread read answers with the conversation's
+// entries and carries no subject line of its own, so a row opened before its
+// list had loaded would have had the subject the cache knew replaced with
+// "(no subject)" — and kept it until the next list load.
+//
+// "(no subject)" rather than "" because that is what `Message.summarize` calls
+// an empty subject line; the summary never reaches here with the empty one.
+function detailSummary(previous, summary) {
+  if (!summary) return previous
+  if (!previous) return summary
+  var merged = {}
+  for (var key in summary) merged[key] = summary[key]
+  if (merged.subject === "(no subject)" && previous.subject) merged.subject = previous.subject
+  if (!merged.from || (!merged.from.name && !merged.from.email)) merged.from = previous.from
+  if (!merged.snippet) merged.snippet = previous.snippet
+  // The three readings of one date, kept together: a row showing yesterday's
+  // relative time against today's date is worse than either alone.
+  if (!merged.date && previous.date) {
+    merged.date = previous.date
+    merged.time = previous.time
+    merged.fullTime = previous.fullTime
+  }
+  return merged
 }
 
 function indexById(list, id) {
@@ -422,12 +518,37 @@ function resultSummary(list, estimate, hasMore) {
   var shown = Array.isArray(list) ? list.length : 0
   if (shown === 0) return "No messages"
   if (!hasMore) return pluralize(shown, "message")
-  var total = Math.max(shown, Math.floor(Number(estimate) || 0))
+  var total = Math.floor(Number(estimate) || 0)
+  // A provider whose listing carries no total answers with what it read, which
+  // is the number already on screen. "25 of about 25" would be a claim HEY
+  // never made; "so far" is the honest reading of the same two numbers, and
+  // there is a Load more below it saying the rest exists.
+  if (total <= shown) return pluralize(shown, "message") + " so far"
   return shown + " of about " + total
 }
 
 function statusSummary(syncLabel) {
   return String(syncLabel || "")
+}
+
+// A title cut around the one word in it that is a link.
+//
+// Only the brand is the link — "Add a HEY mailbox" opens HEY's website from the
+// word HEY, not from the whole sentence, because a heading that is entirely a
+// link reads as a heading somebody made clickable by accident.
+//
+// A title that does not contain the brand keeps the link on the mark alone,
+// which is what the empty middle says.
+function splitBrand(title, brand) {
+  var text = String(title === undefined || title === null ? "" : title)
+  var word = String(brand === undefined || brand === null ? "" : brand)
+  var at = word === "" ? -1 : text.indexOf(word)
+  if (at < 0) return { before: text, brand: "", after: "" }
+  return {
+    before: text.slice(0, at),
+    brand: word,
+    after: text.slice(at + word.length)
+  }
 }
 
 function truncate(text, limit) {

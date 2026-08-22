@@ -1,15 +1,16 @@
-# Omamail — a Gmail and IMAP email client for Omarchy
+# Omamail — a Gmail, HEY and IMAP email client for Omarchy
 
 **Your mail as a native Omarchy window — not a browser tab.**
 
 Omamail is an Omarchy desktop email client: a Quickshell plugin that reads,
-triages, and answers your mail over the official Gmail API, or over IMAP and
-SMTP for every other mailbox. It runs inside the `omarchy-shell` process you
-already have, follows your active theme, and puts an unread count in the bar.
+triages, and answers your mail over the official Gmail API, over the HEY CLI
+client 37signals publish, or over IMAP and SMTP for every other mailbox. It
+runs inside the `omarchy-shell` process you already have, follows your active
+theme, and puts an unread count in the bar.
 
-Works with **Gmail**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yahoo**,
-**Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any other IMAP
-server — including one you run yourself.
+Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**,
+**Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any
+other IMAP server — including one you run yourself.
 
 ## Features
 
@@ -17,12 +18,15 @@ server — including one you run yourself.
   inside Omarchy rather than to look like a web app in a window. Three columns
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
-- **Gmail and IMAP.** Sign in to Gmail with Google directly, or add any IMAP
-  mailbox with an address and an app password. Several accounts at once, each
-  with its own inbox, cache and unread count.
+- **Gmail, HEY and IMAP.** Sign in to Gmail with Google directly, to HEY
+  through the HEY CLI that 37signals publish, or add any IMAP mailbox with an
+  address and an app password. Several accounts at once, each with its own
+  inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
+  A key the mailbox has no verb for says so instead of pretending: HEY has
+  neither an archive nor a star, so `e` and `s` name what is missing.
 - **Always counting.** The unread badge keeps working while the window is shut,
   for every account, with a desktop notification when new mail lands.
 - **One window.** Read, archive, star, trash, search, and answer without a
@@ -31,9 +35,11 @@ server — including one you run yourself.
   message's own calendar part and drawn as a meeting: when it runs, in your
   clock rather than the organiser's, how long for, where, whether it repeats,
   and who else has said yes. **Yes**, **Maybe** and **No** answer the
-  organiser, and a Google Meet link joins in one click. It works on every
-  mailbox here, not only Gmail — the answer is an ordinary reply, which is
-  what every calendar server is already listening for.
+  organiser, and a Google Meet link joins in one click. It works on Gmail and
+  on IMAP alike — the answer is an ordinary reply, which is what every calendar
+  server is already listening for. Not on HEY: `hey` serves a message's text,
+  not the calendar file beside it, so there is nothing to read the meeting out
+  of.
 - **Off a list in one click.** A newsletter that supports one-click
   unsubscribing is unsubscribed from without leaving the window. One that only
   offers an address gets a message; one that only offers a page says so before
@@ -45,7 +51,9 @@ server — including one you run yourself.
 - **Your theme.** Every colour comes from the active Omarchy theme, so the
   mailbox changes the moment the desktop does.
 - **Keyring-backed.** The Gmail refresh token and every IMAP password live in
-  GNOME Keyring — never in a config file, never on a command line.
+  GNOME Keyring — never in a config file, never on a command line. A HEY
+  mailbox has no credential here at all: the HEY CLI holds its own token, and
+  Omamail only ever asks it whether it is signed in.
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
 
@@ -82,17 +90,57 @@ which is what loads it in the first place. A plugin-scoped target would have to
 be registered by code that is only running once the window is already open.
 
 Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
-`curl` — all of which Omarchy already ships.
+`curl` — all of which Omarchy already ships. A HEY mailbox additionally needs
+`hey`; see below.
 
 ## Mailboxes it can open
 
-Adding a mailbox asks which kind first, because the two setups have nothing in
+Adding a mailbox asks which kind first, because the three setups have nothing in
 common.
 
 **Gmail** signs in with Google directly. Google issues Gmail API access per
 project, so this route needs an OAuth client you create once — the setup page
 walks through it. In exchange it gets labels, conversations, Gmail's own search
 syntax, and a "report spam" that Google actually learns from.
+
+**HEY** needs no address and no password. HEY publishes no IMAP, no POP and no
+public API, so Omamail reads it through the [HEY CLI][hey-cli] client 37signals
+ship for exactly this — which means the sign-in, the token and the keyring entry
+it lives in are all `hey`'s, and Omamail never asks for your HEY password.
+
+Install it once:
+
+```bash
+curl -fsSL https://hey.com/install-cli | bash
+```
+
+Recent versions of Omarchy install it for you as a lazy mise tool, and
+`omarchy-mise-install github:basecamp/hey-cli hey` does the same thing by hand.
+Either way it lands in `~/.local/bin`, which is where Omamail looks when it is
+not already on `PATH`. Then choose **HEY** on the setup page and press **Sign in
+to HEY** — that opens HEY in your browser, and nothing else is asked of you.
+
+The rail is HEY's own: Imbox, New for you, Reply Later, Set Aside, The Feed and
+Paper Trail. **No Sent** — HEY's API has one, but `hey` does not serve it yet:
+there is no `hey box sent`, and search only scopes to the Imbox, the Feed, Paper
+Trail and Trash. When the client gains it, it is one more line in the rail.
+
+What HEY does not have, the panel does not offer: **no star** and **no
+archive**, because HEY moves a thread to one of those boxes instead, and a key
+that quietly meant "file this in Paper Trail" would be a promise this could not
+keep — `e` and `s` say so rather than pretending. Reading, marking read,
+replying, searching, labels, trashing and a "report spam" HEY trains its filter
+on all work.
+
+Three more differences worth knowing. A HEY row is a *conversation*, not a
+single message. Message bodies read as `hey` serves them — as the sender's own
+HTML where your `hey` is new enough to hand it over, and as text elsewhere;
+Omamail asks for the richer one every time and takes whichever comes back, so
+upgrading `hey` improves it with nothing to change here. And the meeting card,
+the one-click unsubscribe, attachments and the Screener are all read out of
+parts of a message that `hey` does not serve, or out of an endpoint it does not
+expose — so they stay in HEY's own app, which the setup page links to.
+
 
 **IMAP** is an address and a password. Fastmail, iCloud, Zoho, Outlook, GMX,
 Proton via its Bridge, or a server of your own: the servers are filled in from
@@ -108,10 +156,6 @@ could not keep. Archive appears only when the server has an archive folder to
 move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
 server is set.
 
-**HEY** is listed as a future integration. A HEY CLI is reportedly in
-development; once it is ready, Omamail can support it through the provider seam
-that is already in place.
-
 To remove it:
 
 ```bash
@@ -123,6 +167,7 @@ config, so removing those is separate and entirely up to you:
 
 ```bash
 secret-tool clear service omamail    # the refresh token and IMAP passwords
+hey auth logout                      # the HEY session, if you added one
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
 ```
@@ -217,7 +262,12 @@ thousand of them, evicted least-recently-used.
 
 ## Where your credentials live
 
-- The refresh token goes to **GNOME Keyring**, keyed by client *and* account,
+- **A HEY mailbox has no credential here at all.** `hey` performs the OAuth
+  flow, keeps the token in your keyring and refreshes it; Omamail only ever
+  asks it whether it is signed in. Signing out from the setup page runs
+  `hey auth logout`, which signs that client out for everything on the machine
+  that uses it.
+- The Gmail refresh token goes to **GNOME Keyring**, keyed by client *and* account,
   written over stdin so it never appears in the process table. Two mailboxes
   share one client, so keying by client alone would have let the second sign-in
   overwrite the first.
@@ -240,7 +290,10 @@ make validate         # node tests, source regressions, qmllint, manifest check
 Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
 [docs/SPEC.md](docs/SPEC.md).
 
-Omamail is an independent project and is not affiliated with Google.
-Gmail is a trademark of Google LLC.
+Omamail is an independent project and is not affiliated with Google or
+37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals,
+LLC.
 
 Licensed under the [MIT License](LICENSE).
+
+[hey-cli]: https://github.com/basecamp/hey-cli

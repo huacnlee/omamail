@@ -73,7 +73,7 @@ Column {
         readonly property bool connectable: Provider.isConnectable(modelData)
 
         width: root.width
-        implicitHeight: cardText.implicitHeight + Style.space(24)
+        implicitHeight: Math.max(cardText.implicitHeight, cardMark.height) + Style.space(24)
         radius: Style.cornerRadius
         color: card.connectable && hover.hovered
           ? Style.hoverFillFor(root.textColor, root.accentColor)
@@ -85,11 +85,28 @@ Column {
         // themes render as ordinary body text.
         opacity: card.connectable ? 1.0 : 0.55
 
+        // The service's own icon, so the row is recognisable before it is read.
+        // A provider with no artwork gets an envelope in the theme's colour
+        // rather than nothing at all: an empty slot would leave its text
+        // hanging out of line with the rows above it, which reads as a fault
+        // rather than as "this one has no logo".
+        ProviderLogo {
+          id: cardMark
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(12)
+          anchors.verticalCenter: parent.verticalCenter
+          size: Style.space(26)
+          logo: Provider.mark(card.modelData)
+          fallbackIcon: "unread"
+          fallbackColor: root.textColor
+        }
+
         Column {
           id: cardText
-          anchors.left: parent.left
+          anchors.left: cardMark.right
+          anchors.leftMargin: Style.space(12)
           anchors.right: parent.right
-          anchors.margins: Style.space(12)
+          anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(3)
 
