@@ -8,6 +8,13 @@ client 37signals publish, or over IMAP and SMTP for every other mailbox. It
 runs inside the `omarchy-shell` process you already have, follows your active
 theme, and puts an unread count in the bar.
 
+
+<img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
+
+And with mini size mode:
+
+<img width="330" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" /> <img width="330" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
+
 Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**,
 **Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any
 other IMAP server — including one you run yourself.
@@ -54,12 +61,6 @@ other IMAP server — including one you run yourself.
   GNOME Keyring — never in a config file, never on a command line. A HEY
   mailbox has no credential here at all: the HEY CLI holds its own token, and
   Omamail only ever asks it whether it is signed in.
-
-<img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
-
-And with mini size mode:
-
-<img width="330" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" /> <img width="330" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
 
 ## What it is
 
