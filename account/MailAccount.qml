@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import "../providers"
 import "../cache"
 
@@ -1089,28 +1090,95 @@ Item {
   // are checked, and it borrows the judgement that decides whether a message
   // may load a picture.
   //
+  // **Sent by curl rather than by XMLHttpRequest, because a gate that judges
+  // only the first address is not a gate.** Qt's XHR follows a 3xx by itself
+  // and re-sends the POST, body intact, wherever that answer points — measured
+  // against a loopback target, which recorded the POST arriving after a single
+  // `302`. So the address the sender wrote would be checked, and a different
+  // address entirely would be the one this machine connected to, from inside
+  // the user's own network. curl follows nothing unless told to, and
+  // `scripts/unsubscribe.sh` tells it twice not to.
+  //
   // The reply is never read beyond its status. It is a document from whoever
   // sent the mail, and the only question being asked of it is whether the
   // address is off the list.
   function postUnsubscribe(url) {
+    if (!Unsub.isPostableUrl(url)) {
+      fail("That unsubscribe address is not one this can post to")
+      return
+    }
     unsubscribing = true
-    var request = new XMLHttpRequest()
-    request.onreadystatechange = function() {
-      if (request.readyState !== XMLHttpRequest.DONE) return
+    var request = unsubscribeComponent.createObject(root, {
+      command: [pluginDir + "/scripts/unsubscribe.sh"],
+      requestLine: [Mail.encodeBase64(String(url)),
+        Mail.encodeBase64(Unsub.postContentType()),
+        Mail.encodeBase64(Unsub.postBody())].join(" ")
+    })
+    if (!request) {
+      unsubscribing = false
+      fail("The unsubscribe request could not be sent")
+      return
+    }
+    request.finished.connect(function(exitCode, status) {
       if (!root) return
+      request.destroy()
       root.unsubscribing = false
-      var status = Number(request.status) || 0
-      if (status >= 200 && status < 400) {
+      root.unsubscribeDone = ""
+      if (exitCode !== 0 || status === 0) {
+        root.fail("The unsubscribe request could not be sent")
+        return
+      }
+      if (status >= 200 && status < 300) {
         root.unsubscribeDone = "Unsubscribed from this list"
         return
       }
-      root.fail(status === 0
-        ? "The unsubscribe request could not be sent"
+      // A 3xx is a server answering a one-click request with "go and ask over
+      // there". It has not done what its own header promised, and the address
+      // it points at was never judged — so it is reported as a refusal rather
+      // than followed.
+      root.fail(status >= 300 && status < 400
+        ? "This list answered with a redirect instead of unsubscribing (" + status + ")"
         : "This list refused the unsubscribe request (" + status + ")")
+    })
+    request.running = true
+  }
+
+  // One process per request, created and destroyed around it. The same shape
+  // the mail transport uses, for the same reason: the URL crosses on stdin
+  // base64-encoded, so a header a stranger wrote never reaches the process
+  // table and nothing has to be escaped on the way.
+  Component {
+    id: unsubscribeComponent
+
+    Process {
+      id: unsubscribeProcess
+
+      property string requestLine: ""
+      signal finished(int exitCode, int status)
+
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+
+      onStarted: {
+        // One line, because Quickshell's Process.write() never closes stdin and
+        // the script would wait forever for an EOF that does not come.
+        write(requestLine + "\n")
+        requestLine = ""
+      }
+
+      onExited: function(exitCode) {
+        // "<curl exit code> <http status>", and nothing else is read.
+        var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
+        var code = Math.floor(Number(parts[0]))
+        var status = Math.floor(Number(parts[1]))
+        if (exitCode !== 0 || parts.length < 2 || !isFinite(code) || !isFinite(status)) {
+          unsubscribeProcess.finished(exitCode === 0 ? 1 : exitCode, 0)
+          return
+        }
+        unsubscribeProcess.finished(code, status)
+      }
     }
-    request.open("POST", url)
-    request.setRequestHeader("Content-Type", Unsub.postContentType())
-    request.send(Unsub.postBody())
   }
 
   // -------------------------------------------------------- notifications

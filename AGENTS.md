@@ -268,6 +268,23 @@ key. What matters while working:
   is world-readable.
 - Anything that could carry a credential passes through `OAuth.redact` before
   it can reach a label.
+- **A gate that judges only the first address is not a gate.** `isPostableUrl`
+  and `imageSourceKind` refuse loopback, private, link-local and single-label
+  hosts — but they judge the address *the sender wrote*, and Qt's
+  `XMLHttpRequest` follows a 3xx by itself and re-sends the request, body
+  intact, wherever that answer points. Measured, not assumed: a loopback target
+  answering `302 Location: /landed` recorded the POST arriving there. So the
+  one-click unsubscribe goes out through `scripts/unsubscribe.sh`, which is
+  curl, which follows nothing unless told to — and a 3xx is reported as a list
+  that did not unsubscribe rather than as an address to chase.
+- **Remote images are the part of that which is not closed.** Qt's own image
+  loader performs those fetches and takes no policy from QML, so a sender who
+  redirects an image can still reach an address the gate would have refused.
+  What holds the line meanwhile is that nothing is fetched until the reader
+  asks. Closing it properly means fetching the bytes here — curl, no redirects
+  — and handing the renderer a `data:` URI, which is a day's work and a change
+  to the rule that the string handed over is the only control point. Do not
+  paper over it with a second check on the same first address.
 - Remote images in a message body are blocked until the reader asks for them.
   Qt's rich text engine really does fetch them, so rendering one fires every
   tracking pixel in the message, and the fetch tells the host that this address

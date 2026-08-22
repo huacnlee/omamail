@@ -71,6 +71,7 @@ test-shell:
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
 	bash tests/test_transport.sh
+	bash tests/test_unsubscribe_transport.sh
 
 # Focus ownership and key routing cannot be tested without a focus scope, and a
 # focus scope needs the QML engine. Offscreen, so it needs no compositor: the
