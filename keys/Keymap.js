@@ -245,12 +245,70 @@ function helpGroups() {
 }
 
 // What the status bar offers from where the user is standing.
-function hintsFor(context) {
+//
+// `unavailable` is the ids the active provider cannot honour — a mailbox with
+// no archive and no star should not be offering `e` and `s` in the row that
+// says what the keyboard does here. The table itself stays whole: what a key
+// means is a property of the application, and only whether it is on offer
+// depends on which mailbox is open.
+function hintsFor(context, unavailable) {
   var out = []
   var rows = bindingsFor(context)
+  var missing = Array.isArray(unavailable) ? unavailable : []
   for (var i = 0; i < rows.length; i++) {
+    if (missing.indexOf(rows[i].id) >= 0) continue
     var text = hintTextFor(rows[i], context)
     if (text !== "") out.push(({ key: hintKeyFor(rows[i]), label: text }))
+  }
+  return out
+}
+
+// A heading costs a line as surely as a row does, so it counts as one.
+// Balancing on rows alone put the small groups together and left the last
+// column visibly short of the others.
+function helpWeight(group) {
+  return (group && Array.isArray(group.rows) ? group.rows.length : 0) + 1
+}
+
+// The help groups laid out in `count` columns.
+//
+// The sheet was one narrow column, which was taller than a short window — so it
+// scrolled, and its scrollbar rode the edge of that column rather than the edge
+// of the sheet, which put a scrollbar down the middle of the screen. Wide and
+// short is the shape a reference sheet wants, and at two or three columns it
+// usually does not scroll at all.
+//
+// Split in order rather than packed by size: a reader who knows the sheet finds
+// a group where it has always been, and "smallest column so far" moves them
+// about every time a binding is added.
+function helpColumns(count) {
+  var groups = helpGroups()
+  var columns = Math.max(1, Math.min(groups.length, Math.floor(Number(count)) || 1))
+  var out = []
+  for (var c = 0; c < columns; c++) out.push([])
+  if (columns === 1) {
+    out[0] = groups
+    return out
+  }
+
+  var total = 0
+  for (var i = 0; i < groups.length; i++) total += helpWeight(groups[i])
+  var share = total / columns
+
+  var at = 0
+  var used = 0
+  for (var g = 0; g < groups.length; g++) {
+    // Groups still to place, and columns still open, this one included in both.
+    var left = groups.length - g
+    var free = columns - at
+    // Move on once this column has had its share — and early when leaving it
+    // any fuller would strand an empty column at the end.
+    if (at < columns - 1 && out[at].length > 0 && (used >= share || left <= free - 1)) {
+      at++
+      used = 0
+    }
+    out[at].push(groups[g])
+    used += helpWeight(groups[g])
   }
   return out
 }

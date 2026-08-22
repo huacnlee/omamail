@@ -242,6 +242,20 @@ if awk '
   fail "requesting account removal must not remove it immediately"
 fi
 
+# A mailbox names itself the way the account list names it.
+#
+# An id is the bare address only for the default provider; every other one
+# carries its provider in front. Assigning the address alone is also an
+# assignment rather than a binding, so it replaced the id the list had given —
+# and `Service.findAccount` compares the two. A HEY mailbox called itself
+# `you@hey.com` while the list called it `hey:you@hey.com`, nothing matched, and
+# switching to it silently fell back to whichever mailbox was first.
+if grep -nE 'accountId = accountEmail' account/MailAccount.qml; then
+  fail "a mailbox's id must come from Accounts.accountId, not from the address alone"
+fi
+grep -q 'accountId = Accounts.accountId(accountEmail, providerId)' account/MailAccount.qml \
+  || fail "MailAccount must name itself through Accounts.accountId"
+
 # Native desktop controls retain the arrow cursor. A pointing hand is reserved
 # for actual links such as URLs inside the message reader.
 for file in components/IconButton.qml components/IconTextButton.qml components/AppMenu.qml \

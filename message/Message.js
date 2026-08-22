@@ -805,10 +805,22 @@ function encodedPhrase(text) {
 // Written by hand rather than through `foldHeader` for the reason above. The
 // address still loses its line breaks, so a display name cannot smuggle a
 // second header in either.
-function fromHeader(email, displayName) {
+// One address as a header *value*: `"Name" <a@b.com>`, or the bare address when
+// there is no name to put in front of it.
+//
+// Split out from `fromHeader` because a provider composing a message rather
+// than parsing one needs the value without a field name — HEY's client builds a
+// To line this way, and pasting `fromHeader`'s output into one produced
+// `To: From: "Name" <a@b.com>`, which `parseAddress` then read as a display
+// name of `From: "Name"`.
+function addressHeader(email, displayName) {
   var address = headerSafe(email).trim()
   var phrase = encodedPhrase(displayName)
-  return "From: " + (phrase === "" ? address : phrase + " <" + address + ">")
+  return phrase === "" ? address : phrase + " <" + address + ">"
+}
+
+function fromHeader(email, displayName) {
+  return "From: " + addressHeader(email, displayName)
 }
 
 function foldHeader(name, value) {

@@ -291,6 +291,13 @@ function isSendAsAllowed(aliases, email) {
 // to map one to the other from the API. Index 0 is right for the common
 // single-account case and wrong in a way the user can see and fix, which beats
 // a link that silently opens somebody else's mailbox.
+// The mailbox itself, rather than a message or a search in it. Gmail's web UI
+// opens on whatever the user last had; there is nothing to point it at.
+function webHomeUrl(accountIndex) {
+  var index = Math.max(0, Math.floor(Number(accountIndex) || 0))
+  return WEB_BASE + "/" + index + "/"
+}
+
 function webMessageUrl(messageId, accountIndex) {
   var index = Math.max(0, Math.floor(Number(accountIndex) || 0))
   return WEB_BASE + "/" + index + "/#all/" + encode(messageId)

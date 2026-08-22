@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../providers/Registry.js" as Provider
 
 // Connecting a mailbox, as two steps instead of a wall of instructions.
 //
@@ -85,47 +86,17 @@ Column {
 
   // ------------------------------------------------------------------ hero
 
-  Item {
+  ProviderHero {
     width: parent.width
-    implicitHeight: Math.max(heroIcon.height, heroText.implicitHeight)
-
-    GmailIcon {
-      id: heroIcon
-      anchors.left: parent.left
-      anchors.top: parent.top
-      anchors.topMargin: Style.space(2)
-      iconSize: Style.font.displayLarge
-      color: root.textColor
-    }
-
-    Column {
-      id: heroText
-      anchors.left: heroIcon.right
-      anchors.leftMargin: Style.space(14)
-      anchors.right: parent.right
-      anchors.top: parent.top
-      spacing: Style.space(4)
-
-      Text {
-        width: parent.width
-        text: root.addingMailbox ? "Add a mailbox" : "Connect your mailbox"
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.heading
-        font.bold: true
-      }
-
-      Text {
-        width: parent.width
-        text: root.addingMailbox
-          ? "Signing in with the OAuth client you already set up. Pick the Google account you want to add."
-          : "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.WordWrap
-      }
-    }
+    providerId: "gmail"
+    // The brand is in the heading because the heading is half the link, and
+    // "Connect your mailbox" named no service at all.
+    title: root.addingMailbox ? "Add a Gmail mailbox" : "Connect your Gmail mailbox"
+    detail: "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
+    textColor: root.textColor
+    dimColor: root.dimColor
+    panelFontFamily: root.panelFontFamily
+    onWebsiteRequested: if (root.service) root.service.openProviderWebsite("gmail")
   }
 
   // Missing dependencies come first: neither step below can finish without

@@ -425,8 +425,8 @@ Item {
     }
   }
 
-  // The three setup pages. Built by the Loader above, one at a time, so the two
-  // not in use hold no half-typed fields and no state to go stale.
+  // The setup pages. Built by the Loader above, one at a time, so the ones not
+  // in use hold no half-typed fields and no state to go stale.
   Component {
     id: providerPickerPage
 
@@ -462,6 +462,23 @@ Item {
     id: gmailSetupPage
 
     SetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      accentColor: root.accent
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
+  Component {
+    id: heySetupPage
+
+    HeySetupPage {
       service: root.service
       textColor: root.foreground
       dimColor: root.dim
@@ -989,21 +1006,23 @@ Item {
             width: setupFlick.width
             implicitHeight: setup.implicitHeight
 
-          // Three setups that share nothing but their place on screen: a
-          // chooser for a mailbox whose kind is not settled yet, then whichever
-          // of the two forms that kind needs. A Loader rather than three
-          // visibilities, so the page not in use holds no fields and no state.
+          // Setups that share nothing but their place on screen: a chooser for
+          // a mailbox whose kind is not settled yet, then whichever page that
+          // kind needs — a Cloud walkthrough, a program and a button, or a
+          // server and a password. A Loader rather than four visibilities, so
+          // the pages not in use hold no fields and no state.
           Loader {
             id: setup
             // A measure this long is unreadable across a wide window, so it is
             // capped rather than stretched.
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(setupHolder.width, Style.space(560))
+            readonly property string kind: Model.setupProvider(root.editingProvider,
+              root.service ? root.service.providerId : "")
             sourceComponent: root.showPicker
               ? providerPickerPage
-              : (Model.setupProvider(root.editingProvider,
-                  root.service ? root.service.providerId : "") === "imap"
-                ? imapSetupPage : gmailSetupPage)
+              : (setup.kind === "imap" ? imapSetupPage
+                : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))
           }
           }
         }
@@ -1158,7 +1177,8 @@ Item {
           dimColor: root.dimmer
           accentColor: root.accent
           panelFontFamily: root.fontFamily
-          hints: Keymap.hintsFor(focusScope.keyContext)
+          hints: Keymap.hintsFor(focusScope.keyContext,
+            root.service ? root.service.unavailableActions : [])
         }
       }
 
@@ -1172,6 +1192,7 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         signedIn: root.ready
+        canOpenWebInbox: !!root.service && root.service.canOpenWebInbox
         accountCount: root.service ? root.service.accountCount : 1
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()

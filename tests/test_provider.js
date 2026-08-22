@@ -7,8 +7,10 @@ const provider = load("providers/Registry.js")
 //
 // Three providers, and the ids are what an accounts.json holds — renaming one
 // silently orphans every account already written with the old name.
-
-deepEqual(provider.ids(), ["gmail", "imap", "hey"])
+//
+// The order is the order the chooser lists them in: the two hosted mailboxes
+// with a service of their own, then the one that is every other mailbox.
+deepEqual(provider.ids(), ["gmail", "hey", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
@@ -36,23 +38,51 @@ assert.strictEqual(provider.can("imap", "threads"), false)
 assert.strictEqual(provider.can("imap", "star"), true, "\\Flagged is a star")
 assert.strictEqual(provider.can("imap", "web"), false, "no web UI to open a message in")
 assert.strictEqual(provider.can("gmail", "web"), true)
-assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
-assert.strictEqual(provider.can("hey", "send"), false, "HEY has nothing behind it")
 
-// HEY is present as a future integration, but cannot connect until its client
-// exists.
+// Opening a message on the web and opening *this mailbox* on the web are two
+// questions. HEY gives every thread an address of its own but has none for a
+// search or a label, so the second answer is no — an "Open web inbox" there
+// could only ever open the Imbox, whatever the user was looking at.
+assert.strictEqual(provider.can("gmail", "webBox"), true)
+assert.strictEqual(provider.can("hey", "web"), true)
+assert.strictEqual(provider.can("hey", "webBox"), false)
+assert.strictEqual(provider.can("imap", "webBox"), false)
+
+// And the address builders agree with the capabilities, so a caller that asked
+// anyway gets nothing rather than somewhere else's mailbox.
+assert.strictEqual(provider.webMessageUrl("hey", "1:2"), "https://app.hey.com/topics/2")
+assert.strictEqual(provider.webBoxUrl("hey", "box:feedbox"), "")
+assert.strictEqual(provider.webBoxUrl("imap", "folder:INBOX"), "")
+assert.strictEqual(provider.webBoxUrl("gmail", "in:inbox"),
+  "https://mail.google.com/mail/u/0/#search/in%3Ainbox")
+assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
+
+// HEY's own shape. The two that are off are off because HEY has no such verb —
+// a star that quietly moved a thread out of the Imbox, or an archive that filed
+// it in Paper Trail, would be a promise the provider cannot keep.
+assert.strictEqual(provider.can("hey", "send"), true)
+assert.strictEqual(provider.can("hey", "search"), true)
+assert.strictEqual(provider.can("hey", "spam"), true, "hey spam trains the filter")
+assert.strictEqual(provider.can("hey", "threads"), true, "a topic is a conversation")
+assert.strictEqual(provider.can("hey", "labels"), true)
+assert.strictEqual(provider.can("hey", "star"), false, "HEY has no flag")
+assert.strictEqual(provider.can("hey", "archive"), false, "HEY has no archive")
+
+// Every provider here can be connected to. The `unavailable` seam is kept for
+// the next one that cannot be, which is what HEY was until `hey` shipped.
 assert.strictEqual(provider.isConnectable("gmail"), true)
 assert.strictEqual(provider.isConnectable("imap"), true)
-assert.strictEqual(provider.isConnectable("hey"), false)
+assert.strictEqual(provider.isConnectable("hey"), true)
 
 assert.strictEqual(provider.unavailableReason("gmail"), "")
 assert.strictEqual(provider.unavailableReason("imap"), "")
+assert.strictEqual(provider.unavailableReason("hey"), "")
 
 // --------------------------------------------------------------- mailboxes
 
 // The glyphs ActionIcon actually draws. A mailbox naming anything else renders
 // as nothing at all.
-const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash"]
+const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash", "reply", "pin", "label"]
 
 // Every provider's first mailbox is its inbox: `mailboxFor` falls back to it,
 // which is what a key belonging to another provider lands on mid-switch.
@@ -119,11 +149,19 @@ assert.strictEqual(provider.query("gmail", "inbox", "   ", ""), "in:inbox",
 // command after a password-provider account signs in, or the first list
 // request is rejected and the mailbox stays empty.
 assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBOX")
+assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
+
+// HEY's own queries, which the client reads back as commands.
+assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
+assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
+assert.strictEqual(provider.query("hey", "trash", "", ""), "box:trash")
+assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentist")
 
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.
 assert.strictEqual(provider.unreadQuery("gmail"), "in:inbox is:unread category:primary")
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
+assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
 
 // Selecting a label in the sidebar is a different act from typing in the search
 // box, even though both end in a query. Routing it through `query` would wrap an
@@ -133,18 +171,51 @@ assert.strictEqual(provider.labelQuery("gmail", "Receipts"), "label:Receipts")
 assert.strictEqual(provider.labelQuery("imap", "Receipts"), "folder:\"Receipts\"")
 assert.strictEqual(provider.labelQuery("imap", "Old Mail"), "folder:\"Old Mail\"",
   "a folder name with a space has to arrive quoted")
-assert.strictEqual(provider.labelQuery("hey", "Anything"), "")
+// HEY addresses a label by the id `hey labels` gave, which is what the sidebar
+// carries as a label's `rawName` — `hey label` takes nothing else.
+assert.strictEqual(provider.labelQuery("hey", "4711"), "label:4711")
+assert.strictEqual(provider.labelQuery("hey", ""), "")
 assert.strictEqual(provider.labelQuery("imap", ""), "")
 assert.strictEqual(provider.labelQuery("imap", "   "), "")
 
 // And the result must be a folder query the DSL can read back, not a search.
 assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 
+// ------------------------------------------------------------- the web home
+
+// A third web question, and the reason it is its own: HEY has a front door even
+// though it has no address for an arbitrary mailbox, so the settings row can
+// link out where the "Open web inbox" row cannot.
+assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u/0/")
+assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
+assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
+
+// ------------------------------------------------------------------ logos
+
+// A file in `assets/`, so the setup page says which mailbox it is about before
+// any of its words do. IMAP has none on purpose: it is a protocol rather than a
+// brand, and no mark would be honest about the server being connected to.
+// The square icon a list row wants, and the lockup a page about the service
+// opens with. HEY's differ — its wordmark is more than twice as wide as it is
+// tall — and a provider with only one file uses it for both.
+assert.strictEqual(provider.mark("gmail"), "gmail.png")
+assert.strictEqual(provider.logo("gmail"), "gmail.png", "one square mark serves both")
+assert.strictEqual(provider.mark("hey"), "hey-mark.png")
+assert.strictEqual(provider.logo("hey"), "hey.png")
+assert.strictEqual(provider.mark("imap"), "")
+assert.strictEqual(provider.logo("imap"), "")
+
 // ------------------------------------------------------------------- auth
 
 assert.strictEqual(provider.authKind("gmail"), "oauth")
 assert.strictEqual(provider.authKind("imap"), "password")
-assert.strictEqual(provider.authKind("hey"), "none")
+// A sign-in this plugin does not perform itself: `hey` owns the browser, the
+// token and the keyring entry it lives in.
+assert.strictEqual(provider.authKind("hey"), "cli")
+assert.strictEqual(provider.usesCli("hey"), true)
+assert.strictEqual(provider.usesCli("gmail"), false)
+assert.strictEqual(provider.usesOAuth("hey"), false)
+assert.strictEqual(provider.usesPassword("hey"), false)
 assert.strictEqual(provider.usesOAuth("gmail"), true)
 assert.strictEqual(provider.usesOAuth("imap"), false)
 assert.strictEqual(provider.usesPassword("imap"), true)
