@@ -21,13 +21,39 @@ Item {
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
 
+  // How long a request may hang before it is given up on.
+  //
+  // Qt's QML XMLHttpRequest has **no** `timeout` and **no** `ontimeout` — the
+  // properties simply do not exist, and assigning one is worse than useless
+  // because it reads back exactly what was written, so the obvious fix looks
+  // like it works. A `Timer` calling `abort()` is the whole of what is
+  // available. Measured, both halves: `"timeout" in xhr` is false, and a
+  // request against a socket that accepts and never answers was still hanging
+  // after eight seconds.
+  //
+  // Thirty seconds because this is a mail API on somebody's home connection,
+  // not a local service — long enough that a slow answer is waited for, and
+  // well inside the two-minute poll so a hung request is gone before the next
+  // one is due.
+  readonly property int requestTimeoutMs: 30000
+
   function newHandle() {
-    return { aborted: false, xhr: null, children: [] }
+    return { aborted: false, timedOut: false, xhr: null, deadline: null, children: [] }
+  }
+
+  // Stopped and destroyed together, because a Timer that outlives its request
+  // is a timer that aborts the *next* one to reuse the object.
+  function clearDeadline(handle) {
+    if (!handle || !handle.deadline) return
+    handle.deadline.stop()
+    handle.deadline.destroy()
+    handle.deadline = null
   }
 
   function abortRequest(handle) {
     if (!handle) return
     handle.aborted = true
+    clearDeadline(handle)
     if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
     handle.xhr = null
     var children = handle.children || []
@@ -77,6 +103,7 @@ Item {
           root.inFlight = Math.max(0, root.inFlight - 1)
           return
         }
+        root.clearDeadline(handle)
         var payload = Api.parseJson(xhr.responseText, null)
         // One retry only, and only for 401: a token can expire between the
         // freshness check and the request reaching Google.
@@ -87,12 +114,32 @@ Item {
         }
         root.inFlight = Math.max(0, root.inFlight - 1)
         var ok = xhr.status >= 200 && xhr.status < 300
-        var error = ok ? "" : root.requestError(xhr.status, payload, xhr,
-          "Gmail could not complete this request")
+        // A request the deadline gave up on arrives here exactly as a failed
+        // one does — `abort()` drives readyState to DONE with status 0, which
+        // is measured rather than assumed. So the timeout costs no second
+        // decrement and no second callback; all it needs is to say which of
+        // the two silences this was.
+        var error = ok ? "" : (handle.timedOut
+          ? "Gmail did not answer in time"
+          : root.requestError(xhr.status, payload, xhr,
+            "Gmail could not complete this request"))
         if (typeof callback === "function") callback(xhr.status, payload, error, xhr)
       }
       xhr.open(String(method || "GET"), url)
       xhr.setRequestHeader("Authorization", "Bearer " + token)
+      // Armed around the send rather than around the whole call: everything
+      // before this was local, and the wait being bounded is the wait on the
+      // network.
+      root.clearDeadline(handle)
+      handle.deadline = deadlineComponent.createObject(root, { interval: root.requestTimeoutMs })
+      if (handle.deadline) {
+        handle.deadline.triggered.connect(function() {
+          if (!root || handle.aborted) return
+          handle.timedOut = true
+          if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
+        })
+        handle.deadline.start()
+      }
       if (body !== undefined && body !== null) {
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.send(JSON.stringify(body))
@@ -240,6 +287,18 @@ Item {
       function(status, payload, error) {
         if (typeof callback === "function") callback(payload, error)
       })
+  }
+
+  // One Timer per request in flight, created and destroyed around it. A single
+  // shared one cannot work: requests here are fired together — a page of
+  // messages is one list call plus one metadata call each — and they finish in
+  // whatever order Google answers.
+  Component {
+    id: deadlineComponent
+
+    Timer {
+      repeat: false
+    }
   }
 
   function sendMessage(payload, callback) {

@@ -316,14 +316,40 @@ Item {
 
   // ---------------------------------------------------------------- tokens
 
+  // How long the token endpoint may hang before the sign-in gives up on it.
+  //
+  // Qt's QML XMLHttpRequest has no `timeout` and no `ontimeout`; a `Timer`
+  // calling `abort()` is what there is. See `GmailApiClient.requestTimeoutMs`
+  // for the measurements, and for why thirty seconds.
+  //
+  // This one matters more than a list load does: a session restore that never
+  // answers leaves `sessionChecked` false, and the panel waits on it for a
+  // session that is never coming.
+  readonly property int tokenTimeoutMs: 30000
+
   function postTokenRequest(body, previousRefreshToken, callback) {
     var serial = ++tokenRequestSerial
     var request = new XMLHttpRequest()
     tokenRequest = request
+
+    var deadline = tokenDeadlineComponent.createObject(root, { interval: tokenTimeoutMs })
+    function disarm() {
+      if (!deadline) return
+      deadline.stop()
+      deadline.destroy()
+      deadline = null
+    }
+
     request.onreadystatechange = function() {
       if (request.readyState !== XMLHttpRequest.DONE) return
+      disarm()
       if (serial !== root.tokenRequestSerial) return
       if (root.tokenRequest === request) root.tokenRequest = null
+      // `abort()` drives readyState to DONE with status 0, so a request the
+      // deadline gave up on lands here as the failure it is —
+      // `parseTokenResponse` already reads a zero status as "could not reach
+      // Google", which is the honest thing to tell somebody whose network went
+      // away mid sign-in.
       var result = OAuth.parseTokenResponse(request.status, request.responseText,
         previousRefreshToken)
       if (typeof callback === "function") callback(result)
@@ -331,6 +357,22 @@ Item {
     request.open("POST", OAuth.TOKEN_URL)
     request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
     request.send(body)
+
+    if (deadline) {
+      deadline.triggered.connect(function() {
+        if (!root) return
+        if (request.abort) request.abort()
+      })
+      deadline.start()
+    }
+  }
+
+  Component {
+    id: tokenDeadlineComponent
+
+    Timer {
+      repeat: false
+    }
   }
 
   function refreshWithToken(refreshToken, purpose) {

@@ -268,6 +268,19 @@ key. What matters while working:
   is world-readable.
 - Anything that could carry a credential passes through `OAuth.redact` before
   it can reach a label.
+- **Every request that crosses the network is given up on eventually, and in
+  QML that costs a `Timer`.** Qt's QML `XMLHttpRequest` has no `timeout` and no
+  `ontimeout`: the properties do not exist, and assigning one reads back
+  exactly what was written — so the obvious fix looks like it works and does
+  nothing at all. A `Timer` calling `abort()` is the whole of what is
+  available, and `abort()` drives `readyState` to `DONE` with status 0, which
+  is why the deadline needs no callback of its own: it lands in the failure
+  path the request already had, decrementing `inFlight` once. Both facts were
+  measured against a socket that accepts and never answers, not read from a
+  specification. `tests/test_source.sh` fails an assignment to `.timeout`,
+  because that is the mistake that looks correct; "this request has a deadline"
+  is not something grep can ask, so it is stated here and proved by the
+  offscreen harness rather than by a test that would pass whatever happened.
 - **A gate that judges only the first address is not a gate.** `isPostableUrl`
   and `imageSourceKind` refuse loopback, private, link-local and single-label
   hosts — but they judge the address *the sender wrote*, and Qt's
