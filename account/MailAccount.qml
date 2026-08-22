@@ -614,6 +614,17 @@ Item {
     unsubscribeDone = ""
     detailLoading = true
 
+    // The reader opens on what the list already knows — sender, subject, date,
+    // flags — rather than on a skeleton. The row *is* a summary, and it is the
+    // same shape the live read produces.
+    //
+    // Without this the body cache was invisible: a message opened before had
+    // its body painted from disk in a few milliseconds, and then sat behind the
+    // loading state until the network answered, because the skeleton was gated
+    // on there being no summary and only the live payload ever set one.
+    var known = Model.indexById(messages, messageId)
+    if (known >= 0) selectedMessage = messages[known]
+
     // A message that has been opened before opens from its file, usually well
     // before Gmail answers. The read is asynchronous, so the live copy can win
     // the race — in which case the cached one is simply dropped rather than
@@ -817,6 +828,7 @@ Item {
 
     if (removed) messages = Model.removeById(messages, messageId)
     else messages = Model.replaceById(messages, updated)
+    rememberList()
     if (selectedId === messageId) {
       if (removed) clearSelection()
       else selectedMessage = updated
@@ -826,6 +838,7 @@ Item {
       root.messages = removed
         ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
         : Model.replaceById(root.messages, before)
+      root.rememberList()
       root.refreshCounts()
       root.fail(error)
     }
@@ -851,6 +864,23 @@ Item {
       }
       api.modifyMessage(messageId, change.add, change.remove, done)
     }
+  }
+
+  // What is on screen, written back to the query cache.
+  //
+  // An action changes `messages` and used to change nothing else, so the copy
+  // on disk still said what the mailbox looked like before it. Anything that
+  // paints from that copy — the next `loadMessages`, a mailbox switched away
+  // from and back, the window reopened — put the old state back on screen: a
+  // message read a moment ago, bold again. The live load corrects it a moment
+  // later, which is what made it look intermittent rather than broken.
+  function rememberList() {
+    if (!listLoaded || !cacheStore.loaded) return
+    cacheStore.putQuery(cacheKey, ({
+      summaries: messages,
+      estimate: resultEstimate,
+      nextPageToken: nextPageToken
+    }))
   }
 
   function actionLabel(action) {
@@ -888,11 +918,13 @@ Item {
     var next = []
     for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
     messages = Model.survivesAction(mailboxKey, "markRead") ? next : []
+    rememberList()
     pendingAction = "markRead"
     api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
       if (error) {
         root.messages = before
+        root.rememberList()
         root.fail(error)
         return
       }

@@ -37,7 +37,10 @@ Item {
 
   // ------------------------------------------------------------------ read
 
+  // One FileView, so one read at a time — and the name it is for, because the
+  // callback alone cannot say which message it was waiting on.
   property var pendingCallback: null
+  property string pendingPath: ""
 
   function read(id, callback) {
     var name = Cache.bodyFileName(id)
@@ -45,17 +48,31 @@ Item {
       if (typeof callback === "function") callback(null)
       return
     }
+    // A second read replaces the first, and the first is *answered* rather than
+    // dropped. It used to be dropped: two reads in one frame — which is what a
+    // held j does — left the first caller holding a callback that never fired.
+    // Nothing waits on it forever, because the network is already on its way,
+    // but a promise silently unkept is how a cache stops being trustworthy.
+    var displaced = pendingCallback
     pendingCallback = callback
-    var wanted = directory + "/" + name
+    pendingPath = directory + "/" + name
+    if (typeof displaced === "function") displaced(null)
+
     // Setting the same path again does not reload on its own, and reopening the
     // message you just closed has to hit the file rather than the last answer.
-    if (reader.path === wanted) reader.reload()
-    else reader.path = wanted
+    if (reader.path === pendingPath) reader.reload()
+    else reader.path = pendingPath
   }
 
+  // Answered against the path that was asked for, not against whatever the
+  // FileView happens to hold. The two agree today because reassigning the path
+  // cancels the load under way — but that is a coincidence of Qt's, and this
+  // is a cache handing a message body to a reader.
   function deliver(body) {
+    if (reader.path !== pendingPath) return
     var callback = pendingCallback
     pendingCallback = null
+    pendingPath = ""
     if (typeof callback === "function") callback(body)
   }
 

@@ -279,4 +279,36 @@ assert.strictEqual(reloaded.version, cache.VERSION)
       invite: null, unsubscribe: null })
 }
 
+// ------------------------------------- what the cache says about a read row
+//
+// An action changes the list on screen and now writes it back here, because
+// anything that paints from this copy — the next load, a mailbox switched away
+// from and back, the window reopened — otherwise put the old state on screen: a
+// message read a moment ago, bold again. So the flags an action moves have to
+// survive the trip to disk and back.
+
+const readRow = {
+  id: "18f3a", subject: "Lunch", snippet: "Are you free",
+  from: { name: "Jane", email: "jane@example.com" }, to: [], cc: [],
+  date: new Date("2026-08-20T10:00:00Z"), time: "10:00", fullTime: "Aug 20, 2026 10:00",
+  unread: false, starred: true, inInbox: true, labelIds: ["INBOX", "STARRED"]
+}
+
+const throughDisk = cache.hydrate(
+  cache.getQuery(
+    cache.load(cache.serialize(
+      cache.putQuery(cache.emptyStore(), "k",
+        { summaries: [readRow], estimate: 1, nextPageToken: "" }, 1000))),
+    "k").summaries)[0]
+
+assert.strictEqual(throughDisk.unread, false, "a row read before the write stays read")
+assert.strictEqual(throughDisk.starred, true)
+deepEqual(throughDisk.labelIds, ["INBOX", "STARRED"])
+assert.strictEqual(throughDisk.date.getTime(), readRow.date.getTime(),
+  "and the date is a Date again, because relativeTime asks it for one")
+
+// The other way too, so this is a round trip rather than a default.
+const unreadRow = { id: "18f3b", date: new Date("2026-08-20T11:00:00Z"), unread: true }
+assert.strictEqual(cache.hydrate(cache.dehydrate([unreadRow]))[0].unread, true)
+
 console.log("test_cache.js ok")

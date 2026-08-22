@@ -103,9 +103,28 @@ Item {
     panelFontFamily: root.panelFontFamily
   }
 
+  // Nothing known at all, which after the reader learned to open on the list's
+  // own row is only a message that is not in the list.
   ReaderSkeleton {
     anchors.fill: parent
     visible: !root.summary && !!root.service && root.service.detailLoading
+    textColor: root.textColor
+    panelFontFamily: root.panelFontFamily
+  }
+
+  // The headers are known and the body is not, which is every message being
+  // opened for the first time. Over the body alone, so the sender and the
+  // subject stay readable while it arrives — a whole-reader skeleton would
+  // hide the very thing that just became available.
+  //
+  // `z` rather than declaration order: this has to sit above the body it
+  // stands in for, and being above it should not depend on where in the file
+  // the two happen to be written.
+  ReaderSkeleton {
+    anchors.fill: bodyFlick
+    z: 1
+    visible: !!root.summary && !!root.service && root.service.detailLoading
+      && root.bodySource === ""
     textColor: root.textColor
     panelFontFamily: root.panelFontFamily
   }
