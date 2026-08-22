@@ -225,6 +225,15 @@ Item {
   readonly property string unsubscribeDetail: unsubscribeDone !== "" ? unsubscribeDone
     : Unsub.explanation(selectedUnsubscribe, canSend)
   property bool detailLoading: false
+  // Whether the reader has something to show yet, which is a different question
+  // from whether a request is still in the air. A body already on disk answers
+  // the first the moment it is read; the second stays true until the live read
+  // lands, and the status bar is right to keep saying so.
+  //
+  // They were one property, and a message HEY serves no body for — its own
+  // sign-up mail — showed the loading state for the whole round trip on every
+  // open, because nothing ever arrived to make it stop looking empty.
+  property bool detailPainted: false
   // Set once Gmail's own copy has landed, so a slower cache read knows not to
   // paint over it.
   property bool detailLive: false
@@ -613,6 +622,7 @@ Item {
     selectedUnsubscribe = null
     unsubscribeDone = ""
     detailLoading = true
+    detailPainted = false
 
     // The reader opens on what the list already knows — sender, subject, date,
     // flags — rather than on a skeleton. The row *is* a summary, and it is the
@@ -652,6 +662,10 @@ Item {
       // second later when the network agrees.
       root.selectedInvite = cached.invite
       root.selectedUnsubscribe = cached.unsubscribe
+      // Including a body that is empty, which is a real answer: this message
+      // has no text, and saying so at once beats a skeleton that waits for the
+      // network to say the same thing.
+      root.detailPainted = true
       bodyCache.touch(messageId)
     })
 
@@ -659,6 +673,7 @@ Item {
       if (serial !== root.detailSerial) return
       root.detailLoading = false
       root.detailLive = true
+      root.detailPainted = true
       if (error || !payload) {
         root.fail(error || "Could not open that message")
         return

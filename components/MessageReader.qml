@@ -124,7 +124,7 @@ Item {
     anchors.fill: bodyFlick
     z: 1
     visible: !!root.summary && !!root.service && root.service.detailLoading
-      && root.bodySource === ""
+      && !root.service.detailPainted
     textColor: root.textColor
     panelFontFamily: root.panelFontFamily
   }
@@ -244,6 +244,30 @@ Item {
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
       onActivated: root.forceRichAnyway = true
+    }
+
+    // A message with nothing in it is a real answer, and an empty reader on its
+    // own does not look like one — it looks like something failed. HEY's own
+    // sign-up mail is the case this exists for: the CLI serves those threads
+    // with no body at all, so there is genuinely nothing to draw.
+    //
+    // Waits for the read to be done before saying it, because "no text" is only
+    // true once nothing more is coming.
+    ReaderNotice {
+      width: parent.width
+      visible: !!root.summary && !!root.service
+        && !root.service.detailLoading && root.service.detailPainted
+        && root.bodySource === "" && root.rawHtml === ""
+        && (root.service.selectedAttachments || []).length === 0
+      text: "This message has no text to show"
+      // Only where there is somewhere to go and read it. The service decides
+      // that, and the "..." is there because what it opens is a browser.
+      actionLabel: !root.service || root.service.canOpenOnWeb ? "Open on the web..." : ""
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
     }
 
     // Under the heavy-document notice when both are up: one says why the
