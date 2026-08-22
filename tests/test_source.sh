@@ -242,6 +242,23 @@ if awk '
   fail "requesting account removal must not remove it immediately"
 fi
 
+# The fix for a hanging request that looks right and does nothing.
+#
+# Qt's QML XMLHttpRequest has no `timeout` and no `ontimeout`: the properties do
+# not exist, and assigning one reads back exactly what was written — so this
+# line passes review, passes a read-through, and leaves the request hanging
+# exactly as before. Measured, not read from a specification: `"timeout" in
+# xhr` is false, and a request against a socket that accepts and never answers
+# was still going after eight seconds. A Timer calling abort() is what there is.
+#
+# Only the trap is checked here. "This request has a deadline" is not something
+# grep can ask — a file may hold several Timers and only one of them may be the
+# one that matters — so that invariant lives in AGENTS.md and in the offscreen
+# harness that measured it, not in a test that would pass whatever happened.
+if grep -rnE '\.timeout[[:space:]]*=' --include=*.qml . | grep -v '^./tests/'; then
+  fail "XMLHttpRequest.timeout does not exist in Qt's QML engine; use a Timer that aborts"
+fi
+
 # A mailbox names itself the way the account list names it.
 #
 # An id is the bare address only for the default provider; every other one
