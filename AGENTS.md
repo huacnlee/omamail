@@ -351,10 +351,10 @@ key. What matters while working:
 
 ## Commits and pull requests
 
-- Follow the GPUI Component title style for pull requests: `<scope>: <Imperative outcome>`. Use a stable module or subsystem name for the lowercase scope; use `app` when one application-level change honestly spans several UI modules.
+- **No prefixes.** A pull request title is the imperative outcome and nothing in front of it: `Read a message at a readable size`, not `reader: Read a message at a readable size`. A scope word adds nothing a precise result has not already said, and it invites a vague result behind it — `app:` in particular ends up on whatever spans more than one directory, which is most things worth doing.
 - Derive the pull request title from the final `base...HEAD` diff. Do not copy the first commit subject when later commits have broadened or changed the outcome.
 - Rewrite the pull request description whenever its scope changes. It states the user-visible results, the architectural reason and invariants, and the verification actually performed; it does not preserve a chronological list of implementation attempts.
-- Commit subjects remain imperative and outcome-oriented. A commit without one honest dominant scope may remain unprefixed; a conventional prefix never substitutes for a precise result.
+- Commit subjects follow the same rule: imperative, outcome-oriented, unprefixed. A conventional prefix never substitutes for a precise result.
 - Markdown prose uses one source line per paragraph. Do not hard-wrap prose to a column width.
 
 ## Releasing
