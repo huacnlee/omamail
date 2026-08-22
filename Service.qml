@@ -497,6 +497,7 @@ Item {
   readonly property string unsubscribeDetail: current ? current.unsubscribeDetail : ""
   readonly property bool unsubscribing: !!current && current.unsubscribing
   readonly property bool detailLoading: !!current && current.detailLoading
+  readonly property bool detailPainted: !!current && current.detailPainted
   readonly property bool sending: !!current && current.sending
   readonly property string lastError: current ? current.lastError : ""
   readonly property string actionStatus: current ? current.actionStatus : ""

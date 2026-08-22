@@ -103,9 +103,28 @@ Item {
     panelFontFamily: root.panelFontFamily
   }
 
+  // Nothing known at all, which after the reader learned to open on the list's
+  // own row is only a message that is not in the list.
   ReaderSkeleton {
     anchors.fill: parent
     visible: !root.summary && !!root.service && root.service.detailLoading
+    textColor: root.textColor
+    panelFontFamily: root.panelFontFamily
+  }
+
+  // The headers are known and the body is not, which is every message being
+  // opened for the first time. Over the body alone, so the sender and the
+  // subject stay readable while it arrives — a whole-reader skeleton would
+  // hide the very thing that just became available.
+  //
+  // `z` rather than declaration order: this has to sit above the body it
+  // stands in for, and being above it should not depend on where in the file
+  // the two happen to be written.
+  ReaderSkeleton {
+    anchors.fill: bodyFlick
+    z: 1
+    visible: !!root.summary && !!root.service && root.service.detailLoading
+      && !root.service.detailPainted
     textColor: root.textColor
     panelFontFamily: root.panelFontFamily
   }
@@ -225,6 +244,30 @@ Item {
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
       onActivated: root.forceRichAnyway = true
+    }
+
+    // A message with nothing in it is a real answer, and an empty reader on its
+    // own does not look like one — it looks like something failed. HEY's own
+    // sign-up mail is the case this exists for: the CLI serves those threads
+    // with no body at all, so there is genuinely nothing to draw.
+    //
+    // Waits for the read to be done before saying it, because "no text" is only
+    // true once nothing more is coming.
+    ReaderNotice {
+      width: parent.width
+      visible: !!root.summary && !!root.service
+        && !root.service.detailLoading && root.service.detailPainted
+        && root.bodySource === "" && root.rawHtml === ""
+        && (root.service.selectedAttachments || []).length === 0
+      text: "This message has no text to show"
+      // Only where there is somewhere to go and read it. The service decides
+      // that, and the "..." is there because what it opens is a browser.
+      actionLabel: !root.service || root.service.canOpenOnWeb ? "Open on the web..." : ""
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
     }
 
     // Under the heavy-document notice when both are up: one says why the
