@@ -387,6 +387,80 @@ function renamedLegacyKeyringAttributes(clientId) {
   return attributes
 }
 
+// An omitted attribute is a wildcard too, not just an empty one. secret-tool
+// matches any item carrying *at least* the attributes it was asked for, so
+// both lookups above that leave "account" out match the account-keyed entries
+// as well as the nameless one they are for. On an install where two mailboxes
+// share one Cloud client, either can therefore hand back the *other*
+// mailbox's token.
+//
+// Nothing about that fails loudly. The token refreshes, Google returns no new
+// refresh token so the same one is carried through the response, and it is
+// written back under this account's key. Both mailboxes end up holding one
+// token, and the account you switch to shows the other one's inbox.
+//
+// So the legacy read asks first whether a legacy entry is there at all, with
+// `secret-tool search --all` on the same attributes. That reports one record
+// per match, but it prints the record to stdout and its attributes to
+// *stderr*:
+//
+//   stdout                                    stderr
+//   [/12]                                     attribute.service = omamail
+//   label = Omamail refresh token             attribute.kind = refresh-token
+//   secret = 1//0the-token                    attribute.client-id = 1234-abc...
+//   created = 2026-08-21 13:01:00             attribute.account = one@gmail.com
+//   schema = org.freedesktop.Secret.Generic
+//
+// Two pipes, buffered independently, so which record an attribute line belongs
+// to is not answerable from the outside: one stream can arrive whole after the
+// other. Counting is, and counting is enough, because every match prints
+// exactly one "account" attribute unless it has none.
+//
+// One line at a time rather than one buffer, so that no caller has to hold the
+// stdout of a search that loaded every matching mailbox's token.
+function isKeyringMatchLine(line) {
+  return startsWithPrefix(line, "[")
+}
+
+// Every entry this plugin stores carries a "service" attribute, and the search
+// is keyed on it, so one of these stands for every match. Fewer of them than
+// there are matches means the attribute stream did not account for all of
+// them, and an attribute that was not read cannot be an attribute that is
+// absent.
+function isKeyringAttributedLine(line) {
+  return startsWithPrefix(line, "attribute.service = ")
+}
+
+var ACCOUNT_ATTRIBUTE_PREFIX = "attribute.account = "
+
+// A mailbox that has not learned its address yet is stored under a literal
+// stand-in rather than a blank, so that entry has an "account" attribute
+// without having a name. It belongs to whichever mailbox was mid-setup, which
+// on a single-entry install is the only one there is.
+function isKeyringNamedLine(line) {
+  if (!startsWithPrefix(line, ACCOUNT_ATTRIBUTE_PREFIX)) return false
+  return String(line).substring(ACCOUNT_ATTRIBUTE_PREFIX.length) !== UNNAMED_ACCOUNT
+}
+
+function startsWithPrefix(line, prefix) {
+  return String(line === undefined || line === null ? "" : line).indexOf(prefix) === 0
+}
+
+// One match, every match accounted for, and no named account among them: the
+// only shape where the entry a lookup is about to return is certainly the
+// nameless one, because it is the only entry there is to return.
+//
+// Every other shape refuses. All-named is the case this exists for, where
+// nothing nameless is there and the wildcard would take a mailbox's own token.
+// A nameless entry beside named ones is left alone too: the lookup cannot be
+// told which of them to answer with, and an account with named siblings on
+// this client has already been through the migration the legacy read is for.
+function hasLoneLegacyEntry(matches, attributed, named) {
+  if (matches !== 1) return false
+  if (attributed !== matches) return false
+  return named === 0
+}
+
 // Shown under the client id in the panel so a user with several Cloud projects
 // can tell which one is wired up without opening the file.
 function describe(credentials) {
