@@ -300,6 +300,10 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // 0 means "use the window's default". Any positive value came from a drag and
+  // is clamped by the window that knows the current screen width.
+  property real sidebarWidth: 0
+  property real listWidth: 0
   // Somebody who needed the text bigger needs it bigger for their mail, not for
   // the message that made them reach for it. The same goes for reading it as
   // plain text: that is a way of reading mail, not a way of reading one.
@@ -320,6 +324,8 @@ Item {
     try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
     if (parsed && typeof parsed === "object") {
       sidebarCollapsed = parsed.sidebarCollapsed === true
+      sidebarWidth = paneWidthFromPrefs(parsed.sidebarWidth)
+      listWidth = paneWidthFromPrefs(parsed.listWidth)
       bodyZoom = Model.clampZoom(parsed.bodyZoom)
       plainTextForced = parsed.plainTextForced === true
       alwaysShowImages = parsed.alwaysShowImages === true
@@ -341,6 +347,8 @@ Item {
     windowPrefsSettling.stop()
     windowWritePayload = JSON.stringify({
       sidebarCollapsed: sidebarCollapsed,
+      sidebarWidth: sidebarWidth,
+      listWidth: listWidth,
       bodyZoom: bodyZoom,
       plainTextForced: plainTextForced,
       alwaysShowImages: alwaysShowImages
@@ -353,6 +361,25 @@ Item {
     var next = value === true
     if (next === sidebarCollapsed) return
     sidebarCollapsed = next
+    saveWindowPrefs()
+  }
+
+  function paneWidthFromPrefs(value) {
+    var next = Number(value)
+    return isFinite(next) && next > 0 ? next : 0
+  }
+
+  function setSidebarWidth(value) {
+    var next = paneWidthFromPrefs(value)
+    if (next === sidebarWidth) return
+    sidebarWidth = next
+    saveWindowPrefs()
+  }
+
+  function setListWidth(value) {
+    var next = paneWidthFromPrefs(value)
+    if (next === listWidth) return
+    listWidth = next
     saveWindowPrefs()
   }
 
