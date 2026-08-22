@@ -1,4 +1,4 @@
-# Omamail — a Gmail, HEY and IMAP email client for Omarchy
+# Omamail
 
 **Your mail as a native Omarchy window — not a browser tab.**
 
