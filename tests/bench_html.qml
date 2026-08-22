@@ -5,7 +5,7 @@
 // node. Run it on the machine the shell runs on.
 import QtQml
 
-import "../Html.js" as Html
+import "../message/Html.js" as Html
 import "bench_cases.js" as Bench
 
 QtObject {

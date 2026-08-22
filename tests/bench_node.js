@@ -1,7 +1,7 @@
 // The V8 half of `make bench`. See tests/bench_cases.js.
 const { load } = require("./load")
 
-const html = load("Html.js")
+const html = load("message/Html.js")
 const bench = load("tests/bench_cases.js")
 
 // Reached through plain functions rather than through the module object, so
