@@ -44,11 +44,33 @@ var CAPABILITIES = {
 // label to point at, and a query keeps every entry on the same footing.
 var MAILBOXES = [
   { key: "inbox", label: "Inbox", icon: "inbox", query: "in:inbox" },
-  // Scoped to Primary, not just to the inbox. Gmail's category tabs do not
-  // remove the INBOX label, so "in:inbox is:unread" dredges up the whole
-  // promotional backlog — measured against a real mailbox, that view came back
-  // as newsletters and offers almost end to end.
-  { key: "unread", label: "Unread", icon: "unread", query: "in:inbox is:unread category:primary" },
+  // Named by what it leaves out. Gmail's categories do not remove the INBOX
+  // label, so "in:inbox is:unread" dredges up the whole promotional backlog —
+  // measured against a real mailbox, that view came back as newsletters and
+  // offers almost end to end. Excluding the three noisy categories cuts it
+  // down to the same mail asking for Primary would have found.
+  //
+  // Asking for Primary positively is what this used to do, and Primary is the
+  // one category whose search word does not name its label. The other four
+  // read `promotions`, `social`, `forums`, `updates` against
+  // CATEGORY_PROMOTIONS and the rest; Primary's label is CATEGORY_PERSONAL
+  // and the web UI calls it `primary`. The API's `q` promises only "most of"
+  // the web syntax and has never listed `category:` at all, so that one word
+  // is the one with nothing holding it up — and on a real account it matched
+  // nothing at all while the inbox held 201 unread.
+  //
+  // Which way the query fails is why this is a negation rather than a
+  // narrower scope. A positive scope that stops matching empties the mailbox
+  // and the badge, which is unread mail with nothing left to say so. A
+  // negation that stops matching widens to every unread message in the inbox:
+  // noisier, and nothing worse than noisier. That covers the account whose
+  // owner turned Smart features off as well, where Gmail stops applying the
+  // category labels at all and there is no Primary left to ask for.
+  //
+  // Updates stays in. Receipts, deliveries and GitHub's notifications land
+  // there, and they are mail somebody is waiting on.
+  { key: "unread", label: "Unread", icon: "unread",
+    query: "in:inbox is:unread -category:promotions -category:social -category:forums" },
   { key: "starred", label: "Starred", icon: "star", query: "is:starred" },
   { key: "sent", label: "Sent", icon: "send", query: "in:sent" },
   // Optional: the first to go when the row cannot hold every mailbox. Neither

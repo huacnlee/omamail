@@ -159,9 +159,22 @@ assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentis
 
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.
-assert.strictEqual(provider.unreadQuery("gmail"), "in:inbox is:unread category:primary")
+assert.strictEqual(provider.unreadQuery("gmail"),
+  "in:inbox is:unread -category:promotions -category:social -category:forums")
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
+
+// Named by exclusion on purpose, and the reason is which way it fails. Asking
+// for `category:primary` was a positive scope, and a positive scope that stops
+// matching — the label is CATEGORY_PERSONAL, the API has never documented
+// `category:` at all, and Smart features being off stops the labels being
+// applied — leaves the mailbox and the badge empty while unread mail piles up
+// behind them. The negation degrades the other way, to every unread message in
+// the inbox, which is noisier and nothing worse.
+assert.ok(provider.unreadQuery("gmail").indexOf("category:primary") === -1,
+  "the Unread scope is not a positive category filter; it fails closed")
+assert.ok(provider.unreadQuery("gmail").indexOf("-category:updates") === -1,
+  "Updates carries receipts, deliveries and GitHub's notifications; it stays in")
 
 // Selecting a label in the sidebar is a different act from typing in the search
 // box, even though both end in a query. Routing it through `query` would wrap an
