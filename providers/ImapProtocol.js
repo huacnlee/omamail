@@ -364,10 +364,68 @@ function sequenceSet(uids) {
 // a hand-rolled IMAP client ruins a mailbox.
 var LIST_HEADERS = "HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REPLY-TO LIST-UNSUBSCRIBE)"
 
-function searchCommand(criteria) {
+// curl is the transport, and it assembles one response line in a 64 KiB buffer
+// (`DYN_PINGPPONG_CMD`, lib/curlx/dynbuf.h). A server answers SEARCH on a
+// single untagged line however many messages matched, so `UID SEARCH ALL`
+// against a large folder produces a line curl will not hold: it abandons the
+// request with CURLE_TOO_LARGE and the folder shows "A value or data field grew
+// larger than allowed" where its mail should be. An INBOX of around ten
+// thousand messages is enough to reach it.
+//
+// So a folder is asked for a window of itself. A window is a range of message
+// sequence numbers rather than of UIDs, which is what makes it expressible
+// before a single UID is known: RFC 9051 6.4.9 has a bare sequence set inside
+// UID SEARCH select by sequence number while the numbers that come back are
+// still UIDs.
+//
+// 4096 messages per window. A UID is at most 4294967295, so ten digits and a
+// separator bound one answer at 11 octets, and 4096 of them behind "* SEARCH "
+// is 45065 — inside the buffer with room for a server that spaces its reply
+// differently.
+var SEARCH_WINDOW = 4096
+
+// The last window of a mailbox ends at "*" rather than at the count STATUS
+// reported. Mail delivered between the two commands lands past a fixed end, and
+// a list that calls itself newest first would open without it.
+function searchWindow(low, high, count, criteria) {
+  return "UID SEARCH " + low + ":" + (high >= count ? "*" : String(high))
+    + (criteria === "" ? "" : " " + criteria)
+}
+
+// What to ask a folder for, given how many messages STATUS says it holds.
+// `offset` is where the reply has to be sliced and `estimate` how many messages
+// match, or 0 when only the reply itself can say.
+//
+// Without criteria the folder's own order is the answer, so one window is the
+// page: the newest messages sit at the end of the sequence, the count is what
+// STATUS already reported, and nothing but the page crosses the wire. With
+// criteria the server has to be asked, so the mailbox is walked whole — one
+// window at a time, and `parseSearch` reads every SEARCH line in the reply, so
+// the windows are one connection and one answer.
+function searchPlan(criteria, total, offset, limit) {
+  var count = Math.max(0, Math.floor(Number(total)) || 0)
   var text = trimmed(criteria)
-  // ALL rather than an empty criteria list, which is a syntax error.
-  return "UID SEARCH " + (text === "" ? "ALL" : text)
+  var from = Math.max(0, Math.floor(Number(offset)) || 0)
+  var size = Math.max(1, Math.floor(Number(limit)) || 1)
+  var commands = []
+  var low = 1
+  var high = 0
+
+  if (count === 0) return { commands: commands, offset: 0, estimate: 0 }
+
+  if (text === "") {
+    high = count - from
+    if (high < 1) return { commands: commands, offset: 0, estimate: count }
+    low = Math.max(1, high - size + 1)
+    commands.push(searchWindow(low, high, count, ""))
+    return { commands: commands, offset: 0, estimate: count }
+  }
+
+  for (low = 1; low <= count; low += SEARCH_WINDOW) {
+    high = Math.min(count, low + SEARCH_WINDOW - 1)
+    commands.push(searchWindow(low, high, count, text))
+  }
+  return { commands: commands, offset: from, estimate: 0 }
 }
 
 function summaryFetchCommand(uids) {

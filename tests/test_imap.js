@@ -175,9 +175,36 @@ assert.strictEqual(imap.sequenceSet(null), "")
 
 // ---------------------------------------------------------------- commands
 
-assert.strictEqual(imap.searchCommand("UNSEEN"), "UID SEARCH UNSEEN")
-assert.strictEqual(imap.searchCommand(""), "UID SEARCH ALL",
-  "empty criteria is a syntax error; ALL is what it means")
+// curl holds one response line in a 64 KiB buffer and a server answers SEARCH
+// on one line however many messages matched, so nothing may ask a folder a
+// question whose answer is unbounded. Without criteria the page is one window
+// of the folder's own order and nothing else crosses the wire.
+const newest = imap.searchPlan("", 1000, 0, 25)
+deepEqual(newest.commands, ["UID SEARCH 976:*"])
+assert.strictEqual(newest.offset, 0, "the window is the page; there is nothing to skip")
+assert.strictEqual(newest.estimate, 1000, "STATUS counted the folder, so the reply need not")
+
+// The newest window ends at "*" so that mail delivered since STATUS counted is
+// in it. Every other window ends where it was asked to.
+deepEqual(imap.searchPlan("", 1000, 25, 25).commands, ["UID SEARCH 951:975"])
+deepEqual(imap.searchPlan("", 1000, 995, 25).commands, ["UID SEARCH 1:5"],
+  "the oldest page stops at the first message rather than below it")
+deepEqual(imap.searchPlan("", 1000, 1000, 25).commands, [], "past the end asks nothing")
+deepEqual(imap.searchPlan("", 0, 0, 25).commands, [], "an empty folder asks nothing")
+
+// With criteria the server has to be asked, so the mailbox is walked whole —
+// one window at a time, and `parseSearch` reads every SEARCH line as one answer.
+const searched = imap.searchPlan("UNSEEN", 9000, 0, 25)
+deepEqual(searched.commands, [
+  "UID SEARCH 1:4096 UNSEEN",
+  "UID SEARCH 4097:8192 UNSEEN",
+  "UID SEARCH 8193:* UNSEEN"
+])
+assert.strictEqual(searched.estimate, 0, "only the reply knows how many matched")
+assert.strictEqual(imap.searchPlan("UNSEEN", 30, 25, 25).offset, 25,
+  "a searched page is sliced out of the matches, not out of the folder")
+deepEqual(imap.searchPlan("UNSEEN", 30, 0, 25).commands, ["UID SEARCH 1:* UNSEEN"],
+  "a folder smaller than one window is one command")
 
 // BODY.PEEK, never BODY: reading the list must not mark the mailbox seen.
 const summaryFetch = imap.summaryFetchCommand([7, 9])
@@ -249,6 +276,9 @@ deepEqual(imap.parseFetch(spoofed).map((m) => m.uid), [3],
 // ------------------------------------------------------------------ SEARCH
 
 deepEqual(imap.parseSearch("* SEARCH 1 4 9\r\nA1 OK SEARCH completed\r\n"), [1, 4, 9])
+// One window per SEARCH, one reply for the lot: a searched folder arrives as
+// several SEARCH lines and they are one answer.
+deepEqual(imap.parseSearch("* SEARCH 1 4\r\n* SEARCH 9\r\nA1 OK\r\n"), [1, 4, 9])
 deepEqual(imap.parseSearch("* SEARCH\r\nA1 OK\r\n"), [], "nothing matched")
 deepEqual(imap.parseSearch("A1 OK SEARCH completed\r\n"), [],
   "a server may answer with no SEARCH line at all")

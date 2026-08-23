@@ -200,9 +200,12 @@ Item {
 
   // ---------------------------------------------------------------- reads
 
-  // IMAP has no page token: SEARCH answers with every matching UID at once. So
-  // the "token" is an offset into that answer, and the count it reports is
-  // exact rather than the estimate Gmail returns.
+  // IMAP has no page token, so the "token" is an offset and the page is a
+  // window of the folder rather than a slice of a reply that carried all of it.
+  // How big the folder is decides what may be asked of it — a SEARCH the size
+  // of a mailbox is a response line curl refuses to hold — so the size is asked
+  // for first. STATUS is one command against a mailbox nothing has selected,
+  // which is why it is its own request rather than a section of the next one.
   //
   // Newest first, which is the order the list is read in and the reverse of the
   // order UIDs are assigned in.
@@ -219,8 +222,15 @@ Item {
         return
       }
       var folder = root.folderFor(parsed.folder)
-      root.run(folder, [Imap.searchCommand(Imap.normalizeCriteria(parsed.criteria))],
-        function(text, error) {
+      root.run("", [Imap.statusCommand(folder)], function(statusText, statusError) {
+        if (handle.aborted) return
+        if (statusError) {
+          if (typeof callback === "function") callback(null, statusError)
+          return
+        }
+        var plan = Imap.searchPlan(Imap.normalizeCriteria(parsed.criteria),
+          Imap.parseStatus(statusText).messages, offset, limit)
+        root.run(folder, plan.commands, function(text, error) {
           if (handle.aborted) return
           if (typeof callback !== "function") return
           if (error) {
@@ -230,18 +240,25 @@ Item {
           var uids = Imap.parseSearch(text)
           // Ascending from the server; the newest message has the highest UID.
           uids.reverse()
-          var page = uids.slice(offset, offset + limit)
+          // A window that ends at "*" answers with anything delivered since
+          // STATUS counted, so the page is taken from the front of what came
+          // back rather than assumed to be all of it.
+          var page = uids.slice(plan.offset, plan.offset + limit)
           var ids = []
           for (var i = 0; i < page.length; i++) ids.push(Imap.messageId(page[i], folder))
+          // What STATUS counted when the page is a window of the folder, and
+          // what came back when the server had to search for it.
+          var estimate = plan.estimate > 0 ? plan.estimate : uids.length
           callback({
             ids: ids,
             // IMAP has no server-side conversation id. Threading falls back to
             // References, which is what every other IMAP client does.
             threadIds: [],
-            nextPageToken: offset + limit < uids.length ? String(offset + limit) : "",
-            estimate: uids.length
+            nextPageToken: offset + limit < estimate ? String(offset + limit) : "",
+            estimate: estimate
           }, "")
         }, handle)
+      }, handle)
     })
     return handle
   }

@@ -250,6 +250,14 @@ key. What matters while working:
   the end of one response into the middle of the next — which is also how a
   message body could forge a response of its own. Base64 keeps one character
   per octet, so counting characters is counting octets.
+- **A response line has a ceiling, and it is curl's.** libcurl assembles one
+  ping-pong line in a 64 KiB buffer (`DYN_PINGPPONG_CMD`) and abandons the whole
+  request with `CURLE_TOO_LARGE` when a line outgrows it — which `UID SEARCH
+  ALL` does on any mailbox past about ten thousand messages, because a server
+  answers SEARCH on one line however many matched. Nothing may ask a folder a
+  question whose answer is unbounded: `searchPlan` cuts the mailbox into windows
+  of message sequence numbers first, which is what a listing pays a `STATUS`
+  for.
 - `BODY.PEEK`, never `BODY`. Reading a list must not mark the mailbox seen, and
   that is the most common way a hand-rolled IMAP client ruins a mailbox.
 - `UID EXPUNGE`, never bare `EXPUNGE`: the latter removes every `\Deleted`
