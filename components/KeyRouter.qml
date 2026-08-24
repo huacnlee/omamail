@@ -30,7 +30,7 @@ Item {
   property bool overlay: false
 
   // The sequence travels with the id, because one row can bind several keys
-  // that differ in what they mean: `Alt+1`…`Alt+0` are one binding and ten
+  // that differ in what they mean: `Ctrl+1`…`Ctrl+0` are one binding and ten
   // mailboxes.
   signal triggered(string id, string sequence)
 
@@ -40,7 +40,8 @@ Item {
     delegate: Shortcut {
       required property var modelData
       sequence: modelData.sequence
-      enabled: Keymap.isEnabled(modelData.binding, root.context, root.overlay)
+      enabled: Keymap.isSequenceEnabled(modelData.binding, modelData.sequence,
+        root.context, root.overlay)
       onActivated: root.triggered(modelData.id, modelData.sequence)
     }
   }

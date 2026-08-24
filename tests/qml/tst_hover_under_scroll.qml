@@ -1,5 +1,5 @@
-import QtQuick
-import QtTest
+import QtQuick 2.15
+import QtTest 1.3
 
 // Why hovering a row must not move the keyboard's cursor.
 //

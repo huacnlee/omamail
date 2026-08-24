@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "page"]
+var CONTEXTS = ["list", "reader", "search", "compose", "sendPending", "page", "calendar"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -67,33 +67,59 @@ var BINDINGS = [
     group: "Writing", label: "Forward" },
   { id: "compose", keys: ["c"], contexts: MAIL,
     group: "Writing", label: "Compose", hint: { list: "compose" } },
+  { id: "createEvent", keys: ["c"], contexts: ["calendar"],
+    group: "Writing", label: "Create an event", hint: { calendar: "create" } },
+  { id: "calendarNext", keys: ["j", "Down"], contexts: ["calendar"],
+    group: "Calendar", label: "Select the next event",
+    hintKey: "j / k", hint: { calendar: "select" } },
+  { id: "calendarPrevious", keys: ["k", "Up"], contexts: ["calendar"],
+    group: "Calendar", label: "Select the previous event" },
+  { id: "openCalendarEvent", keys: ["Return", "o"], contexts: ["calendar"],
+    group: "Calendar", label: "Open the selected event",
+    hintKey: "o", hint: { calendar: "open" } },
+  { id: "calendarPreviousPeriod", keys: ["h", "Left"], contexts: ["calendar"],
+    group: "Calendar", label: "Previous week or month" },
+  { id: "calendarNextPeriod", keys: ["l", "Right"], contexts: ["calendar"],
+    group: "Calendar", label: "Next week or month" },
+  { id: "calendarToday", keys: ["t"], contexts: ["calendar"],
+    group: "Calendar", label: "Go to today" },
+  { id: "calendarWeek", keys: ["w"], contexts: ["calendar"],
+    group: "Calendar", label: "Show week view" },
+  { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
+    group: "Calendar", label: "Show month view" },
   { id: "send", keys: ["Ctrl+Return"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
+  { id: "undoSend", keys: ["z"], contexts: ["sendPending"],
+    survivesOverlay: true,
+    group: "Writing", label: "Undo send", hint: { sendPending: "undo send" } },
 
-  // One row holding both, because suppression is decided per key: `/` stands
-  // down inside a text field and Ctrl+K, whose whole point is reaching search
-  // from inside one, does not.
-  // Reachable from anywhere. `/` is a bare key, so it is only offered where
+  // Reachable from the mailbox. `/` is a bare key, so it is only offered where
   // bare keys mean anything — inside the field it is a character being typed,
   // and Qt gives the field its keys before any Shortcut sees them.
   { id: "search", keys: ["/"], contexts: MAIL,
     group: "Finding", label: "Search" },
-  { id: "searchAnywhere", keys: ["Ctrl+K"], contexts: ANY,
-    group: "Finding", label: "Search from anywhere" },
 
-  // The rail by number, and nothing to remember: hold Alt and every row says
+  // The rail by number, and nothing to remember: hold Ctrl and every row says
   // which digit opens it. This replaced `g i` / `g s` / `g u` / `g t`, which
   // were two problems in one row — a chord nobody recalls under pressure, and
   // Qt's own 400ms deadline on an unfinished sequence, so half of them did
   // nothing and said nothing about why. A modifier has no deadline.
   //
   // One row, ten sequences: `slotFor` reads which one fired off this row's own
-  // key list, so the `Alt+` prefix is not written down a second time.
+  // key list, so the `Ctrl+` prefix is not written down a second time.
   { id: "goMailbox",
+    keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
+      "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9", "Ctrl+0"],
+    contexts: MAIL, group: "Going", label: "Go to that mailbox",
+    display: "Ctrl+1…0" },
+
+  // Accounts are surfaces rather than destinations inside the current one, so
+  // they use Alt and the same visible order as the account switcher.
+  { id: "goAccount",
     keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
       "Alt+6", "Alt+7", "Alt+8", "Alt+9", "Alt+0"],
-    contexts: MAIL, group: "Going", label: "Go to that mailbox",
-    display: "Alt+1…0" },
+    contexts: ["list", "reader", "calendar"], group: "Going",
+    label: "Go to that email account", display: "Alt+1…0" },
 
   // One key, not nine, and modified rather than bare. Switching mailboxes is
   // not frequent enough to spend a letter on — the bare ones are the scarce
@@ -102,26 +128,39 @@ var BINDINGS = [
   { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
 
+  { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
+    group: "Going", label: "Switch between mail and calendar" },
+  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar"],
+    group: "Going", label: "Go to mail" },
+  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar"],
+    group: "Going", label: "Go to calendar" },
+  { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar"],
+    group: "Going", label: "Show or hide the sidebar" },
+
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
   { id: "zoomIn", keys: ["Ctrl++", "Ctrl+="], contexts: ["reader"],
     group: "Reading", label: "Zoom the message body in" },
   { id: "zoomOut", keys: ["Ctrl+-"], contexts: ["reader"],
     group: "Reading", label: "Zoom the message body out" },
-  { id: "zoomReset", keys: ["Ctrl+0"], contexts: ["reader"],
+  { id: "zoomReset", keys: ["Ctrl+Shift+0"], contexts: ["reader"],
     group: "Reading", label: "Reset the zoom" },
 
   { id: "refresh", keys: ["F5"], contexts: ANY,
     group: "Mailbox", label: "Check for mail" },
-  // A mailbox action, not a global one: the sheet lists what the mailbox
-  // answers to, and a draft or a form is neither. Esc first, then `?`.
-  { id: "help", keys: ["?", "Ctrl+/", "Ctrl+?"], contexts: MAIL,
+  { id: "settings", keys: ["Ctrl+,"], contexts: ANY,
+    group: "Mailbox", label: "Open settings" },
+  // One action and one help row. The old keys remain mailbox-only. Ctrl+K
+  // reaches the same action from fields, forms, drafts, and the calendar.
+  { id: "help", keys: ["Ctrl+K", "?", "Ctrl+/", "Ctrl+?"], contexts: MAIL,
+    sequenceContexts: { "Ctrl+K": ANY },
     survivesOverlay: true,
-    group: "Mailbox", label: "Toggle this sheet" },
+    group: "Mailbox", label: "Toggle all keybindings" },
   { id: "back", keys: ["Escape"], contexts: ANY,
     survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
-    hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
+    hint: { reader: "back", page: "back", compose: "close", search: "leave",
+      sendPending: "undo send" } }
 ]
 
 function byId(id) {
@@ -132,8 +171,8 @@ function byId(id) {
 }
 
 // Which of a row's keys fired, as a zero-based position in the row's own list.
-// Derived rather than parsed: `Alt+3` is the fourth entry because the table
-// says so, and changing the row to `Ctrl+1…0` would need nothing here.
+// Derived rather than parsed: `Ctrl+3` is the third entry because the table
+// says so, and changing the modifier would need nothing here.
 function slotFor(id, sequence) {
   var row = byId(id)
   var keys = row ? row.keys || [] : []
@@ -149,11 +188,27 @@ function matchesContext(binding, context) {
   return false
 }
 
+function matchesSequenceContext(binding, sequence, context) {
+  if (!binding) return false
+  var overrides = binding.sequenceContexts || ({})
+  var contexts = overrides[String(sequence || "")] || binding.contexts || []
+  for (var i = 0; i < contexts.length; i++) {
+    if (contexts[i] === "*" || contexts[i] === context) return true
+  }
+  return false
+}
+
 // Context decides what is live, and nothing else does. There is no "are they
 // typing" question left to get wrong: a text-entry context binds no bare keys,
 // and Qt hands a focused field its keys before any Shortcut sees them.
 function isEnabled(binding, context, overlay) {
   if (!matchesContext(binding, context)) return false
+  if (overlay && !binding.survivesOverlay) return false
+  return true
+}
+
+function isSequenceEnabled(binding, sequence, context, overlay) {
+  if (!matchesSequenceContext(binding, sequence, context)) return false
   if (overlay && !binding.survivesOverlay) return false
   return true
 }
@@ -172,11 +227,12 @@ function bindingsFor(context) {
 // user is typing.
 function sequencesFor(context) {
   var out = []
-  var rows = bindingsFor(context)
+  var rows = BINDINGS
   for (var i = 0; i < rows.length; i++) {
     var keys = rows[i].keys || []
     for (var k = 0; k < keys.length; k++) {
-      out.push(({ id: rows[i].id, sequence: keys[k], binding: rows[i] }))
+      if (matchesSequenceContext(rows[i], keys[k], context))
+        out.push(({ id: rows[i].id, sequence: keys[k], binding: rows[i] }))
     }
   }
   return out
@@ -188,6 +244,7 @@ function sequencesFor(context) {
 // without anyone remembering to spell it out.
 function readableSequence(sequence) {
   var text = String(sequence || "")
+  if (text.charAt(text.length - 1) === ",") return text
   if (text.indexOf(",") > 0) return text.split(",").join(" then ")
   text = text.replace("Return", "Enter")
   if (text === "Escape") return "Esc"
@@ -293,17 +350,21 @@ function helpColumns(count) {
 
   var total = 0
   for (var i = 0; i < groups.length; i++) total += helpWeight(groups[i])
-  var share = total / columns
-
   var at = 0
   var used = 0
+  var placed = 0
   for (var g = 0; g < groups.length; g++) {
     // Groups still to place, and columns still open, this one included in both.
     var left = groups.length - g
     var free = columns - at
-    // Move on once this column has had its share — and early when leaving it
-    // any fuller would strand an empty column at the end.
-    if (at < columns - 1 && out[at].length > 0 && (used >= share || left <= free - 1)) {
+    var target = (total - placed) / free
+    var nextWeight = helpWeight(groups[g])
+    // Start the next column when adding this whole group would move farther
+    // from the remaining share. A group never splits across columns.
+    if (at < columns - 1 && out[at].length > 0
+        && (left <= free - 1
+          || Math.abs(used - target) <= Math.abs(used + nextWeight - target))) {
+      placed += used
       at++
       used = 0
     }
@@ -320,17 +381,14 @@ function conflicts() {
   var found = []
   for (var c = 0; c < CONTEXTS.length; c++) {
     var seen = ({})
-    var rows = bindingsFor(CONTEXTS[c])
+    var rows = sequencesFor(CONTEXTS[c])
     for (var i = 0; i < rows.length; i++) {
-      var keys = rows[i].keys || []
-      for (var k = 0; k < keys.length; k++) {
-        if (seen[keys[k]]) {
-          found.push(({ context: CONTEXTS[c], keys: keys[k],
-            ids: [seen[keys[k]], rows[i].id] }))
+      if (seen[rows[i].sequence]) {
+          found.push(({ context: CONTEXTS[c], keys: rows[i].sequence,
+            ids: [seen[rows[i].sequence], rows[i].id] }))
         } else {
-          seen[keys[k]] = rows[i].id
+          seen[rows[i].sequence] = rows[i].id
         }
-      }
     }
   }
   return found

@@ -668,6 +668,26 @@ function invitationFrom(text, fallbackMethod) {
   var event = childNamed(calendar, "VEVENT")
   if (!event) return null
 
+  return eventFromComponent(calendar, event, fallbackMethod)
+}
+
+// Calendar feeds may carry more than one VEVENT. Keep their conversion on the
+// same path as invitations so a time zone or all-day event cannot mean one
+// thing in mail and another thing in the calendar view.
+function eventsFrom(text, fallbackMethod) {
+  var calendar = parse(text)
+  if (!calendar || calendar.name !== "VCALENDAR") return []
+  var components = childrenNamed(calendar, "VEVENT")
+  var events = []
+  for (var i = 0; i < components.length; i++) {
+    var event = eventFromComponent(calendar, components[i], fallbackMethod)
+    if (event) events.push(event)
+  }
+  return events
+}
+
+function eventFromComponent(calendar, event, fallbackMethod) {
+
   var uid = textOf(event, "UID")
   if (uid === "") return null
 
@@ -686,6 +706,19 @@ function invitationFrom(text, fallbackMethod) {
   }
 
   var recurrence = property(event, "RRULE")
+  var recurrenceId = resolveTime(property(event, "RECURRENCE-ID"), calendar)
+  var excluded = []
+  var exclusionLines = properties(event, "EXDATE")
+  for (var exclusionIndex = 0; exclusionIndex < exclusionLines.length; exclusionIndex++) {
+    var values = String(exclusionLines[exclusionIndex].value || "").split(",")
+    for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
+      var excludedAt = resolveTime({
+        name: "EXDATE", params: exclusionLines[exclusionIndex].params,
+        value: values[valueIndex], raw: exclusionLines[exclusionIndex].raw
+      }, calendar)
+      if (excludedAt) excluded.push(excludedAt.ms)
+    }
+  }
 
   return {
     method: normalizedMethod(textOf(calendar, "METHOD")) || normalizedMethod(fallbackMethod),
@@ -700,6 +733,9 @@ function invitationFrom(text, fallbackMethod) {
     start: start,
     end: end,
     recurrence: recurrence ? describeRecurrence(recurrence.value) : "",
+    recurrenceRule: recurrence ? String(recurrence.value || "") : "",
+    recurrenceIdMs: recurrenceId ? recurrenceId.ms : 0,
+    excludedMs: excluded,
     meetLink: conferenceLink(event),
     // Kept verbatim for the reply. A DTSTART rebuilt out of the moment this
     // parser settled on would answer a question the organiser did not ask; the

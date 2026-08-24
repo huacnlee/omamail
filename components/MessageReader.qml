@@ -87,10 +87,14 @@ Item {
   readonly property int pageInset: narrowBody ? Style.space(8) : Style.space(14)
   readonly property int bodyInset: pageInset
   readonly property int bodyWidth: Math.max(80, bodyFlick.width - bodyInset * 2)
+  readonly property int preferredBodyWidth: root.htmlAvailable
+    ? Html.preferredContentWidth(
+        root.bodyDocument ? root.bodyDocument : root.rawHtml, root.bodyWidth)
+    : root.bodyWidth
   // Quantised, because this is a dependency of the document itself: bound to
   // the exact width, dragging the splitter would rebuild and re-lay-out the
   // whole message on every frame.
-  readonly property int imageWidth: Math.round(root.bodyWidth / 20) * 20
+  readonly property int imageWidth: Math.round(root.preferredBodyWidth / 20) * 20
 
   ReaderBlankSlate {
     anchors.fill: parent
@@ -359,7 +363,7 @@ Item {
       y: inviteCard.visible
         ? inviteCard.y + inviteCard.height + Style.space(14)
         : Style.space(14)
-      width: root.bodyWidth
+      width: root.preferredBodyWidth
       readOnly: true
       selectByMouse: true
       wrapMode: TextEdit.Wrap

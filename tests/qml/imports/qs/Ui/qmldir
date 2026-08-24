@@ -1,0 +1,6 @@
+module qs.Ui
+TextField 1.0 TextField.qml
+Button 1.0 Button.qml
+PanelSeparator 1.0 PanelSeparator.qml
+PanelSectionHeader 1.0 PanelSectionHeader.qml
+PanelToolTip 1.0 PanelToolTip.qml

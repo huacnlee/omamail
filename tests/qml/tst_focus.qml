@@ -1,5 +1,5 @@
-import QtQuick
-import QtTest
+import QtQuick 2.15
+import QtTest 1.3
 
 // Focus ownership. A child that declares `focus: true` becomes the window's
 // activeFocusItem even while it is invisible — Qt does not exclude hidden items

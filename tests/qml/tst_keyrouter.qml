@@ -1,7 +1,7 @@
-import QtQuick
-import QtQuick.Window
-import QtQuick.Controls as QQC
-import QtTest
+import QtQuick 2.15
+import QtQuick.Window 2.15
+import QtQuick.Controls 2.15 as QQC
+import QtTest 1.3
 import "../../components" as Omamail
 
 // The keyboard belongs to the application, and the context says what a key
@@ -95,12 +95,34 @@ Item {
       host.context = "compose"
       wait(20)
       keyClick(Qt.Key_K, Qt.ControlModifier)
-      compare(host.lastId, "searchAnywhere",
-        "search is reachable from inside a draft, which is why it is bound twice")
+      compare(host.lastId, "help",
+        "Ctrl+K opens the shortcut sheet from inside a draft")
+    }
+
+    function test_z_only_undoes_during_the_send_window() {
+      host.context = "compose"
+      wait(20)
+      keyClick(Qt.Key_Z)
+      compare(host.lastId, "", "z remains draft text before Send is pressed")
+
+      host.context = "sendPending"
+      scope.applyContextFocus()
+      wait(20)
+      keyClick(Qt.Key_Z)
+      compare(host.lastId, "undoSend")
+    }
+
+    function test_undo_survives_the_shortcut_sheet() {
+      host.context = "sendPending"
+      host.overlay = true
+      scope.applyContextFocus()
+      wait(20)
+      keyClick(Qt.Key_Z)
+      compare(host.lastId, "undoSend")
     }
 
     function test_escape_is_the_way_out_of_every_context() {
-      var contexts = ["list", "reader", "search", "compose", "page"]
+      var contexts = ["list", "reader", "search", "compose", "sendPending", "page"]
       for (var i = 0; i < contexts.length; i++) {
         host.context = contexts[i]
         host.lastId = ""
@@ -165,22 +187,45 @@ Item {
     // 400ms deadline on an unfinished sequence, which is what the mailboxes
     // used to be reached through and why half the presses did nothing.
     function test_a_digit_names_the_mailbox_it_opens() {
-      keyClick(Qt.Key_3, Qt.AltModifier)
+      keyClick(Qt.Key_3, Qt.ControlModifier)
       compare(host.lastId, "goMailbox")
-      compare(host.lastSequence, "Alt+3")
+      compare(host.lastSequence, "Ctrl+3")
     }
 
     function test_the_tenth_mailbox_is_the_zero_key() {
-      keyClick(Qt.Key_0, Qt.AltModifier)
+      keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "goMailbox")
-      compare(host.lastSequence, "Alt+0")
+      compare(host.lastSequence, "Ctrl+0")
     }
 
     function test_a_digit_is_dead_in_a_draft() {
       host.context = "compose"
       wait(20)
-      keyClick(Qt.Key_3, Qt.AltModifier)
+      keyClick(Qt.Key_3, Qt.ControlModifier)
       compare(host.lastId, "", "typing a number into a reply is not going anywhere")
+    }
+
+    function test_alt_digit_names_the_account_it_opens() {
+      keyClick(Qt.Key_3, Qt.AltModifier)
+      compare(host.lastId, "goAccount")
+      compare(host.lastSequence, "Alt+3")
+    }
+
+    function test_account_digits_are_dead_in_a_draft() {
+      host.context = "compose"
+      wait(20)
+      keyClick(Qt.Key_3, Qt.AltModifier)
+      compare(host.lastId, "", "a recipient may contain a number")
+    }
+
+    function test_mail_and_calendar_have_mnemonic_shortcuts() {
+      keyClick(Qt.Key_C, Qt.ControlModifier | Qt.ShiftModifier)
+      compare(host.lastId, "calendarView")
+      host.context = "calendar"
+      host.lastId = ""
+      wait(20)
+      keyClick(Qt.Key_M, Qt.ControlModifier | Qt.ShiftModifier)
+      compare(host.lastId, "mailView")
     }
 
     // One press, not a chord: it opens a list the keyboard then walks, so
@@ -203,12 +248,12 @@ Item {
     }
 
     function test_a_reader_only_key_is_dead_in_the_list() {
-      keyClick(Qt.Key_0, Qt.ControlModifier)
+      keyClick(Qt.Key_0, Qt.ControlModifier | Qt.ShiftModifier)
       compare(host.lastId, "", "nothing to zoom from the list")
       host.context = "reader"
       host.lastId = ""
       wait(20)
-      keyClick(Qt.Key_0, Qt.ControlModifier)
+      keyClick(Qt.Key_0, Qt.ControlModifier | Qt.ShiftModifier)
       compare(host.lastId, "zoomReset")
     }
 

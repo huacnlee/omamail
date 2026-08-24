@@ -47,7 +47,7 @@ Column {
   // actually using rather than going blank after a save.
   function syncFromStore() {
     if (!auth) return
-    clientIdField.text = auth.clientId
+    clientIdField.text = String(auth.clientId || "")
     clientSecretField.text = auth.credentials ? String(auth.credentials.clientSecret || "") : ""
   }
 

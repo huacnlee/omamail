@@ -19,11 +19,12 @@ var DEFAULT_PORT = 9481
 var CALLBACK_PATH = "/oauth2callback"
 
 // gmail.modify is read plus label/trash changes — it deliberately cannot
-// permanently delete. gmail.send is what reply and compose need. Neither
-// grants access to the account profile beyond the mailbox address.
+// permanently delete. gmail.send is what reply and compose need. Calendar
+// access is read-only and exists solely for the calendar view.
 var SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send"
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/calendar.events"
 ]
 
 function normalizedPort(value) {

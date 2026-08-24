@@ -40,6 +40,7 @@
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
       "oauthPort": 9481,
+      "undoSendSeconds": 10,
       "openOnClick": "Window"
     },
     "schema": [
@@ -89,6 +90,16 @@
         "step": 1,
         "defaultValue": 9481,
         "description": "Loopback port used once during Google sign-in. HEY and IMAP accounts never use it. Change it only if something else already listens there."
+      },
+      {
+        "key": "undoSendSeconds",
+        "type": "integer",
+        "label": "Undo send window (seconds)",
+        "min": 0,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 10,
+        "description": "Delays outgoing mail so you can cancel it. Set this to 0 to send immediately."
       },
       {
         "key": "openOnClick",

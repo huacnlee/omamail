@@ -548,4 +548,30 @@ assert.strictEqual(calendar.parseDateValue("20261321T100000"), null, "month 13")
 assert.strictEqual(calendar.parseDateValue("20260821T250000"), null, "hour 25")
 assert.ok(calendar.parseDateValue("20260821T100000Z").utc)
 
+// A CalDAV object may carry several events. Calendar views need every event,
+// while the invitation reader intentionally takes only the first one.
+const feed = [
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "BEGIN:VEVENT",
+  "UID:first",
+  "SUMMARY:Morning review",
+  "DTSTART:20260824T080000Z",
+  "DTEND:20260824T083000Z",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:second",
+  "SUMMARY:Release window",
+  "DTSTART;VALUE=DATE:20260825",
+  "DTEND;VALUE=DATE:20260826",
+  "END:VEVENT",
+  "END:VCALENDAR"
+].join("\r\n")
+const feedEvents = calendar.eventsFrom(feed)
+assert.strictEqual(feedEvents.length, 2)
+assert.strictEqual(feedEvents[0].uid, "first")
+assert.strictEqual(feedEvents[0].summary, "Morning review")
+assert.strictEqual(feedEvents[1].uid, "second")
+assert.strictEqual(feedEvents[1].start.allDay, true)
+
 console.log("test_calendar.js ok")

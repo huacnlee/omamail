@@ -307,6 +307,15 @@ function indexById(list, id) {
   return -1
 }
 
+function messageById(primary, fallback, id) {
+  var first = Array.isArray(primary) ? primary : []
+  var index = indexById(first, id)
+  if (index >= 0) return first[index]
+  var second = Array.isArray(fallback) ? fallback : []
+  index = indexById(second, id)
+  return index >= 0 ? second[index] : null
+}
+
 // The rail as one numbered list, in the order it is drawn: the provider's
 // mailboxes first, then the labels or folders the server reported. Both the
 // sidebar's badges and the keys that jump read this, so the number beside a row

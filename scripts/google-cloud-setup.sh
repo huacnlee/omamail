@@ -62,8 +62,8 @@ else
   gcloud projects create "$project_id" --name="Omamail"
 fi
 
-printf 'Enabling the Gmail API…\n'
-gcloud services enable gmail.googleapis.com --project="$project_id"
+printf 'Enabling the Gmail and Google Calendar APIs…\n'
+gcloud services enable gmail.googleapis.com calendar-json.googleapis.com --project="$project_id"
 
 consent_url="https://console.cloud.google.com/auth/overview?project=$project_id"
 clients_url="https://console.cloud.google.com/auth/clients/create?project=$project_id"

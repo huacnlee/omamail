@@ -4,8 +4,8 @@ import qs.Commons
 import qs.Ui
 import "../keys/Keymap.js" as Keymap
 
-// The reference sheet behind Ctrl+?. A plain list rather than a dialog because
-// it never needs an answer — Esc, Ctrl+? again, or a click puts it away.
+// The reference sheet behind Ctrl+K. A plain list rather than a dialog because
+// it never needs an answer — Esc, Ctrl+K again, or a click puts it away.
 //
 // **Wide and short, in as many columns as the window has room for.** One narrow
 // column was taller than a short window, so it scrolled — and because the

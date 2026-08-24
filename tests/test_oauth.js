@@ -34,6 +34,7 @@ assert.ok(url.indexOf("access_type=offline") > 0)
 assert.ok(url.indexOf("prompt=consent") > 0)
 assert.ok(url.indexOf("redirect_uri=http%3A%2F%2F127.0.0.1%3A9481%2Foauth2callback") > 0)
 assert.ok(url.indexOf("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify%20") > 0)
+assert.ok(url.indexOf("https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.events") > 0)
 assert.ok(url.indexOf("login_hint") < 0, "an absent hint is omitted, not sent empty")
 
 const hinted = oauth.authorizationUrl({
@@ -107,14 +108,17 @@ assert.strictEqual(oauth.parseTokenResponse(200, "{}", "").ok, false, "no access
 // --------------------------------------------------------------- scopes
 
 deepEqual(
-  oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send"),
+  oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events"),
   [])
 deepEqual(
   oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify"),
-  ["https://www.googleapis.com/auth/gmail.send"])
+  ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events"])
 assert.strictEqual(
   oauth.missingScopeMessage(["https://www.googleapis.com/auth/gmail.send"]),
   "Google sign-in finished without the gmail.send permission. Sign in again and leave every checkbox ticked")
+assert.strictEqual(
+  oauth.missingScopeMessage(["https://www.googleapis.com/auth/calendar.events"]),
+  "Google sign-in finished without the calendar.events permission. Sign in again and leave every checkbox ticked")
 assert.strictEqual(oauth.missingScopeMessage([]), "")
 
 // -------------------------------------------------------------- redaction

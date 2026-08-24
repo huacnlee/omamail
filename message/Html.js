@@ -453,6 +453,12 @@ function removeAttribute(node, name) {
   node.attrs = kept
 }
 
+function setAttribute(node, name, value) {
+  var attr = attributeOf(node, name)
+  if (attr) attr.value = String(value)
+  else node.attrs.push({ name: name, value: String(value) })
+}
+
 function setStyle(node, declarations) {
   var attr = attributeOf(node, "style")
   var style = joinDeclarations(declarations)
@@ -935,6 +941,41 @@ function cleanAttributes(node, keepColors, declarations) {
   setStyle(node, survivors)
 }
 
+// QTextDocument supports image dimensions as HTML attributes, but not as CSS
+// width and height declarations. Most mail clients accept both spellings, and
+// many senders use only CSS. Promote absolute pixel dimensions to the spelling
+// Qt understands while leaving the original declaration for other consumers.
+function promoteImageDimensions(node, declarations) {
+  if (node.name !== "img" || declarations === null) return
+  for (var i = 0; i < declarations.length; i++) {
+    var declaration = declarations[i]
+    if (declaration.name !== "width" && declaration.name !== "height") continue
+    if (attributeOf(node, declaration.name) !== null) continue
+    var pixels = String(declaration.value).match(/^(\d+(?:\.\d+)?)px$/i)
+    if (!pixels) continue
+    setAttribute(node, declaration.name, pixels[1])
+  }
+}
+
+function hasDirectImage(node) {
+  for (var i = 0; i < node.children.length; i++) {
+    if (node.children[i].type !== "text" && node.children[i].name === "img") return true
+  }
+  return false
+}
+
+// Browser email templates use a zero line height around adjacent images to
+// remove the small inline-image baseline gap. QTextDocument instead collapses
+// the whole row and paints the following block over those images.
+function keepImageRowOpen(node) {
+  if (!hasDirectImage(node)) return
+  rewriteStyle(node, function(declaration) {
+    if ((declaration.name === "line-height" || declaration.name === "font-size")
+      && /^0(?:\.0+)?(?:px|pt|%|em|rem)?$/i.test(declaration.value)) return null
+    return declaration
+  })
+}
+
 // ----------------------------------------------------------- scaffolding
 //
 // Real mail is mostly scaffolding. A card centred in an Outlook window is six
@@ -1072,11 +1113,13 @@ function sanitize(html, options) {
       if (declarations !== null && VOID_ELEMENTS[child.name] !== true
         && isHiddenBy(declarations)) continue
 
+      promoteImageDimensions(child, declarations)
       cleanAttributes(child, keepColors, declarations)
 
       if (child.name === "img" && !keepImage(child)) continue
 
       clean(child)
+      keepImageRowOpen(child)
       survivors.push(child)
     }
     node.children = survivors
@@ -1219,9 +1262,10 @@ var MIN_IMAGE_WIDTH = 40
 // Which of the three fittings to apply, and the width to fit to. Kept as one
 // object because they are asked for together and because the answer for an
 // element is one pass over its attributes however many of them are on.
-function fitting(heights, sides, widths, available) {
+function fitting(heights, sides, widths, available, clampedHeightsOnly) {
   return {
     heights: heights === true,
+    clampedHeightsOnly: clampedHeightsOnly === true,
     sides: sides === true,
     widths: widths === true,
     limit: Math.max(MIN_IMAGE_WIDTH, Math.floor(Number(available) || 0))
@@ -1247,15 +1291,24 @@ function withoutSides(value) {
 // over content that would have wrapped perfectly well.
 var SIZED_ELEMENTS = { table: true, td: true, th: true, tr: true, div: true }
 
-function fitDeclaration(declaration, node, fit) {
+function intrinsicContentWidth(node, value) {
+  var percent = String(value || "").replace(/^\s+|\s+$/g, "").match(/^(\d+(?:\.\d+)?)%$/)
+  if (!percent || Number(percent[1]) > 5) return false
+  if (node.name === "table") return true
+  if (node.name !== "td" && node.name !== "th") return false
+  return String(attributeValue(node, "style")).toLowerCase().indexOf("nowrap") >= 0
+}
+
+function fitDeclaration(declaration, node, fit, dropImageHeight) {
   var name = declaration.name
-  if (fit.heights && node.name === "img" && name === "height") return null
+  if (dropImageHeight && name === "height") return null
   if (fit.sides) {
     if (SIDE_SPACING[name] === true) return null
     if (name === "padding" || name === "margin")
       return { name: name, value: withoutSides(declaration.value) }
   }
   if (fit.widths) {
+    if (name === "width" && intrinsicContentWidth(node, declaration.value)) return null
     if (name === "width" && SIZED_ELEMENTS[node.name] === true) {
       var pixels = declaration.value.match(/^(\d+)px$/i)
       if (pixels && Number(pixels[1]) > fit.limit) return null
@@ -1283,6 +1336,9 @@ function fitAttributes(node, fit) {
   if (attrs.length === 0) return attrs
   var isImage = fit.heights && node.name === "img"
   var isSized = fit.widths && SIZED_ELEMENTS[node.name] === true
+  var imageWidth = Number(attributeValue(node, "width"))
+  var dropImageHeight = isImage && (!fit.clampedHeightsOnly
+    || (isFinite(imageWidth) && imageWidth > fit.limit))
   if (!isImage && !isSized && !fit.sides) {
     if (!fit.widths) return attrs
     // Anything can carry white-space:nowrap, so the fast path out of here has
@@ -1302,16 +1358,19 @@ function fitAttributes(node, fit) {
     // 1600 to 380 keeps its original height and renders as a smear. Measured
     // against the engine rather than assumed: strip the heights and Qt derives
     // the height from the aspect ratio on its own.
-    if (isImage && attr.name === "height") replacement = null
+    if (dropImageHeight && attr.name === "height") replacement = null
+    else if (isSized && attr.name === "width"
+      && intrinsicContentWidth(node, attr.value)) replacement = null
     else if (isSized && attr.name === "width" && /^\d+$/.test(String(attr.value))
       && Number(attr.value) > fit.limit) replacement = null
     else if (attr.name === "style" && attr.value !== null && attr.value !== undefined
-      && (fit.sides || FITTABLE_DECLARATION.test(String(attr.value)))) {
+      && (fit.sides || FITTABLE_DECLARATION.test(String(attr.value))
+        || dropImageHeight)) {
       var declarations = splitDeclarations(attr.value)
       var kept = []
       var changed = false
       for (var j = 0; j < declarations.length; j++) {
-        var fitted = fitDeclaration(declarations[j], node, fit)
+        var fitted = fitDeclaration(declarations[j], node, fit, dropImageHeight)
         if (fitted !== declarations[j]) changed = true
         if (fitted) kept.push(fitted)
       }
@@ -1339,6 +1398,44 @@ function fitAttributes(node, fit) {
 function documentTree(source) {
   if (source && source.type === "root") return source
   return parse(source)
+}
+
+var CONTENT_WIDTH_ELEMENTS = {
+  body: true, div: true, table: true, section: true, article: true,
+  header: true, footer: true, main: true
+}
+
+function fixedPixelWidth(value) {
+  var match = String(value === undefined || value === null ? "" : value)
+    .replace(/^\s+|\s+$/g, "").match(/^(\d+(?:\.\d+)?)(?:px)?$/i)
+  return match ? Number(match[1]) : 0
+}
+
+function widestDeclaredContent(node, current) {
+  var widest = current
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") continue
+    if (CONTENT_WIDTH_ELEMENTS[child.name] === true) {
+      var width = fixedPixelWidth(attributeValue(child, "width"))
+      var declarations = splitDeclarations(attributeValue(child, "style"))
+      for (var j = 0; j < declarations.length; j++) {
+        if (declarations[j].name !== "max-width"
+          && declarations[j].name !== "width") continue
+        width = Math.max(width, fixedPixelWidth(declarations[j].value))
+      }
+      // Tiny fixed boxes are icons, bullets, and badges, not the message card.
+      if (width >= 240) widest = Math.max(widest, width)
+    }
+    widest = widestDeclaredContent(child, widest)
+  }
+  return widest
+}
+
+function preferredContentWidth(source, available) {
+  var limit = Math.max(80, Math.floor(Number(available) || 0))
+  var declared = widestDeclaredContent(documentTree(source), 0)
+  return declared > 0 ? Math.min(limit, Math.floor(declared)) : limit
 }
 
 function stripImageHeights(html) {
@@ -1373,7 +1470,8 @@ function documentFor(bodyHtml, colors) {
   // wide one reads better with the sender's own spacing. A width the window
   // cannot hold goes at every width: there is no horizontal scroll here, so
   // what overflows is not read at all.
-  var fit = fitting(true, palette.compact === true, maxImage >= MIN_IMAGE_WIDTH, maxImage)
+  var fit = fitting(true, palette.compact === true,
+    maxImage >= MIN_IMAGE_WIDTH, maxImage, true)
 
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"

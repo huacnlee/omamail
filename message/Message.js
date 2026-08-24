@@ -462,6 +462,12 @@ function formatSize(bytes) {
   return (value / (1024 * 1024)).toFixed(value < 10485760 ? 1 : 0) + " MB"
 }
 
+function formatCount(count, singular) {
+  var amount = Math.max(0, Math.floor(Number(count) || 0))
+  var noun = String(singular || "item")
+  return amount + " " + noun + (amount === 1 ? "" : "s")
+}
+
 // ------------------------------------------------------ RFC 822 → payload
 //
 // Gmail hands back a message already taken apart: a headers array, a MIME
@@ -867,6 +873,24 @@ function base64Body(text) {
   return wrapped.join("\r\n")
 }
 
+// Provider attachment bodies are base64url. MIME uses standard base64, but
+// changing alphabets does not require decoding the binary file through a text
+// string. Doing that would corrupt every byte sequence that is not UTF-8.
+function mimeBase64(data) {
+  var encoded = String(data || "").replace(/[\r\n\s]/g, "")
+    .replace(/-/g, "+").replace(/_/g, "/")
+  while (encoded.length % 4 !== 0) encoded += "="
+  var wrapped = []
+  for (var i = 0; i < encoded.length; i += 76) wrapped.push(encoded.substr(i, 76))
+  return wrapped.join("\r\n")
+}
+
+function attachmentType(value) {
+  var type = String(value || "").split(";")[0].trim().toLowerCase()
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(type)
+    ? type : "application/octet-stream"
+}
+
 // The separator only has to be a string the parts do not contain, and every
 // part here is base64 — an alphabet with no "_" in it, so a boundary carrying
 // one cannot occur inside a body however long it is. The caller may name it,
@@ -901,11 +925,42 @@ function buildRawMessage(fields) {
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""
     ? values.calendar : null
-  if (!calendar) {
+  var attachments = Array.isArray(values.attachments) ? values.attachments : []
+  var included = []
+  for (var attachmentIndex = 0; attachmentIndex < attachments.length; attachmentIndex++) {
+    var attachment = attachments[attachmentIndex] || ({})
+    if (attachment.data === undefined || attachment.data === null) continue
+    included.push(attachment)
+  }
+  if (!calendar && included.length === 0) {
     lines.push("Content-Type: text/plain; charset=UTF-8")
     lines.push("Content-Transfer-Encoding: base64")
     lines.push("")
     return lines.join("\r\n") + "\r\n" + base64Body(values.body) + "\r\n"
+  }
+
+  if (included.length > 0) {
+    var mixedBoundary = mimeBoundary(values.boundary)
+    lines.push("Content-Type: multipart/mixed; boundary=\"" + mixedBoundary + "\"")
+    lines.push("")
+    lines.push("--" + mixedBoundary)
+    lines.push("Content-Type: text/plain; charset=UTF-8")
+    lines.push("Content-Transfer-Encoding: base64")
+    lines.push("")
+    lines.push(base64Body(values.body))
+    for (var includedIndex = 0; includedIndex < included.length; includedIndex++) {
+      var file = included[includedIndex]
+      var filename = String(file.filename || "attachment")
+      lines.push("--" + mixedBoundary)
+      lines.push("Content-Type: " + attachmentType(file.mimeType)
+        + "; name=" + encodedPhrase(filename))
+      lines.push("Content-Transfer-Encoding: base64")
+      lines.push("Content-Disposition: attachment; filename=" + encodedPhrase(filename))
+      lines.push("")
+      lines.push(mimeBase64(file.data))
+    }
+    lines.push("--" + mixedBoundary + "--")
+    return lines.join("\r\n") + "\r\n"
   }
 
   // `multipart/alternative`, not `mixed`: the calendar part and the sentence

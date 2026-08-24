@@ -10,6 +10,7 @@ import "../providers/GmailApi.js" as Api
 import "../message/Message.js" as Mail
 import "../message/Calendar.js" as Calendar
 import "../message/Unsubscribe.js" as Unsub
+import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Accounts.js" as Accounts
 import "../providers/Registry.js" as Provider
@@ -60,7 +61,8 @@ Item {
     maxMessages: 25,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
-    oauthPort: 9481
+    oauthPort: 9481,
+    undoSendSeconds: 10
   })
   property var settings: defaultSettingValues
 
@@ -81,6 +83,8 @@ Item {
   readonly property string defaultQuery: String(setting("defaultQuery", "in:inbox")).trim()
   readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
+  readonly property int undoSendSeconds: Outbox.normalizeDelay(
+    setting("undoSendSeconds", Outbox.DEFAULT_DELAY_SECONDS))
 
   // Built by the loaders at the bottom, so both are null for one frame while an
   // account switches provider. Every use guards for that rather than assuming.
@@ -125,6 +129,7 @@ Item {
   // folder's own name inside the inbox.
   property string rawQuery: ""
   property var messages: []
+  property var previewMessages: []
   property var labels: []
   property var sendAsAliases: []
   property bool sendAsLoading: false
@@ -256,6 +261,8 @@ Item {
   readonly property string ownAddress: accountEmail !== "" ? accountEmail : configuredEmail
   property int inboxUnread: 0
   property bool countLoading: false
+  property var countHandle: null
+  property int countSerial: 0
 
   // When the list last agreed with the server. Ticked separately so the label
   // ages without anything else re-evaluating.
@@ -273,6 +280,9 @@ Item {
   property string actionStatus: ""
   property string pendingAction: ""
   property bool sending: false
+  property var pendingSend: null
+  property int sendSecondsRemaining: 0
+  readonly property bool sendPending: pendingSend !== null
 
   // Notifications only start once the first successful load has established
   // what was already there.
@@ -379,16 +389,43 @@ Item {
 
   function refreshCounts() {
     if (!ready || countLoading) return
+    var serial = ++countSerial
     countLoading = true
     // Counted with the same query the Unread mailbox uses, not from the INBOX
     // label. The label counts every categorised message too, which is how this
     // reached 2483 on a real account — a number that is never zero, can only be
     // reported as "999+", and cannot tell anyone whether something is waiting.
-    api.listMessages(Provider.unreadQuery(providerId), 1, "", function(page, error) {
-      root.countLoading = false
-      if (error || !page) return
+    countHandle = api.listMessages(Provider.unreadQuery(providerId), 3, "", function(page, error) {
+      if (serial !== root.countSerial) return
+      if (error || !page) {
+        root.countLoading = false
+        root.countHandle = null
+        return
+      }
       var before = root.inboxUnread
       root.inboxUnread = page.estimate
+
+      if (page.ids.length === 0) {
+        root.previewMessages = []
+        root.countLoading = false
+        root.countHandle = null
+      } else {
+        root.countHandle = root.api.getMessages(page.ids, false, function(payloads) {
+          if (serial !== root.countSerial) return
+          var now = new Date()
+          var summaries = []
+          for (var i = 0; i < payloads.length; i++) {
+            var summary = Mail.summarize(payloads[i], now)
+            // The provider's unread query is authoritative. Some IMAP servers
+            // omit FLAGS from metadata even when SEARCH UNSEEN found the row.
+            summary.unread = true
+            summaries.push(summary)
+          }
+          root.previewMessages = summaries
+          root.countLoading = false
+          root.countHandle = null
+        }, root.countHandle)
+      }
 
       // A mailbox that gains unread mail earns a look, whether or not it is the
       // one on screen. The badge and the notification are both raised from a
@@ -632,8 +669,8 @@ Item {
     // its body painted from disk in a few milliseconds, and then sat behind the
     // loading state until the network answered, because the skeleton was gated
     // on there being no summary and only the live payload ever set one.
-    var known = Model.indexById(messages, messageId)
-    if (known >= 0) selectedMessage = messages[known]
+    var knownSummary = Model.messageById(messages, previewMessages, messageId)
+    if (knownSummary) selectedMessage = knownSummary
 
     // A message that has been opened before opens from its file, usually well
     // before Gmail answers. The read is asynchronous, so the live copy can win
@@ -681,8 +718,8 @@ Item {
       // Merged with the row rather than replacing it: a provider whose detail
       // read carries no subject line of its own — HEY reads a conversation, not
       // a message — would otherwise blank the one the list had drawn.
-      var known = Model.indexById(root.messages, messageId)
-      var summary = Model.detailSummary(known >= 0 ? root.messages[known] : null,
+      var previous = Model.messageById(root.messages, root.previewMessages, messageId)
+      var summary = Model.detailSummary(previous,
         Mail.summarize(payload, new Date()))
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
@@ -726,6 +763,7 @@ Item {
       // there at once the next time this message is opened.
       root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
       root.messages = Model.replaceById(root.messages, summary)
+      root.previewMessages = Model.replaceById(root.previewMessages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
       if (summary.unread) root.act(messageId, "markRead", true)
@@ -776,6 +814,7 @@ Item {
     renderSource(sourceHtml)
   }
 
+
   function clearSelection() {
     detailSerial++
     abortRequest(detailHandle)
@@ -825,8 +864,9 @@ Item {
       return
     }
     var index = Model.indexById(messages, messageId)
-    if (index < 0) return
-    var before = messages[index]
+    var previewIndex = Model.indexById(previewMessages, messageId)
+    if (index < 0 && previewIndex < 0) return
+    var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var updated = Model.applyLabelChange(before, action)
     var survives = Model.survivesAction(mailboxKey, action)
 
@@ -841,19 +881,35 @@ Item {
     var keepOpen = quiet === true && selectedId === messageId
     var removed = !survives && !keepOpen
 
-    if (removed) messages = Model.removeById(messages, messageId)
-    else messages = Model.replaceById(messages, updated)
-    rememberList()
+    if (index >= 0) {
+      if (removed) messages = Model.removeById(messages, messageId)
+      else messages = Model.replaceById(messages, updated)
+      rememberList()
+    }
+    if (previewIndex >= 0) {
+      previewMessages = updated.unread
+        ? Model.replaceById(previewMessages, updated)
+        : Model.removeById(previewMessages, messageId)
+    }
     if (selectedId === messageId) {
       if (removed) clearSelection()
       else selectedMessage = updated
     }
 
     function restore(error) {
-      root.messages = removed
-        ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
-        : Model.replaceById(root.messages, before)
-      root.rememberList()
+      if (index >= 0) {
+        root.messages = removed
+          ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
+          : Model.replaceById(root.messages, before)
+        root.rememberList()
+      }
+      if (previewIndex >= 0) {
+        var previewKnown = Model.indexById(root.previewMessages, messageId)
+        root.previewMessages = previewKnown >= 0
+          ? Model.replaceById(root.previewMessages, before)
+          : root.previewMessages.slice(0, previewIndex).concat(
+              [before], root.previewMessages.slice(previewIndex))
+      }
       root.refreshCounts()
       root.fail(error)
     }
@@ -950,43 +1006,52 @@ Item {
 
   // ---------------------------------------------------------------- reply
 
+  // Loads the original bytes before a forward can claim it includes them.
+  // Gmail fetches each part; IMAP reads the same part from the full message.
+  function loadAttachments(messageId, attachments, callback) {
+    var listed = Array.isArray(attachments) ? attachments : []
+    if (listed.length === 0) {
+      if (typeof callback === "function") callback([], "")
+      return []
+    }
+    var remaining = listed.length
+    var loaded = new Array(listed.length)
+    var handles = []
+    var firstError = ""
+    for (var i = 0; i < listed.length; i++) {
+      (function(index) {
+        var source = listed[index] || ({})
+        handles.push(api.getAttachment(messageId, String(source.attachmentId || ""),
+          function(data, error) {
+            if (error && firstError === "")
+              firstError = "Could not include " + String(source.filename || "an attachment")
+                + ": " + error
+            loaded[index] = ({
+              filename: String(source.filename || "attachment"),
+              mimeType: String(source.mimeType || "application/octet-stream"),
+              size: Math.max(0, Math.floor(Number(source.size) || 0)),
+              data: String(data || "")
+            })
+            remaining--
+            if (remaining === 0 && typeof callback === "function")
+              callback(loaded, firstError)
+          }))
+      })(i)
+    }
+    return handles
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
-  function send(fields) {
-    if (!ready || sending) return
-    var values = fields || ({})
-    var body = String(values.body || "").trim()
-    if (body === "") {
-      fail("Write something before sending")
-      return
+  function deliver(payload) {
+    if (!ready) {
+      fail("The mailbox is not ready to send")
+      return false
     }
-    var to = String(values.to || "").trim()
-    if (to === "") {
-      fail("Add a recipient first")
-      return
-    }
-    // The display name is read back off the alias list rather than taken from
-    // the compose form: the list is what `isSendAsAllowed` just checked, so the
-    // name on the message cannot disagree with the address that was allowed.
-    var from = String(values.from || "").trim()
-    var alias = from === "" ? null : Api.sendAsFor(availableSendAsAliases, from)
-    if (from !== "" && !alias) {
-      fail("Choose a valid From address")
-      return
-    }
+    if (sending) return false
     sending = true
-    api.sendMessage(Mail.buildSendPayload({
-      from: from,
-      fromName: alias ? String(alias.displayName || "") : "",
-      to: to,
-      cc: String(values.cc || "").trim(),
-      subject: String(values.subject || ""),
-      body: body,
-      threadId: values.threadId,
-      inReplyTo: values.inReplyTo,
-      references: values.references
-    }), function(payload, error) {
+    api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
         root.fail(error)
@@ -995,6 +1060,74 @@ Item {
       root.note("Sent")
       root.replySent()
     })
+    return true
+  }
+
+  function deliverPending() {
+    if (!sendPending) return false
+    var payload = pendingSend.payload
+    sendDelayTimer.stop()
+    sendCountdownTimer.stop()
+    pendingSend = null
+    sendSecondsRemaining = 0
+    return deliver(payload)
+  }
+
+  function undoSend() {
+    if (!sendPending) return false
+    sendDelayTimer.stop()
+    sendCountdownTimer.stop()
+    pendingSend = null
+    sendSecondsRemaining = 0
+    note("Send undone")
+    return true
+  }
+
+  function send(fields) {
+    if (!ready || sending || sendPending) return false
+    var values = fields || ({})
+    var body = String(values.body || "").trim()
+    if (body === "") {
+      fail("Write something before sending")
+      return false
+    }
+    var to = String(values.to || "").trim()
+    if (to === "") {
+      fail("Add a recipient first")
+      return false
+    }
+    // The display name is read back off the alias list rather than taken from
+    // the compose form: the list is what `isSendAsAllowed` just checked, so the
+    // name on the message cannot disagree with the address that was allowed.
+    var from = String(values.from || "").trim()
+    var alias = from === "" ? null : Api.sendAsFor(availableSendAsAliases, from)
+    if (from !== "" && !alias) {
+      fail("Choose a valid From address")
+      return false
+    }
+    var payload = Mail.buildSendPayload({
+      from: from,
+      fromName: alias ? String(alias.displayName || "") : "",
+      to: to,
+      cc: String(values.cc || "").trim(),
+      subject: String(values.subject || ""),
+      body: body,
+      attachments: Array.isArray(values.attachments) ? values.attachments : [],
+      threadId: values.threadId,
+      inReplyTo: values.inReplyTo,
+      references: values.references
+    })
+
+    var queued = Outbox.schedule(payload, Date.now(), undoSendSeconds)
+    if (!queued) return deliver(payload)
+
+    pendingSend = queued
+    sendSecondsRemaining = Outbox.remainingSeconds(queued.dueAt, Date.now())
+    sendDelayTimer.interval = Math.max(1, queued.dueAt - Date.now())
+    sendDelayTimer.restart()
+    sendCountdownTimer.restart()
+    note("Message queued")
+    return true
   }
 
   signal replySent()
@@ -1259,6 +1392,7 @@ Item {
     rawQuery = ""
     clearSelection()
     messages = []
+    previewMessages = []
     listLoaded = false
     loadMessages(false)
   }
@@ -1326,6 +1460,13 @@ Item {
   }
 
   function signIn() { if (auth) auth.beginLogin() }
+  function withAccessToken(callback) {
+    if (providerId !== "gmail" || !auth) {
+      callback("", "This is not a Google account")
+      return
+    }
+    auth.withAccessToken(callback)
+  }
   function cancelSignIn() { if (auth) auth.cancelLogin() }
 
   // The setup form's entry point for a password provider. Gmail has no use for
@@ -1534,6 +1675,26 @@ Item {
     id: noticeTimer
     interval: 4000
     onTriggered: root.actionStatus = ""
+  }
+
+  Timer {
+    id: sendDelayTimer
+    repeat: false
+    onTriggered: root.deliverPending()
+  }
+
+  Timer {
+    id: sendCountdownTimer
+    interval: 250
+    repeat: true
+    onTriggered: {
+      if (!root.sendPending) {
+        stop()
+        return
+      }
+      root.sendSecondsRemaining = Outbox.remainingSeconds(
+        root.pendingSend.dueAt, Date.now())
+    }
   }
 
   // The unread count is one label read — cheap enough to keep running while

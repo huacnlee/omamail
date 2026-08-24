@@ -158,6 +158,34 @@ assert.strictEqual(message.htmlToText("<style>p{}</style>text"), "text")
 assert.strictEqual(message.formatSize(512), "512 B")
 assert.strictEqual(message.formatSize(2048), "2.0 KB")
 assert.strictEqual(message.formatSize(2 * 1024 * 1024), "2.0 MB")
+assert.strictEqual(message.formatCount(1, "original attachment"), "1 original attachment")
+assert.strictEqual(message.formatCount(2, "original attachment"), "2 original attachments")
+
+// A forwarded file is a real MIME attachment, not only a label in the draft.
+// Its provider data is already base64url, including arbitrary binary bytes.
+const forwardRaw = message.buildRawMessage({
+  from: "me@example.com",
+  to: "you@example.com",
+  subject: "Fwd: report",
+  body: "See the original file.",
+  boundary: "=_forward_test",
+  attachments: [{
+    filename: "report.pdf",
+    mimeType: "application/pdf",
+    size: 4,
+    data: "AP_-AQ"
+  }]
+})
+assert.ok(forwardRaw.includes('Content-Type: multipart/mixed; boundary="=_forward_test"'))
+assert.ok(forwardRaw.includes('Content-Disposition: attachment; filename="report.pdf"'))
+assert.ok(forwardRaw.includes("AP/+AQ=="), "attachment bytes remain intact")
+assert.strictEqual(message.attachments(message.parseRfc822(forwardRaw))[0].filename,
+  "report.pdf")
+const emptyForward = message.buildRawMessage({
+  to: "you@example.com", body: "Empty file attached", boundary: "=_empty_test",
+  attachments: [{ filename: "empty.txt", mimeType: "text/plain", size: 0, data: "" }]
+})
+assert.ok(emptyForward.includes('filename="empty.txt"'), "a zero-byte attachment is still attached")
 
 // -------------------------------------------------------------------- time
 

@@ -26,9 +26,11 @@ draft beats reading, a query being typed beats the list underneath it:
 
 ```qml
 readonly property string keyContext:
-    root.showPage  ? "page"
+    root.service && root.service.sendPending ? "sendPending"
+  : root.showPage  ? "page"
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
+  : root.calendarVisible ? "calendar"
   : root.currentView === "reader" ? "reader"
   : "list"
 ```
@@ -39,7 +41,9 @@ readonly property string keyContext:
 | `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor without opening; `o` or `Enter` opens what they landed on |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
+| `sendPending` | A message in its undo window | `z`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
+| `calendar` | The calendar month | Calendar navigation and the modified keys |
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
@@ -96,24 +100,36 @@ used to exist, and they had.
 | `replyAll` | `a` | mail | Reply to all |
 | `forward` | `f` | mail | Forward |
 | `compose` | `c` | mail | Compose |
+| `createEvent` | `c` | calendar | Create an event |
+| `calendarNext` | `j`, `Down` | calendar | Select the next event |
+| `calendarPrevious` | `k`, `Up` | calendar | Select the previous event |
+| `openCalendarEvent` | `Return`, `o` | calendar | Open the selected event |
+| `calendarPreviousPeriod` | `h`, `Left` | calendar | Previous week or month |
+| `calendarNextPeriod` | `l`, `Right` | calendar | Next week or month |
+| `calendarToday` | `t` | calendar | Go to today |
+| `calendarWeek` | `w` | calendar | Show week view |
+| `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return` | compose | Send |
+| `undoSend` | `z` | sendPending | Undo send |
 | `search` | `/` | mail | Search |
-| `searchAnywhere` | `Ctrl+K` | all | Search from anywhere |
-| `goMailbox` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail | Go to that mailbox |
+| `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
+| `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
+| `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
+| `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
-| `zoomReset` | `Ctrl+0` | reader | Reset the zoom |
+| `zoomReset` | `Ctrl+Shift+0` | reader | Reset the zoom |
 | `refresh` | `F5` | all | Check for mail |
-| `help` | `?`, `Ctrl+/`, `Ctrl+?` | mail | Toggle this sheet |
+| `settings` | `Ctrl+,` | all | Open settings |
+| `help` | `Ctrl+K`, `?`, `Ctrl+/`, `Ctrl+?` | mail | Toggle all keybindings |
 | `back` | `Escape` | all | Back, or close the window |
 <!-- END BINDINGS -->
 
-Two rows are split on purpose. `search` keeps the bare `/` in the mailbox while
-`searchAnywhere` reaches search from inside a draft or a form — the bare key
-cannot live in a text-entry context, and the modified one should. `help` is a
-mailbox action rather than a global one: the sheet lists what the mailbox
-answers to, and a draft is not a mailbox.
+The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
+opens the complete key sheet from every context.
 
 ## Why the rail is numbered and not chorded
 
@@ -129,7 +145,7 @@ clock had been running. Measured, not guessed:
 And they had to be memorised. Four bindings that look like nothing on screen,
 for the four places you actually go.
 
-`Alt+1`…`Alt+0` replaces both. A modifier has no deadline, and **holding Alt
+`Ctrl+1`…`Ctrl+0` replaces both. A modifier has no deadline, and **holding Ctrl
 puts the digit on every row of the rail**, so there is nothing to remember —
 the rail says which key opens it. The numbers run down the rail as it is drawn,
 mailboxes first and then the server's labels, from `Model.sidebarSlots`, which
@@ -137,10 +153,10 @@ is the same list the badges are drawn from: the number beside a row and the row
 a number opens are one fact rather than two. Past the tenth row there is simply
 no number, because there is no digit left to offer.
 
-Held Alt is the one `Keys` handler in `App.qml`, and it is not a binding — a
+Held Ctrl is the one `Keys` handler in `App.qml`, and it is not a binding — a
 modifier alone cannot be a `Shortcut`, so there is nothing to route. It accepts
-no event, so what follows Alt still goes where it always went, and it clears on
-`activeFocus` rather than on the release: Alt+Tab takes the release with it, and
+no event, so what follows Ctrl still goes where it always went. It clears on
+`activeFocus` rather than on release because Ctrl+Tab can take the release, and
 waiting for one that is not coming would paint the numbers on permanently.
 
 `Escape` is the only bare key bound everywhere, because it is the way out of

@@ -24,11 +24,7 @@ while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
 
 # 1. No hard-coded colours in QML. Every colour comes from the active Omarchy
 #    theme, or a light theme renders unreadable text.
-# gmailRed in ActionIcon is the single declared exception: the M inside the
-# Gmail mark is a brand asset, the same carve-out this author's other plugins
-# make for an official logo. Everything else takes the theme.
-if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- "${QML_FILES[@]}" \
-   | grep -v 'gmailRed'; then
+if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- "${QML_FILES[@]}"; then
   fail "hard-coded colour in QML: use Color.* or a colour passed in from App.qml"
 fi
 if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' -- "${QML_FILES[@]}"; then
@@ -61,11 +57,14 @@ if grep -vE '^\s*(//|\*|/\*)' message/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
   fail "message/Html.js may only name the PAPER/INK sheet colours"
 fi
 
-# 4. barForeground is a qs.Ui.Panel property. A BarWidget that reads it gets
-#    undefined, and an undefined colour paints nothing at all.
-if grep -vE '^\s*//' BarWidget.qml | grep -n 'barForeground'; then
-  fail "BarWidget has no barForeground; read bar.foreground instead"
-fi
+# 4. The bar switches `barForeground` when transparent mode needs contrast.
+#    `foreground` is the fixed theme value and does not follow that switch.
+grep -q 'bar ? bar\.barForeground' BarWidget.qml \
+  || fail "the bar icon must follow bar.barForeground in transparent mode"
+grep -q 'markColor: root.accent' App.qml \
+  || fail "the Omamail header M must use the active theme accent"
+grep -q 'markColor: Color.accent' BarWidget.qml \
+  || fail "the bar M must use the active theme accent"
 
 # IconTextButton has no separate hover glyph colour. Assigning one makes the
 # whole component type unavailable at runtime, and App.qml then cannot be
@@ -102,6 +101,9 @@ awk '
 # screen saying which icon put it there.
 grep -q 'windowOpen' BarWidget.qml \
   || fail "the bar icon must show an active style while the window is open"
+grep -q 'KeyboardPanel {' BarWidget.qml \
+  || fail "the bar icon must open a mail and calendar preview"
+[ -f bar/BarPreview.qml ] || fail "the bar preview view is missing"
 # As a selected fill, the way every other selected control here is drawn. The
 # bar's own `active` recolours the glyph from the theme's `bar.active`, which
 # falls back to `urgent` — a warning colour for a window simply being open.
@@ -144,13 +146,148 @@ if grep -rn '^\s*focus: true\s*$' components/ComposeView.qml; then
   fail "ComposeView must not hold the focus unconditionally"
 fi
 
+grep -q 'Qt.rgba(popupBackgroundColor.r, popupBackgroundColor.g, popupBackgroundColor.b, 1)' \
+  components/RecipientSuggestions.qml \
+  || fail "recipient suggestions must obscure the compose form behind them"
+grep -q 'z: root.toSuggestions.length > 0 ? 100 : 0' components/ComposeView.qml \
+  || fail "recipient suggestions must stack above later compose rows"
+grep -q 'NumberField {' components/SettingsPage.qml \
+  || fail "the in-app settings page must expose numeric settings"
+grep -q 'setUndoSendSeconds' components/SettingsPage.qml \
+  || fail "the in-app settings page must save the undo window"
+
 # The IMAP server disclosure always reserves an icon slot. Both names selected
 # by its state must have a drawing, or the slot is blank in one or both states.
-for icon in chevronRight chevronDown; do
+for icon in chevronLeft chevronRight chevronDown mail; do
   if ! grep -q "root.name === \"$icon\"" components/ActionIcon.qml; then
-    fail "ActionIcon does not draw ImapSetupPage's $icon icon"
+    fail "ActionIcon does not draw the $icon icon"
   fi
 done
+grep -q 'text: "Week"' components/CalendarView.qml \
+  || fail "the calendar needs a week-view control"
+python3 - <<'PY'
+from pathlib import Path
+text = Path("components/CalendarView.qml").read_text()
+if text.index('text: "Week"') > text.index('text: "Month"'):
+    raise SystemExit("test_source.sh: Week must appear before Month in the view switcher")
+if 'text: "Go to today"' not in text:
+    raise SystemExit("test_source.sh: Today must read as a navigation action")
+today = text.index('text: "Go to today"')
+right = text.index('anchors.right: parent.right')
+if today > right:
+    raise SystemExit("test_source.sh: Go to today must sit with the date on the left")
+today_block = text[today:text.index('}', today)]
+if 'bordered: false' not in today_block:
+    raise SystemExit("test_source.sh: Go to today must be a text-only action")
+if 'iconName: "refresh"' in text:
+    raise SystemExit("test_source.sh: calendar refresh belongs in the window header")
+PY
+grep -q 'text: "Create event\.\.\."' App.qml \
+  || fail "calendar mode needs a Create event... header action"
+[ -f components/CalendarSidebar.qml ] \
+  || fail "the calendar sidebar is missing"
+grep -q 'function setSourceEnabled' calendar/CalendarController.qml \
+  || fail "calendar visibility must persist through the controller"
+grep -q 'function setSourceColor' calendar/CalendarController.qml \
+  || fail "calendar colors must persist through the controller"
+grep -q 'property bool sourcesLoaded' calendar/CalendarController.qml \
+  || fail "calendar refresh must wait for the saved source list"
+grep -q 'if (firstLoad && root.rangeStart && root.rangeEnd)' calendar/CalendarController.qml \
+  || fail "calendar events must load automatically after startup source discovery"
+grep -q 'function onSourcesLoadedChanged' components/CalendarView.qml \
+  || fail "the calendar view must refresh when its saved sources become ready"
+grep -q 'property double pendingRangeStart' calendar/CalendarController.qml \
+  || fail "a calendar range change during loading must be queued"
+grep -q 'root.refresh(nextStart, nextEnd)' calendar/CalendarController.qml \
+  || fail "the queued calendar range must run after the active refresh"
+grep -q 'CalendarPalette {' components/CalendarSidebar.qml \
+  || fail "calendar color choices must come from the active theme palette"
+grep -q 'Popup {' components/CalendarSidebar.qml \
+  || fail "a calendar color circle must open a compact picker popup"
+grep -q 'allDayEventsOnDay' components/WeekCalendarView.qml \
+  || fail "all-day events must have a pinned week-view lane"
+grep -q 'signal createAt' components/WeekCalendarView.qml \
+  || fail "empty week slots must start event creation"
+grep -q 'function beginAt' components/CalendarEventComposer.qml \
+  || fail "event creation must accept a preselected time"
+grep -q 'groupByAccount' components/CalendarSidebar.qml \
+  || fail "calendar rows must be grouped under their accounts"
+grep -q 'property bool collapsed' components/CalendarSidebar.qml \
+  || fail "the calendar sidebar needs a collapsed rail state"
+grep -q 'name: "calendar"' components/CalendarSidebar.qml \
+  || fail "the collapsed calendar rail needs a calendar icon"
+grep -q 'entryColor: calendarPalette.colorFor(modelData.colorKey)' components/CalendarSidebar.qml \
+  || fail "calendar visibility controls must use the assigned calendar color"
+grep -q 'property bool sidebarCollapsed' components/CalendarView.qml \
+  || fail "calendar sidebar toggling must collapse to a rail instead of hiding it"
+python3 - <<'PY'
+from pathlib import Path
+
+app = Path("App.qml").read_text()
+for component_id in ("sidebar", "listColumn", "reader"):
+    marker = f"id: {component_id}"
+    start = app.index(marker)
+    end = app.find("\n        }", start)
+    block = app[start:end]
+    if "!root.calendarVisible" not in block:
+        raise SystemExit(
+            f"test_source.sh: {component_id} must be inactive behind the calendar view"
+        )
+PY
+[ -f components/CalendarEventDetail.qml ] \
+  || fail "calendar events need an in-app overview page"
+grep -q 'CalendarEventDetail {' components/CalendarView.qml \
+  || fail "calendar event activation must open the native overview"
+
+if grep -q 'Open Omamail' bar/BarPreview.qml; then
+  fail "the bar preview must not contain a redundant Open Omamail button"
+fi
+grep -q 'messages: host ? host.previewMessages : \[\]' Service.qml \
+  || fail "the bar preview must use each account's unread preview feed"
+grep -q 'id: barCalendar' Service.qml \
+  || fail "the bar preview needs an independent upcoming-event range"
+grep -q 'root.gmail.refreshCalendarPreview()' BarWidget.qml \
+  || fail "opening the bar preview must refresh its upcoming events"
+grep -q 'width: parent ? parent.width : 0' BarWidget.qml \
+  || fail "bar preview rows must stay inside the panel's padded content area"
+grep -q '"MMM d · ddd HH:mm"' bar/BarPreview.qml \
+  || fail "upcoming events must show a calendar date as well as a weekday"
+if awk '
+  /function activateEvent\(event\)/ { in_function = 1 }
+  in_function && /Qt\.openUrlExternally/ { found = 1 }
+  in_function && /^  }/ { exit found ? 0 : 1 }
+  END { exit found ? 0 : 1 }
+' components/CalendarView.qml; then
+  fail "activating a calendar event must not jump to its provider"
+fi
+grep -q 'calendarView.detailOpen' App.qml \
+  || fail "Escape must close the native calendar event overview first"
+if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml; then
+  fail "event creation must use the central Escape route, not an ambiguous duplicate"
+fi
+grep -q 'text: "Make recurring"' components/CalendarEventComposer.qml \
+  || fail "event creation needs an optional recurrence section"
+grep -q 'text: "Add a calendar"' components/CalendarSettings.qml \
+  || fail "settings must let a user add a calendar"
+grep -q 'placeholderText: "Calendar name"' components/CalendarSettings.qml \
+  || fail "calendar setup needs a name field"
+grep -q 'placeholderText: "CalDAV URL"' components/CalendarSettings.qml \
+  || fail "calendar setup needs a CalDAV URL field"
+grep -q 'placeholderText: "Username"' components/CalendarSettings.qml \
+  || fail "calendar setup needs a username field"
+grep -q 'placeholderText: "Password or app password"' components/CalendarSettings.qml \
+  || fail "calendar setup needs its own password field"
+grep -q 'text: "Set password"' components/CalendarSettings.qml \
+  || fail "existing CalDAV calendars need a password action"
+grep -q 'credentials.json|accounts.json|window.json|calendars.json' scripts/config-store.sh \
+  || fail "the config writer must accept calendar source records"
+if grep -q 'Five Nextcloud calendars\|imported from Thunderbird\|Nextcloud password' components/CalendarSettings.qml; then
+  fail "calendar settings must not describe one user's imported setup"
+fi
+[ -f components/WeekCalendarView.qml ] \
+  || fail "the calendar week view is missing"
+grep -q 'id: dayHeaders' components/WeekCalendarView.qml \
+  || fail "the week view must label each day"
 
 # Row fills reach the list/reader divider; content padding belongs inside a
 # row, not in a gutter that cuts every selected background short.

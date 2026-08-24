@@ -7,13 +7,13 @@ import qs.Ui
 //
 // The fold is an M, not the V of a generic mail glyph — that is the whole
 // difference between this application's mark and every other envelope in the
-// bar. Monochrome here: the bar paints its own foreground, and a brand colour
-// in a row of themed glyphs reads as a rendering fault rather than as identity.
+// bar. The frame follows the bar foreground. The M follows the theme accent.
 Item {
   id: root
 
   property real iconSize: Style.font.icon
   property color color: Color.foreground
+  property color markColor: color
   property color badgeColor: Color.urgent
   // A dot, not a count: the bar says "something arrived", the tooltip says
   // how much, and the window says what.
@@ -26,6 +26,7 @@ Item {
   implicitHeight: iconSize
 
   onColorChanged: envelope.requestPaint()
+  onMarkColorChanged: envelope.requestPaint()
   onIconSizeChanged: envelope.requestPaint()
 
   Canvas {
@@ -67,6 +68,7 @@ Item {
       // shapes readable.
       var innerW = right - left
       var innerH = bottom - top
+      ctx.strokeStyle = root.markColor
       ctx.lineWidth = Math.max(1, stroke * 0.54)
       ctx.beginPath()
       ctx.moveTo(left + innerW * 0.30, bottom - innerH * 0.18)

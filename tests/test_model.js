@@ -101,6 +101,9 @@ deepEqual(model.replaceById(list, { id: "b", unread: true }).map(entry => entry.
 assert.strictEqual(model.indexById(list, "c"), 2)
 assert.strictEqual(model.indexById(list, "zzz"), -1)
 assert.strictEqual(model.indexById(null, "a"), -1)
+assert.strictEqual(model.messageById(list, [{ id: "preview" }], "preview").id, "preview")
+assert.strictEqual(model.messageById(list, [{ id: "preview" }], "a").id, "a")
+assert.strictEqual(model.messageById(list, [{ id: "preview" }], "missing"), null)
 assert.strictEqual(model.unreadCount(list), 2)
 assert.strictEqual(model.unreadCount([]), 0)
 
