@@ -270,8 +270,8 @@ if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
     raise SystemExit("test_source.sh: App must pass the system Today background token")
 if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
     raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
-if "readonly property color calendarTodayBackground: Style.selectionFill" not in app:
-    raise SystemExit("test_source.sh: Today must use the visible system selection token")
+if "readonly property color calendarTodayBackground: Style.selectedAccentFill" not in app:
+    raise SystemExit("test_source.sh: Today must use the quieter system accent fill token")
 if "calendarBorderWidth: root.calendarBorderWidth" not in app:
     raise SystemExit("test_source.sh: App must pass the system calendar border width")
 if "border.color: root.calendarBorderColor" not in calendar or "border.width: root.calendarBorderWidth" not in calendar:

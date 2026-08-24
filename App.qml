@@ -40,7 +40,7 @@ Item {
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
   readonly property color calendarBorder: Style.normalBorderColor
-  readonly property color calendarTodayBackground: Style.selectionFill
+  readonly property color calendarTodayBackground: Style.selectedAccentFill
   readonly property int calendarBorderWidth: Style.normalBorderWidth
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
