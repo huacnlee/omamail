@@ -213,6 +213,10 @@ sidebar = Path("components/MailboxSidebar.qml").read_text()
 footer = sidebar[sidebar.index("id: footer"):sidebar.index("component Entry:")]
 if 'label: "Calendar"' not in footer or "calendarRequested" not in footer:
     raise SystemExit("test_source.sh: Calendar must be fixed above the sidebar account row")
+calendar = footer.index('label: "Calendar"')
+separator = footer.index("PanelSeparator", calendar)
+if "Style.space(6)" not in footer[calendar:separator]:
+    raise SystemExit("test_source.sh: Calendar must keep a gap above the account separator")
 
 app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]

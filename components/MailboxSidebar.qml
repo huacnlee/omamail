@@ -158,6 +158,11 @@ Item {
       onActivated: root.calendarRequested()
     }
 
+    Item {
+      width: parent.width
+      height: Style.space(6)
+    }
+
     PanelSeparator {
       width: parent.width
       foreground: root.textColor
