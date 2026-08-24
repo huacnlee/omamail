@@ -20,9 +20,11 @@ Item {
   required property color dimColor
   required property string panelFontFamily
   property bool collapsed: false
+  property bool calendarSelected: false
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
+  signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -87,7 +89,8 @@ Item {
           // is waiting; the labels below still count, because those are lists
           // the user built and their sizes mean something.
           count: 0
-          selected: !!root.service && root.service.mailboxKey === modelData.key
+          selected: !root.calendarSelected && !!root.service
+            && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
           slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
           onActivated: root.mailboxSelected(modelData.key)
@@ -128,7 +131,7 @@ Item {
           icon: "label"
           slotNumber: Model.slotNumberOf(root.slots, "label", modelData.id)
           count: modelData.unread
-          selected: !!root.service && root.service.rawQuery !== ""
+          selected: !root.calendarSelected && !!root.service && root.service.rawQuery !== ""
             && root.service.rawQuery
               === Provider.labelQuery(root.service.providerId, modelData.rawName)
           onActivated: root.labelSelected(modelData.id, modelData.rawName)
@@ -146,6 +149,19 @@ Item {
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.bottom: parent.bottom
+
+    Entry {
+      x: Style.space(6)
+      label: "Calendar"
+      icon: "calendar"
+      selected: root.calendarSelected
+      onActivated: root.calendarRequested()
+    }
+
+    Item {
+      width: parent.width
+      height: Style.space(6)
+    }
 
     PanelSeparator {
       width: parent.width

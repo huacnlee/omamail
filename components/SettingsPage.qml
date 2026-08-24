@@ -14,6 +14,7 @@ Column {
   id: root
 
   required property var service
+  required property var calendarController
   required property color textColor
   required property color dimColor
   required property color accentColor
@@ -101,6 +102,70 @@ Column {
       foreground: root.textColor
       accent: root.accentColor
       onToggled: if (root.service) root.service.setAlwaysShowImages(!root.service.alwaysShowImages)
+    }
+  }
+
+  // --------------------------------------------------------------- writing
+
+  Text {
+    text: "WRITING"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(undoText.implicitHeight, undoSeconds.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: undoText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: undoSeconds.left
+      anchors.rightMargin: Style.space(16)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Undo send window"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Omamail waits before delivery. Press Ctrl+Z or select Undo to cancel. Set 0 to send now."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    NumberField {
+      id: undoSeconds
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      label: "Seconds"
+      from: 0
+      to: 60
+      stepSize: 1
+      value: root.service ? root.service.undoSendSeconds : 10
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      fontSize: Style.font.bodySmall
+      onModified: function(next) {
+        if (root.service) root.service.setUndoSendSeconds(next)
+      }
     }
   }
 
@@ -206,6 +271,21 @@ Column {
     foreground: root.textColor
   }
 
+  CalendarSettings {
+    width: parent.width
+    controller: root.calendarController
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    urgentColor: root.urgentColor
+    panelFontFamily: root.panelFontFamily
+  }
+
+  PanelSeparator {
+    width: parent.width
+    foreground: root.textColor
+  }
+
   // ---------------------------------------------------------- oauth client
 
   Text {
@@ -231,7 +311,7 @@ Column {
       Text {
         width: parent.width
         text: root.auth && root.auth.credentialsPresent
-          ? root.auth.clientDescription : "No client yet"
+          ? String(root.auth.clientDescription || "Google OAuth client") : "No client yet"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall

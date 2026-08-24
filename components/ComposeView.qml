@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../message/Message.js" as Mail
+import "../compose/Recipients.js" as Recipients
 
 // Composing takes over the whole content area of the one window rather than
 // opening a second one: Omarchy's panel mechanism would give an extra window
@@ -29,8 +30,11 @@ Item {
   readonly property int formInset: Style.space(18)
   readonly property int formLabelWidth: Style.space(52)
   readonly property int formLabelGap: Style.space(10)
+  readonly property bool deliveryLocked: !!root.service
+    && (root.service.sendPending || root.service.sending)
 
   property bool opened: false
+  property bool parkedForSend: false
   property string mode: "new"
   property string threadId: ""
   property string inReplyTo: ""
@@ -38,6 +42,17 @@ Item {
   property string fromEmail: ""
   property var replyRecipients: []
   property bool fromWasChosen: false
+  property var toSuggestions: []
+  property var ccSuggestions: []
+  property var originalAttachments: []
+  property var forwardedAttachments: []
+  property bool forwardAttachmentsLoading: false
+  property string forwardAttachmentError: ""
+  property int forwardLoadSerial: 0
+
+  readonly property var contactBook: root.service
+    && Array.isArray(root.service.recipientContacts)
+    ? root.service.recipientContacts : []
 
   readonly property var fromAliases: {
     if (!root.service || !Array.isArray(root.service.sendAsAliases)) return []
@@ -52,6 +67,7 @@ Item {
   }
 
   function reset() {
+    forwardLoadSerial++
     fromMenu.close()
     toField.text = ""
     ccField.text = ""
@@ -64,6 +80,13 @@ Item {
     fromEmail = ""
     replyRecipients = []
     fromWasChosen = false
+    toSuggestions = []
+    ccSuggestions = []
+    originalAttachments = []
+    forwardedAttachments = []
+    forwardAttachmentsLoading = false
+    forwardAttachmentError = ""
+    parkedForSend = false
   }
 
   function selectPreferredFrom() {
@@ -105,7 +128,41 @@ Item {
     return kept.join(", ")
   }
 
-  function begin(nextMode, summary, bodyText) {
+  function updateRecipientSuggestions() {
+    toSuggestions = toField.activeFocus
+      ? Recipients.suggest(contactBook, toField.text, 5) : []
+    ccSuggestions = ccField.activeFocus
+      ? Recipients.suggest(contactBook, ccField.text, 5) : []
+  }
+
+  function acceptTo(contact) {
+    toField.text = Recipients.accept(toField.text, contact)
+    toSuggestions = []
+    toField.forceActiveFocus()
+  }
+
+  function acceptCc(contact) {
+    ccField.text = Recipients.accept(ccField.text, contact)
+    ccSuggestions = []
+    ccField.forceActiveFocus()
+  }
+
+  function loadForwardAttachments() {
+    if (!service || originalAttachments.length === 0) return
+    var serial = ++forwardLoadSerial
+    forwardAttachmentsLoading = true
+    forwardAttachmentError = ""
+    forwardedAttachments = []
+    service.loadAttachments(service.selectedId, originalAttachments,
+      function(loaded, error) {
+        if (serial !== root.forwardLoadSerial || !root.opened || root.mode !== "forward") return
+        root.forwardAttachmentsLoading = false
+        root.forwardAttachmentError = String(error || "")
+        root.forwardedAttachments = error ? [] : loaded
+      })
+  }
+
+  function begin(nextMode, summary, bodyText, attachments) {
     reset()
     mode = String(nextMode || "new")
     opened = true
@@ -125,6 +182,8 @@ Item {
 
       if (mode === "forward") {
         subjectField.text = "Fwd: " + summary.subject
+        originalAttachments = Array.isArray(attachments) ? attachments.slice() : []
+        if (originalAttachments.length > 0) loadForwardAttachments()
       } else {
         toField.text = replyTo
         subjectField.text = Mail.replySubject(summary.subject)
@@ -137,6 +196,7 @@ Item {
     }
 
     selectPreferredFrom()
+    if (root.service) root.service.refreshRecipientContacts()
 
     // Focus is not placed here. Opening this changes the window's key context,
     // and the context is what moves the keyboard — one mechanism, so the two
@@ -158,6 +218,7 @@ Item {
   // Escape, and the send that succeeded. The window is told because only the
   // window knows where the draft was raised from.
   signal closed()
+  signal sendQueued()
 
   function finish() {
     reset()
@@ -165,18 +226,39 @@ Item {
     closed()
   }
 
+  function parkForSend() {
+    opened = false
+    parkedForSend = true
+    sendQueued()
+  }
+
+  function resumePendingSend() {
+    if (!parkedForSend) return false
+    parkedForSend = false
+    opened = true
+    return true
+  }
+
+  function cancelOrFinish() {
+    if (root.service && root.service.sendPending) root.service.undoSend()
+    else finish()
+  }
+
   function submit() {
     if (!service) return
-    service.send(({
+    if (forwardAttachmentsLoading || forwardAttachmentError !== "") return
+    var accepted = service.send(({
       from: root.fromEmail,
       to: toField.text,
       cc: ccField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
+      attachments: root.mode === "forward" ? root.forwardedAttachments : [],
       // A forward starts a new conversation; a reply must stay in the old one.
       threadId: root.mode === "forward" ? "" : root.threadId,
       inReplyTo: root.mode === "forward" ? "" : root.inReplyTo
     }))
+    if (accepted === true || service.sendPending || service.sending) parkForSend()
   }
 
   anchors.fill: parent
@@ -190,6 +272,7 @@ Item {
   onFromAliasesChanged: {
     if (opened && !fromWasChosen) selectPreferredFrom()
   }
+  onContactBookChanged: updateRecipientSuggestions()
 
   // ----------------------------------------------------------- header
   //
@@ -211,7 +294,7 @@ Item {
       textColor: root.textColor
       dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
-      onActivated: root.finish()
+      onActivated: root.cancelOrFinish()
     }
 
     Row {
@@ -242,9 +325,14 @@ Item {
 
   Column {
     id: fields
+    objectName: "compose-fields"
     anchors.top: head.bottom
     anchors.left: parent.left
     anchors.right: parent.right
+    // Suggestions extend below this column into the message body. Raising only
+    // the row cannot cross the sibling boundary, so the body painted over the
+    // popup even though the popup itself had a high z value.
+    z: 10
 
     Item {
       width: parent.width
@@ -287,7 +375,7 @@ Item {
         verticalPadding: Style.spacing.inputPaddingY
         leftAlign: true
         selected: fromMenu.opened
-        enabled: root.fromAliases.length > 1
+        enabled: root.fromAliases.length > 1 && !root.deliveryLocked
         onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
 
         // The kit's own chevron is a font glyph, which at this size renders
@@ -313,6 +401,7 @@ Item {
 
     Item {
       width: parent.width
+      z: root.toSuggestions.length > 0 ? 100 : 0
       // The field plus the same breathing room it carries inside itself, so
       // its border is not crowded against the rules above and below. Derived
       // rather than a fixed height: the field grows with the theme's font
@@ -341,11 +430,13 @@ Item {
         foreground: root.ccVisible ? root.textColor : root.dimColor
         bordered: false
         fontSize: Style.font.caption
+        enabled: !root.deliveryLocked
         onClicked: root.ccVisible = !root.ccVisible
       }
 
       TextField {
         id: toField
+        objectName: "compose-to-field"
         anchors.left: toLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: ccToggle.left
@@ -356,7 +447,40 @@ Item {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "recipient@example.com"
-        onAccepted: subjectField.forceActiveFocus()
+        enabled: !root.deliveryLocked
+        onTextChanged: root.updateRecipientSuggestions()
+        onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.onPressed: function(event) {
+          if (root.toSuggestions.length === 0) return
+          if (event.key === Qt.Key_Down) {
+            toSuggestionsPopup.moveSelection(1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Up) {
+            toSuggestionsPopup.moveSelection(-1)
+            event.accepted = true
+          }
+        }
+        onAccepted: {
+          if (root.toSuggestions.length > 0) toSuggestionsPopup.acceptSelection()
+          else subjectField.forceActiveFocus()
+        }
+      }
+
+      RecipientSuggestions {
+        id: toSuggestionsPopup
+        objectName: "compose-to-suggestions"
+        x: toField.x
+        y: parent.height - Style.space(2)
+        width: toField.width
+        z: 60
+        contacts: root.toSuggestions
+        textColor: root.textColor
+        dimColor: root.dimColor
+        accentColor: root.accentColor
+        popupBackgroundColor: root.popupBackgroundColor
+        popupBorderColor: root.popupBorderColor
+        panelFontFamily: root.panelFontFamily
+        onChosen: function(contact) { root.acceptTo(contact) }
       }
 
       PanelSeparator {
@@ -369,6 +493,7 @@ Item {
     Item {
       visible: root.ccVisible
       width: parent.width
+      z: root.ccSuggestions.length > 0 ? 100 : 0
       // The field plus the same breathing room it carries inside itself, so
       // its border is not crowded against the rules above and below. Derived
       // rather than a fixed height: the field grows with the theme's font
@@ -399,7 +524,39 @@ Item {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        onAccepted: subjectField.forceActiveFocus()
+        enabled: !root.deliveryLocked
+        onTextChanged: root.updateRecipientSuggestions()
+        onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.onPressed: function(event) {
+          if (root.ccSuggestions.length === 0) return
+          if (event.key === Qt.Key_Down) {
+            ccSuggestionsPopup.moveSelection(1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Up) {
+            ccSuggestionsPopup.moveSelection(-1)
+            event.accepted = true
+          }
+        }
+        onAccepted: {
+          if (root.ccSuggestions.length > 0) ccSuggestionsPopup.acceptSelection()
+          else subjectField.forceActiveFocus()
+        }
+      }
+
+      RecipientSuggestions {
+        id: ccSuggestionsPopup
+        x: ccField.x
+        y: parent.height - Style.space(2)
+        width: ccField.width
+        z: 60
+        contacts: root.ccSuggestions
+        textColor: root.textColor
+        dimColor: root.dimColor
+        accentColor: root.accentColor
+        popupBackgroundColor: root.popupBackgroundColor
+        popupBorderColor: root.popupBorderColor
+        panelFontFamily: root.panelFontFamily
+        onChosen: function(contact) { root.acceptCc(contact) }
       }
 
       PanelSeparator {
@@ -432,6 +589,7 @@ Item {
 
       TextField {
         id: subjectField
+        objectName: "compose-subject-field"
         anchors.left: subjectLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -442,7 +600,90 @@ Item {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
+        enabled: !root.deliveryLocked
+        KeyNavigation.tab: bodyEdit
         onAccepted: bodyEdit.forceActiveFocus()
+      }
+
+      PanelSeparator {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        foreground: root.textColor
+      }
+    }
+
+    Item {
+      visible: root.mode === "forward" && root.originalAttachments.length > 0
+      width: parent.width
+      implicitHeight: attachmentSummary.implicitHeight + Style.space(14)
+
+      Text {
+        id: attachmentLabel
+        anchors.left: parent.left
+        anchors.leftMargin: root.formInset
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(9)
+        width: root.formLabelWidth
+        horizontalAlignment: Text.AlignRight
+        text: "Files"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Column {
+        id: attachmentSummary
+        anchors.left: attachmentLabel.right
+        anchors.leftMargin: root.formLabelGap
+        anchors.right: retryAttachments.left
+        anchors.rightMargin: Style.space(8)
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(7)
+        spacing: Style.space(3)
+
+        Text {
+          width: parent.width
+          text: root.forwardAttachmentsLoading
+            ? "Loading original attachments..."
+            : (root.forwardAttachmentError !== ""
+              ? root.forwardAttachmentError
+              : Mail.formatCount(root.forwardedAttachments.length, "original attachment")
+                + " will be forwarded")
+          textFormat: Text.PlainText
+          color: root.forwardAttachmentError !== "" ? root.accentColor : root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
+
+        Repeater {
+          model: root.originalAttachments
+          Text {
+            required property var modelData
+            width: attachmentSummary.width
+            textFormat: Text.PlainText
+            text: String(modelData.filename || "attachment") + "  "
+              + Mail.formatSize(modelData.size)
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideMiddle
+          }
+        }
+      }
+
+      Button {
+        id: retryAttachments
+        visible: root.forwardAttachmentError !== ""
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(18)
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(6)
+        text: "Retry"
+        foreground: root.textColor
+        bordered: false
+        fontSize: Style.font.caption
+        onClicked: root.loadForwardAttachments()
       }
 
       PanelSeparator {
@@ -466,7 +707,8 @@ Item {
     onOpened: root.placeFromMenu()
     background: Rectangle {
       radius: Style.cornerRadius
-      color: root.popupBackgroundColor
+      color: Qt.rgba(root.popupBackgroundColor.r, root.popupBackgroundColor.g,
+        root.popupBackgroundColor.b, 1)
       border.width: 1
       border.color: root.popupBorderColor
     }
@@ -533,6 +775,7 @@ Item {
   // window ground; the rows above already carry the structure.
   Flickable {
     id: bodyFlick
+    objectName: "compose-body"
     anchors.top: fields.bottom
     anchors.left: parent.left
     anchors.right: parent.right
@@ -548,6 +791,8 @@ Item {
 
     TextEdit {
       id: bodyEdit
+      objectName: "compose-body-editor"
+      activeFocusOnTab: true
       width: bodyFlick.width
       // Tall enough to fill the visible area even when the draft is short.
       // A TextEdit sized to its text leaves the space below it belonging to
@@ -562,6 +807,7 @@ Item {
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
+      enabled: !root.deliveryLocked
     }
   }
 
@@ -587,13 +833,21 @@ Item {
       spacing: Style.space(10)
 
       IconTextButton {
-        iconName: "send"
-        tooltipText: "Send · Ctrl+Enter"
-        text: root.service && root.service.sending ? "Sending" : "Send"
+        iconName: root.service && root.service.sendPending ? "undo" : "send"
+        tooltipText: root.service && root.service.sendPending
+          ? "Undo send · Ctrl+Z" : "Send · Ctrl+Enter"
+        text: root.service && root.service.sendPending
+          ? "Undo send (" + root.service.sendSecondsRemaining + "s)"
+          : (root.service && root.service.sending ? "Sending" : "Send")
         foreground: root.textColor
         fontFamily: root.panelFontFamily
         enabled: !!root.service && !root.service.sending
-        onClicked: root.submit()
+          && (root.service.sendPending || (!root.forwardAttachmentsLoading
+            && root.forwardAttachmentError === ""))
+        onClicked: {
+          if (root.service.sendPending) root.service.undoSend()
+          else root.submit()
+        }
       }
 
       Button {
@@ -601,6 +855,7 @@ Item {
         foreground: root.dimColor
         bordered: false
         fontSize: Style.font.bodySmall
+        enabled: !root.deliveryLocked
         onClicked: root.finish()
       }
     }

@@ -549,6 +549,19 @@ const bare = html.documentFor("x")
 assert.ok(bare.indexOf("undefined") < 0)
 assert.ok(bare.indexOf("x</body>") > 0)
 
+// QTextDocument ignores max-width on ordinary containers. The QML reader uses
+// the sender's outer content width instead, so a 600px message does not stretch
+// across a wide monitor.
+{
+  const card = html.sanitize("<html><body><div style=\"max-width:600px\">"
+    + "<div style=\"max-width:520px\"><p>copy</p></div></div></body></html>")
+  assert.strictEqual(html.preferredContentWidth(card.document, 1800), 600)
+  assert.strictEqual(html.preferredContentWidth(card.document, 480), 480,
+    "the message still fits a narrow reader")
+  assert.strictEqual(html.preferredContentWidth("<p>copy</p>", 1800), 1800,
+    "unconstrained mail keeps the available width")
+}
+
 
 // ------------------------------------------------- plain text with images
 //
@@ -604,6 +617,21 @@ assert.ok(bare.indexOf("x</body>") > 0)
 // honoured in pixels but a percentage collapses the image, and an explicit
 // height survives the clamp and smears the picture.
 {
+  var cssSizedLogo = html.sanitize(
+    '<img src="https://cdn.example.com/logo.png" style="height:34px;padding:3px">',
+    { allowRemoteImages: true })
+  var logoDoc = html.documentFor(cssSizedLogo.document, { maxImageWidth: 1200 })
+  assert.ok(logoDoc.indexOf('height="34"') > 0,
+    "a CSS-only logo height becomes the HTML attribute Qt supports")
+
+  var logoRow = html.sanitize('<div style="line-height:0;font-size:0">'
+    + '<img src="https://cdn.example.com/logo.png" style="height:34px"></div>'
+    + '<p>Title below</p>', { allowRemoteImages: true }).html
+  assert.ok(logoRow.indexOf("line-height:0") < 0,
+    "an image row keeps enough line height to separate the next block")
+  assert.ok(logoRow.indexOf("font-size:0") < 0,
+    "zero-size image-row text cannot collapse the row")
+
   var img = html.stripImageHeights(
     '<img src=a.png width="1600" height="400" style="width:1600px;height:400px;max-height:9px">')
   assert.ok(img.indexOf('height="400"') < 0, "the height attribute goes")
@@ -647,7 +675,9 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(html.documentFor(fitted, { maxImageWidth: 800 }).indexOf('width="600"') > 0,
     "and one that fits is the sender's own")
   assert.ok(html.documentFor(fitted, { maxImageWidth: 380 }).indexOf('height="200"') < 0,
-    "heights come out at every width")
+    "a clamped image gives up the height that would smear it")
+  assert.ok(html.documentFor(fitted, { maxImageWidth: 800 }).indexOf('height="200"') > 0,
+    "an image that already fits keeps its intended height")
 
   // The document itself is accepted in place of the string written from it, and
   // has to fit to exactly the same thing.
@@ -672,6 +702,24 @@ assert.ok(bare.indexOf("x</body>") > 0)
   assert.ok(relaxed.indexOf('width="600"') < 0, "a table wider than the window gives it up")
   assert.ok(relaxed.indexOf('width="100"') > 0, "one that fits is left alone")
   assert.ok(relaxed.indexOf("width:640px") < 0, "declared widths too")
+
+  // Some mail templates use a 1%-wide cell plus nowrap to mean "take only
+  // what the label needs". Qt does not implement that intrinsic sizing. Once
+  // nowrap is removed, the percentage squeezes each word into one character
+  // per line. The Semrush status labels exposed this combination.
+  var intrinsic = html.relaxFixedWidths(
+    '<table width="100%"><tr><td>page</td><td width="1%" '
+      + 'style="white-space:nowrap;width:1%;min-width:165px">Good → To improve</td></tr></table>',
+    640)
+  assert.ok(intrinsic.indexOf('width="1%"') < 0, "a tiny cell is allowed to size to its label")
+  assert.ok(intrinsic.indexOf("width:1%") < 0, "the matching style is removed too")
+  assert.ok(intrinsic.indexOf('width="100%"') > 0, "the table still fills its container")
+
+  var intrinsicTable = html.relaxFixedWidths(
+    '<table width="1%" style="width:1%"><tr><td width="1%" '
+      + 'style="white-space:nowrap;width:1%">Healthy</td><td>3</td></tr></table>', 640)
+  assert.ok(intrinsicTable.indexOf('width="1%"') < 0,
+    "the intrinsic table around the labels is not squeezed either")
 }
 
 

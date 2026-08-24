@@ -48,6 +48,7 @@ Item {
       anchors.horizontalCenter: parent.horizontalCenter
       name: "gmail"
       brand: true
+      markColor: root.accentColor
       iconSize: Style.space(44)
       strokeScale: 1.0
       color: Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, 0.5)
@@ -137,7 +138,7 @@ Item {
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: "Ctrl+? for every shortcut"
+        text: "Ctrl+K for every shortcut"
         color: root.dimmerColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

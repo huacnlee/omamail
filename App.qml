@@ -9,6 +9,7 @@ import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
 import "keys/Keymap.js" as Keymap
 import "components"
+import "calendar"
 
 // The application window. The shell loads this entry point when the plugin is
 // summoned and calls open()/close() on it; the FloatingWindow follows.
@@ -38,6 +39,9 @@ Item {
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
+  readonly property color calendarBorder: Style.normalBorderColor
+  readonly property color calendarTodayBackground: Style.selectedAccentFill
+  readonly property int calendarBorderWidth: Style.normalBorderWidth
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
@@ -58,6 +62,19 @@ Item {
 
   readonly property string fontFamily: Style.font.family
 
+  function copyText(text) {
+    clipboardProxy.text = String(text || "")
+    clipboardProxy.selectAll()
+    clipboardProxy.copy()
+    clipboardProxy.deselect()
+  }
+
+  TextEdit {
+    id: clipboardProxy
+    visible: false
+    readOnly: true
+  }
+
   // Two breakpoints, not a continuum: three columns, list-plus-reader with the
   // sidebar collapsed to a strip, and a single column that swaps list for
   // reader.
@@ -65,6 +82,7 @@ Item {
   readonly property bool compact: window.width < Style.space(760)
 
   property string currentView: "list"
+  readonly property bool calendarVisible: currentView === "calendar"
   property string cursorId: ""
   // Kept across messages, and across the window being closed: somebody who
   // wants plain text wants it for their mail, not for one message. The service
@@ -116,6 +134,12 @@ Item {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
 
+  function openSettings() {
+    shortcutHelpVisible = false
+    setupVisible = false
+    settingsVisible = true
+  }
+
   readonly property bool ready: !!service && service.ready
   // The walkthrough is for having no mailbox at all. A mailbox that has been
   // added but not signed in yet belongs in settings, next to the ones that are.
@@ -130,7 +154,7 @@ Item {
   readonly property bool showSettings: settingsVisible && !showSetup
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSetup || showSettings
-  readonly property bool composing: compose.opened
+  readonly property bool composing: compose.opened || eventComposer.opened
 
   function open(payloadJson) {
     var payload = ({})
@@ -139,6 +163,16 @@ Item {
     opened = true
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
+    if (payload.accountId && service) service.switchTo(String(payload.accountId))
+    if (payload.messageId) Qt.callLater(function() {
+      root.openMessage(String(payload.messageId))
+    })
+    if (payload.view === "calendar") {
+      currentView = "calendar"
+      Qt.callLater(function() {
+        calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
+      })
+    }
     if (payload.compose === true) {
       composeReturnView = currentView
       startCompose("new")
@@ -220,14 +254,15 @@ Item {
   property string composeReturnView: ""
 
   function startCompose(mode) {
-    if (!service) return
+    if (!service || service.sendPending || service.sending) return
     var next = String(mode || "new")
     if (next !== "new" && !service.selectedMessage) {
       pendingComposeMode = next
       return
     }
     pendingComposeMode = ""
-    compose.begin(next, service.selectedMessage, service.selectedBody.text)
+    compose.begin(next, service.selectedMessage, service.selectedBody.text,
+      service.selectedAttachments)
   }
 
   function resumeHeldCompose() {
@@ -253,6 +288,12 @@ Item {
     var from = composeReturnView
     composeReturnView = ""
     if (from === "list" && currentView === "reader") backToList()
+  }
+
+  function undoPendingSend() {
+    if (!service || !service.undoSend()) return false
+    compose.resumePendingSend()
+    return true
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -331,17 +372,50 @@ Item {
       composeReturnView = currentView
       return startCompose("new")
     }
+    if (id === "createEvent") return eventComposer.begin()
+    if (id === "calendarNext") return calendarView.moveSelection(1)
+    if (id === "calendarPrevious") return calendarView.moveSelection(-1)
+    if (id === "openCalendarEvent") return calendarView.activateSelection()
+    if (id === "calendarPreviousPeriod") return calendarView.movePeriod(-1)
+    if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
+    if (id === "calendarToday") return calendarView.goToday()
+    if (id === "calendarWeek") return calendarView.setView("week")
+    if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
+    if (id === "undoSend") { undoPendingSend(); return }
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
+    if (id === "goAccount") {
+      var accountIndex = Keymap.slotFor(id, sequence)
+      if (service && accountIndex >= 0 && accountIndex < service.accountCount)
+        root.switchAccount(accountIndex)
+      return
+    }
     if (id === "switchAccount") return accountSwitcher.openCentered()
+    if (id === "calendar") {
+      if (calendarVisible) backToList()
+      else {
+        currentView = "calendar"
+        calendarView.refresh()
+      }
+      return
+    }
+    if (id === "mailView") return backToList()
+    if (id === "calendarView") {
+      currentView = "calendar"
+      calendarView.refresh()
+      return
+    }
+    if (id === "toggleSidebar") return toggleSidebar()
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { if (service) service.setBodyZoom(1.0); return }
     if (id === "refresh") {
-      if (service) service.refresh()
+      if (calendarVisible) calendarView.refresh()
+      else if (service) service.refresh()
       return
     }
+    if (id === "settings") return openSettings()
     if (id === "help") {
       shortcutHelpVisible = !shortcutHelpVisible
       return
@@ -366,10 +440,12 @@ Item {
       if (searchBar.queryText !== "") searchBar.clear()
       focusScope.parkKeyboard()
     }
-    else if (composing) compose.finish()
-    else if (currentView === "reader") backToList()
+    else if (eventComposer.opened) eventComposer.close()
+    else if (compose.opened) compose.finish()
     else if (setupVisible) setupVisible = false
     else if (settingsVisible) settingsVisible = false
+    else if (currentView === "calendar" && calendarView.detailOpen) calendarView.closeDetail()
+    else if (currentView === "reader" || currentView === "calendar") backToList()
     else if (service && service.searchQuery !== "") service.search("")
     else requestClose()
   }
@@ -509,12 +585,27 @@ Item {
     }
   }
 
+  function switchAccount(index) {
+    if (!service) return false
+    var keepCalendar = calendarVisible
+    var mailbox = service.mailboxKey
+    if (service.switchToIndex(index) !== true) return false
+    if (keepCalendar) {
+      currentView = "calendar"
+      return true
+    }
+    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
+    if (target !== "") service.selectMailbox(target)
+    backToList()
+    return true
+  }
+
   function editAccount(index) {
     if (!service) return
     var accounts = service.accountSummaries || []
     editingProvider = index >= 0 && index < accounts.length
       ? String(accounts[index].provider || "gmail") : "gmail"
-    service.switchToIndex(index)
+    if (!service.switchToIndex(index)) return
     providerChosen = true
     pickingProvider = false
     settingsVisible = false
@@ -568,33 +659,35 @@ Item {
       // Where the window is, and the only thing that says what a key means.
       // A page is a form before it is anything else, a draft beats reading, a
       // query being typed beats the list underneath it.
-      // Holding Alt names every row on the rail, so the digits are read rather
+      // Holding Ctrl names every row on the rail, so the digits are read rather
       // than remembered. A `Keys` handler, which bindings may not use — but a
       // modifier on its own cannot be a `Shortcut`, so there is no binding to
       // route and nothing for `KeyRouter` to own. It accepts nothing: whatever
-      // follows Alt still goes exactly where it went before.
+      // follows Ctrl still goes exactly where it went before.
       //
-      // `activeFocus` is what clears it. Alt+Tab leaves the window with Alt
-      // down and the release lands somewhere else, so waiting for a release
+      // `activeFocus` is what clears it. Ctrl+Tab can leave the window with Ctrl
+      // down and the release can land somewhere else, so waiting for a release
       // that is never coming would paint the numbers on permanently.
-      property bool altDown: false
-      readonly property bool altHeld: altDown && activeFocus
+      property bool ctrlDown: false
+      readonly property bool ctrlHeld: ctrlDown && activeFocus
         && (keyContext === "list" || keyContext === "reader")
 
       Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Alt) focusScope.altDown = true
+        if (event.key === Qt.Key_Control) focusScope.ctrlDown = true
       }
       Keys.onReleased: function(event) {
-        if (event.key === Qt.Key_Alt) focusScope.altDown = false
+        if (event.key === Qt.Key_Control) focusScope.ctrlDown = false
       }
-      onActiveFocusChanged: if (!activeFocus) altDown = false
+      onActiveFocusChanged: if (!activeFocus) ctrlDown = false
 
-      readonly property string keyContext:
-          root.showPage  ? "page"
-        : root.composing ? "compose"
-        : searchBar.fieldFocused ? "search"
-        : root.currentView === "reader" ? "reader"
-        : "list"
+      readonly property string keyContext: Keymap.contextFor(({
+        showPage: root.showPage,
+        composing: root.composing,
+        searchFocused: searchBar.fieldFocused,
+        calendarVisible: root.calendarVisible,
+        currentView: root.currentView,
+        sendPending: !!root.service && root.service.sendPending
+      }))
 
       // The context owns the keyboard. Changing it moves the focus to whatever
       // that context types into, or parks it when the context types into
@@ -606,7 +699,10 @@ Item {
       // and there is nothing to keep in step.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function applyContextFocus() {
-        if (keyContext === "compose") compose.takeFocus()
+        if (keyContext === "compose") {
+          if (eventComposer.opened) eventComposer.takeFocus()
+          else compose.takeFocus()
+        }
         else if (keyContext === "search") searchBar.focusField()
         else parkKeyboard()
       }
@@ -650,6 +746,7 @@ Item {
             name: "gmail"
             iconSize: Style.font.iconLarge
             color: root.foreground
+            markColor: root.accent
             brand: true
           }
 
@@ -708,7 +805,7 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && !root.composing
+            visible: !root.showPage && !root.composing && !root.calendarVisible
               && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
@@ -742,18 +839,39 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing
             iconName: "refresh"
-            tooltipText: root.service && root.service.listLoading
-              ? "Checking for mail" : "Check mail · F5"
+            tooltipText: root.calendarVisible
+              ? (root.service && root.service.calendarController.loading
+                ? "Loading calendars" : "Refresh calendars · F5")
+              : (root.service && root.service.listLoading
+                ? "Checking for mail" : "Check mail · F5")
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
-            enabled: root.ready && !(root.service && root.service.listLoading)
-            onClicked: if (root.service) root.service.refresh()
+            enabled: root.ready && (root.calendarVisible
+              ? !(root.service && root.service.calendarController.loading)
+              : !(root.service && root.service.listLoading))
+            onClicked: {
+              if (root.calendarVisible) calendarView.refresh()
+              else if (root.service) root.service.refresh()
+            }
+          }
+
+          IconTextButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && root.calendarVisible
+            text: "Create event..."
+            iconName: "plus"
+            foreground: root.dim
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            enabled: root.ready
+            onClicked: eventComposer.begin()
           }
 
           IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
+            visible: !root.showPage && !root.composing && !root.calendarVisible
             iconName: "send"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -792,6 +910,7 @@ Item {
           width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
+          calendarSelected: root.calendarVisible
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
@@ -799,9 +918,13 @@ Item {
           panelFontFamily: root.fontFamily
           switcherOpen: accountSwitcher.opened
           slots: root.sidebarSlots
-          numbersVisible: focusScope.altHeld
+          numbersVisible: focusScope.ctrlHeld
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
+          onCalendarRequested: {
+            root.currentView = "calendar"
+            calendarView.refresh()
+          }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
@@ -848,6 +971,7 @@ Item {
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
+            && !root.calendarVisible
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -933,7 +1057,7 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showPage && !root.composing
+          visible: !root.showPage && !root.composing && !root.calendarVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
@@ -971,7 +1095,7 @@ Item {
         ComposeView {
           id: compose
           anchors.fill: parent
-          visible: root.composing && !root.showPage
+          visible: opened && !root.showPage
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
@@ -982,6 +1106,49 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           onClosed: root.leaveCompose()
+          onSendQueued: root.backToList()
+        }
+
+        CalendarEventComposer {
+          id: eventComposer
+          anchors.fill: parent
+          z: 20
+          visible: opened && !root.showPage
+          controller: root.service ? root.service.calendarController : null
+          textColor: root.foreground
+          backgroundColor: root.background
+          accentColor: root.accent
+          urgentColor: root.urgent
+          dimColor: root.dim
+          panelFontFamily: root.fontFamily
+        }
+
+        Rectangle {
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          visible: root.calendarVisible && !root.showPage && !root.composing
+          color: root.background
+          z: 10
+
+          CalendarView {
+            id: calendarView
+            anchors.fill: parent
+            controller: root.service ? root.service.calendarController : null
+            textColor: root.foreground
+            backgroundColor: root.background
+            accentColor: root.accent
+            urgentColor: root.urgent
+            dimColor: root.dim
+            calendarBorderColor: root.calendarBorder
+            calendarTodayBackgroundColor: root.calendarTodayBackground
+            calendarBorderWidth: root.calendarBorderWidth
+            panelFontFamily: root.fontFamily
+            onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
+            onCopyRequested: function(text) { root.copyText(text) }
+            onOpenRequested: function(url) { Qt.openUrlExternally(url) }
+          }
         }
 
         // Setup takes the whole body: there is nothing else to look at until
@@ -1049,6 +1216,7 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: Math.min(settingsHolder.width, Style.space(560))
               service: root.service
+              calendarController: root.service ? root.service.calendarController : null
               textColor: root.foreground
               dimColor: root.dim
               accentColor: root.accent
@@ -1069,6 +1237,23 @@ Item {
             }
           }
         }
+      }
+
+      UndoSendToast {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(16)
+        anchors.bottom: statusBar.top
+        anchors.bottomMargin: Style.space(12)
+        z: 80
+        visible: !!root.service && root.service.sendPending && compose.parkedForSend
+        secondsRemaining: root.service ? root.service.sendSecondsRemaining : 0
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onUndoRequested: root.undoPendingSend()
       }
 
       // --------------------------------------------------------- status bar
@@ -1197,7 +1382,7 @@ Item {
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.shortcutHelpVisible = true
-        onSetupRequested: root.settingsVisible = true
+        onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
@@ -1222,8 +1407,7 @@ Item {
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
         onAccountChosen: function(index) {
-          if (root.service) root.service.switchToIndex(index)
-          root.backToList()
+          root.switchAccount(index)
         }
         onAddAccountRequested: {
           root.editingProvider = ""
@@ -1231,8 +1415,7 @@ Item {
           root.setupVisible = true
         }
         onManageRequested: {
-          root.setupVisible = false
-          root.settingsVisible = true
+          root.openSettings()
         }
       }
 

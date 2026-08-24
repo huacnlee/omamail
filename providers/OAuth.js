@@ -19,11 +19,13 @@ var DEFAULT_PORT = 9481
 var CALLBACK_PATH = "/oauth2callback"
 
 // gmail.modify is read plus label/trash changes — it deliberately cannot
-// permanently delete. gmail.send is what reply and compose need. Neither
-// grants access to the account profile beyond the mailbox address.
+// permanently delete. gmail.send is what reply and compose need.
+// calendar.events reads calendars and creates events without broader account
+// access.
 var SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send"
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/calendar.events"
 ]
 
 function normalizedPort(value) {
@@ -81,6 +83,9 @@ function authorizationUrl(options) {
     code_challenge_method: "S256",
     state: settings.state,
     access_type: "offline",
+    // Google joins these permissions to an existing grant. This matters when
+    // an upgrade adds Calendar to a mailbox that already granted Gmail.
+    include_granted_scopes: "true",
     // Without this Google returns a refresh token only on the very first
     // consent, so a user who reinstalls the plugin would be stuck with an
     // access token that expires in an hour and never comes back.

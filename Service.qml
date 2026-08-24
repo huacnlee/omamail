@@ -2,10 +2,14 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "account"
+import "calendar"
 
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
 import "providers/Registry.js" as Provider
+import "bar/Preview.js" as Preview
+import "calendar/Sources.js" as CalendarSources
+import "message/Outbox.js" as Outbox
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -43,9 +47,23 @@ Item {
     maxMessages: 25,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
-    oauthPort: 9481
+    oauthPort: 9481,
+    undoSendSeconds: 10
   })
   property var settings: defaultSettingValues
+  readonly property int undoSendSeconds: Outbox.normalizeDelay(
+    settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
+
+  // Thunderbird and Betterbird keep both explicit and learned addresses in
+  // their local profile. The helper reads those databases without modifying
+  // them. Nothing is copied into Omamail's settings or cache.
+  property var recipientContacts: []
+
+  function refreshRecipientContacts() {
+    if (contactReader.running || pluginDir === "") return
+    contactReader.command = [pluginDir + "/scripts/contact-suggestions.py"]
+    contactReader.running = true
+  }
 
   function applySettings(values) {
     var next = ({})
@@ -58,6 +76,22 @@ Item {
     if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
   }
 
+  function persistSetting(name, value) {
+    var next = ({})
+    for (var key in settings) if (key !== "id") next[key] = settings[key]
+    next[name] = value
+    applySettings(next)
+
+    var entry = ({ id: pluginId })
+    for (var field in next) entry[field] = next[field]
+    if (shell && typeof shell.updateEntryInline === "function")
+      shell.updateEntryInline(pluginId, entry)
+  }
+
+  function setUndoSendSeconds(value) {
+    persistSetting("undoSendSeconds", Outbox.normalizeDelay(value))
+  }
+
   // ---------------------------------------------------------- the accounts
 
   property var accountList: Accounts.emptyList()
@@ -67,6 +101,8 @@ Item {
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
+  readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
+    ? String(current.accountId) : "__no_google_account__"
 
   // The instance whose mailbox is on screen. Everything below forwards to it.
   property var current: null
@@ -109,26 +145,29 @@ Item {
   }
 
   // The whole point of switching is that it is instant, which it is because
-  // each account keeps its own cache on disk.
+  // each account keeps its own cache on disk. A queued send belongs to its
+  // account host and remains reachable after the visible account changes.
   function switchTo(id) {
-    if (String(id) === activeAccountId && activeIndex < 0) return
+    if (String(id) === activeAccountId && activeIndex < 0) return true
     activeIndex = -1
     accountList = Accounts.setActive(accountList, id)
     saveAccounts()
     refreshCurrent()
+    return true
   }
 
   // The switcher selects by position, because that is the only handle a mailbox
   // without an address has.
   function switchToIndex(index) {
     var accounts = accountList ? accountList.accounts : []
-    if (index < 0 || index >= accounts.length) return
+    if (index < 0 || index >= accounts.length) return false
+    if (index === indexOfActiveAccount()) return true
     if (accounts[index].id !== "") {
-      switchTo(accounts[index].id)
-      return
+      return switchTo(accounts[index].id)
     }
     activeIndex = index
     refreshCurrent()
+    return true
   }
 
   // The provider is chosen before the row exists, because it decides which
@@ -436,6 +475,34 @@ Item {
     return out
   }
 
+  readonly property var barMessages: {
+    var accounts = []
+    var values = accountList ? accountList.accounts : []
+    for (var i = 0; i < values.length; i++) {
+      var host = accountHosts.objectAt(i)
+      accounts.push({
+        id: values[i].id, label: Accounts.label(values[i]), inbox: "Inbox",
+        messages: host ? host.previewMessages : []
+      })
+    }
+    return Preview.latestMessages(accounts, 3)
+  }
+
+  readonly property alias calendarController: sharedCalendar
+  readonly property var barEvents: Preview.upcomingEvents(
+    barCalendar.events, Date.now(), 2)
+
+  function refreshCalendarPreview() {
+    var now = new Date()
+    barCalendar.refresh(now.getTime(),
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 31).getTime())
+  }
+
+  function openCalendarEditor() {
+    var url = CalendarSources.calendarEditorUrl(sharedCalendar.sourceList)
+    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+  }
+
   // ------------------------------------------------------------- forwarding
 
   property bool windowOpen: false
@@ -499,6 +566,16 @@ Item {
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool detailPainted: !!current && current.detailPainted
   readonly property bool sending: !!current && current.sending
+  readonly property var pendingSendHost: {
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host && host.sendPending) return host
+    }
+    return null
+  }
+  readonly property bool sendPending: !!pendingSendHost
+  readonly property int sendSecondsRemaining: pendingSendHost
+    ? pendingSendHost.sendSecondsRemaining : 0
   readonly property string lastError: current ? current.lastError : ""
   readonly property string actionStatus: current ? current.actionStatus : ""
   readonly property string signInProgress: current ? current.signInProgress : ""
@@ -522,7 +599,28 @@ Item {
   function act(id, action, quiet) { if (current) current.act(id, action, quiet) }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
-  function send(fields) { if (current) current.send(fields) }
+  function send(fields) { return current ? current.send(fields) : false }
+  function undoSend() {
+    var host = pendingSendHost
+    if (!host) return false
+    if (host !== current) {
+      for (var i = 0; i < accountHosts.count; i++) {
+        if (accountHosts.objectAt(i) === host) {
+          switchToIndex(i)
+          break
+        }
+      }
+    }
+    return host.undoSend()
+  }
+  function loadAttachments(messageId, attachments, callback) {
+    if (current) return current.loadAttachments(messageId, attachments, callback)
+    if (typeof callback === "function") callback([], "No mailbox is selected")
+    return null
+  }
+  function openAttachment(messageId, attachment) {
+    if (current) current.openAttachment(messageId, attachment)
+  }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null
   }
@@ -600,9 +698,47 @@ Item {
   }
   function openConsentScreen() { if (current) current.openConsentScreen() }
 
+  function withGoogleAccessToken(accountId, callback) {
+    var accounts = accountList && accountList.accounts ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      if (accounts[i] && accounts[i].id === accountId && accounts[i].provider === "gmail") {
+        var host = accountHosts.objectAt(i)
+        if (host) { host.withAccessToken(callback); return }
+      }
+    }
+    callback("", "The Google calendar account is not signed in")
+  }
+
   signal replySent()
 
   // ------------------------------------------------------------- instances
+
+  CalendarController {
+    id: sharedCalendar
+    service: root
+    pluginDir: root.pluginDir
+    accountId: root.calendarAccountId
+    onSourceListChanged: {
+      barCalendar.sourceList = sourceList
+      Qt.callLater(root.refreshCalendarPreview)
+    }
+    onSourcesLoadedChanged: barCalendar.sourcesLoaded = sourcesLoaded
+  }
+
+  CalendarController {
+    id: barCalendar
+    service: root
+    pluginDir: root.pluginDir
+    cacheName: "calendar-bar"
+    Component.onCompleted: Qt.callLater(root.refreshCalendarPreview)
+  }
+
+  Timer {
+    interval: 600000
+    repeat: true
+    running: true
+    onTriggered: root.refreshCalendarPreview()
+  }
 
   // The model is a COUNT, not the array. An Instantiator rebuilds every
   // delegate when its model changes identity, and this list is reassigned
@@ -708,4 +844,18 @@ Item {
       if (root.accountsSaveQueued) root.saveAccounts()
     }
   }
+
+  Process {
+    id: contactReader
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      var parsed = null
+      try { parsed = JSON.parse(String(stdout.text || "[]")) } catch (e) { parsed = null }
+      if (Array.isArray(parsed)) root.recipientContacts = parsed
+    }
+  }
+
+  Component.onCompleted: Qt.callLater(root.refreshRecipientContacts)
 }

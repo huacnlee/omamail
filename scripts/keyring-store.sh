@@ -28,5 +28,15 @@ if [ -z "$refresh_token" ]; then
   exit 3
 fi
 
+# libsecret may replace the existing account-keyed item when a new versioning
+# attribute is added, preserving the old attribute set instead of the one on
+# this command. Remove that exact pre-grant shape before storing its replacement.
+# Credentials.keyringAttributes() owns this ordered shape.
+if [ "$#" -eq 10 ] \
+    && [ "$1" = service ] && [ "$3" = kind ] \
+    && [ "$5" = client-id ] && [ "$7" = account ] && [ "$9" = grant ]; then
+  secret-tool clear "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" || true
+fi
+
 printf '%s' "$refresh_token" | secret-tool store \
   --label='Omamail refresh token' "$@"

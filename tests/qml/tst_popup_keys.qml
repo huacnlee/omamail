@@ -1,6 +1,6 @@
-import QtQuick
-import QtQuick.Controls as QQC
-import QtTest
+import QtQuick 2.15
+import QtQuick.Controls 2.15 as QQC
+import QtTest 1.3
 
 // Why the account switcher answers its own keys, which is the opposite of what
 // every other component in this window does.

@@ -24,6 +24,15 @@ function setupProvider(chosen, live) {
   return String(live === undefined || live === null ? "" : live).trim() || "gmail"
 }
 
+function mailboxAfterAccountSwitch(currentKey, targetMailboxes) {
+  var key = String(currentKey || "")
+  var mailboxes = Array.isArray(targetMailboxes) ? targetMailboxes : []
+  for (var i = 0; i < mailboxes.length; i++) {
+    if (mailboxes[i] && String(mailboxes[i].key || "") === key) return key
+  }
+  return ""
+}
+
 // One value the panel can switch on, in the order a new user meets them.
 function setupState(status) {
   var value = status || {}
@@ -310,6 +319,15 @@ function indexById(list, id) {
     if (source[i] && source[i].id === id) return i
   }
   return -1
+}
+
+function messageById(primary, fallback, id) {
+  var first = Array.isArray(primary) ? primary : []
+  var index = indexById(first, id)
+  if (index >= 0) return first[index]
+  var second = Array.isArray(fallback) ? fallback : []
+  index = indexById(second, id)
+  return index >= 0 ? second[index] : null
 }
 
 // The rail as one numbered list, in the order it is drawn: the provider's

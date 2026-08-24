@@ -13,10 +13,9 @@ Canvas {
   property string name: ""
   property color color: Color.foreground
 
-  // The one brand colour in the project, and it applies to exactly one glyph:
-  // the M inside the Gmail mark. Everything else in this app takes the Omarchy
-  // theme — see AGENTS.md. Set `brand: false` for a monochrome mark.
-  readonly property color gmailRed: "#EA4335"
+  // Omamail keeps the envelope in the foreground and gives its M the active
+  // theme accent. Provider artwork uses ProviderLogo instead of this mark.
+  property color markColor: color
   property bool brand: false
   property real iconSize: Style.font.icon
   property real strokeScale: 1.4
@@ -31,6 +30,7 @@ Canvas {
   onColorChanged: requestPaint()
   onIconSizeChanged: requestPaint()
   onBrandChanged: requestPaint()
+  onMarkColorChanged: requestPaint()
 
   onPaint: {
     var ctx = getContext("2d")
@@ -107,6 +107,10 @@ Canvas {
     } else if (root.name === "send") {
       move(14.5, 1.5); line(7, 9)
       move(14.5, 1.5); line(10, 14.5); line(7, 9); line(1.5, 6); ctx.closePath()
+    } else if (root.name === "undo") {
+      move(5.5, 3); line(1.8, 6.8); line(5.5, 10.5)
+      move(1.8, 6.8); line(9, 6.8)
+      arc(9, 11.2, 4.4, -Math.PI / 2, 0)
     } else if (root.name === "menu") {
       move(2.5, 4.5); line(13.5, 4.5)
       move(2.5, 8); line(13.5, 8)
@@ -120,6 +124,8 @@ Canvas {
     } else if (root.name === "back") {
       move(9, 3); line(4, 8); line(9, 13)
       move(4, 8); line(14, 8)
+    } else if (root.name === "chevronLeft") {
+      move(10.5, 3); line(5.5, 8); line(10.5, 13)
     } else if (root.name === "chevronRight") {
       move(5.5, 3); line(10.5, 8); line(5.5, 13)
     } else if (root.name === "chevronDown") {
@@ -147,15 +153,15 @@ Canvas {
       move(1.5, 1.5); line(7.6, 1.5); line(14.5, 8.4); line(8.4, 14.5)
       line(1.5, 7.6); ctx.closePath()
       move(5.7, 4.5); arc(4.5, 4.5, 1.2, 0, Math.PI * 2)
-    } else if (root.name === "gmail") {
+    } else if (root.name === "gmail" || root.name === "mail") {
       // The Gmail mark: the envelope body, with the M fold inset inside it. A
       // plain envelope with a V fold is the generic mail glyph — the M is the
       // whole difference. The two are stroked separately so the M can carry
-      // the brand red while the envelope stays themed.
+      // the theme accent while the envelope stays in the foreground colour.
       ctx.rect(1 * s, 3 * s, 14 * s, 10 * s)
       ctx.stroke()
       ctx.beginPath()
-      if (root.brand) ctx.strokeStyle = root.gmailRed
+      if (root.name === "gmail" && root.brand) ctx.strokeStyle = root.markColor
       move(3.6, 13); line(3.6, 5.6); line(8, 9.3); line(12.4, 5.6); line(12.4, 13)
     } else if (root.name === "sidebar") {
       ctx.rect(1.5 * s, 2.5 * s, 13 * s, 11 * s)

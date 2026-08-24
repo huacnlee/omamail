@@ -46,4 +46,24 @@ for bad in "" "a" "client-id "; do
   fi
 done
 
+# libsecret replaces an existing item that matches the unversioned attributes
+# without adding a newly introduced attribute. Remove that old shape first so
+# a successful Calendar consent is stored as the versioned grant that restore
+# looks up on the next launch.
+mkdir -p "$test_root/bin"
+printf '%s\n' '#!/bin/sh' 'printf '\''%s\n'\'' "$*" >> "$KEYRING_CALLS"' \
+  > "$test_root/bin/secret-tool"
+chmod +x "$test_root/bin/secret-tool"
+KEYRING_CALLS="$test_root/keyring-calls" PATH="$test_root/bin:$PATH" \
+  sh scripts/keyring-store.sh \
+    service omamail kind refresh-token client-id client account me@example.com \
+    grant calendar-events-v1 <<EOF
+token
+EOF
+expected_calls='clear service omamail kind refresh-token client-id client account me@example.com
+store --label=Omamail refresh token service omamail kind refresh-token client-id client account me@example.com grant calendar-events-v1'
+actual_calls=$(cat "$test_root/keyring-calls")
+[ "$actual_calls" = "$expected_calls" ] \
+  || fail "keyring-store.sh did not replace the unversioned grant before storing the versioned one"
+
 printf 'test_install.sh ok\n'
