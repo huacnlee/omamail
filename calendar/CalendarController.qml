@@ -29,6 +29,7 @@ Item {
   property string lookedUpPassword: ""
   property bool lookupHandled: false
   property var googleRequest: null
+  property bool googleRequestTimedOut: false
   property var passwordSaveQueue: []
   property string passwordToSave: ""
   property bool savingPassword: false
@@ -41,6 +42,7 @@ Item {
   property var eventSource: null
   property var eventDraft: null
   property var eventRequest: null
+  property bool eventRequestTimedOut: false
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
   readonly property var contextSources: Sources.forAccount(availableSources, accountId)
@@ -128,6 +130,7 @@ Item {
     eventSource = null
     eventDraft = null
     eventRequest = null
+    eventRequestTimedOut = false
     eventCreated(ok, String(error || ""))
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
@@ -137,6 +140,7 @@ Item {
       if (!token) { root.finishEvent(false, error); return }
       var request = new XMLHttpRequest()
       root.eventRequest = request
+      root.eventRequestTimedOut = false
       request.open("POST", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
       request.setRequestHeader("Authorization", "Bearer " + token)
       request.setRequestHeader("Content-Type", "application/json")
@@ -144,9 +148,12 @@ Item {
         if (request.readyState !== XMLHttpRequest.DONE) return
         eventDeadline.stop()
         root.eventRequest = null
+        var timedOut = root.eventRequestTimedOut
+        root.eventRequestTimedOut = false
         if (request.status < 200 || request.status >= 300) {
-          root.finishEvent(false,
-            Calendar.googleResponseError(request.status, request.responseText))
+          root.finishEvent(false, timedOut
+            ? "The Google Calendar event request timed out"
+            : Calendar.googleResponseError(request.status, request.responseText))
           return
         }
         root.finishEvent(true, "")
@@ -374,15 +381,21 @@ Item {
       if (!token) { root.failSource(error); return }
       var request = new XMLHttpRequest()
       root.googleRequest = request
+      root.googleRequestTimedOut = false
       request.open("GET", Calendar.googleEventsUrl(root.rangeStart, root.rangeEnd))
       request.setRequestHeader("Authorization", "Bearer " + token)
       request.onreadystatechange = function() {
         if (request.readyState !== XMLHttpRequest.DONE) return
         googleDeadline.stop()
         root.googleRequest = null
+        var timedOut = root.googleRequestTimedOut
+        root.googleRequestTimedOut = false
         if (request.status < 200 || request.status >= 300) {
-          var reason = Calendar.googleResponseError(request.status, request.responseText)
-          root.failSource(reason, Calendar.isGoogleCalendarApiDisabledError(reason)
+          var reason = timedOut
+            ? "The Google Calendar request timed out"
+            : Calendar.googleResponseError(request.status, request.responseText)
+          root.failSource(reason, !timedOut
+              && Calendar.isGoogleCalendarApiDisabledError(reason)
             ? "googleApiDisabled" : "")
           return
         }
@@ -549,7 +562,9 @@ Item {
     id: googleDeadline
     interval: 60000
     onTriggered: {
-      if (root.googleRequest) root.googleRequest.abort()
+      if (!root.googleRequest) return
+      root.googleRequestTimedOut = true
+      root.googleRequest.abort()
     }
   }
 
@@ -566,7 +581,9 @@ Item {
     id: eventDeadline
     interval: 60000
     onTriggered: {
-      if (root.eventRequest) root.eventRequest.abort()
+      if (!root.eventRequest) return
+      root.eventRequestTimedOut = true
+      root.eventRequest.abort()
     }
   }
 }

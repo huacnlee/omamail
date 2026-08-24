@@ -157,17 +157,29 @@ assert.strictEqual(utcInvite.start.ms, Date.UTC(2026, 7, 21, 9, 0, 0))
 assert.strictEqual(utcInvite.start.tzid, "")
 assert.strictEqual(calendar.formatDuration(utcInvite), "15 min")
 
-// A named zone with no VTIMEZONE beside it cannot be converted. The wall clock
-// is kept and the zone is named, rather than a converted time nothing backs.
-const unknownZone = calendar.invitationFrom([
+// A named zone without a VTIMEZONE block stays unresolved. Its placeholder
+// must not change with the machine timezone running the parser.
+const namedZone = calendar.invitationFrom([
   "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST", "BEGIN:VEVENT",
   "UID:u2", "SUMMARY:Call",
-  "DTSTART;TZID=Antarctica/Troll:20260821T090000",
+  "DTSTART;TZID=Europe/Stockholm:20260821T090000",
+  "END:VEVENT", "END:VCALENDAR"].join("\r\n"))
+assert.strictEqual(namedZone.start.resolved, false)
+assert.strictEqual(namedZone.start.tzid, "Europe/Stockholm")
+assert.strictEqual(namedZone.start.ms, Date.UTC(2026, 7, 21, 9, 0, 0))
+assert.ok(calendar.formatWhen(namedZone).indexOf("09:00 (Europe/Stockholm)") > 0)
+
+// A private zone name cannot be converted. Its fallback is UTC rather than
+// the parser machine's local zone, so separate machines agree on the instant.
+const unknownZone = calendar.invitationFrom([
+  "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST", "BEGIN:VEVENT",
+  "UID:u2b", "SUMMARY:Call",
+  "DTSTART;TZID=Example/Headquarters:20260821T090000",
   "END:VEVENT", "END:VCALENDAR"].join("\r\n"))
 assert.strictEqual(unknownZone.start.resolved, false)
-assert.strictEqual(unknownZone.start.tzid, "Antarctica/Troll")
-assert.strictEqual(unknownZone.start.ms, new Date(2026, 7, 21, 9, 0, 0).getTime())
-assert.ok(calendar.formatWhen(unknownZone).indexOf("(Antarctica/Troll)") > 0,
+assert.strictEqual(unknownZone.start.tzid, "Example/Headquarters")
+assert.strictEqual(unknownZone.start.ms, Date.UTC(2026, 7, 21, 9, 0, 0))
+assert.ok(calendar.formatWhen(unknownZone).indexOf("(Example/Headquarters)") > 0,
   "an unresolved time says which clock it is on")
 
 // DURATION stands in for a missing DTEND.

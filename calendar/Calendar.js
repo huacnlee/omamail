@@ -176,13 +176,22 @@ function recurrenceStarts(event, rangeEnd) {
   var interval = Math.max(1, Math.floor(Number(parts.INTERVAL) || 1))
   var countLimit = Math.max(0, Math.floor(Number(parts.COUNT) || 0))
   var until = recurrenceUntil(parts.UNTIL)
-  var base = new Date(Number(event.start.ms))
+  var tzid = String(event.start.tzid || "")
+  var source = event.source || {}
+  var wallFields = tzid !== "" ? Ics.dateFieldsFromLine(source.dtstart) : null
+  var zoned = !!wallFields && !wallFields.dateOnly
+  var base = zoned
+    ? new Date(Date.UTC(wallFields.year, wallFields.month - 1, wallFields.day,
+        wallFields.hour, wallFields.minute, wallFields.second))
+    : new Date(Number(event.start.ms))
   var cursor = new Date(base.getTime())
-  var utc = !!(event.source && /Z\s*$/i.test(String(event.source.dtstart || "")))
+  var utc = zoned
+    || !!(event.source && /Z\s*$/i.test(String(event.source.dtstart || "")))
   var out = []
   var count = 0
-  var limit = Math.min(Number(rangeEnd) || base.getTime(),
-    until > 0 ? until + 1 : Number(rangeEnd) || base.getTime())
+  var rangeLimit = Number(rangeEnd) || base.getTime()
+  var limit = zoned ? rangeLimit + 86400000
+    : Math.min(rangeLimit, until > 0 ? until + 1 : rangeLimit)
 
   for (var scanned = 0; scanned < 10000 && cursor.getTime() < limit; scanned++) {
     var cursorYear = datePart(cursor, "getFullYear", "getUTCFullYear", utc)
@@ -219,11 +228,20 @@ function recurrenceStarts(event, rangeEnd) {
           : cursorDate === baseDate)
       matches = yearDelta >= 0 && yearDelta % interval === 0 && monthMatch && yearDayMatch
     }
-    if (matches && cursor.getTime() >= base.getTime()) {
+    var occurrenceMs = cursor.getTime()
+    if (zoned) {
+      occurrenceMs = Ics.timeInZone({
+        year: cursor.getUTCFullYear(), month: cursor.getUTCMonth() + 1,
+        day: cursor.getUTCDate(), hour: cursor.getUTCHours(),
+        minute: cursor.getUTCMinutes(), second: cursor.getUTCSeconds()
+      }, tzid, source.timezones).ms
+    }
+    if (matches && occurrenceMs >= Number(event.start.ms)) {
       count++
       if (countLimit > 0 && count > countLimit) break
-      if (!until || cursor.getTime() <= until) out.push(cursor.getTime())
+      if (!until || occurrenceMs <= until) out.push(occurrenceMs)
     }
+    if (until && occurrenceMs > until) break
     if (utc) cursor.setUTCDate(cursor.getUTCDate() + 1)
     else cursor.setDate(cursor.getDate() + 1)
   }

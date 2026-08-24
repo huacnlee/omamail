@@ -41,7 +41,7 @@ Rectangle {
     Button {
       objectName: "undo-send-button"
       anchors.verticalCenter: parent.verticalCenter
-      text: "Undo  z"
+      text: "Undo  Ctrl+Z"
       foreground: root.accentColor
       accent: root.accentColor
       bordered: true

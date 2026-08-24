@@ -429,7 +429,6 @@ Item {
   // never run.
   function goBack() {
     if (shortcutHelpVisible) shortcutHelpVisible = false
-    else if (service && service.sendPending) undoPendingSend()
     // A query being typed is the nearest thing to leave: clear it if there is
     // one, then hand the keyboard back to the mailbox. This used to live in
     // SearchBar as its own Keys handler, which a window Shortcut silently beats.
@@ -606,7 +605,7 @@ Item {
     var accounts = service.accountSummaries || []
     editingProvider = index >= 0 && index < accounts.length
       ? String(accounts[index].provider || "gmail") : "gmail"
-    service.switchToIndex(index)
+    if (!service.switchToIndex(index)) return
     providerChosen = true
     pickingProvider = false
     settingsVisible = false
@@ -681,14 +680,14 @@ Item {
       }
       onActiveFocusChanged: if (!activeFocus) ctrlDown = false
 
-      readonly property string keyContext:
-          service && service.sendPending ? "sendPending"
-        : root.showPage  ? "page"
-        : root.composing ? "compose"
-        : searchBar.fieldFocused ? "search"
-        : root.calendarVisible ? "calendar"
-        : root.currentView === "reader" ? "reader"
-        : "list"
+      readonly property string keyContext: Keymap.contextFor(({
+        showPage: root.showPage,
+        composing: root.composing,
+        searchFocused: searchBar.fieldFocused,
+        calendarVisible: root.calendarVisible,
+        currentView: root.currentView,
+        sendPending: !!root.service && root.service.sendPending
+      }))
 
       // The context owns the keyboard. Changing it moves the focus to whatever
       // that context types into, or parks it when the context types into

@@ -304,6 +304,8 @@ if grep -q '^    events = \[\]$' calendar/CalendarController.qml; then
 fi
 grep -q 'root.refresh(nextStart, nextEnd)' calendar/CalendarController.qml \
   || fail "the queued calendar range must run after the active refresh"
+grep -q 'eventDeadline.restart()' calendar/CalendarController.qml \
+  || fail "Google event creation must start its deadline"
 python3 - <<'PY'
 from pathlib import Path
 
@@ -316,9 +318,8 @@ if "id: eventDeadline" not in controller or "root.eventRequest.abort()" not in c
     raise SystemExit("test_source.sh: Google event creation must abort after a deadline")
 
 service = Path("Service.qml").read_text()
-switch = service[service.index("function switchTo(id)"):service.index("function switchToIndex(index)")]
-if "sendPending" not in switch:
-    raise SystemExit("test_source.sh: an undoable send must prevent account switching")
+if "readonly property var pendingSendHost" not in service:
+    raise SystemExit("test_source.sh: an undoable send must remain reachable across accounts")
 PY
 grep -q 'allDayEventsOnDay' components/WeekCalendarView.qml \
   || fail "all-day events must have a pinned week-view lane"

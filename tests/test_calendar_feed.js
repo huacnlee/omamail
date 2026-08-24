@@ -125,6 +125,21 @@ assert.strictEqual(recurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 12, 0))
 assert.strictEqual(recurringEvents[0].sourceId, "work")
 assert.strictEqual(recurringEvents[0].href, "/cal/standup.ics")
 
+const unresolvedRecurringXml = recurringXml
+  .replace([
+    "BEGIN:VTIMEZONE\r\nTZID:Test/PlusTwo\r\n",
+    "BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0200\r\n",
+    "TZOFFSETTO:+0200\r\nEND:STANDARD\r\n",
+    "END:VTIMEZONE\r\n"
+  ].join(""), "")
+  .replace(/Test\/PlusTwo/g, "Europe/Stockholm")
+const unresolvedRecurringEvents = feed.eventsFromCaldav(unresolvedRecurringXml, "work",
+  Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+assert.strictEqual(unresolvedRecurringEvents.length, 1)
+assert.strictEqual(unresolvedRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 14, 0),
+  "an unresolved TZID uses the same placeholder on every machine")
+assert.strictEqual(unresolvedRecurringEvents[0].start.resolved, false)
+
 const utcRecurringXml = recurringXml
   .replace(/;TZID=Test\/PlusTwo/g, "")
   .replace(/20240208T140000/g, "20240208T130000Z")

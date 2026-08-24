@@ -100,6 +100,20 @@ Item {
       compare(picker.visible, false)
     }
 
+    function test_tab_moves_from_subject_to_body() {
+      compose.begin("new", null, "", [])
+      var subjectField = named(compose, "compose-subject-field")
+      var bodyEditor = named(compose, "compose-body-editor")
+      verify(subjectField)
+      verify(bodyEditor)
+
+      subjectField.forceActiveFocus()
+      verify(subjectField.activeFocus)
+      keyClick(Qt.Key_Tab)
+      verify(bodyEditor.activeFocus,
+        "Tab from the subject must enter the message body")
+    }
+
     function test_queued_send_hides_compose_and_undo_restores_the_draft() {
       compose.begin("new", null, "", [])
       var toField = named(compose, "compose-to-field")

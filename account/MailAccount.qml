@@ -1041,6 +1041,48 @@ Item {
     return handles
   }
 
+  // Opens only after the user asks. The provider hands back base64url bytes;
+  // the helper writes them to a private runtime file before the desktop opens
+  // the file with its registered application.
+  function openAttachment(messageId, attachment) {
+    var source = attachment || ({})
+    if (!ready) {
+      fail("Sign in before opening an attachment")
+      return
+    }
+    if (String(messageId || "") === "" || String(source.attachmentId || "") === "") {
+      fail("That attachment is not available")
+      return
+    }
+    clearNotice()
+    loadAttachments(messageId, [source], function(loaded, error) {
+      if (error || !loaded || loaded.length === 0) {
+        root.fail(error || "That attachment could not be loaded")
+        return
+      }
+      var file = loaded[0]
+      var request = attachmentOpenComponent.createObject(root, {
+        command: [pluginDir + "/scripts/open-attachment.py"],
+        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
+          + "\n" + String(file.data || "") + "\n"
+      })
+      if (!request) {
+        root.fail("That attachment could not be opened")
+        return
+      }
+      request.finished.connect(function(exitCode, detail) {
+        request.destroy()
+        if (!root) return
+        if (exitCode !== 0) {
+          root.fail(detail || "That attachment could not be opened")
+          return
+        }
+        root.note("Opening " + String(file.filename || "attachment"))
+      })
+      request.running = true
+    })
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
@@ -1357,6 +1399,30 @@ Item {
           return
         }
         unsubscribeProcess.finished(code, status)
+      }
+    }
+  }
+
+  Component {
+    id: attachmentOpenComponent
+
+    Process {
+      id: attachmentOpenProcess
+
+      property string requestPayload: ""
+      signal finished(int exitCode, string detail)
+
+      stdinEnabled: true
+      stderr: StdioCollector { waitForEnd: true }
+
+      onStarted: {
+        write(requestPayload)
+        requestPayload = ""
+      }
+
+      onExited: function(exitCode) {
+        var detail = String(attachmentOpenProcess.stderr.text || "").trim()
+        attachmentOpenProcess.finished(exitCode, detail)
       }
     }
   }

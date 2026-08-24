@@ -15,6 +15,22 @@ grep -q 'function setUndoSendSeconds' Service.qml \
   || fail "the in-app settings page must be able to change the undo window"
 grep -q 'shell.updateEntryInline(pluginId, entry)' Service.qml \
   || fail "the undo window must persist in shell settings"
+python3 - <<'PY'
+from pathlib import Path
+
+text = Path("Service.qml").read_text()
+start = text.index("function switchTo(id)")
+end = text.index("function switchToIndex(index)", start)
+block = text[start:end]
+if "sendPending" in block:
+    raise SystemExit(
+        "test_service_source.sh: a pending send must not block account switching"
+    )
+if "pendingSendHost" not in text:
+    raise SystemExit(
+        "test_service_source.sh: undo must remain reachable after account switching"
+    )
+PY
 
 # Only the ROOT object's required properties matter. The shell constructs that
 # object and can satisfy nothing beyond the four it injects, so one it does not

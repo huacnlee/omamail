@@ -475,33 +475,17 @@ Item {
     Repeater {
       model: root.service ? root.service.selectedAttachments : []
 
-      Row {
+      AttachmentRow {
         required property var modelData
-        spacing: Style.space(6)
-
-        ActionIcon {
-          anchors.verticalCenter: parent.verticalCenter
-          name: "attachment"
-          iconSize: Style.font.iconSmall
-          color: root.dimColor
-        }
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          textFormat: Text.PlainText
-          text: modelData.filename
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
-        }
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: Mail.formatSize(modelData.size)
-          color: root.dimmerColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
+        width: parent.width
+        attachment: modelData
+        textColor: root.textColor
+        dimColor: root.dimColor
+        dimmerColor: root.dimmerColor
+        panelFontFamily: root.panelFontFamily
+        onOpenRequested: function(attachment) {
+          if (root.service && root.summary)
+            root.service.openAttachment(root.summary.id, attachment)
         }
       }
     }

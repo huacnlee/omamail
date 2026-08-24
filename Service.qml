@@ -145,13 +145,10 @@ Item {
   }
 
   // The whole point of switching is that it is instant, which it is because
-  // each account keeps its own cache on disk.
+  // each account keeps its own cache on disk. A queued send belongs to its
+  // account host and remains reachable after the visible account changes.
   function switchTo(id) {
-    if (current && current.sendPending) {
-      current.note("Undo or wait before switching accounts")
-      return false
-    }
-    if (String(id) === activeAccountId && activeIndex < 0) return
+    if (String(id) === activeAccountId && activeIndex < 0) return true
     activeIndex = -1
     accountList = Accounts.setActive(accountList, id)
     saveAccounts()
@@ -162,12 +159,9 @@ Item {
   // The switcher selects by position, because that is the only handle a mailbox
   // without an address has.
   function switchToIndex(index) {
-    if (current && current.sendPending) {
-      current.note("Undo or wait before switching accounts")
-      return false
-    }
     var accounts = accountList ? accountList.accounts : []
-    if (index < 0 || index >= accounts.length) return
+    if (index < 0 || index >= accounts.length) return false
+    if (index === indexOfActiveAccount()) return true
     if (accounts[index].id !== "") {
       return switchTo(accounts[index].id)
     }
@@ -572,8 +566,16 @@ Item {
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool detailPainted: !!current && current.detailPainted
   readonly property bool sending: !!current && current.sending
-  readonly property bool sendPending: !!current && current.sendPending
-  readonly property int sendSecondsRemaining: current ? current.sendSecondsRemaining : 0
+  readonly property var pendingSendHost: {
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host && host.sendPending) return host
+    }
+    return null
+  }
+  readonly property bool sendPending: !!pendingSendHost
+  readonly property int sendSecondsRemaining: pendingSendHost
+    ? pendingSendHost.sendSecondsRemaining : 0
   readonly property string lastError: current ? current.lastError : ""
   readonly property string actionStatus: current ? current.actionStatus : ""
   readonly property string signInProgress: current ? current.signInProgress : ""
@@ -598,11 +600,26 @@ Item {
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
   function send(fields) { return current ? current.send(fields) : false }
-  function undoSend() { return current ? current.undoSend() : false }
+  function undoSend() {
+    var host = pendingSendHost
+    if (!host) return false
+    if (host !== current) {
+      for (var i = 0; i < accountHosts.count; i++) {
+        if (accountHosts.objectAt(i) === host) {
+          switchToIndex(i)
+          break
+        }
+      }
+    }
+    return host.undoSend()
+  }
   function loadAttachments(messageId, attachments, callback) {
     if (current) return current.loadAttachments(messageId, attachments, callback)
     if (typeof callback === "function") callback([], "No mailbox is selected")
     return null
+  }
+  function openAttachment(messageId, attachment) {
+    if (current) current.openAttachment(messageId, attachment)
   }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null

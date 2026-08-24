@@ -8,6 +8,7 @@ Rectangle {
   property bool bordered: false
   property bool selected: false
   property bool leftAlign: false
+  property bool focusable: false
   property string fontFamily: "monospace"
   property real fontSize: 13
   property real horizontalPadding: 8

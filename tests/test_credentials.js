@@ -136,7 +136,8 @@ deepEqual(first, [
   "service", "omamail",
   "kind", "refresh-token",
   "client-id", sharedClient,
-  "account", "one@gmail.com"
+  "account", "one@gmail.com",
+  "grant", "calendar-events-v1"
 ])
 assert.notStrictEqual(JSON.stringify(first), JSON.stringify(second),
   "two accounts on one client must not share a keyring entry")
@@ -167,14 +168,20 @@ for (const attributes of attributeSets) {
 assert.strictEqual(credentials.keyringAttributes(sharedClient, "").indexOf("default") > 0, true,
   "an account with no name yet still gets a literal account attribute")
 
+deepEqual(credentials.previousGrantKeyringAttributes(sharedClient, "one@gmail.com"), [
+  "service", "omamail",
+  "kind", "refresh-token",
+  "client-id", sharedClient,
+  "account", "one@gmail.com"
+])
+
 // Without a client id there is nothing to look up, and an attribute-free
 // lookup would match every token the plugin ever stored.
 deepEqual(credentials.keyringAttributes("", "one@gmail.com"), [])
 deepEqual(credentials.legacyKeyringAttributes(""), [])
 
-// The old single-account entries carry no "account" attribute, so the new
-// lookup cannot see them. They are read once with these and rewritten, rather
-// than leaving an already signed-in user at a sign-in button.
+// The old single-account entries carry no account or grant attribute. The
+// upgrade detects them separately and asks Google for Calendar permission.
 deepEqual(credentials.legacyKeyringAttributes(sharedClient), [
   "service", "omamail",
   "kind", "refresh-token",

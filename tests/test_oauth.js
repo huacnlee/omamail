@@ -29,6 +29,8 @@ const url = oauth.authorizationUrl({
 assert.ok(url.indexOf("https://accounts.google.com/o/oauth2/v2/auth?") === 0)
 assert.ok(url.indexOf("code_challenge_method=S256") > 0)
 assert.ok(url.indexOf("access_type=offline") > 0)
+assert.ok(url.indexOf("include_granted_scopes=true") > 0,
+  "calendar permission must extend an existing Gmail grant")
 // Without prompt=consent Google issues a refresh token only on the very first
 // authorization, so a reinstall would leave the plugin unable to stay signed in.
 assert.ok(url.indexOf("prompt=consent") > 0)

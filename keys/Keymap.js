@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "sendPending", "page", "calendar"]
+var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -89,9 +89,9 @@ var BINDINGS = [
     group: "Calendar", label: "Show month view" },
   { id: "send", keys: ["Ctrl+Return"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
-  { id: "undoSend", keys: ["z"], contexts: ["sendPending"],
+  { id: "undoSend", keys: ["Ctrl+Z"], contexts: ["list", "reader", "calendar"],
     survivesOverlay: true,
-    group: "Writing", label: "Undo send", hint: { sendPending: "undo send" } },
+    group: "Writing", label: "Undo send" },
 
   // Reachable from the mailbox. `/` is a bare key, so it is only offered where
   // bare keys mean anything — inside the field it is a character being typed,
@@ -159,9 +159,21 @@ var BINDINGS = [
   { id: "back", keys: ["Escape"], contexts: ANY,
     survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
-    hint: { reader: "back", page: "back", compose: "close", search: "leave",
-      sendPending: "undo send" } }
+    hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
 ]
+
+// A pending send is a transient action over the screen, not a screen of its
+// own. It does not replace this context, so mailbox navigation stays live while
+// the toast offers Ctrl+Z and its button.
+function contextFor(state) {
+  var value = state || ({})
+  if (value.showPage) return "page"
+  if (value.composing) return "compose"
+  if (value.searchFocused) return "search"
+  if (value.calendarVisible) return "calendar"
+  if (value.currentView === "reader") return "reader"
+  return "list"
+}
 
 function byId(id) {
   for (var i = 0; i < BINDINGS.length; i++) {

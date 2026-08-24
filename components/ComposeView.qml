@@ -589,6 +589,7 @@ Item {
 
       TextField {
         id: subjectField
+        objectName: "compose-subject-field"
         anchors.left: subjectLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -600,6 +601,7 @@ Item {
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
         enabled: !root.deliveryLocked
+        KeyNavigation.tab: bodyEdit
         onAccepted: bodyEdit.forceActiveFocus()
       }
 
@@ -790,6 +792,7 @@ Item {
     TextEdit {
       id: bodyEdit
       objectName: "compose-body-editor"
+      activeFocusOnTab: true
       width: bodyFlick.width
       // Tall enough to fill the visible area even when the draft is short.
       // A TextEdit sized to its text leaves the space below it belonging to
@@ -832,7 +835,7 @@ Item {
       IconTextButton {
         iconName: root.service && root.service.sendPending ? "undo" : "send"
         tooltipText: root.service && root.service.sendPending
-          ? "Undo send · z" : "Send · Ctrl+Enter"
+          ? "Undo send · Ctrl+Z" : "Send · Ctrl+Enter"
         text: root.service && root.service.sendPending
           ? "Undo send (" + root.service.sendSecondsRemaining + "s)"
           : (root.service && root.service.sending ? "Sending" : "Send")

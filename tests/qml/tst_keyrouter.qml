@@ -99,30 +99,25 @@ Item {
         "Ctrl+K opens the shortcut sheet from inside a draft")
     }
 
-    function test_z_only_undoes_during_the_send_window() {
+    function test_undo_and_mail_navigation_share_the_mail_context() {
       host.context = "compose"
       wait(20)
-      keyClick(Qt.Key_Z)
-      compare(host.lastId, "", "z remains draft text before Send is pressed")
+      keyClick(Qt.Key_Z, Qt.ControlModifier)
+      compare(host.lastId, "", "Ctrl+Z remains text undo while composing")
 
-      host.context = "sendPending"
+      host.context = "reader"
       scope.applyContextFocus()
       wait(20)
-      keyClick(Qt.Key_Z)
+      keyClick(Qt.Key_Z, Qt.ControlModifier)
       compare(host.lastId, "undoSend")
-    }
-
-    function test_undo_survives_the_shortcut_sheet() {
-      host.context = "sendPending"
-      host.overlay = true
-      scope.applyContextFocus()
-      wait(20)
-      keyClick(Qt.Key_Z)
-      compare(host.lastId, "undoSend")
+      host.lastId = ""
+      keyClick(Qt.Key_Down)
+      compare(host.lastId, "cursorDown",
+        "the undo window must not stand mailbox navigation down")
     }
 
     function test_escape_is_the_way_out_of_every_context() {
-      var contexts = ["list", "reader", "search", "compose", "sendPending", "page"]
+      var contexts = ["list", "reader", "search", "compose", "page", "calendar"]
       for (var i = 0; i < contexts.length; i++) {
         host.context = contexts[i]
         host.lastId = ""

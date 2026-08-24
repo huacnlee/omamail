@@ -141,7 +141,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Omamail waits before delivery. Press z or Escape to cancel. Set 0 to send now."
+        text: "Omamail waits before delivery. Press Ctrl+Z or select Undo to cancel. Set 0 to send now."
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

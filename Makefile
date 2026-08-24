@@ -23,7 +23,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
 	components/IconTextButton.qml \
-  components/ImagePopover.qml \
+	components/ImagePopover.qml \
+	components/AttachmentRow.qml \
   components/KeyHints.qml \
 	components/MessageReader.qml \
 	components/ReaderNotice.qml \
@@ -90,6 +91,7 @@ test-shell:
 	bash tests/test_install.sh
 	bash tests/test_transport.sh
 	bash tests/test_unsubscribe_transport.sh
+	bash tests/test_attachment_open.sh
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
 

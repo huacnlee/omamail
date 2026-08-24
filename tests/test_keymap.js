@@ -53,14 +53,23 @@ function byId(id) {
 
 const undoSend = byId("undoSend")
 assert.ok(undoSend, "the delayed-send state offers an undo action")
-assert.strictEqual(keymap.displayFor(undoSend), "z")
-assert.strictEqual(keymap.isEnabled(undoSend, "sendPending", false), true)
-assert.strictEqual(keymap.isEnabled(undoSend, "sendPending", true), true,
-  "the help sheet cannot hide the time-limited undo action")
+assert.strictEqual(keymap.displayFor(undoSend), "Ctrl+Z")
+assert.strictEqual(keymap.isEnabled(undoSend, "list", false), true)
+assert.strictEqual(keymap.isEnabled(undoSend, "reader", false), true)
+assert.strictEqual(keymap.isEnabled(undoSend, "calendar", false), true)
 assert.strictEqual(keymap.isEnabled(undoSend, "compose", false), false,
-  "z remains ordinary draft text before Send is pressed")
-assert.strictEqual(keymap.isEnabled(undoSend, "list", false), false,
-  "z has no mailbox side effect")
+  "Ctrl+Z remains text undo while a draft is open")
+assert.strictEqual(keymap.isEnabled(undoSend, "search", false), false,
+  "Ctrl+Z remains text undo while a query is being edited")
+
+assert.strictEqual(keymap.contextFor({
+  sendPending: true,
+  currentView: "reader"
+}), "reader", "a delayed send must not replace the reader's keyboard context")
+assert.strictEqual(keymap.contextFor({
+  sendPending: true,
+  currentView: "list"
+}), "list", "a delayed send must not replace the list's keyboard context")
 
 // ------------------------------------------------------------------ enabling
 
@@ -229,10 +238,6 @@ const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],
   "Escape discards a draft, so it says close rather than back")
-deepEqual(keymap.hintsFor("sendPending").map(function (h) {
-  return h.key + " " + h.label
-}), ["z undo send", "Esc undo send"],
-  "the pending state explains both ways to stop delivery")
 deepEqual(keymap.hintsFor("page").map(function (h) { return h.label }),
   ["back"],
   "a form's whole keyboard contract is leaving it")

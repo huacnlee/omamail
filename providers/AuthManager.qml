@@ -194,12 +194,10 @@ Item {
 
   // -------------------------------------------------------------- keyring
 
-  // An install that predates multi-account stored its token under the client id
-  // alone. Reading that once, and rewriting under the new attributes, is the
-  // difference between an upgrade and a silent sign-out.
+  // Older grants are detected so the panel can ask for Calendar permission.
+  // Their tokens stay in the keyring and are never treated as current grants.
   property bool triedLegacyLookup: false
   property int secretLookupStage: 0
-  property var renamedAttributesToClear: []
   property var legacyAttributes: []
 
   // Two keyring entries are not tied to an address: the pre-multi-account one
@@ -237,14 +235,17 @@ Item {
     lookupHandled = false
     secretLookupStage++
     var attributes = []
-    if (secretLookupStage === 1 && mayAdoptLegacyToken) {
+    if (secretLookupStage === 1) {
+      triedLegacyLookup = false
+      attributes = Credentials.previousGrantKeyringAttributes(clientId, accountId)
+    } else if (secretLookupStage === 2 && mayAdoptLegacyToken) {
       triedLegacyLookup = true
       attributes = Credentials.legacyKeyringAttributes(clientId)
-    } else if (secretLookupStage <= 2) {
-      secretLookupStage = 2
+    } else if (secretLookupStage <= 3) {
+      secretLookupStage = 3
       triedLegacyLookup = false
       attributes = Credentials.renamedKeyringAttributes(clientId, accountId)
-    } else if (secretLookupStage === 3 && mayAdoptLegacyToken) {
+    } else if (secretLookupStage === 4 && mayAdoptLegacyToken) {
       triedLegacyLookup = true
       attributes = Credentials.renamedLegacyKeyringAttributes(clientId)
     }
@@ -289,7 +290,7 @@ Item {
     if (lookupHandled) return
     lookupHandled = true
     var token = String(raw || "").trim()
-    if (!token && secretLookupStage < 3 && clientId !== "") {
+    if (!token && secretLookupStage < 4 && clientId !== "") {
       startNextSecretLookup()
       return
     }
@@ -301,11 +302,18 @@ Item {
       if (purpose === "request") finishWaiters("", "Sign in to Gmail first")
       return
     }
-    renamedAttributesToClear = secretLookupStage >= 2
-      ? (secretLookupStage === 3
-        ? Credentials.renamedLegacyKeyringAttributes(clientId)
-        : Credentials.renamedKeyringAttributes(clientId, accountId))
-      : []
+    // Every fallback entry predates the Calendar grant marker. Refreshing it
+    // would report a live Gmail session while Calendar returns 403. Keep the
+    // saved token for Google's incremental consent flow, but require sign-in.
+    if (secretLookupStage > 0) {
+      token = ""
+      resetMemorySession()
+      sessionChecked = true
+      lastError = "Sign in again to add Google Calendar permission"
+      if (purpose === "request") finishWaiters("", lastError)
+      else sessionUnavailable(lastError)
+      return
+    }
     refreshWithToken(token, purpose)
   }
 
@@ -434,9 +442,6 @@ Item {
   }
 
   function acceptToken(result) {
-    // Rewriting after a legacy read is what completes the migration; without it
-    // the old entry stays authoritative and a second account would still clash.
-    if (triedLegacyLookup && !result.refreshToken) triedLegacyLookup = false
     accessToken = result.accessToken
     accessTokenExpiresAt = Date.now() + result.expiresIn * 1000
     if (result.scope) grantedScope = result.scope
@@ -541,15 +546,21 @@ Item {
         root.sessionUnavailable(root.lastError)
         return
       }
-      root.acceptToken(result)
-      root.sessionChecked = true
-
       // A user can untick individual permissions on Google's consent screen.
       // The resulting token works for reading and fails at the first archive,
       // which is a far worse experience than saying so now.
       var missing = OAuth.missingScopes(result.scope, root.scopes)
-      if (missing.length > 0) root.lastError = OAuth.missingScopeMessage(missing)
+      if (missing.length > 0) {
+        root.resetMemorySession()
+        root.sessionChecked = true
+        root.lastError = OAuth.missingScopeMessage(missing)
+        root.finishWaiters("", root.lastError)
+        root.sessionUnavailable(root.lastError)
+        return
+      }
 
+      root.acceptToken(result)
+      root.sessionChecked = true
       root.finishWaiters(root.accessToken, "")
       root.loginSucceeded()
     })
@@ -778,11 +789,6 @@ Item {
       root.keyringWriteToken = ""
       if (exitCode !== 0)
         root.lastError = "Signed in, but the session could not be saved. You may need to sign in again after a restart"
-      if (exitCode === 0 && root.renamedAttributesToClear.length && !keyringClear.running) {
-        keyringClear.command = ["secret-tool", "clear"].concat(root.renamedAttributesToClear)
-        root.renamedAttributesToClear = []
-        keyringClear.running = true
-      }
       if (root.logoutPendingClear) {
         root.logoutPendingClear = false
         root.clearStoredToken()

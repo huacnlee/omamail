@@ -26,8 +26,7 @@ draft beats reading, a query being typed beats the list underneath it:
 
 ```qml
 readonly property string keyContext:
-    root.service && root.service.sendPending ? "sendPending"
-  : root.showPage  ? "page"
+    root.showPage  ? "page"
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
@@ -41,7 +40,6 @@ readonly property string keyContext:
 | `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor without opening; `o` or `Enter` opens what they landed on |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
-| `sendPending` | A message in its undo window | `z`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
 
@@ -110,7 +108,7 @@ used to exist, and they had.
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return` | compose | Send |
-| `undoSend` | `z` | sendPending | Undo send |
+| `undoSend` | `Ctrl+Z` | mail+calendar | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
@@ -130,6 +128,8 @@ used to exist, and they had.
 
 The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
 opens the complete key sheet from every context.
+
+The delayed-send toast does not create a keyboard context. The list, reader, or calendar keeps its normal keys while the toast is visible. `Ctrl+Z` and the toast button undo the pending send. `Escape` keeps its normal navigation meaning.
 
 ## Why the rail is numbered and not chorded
 

@@ -328,6 +328,10 @@ function path(home) {
 var KEYRING_SERVICE = "omamail"
 var RENAMED_KEYRING_SERVICE = "omarchy-gmail"
 var KEYRING_KIND = "refresh-token"
+// A token stored before Calendar support cannot prove it carries the new
+// permission. A versioned lookup leaves that token untouched and presents the
+// sign-in flow again, where Google extends the existing grant.
+var KEYRING_GRANT = "calendar-events-v1"
 
 // secret-tool reads an empty attribute value as "match anything", which would
 // hand back some other account's token, so an account with no name yet gets a
@@ -344,14 +348,28 @@ function keyringAttributes(clientId, accountId) {
     "service", KEYRING_SERVICE,
     "kind", KEYRING_KIND,
     "client-id", id,
+    "account", accountKey(accountId) || UNNAMED_ACCOUNT,
+    "grant", KEYRING_GRANT
+  ]
+}
+
+// The account-keyed shape used before Calendar permission was added. It is
+// looked up only to explain why sign-in is required again; its token is never
+// refreshed as if it carried the current grant.
+function previousGrantKeyringAttributes(clientId, accountId) {
+  var id = trimmed(clientId)
+  if (!id) return []
+  return [
+    "service", KEYRING_SERVICE,
+    "kind", KEYRING_KIND,
+    "client-id", id,
     "account", accountKey(accountId) || UNNAMED_ACCOUNT
   ]
 }
 
 // What a single-account install stored before accounts existed. Such an entry
-// has no "account" attribute, so the lookup above never matches it: it is read
-// once with these and written back with the ones above, rather than leaving
-// the user staring at a sign-in button that used to say they were signed in.
+// has no "account" attribute. It is checked separately so the upgrade can
+// explain why the broader grant needs a new sign-in.
 function legacyKeyringAttributes(clientId) {
   var id = trimmed(clientId)
   if (!id) return []
@@ -373,10 +391,10 @@ function imapKeyringAttributes(accountId) {
     "account", id || UNNAMED_ACCOUNT]
 }
 
-// Entries from before the Omamail rename are read once and rewritten under
-// the new service name, so an upgrade keeps the user's signed-in session.
+// Entries from before the Omamail rename also predate Calendar permission.
+// Their exact old shape lets the upgrade identify them without using them.
 function renamedKeyringAttributes(clientId, accountId) {
-  var attributes = keyringAttributes(clientId, accountId)
+  var attributes = previousGrantKeyringAttributes(clientId, accountId)
   if (attributes.length) attributes[1] = RENAMED_KEYRING_SERVICE
   return attributes
 }
@@ -452,9 +470,8 @@ function startsWithPrefix(line, prefix) {
 //
 // Every other shape refuses. All-named is the case this exists for, where
 // nothing nameless is there and the wildcard would take a mailbox's own token.
-// A nameless entry beside named ones is left alone too: the lookup cannot be
-// told which of them to answer with, and an account with named siblings on
-// this client has already been through the migration the legacy read is for.
+// A nameless entry beside named ones is left alone too. The lookup cannot tell
+// which entry it would return.
 function hasLoneLegacyEntry(matches, attributed, named) {
   if (matches !== 1) return false
   if (attributed !== matches) return false
