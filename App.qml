@@ -593,6 +593,23 @@ Item {
     }
   }
 
+  Component {
+    id: jmapSetupPage
+
+    JmapSetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      accentColor: root.accent
+      panelFontFamily: root.fontFamily
+      canLeave: root.anyReady
+      accountCount: root.service ? root.service.accountCount : 1
+      onBackRequested: root.leaveSetup()
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
   function switchAccount(index) {
     if (!service) return false
     var keepCalendar = calendarVisible
@@ -1201,7 +1218,8 @@ Item {
             sourceComponent: root.showPicker
               ? providerPickerPage
               : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))
+                : (setup.kind === "jmap" ? jmapSetupPage
+                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage)))
           }
           }
         }

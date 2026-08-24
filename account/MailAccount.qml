@@ -99,15 +99,22 @@ Item {
   // What the panel may offer for this account. A button the service cannot
   // honour is worse than a missing one: it fails after the user has committed
   // to it, with the row already moved.
-  readonly property bool canArchive: Provider.can(providerId, "archive")
-  readonly property bool canReportSpam: Provider.can(providerId, "spam")
-  readonly property bool canStar: Provider.can(providerId, "star")
-  readonly property bool hasLabels: Provider.can(providerId, "labels")
-  readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
+  function canCapability(name) {
+    if (!Provider.can(providerId, name)) return false
+    if (providerId !== "jmap") return true
+    return !!api && api.canCapability(name)
+  }
+
+  readonly property bool readOnly: providerId === "jmap" && !!api && api.readOnly
+  readonly property bool canArchive: canCapability("archive")
+  readonly property bool canReportSpam: canCapability("spam")
+  readonly property bool canStar: canCapability("star")
+  readonly property bool hasLabels: canCapability("labels")
+  readonly property bool canOpenOnWeb: canCapability("web")
   // A different question from the one above: whether *this mailbox*, as it is
   // filtered right now, has an address in the provider's web app at all.
-  readonly property bool canOpenWebInbox: Provider.can(providerId, "webBox")
-  readonly property bool canSend: Provider.can(providerId, "send")
+  readonly property bool canOpenWebInbox: canCapability("webBox")
+  readonly property bool canSend: canCapability("send")
   // The key-bound actions this mailbox cannot honour, for the hint row. The
   // buttons are hidden by the three properties above; the keys are bound
   // whatever provider is open, so the row that says what the keyboard does here
@@ -803,7 +810,7 @@ Item {
       root.previewMessages = Model.replaceById(root.previewMessages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
-      if (summary.unread) root.act(messageId, "markRead", true)
+      if (summary.unread && !root.readOnly) root.act(messageId, "markRead", true)
     })
   }
 
@@ -959,6 +966,10 @@ Item {
   function act(id, action, quiet) {
     var messageId = String(id || "")
     if (!ready || messageId === "") return
+    if (readOnly) {
+      note("This JMAP account is read-only")
+      return
+    }
     // Before the optimistic update, not after it. A key is not a button: `e`
     // and `s` are bound in every mail context, so an action the provider cannot
     // honour reaches here even though the panel drew no button for it — and the
@@ -1086,6 +1097,10 @@ Item {
 
   function markAllRead() {
     if (!ready || messages.length === 0) return
+    if (readOnly) {
+      note("This JMAP account is read-only")
+      return
+    }
     var ids = []
     for (var i = 0; i < messages.length; i++) {
       if (messages[i].unread) ids.push(messages[i].id)
@@ -1752,7 +1767,8 @@ Item {
   Loader {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
-      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)
+      : (root.providerId === "jmap" ? jmapAuthComponent
+        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -1761,7 +1777,8 @@ Item {
     id: apiLoader
     active: !!authLoader.item
     sourceComponent: root.providerId === "imap" ? imapClientComponent
-      : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
+      : (root.providerId === "jmap" ? jmapClientComponent
+        : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))
   }
 
   Component {
@@ -1823,6 +1840,23 @@ Item {
   }
 
   Component {
+    id: jmapAuthComponent
+
+    JmapAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: gmailClientComponent
     GmailApiClient { auth: authLoader.item }
   }
@@ -1835,6 +1869,14 @@ Item {
   Component {
     id: imapClientComponent
     ImapClient {
+      auth: authLoader.item
+      email: root.configuredEmail
+    }
+  }
+
+  Component {
+    id: jmapClientComponent
+    JmapClient {
       auth: authLoader.item
       email: root.configuredEmail
     }

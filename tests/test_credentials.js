@@ -142,6 +142,15 @@ deepEqual(first, [
 assert.notStrictEqual(JSON.stringify(first), JSON.stringify(second),
   "two accounts on one client must not share a keyring entry")
 
+deepEqual(credentials.jmapKeyringAttributes("jmap:reader@example.com"), [
+  "service", "omamail", "kind", "jmap-api-token",
+  "account", "jmap:reader@example.com"
+])
+assert.notStrictEqual(
+  JSON.stringify(credentials.jmapKeyringAttributes("jmap:reader@example.com")),
+  JSON.stringify(credentials.imapKeyringAttributes("imap:reader@example.com")),
+  "JMAP tokens and IMAP passwords are separate credentials")
+
 // The lookup runs on every session restore; an attribute set that drifts
 // between calls would look exactly like a signed-out account.
 deepEqual(credentials.keyringAttributes(sharedClient, "one@gmail.com"), first)

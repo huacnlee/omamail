@@ -10,10 +10,11 @@ const provider = load("providers/Registry.js")
 //
 // The order is the order the chooser lists them in: the two hosted mailboxes
 // with a service of their own, then the one that is every other mailbox.
-deepEqual(provider.ids(), ["gmail", "hey", "imap"])
+deepEqual(provider.ids(), ["gmail", "hey", "jmap", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
+assert.strictEqual(provider.get("jmap").name, "JMAP")
 
 // An id from a newer build, or a hand-edited file, still has to open a window.
 assert.strictEqual(provider.get("nonesuch").id, "gmail")
@@ -38,6 +39,15 @@ assert.strictEqual(provider.can("imap", "threads"), false)
 assert.strictEqual(provider.can("imap", "star"), true, "\\Flagged is a star")
 assert.strictEqual(provider.can("imap", "web"), false, "no web UI to open a message in")
 assert.strictEqual(provider.can("gmail", "web"), true)
+assert.strictEqual(provider.can("jmap", "threads"), true)
+assert.strictEqual(provider.can("jmap", "labels"), true)
+assert.strictEqual(provider.can("jmap", "send"), false)
+assert.strictEqual(provider.can("jmap", "spam"), false)
+assert.strictEqual(provider.can("jmap", "web"), false)
+assert.strictEqual(provider.can("jmap", "archive"), false,
+  "write verbs stay hidden until a write-scoped account demonstrates them")
+assert.strictEqual(provider.can("jmap", "star"), false)
+assert.strictEqual(provider.can("jmap", "batch"), false)
 
 // Opening a message on the web and opening *this mailbox* on the web are two
 // questions. HEY gives every thread an address of its own but has none for a
@@ -126,6 +136,7 @@ assert.strictEqual(provider.query("gmail", "trash", "", ""), "in:trash")
 assert.strictEqual(provider.query("imap", "inbox", "", ""), "folder:INBOX")
 assert.strictEqual(provider.query("imap", "unread", "", ""), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.query("imap", "sent", "", ""), "folder:\\Sent")
+assert.strictEqual(provider.query("jmap", "unread", "", ""), "role:inbox unread")
 
 // A typed search wins over everything, and is shaped by the provider.
 assert.strictEqual(provider.query("gmail", "trash", "from:jane", ""), "from:jane",
@@ -150,12 +161,15 @@ assert.strictEqual(provider.query("gmail", "inbox", "   ", ""), "in:inbox",
 // request is rejected and the mailbox stays empty.
 assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBOX")
 assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
+assert.strictEqual(provider.query("jmap", "inbox", "", "in:inbox"), "role:inbox")
 
 // HEY's own queries, which the client reads back as commands.
 assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
 assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
 assert.strictEqual(provider.query("hey", "trash", "", ""), "box:trash")
 assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentist")
+assert.strictEqual(provider.query("jmap", "inbox", 'quarterly "report"', ""),
+  'text:"quarterly \\"report\\""')
 
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.
@@ -163,6 +177,7 @@ assert.strictEqual(provider.unreadQuery("gmail"),
   "in:inbox is:unread -category:promotions -category:social -category:forums")
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
+assert.strictEqual(provider.unreadQuery("jmap"), "role:inbox unread")
 
 // Named by exclusion on purpose, and the reason is which way it fails. Asking
 // for `category:primary` was a positive scope, and a positive scope that stops
@@ -187,6 +202,7 @@ assert.strictEqual(provider.labelQuery("imap", "Old Mail"), "folder:\"Old Mail\"
 // HEY addresses a label by the id `hey labels` gave, which is what the sidebar
 // carries as a label's `rawName` — `hey label` takes nothing else.
 assert.strictEqual(provider.labelQuery("hey", "4711"), "label:4711")
+assert.strictEqual(provider.labelQuery("jmap", "m 1"), 'mailbox:"m 1"')
 assert.strictEqual(provider.labelQuery("hey", ""), "")
 assert.strictEqual(provider.labelQuery("imap", ""), "")
 assert.strictEqual(provider.labelQuery("imap", "   "), "")
@@ -202,6 +218,7 @@ assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u/0/")
 assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
 assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
+assert.strictEqual(provider.webHomeUrl("jmap"), "", "JMAP does not imply one vendor's website")
 
 // ------------------------------------------------------------------ logos
 
@@ -217,11 +234,13 @@ assert.strictEqual(provider.mark("hey"), "hey-mark.png")
 assert.strictEqual(provider.logo("hey"), "hey.png")
 assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
+assert.strictEqual(provider.logo("jmap"), "")
 
 // ------------------------------------------------------------------- auth
 
 assert.strictEqual(provider.authKind("gmail"), "oauth")
 assert.strictEqual(provider.authKind("imap"), "password")
+assert.strictEqual(provider.authKind("jmap"), "password")
 // A sign-in this plugin does not perform itself: `hey` owns the browser, the
 // token and the keyring entry it lives in.
 assert.strictEqual(provider.authKind("hey"), "cli")
@@ -232,6 +251,7 @@ assert.strictEqual(provider.usesPassword("hey"), false)
 assert.strictEqual(provider.usesOAuth("gmail"), true)
 assert.strictEqual(provider.usesOAuth("imap"), false)
 assert.strictEqual(provider.usesPassword("imap"), true)
+assert.strictEqual(provider.usesPassword("jmap"), true)
 assert.strictEqual(provider.usesPassword("gmail"), false)
 
 assert.strictEqual(provider.badge("imap"), "IMAP")

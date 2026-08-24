@@ -391,6 +391,17 @@ function imapKeyringAttributes(accountId) {
     "account", id || UNNAMED_ACCOUNT]
 }
 
+// A JMAP API token is account-scoped like an IMAP password, but a different
+// kind keeps two ways of reaching the same address from overwriting each
+// other in the keyring.
+var JMAP_KEYRING_KIND = "jmap-api-token"
+
+function jmapKeyringAttributes(accountId) {
+  var id = accountKey(accountId)
+  return ["service", KEYRING_SERVICE, "kind", JMAP_KEYRING_KIND,
+    "account", id || UNNAMED_ACCOUNT]
+}
+
 // Entries from before the Omamail rename also predate Calendar permission.
 // Their exact old shape lets the upgrade identify them without using them.
 function renamedKeyringAttributes(clientId, accountId) {
