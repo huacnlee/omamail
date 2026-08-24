@@ -101,11 +101,11 @@ Item {
   // to it, with the row already moved.
   function canCapability(name) {
     if (!Provider.can(providerId, name)) return false
-    if (providerId !== "jmap") return true
-    return !!api && api.canCapability(name)
+    if (!api || typeof api.canCapability !== "function") return true
+    return api.canCapability(name)
   }
 
-  readonly property bool readOnly: providerId === "jmap" && !!api && api.readOnly
+  readonly property bool readOnly: !!api && api.readOnly === true
   readonly property bool canArchive: canCapability("archive")
   readonly property bool canReportSpam: canCapability("spam")
   readonly property bool canStar: canCapability("star")
