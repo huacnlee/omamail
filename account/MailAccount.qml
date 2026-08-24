@@ -305,6 +305,7 @@ Item {
       toolsPresent: auth.toolsPresent || !auth.toolsChecked,
       credentialsPresent: auth.credentialsPresent,
       signingIn: auth.loginBusy,
+      recoveringSession: auth.recoveringSession || false,
       signedIn: auth.loggedIn
     })
   }

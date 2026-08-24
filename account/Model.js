@@ -39,6 +39,7 @@ function setupState(status) {
   if (!value.toolsPresent) return "tools_missing"
   if (!value.credentialsPresent) return "no_credentials"
   if (value.signingIn) return "signing_in"
+  if (value.recoveringSession) return "reconnecting"
   if (!value.signedIn) return "signed_out"
   return "ready"
 }
@@ -72,6 +73,7 @@ function setupHeadline(state, provider, authKind) {
     if (authKind === "cli") return "Waiting for " + name + "…"
     return "Waiting for Google…"
   }
+  if (state === "reconnecting") return "Reconnecting to " + name + "…"
   if (state === "signed_out") return "Sign in to " + name
   return ""
 }
@@ -111,6 +113,8 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
       return "The HEY CLI is installed but signed out. Sign in to let it read this mailbox."
     return "Your OAuth client is ready. Sign in to let it read this mailbox."
   }
+  if (state === "reconnecting")
+    return "The saved session is intact. Omamail will retry automatically when the network is available."
   return ""
 }
 
@@ -128,6 +132,7 @@ function setupActionLabel(state, provider, authKind) {
     return "Set up the OAuth client..."
   }
   if (state === "signing_in") return "Cancel"
+  if (state === "reconnecting") return ""
   if (state === "signed_out") return "Sign in to " + providerName(provider) + "..."
   return ""
 }

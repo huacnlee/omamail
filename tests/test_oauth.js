@@ -107,6 +107,21 @@ assert.strictEqual(revoked.error, "Google rejected the saved session. Sign in ag
 assert.strictEqual(oauth.parseTokenResponse(500, "<html>", "").ok, false)
 assert.strictEqual(oauth.parseTokenResponse(200, "{}", "").ok, false, "no access_token is a failure")
 
+// A network outage did not revoke the saved grant. Treating every failed
+// refresh as signed out strands a valid keyring token until the shell restarts.
+assert.strictEqual(oauth.refreshFailureDisposition({ ok: false, invalidGrant: false }), "retry",
+  "temporary refresh failures keep trying the saved session")
+assert.strictEqual(oauth.refreshFailureDisposition({ ok: false, invalidGrant: true }), "signed_out",
+  "only a rejected grant requires another sign-in")
+
+// Retries start promptly, then back off so a long outage does not hammer the
+// token endpoint forever. The cap keeps recovery bounded when the network
+// eventually returns.
+assert.strictEqual(oauth.refreshRetryDelay(0), 5000)
+assert.strictEqual(oauth.refreshRetryDelay(1), 10000)
+assert.strictEqual(oauth.refreshRetryDelay(6), 300000)
+assert.strictEqual(oauth.refreshRetryDelay(100), 300000)
+
 // --------------------------------------------------------------- scopes
 
 deepEqual(

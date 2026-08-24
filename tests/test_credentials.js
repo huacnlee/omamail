@@ -201,6 +201,20 @@ deepEqual(credentials.renamedLegacyKeyringAttributes(sharedClient), [
   "client-id", sharedClient
 ])
 
+// A rejected token must be cleared from the exact lookup stage that produced
+// it. Clearing only the canonical entry leaves a legacy token to be found and
+// rejected again on every restart.
+deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 0),
+  credentials.keyringAttributes(sharedClient, "me@example.com"))
+deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 1),
+  credentials.previousGrantKeyringAttributes(sharedClient, "me@example.com"))
+deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 2),
+  credentials.legacyKeyringAttributes(sharedClient))
+deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 3),
+  credentials.renamedKeyringAttributes(sharedClient, "me@example.com"))
+deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 4),
+  credentials.renamedLegacyKeyringAttributes(sharedClient))
+
 // --------------------------------------------- looking before the leap
 //
 // Why the legacy read counts before it asks is in Credentials.js. What it has

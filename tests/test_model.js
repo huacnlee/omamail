@@ -12,12 +12,17 @@ assert.strictEqual(model.setupState({ toolsPresent: false }), "tools_missing")
 assert.strictEqual(model.setupState({ toolsPresent: true, credentialsPresent: false }), "no_credentials")
 assert.strictEqual(model.setupState({ toolsPresent: true, credentialsPresent: true, signedIn: false }), "signed_out")
 assert.strictEqual(model.setupState({ toolsPresent: true, credentialsPresent: true, signingIn: true }), "signing_in")
+assert.strictEqual(model.setupState({ toolsPresent: true, credentialsPresent: true,
+  recoveringSession: true, signedIn: false }), "reconnecting")
 assert.strictEqual(model.setupState({ toolsPresent: true, credentialsPresent: true, signedIn: true }), "ready")
 assert.strictEqual(model.setupState(null), "tools_missing")
 
 // Missing tools have to be named. "Something is missing" is not actionable.
 assert.ok(model.setupDetail("tools_missing", ["socat", "secret-tool"]).indexOf("socat, secret-tool") > 0)
 assert.strictEqual(model.setupHeadline("ready"), "")
+assert.strictEqual(model.setupHeadline("reconnecting"), "Reconnecting to Gmail…")
+assert.ok(model.setupDetail("reconnecting").indexOf("retry automatically") > 0)
+assert.strictEqual(model.setupActionLabel("reconnecting"), "")
 assert.strictEqual(model.setupHeadline("signed_out"), "Sign in to Gmail",
   "an account with no provider recorded is a Gmail account")
 assert.strictEqual(model.setupHeadline("signed_out", "IMAP"), "Sign in to IMAP")

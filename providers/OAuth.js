@@ -190,6 +190,21 @@ function parseTokenResponse(status, text, previousRefreshToken) {
   }
 }
 
+// A saved grant stops being a session only when Google says the grant itself
+// is invalid. Timeouts, transport failures and server errors leave it intact
+// and must be retried when the network is usable again.
+function refreshFailureDisposition(result) {
+  return result && result.invalidGrant ? "signed_out" : "retry"
+}
+
+// Start quickly for a network transition, then back off to one request every
+// five minutes during a longer outage. A successful refresh resets the caller's
+// attempt counter.
+function refreshRetryDelay(attempt) {
+  var count = Math.max(0, Math.floor(Number(attempt)) || 0)
+  return Math.min(300000, 5000 * Math.pow(2, count))
+}
+
 // A grant is only useful if it came back with everything the panel needs. A
 // user who unticks a checkbox on Google's consent screen gets a working token
 // with a scope set that silently breaks half the actions.
