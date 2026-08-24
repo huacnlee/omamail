@@ -108,16 +108,22 @@ python3 - <<'PY'
 from pathlib import Path
 
 widget = Path("BarWidget.qml").read_text()
+open_window = widget[widget.index("function openWindow()"):widget.index("function openMessage(")]
+if "shell.toggle" not in open_window or open_window.index("shell.toggle") > open_window.index("shell.summon"):
+    raise SystemExit("test_source.sh: the bar's main-window action must toggle an open window closed")
 pressed = widget[widget.index("onPressed: function(buttonCode)"):]
 pressed = pressed[:pressed.index("\n    }")]
 if "buttonCode === Qt.LeftButton" not in pressed or "root.openWindow()" not in pressed:
     raise SystemExit("test_source.sh: left-clicking the bar icon must open Omamail")
 PY
-# As a selected fill, the way every other selected control here is drawn. The
-# bar's own `active` recolours the glyph from the theme's `bar.active`, which
-# falls back to `urgent` — a warning colour for a window simply being open.
-grep -q 'selectedFillFor' BarWidget.qml \
-  || fail "the bar icon's open state must use the selected fill, not a glyph colour"
+# The shell marks an open bar panel with a short accent line on the bar's inner
+# edge. Omamail's main window is not a bar popout, so its widget draws the same
+# indicator itself instead of substituting an unrelated grey square.
+grep -q 'id: openIndicator' BarWidget.qml \
+  || fail "the open Omamail window must use the bar's accent-line indicator"
+if grep -q 'id: openFill' BarWidget.qml; then
+  fail "the bar icon must not replace the native-style indicator with a selected fill"
+fi
 if grep -vE '^[[:space:]]*//' BarWidget.qml | grep -n 'activeColor'; then
   fail "BarWidget must not paint its glyph with the bar's urgent-derived activeColor"
 fi
@@ -200,8 +206,26 @@ if "height:" not in error_block or "lastError" not in error_block:
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"
-[ -f components/CalendarSidebar.qml ] \
-  || fail "the calendar sidebar is missing"
+python3 - <<'PY'
+from pathlib import Path
+
+sidebar = Path("components/MailboxSidebar.qml").read_text()
+footer = sidebar[sidebar.index("id: footer"):sidebar.index("component Entry:")]
+if 'label: "Calendar"' not in footer or "calendarRequested" not in footer:
+    raise SystemExit("test_source.sh: Calendar must be fixed above the sidebar account row")
+
+app = Path("App.qml").read_text()
+sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
+if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
+    raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
+header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]
+if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
+    raise SystemExit("test_source.sh: Calendar navigation belongs in the sidebar, not the header")
+
+calendar = Path("components/CalendarView.qml").read_text()
+if "CalendarSidebar {" in calendar:
+    raise SystemExit("test_source.sh: Calendar must not open a second sidebar")
+PY
 grep -q 'function setSourceEnabled' calendar/CalendarController.qml \
   || fail "calendar visibility must persist through the controller"
 grep -q 'function setSourceColor' calendar/CalendarController.qml \
@@ -232,31 +256,17 @@ switch = service[service.index("function switchTo(id)"):service.index("function 
 if "sendPending" not in switch:
     raise SystemExit("test_source.sh: an undoable send must prevent account switching")
 PY
-grep -q 'CalendarPalette {' components/CalendarSidebar.qml \
-  || fail "calendar color choices must come from the active theme palette"
-grep -q 'Popup {' components/CalendarSidebar.qml \
-  || fail "a calendar color circle must open a compact picker popup"
 grep -q 'allDayEventsOnDay' components/WeekCalendarView.qml \
   || fail "all-day events must have a pinned week-view lane"
 grep -q 'signal createAt' components/WeekCalendarView.qml \
   || fail "empty week slots must start event creation"
 grep -q 'function beginAt' components/CalendarEventComposer.qml \
   || fail "event creation must accept a preselected time"
-grep -q 'groupByAccount' components/CalendarSidebar.qml \
-  || fail "calendar rows must be grouped under their accounts"
-grep -q 'property bool collapsed' components/CalendarSidebar.qml \
-  || fail "the calendar sidebar needs a collapsed rail state"
-grep -q 'name: "calendar"' components/CalendarSidebar.qml \
-  || fail "the collapsed calendar rail needs a calendar icon"
-grep -q 'entryColor: calendarPalette.colorFor(modelData.colorKey)' components/CalendarSidebar.qml \
-  || fail "calendar visibility controls must use the assigned calendar color"
-grep -q 'property bool sidebarCollapsed' components/CalendarView.qml \
-  || fail "calendar sidebar toggling must collapse to a rail instead of hiding it"
 python3 - <<'PY'
 from pathlib import Path
 
 app = Path("App.qml").read_text()
-for component_id in ("sidebar", "listColumn", "reader"):
+for component_id in ("listColumn", "reader"):
     marker = f"id: {component_id}"
     start = app.index(marker)
     end = app.find("\n        }", start)

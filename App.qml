@@ -115,10 +115,6 @@ Item {
   // user had already expressed and the window kept forgetting.
   readonly property bool sidebarCollapsed: !!service && service.sidebarCollapsed
   function toggleSidebar() {
-    if (calendarVisible) {
-      calendarView.toggleSidebar()
-      return
-    }
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
 
@@ -808,24 +804,6 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(4)
 
-          IconButton {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
-            iconName: root.calendarVisible ? "mail" : "calendar"
-            tooltipText: root.calendarVisible ? "Mail" : "Calendar"
-            foreground: root.calendarVisible ? root.foreground : root.dim
-            hoverColor: root.foreground
-            fontFamily: root.fontFamily
-            selected: root.calendarVisible
-            onClicked: {
-              if (root.calendarVisible) root.backToList()
-              else {
-                root.currentView = "calendar"
-                calendarView.refresh()
-              }
-            }
-          }
-
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
@@ -903,8 +881,8 @@ Item {
           anchors.bottom: parent.bottom
           width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
           visible: !root.compact && !root.showPage && !root.composing
-            && !root.calendarVisible
           collapsed: root.sidebarCollapsed
+          calendarSelected: root.calendarVisible
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
@@ -915,6 +893,10 @@ Item {
           numbersVisible: focusScope.ctrlHeld
           onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
+          onCalendarRequested: {
+            root.currentView = "calendar"
+            calendarView.refresh()
+          }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
@@ -1114,7 +1096,10 @@ Item {
         }
 
         Rectangle {
-          anchors.fill: parent
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebar.visible ? sidebar.right : parent.left
           visible: root.calendarVisible && !root.showPage && !root.composing
           color: root.background
           z: 10

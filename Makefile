@@ -44,7 +44,6 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/CalendarEventComposer.qml \
 	components/CalendarEventDetail.qml \
 	components/CalendarPalette.qml \
-	components/CalendarSidebar.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml \
 	calendar/CalendarController.qml \

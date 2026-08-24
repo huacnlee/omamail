@@ -20,7 +20,6 @@ Item {
   property string selectedEventId: ""
   property var detailEvent: null
   readonly property bool detailOpen: detailEvent !== null
-  property bool sidebarCollapsed: false
   readonly property var days: Calendar.monthDays(
     visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
   readonly property var weekDays: Calendar.weekDays(visibleWeek.getTime(), 1)
@@ -122,8 +121,6 @@ Item {
     viewMode = mode === "week" ? "week" : "month"
     refresh()
   }
-
-  function toggleSidebar() { sidebarCollapsed = !sidebarCollapsed }
 
   function showEvent(eventId, startMs) {
     selectedEventId = String(eventId || "")
@@ -248,32 +245,10 @@ Item {
       id: calendarBody
       width: parent.width
       height: parent.height - y
-      spacing: Style.space(10)
-
-      CalendarSidebar {
-        id: calendarSidebar
-        width: root.sidebarCollapsed ? Style.space(44) : Style.space(190)
-        height: parent.height
-        collapsed: root.sidebarCollapsed
-        controller: root.controller
-        textColor: root.textColor
-        backgroundColor: root.backgroundColor
-        accentColor: root.accentColor
-        urgentColor: root.urgentColor
-        dimColor: root.dimColor
-        panelFontFamily: root.panelFontFamily
-      }
-
-      Rectangle {
-        id: sidebarDivider
-        width: 1
-        height: parent.height
-        color: Style.normalBorderFor(root.textColor, root.accentColor)
-      }
+      spacing: 0
 
       Item {
-        width: calendarBody.width - calendarSidebar.width - sidebarDivider.width
-          - calendarBody.spacing * 2
+        width: calendarBody.width
         height: calendarBody.height
 
         Column {

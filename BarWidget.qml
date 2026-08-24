@@ -48,8 +48,8 @@ BarWidget {
   function openWindow() {
     close()
     if (!bar || !bar.shell) return
-    if (typeof bar.shell.summon === "function") bar.shell.summon("omamail", "{}")
-    else if (typeof bar.shell.toggle === "function") bar.shell.toggle("omamail", "{}")
+    if (typeof bar.shell.toggle === "function") bar.shell.toggle("omamail", "{}")
+    else if (typeof bar.shell.summon === "function") bar.shell.summon("omamail", "{}")
   }
 
   function openMessage(accountId, messageId) {
@@ -90,32 +90,13 @@ BarWidget {
     // service is what knows: it outlives the window and is told either way.
     readonly property bool windowOpen: root.previewOpen
       || (!!root.gmail && root.gmail.windowOpen)
-    // Not `activeColor`: the bar hands that down from the theme's `bar.active`,
-    // which falls back to `urgent` — a warning colour for a window simply being
-    // open. The glyph keeps its own colour and the open state is a fill behind
-    // it, which is what a selected control looks like everywhere else here.
     readonly property color glyphColor: connected
       ? root.foreground
       : Qt.darker(root.foreground, 1.55)
     readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
 
-    // The bar's own `active` is left alone on purpose: it exists to recolour a
-    // glyph, and this widget draws its own.
-    readonly property color openFill: Style.selectedFillFor(root.foreground, Color.accent)
-
     iconComponent: Component {
       Item {
-        // The same fill a selected control carries anywhere else in this
-        // application, so an open window reads as open rather than as urgent.
-        Rectangle {
-          anchors.centerIn: parent
-          width: Style.space(20)
-          height: width
-          radius: Style.cornerRadius
-          visible: button.windowOpen
-          color: button.openFill
-        }
-
         GmailIcon {
           anchors.centerIn: parent
           iconSize: Style.space(12)
@@ -147,6 +128,26 @@ BarWidget {
       }
       root.previewOpen = !root.previewOpen
     }
+  }
+
+  // The shell draws this same accent line for its own open popouts. Omamail's
+  // application window is routed separately, so the widget mirrors that mark
+  // at the bar's inner edge instead of inventing a different selected shape.
+  Rectangle {
+    id: openIndicator
+    readonly property bool vertical: !!root.bar && root.bar.vertical
+    visible: button.windowOpen
+    color: Color.accent
+    radius: Math.min(width, height) / 2
+    width: vertical ? Style.space(2) : Style.space(10)
+    height: vertical ? Style.space(10) : Style.space(2)
+    x: vertical
+      ? (root.bar.position === "left" ? root.width - width - Style.space(2) : Style.space(2))
+      : Math.round((root.width - width) / 2)
+    y: vertical
+      ? Math.round((root.height - height) / 2)
+      : (root.bar && root.bar.position === "top"
+        ? root.height - height - Style.space(2) : Style.space(2))
   }
 
   KeyboardPanel {
