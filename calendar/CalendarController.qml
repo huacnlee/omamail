@@ -96,6 +96,7 @@ Item {
   }
 
   function finishEvent(ok, error) {
+    eventDeadline.stop()
     creatingEvent = false
     eventSource = null
     eventDraft = null
@@ -114,6 +115,7 @@ Item {
       request.setRequestHeader("Content-Type", "application/json")
       request.onreadystatechange = function() {
         if (request.readyState !== XMLHttpRequest.DONE) return
+        eventDeadline.stop()
         root.eventRequest = null
         if (request.status < 200 || request.status >= 300) {
           root.finishEvent(false,
@@ -122,6 +124,7 @@ Item {
         }
         root.finishEvent(true, "")
       }
+      eventDeadline.restart()
       request.send(JSON.stringify(root.eventDraft.google))
       token = ""
     })
@@ -502,8 +505,14 @@ Item {
     interval: 60000
     onTriggered: {
       if (root.googleRequest) root.googleRequest.abort()
-      root.googleRequest = null
-      root.failSource("The Google Calendar request timed out")
+    }
+  }
+
+  Timer {
+    id: eventDeadline
+    interval: 60000
+    onTriggered: {
+      if (root.eventRequest) root.eventRequest.abort()
     }
   }
 }

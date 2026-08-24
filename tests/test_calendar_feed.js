@@ -14,6 +14,12 @@ assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
 })), "The Google Calendar API is not enabled for this Google Cloud project")
 assert.strictEqual(feed.googleResponseError(401, ""),
   "Google rejected the calendar session. Sign in again")
+assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
+  error: {
+    message: "Request had insufficient authentication scopes.",
+    errors: [{ reason: "insufficientPermissions" }]
+  }
+})), "Google Calendar permission is missing. Sign out and sign in again")
 assert.strictEqual(feed.googleResponseError(500, "not json"),
   "Google Calendar returned HTTP 500")
 
@@ -90,15 +96,19 @@ const recurringXml = [
   '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
   '<d:response><d:href>/cal/standup.ics</d:href><d:propstat><d:prop>',
   '<c:calendar-data>BEGIN:VCALENDAR\r\n',
+  'BEGIN:VTIMEZONE\r\nTZID:Test/PlusTwo\r\n',
+  'BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0200\r\n',
+  'TZOFFSETTO:+0200\r\nEND:STANDARD\r\n',
+  'END:VTIMEZONE\r\n',
   'BEGIN:VEVENT\r\nUID:standup\r\nSUMMARY:Standup\r\n',
-  'DTSTART;TZID=Europe/Stockholm:20240208T140000\r\n',
-  'DTEND;TZID=Europe/Stockholm:20240208T150000\r\n',
+  'DTSTART;TZID=Test/PlusTwo:20240208T140000\r\n',
+  'DTEND;TZID=Test/PlusTwo:20240208T150000\r\n',
   'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH\r\n',
-  'EXDATE;TZID=Europe/Stockholm:20260903T140000\r\nEND:VEVENT\r\n',
+  'EXDATE;TZID=Test/PlusTwo:20260903T140000\r\nEND:VEVENT\r\n',
   'BEGIN:VEVENT\r\nUID:standup\r\nSUMMARY:Moved standup\r\n',
-  'RECURRENCE-ID;TZID=Europe/Stockholm:20260917T140000\r\n',
-  'DTSTART;TZID=Europe/Stockholm:20260918T140000\r\n',
-  'DTEND;TZID=Europe/Stockholm:20260918T150000\r\n',
+  'RECURRENCE-ID;TZID=Test/PlusTwo:20260917T140000\r\n',
+  'DTSTART;TZID=Test/PlusTwo:20260918T140000\r\n',
+  'DTEND;TZID=Test/PlusTwo:20260918T150000\r\n',
   'END:VEVENT\r\nEND:VCALENDAR</c:calendar-data>',
   '</d:prop></d:propstat></d:response></d:multistatus>'
 ].join("")
@@ -111,7 +121,7 @@ assert.strictEqual(recurringEvents[0].sourceId, "work")
 assert.strictEqual(recurringEvents[0].href, "/cal/standup.ics")
 
 const utcRecurringXml = recurringXml
-  .replace(/;TZID=Europe\/Stockholm/g, "")
+  .replace(/;TZID=Test\/PlusTwo/g, "")
   .replace(/20240208T140000/g, "20240208T130000Z")
   .replace(/20240208T150000/g, "20240208T140000Z")
   .replace(/20260903T140000/g, "20260903T130000Z")

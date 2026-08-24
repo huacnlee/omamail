@@ -145,24 +145,33 @@ Item {
   // The whole point of switching is that it is instant, which it is because
   // each account keeps its own cache on disk.
   function switchTo(id) {
+    if (current && current.sendPending) {
+      current.note("Undo or wait before switching accounts")
+      return false
+    }
     if (String(id) === activeAccountId && activeIndex < 0) return
     activeIndex = -1
     accountList = Accounts.setActive(accountList, id)
     saveAccounts()
     refreshCurrent()
+    return true
   }
 
   // The switcher selects by position, because that is the only handle a mailbox
   // without an address has.
   function switchToIndex(index) {
+    if (current && current.sendPending) {
+      current.note("Undo or wait before switching accounts")
+      return false
+    }
     var accounts = accountList ? accountList.accounts : []
     if (index < 0 || index >= accounts.length) return
     if (accounts[index].id !== "") {
-      switchTo(accounts[index].id)
-      return
+      return switchTo(accounts[index].id)
     }
     activeIndex = index
     refreshCurrent()
+    return true
   }
 
   // The provider is chosen before the row exists, because it decides which

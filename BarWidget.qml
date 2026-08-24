@@ -134,11 +134,13 @@ BarWidget {
     }
 
     onPressed: function(buttonCode) {
-      // Right-click does nothing. It used to open the web inbox, which is the
-      // one thing this application exists so you do not have to do, and it is
-      // also where a context menu is expected — so the gesture was both wrong
-      // and reserved. Left opens the window, middle checks for mail.
-      if (buttonCode === Qt.RightButton) return
+      // The primary action stays opening Omamail. The preview is an extra view,
+      // so it lives on the secondary button instead of replacing the only way
+      // to reach the application window. Middle-click still checks for mail.
+      if (buttonCode === Qt.LeftButton) {
+        root.openWindow()
+        return
+      }
       if (buttonCode === Qt.MiddleButton) {
         if (root.gmail) root.gmail.refresh()
         return

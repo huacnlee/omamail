@@ -104,6 +104,15 @@ grep -q 'windowOpen' BarWidget.qml \
 grep -q 'KeyboardPanel {' BarWidget.qml \
   || fail "the bar icon must open a mail and calendar preview"
 [ -f bar/BarPreview.qml ] || fail "the bar preview view is missing"
+python3 - <<'PY'
+from pathlib import Path
+
+widget = Path("BarWidget.qml").read_text()
+pressed = widget[widget.index("onPressed: function(buttonCode)"):]
+pressed = pressed[:pressed.index("\n    }")]
+if "buttonCode === Qt.LeftButton" not in pressed or "root.openWindow()" not in pressed:
+    raise SystemExit("test_source.sh: left-clicking the bar icon must open Omamail")
+PY
 # As a selected fill, the way every other selected control here is drawn. The
 # bar's own `active` recolours the glyph from the theme's `bar.active`, which
 # falls back to `urgent` — a warning colour for a window simply being open.
@@ -200,6 +209,22 @@ grep -q 'property double pendingRangeStart' calendar/CalendarController.qml \
   || fail "a calendar range change during loading must be queued"
 grep -q 'root.refresh(nextStart, nextEnd)' calendar/CalendarController.qml \
   || fail "the queued calendar range must run after the active refresh"
+python3 - <<'PY'
+from pathlib import Path
+
+controller = Path("calendar/CalendarController.qml").read_text()
+google_timeout = controller[controller.index("id: googleDeadline"):]
+google_timeout = google_timeout[:google_timeout.index("}\n  }")]
+if "failSource(" in google_timeout:
+    raise SystemExit("test_source.sh: abort must be the only Google refresh timeout completion path")
+if "id: eventDeadline" not in controller or "root.eventRequest.abort()" not in controller:
+    raise SystemExit("test_source.sh: Google event creation must abort after a deadline")
+
+service = Path("Service.qml").read_text()
+switch = service[service.index("function switchTo(id)"):service.index("function switchToIndex(index)")]
+if "sendPending" not in switch:
+    raise SystemExit("test_source.sh: an undoable send must prevent account switching")
+PY
 grep -q 'CalendarPalette {' components/CalendarSidebar.qml \
   || fail "calendar color choices must come from the active theme palette"
 grep -q 'Popup {' components/CalendarSidebar.qml \

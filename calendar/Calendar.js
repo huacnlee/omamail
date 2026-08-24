@@ -9,8 +9,10 @@ function googleResponseError(status, responseText) {
   var detail = error ? String(error.message || "") : ""
   var reasons = error && Array.isArray(error.errors) ? error.errors : []
   var disabled = /Calendar API has not been used|Calendar API.*disabled/i.test(detail)
+  var permissionMissing = /insufficient authentication scopes/i.test(detail)
   for (var i = 0; i < reasons.length; i++) {
     if (String(reasons[i].reason || "") === "accessNotConfigured") disabled = true
+    if (String(reasons[i].reason || "") === "insufficientPermissions") permissionMissing = true
   }
   var details = error && Array.isArray(error.details) ? error.details : []
   for (var d = 0; d < details.length; d++) {
@@ -20,6 +22,8 @@ function googleResponseError(status, responseText) {
   if (status === 401) return "Google rejected the calendar session. Sign in again"
   if (status === 403 && disabled)
     return "The Google Calendar API is not enabled for this Google Cloud project"
+  if (status === 403 && permissionMissing)
+    return "Google Calendar permission is missing. Sign out and sign in again"
   if (detail !== "") return detail
   return "Google Calendar returned HTTP " + status
 }
