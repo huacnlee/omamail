@@ -9,6 +9,9 @@ const bench = load("tests/bench_cases.js")
 const api = {
   sanitize: function (source, options) { return html.sanitize(source, options) },
   documentFor: function (document, palette) { return html.documentFor(document, palette) },
+  readerDocumentFor: function (document, palette) {
+    return html.readerDocumentFor(document, palette)
+  },
   limits: {
     richText: html.MAX_RICH_TEXT,
     elements: html.MAX_ELEMENTS,

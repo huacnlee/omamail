@@ -159,6 +159,16 @@ Item {
   // tree rather than the string is the difference between one parse per message
   // and one per drag step.
   property var selectedDocument: null
+  // The same message read a second way, off the same parse. Reading mode is a
+  // document of its own rather than a restyling of the one above: the sender's
+  // presentation is discarded and what the message says is rebuilt out of
+  // paragraphs, headings, lists and links. Built whenever a body is, so
+  // changing how a message is read costs neither a fetch nor a parse.
+  property var selectedReaderDocument: null
+  property bool selectedReaderTooHeavy: false
+  // A message whose every word was inside a picture reads as nothing at all,
+  // and the sender's own formatting is the honest answer for it.
+  property bool selectedReaderEmpty: true
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
@@ -650,6 +660,9 @@ Item {
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
     selectedDocument = null
+    selectedReaderDocument = null
+    selectedReaderTooHeavy = false
+    selectedReaderEmpty = true
     sourceHtml = ""
     remoteImagesAllowed = alwaysShowImages
     selectedBlockedImages = 0
@@ -799,10 +812,14 @@ Item {
     sourceHtml = String(source || "")
     var ready = Html.sanitize(sourceHtml, ({
       allowRemoteImages: remoteImagesAllowed,
-      withPlainText: withPlainText === true
+      withPlainText: withPlainText === true,
+      withReader: true
     }))
     selectedHtml = ready.html
     selectedDocument = ready.document
+    selectedReaderDocument = ready.reader ? ready.reader.document : null
+    selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
+    selectedReaderEmpty = !ready.reader || ready.reader.empty
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
     selectedTooHeavy = ready.tooHeavy
@@ -827,6 +844,9 @@ Item {
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
     selectedDocument = null
+    selectedReaderDocument = null
+    selectedReaderTooHeavy = false
+    selectedReaderEmpty = true
     sourceHtml = ""
     remoteImagesAllowed = false
     selectedImages = []

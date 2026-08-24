@@ -57,6 +57,50 @@ if grep -vE '^\s*(//|\*|/\*)' message/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
   fail "message/Html.js may only name the PAPER/INK sheet colours"
 fi
 
+# 3b. Reading mode is a rebuild, and the rebuild lives with the parse.
+#
+# `background` is an address in HTML, not a colour, and Qt fetches it. It sat in
+# the colour list because senders write it next to `bgcolor`, and with
+# `keepColors` on it survived — a real message reached its sender's host with
+# remote images off. An appearance option may never buy a network request, so
+# the resource attributes are refused before the colour question is asked.
+if grep -nE '^var COLOUR_ATTRIBUTES = .*\bbackground\b' message/Html.js; then
+  fail "message/Html.js treats the HTML background attribute as a colour; it is an address"
+fi
+grep -q '^var RESOURCE_ATTRIBUTES = {' message/Html.js \
+  || fail "message/Html.js must refuse resource-bearing attributes as their own class"
+awk '
+  /^function cleanAttributes/ { in_function = 1 }
+  in_function && /RESOURCE_ATTRIBUTES\[name\] === true/ { resource = NR }
+  in_function && /COLOUR_ATTRIBUTES\[name\] === true/ { colour = NR }
+  in_function && /^}/ { exit !(resource && colour && resource < colour) }
+  END { exit !(resource && colour && resource < colour) }
+' message/Html.js \
+  || fail "a resource attribute must be dropped before keepColors is consulted"
+
+# The message reader draws what it is given. Parsing a body, deciding what may
+# be fetched and rebuilding a message for reading are all one file's, and a view
+# that called the sanitiser would be a second place those decisions were made.
+if grep -nE 'Html\.(sanitize|parse|readerTree)\(' components/MessageReader.qml; then
+  fail "the reader view must not parse a body; the account renders it once"
+fi
+grep -q 'withReader: true' account/MailAccount.qml \
+  || fail "the reading document must come off the same parse as the formatted one"
+grep -q 'property string bodyMode: "reader"' Service.qml \
+  || fail "a message opens in reading mode"
+# Choosing between three readings that were all built when the body arrived is a
+# preference and nothing else. A mode switch that re-rendered would re-run the
+# image policy, and one that re-fetched would tell the sender the mail was
+# opened again.
+if awk '
+  /function setBodyMode\(value\)/ { in_function = 1 }
+  in_function && /(renderSource|select\(|getMessage|showRemoteImages)/ { found = 1 }
+  in_function && /^  }/ { exit found ? 0 : 1 }
+  END { exit found ? 0 : 1 }
+' Service.qml; then
+  fail "changing how a message is read must not re-render or re-fetch it"
+fi
+
 # 4. The bar switches `barForeground` when transparent mode needs contrast.
 #    `foreground` is the fixed theme value and does not follow that switch.
 grep -q 'bar ? bar\.barForeground' BarWidget.qml \

@@ -56,11 +56,14 @@ function timed(run) {
   return (Date.now() - started) / runs
 }
 
-// What opening a message costs: the body is sanitised once, and the reader
-// builds its document from the tree that came back.
+// What opening a message costs: the body is parsed once, and all three ways of
+// reading it come off that parse — the sanitised document, the rebuilt reading
+// document, and the plain-text reading. The reader then builds the document for
+// whichever mode is on, which is reading mode by default.
 function openOnce(html, source, palette) {
-  var ready = html.sanitize(source, { allowRemoteImages: false, withPlainText: true })
-  html.documentFor(ready.document, palette)
+  var ready = html.sanitize(source,
+    { allowRemoteImages: false, withPlainText: true, withReader: true })
+  html.readerDocumentFor(ready.reader.document, palette)
   return ready
 }
 
@@ -81,8 +84,8 @@ function run(html, log) {
   }
 
   log("  " + pad("source", 8) + pad("to Qt", 9) + pad("elements", 10)
-    + pad("open", 9) + pad("relayout", 10) + "   verdict")
-  log("  " + pad("", 58).replace(/ /g, "-"))
+    + pad("reading", 9) + pad("open", 10) + pad("relayout", 10) + "   verdict")
+  log("  " + pad("", 68).replace(/ /g, "-"))
 
   var sizes = [6, 24, 90, 240]
   for (var i = 0; i < sizes.length; i++) {
@@ -94,24 +97,36 @@ function run(html, log) {
     var step = 0
     var relayout = timed(function() {
       palette.maxImageWidth = 300 + (step++ % 30) * 20
-      html.documentFor(ready.document, palette)
+      html.readerDocumentFor(ready.reader.document, palette)
     })
     palette.maxImageWidth = 380
 
-    var refused = ready.tooHeavy ? refusedBy(ready.complexity, html.limits) : ""
+    // Which bound bit is asked of the mode that is on. Reading mode is a
+    // different document from the sanitised one and is not heavy for the same
+    // reasons — it is flat, and the reason this column is worth having is that
+    // it stays inside the bounds on mail the formatted view refuses.
+    var refused = ready.reader.tooHeavy
+      ? refusedBy(ready.reader.complexity, html.limits)
+      : (ready.tooHeavy ? "formatted view only (" + refusedBy(ready.complexity, html.limits) + ")" : "")
     log("  " + pad(kb(source) + " KB", 8)
       + pad(kb(ready.html) + " KB", 9)
       + pad(ready.complexity.tags, 10)
-      + pad(open.toFixed(2) + "ms", 9)
+      + pad(ready.reader.complexity.tags, 9)
+      + pad(open.toFixed(2) + "ms", 10)
       + pad(relayout.toFixed(2) + "ms", 10)
       + (refused === "" ? "" : "   refused: " + refused))
   }
 
   log("")
   log("  source    the sender's HTML, as Gmail handed it over")
-  log("  to Qt     what the renderer is given, after sanitising and collapsing")
-  log("  open      sanitise once, then build the document from the tree")
+  log("  to Qt     what the renderer is given for the formatted view")
+  log("  elements  the formatted view's element count")
+  log("  reading   the rebuilt reading document's, off the same parse")
+  log("  open      one parse: sanitise, rebuild for reading, read as text,")
+  log("            then build the document reading mode draws")
   log("  relayout  one width step of a splitter drag, no parse")
-  log("  verdict   which bound refused it; the reader shows the plain text instead,")
-  log("            so such a row is the cost of finding that out, not of showing it")
+  log("  verdict   which bound refused reading mode; the reader shows the plain text")
+  log("            instead, so such a row is the cost of finding that out. A row")
+  log("            marked \"formatted view only\" is one reading mode draws and the")
+  log("            sender's own layout is too heavy for")
 }

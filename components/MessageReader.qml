@@ -23,7 +23,10 @@ Item {
   required property real leadingBoundaryOverlap
   required property color dimmerColor
   required property string panelFontFamily
-  property bool forcePlainText: false
+  // Which of the three ways of reading a message this window is set to. The
+  // window's preference, not this message's: it may not be the one on screen,
+  // because a message can be too heavy to draw the chosen way.
+  property string bodyMode: "reader"
   property real zoom: 1.0
   // A way back only means something when something is behind it. At desktop
   // width the list is on screen and clicking another row is the navigation;
@@ -34,7 +37,7 @@ Item {
   property bool forceRichAnyway: false
 
   signal backRequested()
-  signal togglePlainTextRequested()
+  signal bodyModeRequested(string mode)
   signal zoomRequested(real step)
   signal zoomResetRequested()
   signal composeRequested(string mode)
@@ -50,14 +53,31 @@ Item {
   // The parsed form of the same document. Fitting it to this window is done on
   // the way out, so this is rebuilt on every relayout without being reparsed.
   readonly property var bodyDocument: service ? service.selectedDocument : null
+  // The same message rebuilt for reading: paragraphs, headings, lists and
+  // links, with none of the sender's presentation in it. Built beside the one
+  // above off the same parse, so changing mode costs neither a fetch nor a
+  // reparse — which is also why all three are available at once here.
+  readonly property var readerDocument: service ? service.selectedReaderDocument : null
   readonly property int remoteImages: service ? service.selectedRemoteImages : 0
   readonly property bool remoteImagesAllowed: !!service && service.remoteImagesAllowed
-  // Qt lays rich text out on the GUI thread, and this plugin lives inside the
-  // shell that draws the whole desktop. A document past the bounds gets its
-  // plain-text part instead, with a way to insist.
-  readonly property bool tooHeavy: !!service && service.selectedTooHeavy
-    && !root.forceRichAnyway
-  readonly property bool htmlAvailable: rawHtml !== "" && !root.forcePlainText && !root.tooHeavy
+
+  // What this message can actually be drawn as. Qt lays rich text out on the
+  // GUI thread, and this plugin lives inside the shell that draws the whole
+  // desktop, so a document past the bounds gets its plain-text part instead
+  // with a way to insist.
+  readonly property var bodyOffer: ({
+    html: root.rawHtml !== "",
+    reader: !!root.readerDocument && !!root.service && !root.service.selectedReaderEmpty,
+    readerHeavy: !!root.service && root.service.selectedReaderTooHeavy,
+    originalHeavy: !!root.service && root.service.selectedTooHeavy,
+    forced: root.forceRichAnyway
+  })
+  // The mode on screen, which is the chosen one unless this message cannot be
+  // drawn that way.
+  readonly property string shownMode: Html.resolveBodyMode(root.bodyMode, root.bodyOffer)
+  readonly property bool richBody: root.shownMode !== "plain"
+  // Plain text nobody asked for, which is the one case the notice explains.
+  readonly property bool tooHeavy: Html.bodyModeRefused(root.bodyMode, root.bodyOffer)
 
   // Empty for everything that is not a mailing list. The label carries its own
   // trailing "..." when the only way off this list is a page in a browser,
@@ -87,14 +107,38 @@ Item {
   readonly property int pageInset: narrowBody ? Style.space(8) : Style.space(14)
   readonly property int bodyInset: pageInset
   readonly property int bodyWidth: Math.max(80, bodyFlick.width - bodyInset * 2)
-  readonly property int preferredBodyWidth: root.htmlAvailable
-    ? Html.preferredContentWidth(
-        root.bodyDocument ? root.bodyDocument : root.rawHtml, root.bodyWidth)
-    : root.bodyWidth
+  // The size the message itself is read at, which the chrome around it does not
+  // follow. Named here because the reading measure is derived from it.
+  readonly property int bodyFontSize: Math.max(7, Math.round(Style.font.body * root.zoom))
+  // Sixty-five to seventy-five characters, measured in the face the message is
+  // actually drawn in rather than guessed from its pixel size — a monospace
+  // face and a proportional one disagree about that by half.
+  readonly property int readingMeasure: Math.ceil(readingSample.advanceWidth)
+  readonly property int preferredBodyWidth: root.shownMode === "reader"
+    ? Html.readingColumnWidth(root.bodyWidth, root.readingMeasure)
+    : (root.shownMode === "original"
+      ? Html.preferredContentWidth(
+          root.bodyDocument ? root.bodyDocument : root.rawHtml, root.bodyWidth)
+      : root.bodyWidth)
+  // Reading mode centres its column in whatever the panel has spare. The other
+  // two start at the page inset, because the sender's own layout and a
+  // plain-text body both begin at the left edge.
+  readonly property int bodyOffset: root.shownMode === "reader"
+    ? Html.readingColumnOffset(root.bodyWidth, root.preferredBodyWidth) : 0
   // Quantised, because this is a dependency of the document itself: bound to
   // the exact width, dragging the splitter would rebuild and re-lay-out the
   // whole message on every frame.
   readonly property int imageWidth: Math.round(root.preferredBodyWidth / 20) * 20
+
+  // Seventy characters of ordinary prose. Not a repeated letter: a run of the
+  // same glyph measures the widest or the narrowest one in the face rather than
+  // anything a sentence is made of.
+  TextMetrics {
+    id: readingSample
+    font.family: root.panelFontFamily
+    font.pixelSize: root.bodyFontSize
+    text: "The quick brown fox jumps over the lazy dog and keeps on running away."
+  }
 
   ReaderBlankSlate {
     anchors.fill: parent
@@ -279,7 +323,7 @@ Item {
     // answers to different questions.
     ReaderNotice {
       width: parent.width
-      visible: !!root.summary && root.htmlAvailable
+      visible: !!root.summary && root.richBody
         && !root.remoteImagesAllowed && root.remoteImages > 0
       text: (root.remoteImages === 1 ? "1 image is blocked" : root.remoteImages + " images are blocked")
         + ": loading them tells the sender this message was opened"
@@ -337,9 +381,12 @@ Item {
     // message itself with nowhere to be.
     InviteCard {
       id: inviteCard
-      x: root.bodyInset
+      // Aligned with the message rather than with the panel: reading mode
+      // centres a column, and a card starting somewhere else reads as a second
+      // document rather than as part of this one.
+      x: root.bodyInset + root.bodyOffset
       y: Style.space(14)
-      width: root.bodyWidth
+      width: root.preferredBodyWidth
       invite: root.service ? root.service.selectedInvite : null
       response: root.service ? root.service.selectedResponse : ""
       canRespond: !!root.service && root.service.canRespondToInvite
@@ -359,7 +406,7 @@ Item {
 
     TextEdit {
       id: bodyText
-      x: root.bodyInset
+      x: root.bodyInset + root.bodyOffset
       y: inviteCard.visible
         ? inviteCard.y + inviteCard.height + Style.space(14)
         : Style.space(14)
@@ -367,27 +414,40 @@ Item {
       readOnly: true
       selectByMouse: true
       wrapMode: TextEdit.Wrap
-      // Rich text either way. The plain-text document is built here rather than
-      // taken from the sender — escaped text, line breaks and marker links and
-      // nothing else — so it stays cheap to lay out even for the messages that
-      // fell back to plain text because their own markup was too heavy.
+      // Rich text for all three, because all three are documents by the time
+      // they get here.
       textFormat: TextEdit.RichText
-      text: root.htmlAvailable
-        ? Html.documentFor(root.bodyDocument ? root.bodyDocument : root.rawHtml, ({
+      // Three documents, one parse. The reading one was rebuilt out of what the
+      // message says and carries no sender markup at all; the formatted one is
+      // the sender's own, sanitised; the plain one is built here from escaped
+      // text, line breaks and marker links and nothing else, so it stays cheap
+      // to lay out even for the messages whose own markup was too heavy to draw
+      // in the first place.
+      text: root.shownMode === "reader"
+        ? Html.readerDocumentFor(root.readerDocument, ({
             foreground: root.textColor,
             background: root.backgroundColor,
             link: root.linkColor,
             quote: root.dimColor,
-            padding: 0,
-            maxImageWidth: root.imageWidth,
-            compact: root.narrowBody
+            fontSize: root.bodyFontSize,
+            maxImageWidth: root.imageWidth
           }))
-        : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
-            ({
+        : (root.shownMode === "original"
+          ? Html.documentFor(root.bodyDocument ? root.bodyDocument : root.rawHtml, ({
               foreground: root.textColor,
               background: root.backgroundColor,
-              link: root.linkColor
-            }), root.bodySource === "html")
+              link: root.linkColor,
+              quote: root.dimColor,
+              padding: 0,
+              maxImageWidth: root.imageWidth,
+              compact: root.narrowBody
+            }))
+          : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
+              ({
+                foreground: root.textColor,
+                background: root.backgroundColor,
+                link: root.linkColor
+              }), root.bodySource === "html"))
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
@@ -397,7 +457,7 @@ Item {
       // scanned. At bodySmall it was 11px against the 9pt — twelve — of the
       // terminal beside it, so the message was the smallest text on a screen
       // whose owner had already said what size they read at.
-      font.pixelSize: Math.max(7, Math.round(Style.font.body * root.zoom))
+      font.pixelSize: root.bodyFontSize
       onLinkActivated: function(link) {
         var image = Html.imageLinkIndex(link)
         if (image > 0) {
@@ -497,8 +557,17 @@ Item {
     // something you do to it, so it goes to the far right, out of the path of
     // the actions that change something.
     Item {
+      id: actionsRow
       width: parent.width
-      implicitHeight: messageActions.implicitHeight
+      // The mode picker takes its own line when the two of them will not fit
+      // across the panel. A row of controls that overlaps another row of
+      // controls is worse than a taller toolbar, and the reader can be as
+      // narrow as its own minimum beside the list.
+      readonly property bool stacked: messageActions.implicitWidth
+        + viewModes.implicitWidth + Style.space(24) > width
+      implicitHeight: stacked
+        ? messageActions.implicitHeight + Style.space(4) + viewModes.implicitHeight
+        : messageActions.implicitHeight
 
     Row {
       id: messageActions
@@ -562,20 +631,45 @@ Item {
 
     // The distance across the bar is the separation here, so these need no rule
     // of their own.
-    Row {
+    //
+    // Named rather than iconed. There is no drawing that says "the message as
+    // its sender laid it out" and is not a guess of one, and telling the three
+    // apart is the whole point of having them — so they say what they are, and
+    // the one in use wears the kit's selected surface and its border rather
+    // than only a colour.
+    //
+    // In a slot rather than anchored itself, because it sits beside the actions
+    // at a comfortable width and under them at a narrow one and an anchor
+    // cannot be two things. A box that knows which of the two it is also keeps
+    // every binding here off the row's own measured height, which a Row is
+    // still deciding while it is being asked.
+    Item {
       anchors.right: parent.right
-      anchors.verticalCenter: messageActions.verticalCenter
+      y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
+      width: viewModes.width
+      height: actionsRow.stacked ? viewModes.height : messageActions.height
+
+    Row {
+      id: viewModes
+      anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(2)
 
-      IconButton {
-        visible: root.rawHtml !== ""
-        iconName: "plain"
-        tooltipText: root.forcePlainText ? "Show formatted" : "Show plain text"
-        foreground: root.forcePlainText ? root.accentColor : root.dimColor
-        hoverColor: root.textColor
-        fontFamily: root.panelFontFamily
-        onClicked: root.togglePlainTextRequested()
+      ModeButton {
+        text: "Reader"
+        tooltipText: "Rebuild this message for reading"
+        mode: "reader"
       }
+      ModeButton {
+        text: "Original"
+        tooltipText: "Show the sender's own formatting"
+        mode: "original"
+      }
+      ModeButton {
+        text: "Plain"
+        tooltipText: "Show plain text"
+        mode: "plain"
+      }
+
       // Only Gmail has a web mailbox this plugin knows the address of.
       IconButton {
         visible: !root.service || root.service.canOpenOnWeb
@@ -586,6 +680,28 @@ Item {
       }
     }
     }
+    }
+  }
+
+  // One of the three ways of reading a message. `selected` is the window's
+  // choice rather than what is on screen: a message too heavy to draw the
+  // chosen way says so in its own notice, and a picker that quietly moved to
+  // the mode it fell back to would leave nothing saying the choice still
+  // stands for the next message.
+  component ModeButton: Button {
+    required property string mode
+    // Nothing to choose between where there is no markup: the text is then the
+    // message rather than one reading of it.
+    visible: root.rawHtml !== ""
+    selected: root.bodyMode === mode
+    bordered: selected
+    foreground: selected ? root.textColor : root.dimColor
+    accent: root.accentColor
+    fontFamily: root.panelFontFamily
+    fontSize: Style.font.caption
+    horizontalPadding: Style.space(7)
+    verticalPadding: Style.space(3)
+    onClicked: root.bodyModeRequested(mode)
   }
 
   ImagePopover {

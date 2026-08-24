@@ -332,9 +332,29 @@ key. What matters while working:
   then applies to every message already on disk instead of only to the ones
   fetched afterwards.
 - This runs on the GUI thread of the shell that draws the user's whole desktop.
-  Count the parses: opening a message is one `sanitize`, plus one
-  `readPlainText` when the message had no text/plain part of its own. Anything
-  that needs to know how heavy the result is asks the call that produced it.
+  **Count the parses.** Opening a message is one `sanitize`, and every reading of
+  that message comes out of it: the sanitised document, the rebuilt reading
+  document, and the plain text. Anything that needs to know how heavy a result
+  is asks the call that produced it, and a view never parses a body itself.
+- **Reading mode is a rebuild, not a filter, and that is the whole of its
+  security argument.** The sanitiser walks the sender's tree and removes; the
+  reader builds a new tree and copies across exactly three things — text, a
+  checked `href`, a checked `src`. Every element it emits is constructed with an
+  empty attribute list, so there is no path by which a `class`, a `width`, a
+  `bgcolor`, an `align`, a `style` or a `background` reaches the output *at all*.
+  Do not add a fourth thing that is carried over, and do not "keep just this one
+  attribute": the argument is structural, and one exception ends it.
+- **An HTML `background` is an address, not a colour.** It sat in the colour list
+  because senders write it beside `bgcolor`, and `keepColors` therefore let it
+  through — a real message reached its sender's host with remote images off.
+  Resource-bearing attributes are their own class now and are refused before
+  the colour question is asked, because no appearance option may ever buy a
+  network request. `tests/test_source.sh` asserts that order.
+- Reading mode's link rule is stricter than the formatted view's on purpose:
+  `mailto:` or http(s) at a public host, nothing else. A message must not be
+  able to put the machine this runs on, or the network behind the user's front
+  door, under the pointer. Where the address is refused the label still shows —
+  the words are the message, the address was not.
 
 ## Anything a stranger wrote
 

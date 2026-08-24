@@ -1160,6 +1160,16 @@ function sanitize(html, options) {
   // the sender's own tree and not off what survives the image policy.
   var plain = settings.withPlainText === true ? readTree(root) : null
 
+  // Before too, and for the same reason: reading mode is built out of what the
+  // sender wrote rather than out of what survived the formatted view, so it
+  // needs the type sizes that `clean` is about to discard and the tables that
+  // `flattenTablesIn` is about to fold away. It reads the tree and does not
+  // touch it, which is what lets one parse answer for all three ways of reading
+  // a message — switching between them costs no parse and no fetch.
+  var reader = settings.withReader === true
+    ? readerTree(root, ({ allowRemoteImages: allowImages, maxImages: limit }))
+    : null
+
   clean(root)
   if (settings.keepTables !== true) {
     flattenTablesIn(root, settings.keepTableDepth === undefined
@@ -1184,6 +1194,10 @@ function sanitize(html, options) {
     complexity: size,
     tooHeavy: isTooHeavy(size),
     plainText: plain,
+    // The reading-mode document, its own complexity and its own verdict: it is
+    // a different document from the one below and is not heavy for the same
+    // reasons.
+    reader: reader,
     // The document itself, so the reader can fit it to a window without
     // parsing back the string that was just written from it. Nothing below
     // fitting mutates a tree, which is what makes handing this out safe.
@@ -1506,6 +1520,840 @@ function documentFor(bodyHtml, colors) {
     + serialize(root, fit)
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
+}
+
+// ============================================================== reading mode
+//
+// What a browser means by a reader: not the sender's presentation cleaned up,
+// but the sender's presentation discarded and a small document built out of
+// what the message actually says.
+//
+// The formatted view above is a filter. It walks the sender's tree, removes
+// what Qt draws badly or must not fetch, and hands back what is left — which on
+// real mail is a card six tables deep with its own type, its own gutters and
+// its own palette, minus whichever of those the filter happened to take. That
+// is why a newsletter renders as debris: the layout is gone and the leftovers
+// of it are not, so the result looks accidental rather than deliberately plain.
+//
+// This builds a new tree instead. Nothing is carried across from the sender's
+// document but three things:
+//
+//   text          collapsed the way HTML says whitespace collapses
+//   href          on <a>, and only mailto: or http(s) at a public host
+//   src           on <img>, and only what the image policy already allows
+//
+// There is no fourth. Every element the reader emits is constructed here with
+// an empty attribute list, so a class, an id, a width, a bgcolor, an align, a
+// style, a background or a url() cannot survive this pass by being missed —
+// there is no path by which a sender attribute reaches the output at all. That
+// is the whole security argument for reading mode, and it is a structural one
+// rather than a list of things remembered.
+//
+// The type, the spacing, the measure and the colours are then Omamail's, and
+// are applied by `readerDocumentFor` from the theme.
+
+// Elements whose subtree holds nothing a reader wants. <style> and <script>
+// are the ones that matter — Qt lays their contents out as body text — and the
+// form controls are here because a text field in a mail is a picture of one.
+var READER_DROPPED = {
+  script: true, style: true, head: true, title: true, textarea: true,
+  iframe: true, object: true, embed: true, applet: true, noscript: true,
+  meta: true, link: true, base: true, input: true, select: true, option: true,
+  optgroup: true, svg: true, canvas: true, map: true, area: true,
+  frame: true, frameset: true, video: true, audio: true, source: true,
+  track: true, param: true, template: true, col: true, colgroup: true
+}
+
+// Inline markup the reader draws, mapped to the one element it draws it with.
+// Everything else inline — span, font, small, u — is the sender setting type,
+// and the reader sets its own.
+var READER_INLINE = {
+  b: "strong", strong: "strong",
+  i: "em", em: "em", cite: "em", dfn: "em", "var": "em",
+  code: "code", kbd: "code", samp: "code", tt: "code"
+}
+
+var READER_HEADINGS = { h1: true, h2: true, h3: true, h4: true, h5: true, h6: true }
+
+// Containers that end one line of text and begin another, and mean nothing
+// else. <center> and <nav> are here for the same reason <div> is: by the time
+// the reader has finished, a strip of links is a paragraph of links.
+var READER_BLOCK = {
+  div: true, p: true, section: true, article: true, aside: true, header: true,
+  footer: true, main: true, nav: true, center: true, form: true,
+  fieldset: true, figure: true, figcaption: true, address: true, dl: true,
+  dt: true, dd: true, caption: true, legend: true, details: true, summary: true
+}
+
+// A reader document is flat by construction, so these bite only on mail that is
+// enormous rather than merely deep. There is no ceiling on how many blocks one
+// may hold: a document that grew past what Qt can lay out is refused whole by
+// `isTooHeavy` and the message is shown as text, which is an answer, where a
+// truncated reading would have silently lost the end of the message and looked
+// exactly like a message that ended there.
+var MAX_READER_TABLE_ROWS = 40
+var MAX_READER_TABLE_COLUMNS = 8
+// A heading is a short line. Past this it is a paragraph the sender happened to
+// set large, and promoting it would put a page of body copy in heading type.
+var MAX_HEADING_CHARS = 120
+
+function readerElement(name) {
+  return { type: "element", name: name, attrs: [], selfClosing: false, children: [] }
+}
+
+function readerText(text) {
+  return { type: "text", text: text }
+}
+
+// The document being built.
+//
+//   blocks  what is finished
+//   inline  the run of inline content not yet closed into a block
+//   chain   the inline elements open around that run, outermost first
+//
+// `chain` is what lets a link survive a block boundary. Mail wraps <a> around a
+// whole table to make a button, and without reopening the link in each block
+// the choice is between one block holding the rest of the message and a button
+// whose label has lost its address.
+function readerState() {
+  return { blocks: [], inline: [], chain: [], pending: false, filled: false }
+}
+
+function readerTarget(state) {
+  return state.chain.length === 0 ? state.inline : state.chain[state.chain.length - 1].children
+}
+
+function readerLastText(state) {
+  var target = readerTarget(state)
+  var last = target.length > 0 ? target[target.length - 1] : null
+  return last && last.type === "text" ? last : null
+}
+
+// A space owed is written before anything that is not text. Left for the next
+// text to carry, it lands inside the element it was owed in front of, and
+// "Body <a>link</a>" comes out as "Body<a> link</a>".
+function readerSpace(state) {
+  if (!state.pending || !state.filled) return
+  var last = readerLastText(state)
+  if (last) last.text += " "
+  else readerTarget(state).push(readerText(" "))
+  state.pending = false
+}
+
+function readerOpen(state, node) {
+  readerSpace(state)
+  readerTarget(state).push(node)
+  state.chain.push(node)
+}
+
+// A run of whitespace in the source is one space, which is what HTML says it is
+// — and a space owed is carried rather than written, so the indentation of a
+// template arrives as nothing instead of as a gap in the middle of a sentence.
+// Characters that draw nothing go here too: mail is padded with soft hyphens
+// and zero-width spaces to end the inbox preview line where the sender wants.
+function readerAppendText(state, raw) {
+  var value = String(raw).replace(UNDRAWN_CHARACTERS, "").replace(SOURCE_WHITESPACE, " ")
+  if (value === "") return
+  var core = value.replace(/^ +| +$/g, "")
+  if (core === "") {
+    if (state.filled) state.pending = true
+    return
+  }
+  if (value.charAt(0) === " " && state.filled) state.pending = true
+  var lead = state.pending && state.filled ? " " : ""
+  var last = readerLastText(state)
+  if (last) last.text += lead + core
+  else readerTarget(state).push(readerText(lead + core))
+  state.filled = true
+  state.pending = value.charAt(value.length - 1) === " "
+}
+
+function readerAppendBreak(state) {
+  // Not at the start of a block, and never two in a row: senders space things
+  // out with runs of <br>, and the reader has its own spacing.
+  if (!state.filled) return
+  var target = readerTarget(state)
+  var last = target.length > 0 ? target[target.length - 1] : null
+  if (last && last.type === "element" && last.name === "br") return
+  target.push(readerElement("br"))
+  state.pending = false
+}
+
+// Whether a run of inline content says anything. A block holding only spacing —
+// a spacer image already dropped, a stack of <br>, a cell of &nbsp; — is a
+// block the reader does not draw, which is most of what a layout table is made
+// of.
+function readerMeaningful(nodes) {
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i]
+    if (node.type === "text") {
+      if (decodeReferences(node.text).replace(/[\s\u00a0]+/g, "") !== "") return true
+      continue
+    }
+    if (node.name === "img") return true
+    if (node.name === "br" || node.name === "hr") continue
+    if (readerMeaningful(node.children)) return true
+  }
+  return false
+}
+
+function readerEdgeless(node) {
+  if (node.type === "text") return decodeReferences(node.text).replace(/[\s\u00a0]+/g, "") === ""
+  return node.name === "br"
+}
+
+function readerTrimmed(nodes) {
+  var from = 0
+  var to = nodes.length
+  while (from < to && readerEdgeless(nodes[from])) from++
+  while (to > from && readerEdgeless(nodes[to - 1])) to--
+  return from === 0 && to === nodes.length ? nodes : nodes.slice(from, to)
+}
+
+// How many characters a run of inline content draws, which is the question
+// asked of anything about to become a heading.
+function readerLength(nodes) {
+  var total = 0
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i]
+    if (node.type === "text") total += decodeReferences(node.text).length
+    // A picture is a word or two of the line it sits on, which is all this has
+    // to be right about: the question is only whether a run is short.
+    else if (node.name === "img") total += 8
+    else total += readerLength(node.children)
+  }
+  return total
+}
+
+// Closes the open run into a block, then reopens the inline elements that were
+// still open around it so the next block continues inside them.
+function readerFlush(state, name) {
+  var content = state.inline
+  state.inline = []
+  state.pending = false
+  state.filled = false
+
+  var reopened = []
+  for (var i = 0; i < state.chain.length; i++) {
+    var fresh = readerElement(state.chain[i].name)
+    // Shared rather than copied: nothing mutates a reader element's attributes
+    // once it is built, and a link wrapped around forty boxes is forty of these.
+    fresh.attrs = state.chain[i].attrs
+    if (reopened.length > 0) reopened[reopened.length - 1].children.push(fresh)
+    else state.inline.push(fresh)
+    reopened.push(fresh)
+  }
+  state.chain = reopened
+
+  if (!readerMeaningful(content)) return
+  var block = readerElement(name || "p")
+  block.children = readerTrimmed(content)
+  state.blocks.push(block)
+}
+
+// ------------------------------------------------------------ what is hidden
+//
+// display:none is one spelling of the email preheader and not the common one.
+// A preheader has to reach the inbox preview line and not the message, so it is
+// text set at one pixel, or clamped to no height, or at zero opacity — and Qt
+// honours none of those, which is how it used to arrive as a smudge of
+// unreadable characters above the message.
+var READER_INVISIBLE_TYPE = /^\s*[0-2](\.\d+)?\s*(px|pt)?\s*$/i
+var READER_ZERO_LENGTH = /^\s*0(\.0+)?\s*(px|pt|em|rem|%)?\s*$/i
+
+function readerHiddenBy(declarations) {
+  if (isHiddenBy(declarations)) return true
+  for (var i = 0; i < declarations.length; i++) {
+    var declaration = declarations[i]
+    var name = declaration.name
+    if (name === "font-size" && READER_INVISIBLE_TYPE.test(declaration.value)) return true
+    if (name === "max-height" && READER_ZERO_LENGTH.test(declaration.value)) return true
+    if (name === "opacity" && /^\s*0(\.0+)?\s*$/.test(declaration.value)) return true
+    if (name === "mso-hide" && /^\s*all\b/i.test(declaration.value)) return true
+  }
+  return false
+}
+
+function readerHidden(node) {
+  if (attributeOf(node, "hidden") !== null) return true
+  var style = attributeValue(node, "style")
+  if (style === "") return false
+  return readerHiddenBy(splitDeclarations(style))
+}
+
+// ------------------------------------------------------------- what it points at
+//
+// Stricter than the sanitiser's gate, and deliberately so. A reader document is
+// built from an allow list rather than filtered, so the only addresses in it
+// are mailto: and http(s) at a host on the public internet — a message must not
+// be able to put a link to the machine this runs on, or to the network behind
+// the user's front door, under the pointer. The formatted view keeps its own
+// rule; this one is the reader's.
+function readerHref(node) {
+  var raw = attributeValue(node, "href")
+  if (!safeHref(raw)) return ""
+  var url = normalizedUrl(raw)
+  if (!safeHref(url)) return ""
+  if (/^\s*mailto:/i.test(url)) return raw
+  return isPublicHost(hostOf(url)) ? raw : ""
+}
+
+// The picture's own words, which is what a blocked image leaves behind and what
+// turns a styled button into a labelled link. Decoded and re-escaped rather
+// than passed through: an attribute value is not markup, and alt="a<b" would
+// otherwise serialise into a tag.
+function readerAltText(node) {
+  var attr = attributeOf(node, "alt")
+  if (!attr || attr.value === null || attr.value === undefined) return ""
+  return escapeText(decodeReferences(String(attr.value)))
+    .replace(SOURCE_WHITESPACE, " ").replace(/^ +| +$/g, "")
+}
+
+function readerAppendImage(state, node, ctx) {
+  // A beacon is not a picture, and a reader that left a placeholder where one
+  // had been would be announcing the tracker rather than removing it.
+  if (isTrackingPixel(node)) return
+  var attr = attributeOf(node, "src")
+  var source = attr && attr.value !== null && attr.value !== undefined ? String(attr.value) : ""
+  var kind = attr === null ? "none" : imageSourceKind(source)
+
+  if (kind === "inline" || (kind === "remote" && ctx.allowImages && ctx.kept < ctx.limit)) {
+    if (kind === "remote") ctx.kept++
+    readerSpace(state)
+    var image = readerElement("img")
+    image.attrs = [{ name: "src", value: source }]
+    readerTarget(state).push(image)
+    state.filled = true
+    state.pending = false
+    return
+  }
+  if (kind === "remote") ctx.blocked++
+
+  var alt = readerAltText(node)
+  if (alt !== "") {
+    readerAppendText(state, alt)
+    return
+  }
+  // An alt the sender wrote and left empty is the sender saying this one is
+  // decoration. One they never wrote at all is a picture with something in it,
+  // and a reader that drew nothing there would leave unexplained blank space.
+  if (kind === "remote" && attr !== null && attributeOf(node, "alt") === null)
+    readerAppendText(state, "[image]")
+}
+
+// ------------------------------------------------------------------ headings
+//
+// Native h1-h6 are kept as themselves. The rest of the headings in mail are not
+// elements at all — they are a cell with a font-size on it — so one is inferred
+// from that size, and only from that size.
+//
+// Never from weight: half the lines in a newsletter are bold and none of them
+// are headings. Never from a long line either: a paragraph the sender set large
+// is still a paragraph, and promoting it puts a page of body copy in heading
+// type. What survives both tests is a short line the sender made big, which is
+// what a heading is.
+// Which heading a declared type size stands for, or "" for a size that stands
+// for nothing. Body copy in mail is fourteen to sixteen pixels, so twenty is
+// already a sender reaching for a heading and twenty-eight is them reaching for
+// the top one. Two levels is all that can honestly be read out of a number:
+// there is no sixth heading hidden in a font-size.
+function readerHeadingLevel(value) {
+  var text = String(value).replace(/^\s+|\s+$/g, "").toLowerCase()
+  var number = parseFloat(text)
+  if (!isFinite(number)) return ""
+  // In pixels, because that is the unit the thresholds are stated in and the
+  // sender may have written any of the four. A percentage and an em are both
+  // against a sixteen-pixel default: mail declares no root size of its own.
+  var pixels = /px$/.test(text) ? number
+    : (/pt$/.test(text) ? number * 4 / 3
+      : (/r?em$/.test(text) ? number * 16
+        : (/%$/.test(text) ? number * 0.16 : 0)))
+  if (pixels === 0) return ""
+  if (pixels >= 28) return "h2"
+  return pixels >= 20 ? "h3" : ""
+}
+
+// The heading this element stands for, or "" if it is not one. The last
+// declaration wins, the way it would in a browser.
+function readerHeadingOf(node) {
+  var style = attributeValue(node, "style")
+  if (style === "") return ""
+  if (style.toLowerCase().indexOf("font-size") < 0) return ""
+  var declarations = splitDeclarations(style)
+  var level = ""
+  for (var i = 0; i < declarations.length; i++) {
+    if (declarations[i].name !== "font-size") continue
+    level = readerHeadingLevel(declarations[i].value)
+  }
+  return level
+}
+
+// `single` is set where the heading was inferred rather than written. A native
+// <h1> holding two paragraphs is still the sender saying heading, so those are
+// joined into one; a box holding two paragraphs is a card whatever type the
+// sender set on it, and inferring a heading from that would swallow the card.
+function readerHeading(node, state, ctx, tag, single) {
+  readerFlush(state, "p")
+  var blocks = readerBuild(node, ctx)
+  var content = single === true && blocks.length > 1 ? null : []
+  for (var i = 0; i < blocks.length && content !== null; i++) {
+    if (blocks[i].name !== "p") {
+      content = null
+      break
+    }
+    if (content.length > 0) content.push(readerText(" "))
+    for (var j = 0; j < blocks[i].children.length; j++) content.push(blocks[i].children[j])
+  }
+  // A sender who wrapped a whole card in an <h1>, or set a font size on the box
+  // around one, did not write a heading. What is inside it is what the message
+  // says, so it comes through as itself.
+  if (content === null || content.length === 0
+    || readerLength(content) > MAX_HEADING_CHARS) {
+    for (var k = 0; k < blocks.length; k++) state.blocks.push(blocks[k])
+    return
+  }
+  var heading = readerElement(tag)
+  heading.children = content
+  state.blocks.push(heading)
+}
+
+// ------------------------------------------------------------------- tables
+//
+// The same question the formatted view asks, for the same reason: a table in
+// mail is either the sender's content or the sender's layout, and almost all of
+// them are the layout. `isGrid` is that question — two rows that each hold more
+// than one cell — and it is asked here rather than answered again.
+//
+// A grid becomes a table with no attributes on it. Everything else becomes the
+// blocks its cells always were, in the order they were written, which is what
+// keeps a receipt's labels and figures on separate lines instead of running
+// them together.
+function readerDataTable(node, ctx) {
+  var rows = rowsOf(node, [])
+  if (rows.length === 0 || rows.length > MAX_READER_TABLE_ROWS) return null
+
+  // The whole shape is settled before a single cell is built, so refusing the
+  // table costs no walk that the blocks it becomes instead would have to repeat.
+  var grid = []
+  for (var i = 0; i < rows.length; i++) {
+    var cells = []
+    for (var j = 0; j < rows[i].children.length; j++) {
+      var cell = rows[i].children[j]
+      if (cell.type === "text") continue
+      if (cell.name === "td" || cell.name === "th") cells.push(cell)
+    }
+    if (cells.length > MAX_READER_TABLE_COLUMNS) return null
+    if (cells.length > 0) grid.push(cells)
+  }
+  if (grid.length === 0) return null
+
+  var table = readerElement("table")
+  // Nested grids inside a kept one are the scaffolding again. One level of
+  // table is all the reader draws.
+  ctx.tables = false
+  for (var row = 0; row < grid.length; row++) {
+    var line = readerElement("tr")
+    for (var k = 0; k < grid[row].length; k++) {
+      var out = readerElement(grid[row][k].name === "th" ? "th" : "td")
+      out.children = readerInlineOrBlocks(readerBuild(grid[row][k], ctx))
+      line.children.push(out)
+    }
+    table.children.push(line)
+  }
+  ctx.tables = true
+  return table
+}
+
+// A row of a layout table is a line, not a stack.
+//
+// Every cell made into a block of its own is exactly what turns an avatar, a
+// name and "moved 4 cards" into three paragraphs — the loose vertical stream a
+// reading mode exists to stop producing. So a row whose cells each hold one
+// short run of inline content becomes one line, and a row holding anything
+// larger or more structured than that keeps the blocks, because at that size
+// the cells really were the sender stacking things up.
+//
+// Both answers come out of one walk over the cells, and that is not a tidiness
+// point. Building the cells to find out and then walking them again to lay them
+// out doubles the work at every level of nesting, and a card in real mail is
+// nine layout tables deep: measured, that was five hundred times the work and
+// two and a half seconds on a large newsletter.
+var MAX_ROW_CHARS = 160
+
+function readerRow(node, state, ctx) {
+  // Everything that can refuse a row is asked before anything is built.
+  var cells = []
+  for (var i = 0; i < node.children.length; i++) {
+    var cell = node.children[i]
+    if (cell.type === "text") continue
+    if (cell.name !== "td" && cell.name !== "th") return false
+    // A cell the sender set heading type on is a heading, and joining the row
+    // would walk past the one piece of evidence there is for that.
+    if (readerHeadingOf(cell) !== "") return false
+    cells.push(cell)
+  }
+
+  var built = []
+  for (var j = 0; j < cells.length; j++) built.push(readerBuild(cells[j], ctx))
+
+  var line = []
+  for (var k = 0; k < built.length && line !== null; k++) {
+    var blocks = built[k]
+    if (blocks.length === 0) continue
+    if (blocks.length > 1 || blocks[0].name !== "p") {
+      line = null
+      break
+    }
+    if (line.length > 0) line.push(readerText(" "))
+    for (var m = 0; m < blocks[0].children.length; m++) line.push(blocks[0].children[m])
+  }
+
+  readerFlush(state, "p")
+  if (line !== null && readerLength(line) <= MAX_ROW_CHARS) {
+    if (line.length > 0) {
+      var joined = readerElement("p")
+      joined.children = readerTrimmed(line)
+      state.blocks.push(joined)
+    }
+    return true
+  }
+  for (var n = 0; n < built.length; n++) {
+    for (var b = 0; b < built[n].length; b++) state.blocks.push(built[n][b])
+  }
+  return true
+}
+
+// A cell or a list item holding one paragraph holds inline content, not a
+// paragraph: the paragraph's own spacing below it would be a gap inside a row.
+function readerInlineOrBlocks(blocks) {
+  if (blocks.length === 1 && blocks[0].name === "p") return blocks[0].children
+  return blocks
+}
+
+function readerListItems(node, list, ctx) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") continue
+    if (READER_DROPPED[child.name] === true) continue
+    if (child.name !== "li") {
+      readerListItems(child, list, ctx)
+      continue
+    }
+    var item = readerElement("li")
+    item.children = readerInlineOrBlocks(readerBuild(child, ctx))
+    if (item.children.length === 0) continue
+    list.children.push(item)
+  }
+}
+
+// ------------------------------------------------------------------ the walk
+
+function readerNode(child, state, ctx) {
+  if (child.type === "text") {
+    // Raw text is a stylesheet or a script, whose element is dropped anyway.
+    if (!child.raw) readerAppendText(state, child.text)
+    return
+  }
+  var name = child.name
+  if (READER_DROPPED[name] === true) return
+  if (readerHidden(child)) return
+
+  if (name === "br") {
+    readerAppendBreak(state)
+    return
+  }
+  if (name === "img") {
+    readerAppendImage(state, child, ctx)
+    return
+  }
+  if (name === "hr") {
+    readerFlush(state, "p")
+    state.blocks.push(readerElement("hr"))
+    return
+  }
+
+  if (name === "a") {
+    var href = readerHref(child)
+    // A link the reader will not follow is still a label the reader draws.
+    if (href === "") {
+      readerWalk(child, state, ctx)
+      return
+    }
+    var link = readerElement("a")
+    link.attrs = [{ name: "href", value: href }]
+    readerOpen(state, link)
+    readerWalk(child, state, ctx)
+    state.chain.pop()
+    return
+  }
+
+  var inline = READER_INLINE[name]
+  if (inline !== undefined) {
+    readerOpen(state, readerElement(inline))
+    readerWalk(child, state, ctx)
+    state.chain.pop()
+    return
+  }
+
+  if (READER_HEADINGS[name] === true) {
+    readerHeading(child, state, ctx, name)
+    return
+  }
+
+  if (name === "pre") {
+    readerFlush(state, "p")
+    var preformatted = readerPreText(child, "").replace(/^\n+/, "").replace(/\s+$/, "")
+    if (preformatted !== "") {
+      var block = readerElement("pre")
+      block.children = [readerText(preformatted)]
+      state.blocks.push(block)
+    }
+    return
+  }
+
+  if (name === "ul" || name === "ol") {
+    readerFlush(state, "p")
+    var list = readerElement(name)
+    readerListItems(child, list, ctx)
+    if (list.children.length > 0) {
+      state.blocks.push(list)
+      return
+    }
+    // A list with no items is a box somebody spelled <ul>.
+    readerWalk(child, state, ctx)
+    readerFlush(state, "p")
+    return
+  }
+
+  if (name === "blockquote") {
+    readerFlush(state, "p")
+    var quoted = readerBuild(child, ctx)
+    if (quoted.length === 0) return
+    var quote = readerElement("blockquote")
+    quote.children = quoted
+    state.blocks.push(quote)
+    return
+  }
+
+  if (name === "table") {
+    readerFlush(state, "p")
+    if (ctx.tables) {
+      var grid = isGrid(child) ? readerDataTable(child, ctx) : null
+      if (grid !== null) {
+        state.blocks.push(grid)
+        return
+      }
+    }
+    readerWalk(child, state, ctx)
+    readerFlush(state, "p")
+    return
+  }
+
+  // Only with nothing open around it, for the same reason the heading below
+  // says so: joining a row recurses into a document of its own, and a link
+  // opened outside it would not survive that.
+  if (name === "tr" && state.chain.length === 0 && readerRow(child, state, ctx)) return
+
+  if (TABLE_PARTS[name] === true || READER_BLOCK[name] === true) {
+    // Only with nothing open around it. Inferring a heading recurses into a
+    // document of its own, which a link opened outside would not survive — and
+    // a link around a big-typed cell is the shape of every call to action in
+    // mail.
+    var inferred = state.chain.length === 0 ? readerHeadingOf(child) : ""
+    if (inferred !== "") {
+      readerHeading(child, state, ctx, inferred, true)
+      return
+    }
+    readerFlush(state, "p")
+    readerWalk(child, state, ctx)
+    readerFlush(state, "p")
+    return
+  }
+
+  // Anything unrecognised is a wrapper, and what it wraps is the message.
+  readerWalk(child, state, ctx)
+}
+
+function readerWalk(node, state, ctx) {
+  for (var i = 0; i < node.children.length; i++) readerNode(node.children[i], state, ctx)
+}
+
+// Preformatted text is the one place a run of spaces is content rather than the
+// template's indentation.
+function readerPreText(node, out) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") {
+      if (!child.raw) out += child.text
+      continue
+    }
+    if (READER_DROPPED[child.name] === true) continue
+    if (child.name === "br") {
+      out += "\n"
+      continue
+    }
+    out = readerPreText(child, out)
+  }
+  return out
+}
+
+function readerBuild(node, ctx) {
+  var state = readerState()
+  readerWalk(node, state, ctx)
+  readerFlush(state, "p")
+  return state.blocks
+}
+
+// A rule with nothing above it separates the message from the top of the panel,
+// and two in a row separate nothing from nothing.
+function readerTidy(blocks) {
+  var out = []
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i]
+    if (block.name === "hr") {
+      if (out.length === 0) continue
+      if (out[out.length - 1].name === "hr") continue
+    }
+    out.push(block)
+  }
+  while (out.length > 0 && out[out.length - 1].name === "hr") out.pop()
+  return out
+}
+
+// The reader's document, built from the sender's parsed tree and never out of
+// it. Reads that tree and does not touch it, which is what lets `sanitize` hand
+// over the same parse it is about to clean for the formatted view.
+function readerTree(root, options) {
+  var settings = options || {}
+  var ctx = {
+    allowImages: settings.allowRemoteImages === true,
+    limit: Math.max(0, Math.floor(settings.maxImages === undefined
+      ? MAX_IMAGES : settings.maxImages)),
+    tables: true,
+    kept: 0,
+    blocked: 0
+  }
+  var document = { type: "root", children: readerTidy(readerBuild(root, ctx)) }
+  var text = serialize(document)
+  var size = { length: text.length, tags: 0, images: 0, tables: 0, tableDepth: 0 }
+  size.tableDepth = measure(document, 0, size)
+  return {
+    document: document,
+    html: text,
+    images: ctx.kept,
+    blockedImages: ctx.blocked,
+    complexity: size,
+    tooHeavy: isTooHeavy(size),
+    // A message whose every word was in a picture has a reader document with
+    // nothing in it, and the formatted view is the honest answer for it.
+    empty: document.children.length === 0
+  }
+}
+
+// The reader's document, as a string Qt is given. Every value in the stylesheet
+// comes from the theme or from the reader's own font size, so the sender's
+// contribution to how this looks is exactly nothing.
+function readerDocumentFor(source, colors) {
+  var palette = colors || {}
+  var foreground = String(palette.foreground || "")
+  var background = String(palette.background || "")
+  var link = String(palette.link || foreground)
+  var quote = String(palette.quote || foreground)
+  var base = Math.max(8, Math.floor(Number(palette.fontSize) || 13))
+  var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
+  // One rhythm for the whole document, derived from the size it is read at, so
+  // the spacing follows the zoom rather than standing still while the type
+  // grows past it.
+  var gap = Math.max(4, Math.round(base * 0.85))
+  var rule = Math.max(2, Math.round(base * 0.5))
+
+  return "<html><head><style type=\"text/css\">"
+    + "body{color:" + foreground + ";background-color:" + background + ";}"
+    + "a{color:" + link + ";}"
+    + "p{margin-top:0px;margin-bottom:" + gap + "px;}"
+    + "h1{font-size:" + Math.round(base * 1.6) + "px;margin-top:" + (gap * 2)
+      + "px;margin-bottom:" + rule + "px;}"
+    + "h2{font-size:" + Math.round(base * 1.35) + "px;margin-top:" + (gap * 2)
+      + "px;margin-bottom:" + rule + "px;}"
+    + "h3{font-size:" + Math.round(base * 1.18) + "px;margin-top:" + Math.round(gap * 1.6)
+      + "px;margin-bottom:" + rule + "px;}"
+    + "h4,h5,h6{font-size:" + base + "px;margin-top:" + Math.round(gap * 1.4)
+      + "px;margin-bottom:" + rule + "px;}"
+    + "ul,ol{margin-top:0px;margin-bottom:" + gap + "px;margin-left:" + (base * 2) + "px;}"
+    + "li{margin-bottom:" + rule + "px;}"
+    + "blockquote{color:" + quote + ";margin-left:" + rule
+      + "px;padding-left:" + gap + "px;margin-top:0px;margin-bottom:" + gap + "px;}"
+    + "pre{margin-top:0px;margin-bottom:" + gap + "px;}"
+    + "td,th{padding-top:" + rule + "px;padding-bottom:" + rule
+      + "px;padding-right:" + gap + "px;}"
+    + "th{font-weight:bold;text-align:left;}"
+    + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
+    + "</style></head><body>"
+    + serialize(documentTree(source))
+    + "</body></html>"
+}
+
+// ---------------------------------------------------------- which mode is on
+//
+// Three ways of reading a message and one preference across all of them, so a
+// message that cannot be drawn the chosen way falls through to the one that
+// can rather than showing an empty panel. The order is reader, then the
+// sender's own formatting, then text.
+var BODY_MODES = { reader: true, original: true, plain: true }
+
+// A stored preference, or anything else, read as one of the three. The fallback
+// is what a window written before this existed meant.
+function bodyModeOf(value, fallback) {
+  var wanted = String(value === undefined || value === null ? "" : value)
+  if (BODY_MODES[wanted] === true) return wanted
+  var other = String(fallback === undefined || fallback === null ? "" : fallback)
+  return BODY_MODES[other] === true ? other : "reader"
+}
+
+function resolveBodyMode(wanted, available) {
+  var has = available || {}
+  var want = BODY_MODES[wanted] === true ? wanted : "reader"
+  // No markup at all: the text is not a fallback, it is the message.
+  if (has.html !== true) return "plain"
+  if (want === "plain") return "plain"
+  if (want === "reader" && has.reader !== true) want = "original"
+  var heavy = want === "reader" ? has.readerHeavy === true : has.originalHeavy === true
+  // Qt lays rich text out on the GUI thread of the shell that draws the whole
+  // desktop, so a document past the bounds gets the text instead — until
+  // somebody insists.
+  if (heavy && has.forced !== true) return "plain"
+  return want
+}
+
+// Whether the plain text on screen is a refusal rather than a request, which is
+// what the notice above the message is explaining.
+function bodyModeRefused(wanted, available) {
+  var has = available || {}
+  if (wanted === "plain" || has.html !== true) return false
+  return resolveBodyMode(wanted, available) === "plain"
+}
+
+// ------------------------------------------------------------- the measure
+//
+// A reading column is bounded by how far the eye can travel and still find the
+// start of the next line, which is sixty-five to seventy-five characters — the
+// same rule a book obeys and the reason a browser's reading mode is a column
+// rather than a window. `measured` is that many characters of the reader's own
+// font, measured by Qt rather than guessed from the pixel size: a monospace
+// face and a proportional one disagree about it by half.
+function readingColumnWidth(available, measured) {
+  var room = Math.max(80, Math.floor(Number(available) || 0))
+  var ideal = Math.floor(Number(measured) || 0)
+  // A narrow window has no width to give up, so the column is the window.
+  return ideal > 0 ? Math.min(room, ideal) : room
+}
+
+// Centred in what is left over. The column is the message; the space either
+// side of it belongs to neither the message nor the panel's own inset.
+function readingColumnOffset(available, width) {
+  var room = Math.max(0, Math.floor(Number(available) || 0))
+  var column = Math.max(0, Math.floor(Number(width) || 0))
+  return Math.max(0, Math.round((room - column) / 2))
 }
 
 // ========================================================= plain text bodies

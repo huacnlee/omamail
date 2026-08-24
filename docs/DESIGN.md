@@ -147,6 +147,12 @@ The reader is the content pane and receives the most flexible width. Its hierarc
 
 Long-form body text follows the user's body font size and reader zoom. Chrome uses the smaller theme token. Reader zoom changes the message body, not the surrounding application.
 
+A message can be read three ways, and the choice is the window's rather than the message's: it survives moving to the next message and closing the window, because how somebody reads their mail is a fact about them and not about the message that made them reach for the control.
+
+Reading mode is what a message opens as. It is a rebuilt document, not a restyled one: headings, paragraphs, lists, quotes, links and small data tables in the window's own type, at a measure of sixty-five to seventy-five characters, centred in the pane when the pane is wider than that and filling it when it is not. Nothing of the sender's presentation is in it — no type, no colour, no width, no alignment, no table scaffolding — so every message reads the same way and looks deliberate rather than half-stripped. Original is the sender's own layout, sanitised, for the receipts and statements whose arrangement is carrying meaning. Plain is the text.
+
+The three are named rather than iconed, because no drawing distinguishes them and telling them apart is the point. The chosen one carries the selected surface and a border, not a colour alone. A message that cannot be drawn the chosen way — too heavy to lay out, or with nothing readable in it — falls through to one that can and says so in a notice; the choice itself does not move, because it still stands for the next message.
+
 Notices form a stack with one shared component contract. A notice explains a condition and may expose one immediate action. Structured content such as an invitation is a card because it adds actions and relationships not represented by ordinary prose; routine message metadata is not boxed merely to create visual variety.
 
 Remote images remain blocked per message until requested. The visual treatment must make the blocked state and the scope of the action clear without making the notice compete with the message.
