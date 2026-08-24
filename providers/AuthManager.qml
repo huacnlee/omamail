@@ -58,6 +58,12 @@ Item {
   property string grantedScope: ""
   property bool loggedIn: false
   property bool sessionChecked: false
+  // True after the keyring yielded a refresh token, even while a temporary
+  // network failure prevents it from becoming an access token. This is not a
+  // signed-out account: the saved grant is still the route back to ready.
+  property bool savedSessionPresent: false
+  readonly property bool recoveringSession: savedSessionPresent && !loggedIn
+  property int refreshRetryAttempt: 0
   property bool loginBusy: false
   property bool refreshBusy: false
   property bool credentialsWriteBusy: false
@@ -73,6 +79,8 @@ Item {
   property var tokenWaiters: []
   property string lookupPurpose: ""
   property bool lookupHandled: false
+  property var lookupAttributes: []
+  property var savedTokenAttributes: []
   // One lookup at a time, whichever of the two processes is carrying it.
   readonly property bool lookupRunning: secretLookup.running || legacySearch.running
   property string keyringWriteToken: ""
@@ -147,6 +155,7 @@ Item {
   function restoreSession() {
     sessionChecked = false
     if (!credentialsPresent) {
+      savedSessionPresent = false
       sessionChecked = true
       resetMemorySession()
       return
@@ -186,6 +195,9 @@ Item {
       // A different client means a different keyring entry and a different
       // grant; whatever is in memory belongs to the old one.
       resetMemorySession()
+      savedSessionPresent = false
+      refreshRetryAttempt = 0
+      refreshRetry.stop()
       sessionChecked = false
       if (Credentials.isConfigured(loaded)) restoreSession()
       else sessionChecked = true
@@ -228,8 +240,8 @@ Item {
     lookupHandled = false
     triedLegacyLookup = false
     secretLookupStage = 0
-    secretLookup.command = ["secret-tool", "lookup"].concat(
-      Credentials.keyringAttributes(clientId, accountId))
+    lookupAttributes = Credentials.refreshTokenAttributes(clientId, accountId, 0)
+    secretLookup.command = ["secret-tool", "lookup"].concat(lookupAttributes)
     secretLookup.running = true
   }
 
@@ -262,6 +274,7 @@ Item {
       legacySearch.running = true
       return
     }
+    lookupAttributes = attributes
     secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
     secretLookup.running = true
   }
@@ -281,6 +294,7 @@ Item {
       return
     }
     lookupHandled = false
+    lookupAttributes = legacyAttributes
     secretLookup.command = ["secret-tool", "lookup"].concat(legacyAttributes)
     secretLookup.running = true
   }
@@ -296,11 +310,14 @@ Item {
     var purpose = lookupPurpose
     lookupPurpose = ""
     if (!token) {
+      savedSessionPresent = false
       resetMemorySession()
       sessionChecked = true
       if (purpose === "request") finishWaiters("", "Sign in to Gmail first")
       return
     }
+    savedSessionPresent = true
+    savedTokenAttributes = lookupAttributes.slice()
     renamedAttributesToClear = secretLookupStage >= 2
       ? (secretLookupStage === 3
         ? Credentials.renamedLegacyKeyringAttributes(clientId)
@@ -339,10 +356,11 @@ Item {
     keyringStore.running = true
   }
 
-  function clearStoredToken() {
+  function clearStoredToken(attributes) {
     if (keyringClear.running || !clientId) return
-    keyringClear.command = ["secret-tool", "clear"].concat(
-      Credentials.keyringAttributes(clientId, accountId))
+    var selected = attributes && attributes.length
+      ? attributes : Credentials.keyringAttributes(clientId, accountId)
+    keyringClear.command = ["secret-tool", "clear"].concat(selected)
     keyringClear.running = true
   }
 
@@ -421,9 +439,17 @@ Item {
       if (!result.ok) {
         root.resetMemorySession()
         root.lastError = root.safeError(result.error)
-        // A revoked or expired grant is never coming back. Dropping it here
-        // means the panel offers "Sign in" instead of retrying forever.
-        if (result.invalidGrant) root.clearStoredToken()
+        if (OAuth.refreshFailureDisposition(result) === "signed_out") {
+          // A revoked or expired grant is never coming back. Dropping it here
+          // means the panel offers "Sign in" instead of retrying forever.
+          root.savedSessionPresent = false
+          refreshRetry.stop()
+          root.clearStoredToken(root.savedTokenAttributes)
+        } else {
+          // The keyring token is still valid evidence of a saved session. Keep
+          // it and retry until the network can exchange it for an access token.
+          root.scheduleRefreshRetry()
+        }
         if (purpose === "request") root.finishWaiters("", root.lastError)
         else root.sessionUnavailable(root.lastError)
         return
@@ -441,6 +467,9 @@ Item {
     accessTokenExpiresAt = Date.now() + result.expiresIn * 1000
     if (result.scope) grantedScope = result.scope
     loggedIn = true
+    savedSessionPresent = true
+    refreshRetryAttempt = 0
+    refreshRetry.stop()
     lastError = ""
     if (result.refreshToken) storeRefreshToken(result.refreshToken)
   }
@@ -463,6 +492,13 @@ Item {
     exchangingCode = false
     pkceGenerator.command = [pluginDir + "/scripts/pkce.sh"]
     pkceGenerator.running = true
+  }
+
+  function scheduleRefreshRetry() {
+    if (!savedSessionPresent || refreshRetry.running) return
+    refreshRetry.interval = OAuth.refreshRetryDelay(refreshRetryAttempt)
+    refreshRetryAttempt++
+    refreshRetry.start()
   }
 
   function handlePkce(raw) {
@@ -591,6 +627,9 @@ Item {
 
   function logout() {
     cancelLogin()
+    refreshRetry.stop()
+    refreshRetryAttempt = 0
+    savedSessionPresent = false
     resetMemorySession()
     sessionChecked = true
     grantedScope = ""
@@ -680,6 +719,12 @@ Item {
     id: authTimeout
     interval: 180000
     onTriggered: root.failLogin("Google sign-in took too long. Please try again")
+  }
+
+  Timer {
+    id: refreshRetry
+    repeat: false
+    onTriggered: root.restoreSession()
   }
 
   Process {

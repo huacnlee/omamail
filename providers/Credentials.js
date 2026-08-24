@@ -387,6 +387,16 @@ function renamedLegacyKeyringAttributes(clientId) {
   return attributes
 }
 
+// The restore stages are also the locations an invalid grant must be removed
+// from. Returning the exact attribute vector keeps lookup and cleanup from
+// drifting apart as old storage names are retired.
+function refreshTokenAttributes(clientId, accountId, stage) {
+  if (stage === 1) return legacyKeyringAttributes(clientId)
+  if (stage === 2) return renamedKeyringAttributes(clientId, accountId)
+  if (stage === 3) return renamedLegacyKeyringAttributes(clientId)
+  return keyringAttributes(clientId, accountId)
+}
+
 // An omitted attribute is a wildcard too, not just an empty one. secret-tool
 // matches any item carrying *at least* the attributes it was asked for, so
 // both lookups above that leave "account" out match the account-keyed entries
