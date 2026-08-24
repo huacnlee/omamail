@@ -473,6 +473,40 @@ assert.strictEqual(html.stripColors(null), "")
 assert.ok(html.sanitize("<td bgcolor=\"#fff\" style=\"color:#000\">x</td>").html.indexOf("#") < 0)
 assert.ok(html.sanitize("<td bgcolor=\"#fff\">x</td>", { keepColors: true }).html.indexOf("#fff") > 0)
 
+// An HTML `background` is not one of them. It is an image URL, Qt fetches it,
+// and it rode in the colour list because senders write it beside `bgcolor` —
+// so with `keepColors` on, a real message reached its sender's host with remote
+// images off. No appearance option may buy a network request, so the attributes
+// that carry an address are refused before the colour question is asked.
+const painted = "<table background=\"https://static.example.net/tile.png\" bgcolor=\"#ffffff\">"
+  + "<tr><td background=\"https://static.example.net/cell.png\" bgcolor=\"#eeeeee\">a</td>"
+  + "<td>b</td></tr><tr><td>c</td><td>d</td></tr></table>"
+for (const options of [{}, { keepColors: true }, { keepColors: true, allowRemoteImages: true }]) {
+  const formatted = html.sanitize(painted, options).html
+  assert.ok(formatted.indexOf("background=") < 0,
+    "background survived " + JSON.stringify(options))
+  assert.ok(formatted.indexOf("static.example.net") < 0)
+}
+// The colours themselves are still an appearance question, still answered by
+// the option rather than by the resource rule.
+assert.ok(html.sanitize(painted, { keepColors: true }).html.indexOf("#ffffff") > 0)
+assert.strictEqual(html.stripColors("<body background=\"https://x.example.com/a.png\">t</body>"),
+  "<body>t</body>")
+
+// The rest of the attributes whose value is an address rather than a value.
+for (const attribute of ["srcset", "lowsrc", "dynsrc", "poster", "usemap",
+    "ping", "formaction", "longdesc"]) {
+  assert.ok(html.sanitize("<p " + attribute + "=\"https://x.example.com/a\">t</p>",
+    { keepColors: true }).html.indexOf("x.example.com") < 0,
+    attribute + " kept an address")
+}
+// And a url() in a style is a fetch wherever the engine honours one, whatever
+// the appearance setting says.
+for (const options of [{}, { keepColors: true }]) {
+  assert.ok(html.sanitize("<div style=\"background-image:url(https://x.example.com/a.png)\">t</div>",
+    options).html.indexOf("url(") < 0)
+}
+
 // --------------------------------------------------------- table nesting
 //
 // Qt lays tables out by resolving column widths against each other, and

@@ -726,14 +726,32 @@ var DROPPED_ELEMENTS = {
 // GitHub's #24292e text would sit on a #131313 ground — so both go, and the
 // document stylesheet supplies the pair. Anything that survives (images,
 // borders) belongs to the sender.
-var COLOUR_ATTRIBUTES = { bgcolor: true, background: true, bordercolor: true, color: true }
+var COLOUR_ATTRIBUTES = { bgcolor: true, bordercolor: true, color: true }
 var COLOUR_DECLARATIONS = {
   color: true, background: true, "background-color": true,
   "border-color": true, "outline-color": true
 }
 
+// Attributes whose value is an address rather than a colour or a number, and
+// which therefore belong to the image policy or to nothing at all.
+//
+// `background` is the one that matters and the one that hid here for a while:
+// it sat in the colour list because senders write it beside `bgcolor`, and in
+// HTML it is an image URL. Qt fetches it. With `keepColors` on, a real message
+// reached mirostatic.com with remote images off — a colour setting had bought
+// the sender a network request, which is exactly the thing no appearance option
+// may ever do. The rest are here because being right about which of them Qt
+// honours is not worth the risk of being wrong: a picture arrives as <img>, and
+// that is the one attribute the image policy owns.
+var RESOURCE_ATTRIBUTES = {
+  background: true, srcset: true, lowsrc: true, dynsrc: true, poster: true,
+  data: true, codebase: true, usemap: true, ping: true, formaction: true,
+  longdesc: true, profile: true, manifest: true, archive: true, cite: true
+}
+
 function stripColorsFrom(node) {
   for (var name in COLOUR_ATTRIBUTES) removeAttribute(node, name)
+  for (var resource in RESOURCE_ATTRIBUTES) removeAttribute(node, resource)
   rewriteStyle(node, function(declaration) {
     return COLOUR_DECLARATIONS[declaration.name] === true ? null : declaration
   })
@@ -912,7 +930,11 @@ function cleanAttributes(node, keepColors, declarations) {
     var attr = attrs[i]
     var name = attr.name
     var drop = false
-    if (!keepColors && COLOUR_ATTRIBUTES[name] === true) drop = true
+    // Unconditionally, and before the colour question is asked: `keepColors`
+    // is an appearance setting, and no appearance setting may hand the
+    // renderer an address to fetch.
+    if (RESOURCE_ATTRIBUTES[name] === true) drop = true
+    else if (!keepColors && COLOUR_ATTRIBUTES[name] === true) drop = true
     // Event handlers, which Qt ignores but which have no business surviving a
     // trip through a mail client.
     else if (name.charCodeAt(0) === 111 && HANDLER_ATTRIBUTE.test(name)) drop = true
