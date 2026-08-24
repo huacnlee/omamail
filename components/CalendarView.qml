@@ -220,6 +220,30 @@ Item {
       }
     }
 
+    Rectangle {
+      id: calendarError
+      width: parent.width
+      height: visible ? Style.space(34) : 0
+      visible: root.controller && root.controller.lastError !== ""
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.urgentColor.r, root.urgentColor.g, root.urgentColor.b, 0.12)
+      border.width: 1
+      border.color: root.urgentColor
+
+      Text {
+        anchors.fill: parent
+        anchors.leftMargin: Style.space(10)
+        anchors.rightMargin: Style.space(10)
+        verticalAlignment: Text.AlignVCenter
+        text: root.controller ? root.controller.lastError : ""
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+        textFormat: Text.PlainText
+      }
+    }
+
     Row {
       id: calendarBody
       width: parent.width
@@ -424,20 +448,6 @@ Item {
         }
       }
     }
-  }
-
-  Text {
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    anchors.margins: Style.space(14)
-    visible: root.controller && root.controller.lastError !== ""
-    text: root.controller ? root.controller.lastError : ""
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    elide: Text.ElideRight
-    textFormat: Text.PlainText
   }
 
   CalendarEventDetail {

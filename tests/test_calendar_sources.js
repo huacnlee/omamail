@@ -52,6 +52,8 @@ const withGoogle = sources.withGoogleAccounts(list, [
 assert.strictEqual(withGoogle.sources.length, 2)
 assert.strictEqual(withGoogle.sources[1].id, "google:me@gmail.com")
 assert.strictEqual(withGoogle.sources[1].accountId, "me@gmail.com")
+assert.strictEqual(withGoogle.sources[1].name, "me@gmail.com",
+  "Google calendar errors must identify the full account address")
 
 let hiddenGoogle = sources.add(list, {
   id: "google:me@gmail.com", kind: "google", name: "Personal Google",
@@ -115,7 +117,7 @@ const groups = sources.groupByAccount(groupedList, [
 assert.strictEqual(JSON.stringify(groups.map(function (group) { return group.providerLabel })),
   JSON.stringify(["Google", "CalDAV", "HEY", "CalDAV"]))
 assert.strictEqual(JSON.stringify(groups.map(function (group) { return group.accountLabel })),
-  JSON.stringify(["Personal Gmail", "Work mail", "HEY", "cal-user"]))
+  JSON.stringify(["me@gmail.com", "Work mail", "HEY", "cal-user"]))
 assert.strictEqual(groups[0].calendars[0].id, "google:me@gmail.com")
 assert.strictEqual(groups[1].calendars[0].id, "work")
 assert.strictEqual(groups[3].calendars[0].enabled, false)

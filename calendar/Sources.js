@@ -160,7 +160,10 @@ function withGoogleAccounts(list, accountSummaries) {
     next = add(next, {
       id: "google:" + accountId,
       kind: "google",
-      name: trimmed(account.label || account.email || "Google Calendar"),
+      // Calendar errors name their source. The full address is load-bearing
+      // here: two Google accounts commonly share the same local part, and the
+      // mailbox's short display label cannot say which grant needs attention.
+      name: trimmed(account.email || account.label || "Google Calendar"),
       accountId: accountId,
       enabled: saved ? saved.enabled !== false : true,
       readOnly: true,
@@ -205,7 +208,9 @@ function groupByAccount(list, accountSummaries) {
     groups.push({
       id: "account:" + trimmed(account.id || account.email),
       providerLabel: providerLabel(calendars[0].kind || account.provider),
-      accountLabel: trimmed(account.label || account.email || "Account"),
+      accountLabel: account.provider === "gmail"
+        ? trimmed(account.email || account.label || "Google account")
+        : trimmed(account.label || account.email || "Account"),
       calendars: calendars
     })
   }

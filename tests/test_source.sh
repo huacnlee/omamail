@@ -190,6 +190,13 @@ if 'bordered: false' not in today_block:
     raise SystemExit("test_source.sh: Go to today must be a text-only action")
 if 'iconName: "refresh"' in text:
     raise SystemExit("test_source.sh: calendar refresh belongs in the window header")
+error = text.index("id: calendarError")
+body = text.index("id: calendarBody")
+if error > body:
+    raise SystemExit("test_source.sh: calendar errors must reserve space above the calendar body")
+error_block = text[error:body]
+if "height:" not in error_block or "lastError" not in error_block:
+    raise SystemExit("test_source.sh: calendar errors must occupy their own visible row")
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"
