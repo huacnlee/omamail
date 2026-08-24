@@ -39,6 +39,9 @@ Item {
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
+  readonly property color calendarBorder: Style.normalBorderColor
+  readonly property color calendarTodayBackground: Style.selectionFill
+  readonly property int calendarBorderWidth: Style.normalBorderWidth
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
@@ -1139,6 +1142,9 @@ Item {
             accentColor: root.accent
             urgentColor: root.urgent
             dimColor: root.dim
+            calendarBorderColor: root.calendarBorder
+            calendarTodayBackgroundColor: root.calendarTodayBackground
+            calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }

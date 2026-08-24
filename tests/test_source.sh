@@ -256,6 +256,34 @@ if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
 calendar = Path("components/CalendarView.qml").read_text()
 if "CalendarSidebar {" in calendar:
     raise SystemExit("test_source.sh: Calendar must not open a second sidebar")
+week = Path("components/WeekCalendarView.qml").read_text()
+for source, name in ((calendar, "month"), (week, "week")):
+    if "required property color calendarBorderColor" not in source:
+        raise SystemExit("test_source.sh: %s calendar must inherit the themed border token" % name)
+    if "required property color calendarTodayBackgroundColor" not in source:
+        raise SystemExit("test_source.sh: %s calendar must inherit the themed Today background" % name)
+    if "required property int calendarBorderWidth" not in source:
+        raise SystemExit("test_source.sh: %s calendar must inherit the themed border width" % name)
+if "calendarBorderColor: root.calendarBorder" not in app:
+    raise SystemExit("test_source.sh: App must pass the system calendar border token")
+if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
+    raise SystemExit("test_source.sh: App must pass the system Today background token")
+if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
+    raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
+if "readonly property color calendarTodayBackground: Style.selectionFill" not in app:
+    raise SystemExit("test_source.sh: Today must use the visible system selection token")
+if "calendarBorderWidth: root.calendarBorderWidth" not in app:
+    raise SystemExit("test_source.sh: App must pass the system calendar border width")
+if "border.color: root.calendarBorderColor" not in calendar or "border.width: root.calendarBorderWidth" not in calendar:
+    raise SystemExit("test_source.sh: month cells must consume the themed calendar border")
+if "? root.calendarTodayBackgroundColor" not in calendar:
+    raise SystemExit("test_source.sh: the Month Today cell must consume the themed background")
+if ("calendarBorderColor: root.calendarBorderColor" not in calendar
+        or "calendarTodayBackgroundColor: root.calendarTodayBackgroundColor" not in calendar
+        or "calendarBorderWidth: root.calendarBorderWidth" not in calendar):
+    raise SystemExit("test_source.sh: CalendarView must propagate themed calendar tokens to Week")
+if week.count("root.calendarTodayBackgroundColor") < 2:
+    raise SystemExit("test_source.sh: Week Today must span the all-day lane and timeline")
 PY
 grep -q 'function setSourceEnabled' calendar/CalendarController.qml \
   || fail "calendar visibility must persist through the controller"

@@ -13,6 +13,9 @@ Item {
   required property color accentColor
   required property color urgentColor
   required property color dimColor
+  required property color calendarBorderColor
+  required property color calendarTodayBackgroundColor
+  required property int calendarBorderWidth
   required property string panelFontFamily
   required property string selectedEventId
 
@@ -77,8 +80,8 @@ Item {
     anchors.top: dayHeaders.bottom
     height: root.allDayHeight
     color: "transparent"
-    border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+    border.width: root.calendarBorderWidth
+    border.color: root.calendarBorderColor
     clip: true
 
     Text {
@@ -111,9 +114,10 @@ Item {
 
           Rectangle {
             anchors.fill: parent
-            color: "transparent"
-            border.width: 1
-            border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+            color: allDayColumn.modelData.isoDate === Calendar.isoDate(new Date())
+              ? root.calendarTodayBackgroundColor : "transparent"
+            border.width: root.calendarBorderWidth
+            border.color: root.calendarBorderColor
           }
 
           Column {
@@ -201,8 +205,8 @@ Item {
             anchors.leftMargin: root.timeRailWidth
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 1
-            color: Style.normalBorderFor(root.textColor, root.accentColor)
+            height: root.calendarBorderWidth
+            color: root.calendarBorderColor
           }
         }
       }
@@ -227,9 +231,9 @@ Item {
             Rectangle {
               anchors.fill: parent
               color: dayColumn.modelData.isoDate === Calendar.isoDate(new Date())
-                ? Style.selectedFillFor(root.textColor, root.accentColor) : "transparent"
-              border.width: 1
-              border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+                ? root.calendarTodayBackgroundColor : "transparent"
+              border.width: root.calendarBorderWidth
+              border.color: root.calendarBorderColor
             }
             MouseArea {
               anchors.fill: parent

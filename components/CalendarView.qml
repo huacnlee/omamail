@@ -12,6 +12,9 @@ Item {
   required property color accentColor
   required property color urgentColor
   required property color dimColor
+  required property color calendarBorderColor
+  required property color calendarTodayBackgroundColor
+  required property int calendarBorderWidth
   required property string panelFontFamily
 
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -364,10 +367,10 @@ Item {
           width: monthGrid.width / 7
           height: monthGrid.height / 6
           color: modelData.isoDate === root.todayIso
-            ? Style.selectedFillFor(root.textColor, root.accentColor)
+            ? root.calendarTodayBackgroundColor
             : "transparent"
-          border.width: 1
-          border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+          border.width: root.calendarBorderWidth
+          border.color: root.calendarBorderColor
           radius: 0
 
           MouseArea {
@@ -476,6 +479,9 @@ Item {
       accentColor: root.accentColor
       urgentColor: root.urgentColor
       dimColor: root.dimColor
+      calendarBorderColor: root.calendarBorderColor
+      calendarTodayBackgroundColor: root.calendarTodayBackgroundColor
+      calendarBorderWidth: root.calendarBorderWidth
       panelFontFamily: root.panelFontFamily
       selectedEventId: root.selectedEventId
       onCreateAt: function(startMs) { root.createAt(startMs) }
