@@ -173,6 +173,20 @@ function withGoogleAccounts(list, accountSummaries) {
   return next
 }
 
+function forAccount(list, accountId) {
+  var source = list || emptyList()
+  var wanted = trimmed(accountId)
+  if (wanted === "") return copyList(source)
+  var next = emptyList()
+  var values = Array.isArray(source.sources) ? source.sources : []
+  for (var i = 0; i < values.length; i++) {
+    if (!values[i]) continue
+    if (values[i].kind !== "google" || trimmed(values[i].accountId) === wanted)
+      next = add(next, values[i])
+  }
+  return next
+}
+
 function providerLabel(kind) {
   var value = trimmed(kind).toLowerCase()
   if (value === "google" || value === "gmail") return "Google"

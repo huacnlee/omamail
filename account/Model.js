@@ -24,6 +24,15 @@ function setupProvider(chosen, live) {
   return String(live === undefined || live === null ? "" : live).trim() || "gmail"
 }
 
+function mailboxAfterAccountSwitch(currentKey, targetMailboxes) {
+  var key = String(currentKey || "")
+  var mailboxes = Array.isArray(targetMailboxes) ? targetMailboxes : []
+  for (var i = 0; i < mailboxes.length; i++) {
+    if (mailboxes[i] && String(mailboxes[i].key || "") === key) return key
+  }
+  return ""
+}
+
 // One value the panel can switch on, in the order a new user meets them.
 function setupState(status) {
   var value = status || {}

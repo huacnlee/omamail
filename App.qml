@@ -59,6 +59,19 @@ Item {
 
   readonly property string fontFamily: Style.font.family
 
+  function copyText(text) {
+    clipboardProxy.text = String(text || "")
+    clipboardProxy.selectAll()
+    clipboardProxy.copy()
+    clipboardProxy.deselect()
+  }
+
+  TextEdit {
+    id: clipboardProxy
+    visible: false
+    readOnly: true
+  }
+
   // Two breakpoints, not a continuum: three columns, list-plus-reader with the
   // sidebar collapsed to a strip, and a single column that swaps list for
   // reader.
@@ -371,10 +384,8 @@ Item {
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
     if (id === "goAccount") {
       var accountIndex = Keymap.slotFor(id, sequence)
-      if (service && accountIndex >= 0 && accountIndex < service.accountCount) {
-        service.switchToIndex(accountIndex)
-        backToList()
-      }
+      if (service && accountIndex >= 0 && accountIndex < service.accountCount)
+        root.switchAccount(accountIndex)
       return
     }
     if (id === "switchAccount") return accountSwitcher.openCentered()
@@ -570,6 +581,21 @@ Item {
       onBackRequested: root.leaveSetup()
       onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
+  }
+
+  function switchAccount(index) {
+    if (!service) return false
+    var keepCalendar = calendarVisible
+    var mailbox = service.mailboxKey
+    if (service.switchToIndex(index) !== true) return false
+    if (keepCalendar) {
+      currentView = "calendar"
+      return true
+    }
+    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
+    if (target !== "") service.selectMailbox(target)
+    backToList()
+    return true
   }
 
   function editAccount(index) {
@@ -1115,6 +1141,8 @@ Item {
             dimColor: root.dim
             panelFontFamily: root.fontFamily
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
+            onCopyRequested: function(text) { root.copyText(text) }
+            onOpenRequested: function(url) { Qt.openUrlExternally(url) }
           }
         }
 
@@ -1374,8 +1402,7 @@ Item {
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
         onAccountChosen: function(index) {
-          if (root.service) root.service.switchToIndex(index)
-          root.backToList()
+          root.switchAccount(index)
         }
         onAddAccountRequested: {
           root.editingProvider = ""

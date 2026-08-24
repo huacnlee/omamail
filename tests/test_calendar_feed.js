@@ -12,6 +12,11 @@ assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
     } }]
   }
 })), "The Google Calendar API is not enabled for this Google Cloud project")
+assert.strictEqual(feed.isGoogleCalendarApiDisabledError(
+  "Google: The Google Calendar API is not enabled for this Google Cloud project"), true)
+assert.strictEqual(feed.isGoogleCalendarApiDisabledError("Google: Network request failed"), false)
+assert.strictEqual(feed.googleCalendarApiUrl(),
+  "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com")
 assert.strictEqual(feed.googleResponseError(401, ""),
   "Google rejected the calendar session. Sign in again")
 assert.strictEqual(feed.googleResponseError(403, JSON.stringify({

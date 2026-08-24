@@ -28,6 +28,8 @@ Item {
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   readonly property string todayIso: Calendar.isoDate(new Date())
   signal createAt(double startMs)
+  signal copyRequested(string text)
+  signal openRequested(string url)
 
   CalendarPalette {
     id: calendarPalette
@@ -178,6 +180,28 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(4)
 
+        Item {
+          id: calendarLoading
+          width: visible ? Style.space(24) : 0
+          height: Style.space(24)
+          visible: !!root.controller && root.controller.loading
+
+          ActionIcon {
+            anchors.centerIn: parent
+            name: "refresh"
+            iconSize: Style.font.iconSmall
+            color: root.accentColor
+
+            RotationAnimator on rotation {
+              from: 0
+              to: 360
+              duration: 900
+              loops: Animation.Infinite
+              running: calendarLoading.visible
+            }
+          }
+        }
+
         IconTextButton {
           text: "Week"
           foreground: root.viewMode === "week" ? root.textColor : root.dimColor
@@ -227,8 +251,14 @@ Item {
       border.width: 1
       border.color: root.urgentColor
 
+      readonly property bool apiDisabled: root.controller
+        && root.controller.lastErrorKind === "googleApiDisabled"
+
       Text {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: errorActions.visible ? errorActions.left : parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
         anchors.leftMargin: Style.space(10)
         anchors.rightMargin: Style.space(10)
         verticalAlignment: Text.AlignVCenter
@@ -238,6 +268,37 @@ Item {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
         textFormat: Text.PlainText
+      }
+
+      Row {
+        id: errorActions
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(4)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(4)
+        visible: calendarError.apiDisabled
+
+        IconTextButton {
+          objectName: "calendarErrorCopy"
+          text: "Copy"
+          tooltipText: "Copy this error"
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          onClicked: root.copyRequested(root.controller.lastError)
+        }
+
+        IconTextButton {
+          objectName: "calendarApiEnable"
+          text: "Enable API..."
+          tooltipText: "Open Google Cloud Calendar API setup..."
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          onClicked: root.openRequested(Calendar.googleCalendarApiUrl())
+        }
       }
     }
 

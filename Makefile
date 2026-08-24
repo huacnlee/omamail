@@ -46,7 +46,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/CalendarPalette.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml \
-	calendar/CalendarController.qml \
+	calendar/CalendarController.qml calendar/CalendarCache.qml \
 	components/CalendarView.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
@@ -65,6 +65,7 @@ test-js:
 	node tests/test_gmail_api.js
 	node tests/test_message.js
 	node tests/test_calendar.js
+	node tests/test_calendar_cache.js
 	node tests/test_calendar_feed.js
 	node tests/test_calendar_sources.js
 	node tests/test_calendar_palette.js

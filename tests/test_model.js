@@ -467,3 +467,13 @@ assert.strictEqual(model.setupActionLabel("no_credentials", "HEY", "cli"), "Sign
 // one on screen.
 assert.strictEqual(model.setupProvider("hey", "gmail"), "hey")
 assert.strictEqual(model.setupProvider("", "hey"), "hey")
+
+// Switching accounts keeps the mailbox the person was using when the target
+// provider offers the same one. Provider-specific mailboxes do not get
+// invented on a provider that has no such destination.
+assert.strictEqual(model.mailboxAfterAccountSwitch("unread", [
+  { key: "inbox" }, { key: "unread" }, { key: "all" }
+]), "unread")
+assert.strictEqual(model.mailboxAfterAccountSwitch("starred", [
+  { key: "inbox" }, { key: "unread" }
+]), "")

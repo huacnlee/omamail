@@ -49,7 +49,7 @@ Rectangle {
     recurring = false
     recurrenceFrequency = "WEEKLY"
     resultText.text = ""
-    var sources = controller ? controller.availableSources.sources : []
+    var sources = controller ? controller.contextSources.sources : []
     selectedSourceId = sources.length ? String(sources[0].id) : ""
     opened = true
     Qt.callLater(titleField.forceActiveFocus)

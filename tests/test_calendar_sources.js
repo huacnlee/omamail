@@ -54,6 +54,17 @@ assert.strictEqual(withGoogle.sources[1].id, "google:me@gmail.com")
 assert.strictEqual(withGoogle.sources[1].accountId, "me@gmail.com")
 assert.strictEqual(withGoogle.sources[1].name, "me@gmail.com",
   "Google calendar errors must identify the full account address")
+const forMe = sources.forAccount(sources.withGoogleAccounts(list, [
+  { id: "me@gmail.com", email: "me@gmail.com", provider: "gmail", signedIn: true },
+  { id: "other@gmail.com", email: "other@gmail.com", provider: "gmail", signedIn: true }
+]), "me@gmail.com")
+assert.strictEqual(JSON.stringify(forMe.sources.map(function (source) { return source.id })),
+  JSON.stringify(["nextcloud-personal", "google:me@gmail.com"]),
+  "an account calendar keeps shared CalDAV and only that account's Google source")
+const forDraft = sources.forAccount(withGoogle, "__no_google_account__")
+assert.strictEqual(JSON.stringify(forDraft.sources.map(function (source) { return source.id })),
+  JSON.stringify(["nextcloud-personal"]),
+  "a draft account must not inherit another account's Google calendar")
 
 let hiddenGoogle = sources.add(list, {
   id: "google:me@gmail.com", kind: "google", name: "Personal Google",

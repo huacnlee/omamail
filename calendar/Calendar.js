@@ -28,6 +28,14 @@ function googleResponseError(status, responseText) {
   return "Google Calendar returned HTTP " + status
 }
 
+function isGoogleCalendarApiDisabledError(message) {
+  return /Google Calendar API is not enabled/i.test(String(message || ""))
+}
+
+function googleCalendarApiUrl() {
+  return "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
+}
+
 function two(value) {
   var number = Math.floor(Number(value) || 0)
   return (number < 10 ? "0" : "") + number

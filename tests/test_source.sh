@@ -196,6 +196,10 @@ if 'bordered: false' not in today_block:
     raise SystemExit("test_source.sh: Go to today must be a text-only action")
 if 'iconName: "refresh"' in text:
     raise SystemExit("test_source.sh: calendar refresh belongs in the window header")
+if "id: calendarLoading" not in text or "root.controller.loading" not in text:
+    raise SystemExit("test_source.sh: calendar network refresh must show an inline loading animation")
+if "RotationAnimator on rotation" not in text:
+    raise SystemExit("test_source.sh: the calendar loading indicator must animate")
 error = text.index("id: calendarError")
 body = text.index("id: calendarBody")
 if error > body:
@@ -203,6 +207,29 @@ if error > body:
 error_block = text[error:body]
 if "height:" not in error_block or "lastError" not in error_block:
     raise SystemExit("test_source.sh: calendar errors must occupy their own visible row")
+if 'objectName: "calendarErrorCopy"' not in error_block or "copyRequested" not in error_block:
+    raise SystemExit("test_source.sh: a disabled Calendar API error must offer Copy")
+if 'objectName: "calendarApiEnable"' not in error_block or "openRequested" not in error_block:
+    raise SystemExit("test_source.sh: a disabled Calendar API error must link to Google Cloud")
+if 'lastErrorKind === "googleApiDisabled"' not in error_block:
+    raise SystemExit("test_source.sh: Calendar API actions must use the typed Google error")
+PY
+python3 - <<'PY'
+from pathlib import Path
+text = Path("App.qml").read_text()
+if "function switchAccount(index)" not in text:
+    raise SystemExit("test_source.sh: account entry points must share view-preserving switching")
+switch = text[text.index("function switchAccount(index)"):text.index("function editAccount", text.index("function switchAccount(index)"))]
+if "calendarVisible" not in switch or "mailboxAfterAccountSwitch" not in switch:
+    raise SystemExit("test_source.sh: account switching must retain Calendar or the current mailbox tab")
+if "onAccountChosen" not in text or "root.switchAccount(index)" not in text:
+    raise SystemExit("test_source.sh: the account picker must use view-preserving switching")
+service = Path("Service.qml").read_text()
+if "accountId: root.calendarAccountId" not in service:
+    raise SystemExit("test_source.sh: the visible Calendar must follow the displayed account")
+composer = Path("components/CalendarEventComposer.qml").read_text()
+if "controller.contextSources.sources" not in composer or "controller.sourceGroups" not in composer:
+    raise SystemExit("test_source.sh: event creation must offer only the current account calendars")
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"
@@ -242,6 +269,11 @@ grep -q 'function onSourcesLoadedChanged' components/CalendarView.qml \
   || fail "the calendar view must refresh when its saved sources become ready"
 grep -q 'property double pendingRangeStart' calendar/CalendarController.qml \
   || fail "a calendar range change during loading must be queued"
+grep -q 'CalendarCache {' calendar/CalendarController.qml \
+  || fail "CalendarController must restore events before refreshing the network"
+if grep -q '^    events = \[\]$' calendar/CalendarController.qml; then
+  fail "Calendar refresh must not blank cached events before the network answers"
+fi
 grep -q 'root.refresh(nextStart, nextEnd)' calendar/CalendarController.qml \
   || fail "the queued calendar range must run after the active refresh"
 python3 - <<'PY'

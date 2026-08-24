@@ -11,15 +11,19 @@ Item {
 
   required property var service
   required property string pluginDir
+  property string cacheName: "calendar"
+  property string accountId: ""
   property var sourceList: Sources.emptyList()
   property bool sourcesLoaded: false
   property var events: []
   property bool loading: false
   property string lastError: ""
+  property string lastErrorKind: ""
   property double rangeStart: 0
   property double rangeEnd: 0
   property double pendingRangeStart: 0
   property double pendingRangeEnd: 0
+  property string refreshAccountId: ""
   property var queue: []
   property var activeSource: null
   property string lookedUpPassword: ""
@@ -39,8 +43,15 @@ Item {
   property var eventRequest: null
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
+  readonly property var contextSources: Sources.forAccount(availableSources, accountId)
   readonly property var sourceGroups: Sources.groupByAccount(
-    availableSources, service ? service.accountSummaries : [])
+    contextSources, service ? service.accountSummaries : [])
+
+  onAccountIdChanged: {
+    if (!rangeStart || !rangeEnd || !eventCache.loaded) return
+    events = cachedEventsFor(accountId, rangeStart, rangeEnd)
+    refresh(rangeStart, rangeEnd)
+  }
 
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
@@ -63,20 +74,36 @@ Item {
     pendingRangeEnd = 0
     rangeStart = requestedStart
     rangeEnd = requestedEnd
-    events = []
+    if (!eventCache.loaded) return
     lastError = ""
-    var effectiveSources = Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : [])
+    lastErrorKind = ""
+    refreshAccountId = accountId
+    var effectiveSources = sourcesForAccount(refreshAccountId)
     queue = effectiveSources.sources.filter(function(source) {
       return source && source.enabled
     })
+    var sourceIds = queue.map(function(source) { return String(source.id || "") })
+    events = eventCache.get(refreshAccountId, rangeStart, rangeEnd, sourceIds)
     loading = true
     processNext()
   }
 
+  function sourcesForAccount(wantedAccountId) {
+    return Sources.forAccount(Sources.withGoogleAccounts(
+      sourceList, service ? service.accountSummaries : []), wantedAccountId)
+  }
+
+  function cachedEventsFor(wantedAccountId, startMs, endMs) {
+    var values = sourcesForAccount(wantedAccountId).sources.filter(function(source) {
+      return source && source.enabled
+    })
+    return eventCache.get(wantedAccountId, startMs, endMs,
+      values.map(function(source) { return String(source.id || "") }))
+  }
+
   function createEvent(sourceId, fields) {
     if (creatingEvent) return
-    var values = availableSources.sources
+    var values = contextSources.sources
     var source = null
     for (var i = 0; i < values.length; i++) {
       if (values[i] && values[i].id === String(sourceId)) { source = values[i]; break }
@@ -260,8 +287,12 @@ Item {
     passwordStore.running = true
   }
 
-  function appendEvents(values) {
-    var next = events.slice()
+  function replaceActiveSourceEvents(values) {
+    if (refreshAccountId !== accountId) return
+    var sourceId = activeSource ? String(activeSource.id || "") : ""
+    var next = events.filter(function(event) {
+      return String(event && event.sourceId || "") !== sourceId
+    })
     var additions = Array.isArray(values) ? values : []
     for (var i = 0; i < additions.length; i++) {
       additions[i].sourceName = activeSource
@@ -272,9 +303,11 @@ Item {
     events = next
   }
 
-  function failSource(reason) {
+  function failSource(reason, kind) {
+    if (refreshAccountId !== accountId) { processNext(); return }
     var name = activeSource ? activeSource.name || activeSource.id : "Calendar"
     lastError = name + ": " + String(reason || "Could not load events")
+    lastErrorKind = String(kind || "")
     processNext()
   }
 
@@ -282,11 +315,21 @@ Item {
     if (queue.length === 0) {
       activeSource = null
       loading = false
+      var enabled = sourcesForAccount(refreshAccountId).sources.filter(function(source) {
+        return source && source.enabled
+      }).map(function(source) { return String(source.id || "") })
+      var allowed = {}
+      for (var i = 0; i < enabled.length; i++) allowed[enabled[i]] = true
+      if (refreshAccountId === accountId) events = events.filter(function(event) {
+        return allowed[String(event && event.sourceId || "")] === true
+      })
+      if (rangeStart && rangeEnd && refreshAccountId === accountId)
+        eventCache.put(refreshAccountId, rangeStart, rangeEnd, events)
       var nextStart = pendingRangeStart
       var nextEnd = pendingRangeEnd
       pendingRangeStart = 0
       pendingRangeEnd = 0
-      if (nextStart && nextEnd && (nextStart !== rangeStart || nextEnd !== rangeEnd))
+      if (nextStart && nextEnd)
         Qt.callLater(function() { root.refresh(nextStart, nextEnd) })
       return
     }
@@ -338,13 +381,15 @@ Item {
         googleDeadline.stop()
         root.googleRequest = null
         if (request.status < 200 || request.status >= 300) {
-          root.failSource(Calendar.googleResponseError(request.status, request.responseText))
+          var reason = Calendar.googleResponseError(request.status, request.responseText)
+          root.failSource(reason, Calendar.isGoogleCalendarApiDisabledError(reason)
+            ? "googleApiDisabled" : "")
           return
         }
         var payload = null
         try { payload = JSON.parse(request.responseText) } catch (e) {}
         if (!payload) { root.failSource("Google Calendar returned an unreadable response"); return }
-        root.appendEvents(Calendar.eventsFromGoogle(payload, root.activeSource.id))
+        root.replaceActiveSourceEvents(Calendar.eventsFromGoogle(payload, root.activeSource.id))
         root.processNext()
       }
       googleDeadline.restart()
@@ -459,7 +504,7 @@ Item {
       var status = Number(lines[0])
       var body = lines.length > 1 ? Mail.decodeBase64Url(lines[1].replace(/\+/g, "-").replace(/\//g, "_")) : ""
       if (exitCode !== 0 || status !== 0) { root.failSource("The CalDAV request failed"); return }
-      root.appendEvents(Calendar.eventsFromCaldav(
+      root.replaceActiveSourceEvents(Calendar.eventsFromCaldav(
         body, root.activeSource.id, root.rangeStart, root.rangeEnd))
       root.processNext()
     }
@@ -505,6 +550,15 @@ Item {
     interval: 60000
     onTriggered: {
       if (root.googleRequest) root.googleRequest.abort()
+    }
+  }
+
+  CalendarCache {
+    id: eventCache
+    cacheName: root.cacheName
+    onRestored: {
+      if (root.rangeStart && root.rangeEnd && !root.loading)
+        root.refresh(root.rangeStart, root.rangeEnd)
     }
   }
 

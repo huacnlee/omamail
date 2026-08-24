@@ -101,6 +101,8 @@ Item {
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
+  readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
+    ? String(current.accountId) : "__no_google_account__"
 
   // The instance whose mailbox is on screen. Everything below forwards to it.
   property var current: null
@@ -698,6 +700,7 @@ Item {
     id: sharedCalendar
     service: root
     pluginDir: root.pluginDir
+    accountId: root.calendarAccountId
     onSourceListChanged: {
       barCalendar.sourceList = sourceList
       Qt.callLater(root.refreshCalendarPreview)
@@ -709,6 +712,7 @@ Item {
     id: barCalendar
     service: root
     pluginDir: root.pluginDir
+    cacheName: "calendar-bar"
     Component.onCompleted: Qt.callLater(root.refreshCalendarPreview)
   }
 
