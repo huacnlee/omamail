@@ -175,9 +175,23 @@ assert.strictEqual(imap.sequenceSet(null), "")
 
 // ---------------------------------------------------------------- commands
 
-assert.strictEqual(imap.searchCommand("UNSEEN"), "UID SEARCH UNSEEN")
-assert.strictEqual(imap.searchCommand(""), "UID SEARCH ALL",
-  "empty criteria is a syntax error; ALL is what it means")
+assert.strictEqual(imap.uidListCommand(), "UID FETCH 1:* (UID)",
+  "a UID snapshot is one bounded FETCH response line per message")
+deepEqual(imap.searchCommands("", [1, 2, 3]), [],
+  "an unfiltered listing already has its answer in the UID snapshot")
+deepEqual(imap.searchCommands("UNSEEN", [3, 40, 9000000]), [
+  "UID SEARCH UID 3:9000000 UNSEEN"
+], "a sparse range is bounded by the number of UIDs known to exist inside it")
+
+const manyUids = []
+for (let uid = 1; uid <= 9000; uid++) manyUids.push(uid)
+deepEqual(imap.searchCommands("FLAGGED", manyUids), [
+  "UID SEARCH UID 1:4096 FLAGGED",
+  "UID SEARCH UID 4097:8192 FLAGGED",
+  "UID SEARCH UID 8193:9000 FLAGGED"
+], "no SEARCH response can contain more than 4096 UIDs")
+assert.ok(imap.searchCommands("UNSEEN", manyUids)[2].indexOf("*") < 0,
+  "mail delivered after the snapshot cannot enter its last search window")
 
 // BODY.PEEK, never BODY: reading the list must not mark the mailbox seen.
 const summaryFetch = imap.summaryFetchCommand([7, 9])
@@ -249,10 +263,16 @@ deepEqual(imap.parseFetch(spoofed).map((m) => m.uid), [3],
 // ------------------------------------------------------------------ SEARCH
 
 deepEqual(imap.parseSearch("* SEARCH 1 4 9\r\nA1 OK SEARCH completed\r\n"), [1, 4, 9])
+deepEqual(imap.parseSearch("* SEARCH 9 4\r\n* SEARCH 4 1\r\nA1 OK\r\n"), [1, 4, 9],
+  "several windows are one sorted answer without duplicates")
 deepEqual(imap.parseSearch("* SEARCH\r\nA1 OK\r\n"), [], "nothing matched")
 deepEqual(imap.parseSearch("A1 OK SEARCH completed\r\n"), [],
   "a server may answer with no SEARCH line at all")
 deepEqual(imap.parseSearch(""), [])
+
+deepEqual(imap.parseUidList(
+  "* 3 FETCH (UID 9000000)\r\n* 1 FETCH (UID 3)\r\n* 2 FETCH (UID 40)\r\n"),
+  [3, 40, 9000000], "the UID snapshot does not depend on response order")
 
 // ------------------------------------------------------------------- FETCH
 
