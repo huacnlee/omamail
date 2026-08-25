@@ -690,6 +690,34 @@ fi
 # The compose form, account boundary and raw-message builder must keep the
 # selected send-as address all the way to the provider. A missing link silently
 # falls back to a default address and makes the selector lie.
+# A mailto: link is a draft, not a page. The desktop handler summons the
+# window with the URL; open() turns that into compose fields. Toggle would
+# close a mailbox that is already on screen.
+grep -q 'import "message/Mailto.js" as Mailto' App.qml \
+  || fail "App.qml must parse mailto payloads through Mailto.js"
+grep -q 'Mailto.draftFromPayload(payload)' App.qml \
+  || fail "open() must seed compose from a mailto payload"
+grep -q 'function beginDraft' components/ComposeView.qml \
+  || fail "ComposeView must fill a new draft from a mailto"
+grep -q 'omarchy-shell shell summon' scripts/mailto.sh \
+  || fail "the mailto handler must summon Omamail, not toggle it"
+grep -q 'install-mailto.sh' install.sh \
+  || fail "install.sh must register the mailto desktop handler"
+grep -q 'registerMailtoHandler' Service.qml \
+  || fail "the service must register the mailto handler when the plugin loads"
+grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \
+  || fail "HEY must pass a mailto Bcc through to hey compose"
+grep -q 'signal mailtoRequested(string url)' components/MessageReader.qml \
+  || fail "a mailto in a message body must compose here, not leave through xdg-open"
+if awk '
+  /onLinkActivated:/ { in_link = 1 }
+  in_link && /Qt.openUrlExternally\(link\)/ { found = 1 }
+  in_link && /^[[:space:]]*\}/ { exit found ? 0 : 1 }
+  END { exit found ? 0 : 1 }
+' components/MessageReader.qml; then
+  fail "MessageReader must not send mailto links out through Qt.openUrlExternally"
+fi
+
 grep -q 'from: root.fromEmail' components/ComposeView.qml \
   || fail "ComposeView must submit the selected From address"
 grep -q 'from: from' account/MailAccount.qml \
