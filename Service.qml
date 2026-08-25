@@ -6,6 +6,7 @@ import "calendar"
 
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
+import "compose/Senders.js" as Senders
 import "providers/Registry.js" as Provider
 import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
@@ -518,6 +519,25 @@ Item {
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
   readonly property var sendAsAliases: current ? current.availableSendAsAliases : []
+  // Every address a new message may be sent as, across signed-in mailboxes.
+  // Compose reads this and hides the ones that do not belong on a reply.
+  readonly property var sendIdentities: {
+    var mailboxes = []
+    var accounts = accountList ? accountList.accounts : []
+    var i
+    for (i = 0; i < accounts.length; i++) {
+      var host = accountHosts.objectAt(i)
+      mailboxes.push({
+        id: accounts[i].id,
+        email: host && host.accountEmail ? host.accountEmail : accounts[i].email,
+        label: Accounts.label(accounts[i]),
+        ready: !!(host && host.ready),
+        canSend: !!(host && host.canSend),
+        aliases: host ? host.availableSendAsAliases : []
+      })
+    }
+    return Senders.identities(mailboxes)
+  }
   readonly property string accountAddress: {
     var accounts = accountList ? accountList.accounts : []
     var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()

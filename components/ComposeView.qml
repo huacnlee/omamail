@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Message.js" as Mail
 import "../compose/Recipients.js" as Recipients
+import "../compose/Senders.js" as Senders
 
 // Composing takes over the whole content area of the one window rather than
 // opening a second one: Omarchy's panel mechanism would give an extra window
@@ -60,6 +61,14 @@ Item {
     return root.service.sendAsAliases
   }
 
+  readonly property var fromIdentities: Senders.visible(
+    root.service && Array.isArray(root.service.sendIdentities)
+      ? root.service.sendIdentities : [],
+    root.service ? String(root.service.activeAccountId || "") : "",
+    root.mode)
+
+  readonly property bool canChooseFrom: fromIdentities.length > 1
+
   readonly property string title: {
     if (mode === "reply") return "Reply"
     if (mode === "replyAll") return "Reply all"
@@ -97,10 +106,16 @@ Item {
     fromEmail = choice ? String(choice.email || "") : ""
   }
 
-  function chooseFrom(email) {
-    fromEmail = String(email || "")
+  function chooseFrom(identity) {
+    var row = identity && typeof identity === "object" ? identity : ({ email: identity })
+    fromEmail = String(row.email || "")
     fromWasChosen = true
     fromMenu.close()
+    var accountId = String(row.accountId || "")
+    if (accountId === "" || !root.service) return
+    if (String(root.service.activeAccountId || "") === accountId) return
+    if (root.deliveryLocked) return
+    if (typeof root.service.switchTo === "function") root.service.switchTo(accountId)
   }
 
   function placeFromMenu() {
@@ -379,7 +394,8 @@ Item {
       // padding, so the two read as one control.
       Button {
         id: fromButton
-        readonly property real trailing: root.fromAliases.length > 1
+        objectName: "compose-from-button"
+        readonly property real trailing: root.canChooseFrom
           ? Style.font.iconSmall + Style.spacing.controlGap : 0
 
         anchors.left: fromLabel.right
@@ -397,7 +413,7 @@ Item {
         verticalPadding: Style.spacing.inputPaddingY
         leftAlign: true
         selected: fromMenu.opened
-        enabled: root.fromAliases.length > 1 && !root.deliveryLocked
+        enabled: root.canChooseFrom && !root.deliveryLocked
         onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
 
         // The kit's own chevron is a font glyph, which at this size renders
@@ -407,7 +423,7 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: fromButton.horizontalPadding
           anchors.verticalCenter: parent.verticalCenter
-          visible: root.fromAliases.length > 1
+          visible: root.canChooseFrom
           name: "chevronDown"
           iconSize: Style.font.iconSmall
           color: root.dimColor
@@ -781,7 +797,7 @@ Item {
       id: fromRows
       implicitHeight: contentHeight
       clip: true
-      model: root.fromAliases
+      model: root.fromIdentities
 
       delegate: Rectangle {
         id: fromRow
@@ -819,7 +835,7 @@ Item {
             width: parent.width
             visible: text !== ""
             textFormat: Text.PlainText
-            text: String(fromRow.modelData.displayName || "")
+            text: Senders.subtitle(fromRow.modelData)
             color: root.dimColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption
@@ -828,7 +844,7 @@ Item {
         }
 
         HoverHandler { id: fromHover }
-        TapHandler { onTapped: root.chooseFrom(fromRow.modelData.email) }
+        TapHandler { onTapped: root.chooseFrom(fromRow.modelData) }
       }
     }
   }
