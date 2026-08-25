@@ -58,8 +58,11 @@ const html = load("message/Html.js")
   assert.strictEqual(html.sanitize("<P STYLE=\"DISPLAY:NONE\">secret</P><p>real</p>").html, "<p>real</p>")
   assert.strictEqual(html.sanitize("<A HREF=\"JAVASCRIPT:x()\">t</A>").html, "<a>t</a>")
 
-  // A "<" that starts no tag is a "<" the sender typed.
-  assert.strictEqual(html.stripColors("a < b and 3<4"), "a < b and 3<4")
+  // A "<" that starts no tag is a "<" the sender typed, and it goes back out
+  // escaped rather than raw. It draws the same either way, and leaving it raw
+  // is how a "<" in one place and the letters that finish a tag in another end
+  // up as a tag once something between them is unwrapped.
+  assert.strictEqual(html.stripColors("a < b and 3<4"), "a &lt; b and 3&lt;4")
 
   // A raw-text element ends at its own closing tag and at nothing else, so a
   // stylesheet cannot hide markup from the walk that follows it.
@@ -507,6 +510,88 @@ for (const options of [{}, { keepColors: true }]) {
     options).html.indexOf("url(") < 0)
 }
 
+// Spelled with a character reference it is the same fetch, and the reference
+// carries a ";" — which is also what separates one declaration from the next.
+// Split on that ";", the declaration became two pieces that matched no rule
+// here and were written back out as the url( they started as, for Qt to decode.
+// So the references come out before anything is split.
+for (const hidden of ["&#117;rl", "&#x75;rl", "&amp;#117;rl", "u&#114;l"]) {
+  for (const options of [{}, { keepColors: true }]) {
+    const out = html.sanitize("<div style=\"background-image:" + hidden
+      + "(https://x.example.com/a.png)\">t</div>", options).html
+    assert.ok(out.indexOf("x.example.com") < 0,
+      hidden + " reached the renderer " + JSON.stringify(options) + ": " + out)
+  }
+}
+// The same reference used to smuggle a whole second declaration past the split.
+assert.strictEqual(
+  html.sanitize("<div style=\"padding:2px&#59;background-image:url(https://x.example.com/a.png)\">t</div>",
+    { keepColors: true }).html,
+  "<div style=\"padding:2px\">t</div>")
+// ...and to hide the thing that says it is hidden.
+assert.strictEqual(html.sanitize("<p style=\"display:&#110;one\">secret</p><p>real</p>").html,
+  "<p>real</p>")
+
+// A `src` is an image's attribute and is checked as one. Anywhere else it is
+// the same address with none of that checking behind it.
+for (const source of ["<input type=\"image\" src=\"https://x.example.com/a.png\">",
+    "<image src=\"https://x.example.com/a.png\">"]) {
+  assert.ok(html.sanitize(source, { allowRemoteImages: true }).html.indexOf("x.example.com") < 0,
+    "a src survived on " + source)
+}
+
+// A data: URL is the message's own bytes only when it is a picture. Anything
+// else is a document with references of its own, and whether Qt follows them
+// depends on which image plugins happen to be installed.
+assert.ok(html.sanitize("<img src=\"data:image/png;base64,AAA\">").html.indexOf("data:image/png") > 0)
+assert.strictEqual(html.sanitize("<img src=\"data:text/html,<b>x\">").html, "")
+assert.strictEqual(html.sanitize("<img src=\"data:image/svg+xml;base64,AAA\">").html,
+  "<img src=\"data:image/svg+xml;base64,AAA\">")
+
+// The host is the one question where reading an address twice is not the safe
+// direction: a second decoding can turn up a "@" and hand the authority to a
+// later label. So it has to be public to both readings.
+assert.ok(html.sanitize("<img src=\"https://127.0.0.1&amp;#64;good.example.com/x.png\">",
+  { allowRemoteImages: true }).html.indexOf("127.0.0.1") < 0)
+assert.strictEqual(
+  reading("<p><a href=\"https://127.0.0.1&amp;#64;good.example.com/x\">t</a></p>").html, "<p>t</p>")
+// An "&" in an ordinary query string decodes to itself and changes no host.
+assert.strictEqual(
+  reading("<p><a href=\"https://good.example.com/a?b=1&amp;c=2\">t</a></p>").html,
+  "<p><a href=\"https://good.example.com/a?b=1&amp;c=2\">t</a></p>")
+
+// ------------------------------------------------- markup that was text
+//
+// The tokenizer refuses a "<" that starts no tag and keeps it as text, and the
+// serialiser used to write it back exactly as it found it. That held only while
+// nothing moved the text: `collapse` welds together the text on either side of
+// a span it unwraps, and reading mode rebuilds a paragraph out of pieces and
+// drops the characters that draw as nothing between them. Either way a "<" can
+// end up beside the letters that finish a tag, and Qt then parses an element
+// nobody sent — past the image policy, past the link rule, past all of it,
+// because by then it was not an element, it was a string.
+const smuggled = [
+  // A zero-width space is what stopped it being a tag on the way in.
+  "<p>Hello <\u200bimg src=\"http://127.0.0.1:9/x.png\" width=\"1\" height=\"1\"> world</p>",
+  // No zero-width needed when the halves are in two elements.
+  "<p><span><</span><span>img src=\"https://x.example.com/b.png\"></span></p>",
+  "<pre><b><</b>img src=\"https://x.example.com/c.png\"></pre>",
+  "<p><\u200ba href=\"file:///etc/passwd\">click me</p>",
+  "<p><\u200bstyle>body{background-image:url(https://x.example.com/x.png)}</p>"
+]
+for (const source of smuggled) {
+  const ready = html.sanitize(source, { withReader: true })
+  for (const [view, out] of [["formatted", ready.html], ["reading", ready.reader.html]]) {
+    assert.ok(!/<(img|a|style)\b/i.test(out.replace(/<\/?(p|span|pre|b|strong|em|br)\b[^>]*>/gi, "")),
+      view + " parsed a tag out of text: " + out)
+  }
+  assert.strictEqual(ready.reader.images + ready.reader.blockedImages, 0,
+    "an image nobody counted reached the reading: " + ready.reader.html)
+}
+// What the sender actually typed still reads as itself, entities and all.
+assert.strictEqual(reading("<p>a &lt; b, 3<4, &pound;4.00 and two &amp; three</p>").html,
+  "<p>a &lt; b, 3&lt;4, &pound;4.00 and two &amp; three</p>")
+
 // --------------------------------------------------------- table nesting
 //
 // Qt lays tables out by resolving column widths against each other, and
@@ -817,7 +902,37 @@ function reading(source, options) {
     assert.ok(pair === "a/href" || pair === "img/src",
       "reading mode emitted " + pair + ", which is a sender attribute it cannot have")
   }
+  // The attribute list is only half of it. An element the reader never built
+  // can still arrive as text: this mode joins text the sender kept apart, so a
+  // "<" that was not a tag when it was parsed can be one by the time it is
+  // written. Every "<" in the output has to belong to an element in the tree.
+  const tags = ready.reader.html.match(/</g)
+  assert.strictEqual(tags === null ? 0 : tags.length, elementsOf(ready.reader.document) * 2
+    - voidsOf(ready.reader.document),
+    "reading mode wrote a \"<\" that is not one of its own elements: " + ready.reader.html)
   return ready.reader
+}
+
+function elementsOf(node) {
+  var total = 0
+  var children = node.children || []
+  for (var i = 0; i < children.length; i++) {
+    if (children[i].type === "text") continue
+    total += 1 + elementsOf(children[i])
+  }
+  return total
+}
+
+// An <img> or a <br> writes one "<" rather than two.
+function voidsOf(node) {
+  var total = 0
+  var children = node.children || []
+  for (var i = 0; i < children.length; i++) {
+    if (children[i].type === "text") continue
+    if (children[i].name === "img" || children[i].name === "br" || children[i].name === "hr") total++
+    total += voidsOf(children[i])
+  }
+  return total
 }
 
 // A newsletter shaped like the ones that made this mode necessary: a card seven

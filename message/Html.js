@@ -381,12 +381,33 @@ function serializeAttributes(attrs) {
   return out
 }
 
+// A text node goes back out with its `<` and `>` escaped. What the tokenizer
+// read as text is not always what a second reader would read: this file joins
+// text that the sender had kept apart. `collapse` unwraps a `<span>` and welds
+// the text on either side of it together; reading mode rebuilds a paragraph out
+// of pieces and drops the undrawable characters between them. So a `<` that was
+// refused as a tag — because a zero-width space followed it, or because the
+// letters that would have made it a tag were in the next element — can end up
+// beside those letters, and Qt then parses a tag nobody sent. One sender did
+// exactly this to get an `<img>` past the image policy: the policy never saw it,
+// because by then it was not an element, it was a string.
+//
+// The two characters are escaped at the one place every document leaves by, and
+// it costs a reader nothing: `&lt;` draws as `<`. `&` is deliberately left
+// alone — the text still carries the sender's own entity references, and
+// escaping it would print "&pound;4.00" at somebody expecting a price.
+function escapeMarkup(text) {
+  var value = String(text)
+  if (value.indexOf("<") < 0 && value.indexOf(">") < 0) return value
+  return value.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
 // Written into one array and joined once. Returning a string per level builds a
 // fresh copy of everything below it at every level, which on a document a few
 // hundred elements deep is most of the time this file spends.
 function serializeInto(node, out, fit) {
   if (node.type === "text") {
-    out.push(node.text)
+    out.push(escapeMarkup(node.text))
     return
   }
   if (node.type !== "root") {
@@ -506,12 +527,33 @@ function decodeReferences(text) {
 }
 
 // Decoded twice, because "&amp;#104;" is one reference to Qt and two to a
-// reader looking for a scheme. Over-decoding can only make a source look more
-// remote than it is, and the answer to "remote" is to block it.
+// reader looking for a scheme. For the scheme, over-decoding can only make a
+// source look more dangerous than it is, and the answer to that is to block it.
 function normalizedUrl(value) {
   var text = String(value === undefined || value === null ? "" : value)
   text = decodeReferences(decodeReferences(text))
   return text.replace(/[\t\n\r]/g, "").replace(/^[\s\u0000-\u001f]+|[\s\u0000-\u001f]+$/g, "")
+}
+
+// The host is the one question where that is not true, because a decoding can
+// introduce a "@" and hand the authority to a later label: "127.0.0.1&#64;
+// good.example.com" is a public host to a reader who decodes it and loopback to
+// one who does not. So the host is asked of both readings and has to be public
+// to both — one decode is what Qt does, two is what a sender may be counting on.
+function hostsOf(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+  var once = decodeReferences(text)
+  var twice = decodeReferences(once)
+  return once === twice ? [hostOf(normalizedUrl(text))]
+    : [hostOf(normalizedUrl(text)), hostOf(once.replace(/[\t\n\r]/g, ""))]
+}
+
+function isPublicUrl(value) {
+  var hosts = hostsOf(value)
+  for (var i = 0; i < hosts.length; i++) {
+    if (!isPublicHost(hosts[i])) return false
+  }
+  return true
 }
 
 // The host of an http(s) or protocol-relative URL, lower-cased, with the
@@ -611,8 +653,12 @@ function imageSourceKind(value) {
   var url = normalizedUrl(value)
   if (url === "") return "none"
   if (/^cid:/i.test(url)) return "inline"
-  if (/^data:/i.test(url)) return "inline"
-  if (/^(https?:)?\/\//i.test(url)) return isPublicHost(hostOf(url)) ? "remote" : "unsafe"
+  // Only a picture. A data: URL of any other type is not the message's own
+  // bytes drawn in place — an SVG is a document with its own references, and
+  // whether Qt follows them depends on which image plugins are installed.
+  if (/^data:image\//i.test(url)) return "inline"
+  if (/^data:/i.test(url)) return "unsafe"
+  if (/^(https?:)?\/\//i.test(url)) return isPublicUrl(value) ? "remote" : "unsafe"
   return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "unsafe" : "local"
 }
 
@@ -635,9 +681,17 @@ function safeHref(value) {
 //
 // Split on ";", but not on a ";" inside a quoted string or inside url(...),
 // where it is part of the value rather than the end of one.
-
+//
+// The references come out first, and everything downstream therefore reads CSS
+// rather than a puzzle. CSS has escapes of its own and no use for an HTML
+// entity, so one in a style attribute is a sender hiding from a filter: with
+// them left in, "background-image:&#117;rl(...)" split at the ";" inside
+// "&#117;" into two declarations that were nonsense to every test here, and
+// reassembled on the way out into the "url(" Qt decodes and fetches. Twice,
+// for the same reason an address is read twice.
 function splitDeclarations(style) {
   var text = String(style === undefined || style === null ? "" : style)
+  if (text.indexOf("&") >= 0) text = decodeReferences(decodeReferences(text))
   var out = []
   var current = ""
   var quote = ""
@@ -763,7 +817,7 @@ function stripColorsFrom(node) {
 // policy lives.
 function stripStyleUrlsFrom(node) {
   rewriteStyle(node, function(declaration) {
-    return /url\s*\(/i.test(decodeReferences(declaration.value)) ? null : declaration
+    return /url\s*\(/i.test(declaration.value) ? null : declaration
   })
 }
 
@@ -934,6 +988,11 @@ function cleanAttributes(node, keepColors, declarations) {
     // is an appearance setting, and no appearance setting may hand the
     // renderer an address to fetch.
     if (RESOURCE_ATTRIBUTES[name] === true) drop = true
+    // A `src` belongs to an image and is checked as one. Anywhere else — an
+    // <input type="image">, an SVG <image> — it is the same address with none
+    // of that checking behind it, and which of those Qt honours today is not
+    // worth being wrong about tomorrow.
+    else if (name === "src" && node.name !== "img") drop = true
     else if (!keepColors && COLOUR_ATTRIBUTES[name] === true) drop = true
     // Event handlers, which Qt ignores but which have no business surviving a
     // trip through a mail client.
@@ -956,8 +1015,9 @@ function cleanAttributes(node, keepColors, declarations) {
     var declaration = declarations[j]
     if (!keepColors && COLOUR_DECLARATIONS[declaration.name] === true) continue
     if (uncentre && declaration.name === "text-align" && CENTRED.test(declaration.value)) continue
-    if (/url\s*\(/i.test(declaration.value)
-      && /url\s*\(/i.test(decodeReferences(declaration.value))) continue
+    // No test for a reference here: `splitDeclarations` has already taken them
+    // out, so this reads the same value Qt would.
+    if (/url\s*\(/i.test(declaration.value)) continue
     survivors.push(declaration)
   }
   setStyle(node, survivors)
@@ -1795,7 +1855,7 @@ function readerHref(node) {
   var url = normalizedUrl(raw)
   if (!safeHref(url)) return ""
   if (/^\s*mailto:/i.test(url)) return raw
-  return isPublicHost(hostOf(url)) ? raw : ""
+  return isPublicUrl(raw) ? raw : ""
 }
 
 // The picture's own words, which is what a blocked image leaves behind and what

@@ -78,11 +78,19 @@ awk '
 ' message/Html.js \
   || fail "a resource attribute must be dropped before keepColors is consulted"
 
-# The message reader draws what it is given. Parsing a body, deciding what may
-# be fetched and rebuilding a message for reading are all one file's, and a view
-# that called the sanitiser would be a second place those decisions were made.
-if grep -nE 'Html\.(sanitize|parse|readerTree)\(' components/MessageReader.qml; then
-  fail "the reader view must not parse a body; the account renders it once"
+# A text node goes back out escaped. What the tokenizer read as text is not what
+# a second reader reads once something between two pieces of it is unwrapped, and
+# a "<" that was not a tag on the way in can be one on the way out — past every
+# check here, because by then it is a string rather than an element.
+grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
+  || fail "message/Html.js must escape a text node on the way out, not write it back raw"
+
+# Deciding what may be fetched and rebuilding a message for reading are one
+# file's work, and a view that called the sanitiser would be a second place
+# those decisions were made. What it may still do is fit a document it has
+# already been given to the width it has.
+if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
+  fail "the reader view must not sanitise a body; the account renders it once"
 fi
 grep -q 'withReader: true' account/MailAccount.qml \
   || fail "the reading document must come off the same parse as the formatted one"

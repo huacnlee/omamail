@@ -344,6 +344,15 @@ key. What matters while working:
   `bgcolor`, an `align`, a `style` or a `background` reaches the output *at all*.
   Do not add a fourth thing that is carried over, and do not "keep just this one
   attribute": the argument is structural, and one exception ends it.
+- **A text node is not safe just because the tokenizer called it text.** It goes
+  back out with its `<` and `>` escaped, because this file joins text the sender
+  had kept apart — `collapse` unwraps a span and welds its neighbours together,
+  reading mode rebuilds a paragraph out of pieces and drops the characters that
+  draw as nothing. A `<` that started no tag on the way in can start one on the
+  way out, and the element it makes was never seen by the image policy, the link
+  rule or anything else here: by then it is a string. For the same reason a style
+  attribute has its character references decoded before it is split into
+  declarations — `&#117;rl(` carries the `;` that separates one from the next.
 - **An HTML `background` is an address, not a colour.** It sat in the colour list
   because senders write it beside `bgcolor`, and `keepColors` therefore let it
   through — a real message reached its sender's host with remote images off.
