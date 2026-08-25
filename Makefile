@@ -72,6 +72,7 @@ test-js:
 	node tests/test_calendar_palette.js
 	node tests/test_bar_preview.js
 	node tests/test_unsubscribe.js
+	node tests/test_mailto.js
 	node tests/test_html.js
 	node tests/test_cache.js
 	node tests/test_model.js
@@ -89,6 +90,7 @@ test-shell:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
+	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_attachment_open.sh

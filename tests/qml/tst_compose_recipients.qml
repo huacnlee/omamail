@@ -114,6 +114,24 @@ Item {
         "Tab from the subject must enter the message body")
     }
 
+    function test_begin_draft_fills_the_mailto_fields() {
+      compose.beginDraft({
+        to: "jane@example.com",
+        cc: "copy@example.com",
+        bcc: "hidden@example.com",
+        subject: "Lunch",
+        body: "Tuesday?"
+      })
+      compare(compose.opened, true)
+      compare(named(compose, "compose-to-field").text, "jane@example.com")
+      compare(named(compose, "compose-cc-field").text, "copy@example.com")
+      compare(compose.ccVisible, true)
+      compare(named(compose, "compose-bcc-field").text, "hidden@example.com")
+      compare(compose.bccVisible, true)
+      compare(named(compose, "compose-subject-field").text, "Lunch")
+      compare(named(compose, "compose-body-editor").text, "Tuesday?")
+    }
+
     function test_queued_send_hides_compose_and_undo_restores_the_draft() {
       compose.begin("new", null, "", [])
       var toField = named(compose, "compose-to-field")

@@ -73,5 +73,8 @@ printf '%s\n' 'Registering Omamail in the bar…'
 omarchy-shell shell rescanPlugins
 omarchy plugin enable "$plugin_id"
 
+printf '%s\n' 'Registering Omamail as the mailto handler…'
+"$project_dir/scripts/install-mailto.sh" "$install_path" --claim-default
+
 printf 'Omamail installed for development at %s\n' "$install_path"
 printf '%s\n' 'Click the envelope in the bar. QML edits are read through the symlink.'

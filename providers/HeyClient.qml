@@ -561,6 +561,7 @@ Item {
       threadId: threadId,
       to: Mail.headerFrom(parsed.headers, "To"),
       cc: Mail.headerFrom(parsed.headers, "Cc"),
+      bcc: Mail.headerFrom(parsed.headers, "Bcc"),
       subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject"))
     })
     if (command.length === 0) {

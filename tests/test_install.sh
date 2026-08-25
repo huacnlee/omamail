@@ -66,4 +66,23 @@ actual_calls=$(cat "$test_root/keyring-calls")
 [ "$actual_calls" = "$expected_calls" ] \
   || fail "keyring-store.sh did not replace the unversioned grant before storing the versioned one"
 
+[ -x scripts/install-mailto.sh ] || fail "scripts/install-mailto.sh must be executable"
+mailto_home=$(mktemp -d)
+XDG_DATA_HOME="$mailto_home/share" XDG_CONFIG_HOME="$mailto_home/config" \
+  sh scripts/install-mailto.sh "$(pwd)"
+desktop="$mailto_home/share/applications/omamail.desktop"
+[ -f "$desktop" ] || fail "install-mailto.sh did not write omamail.desktop"
+grep -q '^MimeType=x-scheme-handler/mailto;$' "$desktop" \
+  || fail "omamail.desktop must claim mailto"
+grep -q "^Exec=$(pwd)/scripts/mailto.sh %u$" "$desktop" \
+  || fail "omamail.desktop Exec must be the plugin mailto handler"
+grep -q "^Icon=$(pwd)/assets/omamail.svg$" "$desktop" \
+  || fail "omamail.desktop must use the Omamail mark"
+# A second run with the file already there must not require --claim-default
+# just to keep the desktop file current.
+XDG_DATA_HOME="$mailto_home/share" XDG_CONFIG_HOME="$mailto_home/config" \
+  sh scripts/install-mailto.sh "$(pwd)"
+[ -f "$desktop" ] || fail "a second install-mailto.sh run removed omamail.desktop"
+rm -rf "$mailto_home"
+
 printf 'test_install.sh ok\n'

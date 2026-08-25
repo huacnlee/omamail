@@ -915,6 +915,7 @@ function buildRawMessage(fields) {
   if (values.from) lines.push(fromHeader(values.from, values.fromName))
   lines.push(foldHeader("To", values.to || ""))
   if (values.cc) lines.push(foldHeader("Cc", values.cc))
+  if (values.bcc) lines.push(foldHeader("Bcc", values.bcc))
   lines.push(foldHeader("Subject", values.subject || ""))
   var inReplyTo = referenceValue(values.inReplyTo)
   if (inReplyTo) {

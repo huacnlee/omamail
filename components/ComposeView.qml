@@ -39,6 +39,7 @@ Item {
   property string threadId: ""
   property string inReplyTo: ""
   property bool ccVisible: false
+  property bool bccVisible: false
   property string fromEmail: ""
   property var replyRecipients: []
   property bool fromWasChosen: false
@@ -71,12 +72,14 @@ Item {
     fromMenu.close()
     toField.text = ""
     ccField.text = ""
+    bccField.text = ""
     subjectField.text = ""
     bodyEdit.text = ""
     mode = "new"
     threadId = ""
     inReplyTo = ""
     ccVisible = false
+    bccVisible = false
     fromEmail = ""
     replyRecipients = []
     fromWasChosen = false
@@ -203,14 +206,32 @@ Item {
     // cannot disagree about where the typing goes.
   }
 
+  // A mailto: link is a new message with the fields already named. Reply and
+  // forward stay on `begin`; they fill from a message, not from a URL.
+  function beginDraft(draft) {
+    begin("new", null, "", [])
+    var values = draft || ({})
+    toField.text = String(values.to || "")
+    ccField.text = String(values.cc || "")
+    ccVisible = ccField.text !== ""
+    bccField.text = String(values.bcc || "")
+    bccVisible = bccField.text !== ""
+    subjectField.text = String(values.subject || "")
+    bodyEdit.text = String(values.body || "")
+  }
+
   // Where the keyboard goes when composing becomes the context. A reply starts
   // in the body above the quote; a new message starts at the address.
   function takeFocus() {
     if (mode === "reply" || mode === "replyAll") {
       bodyEdit.forceActiveFocus()
       bodyEdit.cursorPosition = 0
-    } else {
+    } else if (toField.text === "") {
       toField.forceActiveFocus()
+    } else if (subjectField.text === "") {
+      subjectField.forceActiveFocus()
+    } else {
+      bodyEdit.forceActiveFocus()
     }
   }
 
@@ -251,6 +272,7 @@ Item {
       from: root.fromEmail,
       to: toField.text,
       cc: ccField.text,
+      bcc: bccField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
       attachments: root.mode === "forward" ? root.forwardedAttachments : [],
@@ -515,6 +537,7 @@ Item {
 
       TextField {
         id: ccField
+        objectName: "compose-cc-field"
         anchors.left: ccLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -557,6 +580,47 @@ Item {
         popupBorderColor: root.popupBorderColor
         panelFontFamily: root.panelFontFamily
         onChosen: function(contact) { root.acceptCc(contact) }
+      }
+
+      PanelSeparator {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        foreground: root.textColor
+      }
+    }
+
+    Item {
+      visible: root.bccVisible
+      width: parent.width
+      implicitHeight: bccField.implicitHeight + Style.space(14)
+
+      Text {
+        id: bccLabel
+        anchors.left: parent.left
+        anchors.leftMargin: root.formInset
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.formLabelWidth
+        horizontalAlignment: Text.AlignRight
+        text: "Bcc"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      TextField {
+        id: bccField
+        objectName: "compose-bcc-field"
+        anchors.left: bccLabel.right
+        anchors.leftMargin: root.formLabelGap
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(18)
+        anchors.verticalCenter: parent.verticalCenter
+        foreground: root.textColor
+        accent: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        enabled: !root.deliveryLocked
+        onAccepted: subjectField.forceActiveFocus()
       }
 
       PanelSeparator {

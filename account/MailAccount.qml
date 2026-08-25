@@ -1153,6 +1153,7 @@ Item {
       fromName: alias ? String(alias.displayName || "") : "",
       to: to,
       cc: String(values.cc || "").trim(),
+      bcc: String(values.bcc || "").trim(),
       subject: String(values.subject || ""),
       body: body,
       attachments: Array.isArray(values.attachments) ? values.attachments : [],

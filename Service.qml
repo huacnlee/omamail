@@ -65,6 +65,12 @@ Item {
     contactReader.running = true
   }
 
+  function registerMailtoHandler() {
+    if (pluginDir === "" || mailtoInstaller.running) return
+    mailtoInstaller.command = [pluginDir + "/scripts/install-mailto.sh", pluginDir]
+    mailtoInstaller.running = true
+  }
+
   function applySettings(values) {
     var next = ({})
     for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
@@ -857,5 +863,14 @@ Item {
     }
   }
 
-  Component.onCompleted: Qt.callLater(root.refreshRecipientContacts)
+  Process {
+    id: mailtoInstaller
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
+  Component.onCompleted: {
+    Qt.callLater(root.refreshRecipientContacts)
+    Qt.callLater(root.registerMailtoHandler)
+  }
 }
