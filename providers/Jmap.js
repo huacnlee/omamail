@@ -7,20 +7,27 @@
 // decisions the registry asks for.
 
 var ID = "jmap"
-var NAME = "JMAP"
-var SUMMARY = "Fastmail over JMAP, using a mail-scoped API token."
+var NAME = "Fastmail"
+var SUMMARY = "Fastmail's own API, using a mail-scoped API token."
 
 // The existing password setup seam means "a secret typed into a form and kept
 // in the keyring". The JMAP page names that secret accurately as an API token.
 var AUTH = "password"
 
-// These are ceilings. Mutation support exists behind the provider boundary,
-// but stays undeclared until it has been demonstrated with a write-scoped test
-// account. The current live account is deliberately read-only, and a button is
-// a promise this repository does not make on fixture coverage alone.
+// The public id remains the protocol name so account and keyring ids stay
+// stable. The person adding one chooses Fastmail, so the chooser gets the
+// service's own mark and name rather than the transport underneath it.
+var MARK = "fastmail.png"
+
+// This first contribution is deliberately a reader. Labels are narrowed from
+// the session's maxMailboxesPerEmail value; every mutation stays undeclared
+// and unimplemented until its own follow-up.
 var CAPABILITIES = {
+  // A ceiling only: the session decides whether more than one mailbox may be
+  // assigned to an Email.
   labels: true,
-  threads: true,
+  // A server id alone is not conversation UI. Omamail remains message-shaped.
+  threads: false,
   archive: false,
   // Moving to a mailbox with the junk role does not prove the server trained
   // its filter, so it is not offered as "Report spam".
@@ -57,4 +64,8 @@ function searchQuery(text) {
 function labelQuery(name) {
   var value = String(name === undefined || name === null ? "" : name).trim()
   return value === "" ? "" : "mailbox:" + JSON.stringify(value)
+}
+
+function webHomeUrl() {
+  return "https://app.fastmail.com"
 }

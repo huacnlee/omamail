@@ -22,7 +22,9 @@ const session = api.validateSession({
     account: {
       name: "reader@example.com",
       isReadOnly: true,
-      accountCapabilities: { "urn:ietf:params:jmap:mail": {} }
+      accountCapabilities: {
+        "urn:ietf:params:jmap:mail": { maxMailboxesPerEmail: 1000 }
+      }
     }
   },
   primaryAccounts: { "urn:ietf:params:jmap:mail": "account" },
@@ -33,6 +35,7 @@ const session = api.validateSession({
 assert.strictEqual(session.ok, true)
 assert.strictEqual(session.accountId, "account")
 assert.strictEqual(session.isReadOnly, true)
+assert.strictEqual(session.canLabels, true)
 assert.strictEqual(session.apiUrl, "https://phl.api.fastmail.com/jmap/api/")
 assert.strictEqual(api.validateSession({ capabilities: {}, apiUrl: "https://example.com" }).ok, false)
 assert.strictEqual(api.validateSession({
@@ -40,6 +43,43 @@ assert.strictEqual(api.validateSession({
   accounts: { a: { accountCapabilities: { "urn:ietf:params:jmap:mail": {} } } },
   apiUrl: "http://127.0.0.1/jmap"
 }).ok, false, "session endpoints must be HTTPS")
+
+const singleMailboxSession = api.validateSession({
+  capabilities: {
+    "urn:ietf:params:jmap:core": {},
+    "urn:ietf:params:jmap:mail": {}
+  },
+  accounts: { account: { accountCapabilities: {
+    "urn:ietf:params:jmap:mail": { maxMailboxesPerEmail: 1 }
+  } } },
+  primaryAccounts: { "urn:ietf:params:jmap:mail": "account" },
+  apiUrl: "https://example.com/jmap/api/"
+})
+assert.strictEqual(singleMailboxSession.canLabels, false)
+const unlimitedLabelSession = api.validateSession({
+  capabilities: {
+    "urn:ietf:params:jmap:core": {},
+    "urn:ietf:params:jmap:mail": {}
+  },
+  accounts: { account: { accountCapabilities: {
+    "urn:ietf:params:jmap:mail": { maxMailboxesPerEmail: null }
+  } } },
+  primaryAccounts: { "urn:ietf:params:jmap:mail": "account" },
+  apiUrl: "https://example.com/jmap/api/"
+})
+assert.strictEqual(unlimitedLabelSession.canLabels, true)
+const unknownLabelSession = api.validateSession({
+  capabilities: {
+    "urn:ietf:params:jmap:core": {},
+    "urn:ietf:params:jmap:mail": {}
+  },
+  accounts: { account: { accountCapabilities: {
+    "urn:ietf:params:jmap:mail": {}
+  } } },
+  primaryAccounts: { "urn:ietf:params:jmap:mail": "account" },
+  apiUrl: "https://example.com/jmap/api/"
+})
+assert.strictEqual(unknownLabelSession.canLabels, false)
 
 deepEqual(api.filterForQuery("role:inbox", mailboxes), {
   ok: true, error: "", filter: { inMailbox: "m-inbox" }
@@ -89,6 +129,8 @@ const email = {
   bodyValues: { "1.1": { value: "Hello, 世界" } }
 }
 
+// Fastmail folders-mode cannot produce this shape, but RFC 8621 servers that
+// report maxMailboxesPerEmail > 1 can. Preserve every membership in fixtures.
 const normalized = api.normalizeEmail(email, mailboxes)
 assert.strictEqual(normalized.id, "e1")
 assert.strictEqual(normalized.threadId, "t1")
@@ -114,19 +156,6 @@ deepEqual(page.page.threadIds, ["t1"])
 assert.strictEqual(page.page.nextPageToken, "1")
 assert.strictEqual(page.page.estimate, 2)
 assert.strictEqual(page.messages[0].id, "e1")
-
-deepEqual(api.keywordPatch(["STARRED"], ["UNREAD"]), {
-  "keywords/$flagged": true,
-  "keywords/$seen": true
-})
-deepEqual(api.keywordPatch(["UNREAD"], ["STARRED"]), {
-  "keywords/$flagged": null,
-  "keywords/$seen": null
-})
-const trash = api.movePatch(mailboxes, "trash")
-assert.strictEqual(trash.ok, true)
-assert.strictEqual(trash.patch["mailboxIds/m-trash"], true)
-assert.strictEqual(trash.patch["mailboxIds/m-inbox"], null)
 
 const labels = api.labelsFromMailboxes(mailboxes)
 assert.strictEqual(labels[0].id, "m-inbox")

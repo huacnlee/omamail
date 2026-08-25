@@ -14,7 +14,7 @@ deepEqual(provider.ids(), ["gmail", "hey", "jmap", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
-assert.strictEqual(provider.get("jmap").name, "JMAP")
+assert.strictEqual(provider.get("jmap").name, "Fastmail")
 
 // An id from a newer build, or a hand-edited file, still has to open a window.
 assert.strictEqual(provider.get("nonesuch").id, "gmail")
@@ -39,7 +39,8 @@ assert.strictEqual(provider.can("imap", "threads"), false)
 assert.strictEqual(provider.can("imap", "star"), true, "\\Flagged is a star")
 assert.strictEqual(provider.can("imap", "web"), false, "no web UI to open a message in")
 assert.strictEqual(provider.can("gmail", "web"), true)
-assert.strictEqual(provider.can("jmap", "threads"), true)
+assert.strictEqual(provider.can("jmap", "threads"), false,
+  "a thread id alone is not conversation behavior")
 assert.strictEqual(provider.can("jmap", "labels"), true)
 assert.strictEqual(provider.can("jmap", "send"), false)
 assert.strictEqual(provider.can("jmap", "spam"), false)
@@ -218,7 +219,7 @@ assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u/0/")
 assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
 assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
-assert.strictEqual(provider.webHomeUrl("jmap"), "", "JMAP does not imply one vendor's website")
+assert.strictEqual(provider.webHomeUrl("jmap"), "https://app.fastmail.com")
 
 // ------------------------------------------------------------------ logos
 
@@ -234,7 +235,8 @@ assert.strictEqual(provider.mark("hey"), "hey-mark.png")
 assert.strictEqual(provider.logo("hey"), "hey.png")
 assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
-assert.strictEqual(provider.logo("jmap"), "")
+assert.strictEqual(provider.mark("jmap"), "fastmail.png")
+assert.strictEqual(provider.logo("jmap"), "fastmail.png")
 
 // ------------------------------------------------------------------- auth
 

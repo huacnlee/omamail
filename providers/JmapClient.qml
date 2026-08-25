@@ -24,13 +24,14 @@ Item {
   property var mailboxes: []
   property bool mailboxesLoaded: false
   property var messageCache: ({})
-  readonly property bool readOnly: !sessionInfo || sessionInfo.isReadOnly === true
+  // This branch intentionally remains a reader even if given a broader token.
+  readonly property bool readOnly: true
 
   function canCapability(name) {
     var capability = String(name || "")
-    if (capability === "send" || capability === "spam") return false
-    if (capability === "archive" || capability === "star" || capability === "batch")
-      return !!sessionInfo && !readOnly
+    if (capability === "labels") return !!sessionInfo && sessionInfo.canLabels === true
+    if (capability === "send" || capability === "spam" || capability === "archive"
+        || capability === "star" || capability === "batch") return false
     return true
   }
 
@@ -397,68 +398,6 @@ Item {
       }], "")
     })
     return handle
-  }
-
-  // --------------------------------------------------------------- writes
-
-  function mutationPatch(addLabelIds, removeLabelIds) {
-    var add = Array.isArray(addLabelIds) ? addLabelIds : []
-    var remove = Array.isArray(removeLabelIds) ? removeLabelIds : []
-    var patch = Api.keywordPatch(add, remove)
-    var move = null
-    if (remove.indexOf("INBOX") >= 0) move = Api.movePatch(mailboxes, "archive")
-    else if (add.indexOf("INBOX") >= 0) move = Api.movePatch(mailboxes, "inbox")
-    if (move && !move.ok) return move
-    if (move) for (var key in move.patch) patch[key] = move.patch[key]
-    return { ok: true, error: "", patch: patch }
-  }
-
-  function changeMessages(ids, patch, callback) {
-    var handle = newHandle()
-    if (readOnly) {
-      if (typeof callback === "function") callback(null, "This JMAP account is read-only")
-      return handle
-    }
-    post(handle, [Api.updateCall(sessionInfo.accountId, ids, patch, "update")],
-      function(payload, error) {
-        var result = error || Api.parseSetResponse(payload, "update")
-        if (typeof callback === "function") callback(result ? null : {}, result)
-      })
-    return handle
-  }
-
-  function modifyMessage(id, addLabelIds, removeLabelIds, callback) {
-    return batchModify([id], addLabelIds, removeLabelIds, callback)
-  }
-
-  function batchModify(ids, addLabelIds, removeLabelIds, callback) {
-    var planned = mutationPatch(addLabelIds, removeLabelIds)
-    if (!planned.ok) {
-      var handle = newHandle()
-      if (typeof callback === "function") callback(null, planned.error)
-      return handle
-    }
-    return changeMessages(ids, planned.patch, callback)
-  }
-
-  function trashMessage(id, callback) {
-    var planned = Api.movePatch(mailboxes, "trash")
-    if (!planned.ok) {
-      var handle = newHandle()
-      if (typeof callback === "function") callback(null, planned.error)
-      return handle
-    }
-    return changeMessages([id], planned.patch, callback)
-  }
-
-  function untrashMessage(id, callback) {
-    var planned = Api.movePatch(mailboxes, "inbox")
-    if (!planned.ok) {
-      var handle = newHandle()
-      if (typeof callback === "function") callback(null, planned.error)
-      return handle
-    }
-    return changeMessages([id], planned.patch, callback)
   }
 
   function sendMessage(payload, callback) {

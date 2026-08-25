@@ -71,8 +71,8 @@ Column {
   ProviderHero {
     width: parent.width
     providerId: "jmap"
-    title: "Connect Fastmail over JMAP"
-    detail: "Fastmail exposes mail directly over HTTPS. Use a token limited to mail access; read-only is enough for the reader."
+    title: "Connect Fastmail"
+    detail: "Use a Fastmail API token with Email access. A read-only token is enough for this version."
     textColor: root.textColor
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily

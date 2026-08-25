@@ -78,12 +78,21 @@ function validateSession(payload) {
     return { ok: false, error: "This token has no JMAP Mail account" }
 
   var selected = accounts[accountId] || {}
+  var accountCapabilities = selected.accountCapabilities || {}
+  var mailAccountCapabilities = accountCapabilities[MAIL]
+    && typeof accountCapabilities[MAIL] === "object" ? accountCapabilities[MAIL] : {}
+  var reportsMailboxLimit = Object.prototype.hasOwnProperty.call(
+    mailAccountCapabilities, "maxMailboxesPerEmail")
+  var mailboxLimit = mailAccountCapabilities.maxMailboxesPerEmail
+  var canLabels = reportsMailboxLimit && (mailboxLimit === null
+    || (isFinite(Number(mailboxLimit)) && Number(mailboxLimit) > 1))
   return {
     ok: true,
     error: "",
     accountId: accountId,
     name: String(selected.name || ""),
     isReadOnly: selected.isReadOnly === true,
+    canLabels: canLabels,
     apiUrl: String(body.apiUrl || ""),
     downloadUrl: isHttpsUrl(body.downloadUrl) ? String(body.downloadUrl) : "",
     uploadUrl: isHttpsUrl(body.uploadUrl) ? String(body.uploadUrl) : "",
@@ -518,48 +527,6 @@ function labelCounts(mailboxes, id) {
     }
   }
   return null
-}
-
-function keywordPatch(addLabelIds, removeLabelIds) {
-  var add = Array.isArray(addLabelIds) ? addLabelIds : []
-  var remove = Array.isArray(removeLabelIds) ? removeLabelIds : []
-  var patch = {}
-  if (add.indexOf("STARRED") >= 0) patch["keywords/$flagged"] = true
-  if (remove.indexOf("STARRED") >= 0) patch["keywords/$flagged"] = null
-  if (add.indexOf("UNREAD") >= 0) patch["keywords/$seen"] = null
-  if (remove.indexOf("UNREAD") >= 0) patch["keywords/$seen"] = true
-  return patch
-}
-
-function updateCall(accountId, ids, patch, tag) {
-  var update = {}
-  var list = Array.isArray(ids) ? ids : []
-  for (var i = 0; i < list.length; i++) update[String(list[i])] = patch || {}
-  return ["Email/set", { accountId: String(accountId || ""), update: update }, String(tag || "update")]
-}
-
-function movePatch(mailboxes, destinationRole) {
-  var destination = mailboxForRole(mailboxes, destinationRole)
-  if (!destination) return { ok: false, error: "This account has no " + destinationRole + " mailbox", patch: {} }
-  var patch = {}
-  var list = Array.isArray(mailboxes) ? mailboxes : []
-  for (var i = 0; i < list.length; i++) {
-    var role = String((list[i] || {}).role || "").toLowerCase()
-    if (role === "inbox" || role === "trash" || role === "archive")
-      patch["mailboxIds/" + String(list[i].id || "")] = null
-  }
-  patch["mailboxIds/" + destination] = true
-  return { ok: true, error: "", patch: patch }
-}
-
-function parseSetResponse(payload, tag) {
-  var error = methodError(payload)
-  if (error) return error
-  var response = responseByTag(payload, String(tag || "update"))
-  if (!response || response.name !== "Email/set") return "The JMAP server returned no update result"
-  var notUpdated = response.body.notUpdated || {}
-  for (var id in notUpdated) return responseError(200, notUpdated[id], "The message was not changed")
-  return ""
 }
 
 function downloadAddress(template, accountId, blobId, name, type) {
