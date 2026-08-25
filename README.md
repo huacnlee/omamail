@@ -2,11 +2,7 @@
 
 **Your mail as a native Omarchy window — not a browser tab.**
 
-Omamail is an Omarchy desktop email client: a Quickshell plugin that reads,
-triages, and answers your mail over the official Gmail API, over the HEY CLI
-client 37signals publish, or over IMAP and SMTP for every other mailbox. It
-runs inside the `omarchy-shell` process you already have, follows your active
-theme, and puts an unread count in the bar.
+Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages, and answers your mail over the official Gmail API, over Fastmail's JMAP API, over the HEY CLI client 37signals publish, or over IMAP and SMTP for every other mailbox. It runs inside the `omarchy-shell` process you already have, follows your active theme, and puts an unread count in the bar.
 
 
 <img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
@@ -25,10 +21,7 @@ other IMAP server — including one you run yourself.
   inside Omarchy rather than to look like a web app in a window. Three columns
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
-- **Gmail, HEY and IMAP.** Sign in to Gmail with Google directly, to HEY
-  through the HEY CLI that 37signals publish, or add any IMAP mailbox with an
-  address and an app password. Several accounts at once, each with its own
-  inbox, cache and unread count.
+- **Gmail, Fastmail, HEY and IMAP.** Sign in to Gmail with Google directly, connect Fastmail with a mail-scoped API token, sign in to HEY through the HEY CLI that 37signals publish, or add any IMAP mailbox with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
@@ -57,10 +50,7 @@ other IMAP server — including one you run yourself.
   message.
 - **Your theme.** Every colour comes from the active Omarchy theme, so the
   mailbox changes the moment the desktop does.
-- **Keyring-backed.** The Gmail refresh token and every IMAP password live in
-  GNOME Keyring — never in a config file, never on a command line. A HEY
-  mailbox has no credential here at all: the HEY CLI holds its own token, and
-  Omamail only ever asks it whether it is signed in.
+- **Keyring-backed.** The Gmail refresh token, every Fastmail API token and every IMAP password live in GNOME Keyring — never in a config file, never on a command line. A HEY mailbox has no credential here at all: the HEY CLI holds its own token, and Omamail only ever asks it whether it is signed in.
 
 ## What it is
 
@@ -101,8 +91,7 @@ Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
 
 ## Mailboxes it can open
 
-Adding a mailbox asks which kind first, because the three setups have nothing in
-common.
+Adding a mailbox asks which kind first, because the four setups have nothing in common.
 
 **Gmail** signs in with Google directly. Google issues Gmail API access per
 project, so this route needs an OAuth client you create once — the setup page
@@ -146,6 +135,11 @@ upgrading `hey` improves it with nothing to change here. And the meeting card,
 the one-click unsubscribe, attachments and the Screener are all read out of
 parts of a message that `hey` does not serve, or out of an endpoint it does not
 expose — so they stay in HEY's own app, which the setup page links to.
+
+
+**Fastmail** connects to Fastmail's own JMAP API with an API token carrying Email access. Omamail reads Fastmail's session document first and follows the regional API and attachment addresses it returns; only that first session address is built in. The token goes to GNOME Keyring over stdin and never to plugin settings or a command line.
+
+This first JMAP version is deliberately a reader: mailbox lists, unread counts, paging, message reading and Fastmail's server-side search work, while archive, trash, star, read-state changes, reply and compose are not offered. Use the IMAP setup below when this installation also needs to change or send Fastmail mail. Those verbs will move to JMAP only when each one has been demonstrated against a writable account.
 
 
 **IMAP** is an address and a password. Fastmail, iCloud, Zoho, Outlook, GMX,
@@ -276,6 +270,7 @@ thousand of them, evicted least-recently-used.
   written over stdin so it never appears in the process table. Two mailboxes
   share one client, so keying by client alone would have let the second sign-in
   overwrite the first.
+- A Fastmail API token and an IMAP password go to **GNOME Keyring** under separate account-scoped kinds, also over stdin. The same address can use both without either credential overwriting the other.
 - The OAuth client goes to `~/.config/omamail/credentials.json`, mode
   `0600`. Not to plugin settings — `shell.json` is world-readable.
 - The access token exists only in memory.
@@ -295,9 +290,7 @@ make validate         # node tests, source regressions, qmllint, manifest check
 Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
 [docs/SPEC.md](docs/SPEC.md).
 
-Omamail is an independent project and is not affiliated with Google or
-37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals,
-LLC.
+Omamail is an independent project and is not affiliated with Google, Fastmail or 37signals. Gmail is a trademark of Google LLC; Fastmail is a trademark of Fastmail Pty Ltd; HEY is a trademark of 37signals, LLC.
 
 Licensed under the [MIT License](LICENSE).
 
