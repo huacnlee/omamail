@@ -718,6 +718,13 @@ if awk '
   fail "MessageReader must not send mailto links out through Qt.openUrlExternally"
 fi
 
+grep -q 'sendIdentities' components/ComposeView.qml \
+  || fail "compose From must list every connected mailbox that can send"
+grep -q 'function identities' compose/Senders.js \
+  || fail "which addresses a new message may be sent as lives in compose/Senders.js"
+grep -q 'root.service.switchTo' components/ComposeView.qml \
+  || fail "choosing another mailbox as From must switch the sending account"
+
 grep -q 'from: root.fromEmail' components/ComposeView.qml \
   || fail "ComposeView must submit the selected From address"
 grep -q 'from: from' account/MailAccount.qml \

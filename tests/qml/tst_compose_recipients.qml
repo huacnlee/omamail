@@ -18,9 +18,17 @@ Item {
       ({ name: "Third Person", email: "third@example.com" })
     ]
     property var sendAsAliases: []
+    property var sendIdentities: []
     property string accountEmail: "me@example.com"
+    property string activeAccountId: "me@example.com"
+    property string switchedTo: ""
 
     function preferredSendAs(_recipients) { return null }
+    function switchTo(id) {
+      switchedTo = String(id || "")
+      activeAccountId = switchedTo
+      return true
+    }
     function refreshRecipientContacts() {}
     function send(fields) {
       lastSent = fields
@@ -67,6 +75,9 @@ Item {
       mailService.sendPending = false
       mailService.sending = false
       mailService.lastSent = null
+      mailService.sendIdentities = []
+      mailService.activeAccountId = "me@example.com"
+      mailService.switchedTo = ""
       compose.reset()
       compose.opened = false
     }
@@ -130,6 +141,25 @@ Item {
       compare(compose.bccVisible, true)
       compare(named(compose, "compose-subject-field").text, "Lunch")
       compare(named(compose, "compose-body-editor").text, "Tuesday?")
+    }
+
+    function test_from_picker_switches_the_sending_account() {
+      mailService.sendIdentities = [
+        { accountId: "me@example.com", email: "me@example.com",
+          displayName: "", label: "me" },
+        { accountId: "imap:home@example.com", email: "home@example.com",
+          displayName: "", label: "home" }
+      ]
+      compose.beginDraft({
+        to: "jane@example.com", cc: "", bcc: "", subject: "Hi", body: "There"
+      })
+      compare(compose.canChooseFrom, true)
+      compare(named(compose, "compose-from-button").enabled, true)
+      compose.chooseFrom(mailService.sendIdentities[1])
+      compare(compose.fromEmail, "home@example.com")
+      compare(mailService.switchedTo, "imap:home@example.com")
+      compare(named(compose, "compose-to-field").text, "jane@example.com",
+        "changing From must keep the draft")
     }
 
     function test_queued_send_hides_compose_and_undo_restores_the_draft() {

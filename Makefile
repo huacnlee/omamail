@@ -61,6 +61,7 @@ test: test-js test-shell test-qml
 test-js:
 	node tests/test_outbox.js
 	node tests/test_recipients.js
+	node tests/test_senders.js
 	node tests/test_oauth.js
 	node tests/test_credentials.js
 	node tests/test_gmail_api.js
