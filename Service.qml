@@ -360,17 +360,32 @@ Item {
   property bool alwaysShowImages: false
   property bool windowPrefsLoaded: false
   property string windowWritePayload: ""
+  property bool restoreWindow: false
+  property int restoreAttempts: 0
 
   function applyWindowPrefs(raw) {
-    var parsed = null
-    try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-    if (parsed && typeof parsed === "object") {
-      sidebarCollapsed = parsed.sidebarCollapsed === true
-      bodyZoom = Model.clampZoom(parsed.bodyZoom)
-      plainTextForced = parsed.plainTextForced === true
-      alwaysShowImages = parsed.alwaysShowImages === true
-    }
+    var prefs = Model.windowPrefs(raw)
+    sidebarCollapsed = prefs.sidebarCollapsed
+    bodyZoom = prefs.bodyZoom
+    plainTextForced = prefs.plainTextForced
+    alwaysShowImages = prefs.alwaysShowImages
+    restoreWindow = prefs.windowOpen
+    restoreAttempts = 0
     windowPrefsLoaded = true
+    if (restoreWindow) Qt.callLater(root.reopenWindow)
+    else if (windowOpen) saveWindowPrefs()
+  }
+
+  function reopenWindow() {
+    if (!restoreWindow || windowOpen) return
+    if (restoreAttempts > 10) return
+    restoreAttempts = restoreAttempts + 1
+    if (!shell || typeof shell.summon !== "function") {
+      restoreTimer.start()
+      return
+    }
+    var ok = shell.summon(pluginId, "{}")
+    if (!ok) restoreTimer.start()
   }
 
   // A toggle is written the moment it is made; a zoom is dragged, and Ctrl and
@@ -389,7 +404,8 @@ Item {
       sidebarCollapsed: sidebarCollapsed,
       bodyZoom: bodyZoom,
       plainTextForced: plainTextForced,
-      alwaysShowImages: alwaysShowImages
+      alwaysShowImages: alwaysShowImages,
+      windowOpen: windowOpen || restoreWindow
     })
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
     windowWriter.running = true
@@ -436,6 +452,11 @@ Item {
   // to send the whole window back to the beginning.
   property bool anyAccountReady: false
 
+  // Instantiator.objectAt is not a property. sendIdentities has to watch
+  // something recount() updates, or From is computed once with no hosts
+  // and never lists the other signed-in mailboxes.
+  property int hostsEpoch: 0
+
   function recount() {
     var total = 0
     var signedIn = false
@@ -447,6 +468,7 @@ Item {
     }
     unreadTotal = total
     anyAccountReady = signedIn
+    hostsEpoch += 1
   }
 
   // The bar answers for all of them: a badge that counted only the mailbox you
@@ -513,7 +535,11 @@ Item {
   // ------------------------------------------------------------- forwarding
 
   property bool windowOpen: false
-  onWindowOpenChanged: if (current) current.windowOpen = windowOpen
+  onWindowOpenChanged: {
+    if (current) current.windowOpen = windowOpen
+    if (windowOpen) restoreWindow = false
+    saveWindowPrefs()
+  }
 
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
@@ -522,6 +548,7 @@ Item {
   // Every address a new message may be sent as, across signed-in mailboxes.
   // Compose reads this and hides the ones that do not belong on a reply.
   readonly property var sendIdentities: {
+    var _epoch = hostsEpoch
     var mailboxes = []
     var accounts = accountList ? accountList.accounts : []
     var i
@@ -626,6 +653,8 @@ Item {
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
   function send(fields) { return current ? current.send(fields) : false }
+  function fail(text) { if (current) current.fail(text) }
+  function note(text) { if (current) current.note(text) }
   function undoSend() {
     var host = pendingSendHost
     if (!host) return false
@@ -828,6 +857,13 @@ Item {
     id: windowPrefsSettling
     interval: 500
     onTriggered: root.saveWindowPrefs()
+  }
+
+  Timer {
+    id: restoreTimer
+    interval: 200
+    repeat: false
+    onTriggered: root.reopenWindow()
   }
 
   Process {

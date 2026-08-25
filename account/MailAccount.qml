@@ -1129,8 +1129,13 @@ Item {
   function send(fields) {
     if (!ready || sending || sendPending) return false
     var values = fields || ({})
+    var files = Array.isArray(values.attachments) ? values.attachments : []
+    var hasFiles = false
+    for (var fi = 0; fi < files.length; fi++) {
+      if (files[fi] && (files[fi].data || files[fi].path)) hasFiles = true
+    }
     var body = String(values.body || "").trim()
-    if (body === "") {
+    if (body === "" && !hasFiles) {
       fail("Write something before sending")
       return false
     }

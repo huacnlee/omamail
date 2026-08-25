@@ -47,6 +47,9 @@ deepEqual(senders.identities([{
 const all = senders.identities([gmail, imap])
 deepEqual(senders.visible(all, "work@example.com", "new"), all,
   "a new message may be sent from any connected mailbox")
+deepEqual(senders.visible({ 0: all[0], 1: all[1], 2: all[2], length: 3 },
+  "work@example.com", "new"), all,
+  "a QML list of identities is still a list")
 deepEqual(senders.visible(all, "work@example.com", "reply").map(function (row) {
   return row.email
 }), ["work@example.com", "alias@example.com"],

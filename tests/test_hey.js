@@ -134,6 +134,16 @@ deepEqual(hey.composeCommand({ to: "jane@example.com", subject: "Lunch" }),
 deepEqual(hey.composeCommand({ to: "a@b.com", cc: "c@d.com", subject: "Hi" }),
   ["compose", "--to", "a@b.com", "--subject", "Hi", "--cc", "c@d.com"])
 deepEqual(hey.composeCommand({ subject: "Nobody" }), [], "a new message needs a recipient")
+deepEqual(hey.composeCommand({
+  to: "jane@example.com",
+  subject: "Lunch",
+  attachments: [{ path: "/tmp/menu.pdf" }]
+}), [
+  "compose", "--to", "jane@example.com", "--subject", "Lunch",
+  "--attach", "/tmp/menu.pdf"
+])
+assert.strictEqual(hey.isDroppableFlag("--attach"), false)
+assert.strictEqual(hey.isDroppableFlag("--html"), true)
 
 // -------------------------------------------------------------- the answers
 

@@ -9,8 +9,23 @@
 // that draft from a different account would hand another server a thread id
 // it has never seen.
 
+// QML `var` arrays are sometimes length-bearing objects, not JS Array.
+// Array.isArray is then false and From would list nobody.
+function asList(value) {
+  if (value === undefined || value === null) return []
+  if (Array.isArray(value)) return value
+  var n = value.length
+  if (typeof n !== "number" || n < 1) return []
+  var out = []
+  var i
+  for (i = 0; i < n; i++) {
+    if (value[i] !== undefined) out.push(value[i])
+  }
+  return out
+}
+
 function identities(mailboxes) {
-  var rows = Array.isArray(mailboxes) ? mailboxes : []
+  var rows = asList(mailboxes)
   var out = []
   var seen = ({})
   var i
@@ -45,7 +60,7 @@ function identities(mailboxes) {
 }
 
 function visible(rows, accountId, mode) {
-  var list = Array.isArray(rows) ? rows : []
+  var list = asList(rows)
   var kind = String(mode || "new")
   if (kind === "new" || kind === "") return list
   var wanted = String(accountId || "")

@@ -153,8 +153,14 @@ Item {
       compose.beginDraft({
         to: "jane@example.com", cc: "", bcc: "", subject: "Hi", body: "There"
       })
+      wait(30)
       compare(compose.canChooseFrom, true)
-      compare(named(compose, "compose-from-button").enabled, true)
+      var button = named(compose, "compose-from-button")
+      compare(button.enabled, true)
+      mouseClick(button)
+      wait(30)
+      compare(button.selected, true,
+        "clicking From must open the mailbox menu")
       compose.chooseFrom(mailService.sendIdentities[1])
       compare(compose.fromEmail, "home@example.com")
       compare(mailService.switchedTo, "imap:home@example.com")

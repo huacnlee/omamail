@@ -989,5 +989,12 @@ function buildRawMessage(fields) {
 function buildSendPayload(fields) {
   var payload = { raw: encodeBase64Url(buildRawMessage(fields)) }
   if (fields && fields.threadId) payload.threadId = String(fields.threadId)
+  var files = Array.isArray(fields && fields.attachments) ? fields.attachments : []
+  var paths = []
+  for (var i = 0; i < files.length; i++) {
+    if (files[i] && files[i].path)
+      paths.push({ path: String(files[i].path), filename: String(files[i].filename || "") })
+  }
+  if (paths.length > 0) payload.attachments = paths
   return payload
 }
