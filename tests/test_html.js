@@ -1357,6 +1357,33 @@ function activityMail() {
   assert.ok(stacked.complexity.tags < 400 * (html.MAX_READER_CHAIN + 2),
     "a held-open chain multiplied the message: " + stacked.complexity.tags)
   assert.ok(stacked.html.indexOf("x") > 0, "and the message is still in it")
+  // A column of nothing but the "|" between two links is the sender drawing a
+  // line. Out it goes — and what is left is one column, which is not a grid at
+  // all, so a footer of links becomes a list of links instead of a table with a
+  // dangling pipe on every row.
+  assert.strictEqual(
+    reading("<table><tr><td><a href=\"https://a.example.com/\">Online kaufen</a></td><td>|</td></tr>"
+      + "<tr><td><a href=\"https://b.example.com/\">Store finden</a></td><td>|</td></tr>"
+      + "<tr><td>0800 2000 136</td><td>|</td></tr></table>").html,
+    "<p><a href=\"https://a.example.com/\">Online kaufen</a></p>"
+      + "<p><a href=\"https://b.example.com/\">Store finden</a></p>"
+      + "<p>0800 2000 136</p>")
+  // A table that is data on both sides of it is untouched, and a picture is
+  // content however few characters it weighs.
+  assert.strictEqual(
+    reading("<table><tr><th>Hostname</th><td>gitlab.example.com</td></tr>"
+      + "<tr><th>Location</th><td>Munich</td></tr></table>").html,
+    "<table><tr><th>Hostname</th><td>gitlab.example.com</td></tr>"
+      + "<tr><th>Location</th><td>Munich</td></tr></table>")
+  assert.strictEqual(
+    reading("<table><tr><td><img src=\"https://cdn.example.com/a.png\" alt=\"A\"></td><td>Alpha</td></tr>"
+      + "<tr><td><img src=\"https://cdn.example.com/b.png\" alt=\"B\"></td><td>Beta</td></tr></table>").html,
+    "<table><tr><td>A</td><td>Alpha</td></tr><tr><td>B</td><td>Beta</td></tr></table>")
+  // Between two links in a sentence it is punctuation and stays.
+  assert.strictEqual(
+    reading("<p><a href=\"https://a.example.com/\">A</a> | <a href=\"https://b.example.com/\">B</a></p>").html,
+    "<p><a href=\"https://a.example.com/\">A</a> | <a href=\"https://b.example.com/\">B</a></p>")
+
   // A cell that breaks its own line is already two lines, and joining it to the
   // cell beside it hands the bottom half of one to the top half of the next.
   assert.strictEqual(

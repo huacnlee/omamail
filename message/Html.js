@@ -2014,6 +2014,33 @@ function readerHeading(node, state, ctx, tag, single) {
 // blocks its cells always were, in the order they were written, which is what
 // keeps a receipt's labels and figures on separate lines instead of running
 // them together.
+// A column that is the same separator all the way down is not data, it is what
+// the sender put between the things that are. A footer of links with a "|" in
+// the cell beside each one is one column of links and one column of furniture,
+// and once the furniture is gone a single column is not a grid at all — which
+// is what turns "Online kaufen |" back into "Online kaufen".
+var READER_SEPARATOR = /^[\s\u00a0]*[|\u00b7\u2022\u2013\u2014\/-]?[\s\u00a0]*$/
+
+function readerFurniture(node) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") continue
+    // A picture is content whatever it weighs in characters.
+    if (child.name === "img") return false
+    if (!readerFurniture(child)) return false
+  }
+  return READER_SEPARATOR.test(readerTextOf(node))
+}
+
+function readerTextOf(node) {
+  var text = ""
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    text += child.type === "text" ? child.text : readerTextOf(child)
+  }
+  return text
+}
+
 function readerDataTable(node, ctx) {
   var rows = rowsOf(node, [])
   if (rows.length === 0 || rows.length > MAX_READER_TABLE_ROWS) return null
@@ -2032,6 +2059,25 @@ function readerDataTable(node, ctx) {
     if (cells.length > 0) grid.push(cells)
   }
   if (grid.length === 0) return null
+
+  var columns = 0
+  for (var g = 0; g < grid.length; g++) {
+    if (grid[g].length > columns) columns = grid[g].length
+  }
+  for (var column = columns - 1; column >= 0; column--) {
+    var furniture = true
+    for (var r = 0; r < grid.length && furniture; r++) {
+      if (column >= grid[r].length || !readerFurniture(grid[r][column])) furniture = false
+    }
+    if (!furniture) continue
+    for (var w = 0; w < grid.length; w++) grid[w].splice(column, 1)
+  }
+  var widest = 0
+  for (var h = 0; h < grid.length; h++) {
+    if (grid[h].length > widest) widest = grid[h].length
+  }
+  // What is left of a grid once the furniture is out may not be one.
+  if (widest < 2) return null
 
   var table = readerElement("table")
   // Nested grids inside a kept one are the scaffolding again. One level of
@@ -2090,6 +2136,9 @@ function readerRow(node, state, ctx) {
     // A cell the sender set heading type on is a heading, and joining the row
     // would walk past the one piece of evidence there is for that.
     if (readerHeadingOf(cell) !== "") return false
+    // The "|" between two links is the sender drawing a line, not something
+    // anybody reads out. In a row of its own it is all that is left of one.
+    if (readerFurniture(cell)) continue
     cells.push(cell)
   }
 
