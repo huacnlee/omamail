@@ -2066,6 +2066,20 @@ function readerDataTable(node, ctx) {
 // two and a half seconds on a large newsletter.
 var MAX_ROW_CHARS = 160
 
+// A cell that breaks its own line is already two lines, and joining it to the
+// cell beside it puts the bottom half of one against the top half of the next:
+// three cells reading "label / value" came out as "Kundennummer", then
+// "1210617221 Rechnung Nr.", then "M26056185488 Rechnungsdatum".
+function readerBroken(children) {
+  for (var i = 0; i < children.length; i++) {
+    var child = children[i]
+    if (child.type === "text") continue
+    if (child.name === "br") return true
+    if (readerBroken(child.children)) return true
+  }
+  return false
+}
+
 function readerRow(node, state, ctx) {
   // Everything that can refuse a row is asked before anything is built.
   var cells = []
@@ -2086,7 +2100,7 @@ function readerRow(node, state, ctx) {
   for (var k = 0; k < built.length && line !== null; k++) {
     var blocks = built[k]
     if (blocks.length === 0) continue
-    if (blocks.length > 1 || blocks[0].name !== "p") {
+    if (blocks.length > 1 || blocks[0].name !== "p" || readerBroken(blocks[0].children)) {
       line = null
       break
     }

@@ -1357,6 +1357,18 @@ function activityMail() {
   assert.ok(stacked.complexity.tags < 400 * (html.MAX_READER_CHAIN + 2),
     "a held-open chain multiplied the message: " + stacked.complexity.tags)
   assert.ok(stacked.html.indexOf("x") > 0, "and the message is still in it")
+  // A cell that breaks its own line is already two lines, and joining it to the
+  // cell beside it hands the bottom half of one to the top half of the next.
+  assert.strictEqual(
+    reading("<table><tr><td>Kundennummer<br><strong>1210617221</strong></td>"
+      + "<td>Rechnung Nr.<br><strong>M26056185488</strong></td></tr></table>").html,
+    "<p>Kundennummer<br><strong>1210617221</strong></p>"
+      + "<p>Rechnung Nr.<br><strong>M26056185488</strong></p>")
+  // A row of whole lines still becomes one.
+  assert.strictEqual(
+    reading("<table><tr><td>Person 1</td><td>moved</td><td>4 cards</td></tr></table>").html,
+    "<p>Person 1 moved 4 cards</p>")
+
   // What a real message nests is untouched.
   assert.strictEqual(
     reading("<p><a href=\"https://x.example.com/\"><b><i>hi</i></b></a></p>").html,
