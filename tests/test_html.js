@@ -1328,6 +1328,23 @@ function activityMail() {
   assert.strictEqual(enormous.tooHeavy, true)
   assert.ok(enormous.html.indexOf("number 2999") > 0, "and the whole message is in what was refused")
 
+  // An inline element left open is reopened in every block the chain crosses,
+  // so a sender holding a hundred of them open multiplies the whole message by
+  // a hundred — and the multiplying happens before anything measures the result
+  // and refuses it, on the thread that draws the desktop. Past a handful another
+  // one changes nothing anybody can see, so it is not opened; what was inside it
+  // is still there.
+  let held = "<b>".repeat(126)
+  for (let i = 0; i < 400; i++) held += "<div>x</div>"
+  const stacked = html.sanitize(held, { withReader: true }).reader
+  assert.ok(stacked.complexity.tags < 400 * (html.MAX_READER_CHAIN + 2),
+    "a held-open chain multiplied the message: " + stacked.complexity.tags)
+  assert.ok(stacked.html.indexOf("x") > 0, "and the message is still in it")
+  // What a real message nests is untouched.
+  assert.strictEqual(
+    reading("<p><a href=\"https://x.example.com/\"><b><i>hi</i></b></a></p>").html,
+    "<p><a href=\"https://x.example.com/\"><strong><em>hi</em></strong></a></p>")
+
   // One parse answers for all three readings, which is what makes changing mode
   // free: the reader is built from the tree the sanitiser is about to clean,
   // and reading that tree does not change it.

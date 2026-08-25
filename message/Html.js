@@ -1700,10 +1700,21 @@ function readerSpace(state) {
   state.pending = false
 }
 
+// An open inline element is reopened in every block the chain crosses, so a
+// sender who holds a hundred of them open turns each of a thousand paragraphs
+// into a hundred thousand elements — a 24 KB message built a 4 MB document, on
+// the GUI thread, before anything measured it and refused it. Real mail nests a
+// handful of these, a link inside a bold inside a paragraph, and past that
+// another one changes nothing anybody can see, so it is not opened at all: what
+// was inside it is still walked and still drawn.
+var MAX_READER_CHAIN = 8
+
 function readerOpen(state, node) {
+  if (state.chain.length >= MAX_READER_CHAIN) return false
   readerSpace(state)
   readerTarget(state).push(node)
   state.chain.push(node)
+  return true
 }
 
 // A run of whitespace in the source is one space, which is what HTML says it is
@@ -2141,17 +2152,17 @@ function readerNode(child, state, ctx) {
     }
     var link = readerElement("a")
     link.attrs = [{ name: "href", value: href }]
-    readerOpen(state, link)
+    var linked = readerOpen(state, link)
     readerWalk(child, state, ctx)
-    state.chain.pop()
+    if (linked) state.chain.pop()
     return
   }
 
   var inline = READER_INLINE[name]
   if (inline !== undefined) {
-    readerOpen(state, readerElement(inline))
+    var opened = readerOpen(state, readerElement(inline))
     readerWalk(child, state, ctx)
-    state.chain.pop()
+    if (opened) state.chain.pop()
     return
   }
 
