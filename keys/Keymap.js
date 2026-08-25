@@ -225,6 +225,13 @@ function isSequenceEnabled(binding, sequence, context, overlay) {
   return true
 }
 
+// Runtime account state can stand an otherwise valid binding down. Kept apart
+// from context because the same list drives what is drawn and what is live.
+function isOffered(binding, unavailable) {
+  var missing = Array.isArray(unavailable) ? unavailable : []
+  return !!binding && missing.indexOf(binding.id) < 0
+}
+
 function bindingsFor(context) {
   var out = []
   for (var i = 0; i < BINDINGS.length; i++) {
@@ -296,11 +303,12 @@ function hintTextFor(binding, context) {
 
 // Grouped in the order the groups first appear in the table, so the sheet's
 // shape is a property of the table rather than a second list to maintain.
-function helpGroups() {
+function helpGroups(unavailable) {
   var groups = []
   var byName = ({})
   for (var i = 0; i < BINDINGS.length; i++) {
     var binding = BINDINGS[i]
+    if (!isOffered(binding, unavailable)) continue
     if (!byName[binding.group]) {
       byName[binding.group] = ({ name: binding.group, rows: [] })
       groups.push(byName[binding.group])
@@ -350,8 +358,8 @@ function helpWeight(group) {
 // Split in order rather than packed by size: a reader who knows the sheet finds
 // a group where it has always been, and "smallest column so far" moves them
 // about every time a binding is added.
-function helpColumns(count) {
-  var groups = helpGroups()
+function helpColumns(count, unavailable) {
+  var groups = helpGroups(unavailable)
   var columns = Math.max(1, Math.min(groups.length, Math.floor(Number(count)) || 1))
   var out = []
   for (var c = 0; c < columns; c++) out.push([])

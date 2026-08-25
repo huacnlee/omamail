@@ -113,7 +113,7 @@ Item {
   // whatever provider is open, so the row that says what the keyboard does here
   // has to be told as well.
   readonly property var unavailableActions: Model.unavailableActions({
-    archive: canArchive, star: canStar, spam: canReportSpam })
+    write: !readOnly, archive: canArchive, star: canStar, spam: canReportSpam })
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.

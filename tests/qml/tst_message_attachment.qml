@@ -36,6 +36,8 @@ Item {
     property bool canRespondToInvite: false
     property bool rsvpSending: false
     property bool canArchive: true
+    property bool canStar: true
+    property bool readOnly: false
     property bool canOpenOnWeb: true
     property var selectedAttachments: [({
       filename: "Quarterly report.pdf",
@@ -82,6 +84,11 @@ Item {
       return null
     }
 
+    function init() {
+      mailService.readOnly = false
+      wait(20)
+    }
+
     function test_attachment_filename_routes_the_message_and_part_to_the_service() {
       var link = named(reader, "attachment-open-link")
       verify(link, "the message reader must present an attachment control")
@@ -91,6 +98,22 @@ Item {
       link.activated()
       compare(mailService.openedMessageId, "message-4")
       compare(mailService.openedAttachment.attachmentId, "att-7")
+    }
+
+    function test_read_only_reader_draws_no_message_mutation_buttons() {
+      var star = named(reader, "message-reader-star")
+      var archive = named(reader, "message-reader-archive")
+      var trash = named(reader, "message-reader-trash")
+      verify(star && archive && trash)
+      compare(reader.starActionVisible, true)
+      compare(reader.archiveActionVisible, true)
+      compare(reader.trashActionVisible, true)
+
+      mailService.readOnly = true
+      wait(20)
+      compare(reader.starActionVisible, false)
+      compare(reader.archiveActionVisible, false)
+      compare(reader.trashActionVisible, false)
     }
   }
 }

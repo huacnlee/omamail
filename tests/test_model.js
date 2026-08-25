@@ -374,6 +374,9 @@ assert.strictEqual(model.actionUnavailable("trash", "HEY"), "")
 
 deepEqual(model.unavailableActions({ archive: true, star: true, spam: true }), [])
 deepEqual(model.unavailableActions({ archive: false, star: false }), ["archive", "star"])
+deepEqual(model.unavailableActions({ write: false, archive: true, star: true }),
+  ["archive", "trash", "star", "markRead", "markUnread"],
+  "a read-only account offers no message mutation, even when its provider supports one")
 deepEqual(model.unavailableActions(null), ["archive", "star"],
   "an unknown provider offers nothing it cannot prove")
 

@@ -84,6 +84,9 @@ assert.strictEqual(keymap.isEnabled(archive, "search", false), false,
   "nor in a query being typed")
 assert.strictEqual(keymap.isEnabled(archive, "list", true), false,
   "an overlay stands it down")
+assert.strictEqual(keymap.isOffered(archive, []), true)
+assert.strictEqual(keymap.isOffered(archive, ["archive"]), false,
+  "runtime account state stands a valid binding down")
 
 const back = byId("back")
 keymap.CONTEXTS.forEach(function (context) {
@@ -308,6 +311,17 @@ assert.ok(!withoutBoth.some(h => h.label === "star"))
 deepEqual(keymap.hintsFor("list", []), offered, "nothing missing changes nothing")
 deepEqual(keymap.hintsFor("list", null), offered)
 
+const readOnlyActions = ["archive", "trash", "star", "markRead", "markUnread"]
+const readOnlyGroups = keymap.helpGroups(readOnlyActions)
+const readOnlyRows = [].concat(...readOnlyGroups.map(g => g.rows))
+;["Archive", "Move to trash", "Star or unstar", "Mark read", "Mark unread"].forEach(
+  function (label) {
+    assert.ok(!readOnlyRows.some(row => row.action === label),
+      "the read-only shortcut sheet must omit " + label)
+  })
+assert.ok(readOnlyRows.some(row => row.action === "Open the selected message"),
+  "read-only narrows the sheet without hiding read actions")
+
 // ------------------------------------------------------------ the sheet
 //
 // The reference sheet is laid out in columns because one column was taller than
@@ -335,6 +349,10 @@ for (const count of [1, 2, 3, 4]) {
   assert.ok(heaviest <= Math.ceil(totalWeight / count) + 6,
     count + ": no column runs away with the sheet (" + heaviest + ")")
 }
+assert.ok([].concat(...keymap.helpColumns(2, readOnlyActions))
+  .every(group => group.rows.every(row => readOnlyRows.some(candidate =>
+    candidate.keys === row.keys && candidate.action === row.action))),
+  "filtered help remains filtered after it is laid out")
 
 // A count that is not a count still has to draw something.
 deepEqual(keymap.helpColumns(0), [keymap.helpGroups()])

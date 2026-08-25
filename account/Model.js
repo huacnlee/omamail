@@ -198,8 +198,14 @@ function actionUnavailable(action, provider) {
 function unavailableActions(capabilities) {
   var caps = capabilities || {}
   var out = []
-  if (caps.archive !== true) out.push("archive")
-  if (caps.star !== true) out.push("star")
+  // Read-only is runtime account state, not a provider identity. Keep it in
+  // the same list as static capability gaps so every surface — buttons, keys,
+  // and both kinds of hints — receives one provider-neutral answer.
+  var writable = caps.write !== false
+  if (!writable || caps.archive !== true) out.push("archive")
+  if (!writable) out.push("trash")
+  if (!writable || caps.star !== true) out.push("star")
+  if (!writable) out.push("markRead", "markUnread")
   return out
 }
 

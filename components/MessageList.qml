@@ -56,6 +56,8 @@ Column {
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
       canArchive: root.service.canArchive
+      canStar: root.service.canStar
+      readOnly: root.service.readOnly
       onActivated: root.messageActivated(modelData.id)
       onStarToggled: root.service.toggleStar(modelData.id)
       onArchiveRequested: root.service.act(modelData.id, "archive")

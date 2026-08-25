@@ -54,6 +54,12 @@ Item {
   }
 
   readonly property var summary: service ? service.selectedMessage : null
+  readonly property bool canChangeMessage: !service || !service.readOnly
+  readonly property bool starActionVisible: canChangeMessage
+    && (!service || service.canStar)
+  readonly property bool archiveActionVisible: canChangeMessage
+    && (!service || service.canArchive)
+  readonly property bool trashActionVisible: canChangeMessage
   // Already sanitised by the service, remote images and all removed. Qt's rich
   // text engine fetches an <img src="https://..."> for real, so leaving them in
   // would fire every tracking pixel in the message the instant it opened, and
@@ -218,6 +224,8 @@ Item {
 
     IconButton {
       id: starButton
+      objectName: "message-reader-star"
+      visible: root.starActionVisible
       anchors.right: parent.right
       anchors.top: backBar.visible ? backBar.bottom : parent.top
       anchors.topMargin: backBar.visible ? Style.space(10) : 0
@@ -233,8 +241,8 @@ Item {
     Column {
       id: headerColumn
       anchors.left: parent.left
-      anchors.right: starButton.left
-      anchors.rightMargin: Style.space(8)
+      anchors.right: starButton.visible ? starButton.left : parent.right
+      anchors.rightMargin: starButton.visible ? Style.space(8) : 0
       anchors.top: backBar.visible ? backBar.bottom : parent.top
       anchors.topMargin: backBar.visible ? Style.space(14) : 0
       spacing: Style.space(4)
@@ -642,6 +650,7 @@ Item {
         // with them.
         Item {
           id: actionGap
+          visible: root.canChangeMessage
           x: forwardButton.x + forwardButton.width + messageActions.gap
           implicitWidth: Style.space(28)
           implicitHeight: replyButton.implicitHeight
@@ -661,15 +670,18 @@ Item {
         // this quietly do nothing — or worse, delete.
         IconButton {
           id: archiveButton
+          objectName: "message-reader-archive"
           x: actionGap.x + actionGap.width + messageActions.gap
           y: Math.round((parent.height - height) / 2)
-          visible: !root.service || root.service.canArchive
+          visible: root.archiveActionVisible
           iconName: "archive"; tooltipText: "Archive · e"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("archive")
         }
         IconButton {
           id: trashButton
+          objectName: "message-reader-trash"
+          visible: root.trashActionVisible
           x: (archiveButton.visible
             ? archiveButton.x + archiveButton.width
             : actionGap.x + actionGap.width) + messageActions.gap

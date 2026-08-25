@@ -16,10 +16,12 @@ Item {
   property string lastSequence: ""
   property string context: "list"
   property bool overlay: false
+  property var unavailableActions: []
 
   Omamail.KeyRouter {
     context: host.context
     overlay: host.overlay
+    unavailableActions: host.unavailableActions
     onTriggered: function(id, sequence) {
       host.lastId = id
       host.lastSequence = sequence
@@ -58,6 +60,7 @@ Item {
     function init() {
       host.context = "list"
       host.overlay = false
+      host.unavailableActions = []
       host.lastId = ""
       host.lastSequence = ""
       compose.opened = false
@@ -68,6 +71,23 @@ Item {
     function test_a_bare_letter_fires_in_its_context() {
       keyClick(Qt.Key_E)
       compare(host.lastId, "archive")
+    }
+
+    function test_read_only_mutation_keys_are_dead_but_reading_stays_live() {
+      host.unavailableActions = ["archive", "trash", "star", "markRead", "markUnread"]
+      wait(20)
+      var keys = [Qt.Key_E, Qt.Key_D, Qt.Key_S]
+      for (var i = 0; i < keys.length; i++) {
+        host.lastId = ""
+        keyClick(keys[i])
+        compare(host.lastId, "", "a read-only mutation key must be dead")
+      }
+      host.lastId = ""
+      keyClick(Qt.Key_I, Qt.ShiftModifier)
+      compare(host.lastId, "", "mark read must be dead too")
+      host.lastId = ""
+      keyClick(Qt.Key_O)
+      compare(host.lastId, "open", "opening a message remains available")
     }
 
     function test_the_same_letter_is_dead_on_a_form() {

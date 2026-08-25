@@ -1389,6 +1389,7 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         signedIn: root.ready
+        readOnly: !!root.service && root.service.readOnly
         canOpenWebInbox: !!root.service && root.service.canOpenWebInbox
         accountCount: root.service ? root.service.accountCount : 1
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
@@ -1471,6 +1472,7 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
+        unavailableActions: root.service ? root.service.unavailableActions : []
         onDismissed: root.shortcutHelpVisible = false
       }
 
@@ -1479,6 +1481,7 @@ Item {
       KeyRouter {
         context: focusScope.keyContext
         overlay: root.shortcutHelpVisible
+        unavailableActions: root.service ? root.service.unavailableActions : []
         onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }
     }

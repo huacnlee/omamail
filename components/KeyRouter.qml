@@ -28,6 +28,7 @@ Item {
   // else acts. Popups are excluded on purpose: a QQC.Popup with CloseOnEscape
   // consumes its own keys, so the router never sees them.
   property bool overlay: false
+  property var unavailableActions: []
 
   // The sequence travels with the id, because one row can bind several keys
   // that differ in what they mean: `Ctrl+1`…`Ctrl+0` are one binding and ten
@@ -42,6 +43,7 @@ Item {
       sequence: modelData.sequence
       enabled: Keymap.isSequenceEnabled(modelData.binding, modelData.sequence,
         root.context, root.overlay)
+        && Keymap.isOffered(modelData.binding, root.unavailableActions)
       onActivated: root.triggered(modelData.id, modelData.sequence)
     }
   }

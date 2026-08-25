@@ -30,14 +30,23 @@ Item {
   // above it is the part that carries information.
   readonly property bool showLegend: height > Style.space(300) && width > Style.space(320)
 
-  readonly property var keys: [
-    { key: "j / k", action: "Move through the list" },
-    { key: "Enter or o", action: "Open the selected message" },
-    { key: "e", action: "Archive" },
-    { key: "d", action: "Move to trash" },
-    { key: "r", action: "Reply" },
-    { key: "c", action: "Compose" }
-  ]
+  readonly property var keys: {
+    var rows = [
+      { id: "cursorDown", key: "j / k", action: "Move through the list" },
+      { id: "open", key: "Enter or o", action: "Open the selected message" },
+      { id: "archive", key: "e", action: "Archive" },
+      { id: "trash", key: "d", action: "Move to trash" },
+      { id: "reply", key: "r", action: "Reply" },
+      { id: "compose", key: "c", action: "Compose" }
+    ]
+    var unavailable = service && Array.isArray(service.unavailableActions)
+      ? service.unavailableActions : []
+    var offered = []
+    for (var i = 0; i < rows.length; i++) {
+      if (unavailable.indexOf(rows[i].id) < 0) offered.push(rows[i])
+    }
+    return offered
+  }
 
   Column {
     anchors.centerIn: parent

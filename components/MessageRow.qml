@@ -16,6 +16,8 @@ Rectangle {
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
   property bool canArchive: true
+  property bool canStar: true
+  property bool readOnly: false
   property bool hasCursor: false
   property bool selected: false
 
@@ -46,7 +48,7 @@ Rectangle {
       } else if (event.button === Qt.MiddleButton) {
         // Middle-click archives: the one triage action worth having without
         // moving the pointer to a button.
-        root.archiveRequested()
+        if (!root.readOnly && root.canArchive) root.archiveRequested()
       } else {
         root.activated()
       }
@@ -135,18 +137,21 @@ Rectangle {
     }
   }
 
-  // Row actions appear on hover or under the keyboard cursor. A starred
-  // message keeps its star visible either way, because that is state rather
-  // than an affordance.
+  // Row actions appear on hover or under the keyboard cursor. A writable,
+  // starred message keeps its star visible either way, because that is state
+  // as well as an affordance; a read-only account draws no mutation control.
   Row {
     id: actions
+    objectName: "message-row-actions"
     anchors.right: parent.right
     anchors.rightMargin: Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(1)
-    visible: root.hot || root.summary.starred
+    visible: !root.readOnly && (root.hot || (root.canStar && root.summary.starred))
 
     IconButton {
+      objectName: "message-row-star"
+      visible: root.canStar
       iconName: "star"
       filled: root.summary.starred
       tooltipText: (root.summary.starred ? "Unstar" : "Star") + " · s"
@@ -159,6 +164,7 @@ Rectangle {
     }
 
     IconButton {
+      objectName: "message-row-archive"
       // No archive button where the account has nowhere to archive to. On IMAP
       // that is a move to a folder, and a server without one would have this
       // quietly do nothing.
@@ -174,6 +180,7 @@ Rectangle {
     }
 
     IconButton {
+      objectName: "message-row-trash"
       visible: root.hot
       iconName: "trash"
       tooltipText: "Move to trash · d"

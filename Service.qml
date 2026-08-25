@@ -589,6 +589,7 @@ Item {
   readonly property string providerId: current ? current.providerId : Provider.DEFAULT_ID
   readonly property var mailboxes: current
     ? current.mailboxes : Provider.mailboxes(Provider.DEFAULT_ID)
+  readonly property bool readOnly: !!current && current.readOnly
   readonly property bool canArchive: !current || current.canArchive
   readonly property bool canReportSpam: !current || current.canReportSpam
   readonly property bool canStar: !current || current.canStar

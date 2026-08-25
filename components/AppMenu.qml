@@ -13,6 +13,7 @@ Item {
   required property color popupBorderColor
   required property string panelFontFamily
   property bool signedIn: false
+  property bool readOnly: false
   // Whether this mailbox has a web address for what is on screen. Off, the row
   // goes rather than opening something else's inbox.
   property bool canOpenWebInbox: false
@@ -127,9 +128,11 @@ Item {
 
       MenuRow {
         id: markRow
+        objectName: "app-menu-mark-read"
         // "These" and not "all": it marks the messages that are loaded, which
         // is what you are looking at, not every message the mailbox holds.
         text: "Mark these read"
+        visible: root.signedIn && !root.readOnly
         enabled: root.signedIn
         onActivated: { menu.close(); root.markAllReadRequested() }
       }
@@ -142,6 +145,7 @@ Item {
       }
 
       MenuSeparatorLine {
+        visible: markRow.visible || webRow.visible
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
       }

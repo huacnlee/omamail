@@ -50,6 +50,8 @@ grep -q 'required property string pluginDir' account/MailAccount.qml \
 grep -q 'property bool windowOpen' Service.qml || fail "Service.qml must expose windowOpen"
 grep -q 'windowOpen: windowOpen || restoreWindow' Service.qml \
   || fail "a shell restart must persist whether the window was open"
+grep -q 'readonly property bool readOnly: !!current && current.readOnly' Service.qml \
+  || fail "Service.qml must forward provider-neutral read-only account state"
 if grep -q 'panelOpen' Service.qml; then
   fail "panelOpen is the old name; the window entry point sets windowOpen"
 fi

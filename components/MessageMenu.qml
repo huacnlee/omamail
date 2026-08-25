@@ -22,6 +22,10 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
+  readonly property bool canChangeMessage: !service || !service.readOnly
+  readonly property bool filingActionsVisible: archiveRow.visible || trashRow.visible
+    || spamRow.visible
+  readonly property bool stateActionsVisible: readRow.visible || starRow.visible
   readonly property var menuRows: [replyRow, replyAllRow, forwardRow, archiveRow,
     trashRow, spamRow, readRow, starRow, browserRow]
   readonly property bool opened: menu.opened
@@ -122,6 +126,7 @@ Item {
       MenuRow { id: forwardRow; text: "Forward"; onActivated: root.compose("forward") }
 
       MenuSeparatorLine {
+        visible: root.filingActionsVisible || root.stateActionsVisible || browserRow.visible
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
       }
@@ -132,37 +137,51 @@ Item {
       // meant "move to a folder" would be a promise this cannot keep.
       MenuRow {
         id: archiveRow
-        visible: !root.service || root.service.canArchive
+        objectName: "message-menu-archive"
+        visible: root.canChangeMessage && (!root.service || root.service.canArchive)
         text: "Archive"
         onActivated: root.run("archive")
       }
-      MenuRow { id: trashRow; text: "Move to trash"; tone: root.urgentColor; onActivated: root.run("trash") }
+      MenuRow {
+        id: trashRow
+        objectName: "message-menu-trash"
+        visible: root.canChangeMessage
+        text: "Move to trash"
+        tone: root.urgentColor
+        onActivated: root.run("trash")
+      }
       MenuRow {
         id: spamRow
-        visible: !root.service || root.service.canReportSpam
+        visible: root.canChangeMessage && (!root.service || root.service.canReportSpam)
         text: "Report spam"
         tone: root.urgentColor
         onActivated: root.run("spam")
       }
 
       MenuSeparatorLine {
+        visible: root.filingActionsVisible && root.stateActionsVisible
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
       }
 
       MenuRow {
         id: readRow
+        objectName: "message-menu-read-state"
+        visible: root.canChangeMessage
         text: root.summary && root.summary.unread ? "Mark as read" : "Mark as unread"
         onActivated: root.run(root.summary && root.summary.unread ? "markRead" : "markUnread")
       }
       MenuRow {
         id: starRow
-        visible: !root.service || root.service.canStar
+        objectName: "message-menu-star"
+        visible: root.canChangeMessage && (!root.service || root.service.canStar)
         text: root.summary && root.summary.starred ? "Unstar" : "Star"
         onActivated: root.run(root.summary && root.summary.starred ? "unstar" : "star")
       }
 
       MenuSeparatorLine {
+        visible: browserRow.visible
+          && (root.filingActionsVisible || root.stateActionsVisible)
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
       }
