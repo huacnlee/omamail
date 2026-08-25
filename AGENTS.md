@@ -360,6 +360,16 @@ key. What matters while working:
   Resource-bearing attributes are their own class now and are refused before
   the colour question is asked, because no appearance option may ever buy a
   network request. `tests/test_source.sh` asserts that order.
+- **Not everything small is hidden.** A preheader is written `display:none`,
+  `visibility:hidden`, a one-pixel type size, `opacity:0`, or no height with
+  the overflow clipped. Three near-misses are not: `font-size:0` on a container
+  closes the gaps between the boxes it holds and every box re-declares a size —
+  read as hiding, it emptied whole messages; `max-height:0` hides nothing unless
+  what overflows is clipped; and `mso-hide:all` hides from *Outlook*, which
+  makes it the version meant for everybody else, so treating it as hidden throws
+  away the call to action and keeps nothing, because the Outlook branch is in a
+  conditional comment the parser drops. When a reading comes out empty, suspect
+  this before suspecting the walk.
 - Reading mode's link rule is stricter than the formatted view's on purpose:
   `mailto:` or http(s) at a public host, nothing else. A message must not be
   able to put the machine this runs on, or the network behind the user's front
