@@ -162,6 +162,22 @@ Item {
         "changing From must keep the draft")
     }
 
+    function test_bcc_toggle_shows_the_field_and_submit_sends_it() {
+      compose.begin("new", null, "", [])
+      compare(compose.bccVisible, false)
+      var toggle = named(compose, "compose-bcc-toggle")
+      var bccField = named(compose, "compose-bcc-field")
+      verify(toggle)
+      verify(bccField)
+      toggle.clicked()
+      compare(compose.bccVisible, true)
+      bccField.text = "hidden@example.com"
+      named(compose, "compose-to-field").text = "jane@example.com"
+      named(compose, "compose-body-editor").text = "Hello"
+      compose.submit()
+      compare(mailService.lastSent.bcc, "hidden@example.com")
+    }
+
     function test_queued_send_hides_compose_and_undo_restores_the_draft() {
       compose.begin("new", null, "", [])
       var toField = named(compose, "compose-to-field")
