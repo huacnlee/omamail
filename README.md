@@ -227,7 +227,10 @@ Search takes Gmail's own operator syntax straight through — `from:jane`, `has:
 
 ## What it does not do
 
-- **No embedded browser.** Message bodies render through Qt's own rich text
+- **No embedded browser.** A message opens in a reading view Omamail builds
+  itself: headings, paragraphs, lists and links in your own type at a readable
+  measure, with none of the sender's presentation in it. The sender's own
+  layout is one click away, and that one renders through Qt's own rich text
   engine, which handles the HTML-4-and-inline-styles subset that real mail is
   written in. A browser engine cannot be embedded in a plugin at all:
   `QtWebEngineQuick::initialize()` has to run before the host process builds

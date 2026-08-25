@@ -58,13 +58,17 @@ Item {
   // above off the same parse, so changing mode costs neither a fetch nor a
   // reparse — which is also why all three are available at once here.
   readonly property var readerDocument: service ? service.selectedReaderDocument : null
-  readonly property int remoteImages: service ? service.selectedRemoteImages : 0
+  // The blocked pictures of the reading actually on screen. Reading mode
+  // shows fewer of a sender's images than the sanitised document does, and a
+  // notice that counted the other one's would offer to load what is not there.
+  readonly property int remoteImages: !service ? 0
+    : root.shownMode === "reader" ? service.selectedReaderRemoteImages
+    : service.selectedRemoteImages
   readonly property bool remoteImagesAllowed: !!service && service.remoteImagesAllowed
 
-  // What this message can actually be drawn as. Qt lays rich text out on the
-  // GUI thread, and this plugin lives inside the shell that draws the whole
-  // desktop, so a document past the bounds gets its plain-text part instead
-  // with a way to insist.
+  // What this message can actually be drawn as, which is the question
+  // `Html.resolveBodyMode` answers the chosen mode against. `forced` is the
+  // reader having insisted on a document the bounds refused.
   readonly property var bodyOffer: ({
     html: root.rawHtml !== "",
     reader: !!root.readerDocument && !!root.service && !root.service.selectedReaderEmpty,
@@ -564,122 +568,123 @@ Item {
       // controls is worse than a taller toolbar, and the reader can be as
       // narrow as its own minimum beside the list.
       readonly property bool stacked: messageActions.implicitWidth
-        + viewModes.implicitWidth + Style.space(24) > width
+        + viewControls.implicitWidth + Style.space(24) > width
       implicitHeight: stacked
-        ? messageActions.implicitHeight + Style.space(4) + viewModes.implicitHeight
+        ? messageActions.implicitHeight + Style.space(4) + viewControls.implicitHeight
         : messageActions.implicitHeight
 
-    Row {
-      id: messageActions
-      anchors.left: parent.left
-      spacing: Style.space(2)
+      Row {
+        id: messageActions
+        anchors.left: parent.left
+        spacing: Style.space(2)
 
-      IconButton {
-        id: replyButton
-        iconName: "reply"; tooltipText: "Reply · r"
-        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-        onClicked: root.composeRequested("reply")
-      }
-      IconButton {
-        iconName: "replyAll"; tooltipText: "Reply all · a"
-        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-        onClicked: root.composeRequested("replyAll")
-      }
-      IconButton {
-        iconName: "forward"; tooltipText: "Forward · f"
-        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-        onClicked: root.composeRequested("forward")
+        IconButton {
+          id: replyButton
+          iconName: "reply"; tooltipText: "Reply · r"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.composeRequested("reply")
+        }
+        IconButton {
+          iconName: "replyAll"; tooltipText: "Reply all · a"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.composeRequested("replyAll")
+        }
+        IconButton {
+          iconName: "forward"; tooltipText: "Forward · f"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.composeRequested("forward")
+        }
+
+        // Answering a message and disposing of one are different intentions, and
+        // one of them cannot be undone from here. The gap is wide enough that a
+        // hand aiming at Forward cannot land on Archive.
+        //
+        // As tall as the buttons it stands between, taken from one of them rather
+        // than from a constant: IconButton sizes itself from its icon, so a hard
+        // number drifts. A one-pixel-high item in a Row aligns to the row's top
+        // edge, which left the rule floating above the icons instead of level
+        // with them.
+        Item {
+          width: Style.space(28)
+          height: replyButton.height
+
+          PanelSeparator {
+            anchors.centerIn: parent
+            width: 1
+            height: Style.space(15)
+            foreground: root.dimColor
+          }
+        }
+
+        // No archive button where the account has nowhere to archive to. On
+        // IMAP that is a move to a folder, and a server without one would have
+        // this quietly do nothing — or worse, delete.
+        IconButton {
+          visible: !root.service || root.service.canArchive
+          iconName: "archive"; tooltipText: "Archive · e"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.actionRequested("archive")
+        }
+        IconButton {
+          iconName: "trash"; tooltipText: "Move to trash · d"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.actionRequested("trash")
+        }
+
       }
 
-      // Answering a message and disposing of one are different intentions, and
-      // one of them cannot be undone from here. The gap is wide enough that a
-      // hand aiming at Forward cannot land on Archive.
+      // The distance across the bar is the separation here, so these need no rule
+      // of their own.
       //
-      // As tall as the buttons it stands between, taken from one of them rather
-      // than from a constant: IconButton sizes itself from its icon, so a hard
-      // number drifts. A one-pixel-high item in a Row aligns to the row's top
-      // edge, which left the rule floating above the icons instead of level
-      // with them.
+      // Named rather than iconed. There is no drawing that says "the message as
+      // its sender laid it out" and is not a guess of one, and telling the three
+      // apart is the whole point of having them — so they say what they are, and
+      // the one in use wears the kit's selected surface and its border rather
+      // than only a colour.
+      //
+      // In a slot rather than anchored itself, because it sits beside the actions
+      // at a comfortable width and under them at a narrow one, and an anchor
+      // cannot be two things. The slot is what holds the position, so no binding
+      // in here reads the Row's own height while the Row is still deciding it.
       Item {
-        width: Style.space(28)
-        height: replyButton.height
+        anchors.right: parent.right
+        y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
+        width: viewControls.width
+        height: actionsRow.stacked ? viewControls.height : messageActions.height
 
-        PanelSeparator {
-          anchors.centerIn: parent
-          width: 1
-          height: Style.space(15)
-          foreground: root.dimColor
+        Row {
+          id: viewControls
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          ModeButton {
+            text: "Reader"
+            tooltipText: "Rebuild this message for reading"
+            mode: "reader"
+          }
+          ModeButton {
+            text: "Original"
+            tooltipText: "Show the sender's own formatting"
+            mode: "original"
+          }
+          ModeButton {
+            text: "Plain"
+            tooltipText: "Show plain text"
+            mode: "plain"
+          }
+
+          // Opening the message somewhere else is another answer to the same
+          // question, so it stands with them. Only Gmail has a web mailbox this
+          // plugin knows the address of.
+          IconButton {
+            visible: !root.service || root.service.canOpenOnWeb
+            iconName: "browser"; tooltipText: "Open in browser"
+            foreground: root.dimColor; hoverColor: root.textColor
+            fontFamily: root.panelFontFamily
+            onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
+          }
         }
       }
-
-      // No archive button where the account has nowhere to archive to. On
-      // IMAP that is a move to a folder, and a server without one would have
-      // this quietly do nothing — or worse, delete.
-      IconButton {
-        visible: !root.service || root.service.canArchive
-        iconName: "archive"; tooltipText: "Archive · e"
-        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-        onClicked: root.actionRequested("archive")
-      }
-      IconButton {
-        iconName: "trash"; tooltipText: "Move to trash · d"
-        foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-        onClicked: root.actionRequested("trash")
-      }
-
-    }
-
-    // The distance across the bar is the separation here, so these need no rule
-    // of their own.
-    //
-    // Named rather than iconed. There is no drawing that says "the message as
-    // its sender laid it out" and is not a guess of one, and telling the three
-    // apart is the whole point of having them — so they say what they are, and
-    // the one in use wears the kit's selected surface and its border rather
-    // than only a colour.
-    //
-    // In a slot rather than anchored itself, because it sits beside the actions
-    // at a comfortable width and under them at a narrow one and an anchor
-    // cannot be two things. A box that knows which of the two it is also keeps
-    // every binding here off the row's own measured height, which a Row is
-    // still deciding while it is being asked.
-    Item {
-      anchors.right: parent.right
-      y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
-      width: viewModes.width
-      height: actionsRow.stacked ? viewModes.height : messageActions.height
-
-    Row {
-      id: viewModes
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(2)
-
-      ModeButton {
-        text: "Reader"
-        tooltipText: "Rebuild this message for reading"
-        mode: "reader"
-      }
-      ModeButton {
-        text: "Original"
-        tooltipText: "Show the sender's own formatting"
-        mode: "original"
-      }
-      ModeButton {
-        text: "Plain"
-        tooltipText: "Show plain text"
-        mode: "plain"
-      }
-
-      // Only Gmail has a web mailbox this plugin knows the address of.
-      IconButton {
-        visible: !root.service || root.service.canOpenOnWeb
-        iconName: "browser"; tooltipText: "Open in browser"
-        foreground: root.dimColor; hoverColor: root.textColor
-        fontFamily: root.panelFontFamily
-        onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
-      }
-    }
-    }
     }
   }
 

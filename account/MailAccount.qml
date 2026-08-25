@@ -169,6 +169,10 @@ Item {
   // A message whose every word was inside a picture reads as nothing at all,
   // and the sender's own formatting is the honest answer for it.
   property bool selectedReaderEmpty: true
+  // Reading mode drops beacons and everything a sender hid, so it has fewer
+  // pictures to offer than the sanitised document does. The notice counts
+  // what the reading on screen is missing, not what some other one would be.
+  property int selectedReaderRemoteImages: 0
   // Off for every message, every time it is opened. Fetching a sender's images
   // tells them the mail was read, from which address and when, so it happens
   // only when the reader has asked — and asking covers this message alone.
@@ -663,6 +667,7 @@ Item {
     selectedReaderDocument = null
     selectedReaderTooHeavy = false
     selectedReaderEmpty = true
+    selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = alwaysShowImages
     selectedBlockedImages = 0
@@ -698,7 +703,7 @@ Item {
       // disk beside it, on the same grounds the document is: what the cache
       // holds is the sender's HTML, so a fix to how a message reads reaches
       // every message already there instead of only the ones fetched after it.
-      // Both readings come off the one parse, and the picture list comes with
+      // Every reading comes off the one parse, and the picture list comes with
       // them — a marker and the list it points into have to be numbered by the
       // same walk or a marker opens somebody else's picture.
       var reread = root.renderSource(cached.html, cached.source === "html")
@@ -738,7 +743,7 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      // Both readings of the body out of one parse. The markers in the
+      // Every reading of the body out of one parse. The markers in the
       // plain-text one and the pictures they stand for are numbered by the same
       // walk over the same tree, so a marker cannot open somebody else's image
       // — and it is only asked for when the text came from the HTML, because a
@@ -820,6 +825,7 @@ Item {
     selectedReaderDocument = ready.reader ? ready.reader.document : null
     selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
     selectedReaderEmpty = !ready.reader || ready.reader.empty
+    selectedReaderRemoteImages = ready.reader ? ready.reader.blockedImages : 0
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
     selectedTooHeavy = ready.tooHeavy
@@ -847,6 +853,7 @@ Item {
     selectedReaderDocument = null
     selectedReaderTooHeavy = false
     selectedReaderEmpty = true
+    selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = false
     selectedImages = []

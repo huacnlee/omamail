@@ -196,8 +196,8 @@ Item {
     else close()
   }
 
-  // Plain text is a preference and survives; the heavy-document override is a
-  // per-message decision about one specific message and does not.
+  // How a message is read is a preference and survives; the heavy-document
+  // override is a per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""

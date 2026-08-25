@@ -341,7 +341,7 @@ Item {
 
   property bool sidebarCollapsed: false
   // Somebody who needed the text bigger needs it bigger for their mail, not for
-  // the message that made them reach for it. The same goes for the one below:
+  // the message that made them reach for it. The same goes for `bodyMode`:
   // both of these are ways of reading mail, not ways of reading one message.
   property real bodyZoom: 1.0
   // How a message is read: rebuilt for reading, the sender's own formatting, or
@@ -562,6 +562,7 @@ Item {
   readonly property var selectedReaderDocument: current ? current.selectedReaderDocument : null
   readonly property bool selectedReaderTooHeavy: !!current && current.selectedReaderTooHeavy
   readonly property bool selectedReaderEmpty: !current || current.selectedReaderEmpty
+  readonly property int selectedReaderRemoteImages: current ? current.selectedReaderRemoteImages : 0
   readonly property var selectedImages: current ? current.selectedImages : []
   readonly property int selectedBlockedImages: current ? current.selectedBlockedImages : 0
   readonly property int selectedRemoteImages: current ? current.selectedRemoteImages : 0

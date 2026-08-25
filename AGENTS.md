@@ -334,7 +334,8 @@ key. What matters while working:
 - This runs on the GUI thread of the shell that draws the user's whole desktop.
   **Count the parses.** Opening a message is one `sanitize`, and every reading of
   that message comes out of it: the sanitised document, the rebuilt reading
-  document, and the plain text. Anything that needs to know how heavy a result
+  document, and — when the message shipped no `text/plain` part of its own —
+  the plain text. Anything that needs to know how heavy a result
   is asks the call that produced it, and a view never parses a body itself.
 - **Reading mode is a rebuild, not a filter, and that is the whole of its
   security argument.** The sanitiser walks the sender's tree and removes; the
