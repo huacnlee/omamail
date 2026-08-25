@@ -1251,11 +1251,28 @@ function activityMail() {
 {
   // The preheader, in each of the ways it is written.
   for (const hidden of ["display:none", "visibility:hidden", "font-size:1px",
-      "font-size:0", "max-height:0", "opacity:0", "mso-hide:all"]) {
+      "font-size:0", "max-height:0;overflow:hidden", "opacity:0"]) {
     assert.strictEqual(reading('<div style="' + hidden + '">SECRET</div><p>real</p>').html,
       "<p>real</p>", hidden + " did not hide it")
   }
   assert.strictEqual(reading('<div hidden>SECRET</div><p>real</p>').html, "<p>real</p>")
+
+  // And the three that look like it and are not. A cell writes "font-size:0" to
+  // take the space out from between the boxes it holds, and every box inside
+  // sets a size of its own: read as hiding, it took a whole message with it. A
+  // box of no height hides nothing unless what overflows it is clipped. And
+  // "mso-hide:all" is the sender hiding something from Outlook, which makes it
+  // the version meant for everybody else — reading it as hidden threw away a
+  // call to action and left nothing where it had been.
+  assert.strictEqual(
+    reading('<td style="font-size:0"><div style="font-size:17px">Real words</div></td>').html,
+    "<p>Real words</p>")
+  assert.strictEqual(reading('<div style="max-height:0">Still drawn</div>').html,
+    "<p>Still drawn</p>")
+  assert.strictEqual(
+    reading('<table style="mso-hide:all"><tr><td><a href="https://x.example.com/">Book it</a>'
+      + "</td></tr></table>").html,
+    "<p><a href=\"https://x.example.com/\">Book it</a></p>")
 
   // Scripts, stylesheets, and the parts of a document that are not the message.
   assert.strictEqual(reading("<script>steal()</script><style>p{color:red}</style>"

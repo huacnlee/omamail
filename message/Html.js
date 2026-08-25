@@ -1832,24 +1832,39 @@ function readerFlush(state, name) {
 var READER_INVISIBLE_TYPE = /^\s*[0-2](\.\d+)?\s*(px|pt)?\s*$/i
 var READER_ZERO_LENGTH = /^\s*0(\.0+)?\s*(px|pt|em|rem|%)?\s*$/i
 
-function readerHiddenBy(declarations) {
+function readerHiddenBy(declarations, leaf) {
   if (isHiddenBy(declarations)) return true
+  var clipped = false
+  var hidden = false
   for (var i = 0; i < declarations.length; i++) {
     var declaration = declarations[i]
     var name = declaration.name
-    if (name === "font-size" && READER_INVISIBLE_TYPE.test(declaration.value)) return true
-    if (name === "max-height" && READER_ZERO_LENGTH.test(declaration.value)) return true
+    // Only where the text is. A container full of boxes writes "font-size:0" to
+    // take out the space between them and every box inside sets a size of its
+    // own — a whole message arrived empty because every cell of it said this.
+    if (leaf && name === "font-size" && READER_INVISIBLE_TYPE.test(declaration.value)) return true
     if (name === "opacity" && /^\s*0(\.0+)?\s*$/.test(declaration.value)) return true
-    if (name === "mso-hide" && /^\s*all\b/i.test(declaration.value)) return true
+    // A box of no height hides nothing unless what overflows it is clipped, and
+    // the preheader idiom always says both.
+    if (name === "max-height" && READER_ZERO_LENGTH.test(declaration.value)) hidden = true
+    if (name === "overflow" && /^\s*hidden\b/i.test(declaration.value)) clipped = true
   }
-  return false
+  return hidden && clipped
 }
 
+// "mso-hide:all" is deliberately not one of them. It hides from Outlook, which
+// is the sender saying this is the version for everybody else — the Outlook one
+// is in a conditional comment the parser drops. Reading it as "hidden" took the
+// call to action out of a message and left nothing in its place.
 function readerHidden(node) {
   if (attributeOf(node, "hidden") !== null) return true
   var style = attributeValue(node, "style")
   if (style === "") return false
-  return readerHiddenBy(splitDeclarations(style))
+  var leaf = true
+  for (var i = 0; i < node.children.length; i++) {
+    if (node.children[i].type !== "text") { leaf = false; break }
+  }
+  return readerHiddenBy(splitDeclarations(style), leaf)
 }
 
 // ------------------------------------------------------------- what it points at
