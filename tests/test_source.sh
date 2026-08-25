@@ -166,6 +166,8 @@ grep -q 'Qt.rgba(popupBackgroundColor.r, popupBackgroundColor.g, popupBackground
   || fail "recipient suggestions must obscure the compose form behind them"
 grep -q 'z: root.toSuggestions.length > 0 ? 100 : 0' components/ComposeView.qml \
   || fail "recipient suggestions must stack above later compose rows"
+grep -q 'id: bccToggle' components/ComposeView.qml \
+  || fail "a draft must offer Bcc the same way it offers Cc, not only when a mailto names one"
 grep -q 'NumberField {' components/SettingsPage.qml \
   || fail "the in-app settings page must expose numeric settings"
 grep -q 'setUndoSendSeconds' components/SettingsPage.qml \

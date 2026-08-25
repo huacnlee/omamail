@@ -46,6 +46,7 @@ Item {
   property bool fromWasChosen: false
   property var toSuggestions: []
   property var ccSuggestions: []
+  property var bccSuggestions: []
   property var originalAttachments: []
   property var forwardedAttachments: []
   property bool forwardAttachmentsLoading: false
@@ -94,6 +95,7 @@ Item {
     fromWasChosen = false
     toSuggestions = []
     ccSuggestions = []
+    bccSuggestions = []
     originalAttachments = []
     forwardedAttachments = []
     forwardAttachmentsLoading = false
@@ -151,6 +153,8 @@ Item {
       ? Recipients.suggest(contactBook, toField.text, 5) : []
     ccSuggestions = ccField.activeFocus
       ? Recipients.suggest(contactBook, ccField.text, 5) : []
+    bccSuggestions = bccField.activeFocus
+      ? Recipients.suggest(contactBook, bccField.text, 5) : []
   }
 
   function acceptTo(contact) {
@@ -163,6 +167,23 @@ Item {
     ccField.text = Recipients.accept(ccField.text, contact)
     ccSuggestions = []
     ccField.forceActiveFocus()
+  }
+
+  function acceptBcc(contact) {
+    bccField.text = Recipients.accept(bccField.text, contact)
+    bccSuggestions = []
+    bccField.forceActiveFocus()
+  }
+
+  function focusAfterTo() {
+    if (root.ccVisible) ccField.forceActiveFocus()
+    else if (root.bccVisible) bccField.forceActiveFocus()
+    else subjectField.forceActiveFocus()
+  }
+
+  function focusAfterCc() {
+    if (root.bccVisible) bccField.forceActiveFocus()
+    else subjectField.forceActiveFocus()
   }
 
   function loadForwardAttachments() {
@@ -459,17 +480,34 @@ Item {
         font.pixelSize: Style.font.caption
       }
 
-      Button {
-        id: ccToggle
+      Row {
+        id: copyToggles
         anchors.right: parent.right
         anchors.rightMargin: Style.space(18)
         anchors.verticalCenter: parent.verticalCenter
-        text: "Cc"
-        foreground: root.ccVisible ? root.textColor : root.dimColor
-        bordered: false
-        fontSize: Style.font.caption
-        enabled: !root.deliveryLocked
-        onClicked: root.ccVisible = !root.ccVisible
+        spacing: Style.space(4)
+
+        Button {
+          id: ccToggle
+          objectName: "compose-cc-toggle"
+          text: "Cc"
+          foreground: root.ccVisible ? root.textColor : root.dimColor
+          bordered: false
+          fontSize: Style.font.caption
+          enabled: !root.deliveryLocked
+          onClicked: root.ccVisible = !root.ccVisible
+        }
+
+        Button {
+          id: bccToggle
+          objectName: "compose-bcc-toggle"
+          text: "Bcc"
+          foreground: root.bccVisible ? root.textColor : root.dimColor
+          bordered: false
+          fontSize: Style.font.caption
+          enabled: !root.deliveryLocked
+          onClicked: root.bccVisible = !root.bccVisible
+        }
       }
 
       TextField {
@@ -477,7 +515,7 @@ Item {
         objectName: "compose-to-field"
         anchors.left: toLabel.right
         anchors.leftMargin: root.formLabelGap
-        anchors.right: ccToggle.left
+        anchors.right: copyToggles.left
         anchors.rightMargin: Style.space(8)
         anchors.verticalCenter: parent.verticalCenter
         foreground: root.textColor
@@ -500,7 +538,7 @@ Item {
         }
         onAccepted: {
           if (root.toSuggestions.length > 0) toSuggestionsPopup.acceptSelection()
-          else subjectField.forceActiveFocus()
+          else root.focusAfterTo()
         }
       }
 
@@ -578,7 +616,7 @@ Item {
         }
         onAccepted: {
           if (root.ccSuggestions.length > 0) ccSuggestionsPopup.acceptSelection()
-          else subjectField.forceActiveFocus()
+          else root.focusAfterCc()
         }
       }
 
@@ -608,6 +646,7 @@ Item {
     Item {
       visible: root.bccVisible
       width: parent.width
+      z: root.bccSuggestions.length > 0 ? 100 : 0
       implicitHeight: bccField.implicitHeight + Style.space(14)
 
       Text {
@@ -636,7 +675,39 @@ Item {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         enabled: !root.deliveryLocked
-        onAccepted: subjectField.forceActiveFocus()
+        onTextChanged: root.updateRecipientSuggestions()
+        onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.onPressed: function(event) {
+          if (root.bccSuggestions.length === 0) return
+          if (event.key === Qt.Key_Down) {
+            bccSuggestionsPopup.moveSelection(1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Up) {
+            bccSuggestionsPopup.moveSelection(-1)
+            event.accepted = true
+          }
+        }
+        onAccepted: {
+          if (root.bccSuggestions.length > 0) bccSuggestionsPopup.acceptSelection()
+          else subjectField.forceActiveFocus()
+        }
+      }
+
+      RecipientSuggestions {
+        id: bccSuggestionsPopup
+        objectName: "compose-bcc-suggestions"
+        x: bccField.x
+        y: parent.height - Style.space(2)
+        width: bccField.width
+        z: 60
+        contacts: root.bccSuggestions
+        textColor: root.textColor
+        dimColor: root.dimColor
+        accentColor: root.accentColor
+        popupBackgroundColor: root.popupBackgroundColor
+        popupBorderColor: root.popupBorderColor
+        panelFontFamily: root.panelFontFamily
+        onChosen: function(contact) { root.acceptBcc(contact) }
       }
 
       PanelSeparator {
