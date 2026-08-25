@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls as QQC
+import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../message/Message.js" as Mail
@@ -15,7 +17,7 @@ import "../compose/Senders.js" as Senders
 // Compose, reply, reply-all and forward are the same form with different
 // starting values, so `begin()` fills the fields and everything after that is
 // one code path.
-Item {
+DropArea {
   id: root
 
   required property var service
@@ -52,6 +54,19 @@ Item {
   property bool forwardAttachmentsLoading: false
   property string forwardAttachmentError: ""
   property int forwardLoadSerial: 0
+  property var draftAttachments: []
+  property var attachJobs: []
+  property bool attaching: false
+  property bool pasteInFlight: false
+
+  readonly property string attachScript: service && service.pluginDir
+    ? service.pluginDir + "/scripts/attachment.sh" : ""
+  readonly property string composeDir: {
+    var cache = Quickshell.env("XDG_CACHE_HOME")
+    var home = Quickshell.env("HOME")
+    var rootDir = cache !== "" ? cache : (home + "/.cache")
+    return rootDir + "/omamail/compose"
+  }
 
   readonly property var contactBook: root.service
     && Array.isArray(root.service.recipientContacts)
@@ -63,8 +78,7 @@ Item {
   }
 
   readonly property var fromIdentities: Senders.visible(
-    root.service && Array.isArray(root.service.sendIdentities)
-      ? root.service.sendIdentities : [],
+    root.service ? root.service.sendIdentities : [],
     root.service ? String(root.service.activeAccountId || "") : "",
     root.mode)
 
@@ -101,6 +115,15 @@ Item {
     forwardAttachmentsLoading = false
     forwardAttachmentError = ""
     parkedForSend = false
+    var owned = draftAttachments
+    draftAttachments = []
+    attachJobs = []
+    attaching = false
+    pasteInFlight = false
+    for (var i = 0; i < owned.length; i++) {
+      if (owned[i] && owned[i].owned && owned[i].path)
+        enqueueAttach("forget", owned[i].path)
+    }
   }
 
   function selectPreferredFrom() {
@@ -311,7 +334,7 @@ Item {
       bcc: bccField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
-      attachments: root.mode === "forward" ? root.forwardedAttachments : [],
+      attachments: root.allOutgoingAttachments(),
       // A forward starts a new conversation; a reply must stay in the old one.
       threadId: root.mode === "forward" ? "" : root.threadId,
       inReplyTo: root.mode === "forward" ? "" : root.inReplyTo
@@ -319,7 +342,154 @@ Item {
     if (accepted === true || service.sendPending || service.sending) parkForSend()
   }
 
+  function allOutgoingAttachments() {
+    var out = []
+    var forwarded = root.mode === "forward" ? root.forwardedAttachments : []
+    var i
+    for (i = 0; i < forwarded.length; i++) out.push(forwarded[i])
+    for (i = 0; i < root.draftAttachments.length; i++) out.push(root.draftAttachments[i])
+    return out
+  }
+
+  function chooseFiles() {
+    enqueueAttach("pick")
+  }
+
+  function paste() {
+    if (root.pasteInFlight) return
+    root.pasteInFlight = true
+    enqueueAttach("clipboard", "")
+  }
+
+  function pasteKey(event) {
+    if (!event) return
+    if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+      event.accepted = true
+      root.paste()
+    }
+  }
+
+  function pasteText() {
+    if (toField.activeFocus) toField.paste()
+    else if (ccField.activeFocus) ccField.paste()
+    else if (bccField.activeFocus) bccField.paste()
+    else if (subjectField.activeFocus) subjectField.paste()
+    else bodyEdit.paste()
+  }
+
+  function enqueueAttach(mode, path) {
+    var jobs = root.attachJobs.slice()
+    jobs.push({ mode: String(mode || "read"), path: String(path || "") })
+    root.attachJobs = jobs
+    pumpAttach()
+  }
+
+  function pumpAttach() {
+    if (attacher.running || root.attachJobs.length === 0) return
+    if (root.attachScript === "") {
+      root.attachJobs = []
+      if (service && typeof service.fail === "function")
+        service.fail("The attachment helper is missing")
+      return
+    }
+    var job = root.attachJobs[0]
+    var rest = root.attachJobs.slice(1)
+    root.attachJobs = rest
+    root.attaching = true
+    attacher.jobMode = job.mode
+    if (job.mode === "clipboard")
+      attacher.command = [root.attachScript, "clipboard", root.composeDir]
+    else if (job.mode === "pick")
+      attacher.command = [root.attachScript, "pick"]
+    else if (job.mode === "forget")
+      attacher.command = [root.attachScript, "forget", root.composeDir, job.path]
+    else
+      attacher.command = [root.attachScript, "read", job.path]
+    attacher.running = true
+  }
+
+  function finishAttach(mode, text) {
+    var result = null
+    try { result = JSON.parse(String(text || "")) }
+    catch (e) { result = null }
+
+    if (mode === "clipboard") root.pasteInFlight = false
+
+    if (mode === "forget") {
+      root.attaching = root.attachJobs.length > 0
+      pumpAttach()
+      return
+    }
+
+    if (mode === "pick" || (mode === "clipboard" && result && result.ok === true
+        && Array.isArray(result.paths))) {
+      root.attaching = root.attachJobs.length > 0
+      if (result && result.ok === true && Array.isArray(result.paths)) {
+        for (var p = 0; p < result.paths.length; p++)
+          enqueueAttach("read", String(result.paths[p] || ""))
+      }
+      pumpAttach()
+      return
+    }
+
+    if (mode === "clipboard" && result && result.ok !== true
+        && String(result.error || "") === "no-image") {
+      root.attaching = root.attachJobs.length > 0
+      root.pasteText()
+      pumpAttach()
+      return
+    }
+
+    if (!result || result.ok !== true) {
+      root.attaching = root.attachJobs.length > 0
+      if (service && typeof service.fail === "function")
+        service.fail(result && result.error ? String(result.error)
+          : "That file could not be attached")
+      pumpAttach()
+      return
+    }
+
+    var entry = ({
+      filename: String(result.filename || "attachment"),
+      mimeType: String(result.mimeType || "application/octet-stream"),
+      size: Math.max(0, Math.floor(Number(result.size) || 0)),
+      data: String(result.data || ""),
+      path: String(result.path || ""),
+      owned: mode === "clipboard"
+    })
+    var next = root.draftAttachments.slice()
+    next.push(entry)
+    root.draftAttachments = next
+    root.attaching = root.attachJobs.length > 0
+    pumpAttach()
+  }
+
+  function removeAttachment(at) {
+    var list = root.draftAttachments.slice()
+    if (at < 0 || at >= list.length) return
+    var entry = list[at]
+    list.splice(at, 1)
+    root.draftAttachments = list
+    if (entry && entry.owned && entry.path)
+      enqueueAttach("forget", entry.path)
+  }
+
+  function attachDroppedUrls(urls) {
+    var list = urls || []
+    for (var i = 0; i < list.length; i++) {
+      var url = String(list[i] || "")
+      var path = url.indexOf("file://") === 0 ? decodeURIComponent(url.substring(7)) : url
+      if (path !== "") enqueueAttach("read", path)
+    }
+  }
+
   anchors.fill: parent
+  keys: ["text/uri-list"]
+  onDropped: function(drop) {
+    if (!drop.hasUrls) return
+    drop.acceptProposedAction()
+    root.attachDroppedUrls(drop.urls)
+  }
   // Only while it is actually in use. A component that declares `focus: true`
   // owns the window's focus even when invisible — Qt does not exclude hidden
   // items — and an owner that accepts keys is a sink. This swallowed every
@@ -445,6 +615,7 @@ Item {
           anchors.rightMargin: fromButton.horizontalPadding
           anchors.verticalCenter: parent.verticalCenter
           visible: root.canChooseFrom
+          enabled: false
           name: "chevronDown"
           iconSize: Style.font.iconSmall
           color: root.dimColor
@@ -526,7 +697,10 @@ Item {
         enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          root.pasteKey(event)
+          if (event.accepted) return
           if (root.toSuggestions.length === 0) return
           if (event.key === Qt.Key_Down) {
             toSuggestionsPopup.moveSelection(1)
@@ -604,7 +778,10 @@ Item {
         enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          root.pasteKey(event)
+          if (event.accepted) return
           if (root.ccSuggestions.length === 0) return
           if (event.key === Qt.Key_Down) {
             ccSuggestionsPopup.moveSelection(1)
@@ -677,7 +854,10 @@ Item {
         enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
+        Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          root.pasteKey(event)
+          if (event.accepted) return
           if (root.bccSuggestions.length === 0) return
           if (event.key === Qt.Key_Down) {
             bccSuggestionsPopup.moveSelection(1)
@@ -754,6 +934,8 @@ Item {
         enabled: !root.deliveryLocked
         KeyNavigation.tab: bodyEdit
         onAccepted: bodyEdit.forceActiveFocus()
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: root.pasteKey(event)
       }
 
       PanelSeparator {
@@ -847,6 +1029,7 @@ Item {
 
   QQC.Popup {
     id: fromMenu
+    objectName: "compose-from-menu"
     width: Math.min(Style.space(360), root.width - Style.space(36))
     implicitHeight: Math.min(fromRows.implicitHeight + Style.space(8), Style.space(260))
     padding: Style.space(4)
@@ -930,7 +1113,7 @@ Item {
     anchors.top: fields.bottom
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.bottom: actions.top
+    anchors.bottom: attachStrip.top
     anchors.leftMargin: Style.space(18)
     anchors.rightMargin: Style.space(18)
     anchors.topMargin: Style.space(12)
@@ -959,6 +1142,106 @@ Item {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       enabled: !root.deliveryLocked
+      Keys.priority: Keys.BeforeItem
+      Keys.onPressed: root.pasteKey(event)
+    }
+  }
+
+  Item {
+    id: attachStrip
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: actions.top
+    height: root.draftAttachments.length > 0
+      ? Math.min(attachFlick.contentHeight, Style.space(240)) + Style.space(12)
+      : 0
+
+    Flickable {
+      id: attachFlick
+      anchors.fill: parent
+      anchors.leftMargin: Style.space(18)
+      anchors.rightMargin: Style.space(18)
+      anchors.topMargin: Style.space(4)
+      visible: root.draftAttachments.length > 0
+      clip: true
+      contentWidth: width
+      contentHeight: attachList.height
+      boundsBehavior: Flickable.StopAtBounds
+      ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+      Column {
+        id: attachList
+        width: attachFlick.width
+        spacing: Style.space(8)
+
+        Repeater {
+          model: root.draftAttachments
+
+          Column {
+            id: attachItem
+            required property var modelData
+            required property int index
+            width: attachList.width
+            spacing: Style.space(4)
+
+            Image {
+              visible: String(attachItem.modelData.mimeType || "").indexOf("image/") === 0
+                && String(attachItem.modelData.path || "") !== ""
+              width: parent.width
+              height: visible
+                ? Math.min(Math.max(sourceSize.height, Style.space(72)), Style.space(200))
+                : 0
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              cache: false
+              source: visible ? ("file://" + String(attachItem.modelData.path || "")) : ""
+            }
+
+            Row {
+              spacing: Style.space(6)
+              width: parent.width
+
+              ActionIcon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "attachment"
+                iconSize: Style.font.iconSmall
+                color: root.dimColor
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.max(0, parent.width - Style.space(120))
+                textFormat: Text.PlainText
+                text: String(attachItem.modelData.filename || "attachment")
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: Mail.formatSize(attachItem.modelData.size)
+                color: root.dimmerColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                iconName: "close"
+                tooltipText: "Remove"
+                foreground: root.dimColor
+                hoverColor: root.textColor
+                fontFamily: root.panelFontFamily
+                iconSize: Style.font.iconSmall
+                enabled: !root.deliveryLocked
+                onClicked: root.removeAttachment(attachItem.index)
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1001,6 +1284,16 @@ Item {
         }
       }
 
+      IconTextButton {
+        iconName: "attachment"
+        tooltipText: "Attach files..."
+        text: root.attaching ? "Attaching" : "Attach..."
+        foreground: root.textColor
+        fontFamily: root.panelFontFamily
+        enabled: !!root.service && !root.attaching && !root.deliveryLocked
+        onClicked: root.chooseFiles()
+      }
+
       Button {
         text: "Discard"
         foreground: root.dimColor
@@ -1011,6 +1304,17 @@ Item {
       }
     }
 
+  }
+
+  Process {
+    id: attacher
+    property string jobMode: ""
+    stdinEnabled: false
+    stdout: StdioCollector { id: attachOut; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      root.finishAttach(jobMode, String(attachOut.text || ""))
+    }
   }
 
 }

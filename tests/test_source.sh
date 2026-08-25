@@ -726,6 +726,24 @@ grep -q 'function identities' compose/Senders.js \
   || fail "which addresses a new message may be sent as lives in compose/Senders.js"
 grep -q 'root.service.switchTo' components/ComposeView.qml \
   || fail "choosing another mailbox as From must switch the sending account"
+python3 - <<'PY'
+from pathlib import Path
+
+service = Path("Service.qml").read_text()
+start = service.index("readonly property var sendIdentities:")
+end = service.index("readonly property string accountAddress:", start)
+block = service[start:end]
+if "hostsEpoch" not in block:
+    raise SystemExit(
+        "test_source.sh: sendIdentities must re-read after a mailbox host signs in"
+    )
+recount = service[service.index("function recount("):]
+recount = recount[:recount.index("\n  }") + 4]
+if "hostsEpoch" not in recount:
+    raise SystemExit(
+        "test_source.sh: recount() must bump hostsEpoch so From can see signed-in mailboxes"
+    )
+PY
 
 grep -q 'from: root.fromEmail' components/ComposeView.qml \
   || fail "ComposeView must submit the selected From address"
@@ -737,5 +755,27 @@ for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
   grep -q 'function getSendAs' "$client" \
     || fail "$client must implement the provider-neutral sender-list operation"
 done
+
+# Qt FileDialog under QT_QPA_PLATFORMTHEME=gtk3 aborts the whole shell inside
+# GLib/DBus. The window is owned by Quickshell (`quickshell,Attach files`).
+# Attach has to pick files in a child process; opening Omafiles and hoping
+# the user pastes is not a picker.
+if grep -nE 'FileDialog|QtQuick\.Dialogs' -- "${QML_FILES[@]}"; then
+  fail "QML must not open FileDialog: it crashes Quickshell under the gtk3 platform theme"
+fi
+python3 - <<'PY'
+from pathlib import Path
+
+compose = Path("components/ComposeView.qml").read_text()
+start = compose.index("function chooseFiles()")
+end = compose.index("\n  function ", start + 1)
+block = compose[start:end]
+if 'enqueueAttach("pick")' not in block:
+    raise SystemExit("test_source.sh: Attach must pick files out of process through attachment.sh")
+if "FileDialog" in block or "execDetached" in block:
+    raise SystemExit(
+        "test_source.sh: Attach must not open an in-process dialog or a detached file manager"
+    )
+PY
 
 printf 'test_source.sh ok\n'
