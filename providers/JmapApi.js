@@ -470,7 +470,6 @@ function parseListPage(payload, mailboxes, requestedLimit) {
   var ids = Array.isArray(query.body.ids) ? query.body.ids : []
   var position = Math.max(0, Math.floor(Number(query.body.position) || 0))
   var total = Math.max(0, Math.floor(Number(query.body.total) || 0))
-  var limit = Math.max(1, Math.floor(Number(requestedLimit)) || ids.length || 1)
   var normalized = []
   var list = Array.isArray(messages.body.list) ? messages.body.list : []
   for (var i = 0; i < list.length; i++) normalized.push(normalizeEmail(list[i], mailboxes))
@@ -478,7 +477,8 @@ function parseListPage(payload, mailboxes, requestedLimit) {
     page: {
       ids: ids.slice(),
       threadIds: normalized.map(function(item) { return item.threadId }),
-      nextPageToken: position + ids.length < total ? String(position + limit) : "",
+      nextPageToken: ids.length > 0 && position + ids.length < total
+        ? String(position + ids.length) : "",
       estimate: total
     },
     messages: normalized,

@@ -157,6 +157,15 @@ assert.strictEqual(page.page.nextPageToken, "1")
 assert.strictEqual(page.page.estimate, 2)
 assert.strictEqual(page.messages[0].id, "e1")
 
+const cappedPage = api.parseListPage({
+  methodResponses: [
+    ["Email/query", { ids: ["e1"], position: 10, total: 20 }, "query"],
+    ["Email/get", { list: [email] }, "messages"]
+  ]
+}, mailboxes, 5)
+assert.strictEqual(cappedPage.page.nextPageToken, "11",
+  "paging resumes after the IDs returned, even when the server caps the page")
+
 const labels = api.labelsFromMailboxes(mailboxes)
 assert.strictEqual(labels[0].id, "m-inbox")
 assert.strictEqual(labels[0].system, true)
