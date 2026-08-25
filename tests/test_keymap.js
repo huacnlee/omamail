@@ -311,10 +311,12 @@ assert.ok(!withoutBoth.some(h => h.label === "star"))
 deepEqual(keymap.hintsFor("list", []), offered, "nothing missing changes nothing")
 deepEqual(keymap.hintsFor("list", null), offered)
 
-const readOnlyActions = ["archive", "trash", "star", "markRead", "markUnread"]
+const readOnlyActions = ["archive", "trash", "star", "markRead", "markUnread",
+  "reply", "replyAll", "forward", "compose"]
 const readOnlyGroups = keymap.helpGroups(readOnlyActions)
 const readOnlyRows = [].concat(...readOnlyGroups.map(g => g.rows))
-;["Archive", "Move to trash", "Star or unstar", "Mark read", "Mark unread"].forEach(
+;["Archive", "Move to trash", "Star or unstar", "Mark read", "Mark unread",
+  "Reply", "Reply to all", "Forward", "Compose"].forEach(
   function (label) {
     assert.ok(!readOnlyRows.some(row => row.action === label),
       "the read-only shortcut sheet must omit " + label)

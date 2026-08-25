@@ -61,6 +61,9 @@ Item {
     property bool canRespondToInvite: false
     property bool rsvpSending: false
     property bool canArchive: true
+    property bool canStar: true
+    property bool canSend: true
+    property bool readOnly: false
     property bool canOpenOnWeb: false
     property var selectedAttachments: []
 

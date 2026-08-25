@@ -54,6 +54,7 @@ Item {
   }
 
   readonly property var summary: service ? service.selectedMessage : null
+  readonly property bool canCompose: !service || service.canSend
   readonly property bool canChangeMessage: !service || !service.readOnly
   readonly property bool starActionVisible: canChangeMessage
     && (!service || service.canStar)
@@ -602,21 +603,31 @@ Item {
       readonly property bool stacked: messageActions.implicitWidth
         + viewTools.implicitWidth + Style.space(24) > width
       implicitHeight: stacked
-        ? messageActions.implicitHeight + Style.space(4) + viewTools.implicitHeight
-        : messageActions.implicitHeight
+        ? messageActions.implicitHeight
+          + (messageActions.implicitHeight > 0 ? Style.space(4) : 0)
+          + viewTools.implicitHeight
+        : Math.max(messageActions.implicitHeight, viewTools.implicitHeight)
 
       Item {
         id: messageActions
         readonly property int gap: Style.space(2)
-        implicitWidth: trashButton.x + trashButton.width
-        implicitHeight: Math.max(replyButton.height, replyAllButton.height,
-          forwardButton.height, archiveButton.visible ? archiveButton.height : 0,
-          trashButton.height)
+        implicitWidth: trashButton.visible ? trashButton.x + trashButton.width
+          : archiveButton.visible ? archiveButton.x + archiveButton.width
+          : forwardButton.visible ? forwardButton.x + forwardButton.width
+          : 0
+        implicitHeight: Math.max(
+          replyButton.visible ? replyButton.height : 0,
+          replyAllButton.visible ? replyAllButton.height : 0,
+          forwardButton.visible ? forwardButton.height : 0,
+          archiveButton.visible ? archiveButton.height : 0,
+          trashButton.visible ? trashButton.height : 0)
         width: implicitWidth
         height: implicitHeight
 
         IconButton {
           id: replyButton
+          objectName: "message-reader-reply"
+          visible: root.canCompose
           y: (parent.height - height) / 2
           iconName: "reply"; tooltipText: "Reply · r"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
@@ -624,6 +635,8 @@ Item {
         }
         IconButton {
           id: replyAllButton
+          objectName: "message-reader-reply-all"
+          visible: root.canCompose
           x: replyButton.x + replyButton.width + messageActions.gap
           y: (parent.height - height) / 2
           iconName: "replyAll"; tooltipText: "Reply all · a"
@@ -632,6 +645,8 @@ Item {
         }
         IconButton {
           id: forwardButton
+          objectName: "message-reader-forward"
+          visible: root.canCompose
           x: replyAllButton.x + replyAllButton.width + messageActions.gap
           y: Math.round((parent.height - height) / 2)
           iconName: "forward"; tooltipText: "Forward · f"
@@ -650,8 +665,9 @@ Item {
         // with them.
         Item {
           id: actionGap
-          visible: root.canChangeMessage
-          x: forwardButton.x + forwardButton.width + messageActions.gap
+          visible: root.canCompose && root.canChangeMessage
+          x: forwardButton.visible
+            ? forwardButton.x + forwardButton.width + messageActions.gap : 0
           implicitWidth: Style.space(28)
           implicitHeight: replyButton.implicitHeight
           width: implicitWidth
@@ -671,7 +687,8 @@ Item {
         IconButton {
           id: archiveButton
           objectName: "message-reader-archive"
-          x: actionGap.x + actionGap.width + messageActions.gap
+          x: actionGap.visible
+            ? actionGap.x + actionGap.width + messageActions.gap : 0
           y: Math.round((parent.height - height) / 2)
           visible: root.archiveActionVisible
           iconName: "archive"; tooltipText: "Archive · e"
@@ -682,9 +699,10 @@ Item {
           id: trashButton
           objectName: "message-reader-trash"
           visible: root.trashActionVisible
-          x: (archiveButton.visible
-            ? archiveButton.x + archiveButton.width
-            : actionGap.x + actionGap.width) + messageActions.gap
+          x: archiveButton.visible
+            ? archiveButton.x + archiveButton.width + messageActions.gap
+            : actionGap.visible
+              ? actionGap.x + actionGap.width + messageActions.gap : 0
           y: Math.round((parent.height - height) / 2)
           iconName: "trash"; tooltipText: "Move to trash · d"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
@@ -710,13 +728,16 @@ Item {
         id: viewTools
         objectName: "readerViewTools"
         anchors.right: parent.right
-        y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
+        y: actionsRow.stacked
+          ? messageActions.height
+            + (messageActions.height > 0 ? Style.space(4) : 0) : 0
         implicitWidth: modeTrack.width
           + (openWebButton.visible ? Style.space(6) + openWebButton.width : 0)
         implicitHeight: Math.max(modeTrack.height,
           openWebButton.visible ? openWebButton.height : 0)
         width: implicitWidth
-        height: actionsRow.stacked ? implicitHeight : messageActions.height
+        height: actionsRow.stacked ? implicitHeight
+          : Math.max(implicitHeight, messageActions.height)
         readonly property bool controlsAligned: !openWebButton.visible
           || Math.abs((modeTrack.y + modeTrack.height / 2)
             - (openWebButton.y + openWebButton.height / 2)) < 1

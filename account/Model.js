@@ -206,6 +206,7 @@ function unavailableActions(capabilities) {
   if (!writable) out.push("trash")
   if (!writable || caps.star !== true) out.push("star")
   if (!writable) out.push("markRead", "markUnread")
+  if (caps.send !== true) out.push("reply", "replyAll", "forward", "compose")
   return out
 }
 

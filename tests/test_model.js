@@ -372,12 +372,17 @@ assert.strictEqual(model.actionUnavailable("spam", "IMAP"),
   "IMAP has no junk verb to report to")
 assert.strictEqual(model.actionUnavailable("trash", "HEY"), "")
 
-deepEqual(model.unavailableActions({ archive: true, star: true, spam: true }), [])
-deepEqual(model.unavailableActions({ archive: false, star: false }), ["archive", "star"])
-deepEqual(model.unavailableActions({ write: false, archive: true, star: true }),
-  ["archive", "trash", "star", "markRead", "markUnread"],
-  "a read-only account offers no message mutation, even when its provider supports one")
-deepEqual(model.unavailableActions(null), ["archive", "star"],
+deepEqual(model.unavailableActions({
+  write: true, send: true, archive: true, star: true, spam: true
+}), [])
+deepEqual(model.unavailableActions({ write: true, send: true, archive: false, star: false }),
+  ["archive", "star"])
+deepEqual(model.unavailableActions({ write: false, send: false, archive: true, star: true }),
+  ["archive", "trash", "star", "markRead", "markUnread",
+    "reply", "replyAll", "forward", "compose"],
+  "a read-only reader offers neither mutation nor sending affordances")
+deepEqual(model.unavailableActions(null),
+  ["archive", "star", "reply", "replyAll", "forward", "compose"],
   "an unknown provider offers nothing it cannot prove")
 
 console.log("test_model.js ok")

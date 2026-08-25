@@ -253,7 +253,7 @@ Item {
   property string composeReturnView: ""
 
   function startCompose(mode) {
-    if (!service || service.sendPending || service.sending) return
+    if (!service || !service.canSend || service.sendPending || service.sending) return
     var next = String(mode || "new")
     if (next !== "new" && !service.selectedMessage) {
       pendingComposeMode = next
@@ -895,8 +895,10 @@ Item {
           }
 
           IconButton {
+            objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && !root.calendarVisible
+              && !!root.service && root.service.canSend
             iconName: "send"
             tooltipText: "Compose · c"
             foreground: root.dim

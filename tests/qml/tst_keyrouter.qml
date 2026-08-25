@@ -74,7 +74,8 @@ Item {
     }
 
     function test_read_only_mutation_keys_are_dead_but_reading_stays_live() {
-      host.unavailableActions = ["archive", "trash", "star", "markRead", "markUnread"]
+      host.unavailableActions = ["archive", "trash", "star", "markRead", "markUnread",
+        "reply", "replyAll", "forward", "compose"]
       wait(20)
       var keys = [Qt.Key_E, Qt.Key_D, Qt.Key_S]
       for (var i = 0; i < keys.length; i++) {
@@ -88,6 +89,11 @@ Item {
       host.lastId = ""
       keyClick(Qt.Key_O)
       compare(host.lastId, "open", "opening a message remains available")
+      host.lastId = ""
+      keyClick(Qt.Key_C)
+      compare(host.lastId, "", "compose must be dead when this mailbox cannot send")
+      keyClick(Qt.Key_R)
+      compare(host.lastId, "", "reply must be dead when this mailbox cannot send")
     }
 
     function test_the_same_letter_is_dead_on_a_form() {

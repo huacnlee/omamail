@@ -52,6 +52,12 @@ grep -q 'windowOpen: windowOpen || restoreWindow' Service.qml \
   || fail "a shell restart must persist whether the window was open"
 grep -q 'readonly property bool readOnly: !!current && current.readOnly' Service.qml \
   || fail "Service.qml must forward provider-neutral read-only account state"
+grep -q '!service.canSend' App.qml \
+  || fail "App.qml must refuse compose when the current mailbox cannot send"
+grep -q 'root.service.canSend' App.qml \
+  || fail "App.qml must hide compose when the current mailbox cannot send"
+grep -q 'readonly property bool canCompose: !service || service.canSend' components/MessageMenu.qml \
+  || fail "MessageMenu must narrow reply and forward through the send capability"
 if grep -q 'panelOpen' Service.qml; then
   fail "panelOpen is the old name; the window entry point sets windowOpen"
 fi

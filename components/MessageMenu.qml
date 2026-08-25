@@ -22,6 +22,7 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
+  readonly property bool canCompose: !service || service.canSend
   readonly property bool canChangeMessage: !service || !service.readOnly
   readonly property bool filingActionsVisible: archiveRow.visible || trashRow.visible
     || spamRow.visible
@@ -121,9 +122,27 @@ Item {
         }
       }
 
-      MenuRow { id: replyRow; text: "Reply"; onActivated: root.compose("reply") }
-      MenuRow { id: replyAllRow; text: "Reply all"; onActivated: root.compose("replyAll") }
-      MenuRow { id: forwardRow; text: "Forward"; onActivated: root.compose("forward") }
+      MenuRow {
+        id: replyRow
+        objectName: "message-menu-reply"
+        visible: root.canCompose
+        text: "Reply"
+        onActivated: root.compose("reply")
+      }
+      MenuRow {
+        id: replyAllRow
+        objectName: "message-menu-reply-all"
+        visible: root.canCompose
+        text: "Reply all"
+        onActivated: root.compose("replyAll")
+      }
+      MenuRow {
+        id: forwardRow
+        objectName: "message-menu-forward"
+        visible: root.canCompose
+        text: "Forward"
+        onActivated: root.compose("forward")
+      }
 
       MenuSeparatorLine {
         visible: root.filingActionsVisible || root.stateActionsVisible || browserRow.visible

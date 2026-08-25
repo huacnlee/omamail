@@ -37,6 +37,7 @@ Item {
     property bool rsvpSending: false
     property bool canArchive: true
     property bool canStar: true
+    property bool canSend: true
     property bool readOnly: false
     property bool canOpenOnWeb: true
     property var selectedAttachments: [({
@@ -85,7 +86,11 @@ Item {
     }
 
     function init() {
+      reader.visible = false
       mailService.readOnly = false
+      mailService.canSend = true
+      mailService.canOpenOnWeb = true
+      mailService.selectedHtml = ""
       wait(20)
     }
 
@@ -114,6 +119,41 @@ Item {
       compare(reader.starActionVisible, false)
       compare(reader.archiveActionVisible, false)
       compare(reader.trashActionVisible, false)
+    }
+
+    function test_reader_draws_no_reply_controls_when_the_mailbox_cannot_send() {
+      var reply = named(reader, "message-reader-reply")
+      var replyAll = named(reader, "message-reader-reply-all")
+      var forward = named(reader, "message-reader-forward")
+      verify(reply && replyAll && forward)
+      compare(reader.canCompose, true)
+
+      mailService.canSend = false
+      wait(20)
+      compare(reader.canCompose, false)
+      compare(reply.visible, false)
+      compare(replyAll.visible, false)
+      compare(forward.visible, false)
+    }
+
+    function test_reader_modes_keep_the_toolbar_when_writing_is_unavailable() {
+      var toolbar = named(reader, "readerToolbar")
+      var viewTools = named(reader, "readerViewTools")
+      var track = named(reader, "bodyModeTrack")
+      verify(toolbar && viewTools && track)
+
+      mailService.selectedHtml = "<p>Formatted message</p>"
+      mailService.readOnly = true
+      mailService.canSend = false
+      mailService.canOpenOnWeb = false
+      reader.visible = true
+      wait(20)
+
+      verify(track.width > 0, "the three reading modes remain available")
+      compare(viewTools.y, 0, "hidden message actions leave no empty row")
+      compare(viewTools.height, viewTools.implicitHeight)
+      compare(toolbar.implicitHeight, viewTools.implicitHeight,
+        "the view tools still give the toolbar its height")
     }
   }
 }

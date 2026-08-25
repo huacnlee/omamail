@@ -120,7 +120,8 @@ Item {
   // whatever provider is open, so the row that says what the keyboard does here
   // has to be told as well.
   readonly property var unavailableActions: Model.unavailableActions({
-    write: !readOnly, archive: canArchive, star: canStar, spam: canReportSpam })
+    write: !readOnly, send: canSend,
+    archive: canArchive, star: canStar, spam: canReportSpam })
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.
@@ -967,7 +968,7 @@ Item {
     var messageId = String(id || "")
     if (!ready || messageId === "") return
     if (readOnly) {
-      note("This JMAP account is read-only")
+      note("This mailbox is read-only")
       return
     }
     // Before the optimistic update, not after it. A key is not a button: `e`
@@ -1098,7 +1099,7 @@ Item {
   function markAllRead() {
     if (!ready || messages.length === 0) return
     if (readOnly) {
-      note("This JMAP account is read-only")
+      note("This mailbox is read-only")
       return
     }
     var ids = []
