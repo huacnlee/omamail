@@ -80,8 +80,10 @@ Item {
   // drawn that way.
   readonly property string shownMode: Html.resolveBodyMode(root.bodyMode, root.bodyOffer)
   readonly property bool richBody: root.shownMode !== "plain"
-  // Plain text nobody asked for, which is the one case the notice explains.
+  // Plain text nobody asked for, which is one of the two the notices explain.
   readonly property bool tooHeavy: Html.bodyModeRefused(root.bodyMode, root.bodyOffer)
+  // And the other: reading was asked for and there was nothing to rebuild.
+  readonly property bool readingEmpty: Html.bodyModeEmptied(root.bodyMode, root.bodyOffer)
 
   // Empty for everything that is not a mailing list. The label carries its own
   // trailing "..." when the only way off this list is a page in a browser,
@@ -296,6 +298,16 @@ Item {
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
       onActivated: root.forceRichAnyway = true
+    }
+
+    ReaderNotice {
+      width: parent.width
+      visible: root.readingEmpty
+      text: "Showing the sender's own formatting: there was nothing here to rebuild"
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
     }
 
     // A message with nothing in it is a real answer, and an empty reader on its

@@ -2427,6 +2427,16 @@ function resolveBodyMode(wanted, available) {
 
 // Whether the plain text on screen is a refusal rather than a request, which is
 // what the notice above the message is explaining.
+// A different refusal, and one that used to happen in silence: the message had
+// nothing in it to read, so the sender's own layout is what is on screen while
+// the picker still says Reader. Without a word, the reader is left with one
+// message that looks unlike every other and no way to know why.
+function bodyModeEmptied(wanted, available) {
+  var has = available || {}
+  if (wanted !== "reader" || has.html !== true) return false
+  return has.reader !== true && resolveBodyMode(wanted, available) === "original"
+}
+
 function bodyModeRefused(wanted, available) {
   var has = available || {}
   if (wanted === "plain" || has.html !== true) return false

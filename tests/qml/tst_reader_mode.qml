@@ -216,12 +216,16 @@ Item {
       mailService.selectedTooHeavy = false
     }
 
-    function test_a_message_with_nothing_to_read_falls_back_to_the_sender() {
+    function test_a_message_with_nothing_to_read_says_so() {
       mailService.selectedReaderEmpty = true
       compare(reader.shownMode, "original")
       compare(reader.bodyMode, "reader", "and the choice still stands for the next message")
+      verify(reader.readingEmpty,
+        "a message that arrives in a layout unlike every other has to say why")
+      verify(!reader.tooHeavy, "and it is not the heavy-document answer")
       mailService.selectedReaderEmpty = false
       compare(reader.shownMode, "reader")
+      verify(!reader.readingEmpty)
     }
   }
 }
