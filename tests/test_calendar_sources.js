@@ -93,6 +93,8 @@ hiddenGoogle = sources.withGoogleAccounts(hiddenGoogle, [
 ])
 assert.strictEqual(hiddenGoogle.sources[1].enabled, false,
   "discovering an account must not undo its saved visibility")
+assert.strictEqual(hiddenGoogle.sources[1].readOnly, false,
+  "a legacy synthesized Google source must not keep its old read-only stamp")
 
 const visibility = sources.setEnabled(hiddenGoogle, "google:me@gmail.com", true)
 assert.strictEqual(visibility.sources[1].enabled, true)

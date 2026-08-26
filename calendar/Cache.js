@@ -1,6 +1,9 @@
 .pragma library
 
-var VERSION = 1
+// Version 2 adds the Google item id required by event update and delete.
+// Version 1 ranges cannot recover it from their iCal UID or provider URL, so
+// they are invalidated and fetched again instead of restoring unwritable rows.
+var VERSION = 2
 var MAX_RANGES = 8
 var MAX_EVENTS = 2500
 

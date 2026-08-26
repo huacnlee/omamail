@@ -166,10 +166,11 @@ function withGoogleAccounts(list, accountSummaries) {
       name: trimmed(account.email || account.label || "Google Calendar"),
       accountId: accountId,
       enabled: saved ? saved.enabled !== false : true,
-      // A Google calendar accepts writes through the API, so nothing is
-      // stamped here: readOnly names a calendar that refuses writes, which a
-      // hand-configured source can carry from calendars.json.
-      readOnly: saved ? saved.readOnly === true : false,
+      // A Google calendar accepts writes through the API. Older versions
+      // persisted readOnly on these synthesized sources, so it must not be
+      // inherited: keeping the stamp would hide Edit and Delete after an
+      // upgrade. Hand-configured CalDAV sources still keep their own flag.
+      readOnly: false,
       colorKey: saved ? saved.colorKey : Palette.defaultKey("google:" + accountId)
     })
   }
