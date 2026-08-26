@@ -399,6 +399,13 @@ assert.strictEqual(model.clampZoom("nonsense"), 1)
 assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
 assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
+deepEqual(model.windowPrefs(""), {
+  sidebarCollapsed: false, bodyZoom: 1, plainTextForced: false,
+  alwaysShowImages: false, windowOpen: false
+})
+assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
+assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
+
 // ------------------------------------------------- what a detail read carries
 //
 // A detail read is authoritative about everything it carries and silent about
