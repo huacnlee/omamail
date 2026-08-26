@@ -397,12 +397,13 @@ Item {
     // message itself with nowhere to be.
     InviteCard {
       id: inviteCard
-      // Aligned with the message rather than with the panel: reading mode
-      // centres a column, and a card starting somewhere else reads as a second
-      // document rather than as part of this one.
-      x: root.bodyInset + root.bodyOffset
+      objectName: "eventCard"
+      // This is application UI built from the calendar part, not content from
+      // the sender's HTML. Reader mode narrows the mail below it, while this
+      // card keeps the panel's full content width in every mode.
+      x: root.bodyInset
       y: Style.space(14)
-      width: root.preferredBodyWidth
+      width: root.bodyWidth
       invite: root.service ? root.service.selectedInvite : null
       response: root.service ? root.service.selectedResponse : ""
       canRespond: !!root.service && root.service.canRespondToInvite
@@ -574,34 +575,47 @@ Item {
     // the actions that change something.
     Item {
       id: actionsRow
+      objectName: "readerToolbar"
       width: parent.width
       // The mode picker takes its own line when the two of them will not fit
       // across the panel. A row of controls that overlaps another row of
       // controls is worse than a taller toolbar, and the reader can be as
       // narrow as its own minimum beside the list.
       readonly property bool stacked: messageActions.implicitWidth
-        + viewControls.implicitWidth + Style.space(24) > width
+        + viewTools.implicitWidth + Style.space(24) > width
       implicitHeight: stacked
-        ? messageActions.implicitHeight + Style.space(4) + viewControls.implicitHeight
+        ? messageActions.implicitHeight + Style.space(4) + viewTools.implicitHeight
         : messageActions.implicitHeight
 
-      Row {
+      Item {
         id: messageActions
-        anchors.left: parent.left
-        spacing: Style.space(2)
+        readonly property int gap: Style.space(2)
+        implicitWidth: trashButton.x + trashButton.width
+        implicitHeight: Math.max(replyButton.height, replyAllButton.height,
+          forwardButton.height, archiveButton.visible ? archiveButton.height : 0,
+          trashButton.height)
+        width: implicitWidth
+        height: implicitHeight
 
         IconButton {
           id: replyButton
+          y: (parent.height - height) / 2
           iconName: "reply"; tooltipText: "Reply · r"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.composeRequested("reply")
         }
         IconButton {
+          id: replyAllButton
+          x: replyButton.x + replyButton.width + messageActions.gap
+          y: (parent.height - height) / 2
           iconName: "replyAll"; tooltipText: "Reply all · a"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.composeRequested("replyAll")
         }
         IconButton {
+          id: forwardButton
+          x: replyAllButton.x + replyAllButton.width + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
           iconName: "forward"; tooltipText: "Forward · f"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.composeRequested("forward")
@@ -617,8 +631,12 @@ Item {
         // edge, which left the rule floating above the icons instead of level
         // with them.
         Item {
-          width: Style.space(28)
-          height: replyButton.height
+          id: actionGap
+          x: forwardButton.x + forwardButton.width + messageActions.gap
+          implicitWidth: Style.space(28)
+          implicitHeight: replyButton.implicitHeight
+          width: implicitWidth
+          height: parent.height
 
           PanelSeparator {
             anchors.centerIn: parent
@@ -632,12 +650,20 @@ Item {
         // IMAP that is a move to a folder, and a server without one would have
         // this quietly do nothing — or worse, delete.
         IconButton {
+          id: archiveButton
+          x: actionGap.x + actionGap.width + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
           visible: !root.service || root.service.canArchive
           iconName: "archive"; tooltipText: "Archive · e"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("archive")
         }
         IconButton {
+          id: trashButton
+          x: (archiveButton.visible
+            ? archiveButton.x + archiveButton.width
+            : actionGap.x + actionGap.width) + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
           iconName: "trash"; tooltipText: "Move to trash · d"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("trash")
@@ -659,42 +685,70 @@ Item {
       // cannot be two things. The slot is what holds the position, so no binding
       // in here reads the Row's own height while the Row is still deciding it.
       Item {
+        id: viewTools
+        objectName: "readerViewTools"
         anchors.right: parent.right
         y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
-        width: viewControls.width
-        height: actionsRow.stacked ? viewControls.height : messageActions.height
+        implicitWidth: modeTrack.width
+          + (openWebButton.visible ? Style.space(6) + openWebButton.width : 0)
+        implicitHeight: Math.max(modeTrack.height,
+          openWebButton.visible ? openWebButton.height : 0)
+        width: implicitWidth
+        height: actionsRow.stacked ? implicitHeight : messageActions.height
+        readonly property bool controlsAligned: !openWebButton.visible
+          || Math.abs((modeTrack.y + modeTrack.height / 2)
+            - (openWebButton.y + openWebButton.height / 2)) < 1
 
-        Row {
-          id: viewControls
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(2)
+        // Three names for one setting, so they share a track, an outside edge
+        // and the seams between them. The selected fill belongs to one segment
+        // of one control rather than to a loose button beside two others.
+        Rectangle {
+          id: modeTrack
+          objectName: "bodyModeTrack"
+          y: Math.round((parent.height - height) / 2)
+          width: modeSegments.implicitWidth
+          height: modeSegments.implicitHeight
+          radius: Style.cornerRadius
+          color: "transparent"
+          border.width: 1
+          border.color: Style.normalBorderFor(root.textColor, root.accentColor)
 
-          ModeButton {
-            text: "Reader"
-            tooltipText: "Rebuild this message for reading"
-            mode: "reader"
-          }
-          ModeButton {
-            text: "Original"
-            tooltipText: "Show the sender's own formatting"
-            mode: "original"
-          }
-          ModeButton {
-            text: "Plain"
-            tooltipText: "Show plain text"
-            mode: "plain"
-          }
+          Row {
+            id: modeSegments
+            objectName: "bodyModeSegments"
+            spacing: 0
 
-          // Opening the message somewhere else is another answer to the same
-          // question, so it stands with them. Only Gmail has a web mailbox this
-          // plugin knows the address of.
-          IconButton {
-            visible: !root.service || root.service.canOpenOnWeb
-            iconName: "browser"; tooltipText: "Open in browser"
-            foreground: root.dimColor; hoverColor: root.textColor
-            fontFamily: root.panelFontFamily
-            onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
+            ModeButton {
+              text: "Reader"
+              tooltipText: "Rebuild this message for reading"
+              mode: "reader"
+              firstSegment: true
+            }
+            ModeButton {
+              text: "Original"
+              tooltipText: "Show the sender's own formatting"
+              mode: "original"
+            }
+            ModeButton {
+              text: "Plain"
+              tooltipText: "Show plain text"
+              mode: "plain"
+            }
           }
+        }
+
+        // A separate action on the same toolbar. Its centre follows the mode
+        // control's centre even where their natural heights differ.
+        IconButton {
+          id: openWebButton
+          objectName: "openWebButton"
+          visible: !root.service || root.service.canOpenOnWeb
+          x: modeTrack.width + Style.space(6)
+          y: Math.round((parent.height - height) / 2)
+          iconName: "browser"; tooltipText: "Open in browser"
+          foreground: root.dimColor; hoverColor: root.textColor
+          fontFamily: root.panelFontFamily
+          onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
         }
       }
     }
@@ -707,11 +761,12 @@ Item {
   // stands for the next message.
   component ModeButton: Button {
     required property string mode
+    property bool firstSegment: false
     // Nothing to choose between where there is no markup: the text is then the
     // message rather than one reading of it.
     visible: root.rawHtml !== ""
     selected: root.bodyMode === mode
-    bordered: selected
+    bordered: false
     foreground: selected ? root.textColor : root.dimColor
     accent: root.accentColor
     fontFamily: root.panelFontFamily
@@ -719,6 +774,13 @@ Item {
     horizontalPadding: Style.space(7)
     verticalPadding: Style.space(3)
     onClicked: root.bodyModeRequested(mode)
+
+    Rectangle {
+      visible: !parent.firstSegment
+      width: 1
+      height: parent.height
+      color: modeTrack.border.color
+    }
   }
 
   ImagePopover {

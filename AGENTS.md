@@ -339,12 +339,13 @@ key. What matters while working:
   is asks the call that produced it, and a view never parses a body itself.
 - **Reading mode is a rebuild, not a filter, and that is the whole of its
   security argument.** The sanitiser walks the sender's tree and removes; the
-  reader builds a new tree and copies across exactly three things — text, a
-  checked `href`, a checked `src`. Every element it emits is constructed with an
-  empty attribute list, so there is no path by which a `class`, a `width`, a
-  `bgcolor`, an `align`, a `style` or a `background` reaches the output *at all*.
-  Do not add a fourth thing that is carried over, and do not "keep just this one
-  attribute": the argument is structural, and one exception ends it.
+  reader builds a new tree and copies across text, a checked `href`, a checked
+  `src`, and numeric image dimensions capped to the small-inline-image limit.
+  Every element starts with an empty attribute list and only those checked
+  values are added, so there is no path by which a `class`, a `bgcolor`, an
+  `align`, a `style` or a `background` reaches the output *at all*. Do not keep
+  another sender attribute: the argument is structural, and every exception has
+  to be bounded where it is added.
 - **A text node is not safe just because the tokenizer called it text.** It goes
   back out with its `<` and `>` escaped, because this file joins text the sender
   had kept apart — `collapse` unwraps a span and welds its neighbours together,

@@ -1596,18 +1596,18 @@ function documentFor(bodyHtml, colors) {
 // of it are not, so the result looks accidental rather than deliberately plain.
 //
 // This builds a new tree instead. Nothing is carried across from the sender's
-// document but three things:
+// document but four kinds of value:
 //
 //   text          collapsed the way HTML says whitespace collapses
 //   href          on <a>, and only mailto: or http(s) at a public host
 //   src           on <img>, and only what the image policy already allows
+//   width/height  on <img>, numeric and capped to an inline-image size
 //
-// There is no fourth. Every element the reader emits is constructed here with
-// an empty attribute list, so a class, an id, a width, a bgcolor, an align, a
-// style, a background or a url() cannot survive this pass by being missed —
-// there is no path by which a sender attribute reaches the output at all. That
-// is the whole security argument for reading mode, and it is a structural one
-// rather than a list of things remembered.
+// Every element the reader emits is constructed here with an empty attribute
+// list and only these checked values are added, so a class, an id, a bgcolor,
+// an align, a style, a background or a url() cannot survive this pass by being
+// missed. That is the whole security argument for reading mode: structural,
+// with a narrow numeric exception rather than a list of removals.
 //
 // The type, the spacing, the measure and the colours are then Omamail's, and
 // are applied by `readerDocumentFor` from the theme.
@@ -1895,6 +1895,27 @@ function readerAltText(node) {
     .replace(SOURCE_WHITESPACE, " ").replace(/^ +| +$/g, "")
 }
 
+// A sender's numeric size is useful only for genuinely inline artwork. Social
+// icons and avatars often point at a large source file and rely on width and
+// height to say what they are in the line; carrying an arbitrary large size
+// would hand the sender's layout back to the rebuilt document.
+var MAX_READER_INLINE_IMAGE = 96
+
+function readerImageDimension(node, name) {
+  var raw = attributeValue(node, name)
+  var value = /^\s*\d+(?:\.\d+)?\s*$/.test(raw) ? Number(raw) : 0
+  if (!(value > 0)) {
+    var declarations = splitDeclarations(attributeValue(node, "style"))
+    for (var i = 0; i < declarations.length; i++) {
+      if (declarations[i].name !== name) continue
+      var match = String(declarations[i].value).match(/^\s*(\d+(?:\.\d+)?)px\s*$/i)
+      if (match) value = Number(match[1])
+    }
+  }
+  if (!isFinite(value) || value <= 2 || value > MAX_READER_INLINE_IMAGE) return 0
+  return Math.max(3, Math.round(value))
+}
+
 function readerAppendImage(state, node, ctx) {
   // A beacon is not a picture, and a reader that left a placeholder where one
   // had been would be announcing the tracker rather than removing it.
@@ -1908,6 +1929,10 @@ function readerAppendImage(state, node, ctx) {
     readerSpace(state)
     var image = readerElement("img")
     image.attrs = [{ name: "src", value: source }]
+    var width = readerImageDimension(node, "width")
+    var height = readerImageDimension(node, "height")
+    if (width > 0) image.attrs.push({ name: "width", value: String(width) })
+    if (height > 0) image.attrs.push({ name: "height", value: String(height) })
     readerTarget(state).push(image)
     state.filled = true
     state.pending = false
@@ -2363,10 +2388,41 @@ function readerTidy(blocks) {
       if (out.length === 0) continue
       if (out[out.length - 1].name === "hr") continue
     }
+    // Responsive mail often spells a horizontal social strip as one table row
+    // per icon. Once layout tables are flattened those rows are consecutive
+    // paragraphs; join only paragraphs made entirely from bounded small images,
+    // never ordinary picture-and-text content.
+    if (block.name === "p" && readerSmallImageCount(block.children) > 0
+      && out.length > 0 && out[out.length - 1].name === "p"
+      && readerSmallImageCount(out[out.length - 1].children) > 0) {
+      out[out.length - 1].children.push(readerText(" "))
+      for (var joined = 0; joined < block.children.length; joined++)
+        out[out.length - 1].children.push(block.children[joined])
+      continue
+    }
     out.push(block)
   }
   while (out.length > 0 && out[out.length - 1].name === "hr") out.pop()
   return out
+}
+
+function readerSmallImageCount(nodes) {
+  var count = 0
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i]
+    if (node.type === "text") {
+      if (decodeReferences(node.text).replace(/[\s\u00a0]+/g, "") !== "") return 0
+      continue
+    }
+    if (node.name === "img") {
+      if (Number(attributeValue(node, "width")) <= 2) return 0
+      count++
+      continue
+    }
+    if (node.name !== "a" || readerSmallImageCount(node.children) === 0) return 0
+    count += readerSmallImageCount(node.children)
+  }
+  return count
 }
 
 // The reader's document, built from the sender's parsed tree and never out of
@@ -2436,6 +2492,7 @@ function readerDocumentFor(source, colors) {
     + "td,th{padding-top:" + rule + "px;padding-bottom:" + rule
       + "px;padding-right:" + gap + "px;}"
     + "th{font-weight:bold;text-align:left;}"
+    + "img{vertical-align:middle;}"
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body>"
     + serialize(documentTree(source))

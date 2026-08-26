@@ -103,6 +103,17 @@ Item {
       return null
     }
 
+    function named(item, name) {
+      if (!item) return null
+      if (item.objectName === name) return item
+      var values = item.children || []
+      for (var i = 0; i < values.length; i++) {
+        var hit = named(values[i], name)
+        if (hit) return hit
+      }
+      return null
+    }
+
     function body() {
       var edit = found(reader, "QQuickTextEdit")
       verify(edit, "the reader draws its message in a TextEdit")
@@ -183,6 +194,42 @@ Item {
       verify(body().x + body().width <= reader.width, "and nothing runs off the panel")
       reader.width = 900
       verify(reader.bodyOffset > 0, "and the column comes back when there is room again")
+    }
+
+    function test_view_modes_are_one_segmented_toolbar_control() {
+      mailService.canOpenOnWeb = true
+      var toolbar = named(reader, "readerToolbar")
+      var viewTools = named(reader, "readerViewTools")
+      var track = named(reader, "bodyModeTrack")
+      var segments = named(reader, "bodyModeSegments")
+      var web = named(reader, "openWebButton")
+      verify(toolbar && viewTools && track && segments && web)
+      compare(segments.spacing, 0, "segments share edges instead of reading as loose buttons")
+      compare(track.border.width, 1, "the modes share one enclosing border")
+      compare(viewTools.controlsAligned, true,
+        "the segmented toggle and Open Web are aligned on the toolbar: track="
+          + track.y + "/" + track.height + " web=" + web.y + "/" + web.height
+          + " group=" + viewTools.height)
+
+      reader.width = 300
+      tryCompare(toolbar, "stacked", true)
+      verify(track.y >= 0 && web.y >= 0)
+      reader.width = 900
+      tryCompare(toolbar, "stacked", false)
+      mailService.canOpenOnWeb = false
+    }
+
+    function test_event_card_keeps_the_interface_width_in_reader_mode() {
+      mailService.selectedInvite = ({ summary: "Planning", attendees: [] })
+      var card = named(reader, "eventCard")
+      verify(card && card.visible)
+      compare(card.x, reader.bodyInset)
+      compare(card.width, reader.bodyWidth,
+        "the app's event card does not inherit the mail reading measure")
+      reader.bodyMode = "original"
+      compare(card.x, reader.bodyInset)
+      compare(card.width, reader.bodyWidth)
+      mailService.selectedInvite = null
     }
 
     function test_zoom_moves_the_type_and_the_column_with_it() {

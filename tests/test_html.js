@@ -899,7 +899,8 @@ function reading(source, options) {
   const kinds = {}
   for (const pair of attributesOf(ready.reader.document, [])) kinds[pair] = true
   for (const pair of Object.keys(kinds)) {
-    assert.ok(pair === "a/href" || pair === "img/src",
+    assert.ok(pair === "a/href" || pair === "img/src"
+      || pair === "img/width" || pair === "img/height",
       "reading mode emitted " + pair + ", which is a sender attribute it cannot have")
   }
   // The attribute list is only half of it. An element the reader never built
@@ -1401,6 +1402,17 @@ function activityMail() {
     reading("<p><a href=\"https://x.example.com/\"><b><i>hi</i></b></a></p>").html,
     "<p><a href=\"https://x.example.com/\"><strong><em>hi</em></strong></a></p>")
 
+  // Small pictures in layout rows are inline content: avatars sit beside the
+  // words they identify and social icons form one strip. Their bounded numeric
+  // dimensions survive so native 256px artwork does not become body-sized.
+  const icons = reading("<table>"
+    + "<tr><td><a href=\"https://social.example.com/a\"><img src=\"https://cdn.example.com/a.png\" width=\"32\" height=\"32\"></a></td></tr>"
+    + "<tr><td><a href=\"https://social.example.com/b\"><img src=\"https://cdn.example.com/b.png\" style=\"width:32px;height:32px\"></a></td></tr>"
+    + "</table>", { allowRemoteImages: true }).html
+  assert.strictEqual(icons,
+    "<p><a href=\"https://social.example.com/a\"><img src=\"https://cdn.example.com/a.png\" width=\"32\" height=\"32\"></a> "
+      + "<a href=\"https://social.example.com/b\"><img src=\"https://cdn.example.com/b.png\" width=\"32\" height=\"32\"></a></p>")
+
   // One parse answers for all three readings, which is what makes changing mode
   // free: the reader is built from the tree the sanitiser is about to clean,
   // and reading that tree does not change it.
@@ -1428,6 +1440,8 @@ function activityMail() {
   assert.ok(document.indexOf("body{color:#cacccc;background-color:#101315;}") > 0)
   assert.ok(document.indexOf("a{color:#7aa2f7;}") > 0)
   assert.ok(document.indexOf("img{max-width:420px;}") > 0)
+  assert.ok(document.indexOf("vertical-align:middle") > 0,
+    "inline avatars and icons align with the text beside them")
   assert.ok(document.indexOf(read.html) > 0, "the document is the reading, unaltered")
 
   // The rhythm follows the size it is read at rather than standing still while
