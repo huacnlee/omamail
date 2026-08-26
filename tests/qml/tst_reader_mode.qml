@@ -147,6 +147,11 @@ Item {
       verify(text.indexOf("url(") < 0, "a CSS resource reached the renderer")
     }
 
+    function test_the_body_is_separated_from_the_header() {
+      verify(body().y >= 20,
+        "mail content has its own section gap below the sender metadata")
+    }
+
     function test_changing_mode_asks_nothing_of_the_network() {
       var readerText = body().text
       reader.bodyModeRequested("original")

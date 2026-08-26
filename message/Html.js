@@ -1897,11 +1897,12 @@ function readerAltText(node) {
     .replace(SOURCE_WHITESPACE, " ").replace(/^ +| +$/g, "")
 }
 
-// A sender's numeric size is useful only for genuinely inline artwork. Social
-// icons and avatars often point at a large source file and rely on width and
-// height to say what they are in the line; carrying an arbitrary large size
-// would hand the sender's layout back to the rebuilt document.
+// A sender's numeric size prevents Qt from expanding a source bitmap to its
+// natural pixel width. The larger ceiling covers a bounded standalone logo or
+// illustration; the smaller one below decides whether a picture may take part
+// in an inline avatar or icon layout.
 var MAX_READER_INLINE_IMAGE = 96
+var MAX_READER_IMAGE_DIMENSION = 640
 
 function readerImageDimension(node, name) {
   var raw = attributeValue(node, name)
@@ -1914,7 +1915,7 @@ function readerImageDimension(node, name) {
       if (match) value = Number(match[1])
     }
   }
-  if (!isFinite(value) || value <= 2 || value > MAX_READER_INLINE_IMAGE) return 0
+  if (!isFinite(value) || value <= 2 || value > MAX_READER_IMAGE_DIMENSION) return 0
   return Math.max(3, Math.round(value))
 }
 
@@ -2460,7 +2461,10 @@ function readerSmallImageCount(nodes) {
       continue
     }
     if (node.name === "img") {
-      if (Number(attributeValue(node, "width")) <= 2) return 0
+      var width = Number(attributeValue(node, "width"))
+      var height = Number(attributeValue(node, "height"))
+      if (width <= 2 || width > MAX_READER_INLINE_IMAGE
+        || (height > 0 && height > MAX_READER_INLINE_IMAGE)) return 0
       count++
       continue
     }
@@ -2529,7 +2533,9 @@ function readerDocumentFor(source, colors) {
       + "px;margin-bottom:" + rule + "px;}"
     + "h4,h5,h6{font-size:" + base + "px;margin-top:" + Math.round(gap * 1.4)
       + "px;margin-bottom:" + rule + "px;}"
-    + "ul,ol{margin-top:0px;margin-bottom:" + gap + "px;margin-left:" + (base * 2) + "px;}"
+    // QTextDocument already reserves the marker column. Adding another margin
+    // here doubled the indent and pushed list text far inside the reading line.
+    + "ul,ol{margin-top:0px;margin-bottom:" + gap + "px;margin-left:0px;}"
     + "li{margin-bottom:" + rule + "px;}"
     + "blockquote{color:" + quote + ";margin-left:" + rule
       + "px;padding-left:" + gap + "px;margin-top:0px;margin-bottom:" + gap + "px;}"

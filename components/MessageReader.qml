@@ -412,7 +412,7 @@ Item {
       // the sender's HTML. Reader mode narrows the mail below it, while this
       // card keeps the panel's full content width in every mode.
       x: root.bodyInset
-      y: Style.space(14)
+      y: Style.space(24)
       width: root.bodyWidth
       invite: root.service ? root.service.selectedInvite : null
       response: root.service ? root.service.selectedResponse : ""
@@ -436,7 +436,7 @@ Item {
       x: root.bodyInset + root.bodyOffset
       y: inviteCard.visible
         ? inviteCard.y + inviteCard.height + Style.space(14)
-        : Style.space(14)
+        : Style.space(24)
       width: root.preferredBodyWidth
       readOnly: true
       selectByMouse: true

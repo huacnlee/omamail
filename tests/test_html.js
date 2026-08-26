@@ -1415,6 +1415,13 @@ function activityMail() {
     "<p><a href=\"https://social.example.com/a\"><img src=\"https://cdn.example.com/a.png\" width=\"32\" height=\"32\"></a> "
       + "<a href=\"https://social.example.com/b\"><img src=\"https://cdn.example.com/b.png\" width=\"32\" height=\"32\"></a></p>")
 
+  // A standalone logo is not inline artwork, but its declared size still
+  // prevents Qt from expanding the source bitmap to its natural pixel width.
+  // It keeps the bounded dimension without becoming an avatar or icon strip.
+  assert.strictEqual(reading("<p><img src=\"https://cdn.example.com/logo.png\" width=\"120\"></p>",
+    { allowRemoteImages: true }).html,
+  "<p><img src=\"https://cdn.example.com/logo.png\" width=\"120\"></p>")
+
   // An avatar at the start of a line is interface-like identity content, not
   // a picture sitting on the text baseline. Qt ignores image alignment in the
   // paragraph here, so the reader builds one compact, vertically centred row.
@@ -1455,6 +1462,8 @@ function activityMail() {
   assert.ok(document.indexOf("body{color:#cacccc;background-color:#101315;}") > 0)
   assert.ok(document.indexOf("a{color:#7aa2f7;}") > 0)
   assert.ok(document.indexOf("img{max-width:420px;}") > 0)
+  assert.ok(document.indexOf("ul,ol{margin-top:0px;margin-bottom:11px;margin-left:0px;}") > 0,
+    "Qt owns the list marker indent; the reader must not add a second one")
   assert.ok(document.indexOf(read.html) > 0, "the document is the reading, unaltered")
 
   // The rhythm follows the size it is read at rather than standing still while
