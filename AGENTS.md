@@ -390,13 +390,13 @@ key. What matters while working:
 - Derive the pull request title from the final `base...HEAD` diff. Do not copy the first commit subject when later commits have broadened or changed the outcome.
 - **Re-derive it every time a commit is added, not only when the pull request is opened.** The rule above is easy to satisfy at creation and easy to lose afterwards — one pull request here was opened for a single fix, grew three more, and kept the first commit's subject until somebody read it and said it was wrong. The description carries the same rule for the same reason; the title needs it said out loud because a title is short enough to go on looking true.
 - Rewrite the pull request description whenever its scope changes. It states the user-visible results, the architectural reason and invariants, and the verification actually performed; it does not preserve a chronological list of implementation attempts.
-- Every pull request description includes a `## Release Notes` section whose bulleted list contains the user-visible results in language ready to publish. When a pull request has no user-visible result, the section says `- None.`; never omit it.
+- Every pull request description includes a `## Release Notes` section whose bulleted list covers every functional change in the final diff in language ready to publish. It is not a repetition of the pull request title and does not select only the most prominent changes: every shipped function is represented. When a pull request has no functional change worth releasing, the section says `- None.`; never omit it. The rest of the description has no required section structure.
 - Commit subjects follow the same rule: imperative, outcome-oriented, unprefixed. A conventional prefix never substitutes for a precise result.
 - Markdown prose uses one source line per paragraph. Do not hard-wrap prose to a column width.
 
 ## Releasing
 
-- Release notes are assembled from the `## Release Notes` section of every merged pull request in the release range, then checked against the release diff for omissions. Read each final pull request description in full while doing that check: commit subjects and pull request titles are navigation, not a sufficient account of the user-visible results. If a description no longer matches its final diff, correct it before assembling the notes so every shipped feature is represented.
+- Release notes are assembled by reading the `## Release Notes` section of every merged pull request in the release range, then checked against the release diff for omissions. A pull request title is navigation and never substitutes for that section. If a description no longer matches its final diff, correct it before assembling the notes so every shipped function is represented.
 - `scripts/bump.sh 0.2.0` is the whole of it: it sets the manifest version,
   commits, tags and pushes both. The release workflow refuses a tag that
   disagrees with the manifest, and by then the tag is on the remote and has to
