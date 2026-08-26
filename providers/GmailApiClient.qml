@@ -152,7 +152,7 @@ Item {
 
   // ---------------------------------------------------------------- reads
 
-  function listMessages(query, maxResults, pageToken, callback) {
+  function listMessages(query, maxResults, pageToken, callback, progress) {
     return request("GET", Api.messagesPath(),
       Api.listQuery(query, maxResults, pageToken), null,
       function(status, payload, error) {
@@ -184,8 +184,11 @@ Item {
   }
 
   // Fetches every id at once and calls back once, with the results in the
-  // order the ids were given rather than the order Google answered in.
-  function getMessages(ids, full, callback, existingHandle) {
+  // order the ids were given rather than the order Google answered in. A list
+  // search may also take `progress`, which receives the payloads as Google
+  // answers so cached rows can be filled in without waiting for the slowest
+  // request on the page.
+  function getMessages(ids, full, callback, existingHandle, progress) {
     var handle = existingHandle || newHandle()
     var list = Array.isArray(ids) ? ids : []
     var results = new Array(list.length)
@@ -213,6 +216,7 @@ Item {
           if (handle.aborted) return
           if (error && !firstError) firstError = error
           results[index] = payload
+          if (payload && typeof progress === "function") progress([payload])
           remaining--
           if (remaining === 0) finish()
         })

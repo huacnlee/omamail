@@ -602,6 +602,7 @@ Item {
   readonly property string rawQuery: current ? current.rawQuery : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
+  readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
   readonly property bool hasMore: !!current && current.hasMore
   readonly property string resultSummary: current ? current.resultSummary : ""
   readonly property string selectedId: current ? current.selectedId : ""

@@ -90,6 +90,45 @@ store = cache.putQuery(store, "in:inbox|25", { summaries: [], estimate: 0, nextP
 assert.strictEqual(cache.getQuery(store, "in:inbox|25").summaries.length, 0)
 assert.strictEqual(Object.keys(store.queries).length, 1)
 
+// A query nobody has made before still gets an immediate answer from every
+// cached page. All words must occur, but they may occur in different fields.
+let searchable = cache.emptyStore()
+searchable = cache.putQuery(searchable, "in:inbox|25", {
+  summaries: [
+    summary("older", NOW - 2000, {
+      from: { name: "Jane Doe", email: "jane@example.com", display: "Jane Doe" },
+      subject: "Quarterly invoice",
+      snippet: "Ready for review",
+      to: [{ name: "Buyer", email: "buyer@example.org", display: "Buyer" }]
+    }),
+    summary("newer", NOW - 1000, { subject: "Invoice approved", snippet: "Jane signed it" })
+  ],
+  estimate: 2,
+  nextPageToken: ""
+}, NOW)
+// A newer cached copy of one id wins over the older flags and is not repeated.
+searchable = cache.putQuery(searchable, "is:unread|25", {
+  summaries: [summary("older", NOW - 2000, {
+    from: { name: "Jane Doe", email: "jane@example.com", display: "Jane Doe" },
+    subject: "Quarterly invoice",
+    snippet: "Ready for review",
+    unread: false
+  })],
+  estimate: 1,
+  nextPageToken: ""
+}, NOW + 1)
+
+deepEqual(cache.searchSummaries(searchable, "jane invoice").map(row => row.id),
+  ["newer", "older"], "local results are deduplicated and newest first")
+assert.strictEqual(cache.searchSummaries(searchable, "jane invoice")[1].unread, false,
+  "the newest cached copy supplies the row")
+deepEqual(cache.searchSummaries(searchable, "buyer@example.org").map(row => row.id), ["older"],
+  "recipients are searchable too")
+deepEqual(cache.searchSummaries(searchable, '"quarterly invoice"').map(row => row.id), ["older"])
+deepEqual(cache.searchSummaries(searchable, "from:jane"), [],
+  "provider operators are not guessed by the local fallback")
+deepEqual(cache.searchSummaries(searchable, ""), [])
+
 // ---------------------------------------------------------------- pruning
 //
 // This store is rewritten whole every time it is saved, so it has to stay small

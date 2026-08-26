@@ -308,6 +308,42 @@ function replaceById(list, summary) {
   return out
 }
 
+// Search starts with rows found in the query cache, then learns live rows from
+// the provider. One id stays one row, live metadata replaces the cached copy,
+// and a newly found message takes its chronological place instead of jumping
+// around according to which parallel request happened to finish first.
+function mergeSearchResults(cached, live) {
+  var lists = [Array.isArray(cached) ? cached : [], Array.isArray(live) ? live : []]
+  var positions = {}
+  var merged = []
+  var order = 0
+  for (var l = 0; l < lists.length; l++) {
+    for (var i = 0; i < lists[l].length; i++) {
+      var row = lists[l][i]
+      var id = String(row && row.id ? row.id : "")
+      if (id === "") continue
+      if (positions[id] !== undefined) {
+        merged[positions[id]].row = row
+        continue
+      }
+      positions[id] = merged.length
+      merged.push({ row: row, order: order++ })
+    }
+  }
+
+  merged.sort(function(a, b) {
+    var aTime = a.row && a.row.date && typeof a.row.date.getTime === "function"
+      ? Number(a.row.date.getTime()) : 0
+    var bTime = b.row && b.row.date && typeof b.row.date.getTime === "function"
+      ? Number(b.row.date.getTime()) : 0
+    if (aTime !== bTime) return bTime - aTime
+    return a.order - b.order
+  })
+  var out = []
+  for (var j = 0; j < merged.length; j++) out.push(merged[j].row)
+  return out
+}
+
 // The row a message becomes once it has been opened.
 //
 // A detail read is authoritative about everything it carries and silent about

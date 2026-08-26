@@ -10,6 +10,12 @@ Item {
   required property color textColor
   required property color accentColor
   required property string panelFontFamily
+  property bool serverSearching: false
+
+  // Keep the words while the field has room for both them and the query. The
+  // rotating refresh remains at narrow widths, where a status sentence would
+  // leave almost no editable field behind.
+  readonly property bool showServerLabel: width >= Style.space(260)
 
   signal submitted(string query)
   signal cleared()
@@ -45,6 +51,7 @@ Item {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
     rightPadding: horizontalPadding + Style.space(22)
+      + (root.serverSearching ? serverState.width + Style.space(7) : 0)
     onAccepted: root.submitted(text.trim())
 
     // Quieter than the kit's own control surface, which outlines the field at
@@ -70,7 +77,49 @@ Item {
     }
   }
 
+  Item {
+    id: serverState
+    anchors.right: clearButton.left
+    anchors.rightMargin: Style.space(3)
+    anchors.verticalCenter: parent.verticalCenter
+    visible: root.serverSearching
+    width: visible ? serverStateRow.implicitWidth : 0
+    height: Style.space(22)
+
+    Row {
+      id: serverStateRow
+      anchors.centerIn: parent
+      spacing: root.showServerLabel ? Style.space(5) : 0
+
+      ActionIcon {
+        anchors.verticalCenter: parent.verticalCenter
+        name: "refresh"
+        iconSize: Style.font.iconSmall
+        color: root.accentColor
+
+        RotationAnimator on rotation {
+          from: 0
+          to: 360
+          duration: 900
+          loops: Animation.Infinite
+          running: root.serverSearching
+        }
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.showServerLabel
+        text: "Searching server"
+        textFormat: Text.PlainText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+  }
+
   PanelActionButton {
+    id: clearButton
     anchors.right: parent.right
     anchors.rightMargin: Style.space(4)
     anchors.verticalCenter: parent.verticalCenter

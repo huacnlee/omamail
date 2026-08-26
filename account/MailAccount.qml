@@ -345,6 +345,11 @@ Item {
   readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
     : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
   readonly property bool hasMore: nextPageToken !== ""
+  // A cached search can already have rows on screen while this stays true.
+  // Kept separate from the generic list state so the view can say that the
+  // visible answer is still being extended by the server.
+  readonly property bool serverSearchLoading: searchQuery !== ""
+    && rawQuery === "" && listLoading
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
   readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread,
     Provider.badge(providerId), Provider.authKind(providerId))
@@ -530,21 +535,27 @@ Item {
     return Api.preferredSendAs(availableSendAsAliases, recipients)
   }
 
-  // Paints whatever the last visit to this query left behind. Switching
-  // mailboxes should never show an empty column while the network decides.
+  // Paints whatever the last visit to this query left behind. A new typed
+  // search has no entry of its own yet, so it also searches every cached row's
+  // sender, recipients, subject and snippet. The provider keeps searching the
+  // server underneath; this is the immediate answer, not the final boundary of
+  // what can be found.
   function paintFromCache() {
     if (!cacheStore.loaded) return false
     var entry = cacheStore.get(cacheKey)
-    if (!entry || !entry.summaries || entry.summaries.length === 0) return false
+    var restored = entry && entry.summaries ? Cache.hydrate(entry.summaries) : []
+    if (searchQuery !== "" && rawQuery === "")
+      restored = Model.mergeSearchResults(restored,
+        Cache.searchSummaries(cacheStore.store, searchQuery))
+    if (restored.length === 0) return false
 
     var now = new Date()
-    var restored = Cache.hydrate(entry.summaries)
     for (var i = 0; i < restored.length; i++)
       restored[i].time = Mail.relativeTime(restored[i].date, now)
 
     messages = restored
-    resultEstimate = entry.estimate
-    nextPageToken = entry.nextPageToken
+    resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
+    nextPageToken = entry ? entry.nextPageToken : ""
     listLoaded = true
     lastError = ""
 
@@ -575,6 +586,14 @@ Item {
     }
     listLoading = true
     var token = append ? nextPageToken : ""
+
+    // A typed search accepts ids while the provider is still finding them.
+    // Mailbox and label listings have no long-running search phase, so their
+    // simpler page-at-once path stays below.
+    if (searchQuery !== "" && rawQuery === "") {
+      loadSearchMessages(append, token, serial)
+      return
+    }
 
     listHandle = api.listMessages(effectiveQuery, maxMessages, token,
       function(page, error) {
@@ -610,6 +629,119 @@ Item {
       })
   }
 
+  // The two stages of a server search overlap here. `listMessages` reports id
+  // fragments as its search windows settle; each fragment starts its metadata
+  // read immediately, and those payloads paint without waiting for either the
+  // rest of the ids or the slowest metadata request. The final list callback
+  // remains authoritative for paging and for when "Checking" may stop.
+  function loadSearchMessages(append, token, serial) {
+    var cachedSearch = messages.slice()
+    var liveSummaries = []
+    var requested = {}
+    var pendingFetches = 0
+    var listingDone = false
+    var finalPage = null
+    var listingError = ""
+    var summaryError = ""
+
+    function summariesOf(payloads) {
+      var now = new Date()
+      var summaries = []
+      var list = Array.isArray(payloads) ? payloads : []
+      for (var i = 0; i < list.length; i++) summaries.push(Mail.summarize(list[i], now))
+      return summaries
+    }
+
+    function paintPayloads(payloads) {
+      if (serial !== root.listSerial) return
+      var summaries = summariesOf(payloads)
+      if (summaries.length === 0) return
+      liveSummaries = Model.mergeSearchResults(liveSummaries, summaries)
+      root.messages = Model.mergeSearchResults(cachedSearch, liveSummaries)
+      root.listLoaded = true
+      root.lastError = ""
+      root.listRefreshed()
+    }
+
+    function finishIfReady() {
+      if (serial !== root.listSerial || !listingDone || pendingFetches > 0) return
+      root.listLoading = false
+      if (listingError !== "") {
+        root.fail(listingError)
+        return
+      }
+      if (!finalPage) {
+        root.fail("The mail server returned nothing")
+        return
+      }
+
+      root.resultEstimate = finalPage.estimate
+      root.nextPageToken = finalPage.nextPageToken
+      if (summaryError !== "" && liveSummaries.length === 0) {
+        root.fail(summaryError)
+        return
+      }
+      if (finalPage.ids.length === 0 && liveSummaries.length === 0) {
+        if (!append) root.messages = []
+        root.listLoaded = true
+        root.lastError = ""
+        root.lastSyncedMs = Date.now()
+        root.listRefreshed()
+      } else {
+        root.applySummaries(liveSummaries, append, cachedSearch)
+      }
+      cacheStore.putQuery(root.cacheKey, ({
+        summaries: root.messages,
+        estimate: root.resultEstimate,
+        nextPageToken: root.nextPageToken
+      }))
+    }
+
+    function fetchIds(ids) {
+      if (serial !== root.listSerial) return
+      var source = Array.isArray(ids) ? ids : []
+      var wanted = []
+      for (var i = 0; i < source.length; i++) {
+        var id = String(source[i] || "")
+        if (id === "" || requested[id]) continue
+        requested[id] = true
+        wanted.push(id)
+      }
+      if (wanted.length === 0) {
+        finishIfReady()
+        return
+      }
+
+      pendingFetches++
+      api.getMessages(wanted, false, function(payloads, error) {
+        if (serial !== root.listSerial) return
+        paintPayloads(payloads)
+        if (error && (!payloads || payloads.length === 0) && summaryError === "")
+          summaryError = error
+        pendingFetches--
+        finishIfReady()
+      }, listHandle, paintPayloads)
+    }
+
+    function idsArrived(page) {
+      if (serial !== root.listSerial || !page) return
+      root.resultEstimate = Math.max(root.resultEstimate,
+        Math.max(0, Math.floor(Number(page.estimate)) || 0))
+      root.nextPageToken = String(page.nextPageToken || "")
+      fetchIds(page.ids)
+    }
+
+    listHandle = api.listMessages(effectiveQuery, maxMessages, token,
+      function(page, error) {
+        if (serial !== root.listSerial) return
+        finalPage = page
+        listingError = String(error || "")
+        listingDone = true
+        if (page) fetchIds(page.ids)
+        finishIfReady()
+      }, idsArrived)
+  }
+
   function fetchSummaries(ids, append, serial) {
     api.getMessages(ids, false, function(payloads, error) {
       if (serial !== root.listSerial) return
@@ -620,19 +752,29 @@ Item {
       }
       var now = new Date()
       var summaries = []
-      for (var i = 0; i < payloads.length; i++) summaries.push(Mail.summarize(payloads[i], now))
-      root.applySummaries(summaries, append)
-      if (!append) cacheStore.putQuery(root.cacheKey, ({
-        summaries: summaries,
+      for (var i = 0; i < payloads.length; i++)
+        summaries.push(Mail.summarize(payloads[i], now))
+      root.applySummaries(summaries, append, null)
+      // The cache is the list the window actually showed, including pages the
+      // user loaded after the first. Keeping only page one made a later local
+      // search forget rows that had plainly been here already.
+      cacheStore.putQuery(root.cacheKey, ({
+        summaries: root.messages,
         estimate: root.resultEstimate,
         nextPageToken: root.nextPageToken
       }))
     }, listHandle)
   }
 
-  function applySummaries(summaries, append) {
-    var merged = append ? root.messages.concat(summaries) : summaries
-    var arrivals = append ? [] : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+  function applySummaries(summaries, append, cachedSearch) {
+    var searching = Array.isArray(cachedSearch)
+    var merged = searching ? Model.mergeSearchResults(cachedSearch, summaries)
+      : (append ? root.messages.concat(summaries) : summaries)
+    // A manual search may uncover an old unread row the current mailbox page
+    // never held. That is a result, not newly arrived mail, so it must not turn
+    // into a desktop notification.
+    var arrivals = append || searching ? []
+      : Model.newArrivals(summaries, seenIds, notificationsPrimed)
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true

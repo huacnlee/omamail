@@ -240,7 +240,7 @@ Item {
 
   // ---------------------------------------------------------------- reads
 
-  function listMessages(query, maxResults, pageToken, callback) {
+  function listMessages(query, maxResults, pageToken, callback, progress) {
     var handle = newHandle()
     var parsed = Cli.parseQuery(query)
 
@@ -290,7 +290,7 @@ Item {
   // hand. Every caller is written against a callback that arrives later, and
   // running one partway through the function that started it is a re-entry the
   // Gmail client never produces.
-  function getMessages(ids, full, callback, existingHandle) {
+  function getMessages(ids, full, callback, existingHandle, progress) {
     var handle = existingHandle || newHandle()
     var list = Array.isArray(ids) ? ids : []
     if (typeof callback !== "function") return handle
@@ -309,6 +309,7 @@ Item {
             if (handle.aborted) return
             if (error && !firstError) firstError = error
             results[index] = payload
+            if (payload && typeof progress === "function") progress([payload])
             remaining--
             if (remaining > 0) return
             var ordered = []
@@ -330,6 +331,7 @@ Item {
         var row = root.rowFor(list[i])
         if (row) out.push(root.toMessage(list[i], row, null))
       }
+      if (out.length > 0 && typeof progress === "function") progress(out)
       callback(out, out.length > 0 || list.length === 0 ? ""
         : "Those messages are no longer in the mailbox")
     })

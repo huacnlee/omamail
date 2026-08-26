@@ -112,6 +112,22 @@ assert.strictEqual(model.messageById(list, [{ id: "preview" }], "missing"), null
 assert.strictEqual(model.unreadCount(list), 2)
 assert.strictEqual(model.unreadCount([]), 0)
 
+// Local search rows stay visible while live metadata arrives. A live copy
+// replaces the cached one, a new result takes its chronological place, and a
+// request finishing twice cannot draw the same id twice.
+const cachedSearch = [
+  { id: "old", subject: "cached", date: new Date("2026-08-20T10:00:00Z") },
+  { id: "same", subject: "stale", date: new Date("2026-08-22T10:00:00Z") }
+]
+const liveSearch = [
+  { id: "new", subject: "live", date: new Date("2026-08-24T10:00:00Z") },
+  { id: "same", subject: "fresh", date: new Date("2026-08-22T10:00:00Z") }
+]
+const searchMerged = model.mergeSearchResults(cachedSearch, liveSearch)
+deepEqual(searchMerged.map(entry => entry.id), ["new", "same", "old"])
+assert.strictEqual(searchMerged[1].subject, "fresh")
+deepEqual(model.mergeSearchResults(null, liveSearch).map(entry => entry.id), ["new", "same"])
+
 // ---------------------------------------------------------------- the bar
 
 assert.strictEqual(model.badgeText(0), "")

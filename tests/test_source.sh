@@ -488,6 +488,37 @@ if grep -q 'implicitHeight: childrenRect\.height' components/ListSkeleton.qml; t
   fail "Column.implicitHeight is read-only and makes ListSkeleton unavailable"
 fi
 
+# A first-time search paints what every cached mailbox page already knows, then
+# accepts provider results without waiting for the last metadata request. The
+# progress argument is part of the shared client interface, not a Gmail branch
+# in MailAccount.
+grep -q 'Cache\.searchSummaries(cacheStore\.store, searchQuery)' account/MailAccount.qml \
+  || fail "typed searches must inspect every cached message summary first"
+grep -q 'function loadSearchMessages' account/MailAccount.qml \
+  || fail "typed searches need a progressive list pipeline"
+grep -q '}, idsArrived)' account/MailAccount.qml \
+  || fail "server ids must be consumed before the final list callback"
+grep -q 'readonly property bool serverSearchLoading:' account/MailAccount.qml \
+  || fail "typed searches must expose that the server answer is still loading"
+grep -q 'serverSearching: !!root\.service && root\.service\.serverSearchLoading' App.qml \
+  || fail "the search field must receive the live server-search state"
+grep -q 'text: "Searching server"' components/SearchBar.qml \
+  || fail "the search field must name what is still running"
+grep -q 'RotationAnimator on rotation' components/SearchBar.qml \
+  || fail "the server-search state must remain visible when its label no longer fits"
+for client in providers/GmailApiClient.qml providers/HeyClient.qml providers/ImapClient.qml; do
+  grep -q 'function listMessages(query, maxResults, pageToken, callback, progress)' "$client" \
+    || fail "$client must expose the shared progressive search interface"
+  grep -q 'function getMessages(ids, full, callback, existingHandle, progress)' "$client" \
+    || fail "$client must expose the shared progressive list interface"
+done
+grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
+  || fail "IMAP search windows must report ids before the final page"
+grep -q 'Imap\.uidCeilingCommand()' providers/ImapClient.qml \
+  || fail "interactive IMAP search must not wait for the complete UID snapshot"
+grep -q 'streamedSummaryBatch' providers/ImapClient.qml \
+  || fail "streamed IMAP results must fetch headers in visible batches"
+
 # New-mail notifications use the application's own mark, not the desktop's
 # generic unread-mail glyph.
 grep -q 'root\.pluginDir + "/assets/omamail\.svg"' account/MailAccount.qml \

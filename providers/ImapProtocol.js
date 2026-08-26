@@ -305,7 +305,7 @@ function parseMessageId(id) {
 // Grouped by folder, because every command this client sends operates on the
 // folder the connection has selected: one round trip per folder rather than
 // one per message, and a batch spanning two folders is two conversations.
-function groupByFolder(ids) {
+function groupByFolder(ids, maxPerGroup) {
   var list = Array.isArray(ids) ? ids : []
   var order = []
   var groups = {}
@@ -319,7 +319,17 @@ function groupByFolder(ids) {
     groups[parsed.folder].push(parsed.uid)
   }
   var out = []
-  for (var j = 0; j < order.length; j++) out.push({ folder: order[j], uids: groups[order[j]] })
+  var limit = Math.max(0, Math.floor(Number(maxPerGroup)) || 0)
+  for (var j = 0; j < order.length; j++) {
+    var folder = order[j]
+    var uids = groups[folder]
+    if (limit < 1) {
+      out.push({ folder: folder, uids: uids })
+      continue
+    }
+    for (var at = 0; at < uids.length; at += limit)
+      out.push({ folder: folder, uids: uids.slice(at, at + limit) })
+  }
   return out
 }
 
@@ -373,6 +383,13 @@ function uidListCommand() {
   return "UID FETCH 1:* (UID)"
 }
 
+// An interactive search does not need every UID before it can begin. This one
+// short FETCH learns the immutable upper boundary of the mailbox; an empty
+// mailbox answers with no FETCH row at all.
+function uidCeilingCommand() {
+  return "UID FETCH * (UID)"
+}
+
 // A SEARCH over a known UID snapshot can be split without using message
 // sequence numbers. UIDs do not move when another client expunges a message,
 // and a message delivered after the snapshot has a UID above its last one.
@@ -382,6 +399,23 @@ function uidListCommand() {
 // endpoints may be far apart in a sparse mailbox, but the snapshot proves that
 // at most 4096 existing messages lie between them.
 var SEARCH_WINDOW = 4096
+
+// One newest-first numeric UID range for an interactive search. A UID range of
+// width 4096 can contain at most 4096 messages, so its one-line SEARCH answer
+// stays bounded without first downloading the UID of every message. UIDs do
+// not move when another client expunges mail, and the ceiling was read before
+// the first range, so new delivery cannot enter it either.
+function searchWindow(criteria, highestUid) {
+  var text = trimmed(criteria)
+  var last = Math.floor(Number(highestUid))
+  if (text === "" || !isFinite(last) || last < 1)
+    return { command: "", nextUid: 0 }
+  var first = Math.max(1, last - SEARCH_WINDOW + 1)
+  return {
+    command: "UID SEARCH UID " + first + ":" + last + " " + text,
+    nextUid: first - 1
+  }
+}
 
 function sortedUids(values) {
   var list = Array.isArray(values) ? values : []
@@ -403,11 +437,35 @@ function searchCommands(criteria, snapshot) {
   var commands = []
   if (text === "" || uids.length === 0) return commands
 
-  for (var i = 0; i < uids.length; i += SEARCH_WINDOW) {
-    var last = Math.min(uids.length - 1, i + SEARCH_WINDOW - 1)
-    commands.push("UID SEARCH UID " + uids[i] + ":" + uids[last] + " " + text)
+  // Interactive search can paint a page before every window has answered only
+  // if no later answer can put a newer message in front of it. UIDs grow with
+  // delivery, so walking the stable snapshot backwards makes every completed
+  // window a final prefix of the result rather than a provisional one.
+  var last = uids.length - 1
+  while (last >= 0) {
+    var first = Math.max(0, last - SEARCH_WINDOW + 1)
+    commands.push("UID SEARCH UID " + uids[first] + ":" + uids[last] + " " + text)
+    last = first - 1
   }
   return commands
+}
+
+// The visible page after some or all SEARCH windows have answered. During a
+// streamed search `hasUnscanned` keeps pagination alive even if the rows found
+// so far happen to end exactly at the page boundary. The estimate is then a
+// lower bound — Model already calls provider totals "about" for this reason.
+function searchPage(uids, offset, maxResults, hasUnscanned) {
+  var ordered = sortedUids(uids)
+  ordered.reverse()
+  var start = Math.max(0, Math.floor(Number(offset)) || 0)
+  var limit = Math.max(1, Math.floor(Number(maxResults)) || 25)
+  var page = ordered.slice(start, start + limit)
+  var more = hasUnscanned === true || start + limit < ordered.length
+  return {
+    uids: page,
+    nextOffset: more ? String(start + limit) : "",
+    estimate: more ? Math.max(ordered.length, start + limit + 1) : ordered.length
+  }
 }
 
 function summaryFetchCommand(uids) {

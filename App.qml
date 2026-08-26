@@ -839,6 +839,7 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
+          serverSearching: !!root.service && root.service.serverSearchLoading
           // A search replaces the list, so the message still open in the
           // reader is almost certainly not in the results any more.
           onSubmitted: function(query) {
