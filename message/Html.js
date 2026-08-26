@@ -2424,12 +2424,17 @@ function readerAvatarRow(block) {
   if (!readerMeaningful(words) || readerContainsImage(words)) return null
 
   var table = readerElement("table")
-  table.attrs = [{ name: "cellspacing", value: "4" }, { name: "cellpadding", value: "0" }]
+  table.attrs = [{ name: "cellspacing", value: "0" }, { name: "cellpadding", value: "0" }]
   var row = readerElement("tr")
   var picture = readerElement("td")
   var text = readerElement("td")
-  picture.attrs = [{ name: "valign", value: "middle" }]
-  text.attrs = [{ name: "valign", value: "middle" }]
+  // These fixed styles override the document's data-table cell rhythm. Without
+  // them that padding combines with cellspacing and leaves an avatar a full
+  // character cell away from the name it identifies.
+  picture.attrs = [{ name: "valign", value: "middle" },
+    { name: "style", value: "padding:0px;padding-right:6px" }]
+  text.attrs = [{ name: "valign", value: "middle" },
+    { name: "style", value: "padding:0px" }]
   picture.children = [children[0]]
   text.children = words
   row.children = [picture, text]

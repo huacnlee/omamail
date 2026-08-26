@@ -902,7 +902,7 @@ function reading(source, options) {
     assert.ok(pair === "a/href" || pair === "img/src"
       || pair === "img/width" || pair === "img/height"
       || pair === "table/cellspacing" || pair === "table/cellpadding"
-      || pair === "td/valign",
+      || pair === "td/valign" || pair === "td/style",
       "reading mode emitted " + pair + ", which is a sender attribute it cannot have")
   }
   // The attribute list is only half of it. An element the reader never built
@@ -1422,10 +1422,10 @@ function activityMail() {
     + "<img src=\"https://cdn.example.com/alice.png\" width=\"20\" height=\"20\"></a>"
     + "<strong>Alice</strong> left a comment</p>", { allowRemoteImages: true }).html
   assert.strictEqual(avatar,
-    "<table cellspacing=\"4\" cellpadding=\"0\"><tr>"
-      + "<td valign=\"middle\"><a href=\"https://example.com/alice\">"
+    "<table cellspacing=\"0\" cellpadding=\"0\"><tr>"
+      + "<td valign=\"middle\" style=\"padding:0px;padding-right:6px\"><a href=\"https://example.com/alice\">"
       + "<img src=\"https://cdn.example.com/alice.png\" width=\"20\" height=\"20\"></a></td>"
-      + "<td valign=\"middle\"><strong>Alice</strong> left a comment</td>"
+      + "<td valign=\"middle\" style=\"padding:0px\"><strong>Alice</strong> left a comment</td>"
       + "</tr></table>")
 
   // One parse answers for all three readings, which is what makes changing mode
