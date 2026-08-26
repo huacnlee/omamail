@@ -27,8 +27,12 @@ deepEqual(mailto.parse("mailto:?bcc=hidden@example.com"),
   draft("", "", "hidden@example.com", "", ""),
   "a bcc-only link still opens a draft")
 
-assert.strictEqual(mailto.parse("mailto:jane@example.com?subject=Stop+these").subject,
-  "Stop these", "+ in a query string is a space")
+assert.strictEqual(mailto.parse("mailto:user+tag@example.com").to,
+  "user+tag@example.com", "+ is data in a mailto address, not a form-encoded space")
+assert.strictEqual(mailto.parse("mailto:jane@example.com?subject=C++").subject,
+  "C++", "+ is data in a mailto query too; spaces are percent-encoded")
+assert.strictEqual(mailto.parse("mailto:jane@example.com?subject=Stop%20these").subject,
+  "Stop these", "%20 is how a mailto query carries a space")
 assert.strictEqual(mailto.parse("mailto:jane@example.com?subject=%E4%B8%AD%E6%96%87").subject,
   "中文")
 assert.strictEqual(mailto.parse("mailto:jane@example.com?body=line%0Abreak").body,
