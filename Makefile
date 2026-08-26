@@ -99,6 +99,7 @@ test-shell:
 	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
+	bash tests/test_release_notes.sh
 
 # Focus ownership and key routing cannot be tested without a focus scope, and a
 # focus scope needs the QML engine. Offscreen, so it needs no compositor: the

@@ -449,6 +449,14 @@ key. What matters while working:
   MAJOR.MINOR.PATCH, one the manifest already carries, a branch that is not
   main, a dirty tree, a tag that already exists here or on the remote, and a
   main that is behind the remote. It runs `make test` before tagging.
+- A user-visible pull request carries a `## Release Notes` section in its
+  description. Write the shipped results there as concise user-facing bullets;
+  implementation details and verification belong in their own sections.
+- The release workflow finds pull requests from the commit range between the
+  previous and current tags, then `scripts/release-notes.sh` combines every
+  `## Release Notes` section and builds the complete change list. Do not replace
+  this with GitHub's generated notes: those do not read the PR descriptions and
+  can omit a pull request that is present in the tagged history.
 - The tag is the only thing that publishes a release. Nothing else creates one.
 
 ## Verification
