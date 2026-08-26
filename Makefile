@@ -45,6 +45,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/CalendarEventComposer.qml \
 	components/CalendarEventDetail.qml \
 	components/CalendarPalette.qml \
+	components/ConfirmDeleteDialog.qml \
 	components/SetupPage.qml \
 	components/ShortcutHelp.qml \
 	calendar/CalendarController.qml calendar/CalendarCache.qml \
@@ -99,6 +100,7 @@ test-shell:
 	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
+	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh
 
 # Focus ownership and key routing cannot be tested without a focus scope, and a

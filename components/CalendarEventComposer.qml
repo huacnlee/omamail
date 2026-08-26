@@ -19,6 +19,12 @@ Rectangle {
   property string selectedSourceId: ""
   property bool recurring: false
   property string recurrenceFrequency: "WEEKLY"
+  // Set while an existing event is being changed rather than a new one made.
+  // The calendar picker and the recurrence section stand down then: the event
+  // stays on the calendar that owns it, and the rule is the server's to keep.
+  property var editingEvent: null
+  property string editingSourceId: ""
+  readonly property bool editing: editingEvent !== null
   color: root.backgroundColor
 
   function localDate(date) {
@@ -38,6 +44,8 @@ Rectangle {
     if (!(isFinite(requested) && requested > 0))
       start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30, 0, 0)
     var end = new Date(start.getTime() + 3600000)
+    editingEvent = null
+    editingSourceId = ""
     titleField.text = ""
     dateField.text = localDate(start)
     startField.text = localTime(start)
@@ -55,16 +63,41 @@ Rectangle {
     Qt.callLater(titleField.forceActiveFocus)
   }
 
+  function beginEdit(sourceId, event) {
+    if (!event || !event.start) return
+    var start = new Date(Number(event.start.ms))
+    var end = event.end ? new Date(Number(event.end.ms)) : new Date(start.getTime() + 3600000)
+    editingEvent = event
+    editingSourceId = String(sourceId || "")
+    titleField.text = String(event.summary || "")
+    dateField.text = localDate(start)
+    startField.text = localTime(start)
+    endField.text = localTime(end)
+    locationField.text = String(event.location || "")
+    notesField.text = String(event.description || "")
+    intervalField.text = "1"
+    countField.text = ""
+    recurring = false
+    resultText.text = ""
+    selectedSourceId = editingSourceId
+    opened = true
+    Qt.callLater(titleField.forceActiveFocus)
+  }
+
   function begin() { beginAt(0) }
 
-  function close() { opened = false }
+  function close() {
+    opened = false
+    editingEvent = null
+    editingSourceId = ""
+  }
   function takeFocus() { titleField.forceActiveFocus() }
 
   function submit() {
     if (!controller) return
     var start = new Date(dateField.text + "T" + startField.text + ":00")
     var end = new Date(dateField.text + "T" + endField.text + ":00")
-    controller.createEvent(selectedSourceId, {
+    var fields = {
       title: titleField.text,
       startMs: start.getTime(),
       endMs: end.getTime(),
@@ -76,7 +109,9 @@ Rectangle {
         interval: intervalField.text,
         count: countField.text
       }
-    })
+    }
+    if (editing) controller.updateEvent(editingSourceId, editingEvent, fields)
+    else controller.createEvent(selectedSourceId, fields)
   }
 
   CalendarPalette {
@@ -111,7 +146,7 @@ Rectangle {
       }
 
       Text {
-        text: "Create event"
+        text: root.editing ? "Edit event" : "Create event"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.heading
@@ -120,6 +155,7 @@ Rectangle {
       }
 
       Text {
+        visible: !root.editing
         text: "CALENDAR"
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -129,7 +165,7 @@ Rectangle {
       }
 
       Repeater {
-        model: root.controller ? root.controller.sourceGroups : []
+        model: root.editing ? [] : (root.controller ? root.controller.sourceGroups : [])
 
         delegate: Column {
           id: sourceGroup
@@ -225,6 +261,7 @@ Rectangle {
       }
 
       IconTextButton {
+        visible: !root.editing
         text: "Make recurring"
         iconName: root.recurring ? "check" : ""
         selected: root.recurring
@@ -236,7 +273,7 @@ Rectangle {
 
       Column {
         width: parent.width
-        visible: root.recurring
+        visible: root.recurring && !root.editing
         spacing: Style.space(8)
 
         Text {
@@ -341,12 +378,17 @@ Rectangle {
         spacing: Style.space(6)
 
         IconTextButton {
-          text: root.controller && root.controller.creatingEvent ? "Creating" : "Create event"
-          iconName: "plus"
+          text: {
+            if (root.editing)
+              return root.controller && root.controller.eventWriting ? "Saving" : "Save changes"
+            return root.controller && root.controller.creatingEvent ? "Creating" : "Create event"
+          }
+          iconName: root.editing ? "check" : "plus"
           foreground: root.textColor
           accent: root.accentColor
           fontFamily: root.panelFontFamily
-          enabled: root.controller && !root.controller.creatingEvent
+          enabled: root.controller && (root.editing
+            ? !root.controller.eventWriting : !root.controller.creatingEvent)
           onClicked: root.submit()
         }
 
@@ -375,6 +417,10 @@ Rectangle {
   Connections {
     target: root.controller
     function onEventCreated(ok, error) {
+      if (ok) root.close()
+      else resultText.text = error
+    }
+    function onEventUpdated(ok, error) {
       if (ok) root.close()
       else resultText.text = error
     }

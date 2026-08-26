@@ -281,9 +281,10 @@ thousand of them, evicted least-recently-used.
 - The access token exists only in memory.
 - Signing out clears the keyring entry.
 
-The app asks for `gmail.modify` and `gmail.send`. `gmail.modify` covers reading,
-labelling, archiving and trashing, and deliberately **cannot** delete anything
-permanently.
+The app asks for `gmail.modify`, `gmail.send` and `calendar.events`.
+`gmail.modify` covers reading, labelling, archiving and trashing, and
+deliberately **cannot** delete anything permanently. `calendar.events` reads
+calendars and writes events.
 
 ## Development
 

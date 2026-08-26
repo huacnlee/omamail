@@ -27,6 +27,7 @@ three directories away from the client that calls it.
 | `providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
 | `account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
 | `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
+| `calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
 | `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
 | `components/` | Views. They draw what they are given and decide nothing. |
 

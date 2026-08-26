@@ -173,10 +173,14 @@ const google = feed.eventsFromGoogle({ items: [{
 }] }, "google:me")
 assert.strictEqual(google.length, 1)
 assert.strictEqual(google[0].uid, "g1")
+assert.strictEqual(google[0].googleId, "g1",
+  "the write URL needs the item id, separate from the iCalUID")
 assert.strictEqual(google[0].sourceId, "google:me")
 assert.strictEqual(google[0].start.ms, Date.parse("2026-08-24T10:00:00+02:00"))
 const googleUrl = feed.googleEventsUrl(Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
 assert.ok(googleUrl.indexOf("https://www.googleapis.com/calendar/v3/calendars/primary/events?") === 0)
+assert.strictEqual(feed.googleEventUrl("g1_20260824T080000Z"),
+  "https://www.googleapis.com/calendar/v3/calendars/primary/events/g1_20260824T080000Z")
 
 const created = feed.createEvent({
   title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
@@ -219,6 +223,53 @@ assert.strictEqual(feed.createEvent({ title: "", startMs: 1, endMs: 2 }, 1).erro
   "Add an event title")
 assert.strictEqual(feed.createEvent({ title: "x", startMs: 2, endMs: 1 }, 1).error,
   "End time must be after start time")
+
+// An edit keeps the event's identity and tells every copy which write is new.
+const updated = feed.updateEvent({
+  title: "Planning, moved", startMs: Date.UTC(2026, 7, 24, 10, 0),
+  endMs: Date.UTC(2026, 7, 24, 11, 0), location: "", description: "Weekly plan"
+}, { uid: "omamail-1234", sequence: 0 }, 5678)
+assert.strictEqual(updated.ok, true)
+assert.strictEqual(updated.uid, "omamail-1234")
+assert.ok(updated.ics.indexOf("UID:omamail-1234") > 0)
+assert.ok(updated.ics.indexOf("SEQUENCE:1") > 0,
+  "a rewrite bumps the sequence so older copies yield")
+assert.ok(updated.ics.indexOf("DTSTART:20260824T100000Z") > 0)
+assert.ok(updated.ics.indexOf("SUMMARY:Planning\\, moved") > 0,
+  "ical text escapes what the field carries")
+assert.ok(updated.ics.indexOf("RRULE") < 0,
+  "recurrence is not editable here, so none is written")
+assert.ok(updated.ics.indexOf("LOCATION") < 0, "a cleared field leaves the ICS")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(updated.google)), {
+  summary: "Planning, moved", description: "Weekly plan", location: "",
+  start: { dateTime: "2026-08-24T10:00:00.000Z" },
+  end: { dateTime: "2026-08-24T11:00:00.000Z" }
+})
+assert.ok(!("recurrence" in updated.google),
+  "omitting recurrence from the patch is what keeps the server's rule")
+const bumpedAgain = feed.updateEvent({
+  title: "x", startMs: 1, endMs: 2
+}, { uid: "u", sequence: 4 }, 1)
+assert.ok(bumpedAgain.ics.indexOf("SEQUENCE:5") > 0)
+assert.strictEqual(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1).error,
+  "The event has no identity to update")
+assert.strictEqual(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
+  { uid: "u" }, 1).error, "Add an event title")
+
+// The CalDAV write address is the event's own href, resolved the way the
+// server wrote it: absolute, absolute-path, or relative to the collection.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "/cal/me/a.ics" }), "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "a.ics" }), "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me",
+  { href: "", uid: "omamail-1" }), "https://dav.example/cal/me/omamail-1.ics")
+assert.strictEqual(feed.caldavEventUrl("http://dav.example/cal/me/",
+  { href: "/cal/me/a.ics" }), "", "CalDAV writes stay on HTTPS")
+assert.strictEqual(feed.caldavEventUrl("", { href: "", uid: "" }), "")
 assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)

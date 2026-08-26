@@ -356,6 +356,11 @@ function eventsFromGoogle(payload, sourceId) {
       !!(item.end && item.end.date && !item.end.dateTime))
     out.push({
       method: "", uid: String(item.iCalUID || item.id || ""),
+      // The write URL needs the item's own id, not the iCalUID: with
+      // singleEvents=true an expanded occurrence carries an instance id, and
+      // patching or deleting it does exactly what Google Calendar does to one
+      // occurrence of a series.
+      googleId: String(item.id || ""),
       sequence: Math.max(0, Math.floor(Number(item.sequence) || 0)),
       summary: String(item.summary || "Untitled event"),
       description: String(item.description || ""), location: String(item.location || ""),
@@ -410,7 +415,7 @@ function recurrenceIntervalUnit(frequency, interval) {
   return Number(interval) === 1 ? unit : unit + "s"
 }
 
-function createEvent(fields, nowMs) {
+function validateEventFields(fields) {
   var value = fields || {}
   var title = String(value.title || "").trim()
   var start = Number(value.startMs)
@@ -418,28 +423,87 @@ function createEvent(fields, nowMs) {
   if (title === "") return { ok: false, error: "Add an event title" }
   if (!isFinite(start) || !isFinite(end)) return { ok: false, error: "Add valid start and end times" }
   if (end <= start) return { ok: false, error: "End time must be after start time" }
-  var recurrence = recurrenceRule(value.recurrence)
+  return { ok: true, title: title, start: start, end: end,
+    description: String(value.description || ""), location: String(value.location || "") }
+}
+
+function veventLines(uid, sequence, stampMs, fields, rule) {
+  var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Omamail//Calendar//EN",
+    "BEGIN:VEVENT", "UID:" + uid, "DTSTAMP:" + icsUtc(stampMs)]
+  if (sequence > 0) lines.push("SEQUENCE:" + sequence)
+  lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end),
+    "SUMMARY:" + icsText(fields.title))
+  if (fields.description !== "") lines.push("DESCRIPTION:" + icsText(fields.description))
+  if (fields.location !== "") lines.push("LOCATION:" + icsText(fields.location))
+  if (rule !== "") lines.push("RRULE:" + rule)
+  lines.push("END:VEVENT", "END:VCALENDAR", "")
+  return lines
+}
+
+function googleEventBody(fields) {
+  return {
+    summary: fields.title, description: fields.description, location: fields.location,
+    start: { dateTime: new Date(fields.start).toISOString() },
+    end: { dateTime: new Date(fields.end).toISOString() }
+  }
+}
+
+function createEvent(fields, nowMs) {
+  var checked = validateEventFields(fields)
+  if (!checked.ok) return checked
+  var recurrence = recurrenceRule((fields || {}).recurrence)
   if (!recurrence.ok) return recurrence
   var uid = "omamail-" + Math.floor(Number(nowMs) || Date.now())
-  var description = String(value.description || "")
-  var location = String(value.location || "")
-  var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Omamail//Calendar//EN",
-    "BEGIN:VEVENT", "UID:" + uid, "DTSTAMP:" + icsUtc(nowMs || Date.now()),
-    "DTSTART:" + icsUtc(start), "DTEND:" + icsUtc(end), "SUMMARY:" + icsText(title)]
-  if (description !== "") lines.push("DESCRIPTION:" + icsText(description))
-  if (location !== "") lines.push("LOCATION:" + icsText(location))
-  if (recurrence.rule !== "") lines.push("RRULE:" + recurrence.rule)
-  lines.push("END:VEVENT", "END:VCALENDAR", "")
   var result = {
-    ok: true, uid: uid, ics: lines.join("\r\n"),
-    google: {
-      summary: title, description: description, location: location,
-      start: { dateTime: new Date(start).toISOString() },
-      end: { dateTime: new Date(end).toISOString() }
-    }
+    ok: true, uid: uid,
+    ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule).join("\r\n"),
+    google: googleEventBody(checked)
   }
   if (recurrence.rule !== "") result.google.recurrence = ["RRULE:" + recurrence.rule]
   return result
+}
+
+// An edit rewrites the event on its own identity: the UID names it, and the
+// bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
+// not editable here — the Google patch omits the key so the server keeps the
+// rule, and a recurring CalDAV event never reaches this function because the
+// detail draws no Edit for one.
+function updateEvent(fields, existing, nowMs) {
+  var event = existing || {}
+  var uid = String(event.uid || "")
+  if (uid === "") return { ok: false, error: "The event has no identity to update" }
+  var checked = validateEventFields(fields)
+  if (!checked.ok) return checked
+  var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0)) + 1
+  return {
+    ok: true, uid: uid,
+    ics: veventLines(uid, sequence, Number(nowMs) || Date.now(), checked, "").join("\r\n"),
+    google: googleEventBody(checked)
+  }
+}
+
+function googleEventUrl(eventId) {
+  return "https://www.googleapis.com/calendar/v3/calendars/primary/events/"
+    + encodeURIComponent(String(eventId || ""))
+}
+
+// A REPORT answers with the event's own href, which the server may write as a
+// full URL or as a path against the host the collection lives on.
+function caldavEventUrl(sourceUrl, event) {
+  var href = String(event && event.href || "")
+  if (/^https:\/\//i.test(href)) return href
+  var base = String(sourceUrl || "")
+  var host = /^(https:\/\/[^/]+)/i.exec(base)
+  if (!host) return ""
+  if (href.charAt(0) === "/") return host[1] + href
+  if (href !== "") {
+    var collection = base.charAt(base.length - 1) === "/" ? base : base + "/"
+    return collection + href
+  }
+  var uid = String(event && event.uid || "")
+  if (uid === "") return ""
+  var root = base.charAt(base.length - 1) === "/" ? base : base + "/"
+  return root + encodeURIComponent(uid) + ".ics"
 }
 
 function compareEvents(left, right) {

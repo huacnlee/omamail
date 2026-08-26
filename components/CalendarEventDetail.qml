@@ -16,6 +16,8 @@ Rectangle {
   required property string panelFontFamily
 
   signal closed()
+  signal editRequested(string sourceId, var event)
+  signal deleteRequested(string sourceId, var event)
 
   readonly property var source: {
     var sources = controller && controller.availableSources
@@ -26,6 +28,13 @@ Rectangle {
     }
     return null
   }
+  // The button rule: an operation that cannot really run is not drawn. Google
+  // writes against the item id; CalDAV against the event's href, and a
+  // recurring one is one ICS with state this panel does not re-serialize.
+  readonly property bool canWrite: !!root.source && !!event
+    && (root.source.kind === "google"
+      ? String(event.googleId || "") !== ""
+      : String(event.href || "") !== "" && String(event.recurrenceRule || "") === "")
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
   readonly property string meetingLink: httpLink(event ? event.meetLink : "")
@@ -165,9 +174,29 @@ Rectangle {
 
       Flow {
         visible: root.meetingLink !== "" || root.locationLink !== ""
-          || root.providerLink !== ""
+          || root.providerLink !== "" || root.canWrite
         width: parent.width
         spacing: Style.space(7)
+
+        IconTextButton {
+          visible: root.canWrite
+          text: "Edit..."
+          iconName: "compose"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
+        }
+
+        IconTextButton {
+          visible: root.canWrite
+          text: "Delete..."
+          iconName: "trash"
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
+        }
 
         IconTextButton {
           visible: root.meetingLink !== ""
