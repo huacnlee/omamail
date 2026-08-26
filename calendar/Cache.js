@@ -1,9 +1,10 @@
 .pragma library
 
-// Version 2 adds the Google item id required by event update and delete.
-// Version 1 ranges cannot recover it from their iCal UID or provider URL, so
-// they are invalidated and fetched again instead of restoring unwritable rows.
-var VERSION = 2
+// Version 2 added the Google item id required by update and delete; version 3
+// adds the original CalDAV resource required to preserve fields during PUT.
+// Older ranges cannot recover either value, so they are fetched again instead
+// of restoring rows that are unwritable or unsafe to edit.
+var VERSION = 3
 var MAX_RANGES = 8
 var MAX_EVENTS = 2500
 

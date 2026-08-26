@@ -256,6 +256,36 @@ assert.strictEqual(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1)
 assert.strictEqual(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
   { uid: "u" }, 1).error, "Add an event title")
 
+// A CalDAV update replaces the whole resource, so fields this editor does not
+// draw must survive a change to the ones it does. In particular, editing the
+// title must not remove the organiser, attendees, alarms, timezone rules or a
+// server extension from the VEVENT it puts back.
+const preservedXml = [
+  '<?xml version="1.0"?>',
+  '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+  '<d:response><d:href>/cal/preserved.ics</d:href><d:propstat><d:prop>',
+  '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n',
+  'BEGIN:VTIMEZONE\r\nTZID:Custom/Office\r\nEND:VTIMEZONE\r\n',
+  'BEGIN:VEVENT\r\nUID:preserved\r\nDTSTART:20260824T080000Z\r\n',
+  'DTEND:20260824T090000Z\r\nSUMMARY:Before\r\n',
+  'ORGANIZER:mailto:owner@example.com\r\nATTENDEE:mailto:guest@example.com\r\n',
+  'X-SERVER-FIELD:keep-me\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n',
+  'TRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR',
+  '</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'
+].join("")
+const preservedEvent = feed.eventsFromCaldav(preservedXml, "work")[0]
+const preservedUpdate = feed.updateEvent({
+  title: "After", startMs: Date.UTC(2026, 7, 24, 8, 0),
+  endMs: Date.UTC(2026, 7, 24, 9, 0), location: "", description: ""
+}, preservedEvent, 5678)
+assert.ok(preservedUpdate.ics.indexOf("SUMMARY:After") > 0)
+assert.ok(preservedUpdate.ics.indexOf("SUMMARY:Before") < 0)
+assert.ok(preservedUpdate.ics.indexOf("ORGANIZER:mailto:owner@example.com") > 0)
+assert.ok(preservedUpdate.ics.indexOf("ATTENDEE:mailto:guest@example.com") > 0)
+assert.ok(preservedUpdate.ics.indexOf("BEGIN:VALARM") > 0)
+assert.ok(preservedUpdate.ics.indexOf("X-SERVER-FIELD:keep-me") > 0)
+assert.ok(preservedUpdate.ics.indexOf("BEGIN:VTIMEZONE") > 0)
+
 // A write is refused where it cannot really run: no source, a read-only
 // calendar of any kind, or a recurring CalDAV event whose ICS state this
 // client does not re-serialize. A recurring Google event edits fine — the

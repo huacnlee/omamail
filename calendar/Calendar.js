@@ -322,6 +322,10 @@ function eventsFromCaldav(xml, sourceId, rangeStart, rangeEnd) {
     for (var j = 0; j < events.length; j++) {
       events[j].sourceId = String(sourceId || "")
       events[j].href = responses[i].href
+      // A CalDAV update replaces this entire resource. Keep the source so the
+      // writer can change the fields it owns without dropping everything it
+      // does not model, such as alarms, attendees and server extensions.
+      events[j].calendarData = responses[i].data
       out.push(events[j])
     }
   }
@@ -453,6 +457,19 @@ function veventLines(uid, sequence, stampMs, fields, rule, allDay) {
   return lines
 }
 
+function editableEventLines(sequence, stampMs, fields, allDay) {
+  var lines = ["DTSTAMP:" + icsUtc(stampMs), "SEQUENCE:" + sequence]
+  if (allDay === true)
+    lines.push("DTSTART;VALUE=DATE:" + icsDate(fields.start),
+      "DTEND;VALUE=DATE:" + icsDate(fields.end))
+  else
+    lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end))
+  lines.push("SUMMARY:" + icsText(fields.title))
+  if (fields.description !== "") lines.push("DESCRIPTION:" + icsText(fields.description))
+  if (fields.location !== "") lines.push("LOCATION:" + icsText(fields.location))
+  return lines
+}
+
 function googleEventBody(fields, allDay) {
   var body = {
     summary: fields.title, description: fields.description, location: fields.location
@@ -523,10 +540,16 @@ function updateEvent(fields, existing, nowMs) {
   if (!checked.ok) return checked
   var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0)) + 1
   var allDay = !!(event.start && event.start.allDay)
+  var stampMs = Number(nowMs) || Date.now()
+  var original = String(event.calendarData || "")
+  var rewritten = original === "" ? "" : Ics.rewriteEvent(original, uid,
+    editableEventLines(sequence, stampMs, checked, allDay),
+    ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
+      "DESCRIPTION", "LOCATION"])
   return {
     ok: true, uid: uid,
-    ics: veventLines(uid, sequence, Number(nowMs) || Date.now(), checked, "",
-      allDay).join("\r\n"),
+    ics: rewritten !== "" ? rewritten
+      : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
     google: googleEventBody(checked, allDay)
   }
 }
