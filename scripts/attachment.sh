@@ -178,7 +178,7 @@ uri_to_path() {
     file://*) u=${u#file://} ;;
     *) return 1 ;;
   esac
-  printf '%b' "${u//%/\\x}"
+  python3 -c 'import sys, urllib.parse; sys.stdout.buffer.write(urllib.parse.unquote_to_bytes(sys.argv[1]))' "$u"
 }
 
 clipboard_uris() {

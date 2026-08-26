@@ -22,6 +22,14 @@ JS_FILES=()
 while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
   < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
 
+# A developer machine may point /bin/sh at bash while the release runner points
+# it at dash. Bash's global parameter replacement then passes locally and dies
+# only in CI with "Bad substitution". Scripts declaring /bin/sh stay within
+# POSIX parameter expansion regardless of which shell happens to own that path.
+if grep -rnE '\$\{[A-Za-z_][A-Za-z0-9_]*//' --include='*.sh' scripts; then
+  fail "a /bin/sh script uses bash-only global parameter replacement"
+fi
+
 # 1. No hard-coded colours in QML. Every colour comes from the active Omarchy
 #    theme, or a light theme renders unreadable text.
 if grep -nE '(color|Color)\s*:\s*"#[0-9A-Fa-f]{3,8}"' -- "${QML_FILES[@]}"; then
