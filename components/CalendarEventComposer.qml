@@ -444,11 +444,15 @@ Rectangle {
 
   Connections {
     target: root.controller
+    // A completion can belong to a write the user already cancelled out of:
+    // a closed composer shows nothing and must not close a newer edit.
     function onEventCreated(ok, error) {
+      if (!root.opened) return
       if (ok) root.close()
       else resultText.text = error
     }
     function onEventUpdated(ok, error) {
+      if (!root.opened) return
       if (ok) root.close()
       else resultText.text = error
     }

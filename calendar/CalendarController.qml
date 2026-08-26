@@ -198,6 +198,12 @@ Item {
     eventRequestTimedOut = false
     if (op === "delete") eventDeleted(ok, String(error || ""))
     else eventUpdated(ok, String(error || ""))
+    // A delete is asked for from the detail, not the composer, so nothing
+    // else is listening: the failure has to land on the view's own banner.
+    if (!ok) {
+      lastError = String(error || "Could not write the event")
+      lastErrorKind = ""
+    }
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
 
