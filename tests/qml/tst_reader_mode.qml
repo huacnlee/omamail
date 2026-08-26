@@ -50,6 +50,7 @@ Item {
     property bool selectedReaderEmpty: rendered.reader.empty
     property int selectedRemoteImages: rendered.remoteImages
     property bool remoteImagesAllowed: false
+    property bool remoteImagesLoading: false
     property bool selectedTooHeavy: rendered.tooHeavy
     property string unsubscribeLabel: ""
     property string unsubscribeDetail: ""

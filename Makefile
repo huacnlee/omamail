@@ -94,6 +94,7 @@ test-shell:
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_unsubscribe_transport.sh
+	bash tests/test_image_fetch.sh
 	bash tests/test_attachment_open.sh
 	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh

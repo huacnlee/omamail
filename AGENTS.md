@@ -296,18 +296,17 @@ key. What matters while working:
   one-click unsubscribe goes out through `scripts/unsubscribe.sh`, which is
   curl, which follows nothing unless told to — and a 3xx is reported as a list
   that did not unsubscribe rather than as an address to chase.
-- **Remote images are the part of that which is not closed.** Qt's own image
-  loader performs those fetches and takes no policy from QML, so a sender who
-  redirects an image can still reach an address the gate would have refused.
-  What holds the line meanwhile is that nothing is fetched until the reader
-  asks. Closing it properly means fetching the bytes here — curl, no redirects
-  — and handing the renderer a `data:` URI, which is a day's work and a change
-  to the rule that the string handed over is the only control point. Do not
-  paper over it with a second check on the same first address.
+- **Qt never fetches a remote message image itself.** Its loader takes no policy
+  from QML, follows redirects, and draws a broken placeholder while a resource
+  is pending. Once the reader has allowed images, `scripts/image-fetch.sh`
+  fetches each approved public HTTP(S) source with curl, no redirects, a size
+  ceiling and deadlines. Only a successful supported image comes back as a
+  `data:` URI; until then the source is absent from both rich documents. Do not
+  hand the original remote URL back to Qt or replace this with a QML request,
+  because that reopens both redirect SSRF and the loading-placeholder defect.
 - Remote images in a message body are blocked until the reader asks for them.
-  Qt's rich text engine really does fetch them, so rendering one fires every
-  tracking pixel in the message, and the fetch tells the host that this address
-  opened this message at this moment.
+  Fetching one still tells its host that this address opened this message at
+  this moment, so tracking pixels and hidden images never enter the fetch list.
 - The answer is a standing one, off until it is given. Asking per message meant
   answering the same question on every newsletter and remembering none of it,
   so the cost of asking fell on somebody who had already decided. The notice's

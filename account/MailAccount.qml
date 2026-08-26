@@ -173,14 +173,23 @@ Item {
   // pictures to offer than the sanitised document does. The notice counts
   // what the reading on screen is missing, not what some other one would be.
   property int selectedReaderRemoteImages: 0
-  // Off for every message, every time it is opened. Fetching a sender's images
-  // tells them the mail was read, from which address and when, so it happens
-  // only when the reader has asked — and asking covers this message alone.
+  // Fetching a sender's images tells them the mail was read, from which address
+  // and when, so it happens only after the standing preference allows it.
   // The window's standing answer about remote images, which is where a
   // message starts. Off, and every message begins blocked and is asked about
   // one at a time.
   property bool alwaysShowImages: false
   property bool remoteImagesAllowed: false
+  property bool remoteImagesLoading: false
+  property var remoteImageData: ({})
+  property var selectedRemoteImageSources: []
+  property var imageFetchQueue: []
+  property var imageFetchProcess: null
+  property int imageFetchSerial: 0
+  // Prepared remote bytes stay separate from the source body. Qt receives only
+  // completed data URIs, never an address whose pending load would draw its
+  // built-in broken placeholder or whose redirect could escape the URL gate.
+
   // The sender's images, in the order htmlToText numbers them, so a marker in
   // the plain-text body can be traced back to the picture it replaced.
   property var selectedImages: []
@@ -670,6 +679,15 @@ Item {
     selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = alwaysShowImages
+    remoteImagesLoading = false
+    remoteImageData = ({})
+    selectedRemoteImageSources = []
+    imageFetchQueue = []
+    imageFetchSerial++
+    if (imageFetchProcess) {
+      imageFetchProcess.destroy()
+      imageFetchProcess = null
+    }
     selectedBlockedImages = 0
     selectedRemoteImages = 0
     selectedImages = []
@@ -817,6 +835,7 @@ Item {
     sourceHtml = String(source || "")
     var ready = Html.sanitize(sourceHtml, ({
       allowRemoteImages: remoteImagesAllowed,
+      remoteImageData: remoteImagesAllowed ? remoteImageData : null,
       withPlainText: withPlainText === true,
       withReader: true
     }))
@@ -828,14 +847,64 @@ Item {
     selectedReaderRemoteImages = ready.reader ? ready.reader.blockedImages : 0
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
+    selectedRemoteImageSources = ready.remoteImageSources || []
     selectedTooHeavy = ready.tooHeavy
+    if (remoteImagesAllowed && !remoteImagesLoading
+      && Object.keys(remoteImageData).length === 0
+      && selectedRemoteImageSources.length > 0)
+      Qt.callLater(root.prepareRemoteImages)
     return ready
   }
 
   function showRemoteImages() {
     if (remoteImagesAllowed || sourceHtml === "") return
     remoteImagesAllowed = true
+    remoteImageData = ({})
     renderSource(sourceHtml)
+  }
+
+  function prepareRemoteImages() {
+    if (!remoteImagesAllowed || remoteImagesLoading || sourceHtml === ""
+      || selectedRemoteImageSources.length === 0) return
+    imageFetchQueue = selectedRemoteImageSources.slice(0)
+    remoteImagesLoading = true
+    imageFetchSerial++
+    fetchNextImage(imageFetchSerial)
+  }
+
+  function fetchNextImage(serial) {
+    if (serial !== imageFetchSerial) return
+    if (imageFetchQueue.length === 0) {
+      remoteImagesLoading = false
+      imageFetchProcess = null
+      return
+    }
+    var queue = imageFetchQueue.slice(0)
+    var source = String(queue.shift())
+    imageFetchQueue = queue
+    var request = imageFetchComponent.createObject(root, {
+      command: [pluginDir + "/scripts/image-fetch.sh"],
+      requestLine: Mail.encodeBase64(source)
+    })
+    imageFetchProcess = request
+    if (!request) {
+      fetchNextImage(serial)
+      return
+    }
+    request.finished.connect(function(data) {
+      request.destroy()
+      if (serial !== root.imageFetchSerial) return
+      root.imageFetchProcess = null
+      if (data !== "") {
+        var prepared = ({})
+        for (var key in root.remoteImageData) prepared[key] = root.remoteImageData[key]
+        prepared[source] = data
+        root.remoteImageData = prepared
+        root.renderSource(root.sourceHtml)
+      }
+      root.fetchNextImage(serial)
+    })
+    request.running = true
   }
 
 
@@ -856,6 +925,15 @@ Item {
     selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = false
+    remoteImagesLoading = false
+    remoteImageData = ({})
+    selectedRemoteImageSources = []
+    imageFetchQueue = []
+    imageFetchSerial++
+    if (imageFetchProcess) {
+      imageFetchProcess.destroy()
+      imageFetchProcess = null
+    }
     selectedImages = []
     selectedBlockedImages = 0
     selectedRemoteImages = 0
@@ -1403,6 +1481,27 @@ Item {
   // the mail transport uses, for the same reason: the URL crosses on stdin
   // base64-encoded, so a header a stranger wrote never reaches the process
   // table and nothing has to be escaped on the way.
+  Component {
+    id: imageFetchComponent
+
+    Process {
+      id: imageFetchRequest
+      property string requestLine: ""
+      signal finished(string data)
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+      onStarted: {
+        write(requestLine + "\n")
+        requestLine = ""
+      }
+      onExited: function(exitCode) {
+        var data = String(imageFetchRequest.stdout.text || "").trim()
+        imageFetchRequest.finished(exitCode === 0 && /^data:image\//.test(data) ? data : "")
+      }
+    }
+  }
+
   Component {
     id: unsubscribeComponent
 

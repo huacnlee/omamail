@@ -963,6 +963,39 @@ var MAX_TABLE_DEPTH = 4
 // every element in the document, which on a large message is most of the work.
 var HANDLER_ATTRIBUTE = /^on[a-z]+$/
 
+// The addresses a caller may prepare before Qt receives the document. Taken
+// from the parsed tree so asking for them costs no second parse, with the same
+// tracker, host and count rules the renderer uses.
+function readerRemoteImageSources(root, limit) {
+  var out = []
+  var seen = {}
+
+  function walk(node) {
+    for (var i = 0; i < node.children.length && out.length < limit; i++) {
+      var child = node.children[i]
+      if (child.type === "text") continue
+      if (DROPPED_ELEMENTS[child.name] === true) continue
+      var style = attributeOf(child, "style")
+      var declarations = style !== null && style.value !== null && style.value !== undefined
+        ? splitDeclarations(style.value) : null
+      if (declarations !== null && VOID_ELEMENTS[child.name] !== true
+        && isHiddenBy(declarations)) continue
+      if (child.name === "img") {
+        var source = attributeValue(child, "src")
+        if (imageSourceKind(source) === "remote" && !isTrackingPixel(child)
+          && seen[source] !== true) {
+          seen[source] = true
+          out.push(source)
+        }
+      }
+      walk(child)
+    }
+  }
+
+  walk(root)
+  return out
+}
+
 // The sender centres a 600px card in the middle of a wide window. This reader
 // is a panel of left-aligned text beside a left-aligned list, and the same
 // mail kept centred in it comes out as a column of short lines adrift — the
@@ -1132,6 +1165,8 @@ function sanitize(html, options) {
   var source = String(html === undefined || html === null ? "" : html)
   var keepColors = settings.keepColors === true
   var allowImages = settings.allowRemoteImages === true
+  var imageData = settings.remoteImageData && typeof settings.remoteImageData === "object"
+    ? settings.remoteImageData : null
   var limit = Math.max(0, Math.floor(
     settings.maxImages === undefined ? MAX_IMAGES : settings.maxImages))
 
@@ -1146,6 +1181,12 @@ function sanitize(html, options) {
   var blocked = 0
   var kept = 0
   var loadable = 0
+
+  function preparedImage(source) {
+    if (imageData === null || !Object.prototype.hasOwnProperty.call(imageData, source)) return ""
+    var value = String(imageData[source] || "")
+    return /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i.test(value) ? value : ""
+  }
 
   function keepImage(node) {
     var source = attributeValue(node, "src")
@@ -1165,6 +1206,14 @@ function sanitize(html, options) {
     if (!allowImages || kept >= limit) {
       blocked++
       return false
+    }
+    if (imageData !== null) {
+      var prepared = preparedImage(source)
+      if (prepared === "") {
+        blocked++
+        return false
+      }
+      attributeOf(node, "src").value = prepared
     }
     kept++
     return true
@@ -1208,6 +1257,7 @@ function sanitize(html, options) {
   }
 
   var root = parse(source)
+  var remoteSources = readerRemoteImageSources(root, limit)
 
   // Read as text before anything is dropped, and only when a caller asked: the
   // reader wants both of these for a message with no text/plain part of its
@@ -1227,7 +1277,8 @@ function sanitize(html, options) {
   // touch it, which is what lets one parse answer for all three ways of reading
   // a message — switching between them costs no parse and no fetch.
   var reader = settings.withReader === true
-    ? readerTree(root, ({ allowRemoteImages: allowImages, maxImages: limit }))
+    ? readerTree(root, ({ allowRemoteImages: allowImages, maxImages: limit,
+        remoteImageData: imageData }))
     : null
 
   clean(root)
@@ -1251,6 +1302,7 @@ function sanitize(html, options) {
     blockedImages: blocked,
     images: kept,
     remoteImages: loadable,
+    remoteImageSources: remoteSources,
     complexity: size,
     tooHeavy: isTooHeavy(size),
     plainText: plain,
@@ -1927,11 +1979,20 @@ function readerAppendImage(state, node, ctx) {
   var source = attr && attr.value !== null && attr.value !== undefined ? String(attr.value) : ""
   var kind = attr === null ? "none" : imageSourceKind(source)
 
-  if (kind === "inline" || (kind === "remote" && ctx.allowImages && ctx.kept < ctx.limit)) {
+  var renderedSource = source
+  if (kind === "remote" && ctx.imageData !== null) {
+    renderedSource = Object.prototype.hasOwnProperty.call(ctx.imageData, source)
+      ? String(ctx.imageData[source] || "") : ""
+    if (!/^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i.test(renderedSource))
+      renderedSource = ""
+  }
+
+  if (kind === "inline" || (kind === "remote" && ctx.allowImages
+    && ctx.kept < ctx.limit && renderedSource !== "")) {
     if (kind === "remote") ctx.kept++
     readerSpace(state)
     var image = readerElement("img")
-    image.attrs = [{ name: "src", value: source }]
+    image.attrs = [{ name: "src", value: renderedSource }]
     var width = readerImageDimension(node, "width")
     var height = readerImageDimension(node, "height")
     if (width > 0) image.attrs.push({ name: "width", value: String(width) })
@@ -2487,6 +2548,8 @@ function readerTree(root, options) {
     kept: 0,
     blocked: 0
   }
+  ctx.imageData = settings.remoteImageData && typeof settings.remoteImageData === "object"
+    ? settings.remoteImageData : null
   var document = { type: "root", children: readerTidy(readerBuild(root, ctx)) }
   var text = serialize(document)
   var size = { length: text.length, tags: 0, images: 0, tables: 0, tableDepth: 0 }
@@ -2533,9 +2596,10 @@ function readerDocumentFor(source, colors) {
       + "px;margin-bottom:" + rule + "px;}"
     + "h4,h5,h6{font-size:" + base + "px;margin-top:" + Math.round(gap * 1.4)
       + "px;margin-bottom:" + rule + "px;}"
-    // QTextDocument already reserves the marker column. Adding another margin
-    // here doubled the indent and pushed list text far inside the reading line.
-    + "ul,ol{margin-top:0px;margin-bottom:" + gap + "px;margin-left:0px;}"
+    // Disable QTextDocument's own marker indent and provide one fixed
+    // two-character column. Leaving both active doubled the indentation.
+    + "ul,ol{margin-top:0px;margin-bottom:" + gap
+      + "px;margin-left:26px;-qt-list-indent:0;}"
     + "li{margin-bottom:" + rule + "px;}"
     + "blockquote{color:" + quote + ";margin-left:" + rule
       + "px;padding-left:" + gap + "px;margin-top:0px;margin-bottom:" + gap + "px;}"

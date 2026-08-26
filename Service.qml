@@ -617,6 +617,7 @@ Item {
   readonly property int selectedBlockedImages: current ? current.selectedBlockedImages : 0
   readonly property int selectedRemoteImages: current ? current.selectedRemoteImages : 0
   readonly property bool remoteImagesAllowed: !!current && current.remoteImagesAllowed
+  readonly property bool remoteImagesLoading: !!current && current.remoteImagesLoading
   readonly property var selectedAttachments: current ? current.selectedAttachments : []
   readonly property bool selectedTooHeavy: !!current && current.selectedTooHeavy
   // The meeting inside the message, and this account's answer to it.

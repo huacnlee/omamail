@@ -306,6 +306,29 @@ assert.strictEqual(capped.images, html.MAX_IMAGES)
 assert.strictEqual(capped.blockedImages, 8)
 assert.strictEqual(html.sanitize(many, { allowRemoteImages: true, maxImages: 3 }).images, 3)
 
+// A caller may defer remote resources until it has fetched and validated the
+// bytes itself. Qt then sees no loading URL (and draws no broken placeholder),
+// only a data URI once that exact source is ready.
+{
+  const source = "<p><img src=\"https://cdn.example.com/photo.png\" width=\"120\"></p>"
+  const waiting = html.sanitize(source, {
+    allowRemoteImages: true, remoteImageData: ({}), withReader: true
+  })
+  assert.strictEqual(waiting.html.indexOf("cdn.example.com"), -1)
+  assert.strictEqual(waiting.reader.html.indexOf("cdn.example.com"), -1)
+  deepEqual(waiting.remoteImageSources, ["https://cdn.example.com/photo.png"])
+  deepEqual(html.sanitize("<div style=\"display:none\"><img src=\"https://track.example.com/hidden.png\" width=\"40\"></div>")
+    .remoteImageSources, [], "a hidden picture is not prefetched")
+
+  const ready = html.sanitize(source, {
+    allowRemoteImages: true,
+    remoteImageData: ({ "https://cdn.example.com/photo.png": "data:image/png;base64,AAAA" }),
+    withReader: true
+  })
+  assert.ok(ready.html.indexOf("data:image/png;base64,AAAA") > 0)
+  assert.ok(ready.reader.html.indexOf("data:image/png;base64,AAAA") > 0)
+}
+
 // -------------------------------------------------------------- complexity
 //
 // Qt lays rich text out synchronously on the GUI thread, and this plugin runs
@@ -1462,8 +1485,8 @@ function activityMail() {
   assert.ok(document.indexOf("body{color:#cacccc;background-color:#101315;}") > 0)
   assert.ok(document.indexOf("a{color:#7aa2f7;}") > 0)
   assert.ok(document.indexOf("img{max-width:420px;}") > 0)
-  assert.ok(document.indexOf("ul,ol{margin-top:0px;margin-bottom:11px;margin-left:0px;}") > 0,
-    "Qt owns the list marker indent; the reader must not add a second one")
+  assert.ok(document.indexOf("ul,ol{margin-top:0px;margin-bottom:11px;margin-left:26px;-qt-list-indent:0;}") > 0,
+    "lists use one explicit two-character indent instead of Qt's default plus a margin")
   assert.ok(document.indexOf(read.html) > 0, "the document is the reading, unaltered")
 
   // The rhythm follows the size it is read at rather than standing still while

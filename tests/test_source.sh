@@ -94,6 +94,10 @@ if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
 fi
 grep -q 'withReader: true' account/MailAccount.qml \
   || fail "the reading document must come off the same parse as the formatted one"
+grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
+  || fail "Qt must receive prepared image bytes rather than a pending remote source"
+grep -q 'max-redirs = 0' scripts/image-fetch.sh \
+  || fail "the image fetcher must not follow an unchecked redirect"
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
 # Choosing between three readings that were all built when the body arrived is a
