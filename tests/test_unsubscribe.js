@@ -32,9 +32,10 @@ deepEqual(unsub.parseMailto("mailto:bye@example.com"),
   { to: "bye@example.com", subject: "Unsubscribe", body: "Unsubscribe" })
 deepEqual(unsub.parseMailto("mailto:bye@example.com?subject=Stop%20these&body=please"),
   { to: "bye@example.com", subject: "Stop these", body: "please" })
-// "+" is a space in a query string, which is where these live.
-assert.strictEqual(unsub.parseMailto("mailto:bye@example.com?subject=Stop+these").subject,
-  "Stop these")
+assert.strictEqual(unsub.parseMailto("mailto:bye+tag@example.com").to,
+  "bye+tag@example.com", "+ is data in a mailto address, not a form-encoded space")
+assert.strictEqual(unsub.parseMailto("mailto:bye@example.com?subject=C++").subject,
+  "C++", "+ is data in a mailto query too; spaces are percent-encoded")
 // Several recipients: the first is the one that unambiguously belongs here.
 assert.strictEqual(unsub.parseMailto("mailto:a@example.com,b@example.com").to, "a@example.com")
 assert.strictEqual(unsub.parseMailto("mailto:not-an-address"), null)

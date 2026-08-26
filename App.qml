@@ -8,6 +8,7 @@ import qs.Ui
 import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
 import "keys/Keymap.js" as Keymap
+import "message/Mailto.js" as Mailto
 import "components"
 import "calendar"
 
@@ -173,10 +174,8 @@ Item {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
     }
-    if (payload.compose === true) {
-      composeReturnView = currentView
-      startCompose("new")
-    }
+    var draft = Mailto.draftFromPayload(payload)
+    if (draft) root.openDraft(draft)
     // The list is usually already loaded by the time the window is summoned —
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
@@ -263,6 +262,15 @@ Item {
     pendingComposeMode = ""
     compose.begin(next, service.selectedMessage, service.selectedBody.text,
       service.selectedAttachments)
+  }
+
+  // A mailto: URL, or the blank draft `compose: true` asks for. The window is
+  // already open when this runs — summon delivers the payload to open().
+  function openDraft(draft) {
+    if (!draft) return
+    if (service && (service.sendPending || service.sending)) return
+    composeReturnView = currentView
+    compose.beginDraft(draft)
   }
 
   function resumeHeldCompose() {
@@ -1081,6 +1089,9 @@ Item {
           onComposeRequested: function(mode) {
             root.composeReturnView = root.currentView
             root.startCompose(mode)
+          }
+          onMailtoRequested: function(url) {
+            root.openDraft(Mailto.parse(url))
           }
           onActionRequested: function(action) {
             if (root.service && root.service.selectedId !== "") {

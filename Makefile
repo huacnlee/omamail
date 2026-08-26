@@ -61,6 +61,7 @@ test: test-js test-shell test-qml
 test-js:
 	node tests/test_outbox.js
 	node tests/test_recipients.js
+	node tests/test_senders.js
 	node tests/test_oauth.js
 	node tests/test_credentials.js
 	node tests/test_gmail_api.js
@@ -72,6 +73,7 @@ test-js:
 	node tests/test_calendar_palette.js
 	node tests/test_bar_preview.js
 	node tests/test_unsubscribe.js
+	node tests/test_mailto.js
 	node tests/test_html.js
 	node tests/test_cache.js
 	node tests/test_model.js
@@ -89,9 +91,11 @@ test-shell:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_install.sh
+	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_attachment_open.sh
+	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
 

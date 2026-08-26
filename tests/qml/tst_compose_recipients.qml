@@ -18,9 +18,17 @@ Item {
       ({ name: "Third Person", email: "third@example.com" })
     ]
     property var sendAsAliases: []
+    property var sendIdentities: []
     property string accountEmail: "me@example.com"
+    property string activeAccountId: "me@example.com"
+    property string switchedTo: ""
 
     function preferredSendAs(_recipients) { return null }
+    function switchTo(id) {
+      switchedTo = String(id || "")
+      activeAccountId = switchedTo
+      return true
+    }
     function refreshRecipientContacts() {}
     function send(fields) {
       lastSent = fields
@@ -67,6 +75,9 @@ Item {
       mailService.sendPending = false
       mailService.sending = false
       mailService.lastSent = null
+      mailService.sendIdentities = []
+      mailService.activeAccountId = "me@example.com"
+      mailService.switchedTo = ""
       compose.reset()
       compose.opened = false
     }
@@ -112,6 +123,65 @@ Item {
       keyClick(Qt.Key_Tab)
       verify(bodyEditor.activeFocus,
         "Tab from the subject must enter the message body")
+    }
+
+    function test_begin_draft_fills_the_mailto_fields() {
+      compose.beginDraft({
+        to: "jane@example.com",
+        cc: "copy@example.com",
+        bcc: "hidden@example.com",
+        subject: "Lunch",
+        body: "Tuesday?"
+      })
+      compare(compose.opened, true)
+      compare(named(compose, "compose-to-field").text, "jane@example.com")
+      compare(named(compose, "compose-cc-field").text, "copy@example.com")
+      compare(compose.ccVisible, true)
+      compare(named(compose, "compose-bcc-field").text, "hidden@example.com")
+      compare(compose.bccVisible, true)
+      compare(named(compose, "compose-subject-field").text, "Lunch")
+      compare(named(compose, "compose-body-editor").text, "Tuesday?")
+    }
+
+    function test_from_picker_switches_the_sending_account() {
+      mailService.sendIdentities = [
+        { accountId: "me@example.com", email: "me@example.com",
+          displayName: "", label: "me" },
+        { accountId: "imap:home@example.com", email: "home@example.com",
+          displayName: "", label: "home" }
+      ]
+      compose.beginDraft({
+        to: "jane@example.com", cc: "", bcc: "", subject: "Hi", body: "There"
+      })
+      wait(30)
+      compare(compose.canChooseFrom, true)
+      var button = named(compose, "compose-from-button")
+      compare(button.enabled, true)
+      mouseClick(button)
+      wait(30)
+      compare(button.selected, true,
+        "clicking From must open the mailbox menu")
+      compose.chooseFrom(mailService.sendIdentities[1])
+      compare(compose.fromEmail, "home@example.com")
+      compare(mailService.switchedTo, "imap:home@example.com")
+      compare(named(compose, "compose-to-field").text, "jane@example.com",
+        "changing From must keep the draft")
+    }
+
+    function test_bcc_toggle_shows_the_field_and_submit_sends_it() {
+      compose.begin("new", null, "", [])
+      compare(compose.bccVisible, false)
+      var toggle = named(compose, "compose-bcc-toggle")
+      var bccField = named(compose, "compose-bcc-field")
+      verify(toggle)
+      verify(bccField)
+      toggle.clicked()
+      compare(compose.bccVisible, true)
+      bccField.text = "hidden@example.com"
+      named(compose, "compose-to-field").text = "jane@example.com"
+      named(compose, "compose-body-editor").text = "Hello"
+      compose.submit()
+      compare(mailService.lastSent.bcc, "hidden@example.com")
     }
 
     function test_queued_send_hides_compose_and_undo_restores_the_draft() {
