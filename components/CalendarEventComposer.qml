@@ -57,8 +57,8 @@ Rectangle {
     recurring = false
     recurrenceFrequency = "WEEKLY"
     resultText.text = ""
-    var sources = controller ? controller.contextSources.sources : []
-    selectedSourceId = sources.length ? String(sources[0].id) : ""
+    var groups = controller ? controller.writableSourceGroups : []
+    selectedSourceId = groups.length ? String(groups[0].calendars[0].id) : ""
     opened = true
     Qt.callLater(titleField.forceActiveFocus)
   }
@@ -165,7 +165,7 @@ Rectangle {
       }
 
       Repeater {
-        model: root.editing ? [] : (root.controller ? root.controller.sourceGroups : [])
+        model: root.editing ? [] : (root.controller ? root.controller.writableSourceGroups : [])
 
         delegate: Column {
           id: sourceGroup

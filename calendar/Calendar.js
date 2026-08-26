@@ -463,6 +463,22 @@ function createEvent(fields, nowMs) {
   return result
 }
 
+// Whether a write can run against this source at all. A read-only calendar
+// refuses every write. A recurring CalDAV event is one ICS holding a rule,
+// its exceptions and its exclusions; rewriting that file from the fields the
+// composer edits would drop the parts it keeps no model of, so the operation
+// is refused before anything is written — the same judgement the button rule
+// makes upstream. Creation asks with no event: only the source's own rules
+// apply.
+function writeRefusal(source, event) {
+  if (!source) return "Choose a calendar"
+  if (source.readOnly === true) return "This calendar is read-only"
+  if (source.kind !== "caldav") return ""
+  if (String(event && event.recurrenceRule || "") !== "")
+    return "Recurring CalDAV events can only be changed in a full calendar client"
+  return ""
+}
+
 // An edit rewrites the event on its own identity: the UID names it, and the
 // bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
 // not editable here — the Google patch omits the key so the server keeps the

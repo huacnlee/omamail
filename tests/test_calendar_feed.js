@@ -256,6 +256,23 @@ assert.strictEqual(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1)
 assert.strictEqual(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
   { uid: "u" }, 1).error, "Add an event title")
 
+// A write is refused where it cannot really run: no source, a read-only
+// calendar of any kind, or a recurring CalDAV event whose ICS state this
+// client does not re-serialize. A recurring Google event edits fine — the
+// server keeps the rule and one occurrence is patched.
+assert.strictEqual(feed.writeRefusal(null, null), "Choose a calendar")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav", readOnly: true }, null),
+  "This calendar is read-only")
+assert.strictEqual(feed.writeRefusal({ kind: "google", readOnly: true }, null),
+  "This calendar is read-only")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceRule: "FREQ=WEEKLY" }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
+assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
+assert.strictEqual(feed.writeRefusal({ kind: "google" },
+  { recurrenceRule: "FREQ=WEEKLY" }), "")
+
 // The CalDAV write address is the event's own href, resolved the way the
 // server wrote it: absolute, absolute-path, or relative to the collection.
 assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",

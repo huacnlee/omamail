@@ -52,6 +52,24 @@ const withGoogle = sources.withGoogleAccounts(list, [
 assert.strictEqual(withGoogle.sources.length, 2)
 assert.strictEqual(withGoogle.sources[1].id, "google:me@gmail.com")
 assert.strictEqual(withGoogle.sources[1].accountId, "me@gmail.com")
+assert.strictEqual(withGoogle.sources[1].readOnly, false,
+  "a Google calendar accepts writes through the API")
+assert.ok(sources.writable(withGoogle.sources[1]))
+
+let readOnlyList = sources.add(list, {
+  id: "caldav:shared-example-team", kind: "caldav", name: "Team",
+  url: "https://shared.example/dav/team/", username: "me", readOnly: true
+})
+assert.strictEqual(sources.writable(readOnlyList.sources[1]), false,
+  "a read-only calendar is not somewhere a write can be offered")
+assert.strictEqual(sources.load(sources.serialize(readOnlyList)).sources[1].readOnly,
+  true, "the read-only flag survives a config round trip")
+const writableGroups = sources.writableGroups(sources.groupByAccount(readOnlyList, [
+  { id: "me@gmail.com", email: "me@gmail.com", provider: "gmail", signedIn: true }
+]))
+assert.strictEqual(writableGroups.length, 1)
+assert.strictEqual(JSON.stringify(writableGroups[0].calendars.map(function (source) { return source.id })),
+  JSON.stringify(["nextcloud-personal"]), "the read-only calendar leaves the creation picker")
 assert.strictEqual(withGoogle.sources[1].name, "me@gmail.com",
   "Google calendar errors must identify the full account address")
 const forMe = sources.forAccount(sources.withGoogleAccounts(list, [

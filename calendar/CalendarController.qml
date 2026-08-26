@@ -59,6 +59,8 @@ Item {
   readonly property var contextSources: Sources.forAccount(availableSources, accountId)
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
+  // The composer offers only calendars a write can run against.
+  readonly property var writableSourceGroups: Sources.writableGroups(sourceGroups)
 
   onAccountIdChanged: {
     if (!rangeStart || !rangeEnd || !eventCache.loaded) return
@@ -127,7 +129,8 @@ Item {
   function createEvent(sourceId, fields) {
     if (creatingEvent || eventWriting) return
     var source = findSource(sourceId)
-    if (!source) { eventCreated(false, "Choose a calendar"); return }
+    var refusal = Calendar.writeRefusal(source, null)
+    if (refusal !== "") { eventCreated(false, refusal); return }
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return }
     eventSource = source
@@ -152,22 +155,10 @@ Item {
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
 
-  // A recurring CalDAV event is one ICS holding a rule, its exceptions and its
-  // exclusions. Rewriting that file from the fields this panel edits would
-  // drop the parts it keeps no model of, so the operation is refused before
-  // anything is written — the same judgement the button rule makes upstream.
-  function caldavWriteRefusal(source, event) {
-    if (source.kind !== "caldav") return ""
-    if (String(event && event.recurrenceRule || "") !== "")
-      return "Recurring CalDAV events can only be changed in a full calendar client"
-    return ""
-  }
-
   function updateEvent(sourceId, event, fields) {
     if (creatingEvent || eventWriting) return
     var source = findSource(sourceId)
-    if (!source) { eventUpdated(false, "Choose a calendar"); return }
-    var refusal = caldavWriteRefusal(source, event)
+    var refusal = Calendar.writeRefusal(source, event)
     if (refusal !== "") { eventUpdated(false, refusal); return }
     var built = Calendar.updateEvent(fields, event, Date.now())
     if (!built.ok) { eventUpdated(false, built.error); return }
@@ -183,8 +174,7 @@ Item {
   function deleteEvent(sourceId, event) {
     if (creatingEvent || eventWriting) return
     var source = findSource(sourceId)
-    if (!source) { eventDeleted(false, "Choose a calendar"); return }
-    var refusal = caldavWriteRefusal(source, event)
+    var refusal = Calendar.writeRefusal(source, event)
     if (refusal !== "") { eventDeleted(false, refusal); return }
     writeOp = "delete"
     writeSource = source
