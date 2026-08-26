@@ -1445,6 +1445,13 @@ function activityMail() {
     { allowRemoteImages: true }).html,
   "<p><img src=\"https://cdn.example.com/logo.png\" width=\"120\"></p>")
 
+  // The reading column may clamp a large picture's width. Its explicit height
+  // must not survive that clamp or Qt stretches the image instead of deriving
+  // the matching height from its intrinsic aspect ratio.
+  assert.strictEqual(reading("<p><img src=\"https://cdn.example.com/hero.jpg\" width=\"600\" height=\"375\"></p>",
+    { allowRemoteImages: true }).html,
+  "<p><img src=\"https://cdn.example.com/hero.jpg\" width=\"600\"></p>")
+
   // An avatar at the start of a line is interface-like identity content, not
   // a picture sitting on the text baseline. Qt ignores image alignment in the
   // paragraph here, so the reader builds one compact, vertically centred row.

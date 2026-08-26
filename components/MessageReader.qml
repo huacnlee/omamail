@@ -364,18 +364,6 @@ Item {
       onActivated: if (root.service) root.service.showRemoteImages()
     }
 
-    ReaderNotice {
-      width: parent.width
-      visible: !!root.summary && !!root.service && root.service.remoteImagesLoading === true
-      text: "Loading images..."
-      busy: true
-      busyLabel: "Loading images..."
-      textColor: root.textColor
-      dimColor: root.dimColor
-      accentColor: root.accentColor
-      panelFontFamily: root.panelFontFamily
-    }
-
     // Last of the three, because it is the only one that is not about how the
     // message is being drawn. The label carries its own "..." when what it
     // opens is a browser — the service decides that, since it is the same

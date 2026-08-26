@@ -1996,7 +1996,13 @@ function readerAppendImage(state, node, ctx) {
     var width = readerImageDimension(node, "width")
     var height = readerImageDimension(node, "height")
     if (width > 0) image.attrs.push({ name: "width", value: String(width) })
-    if (height > 0) image.attrs.push({ name: "height", value: String(height) })
+    // A large picture can be narrowed again by the reading column's max-width.
+    // Qt clamps that width without scaling an explicit height, which distorts
+    // the picture. Small icons never meet that clamp and need both dimensions
+    // to keep native high-resolution artwork at interface size.
+    if (height > 0 && width > 0 && width <= MAX_READER_INLINE_IMAGE
+      && height <= MAX_READER_INLINE_IMAGE)
+      image.attrs.push({ name: "height", value: String(height) })
     readerTarget(state).push(image)
     state.filled = true
     state.pending = false
