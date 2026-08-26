@@ -273,6 +273,11 @@ assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
 assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
   { recurrenceIdMs: new Date(2026, 7, 24).getTime() }),
   "Recurring CalDAV events can only be changed in a full calendar client")
+// A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0; the raw
+// line still answers for it, because the href names the series' shared file.
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceIdMs: 0, source: { recurrenceId: "RECURRENCE-ID:not-a-date" } }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
 assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" },

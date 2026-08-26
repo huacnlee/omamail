@@ -497,8 +497,13 @@ function writeRefusal(source, event) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
   if (source.kind !== "caldav") return ""
+  // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
+  // the event's href still names the series' shared file — the raw line the
+  // parser kept answers for it.
+  var rawRecurrenceId = event && event.source
+    ? String(event.source.recurrenceId || "") : ""
   if (String(event && event.recurrenceRule || "") !== ""
-      || Number(event && event.recurrenceIdMs) > 0)
+      || Number(event && event.recurrenceIdMs) > 0 || rawRecurrenceId !== "")
     return "Recurring CalDAV events can only be changed in a full calendar client"
   return ""
 }

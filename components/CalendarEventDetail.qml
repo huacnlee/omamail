@@ -42,6 +42,7 @@ Rectangle {
       ? String(event.googleId || "") !== ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
         && Number(event.recurrenceIdMs || 0) <= 0
+        && String(event.source && event.source.recurrenceId || "") === ""
         && Calendar.caldavEventUrl(root.source.url, event) !== "")
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
