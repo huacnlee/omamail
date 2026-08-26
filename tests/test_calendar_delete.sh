@@ -28,4 +28,12 @@ if printf '%s %s\n' "$(b64 'http://calendar.example/a.ics')" "$(b64 'me:secret')
   echo 'calendar-delete.sh: plain HTTP must be refused' >&2
   exit 1
 fi
+# A decoded field becomes one quoted line of the curl config, so an address
+# carrying a line break is refused before curl is ever invoked.
+if printf '%s %s\n' "$(printf 'https://calendar.example/a.ics\noutput = "/tmp/x"' | base64 -w0)" \
+  "$(b64 'me:secret')" \
+  | PATH="$work/bin:$PATH" "$project_dir/scripts/calendar-delete.sh" 2>/dev/null; then
+  echo 'calendar-delete.sh: a URL that spans lines must be refused' >&2
+  exit 1
+fi
 echo 'calendar-delete.sh ok'

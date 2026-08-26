@@ -12,6 +12,14 @@ set -- $line
 url=$(decode "$1")
 credentials=$(decode "$2")
 event=$(decode "$3")
+# Each decoded field becomes one quoted line of the curl config; a line break
+# in one would smuggle in more options, so it is refused before curl runs.
+# (The newline is a literal: command substitution would strip it.)
+nl='
+'
+cr=$(printf '\r')
+case $url in *"$nl"* | *"$cr"*) fail 'calendar-write.sh: URL may not span lines' ;; esac
+case $credentials in *"$nl"* | *"$cr"*) fail 'calendar-write.sh: credentials may not span lines' ;; esac
 case "$url" in https://*) ;; *) fail 'calendar-write.sh: CalDAV requires HTTPS' ;; esac
 
 umask 077

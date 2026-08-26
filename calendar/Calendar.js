@@ -552,12 +552,15 @@ function urlOrigin(url) {
 // full URL or as a path against the host the collection lives on. An absolute
 // href is accepted only on the collection's own origin: anything else would
 // send this calendar's credentials to a server that merely named an address
-// in an answer.
+// in an answer. Raw whitespace is refused outright — a URL's spaces arrive
+// percent-encoded, and the resolved address becomes one quoted line of the
+// transport's curl config, where a line break would write more options.
 function caldavEventUrl(sourceUrl, event) {
   var base = String(sourceUrl || "")
   var origin = urlOrigin(base)
   if (origin === "") return ""
   var href = String(event && event.href || "")
+  if (/\s/.test(href)) return ""
   if (/^https:\/\//i.test(href) || href.substring(0, 2) === "//") {
     var candidate = href.substring(0, 2) === "//" ? "https:" + href : href
     return urlOrigin(candidate) === origin ? candidate : ""

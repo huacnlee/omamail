@@ -336,6 +336,17 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
   { href: "//dav.example/cal/me/a.ics" }),
   "https://dav.example/cal/me/a.ics",
   "a scheme-relative href on the same host resolves")
+
+// Raw whitespace is refused: a URL's spaces arrive percent-encoded, and the
+// resolved address becomes one quoted line of the transport's curl config,
+// where a line break would write more options.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics\noutput = elsewhere" }), "",
+  "a line break in an absolute href is refused")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "/cal/me/a.ics\r\nnext" }), "", "same for a path href")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "a b.ics" }), "", "a raw space is not a URL")
 assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
