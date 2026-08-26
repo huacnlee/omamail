@@ -489,13 +489,16 @@ function createEvent(fields, nowMs) {
 // its exceptions and its exclusions; rewriting that file from the fields the
 // composer edits would drop the parts it keeps no model of, so the operation
 // is refused before anything is written — the same judgement the button rule
-// makes upstream. Creation asks with no event: only the source's own rules
+// makes upstream. A modified occurrence carries no RRULE of its own, only a
+// RECURRENCE-ID, but its href is still the series' shared file, so it answers
+// the same way. Creation asks with no event: only the source's own rules
 // apply.
 function writeRefusal(source, event) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
   if (source.kind !== "caldav") return ""
-  if (String(event && event.recurrenceRule || "") !== "")
+  if (String(event && event.recurrenceRule || "") !== ""
+      || Number(event && event.recurrenceIdMs) > 0)
     return "Recurring CalDAV events can only be changed in a full calendar client"
   return ""
 }

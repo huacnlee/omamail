@@ -268,6 +268,11 @@ assert.strictEqual(feed.writeRefusal({ kind: "google", readOnly: true }, null),
 assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
   { recurrenceRule: "FREQ=WEEKLY" }),
   "Recurring CalDAV events can only be changed in a full calendar client")
+// A modified occurrence carries a RECURRENCE-ID but no RRULE — and its href
+// is the series' shared file, so writing it would rewrite the whole series.
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceIdMs: new Date(2026, 7, 24).getTime() }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
 assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" },

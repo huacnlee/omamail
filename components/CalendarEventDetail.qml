@@ -32,14 +32,16 @@ Rectangle {
   // The button rule: an operation that cannot really run is not drawn. A
   // read-only calendar draws neither button. Google writes against the item
   // id; CalDAV against the event's href, a recurring one is one ICS with
-  // state this panel does not re-serialize, and an href that resolves outside
-  // the source's own origin is refused by the same rule the controller
-  // applies before any credential is read.
+  // state this panel does not re-serialize — and a modified occurrence
+  // carries only a RECURRENCE-ID, but its href is the series' shared file —
+  // and an href that resolves outside the source's own origin is refused by
+  // the same rule the controller applies before any credential is read.
   readonly property bool canWrite: !!root.source && !!event
     && root.source.readOnly !== true
     && (root.source.kind === "google"
       ? String(event.googleId || "") !== ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
+        && Number(event.recurrenceIdMs || 0) <= 0
         && Calendar.caldavEventUrl(root.source.url, event) !== "")
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
