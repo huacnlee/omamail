@@ -43,11 +43,24 @@ Item {
   property var eventDraft: null
   property var eventRequest: null
   property bool eventRequestTimedOut: false
+  // One write at a time, create or otherwise: the password lookup, the writer
+  // and the deadline all hold one operation's state, so update and delete
+  // share this guard with create rather than growing their own.
+  property string writeOp: ""
+  property var writeSource: null
+  property var writeEvent: null
+  property var writeDraft: null
+  // The address the current CalDAV write goes to, judged before the keyring
+  // is touched and carried to the writer that runs after it.
+  property string writeUrl: ""
+  property bool eventWriting: false
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
   readonly property var contextSources: Sources.forAccount(availableSources, accountId)
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
+  // The composer offers only calendars a write can run against.
+  readonly property var writableSourceGroups: Sources.writableGroups(sourceGroups)
 
   onAccountIdChanged: {
     if (!rangeStart || !rangeEnd || !eventCache.loaded) return
@@ -58,6 +71,8 @@ Item {
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
   signal eventCreated(bool ok, string error)
+  signal eventUpdated(bool ok, string error)
+  signal eventDeleted(bool ok, string error)
 
   readonly property string configPath: {
     var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
@@ -103,16 +118,24 @@ Item {
       values.map(function(source) { return String(source.id || "") }))
   }
 
-  function createEvent(sourceId, fields) {
-    if (creatingEvent) return
+  function findSource(sourceId) {
     var values = contextSources.sources
-    var source = null
     for (var i = 0; i < values.length; i++) {
-      if (values[i] && values[i].id === String(sourceId)) { source = values[i]; break }
+      if (values[i] && values[i].id === String(sourceId)) return values[i]
     }
-    if (!source) { eventCreated(false, "Choose a calendar"); return }
+    return null
+  }
+
+  function createEvent(sourceId, fields) {
+    if (creatingEvent || eventWriting) {
+      eventCreated(false, "Another event change is still in progress")
+      return false
+    }
+    var source = findSource(sourceId)
+    var refusal = Calendar.writeRefusal(source, null)
+    if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
-    if (!built.ok) { eventCreated(false, built.error); return }
+    if (!built.ok) { eventCreated(false, built.error); return false }
     eventSource = source
     eventDraft = built
     creatingEvent = true
@@ -122,6 +145,7 @@ Item {
         .concat(Sources.keyringAttributes(source.id))
       eventPasswordLookup.running = true
     }
+    return true
   }
 
   function finishEvent(ok, error) {
@@ -133,6 +157,117 @@ Item {
     eventRequestTimedOut = false
     eventCreated(ok, String(error || ""))
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
+  }
+
+  function updateEvent(sourceId, event, fields) {
+    if (creatingEvent || eventWriting) {
+      eventUpdated(false, "Another event change is still in progress")
+      return false
+    }
+    var source = findSource(sourceId)
+    var refusal = Calendar.writeRefusal(source, event)
+    if (refusal !== "") { eventUpdated(false, refusal); return false }
+    var built = Calendar.updateEvent(fields, event, Date.now())
+    if (!built.ok) { eventUpdated(false, built.error); return false }
+    writeOp = "update"
+    writeSource = source
+    writeEvent = event
+    writeDraft = built
+    eventWriting = true
+    if (source.kind === "google") startGoogleWrite()
+    else startCaldavWrite()
+    return true
+  }
+
+  function deleteEvent(sourceId, event) {
+    if (creatingEvent || eventWriting) {
+      eventDeleted(false, "Another event change is still in progress")
+      return false
+    }
+    var source = findSource(sourceId)
+    var refusal = Calendar.writeRefusal(source, event)
+    if (refusal !== "") { eventDeleted(false, refusal); return false }
+    writeOp = "delete"
+    writeSource = source
+    writeEvent = event
+    writeDraft = null
+    eventWriting = true
+    if (source.kind === "google") startGoogleWrite()
+    else startCaldavWrite()
+    return true
+  }
+
+  function finishWrite(ok, error) {
+    var op = writeOp
+    eventDeadline.stop()
+    eventWriting = false
+    writeOp = ""
+    writeSource = null
+    writeEvent = null
+    writeDraft = null
+    writeUrl = ""
+    eventRequest = null
+    eventRequestTimedOut = false
+    if (op === "delete") eventDeleted(ok, String(error || ""))
+    else eventUpdated(ok, String(error || ""))
+    // A delete is asked for from the detail, not the composer, so nothing
+    // else is listening: the failure has to land on the view's own banner.
+    if (!ok) {
+      lastError = String(error || "Could not write the event")
+      lastErrorKind = ""
+    }
+    if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
+  }
+
+  function startGoogleWrite() {
+    var eventId = String(writeEvent && writeEvent.googleId || "")
+    if (eventId === "") { finishWrite(false, "This event has no Google id to write against"); return }
+    service.withGoogleAccessToken(writeSource.accountId, function(token, error) {
+      if (!token) { root.finishWrite(false, error); return }
+      var request = new XMLHttpRequest()
+      root.eventRequest = request
+      root.eventRequestTimedOut = false
+      if (root.writeOp === "delete") {
+        request.open("DELETE", Calendar.googleEventUrl(eventId))
+      } else {
+        request.open("PATCH", Calendar.googleEventUrl(eventId))
+        request.setRequestHeader("Content-Type", "application/json")
+      }
+      request.setRequestHeader("Authorization", "Bearer " + token)
+      request.onreadystatechange = function() {
+        if (request.readyState !== XMLHttpRequest.DONE) return
+        eventDeadline.stop()
+        root.eventRequest = null
+        var timedOut = root.eventRequestTimedOut
+        root.eventRequestTimedOut = false
+        if (request.status < 200 || request.status >= 300) {
+          root.finishWrite(false, timedOut
+            ? "The Google Calendar event request timed out"
+            : Calendar.googleResponseError(request.status, request.responseText))
+          return
+        }
+        root.finishWrite(true, "")
+      }
+      eventDeadline.restart()
+      if (root.writeOp === "delete") request.send()
+      else request.send(JSON.stringify(root.writeDraft.google))
+      token = ""
+    })
+  }
+
+  // The address is judged before the keyring is touched: a write URL that
+  // does not resolve to the source's own origin stops the operation here,
+  // not after a password has been read for it.
+  function startCaldavWrite() {
+    var url = Calendar.caldavEventUrl(writeSource ? writeSource.url : "", writeEvent)
+    if (url === "") {
+      finishWrite(false, "The event's address is outside this calendar's server")
+      return
+    }
+    writeUrl = url
+    caldavWritePasswordLookup.command = ["secret-tool", "lookup"]
+      .concat(Sources.keyringAttributes(writeSource.id))
+    caldavWritePasswordLookup.running = true
   }
 
   function createGoogleEvent() {
@@ -555,6 +690,60 @@ Item {
     onExited: function(exitCode) {
       root.finishEvent(exitCode === 0,
         exitCode === 0 ? "" : String(eventWriteError.text || "Could not create the event"))
+    }
+  }
+
+  Process {
+    id: caldavWritePasswordLookup
+    stdout: StdioCollector { id: writePasswordOutput; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      var password = String(writePasswordOutput.text || "").trim()
+      if (exitCode !== 0 || password === "") {
+        root.finishWrite(false, "Set this calendar's password in Settings")
+        return
+      }
+      // The URL was resolved and judged in startCaldavWrite, before this
+      // lookup ran; here it is only read back.
+      var url = root.writeUrl
+      var credentials = root.writeSource.username + ":" + password
+      if (root.writeOp === "delete") {
+        eventDeleter.command = [root.pluginDir + "/scripts/calendar-delete.sh"]
+        eventDeleter.requestLine = Mail.encodeBase64(url) + " "
+          + Mail.encodeBase64(credentials) + "\n"
+        eventDeleter.running = true
+      } else {
+        caldavEventUpdater.command = [root.pluginDir + "/scripts/calendar-write.sh"]
+        caldavEventUpdater.requestLine = Mail.encodeBase64(url) + " "
+          + Mail.encodeBase64(credentials) + " " + Mail.encodeBase64(root.writeDraft.ics) + "\n"
+        caldavEventUpdater.running = true
+      }
+      password = ""
+      credentials = ""
+    }
+  }
+
+  Process {
+    id: caldavEventUpdater
+    property string requestLine: ""
+    stdinEnabled: true
+    stderr: StdioCollector { id: eventUpdateError; waitForEnd: true }
+    onStarted: { write(requestLine); requestLine = "" }
+    onExited: function(exitCode) {
+      root.finishWrite(exitCode === 0,
+        exitCode === 0 ? "" : String(eventUpdateError.text || "Could not update the event"))
+    }
+  }
+
+  Process {
+    id: eventDeleter
+    property string requestLine: ""
+    stdinEnabled: true
+    stderr: StdioCollector { id: eventDeleteError; waitForEnd: true }
+    onStarted: { write(requestLine); requestLine = "" }
+    onExited: function(exitCode) {
+      root.finishWrite(exitCode === 0,
+        exitCode === 0 ? "" : String(eventDeleteError.text || "Could not delete the event"))
     }
   }
 

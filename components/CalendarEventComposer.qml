@@ -19,6 +19,20 @@ Rectangle {
   property string selectedSourceId: ""
   property bool recurring: false
   property string recurrenceFrequency: "WEEKLY"
+  // Set while an existing event is being changed rather than a new one made.
+  // The calendar picker and the recurrence section stand down then: the event
+  // stays on the calendar that owns it, and the rule is the server's to keep.
+  property var editingEvent: null
+  property string editingSourceId: ""
+  readonly property bool editing: editingEvent !== null
+  // Set when this form's own write is in flight. A completion is answered only
+  // while it is: a write the user cancelled out of — Escape, then a newer
+  // edit — must not close or report into this one.
+  property bool writePending: false
+  // An all-day event is edited as the dates it spans; the time fields stand
+  // down, because writing them back would turn the event into a timed one.
+  readonly property bool editingAllDay: editing
+    && !!(editingEvent.start && editingEvent.start.allDay)
   color: root.backgroundColor
 
   function localDate(date) {
@@ -38,6 +52,9 @@ Rectangle {
     if (!(isFinite(requested) && requested > 0))
       start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30, 0, 0)
     var end = new Date(start.getTime() + 3600000)
+    editingEvent = null
+    editingSourceId = ""
+    writePending = false
     titleField.text = ""
     dateField.text = localDate(start)
     startField.text = localTime(start)
@@ -49,22 +66,63 @@ Rectangle {
     recurring = false
     recurrenceFrequency = "WEEKLY"
     resultText.text = ""
-    var sources = controller ? controller.contextSources.sources : []
-    selectedSourceId = sources.length ? String(sources[0].id) : ""
+    var groups = controller ? controller.writableSourceGroups : []
+    selectedSourceId = groups.length ? String(groups[0].calendars[0].id) : ""
+    opened = true
+    Qt.callLater(titleField.forceActiveFocus)
+  }
+
+  function beginEdit(sourceId, event) {
+    if (!event || !event.start) return
+    var start = new Date(Number(event.start.ms))
+    var end = event.end ? new Date(Number(event.end.ms)) : new Date(start.getTime() + 3600000)
+    editingEvent = event
+    editingSourceId = String(sourceId || "")
+    writePending = false
+    titleField.text = String(event.summary || "")
+    dateField.text = localDate(start)
+    startField.text = localTime(start)
+    endField.text = localTime(end)
+    // The stored all-day end is the exclusive midnight after the last shown
+    // day, so the field shows a millisecond before it.
+    endDateField.text = event.start.allDay && event.end
+      ? localDate(new Date(Number(event.end.ms) - 1)) : localDate(end)
+    locationField.text = String(event.location || "")
+    notesField.text = String(event.description || "")
+    intervalField.text = "1"
+    countField.text = ""
+    recurring = false
+    resultText.text = ""
+    selectedSourceId = editingSourceId
     opened = true
     Qt.callLater(titleField.forceActiveFocus)
   }
 
   function begin() { beginAt(0) }
 
-  function close() { opened = false }
+  function close() {
+    opened = false
+    editingEvent = null
+    editingSourceId = ""
+  }
   function takeFocus() { titleField.forceActiveFocus() }
 
   function submit() {
     if (!controller) return
+    // Create, update and delete share one controller write slot. Do not mark
+    // this form pending unless that slot is free: otherwise an older write's
+    // completion could be mistaken for this form's and close it.
+    if (controller.creatingEvent || controller.eventWriting) return
     var start = new Date(dateField.text + "T" + startField.text + ":00")
     var end = new Date(dateField.text + "T" + endField.text + ":00")
-    controller.createEvent(selectedSourceId, {
+    if (editingAllDay) {
+      start = new Date(dateField.text + "T00:00:00")
+      var lastDay = new Date(endDateField.text + "T00:00:00")
+      // The written end is exclusive: the midnight after the last shown day,
+      // reached by date fields so a daylight-saving boundary cannot shift it.
+      end = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1)
+    }
+    var fields = {
       title: titleField.text,
       startMs: start.getTime(),
       endMs: end.getTime(),
@@ -76,7 +134,10 @@ Rectangle {
         interval: intervalField.text,
         count: countField.text
       }
-    })
+    }
+    writePending = true
+    if (editing) controller.updateEvent(editingSourceId, editingEvent, fields)
+    else controller.createEvent(selectedSourceId, fields)
   }
 
   CalendarPalette {
@@ -111,7 +172,8 @@ Rectangle {
       }
 
       Text {
-        text: "Create event"
+        text: root.editingAllDay ? "Edit event · All day"
+          : root.editing ? "Edit event" : "Create event"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.heading
@@ -120,6 +182,7 @@ Rectangle {
       }
 
       Text {
+        visible: !root.editing
         text: "CALENDAR"
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -129,7 +192,7 @@ Rectangle {
       }
 
       Repeater {
-        model: root.controller ? root.controller.sourceGroups : []
+        model: root.editing ? [] : (root.controller ? root.controller.writableSourceGroups : [])
 
         delegate: Column {
           id: sourceGroup
@@ -185,14 +248,25 @@ Rectangle {
 
         TextField {
           id: dateField
-          width: (parent.width - parent.spacing * 2) * 0.5
+          width: root.editingAllDay ? (parent.width - parent.spacing) * 0.5
+            : (parent.width - parent.spacing * 2) * 0.5
           foreground: root.textColor
           font.family: root.panelFontFamily
-          placeholderText: "YYYY-MM-DD"
+          placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
+        }
+
+        TextField {
+          id: endDateField
+          visible: root.editingAllDay
+          width: (parent.width - parent.spacing) * 0.5
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          placeholderText: "Last day (YYYY-MM-DD)"
         }
 
         TextField {
           id: startField
+          visible: !root.editingAllDay
           width: (parent.width - parent.spacing * 2) * 0.25
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -201,6 +275,7 @@ Rectangle {
 
         TextField {
           id: endField
+          visible: !root.editingAllDay
           width: (parent.width - parent.spacing * 2) * 0.25
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -225,6 +300,7 @@ Rectangle {
       }
 
       IconTextButton {
+        visible: !root.editing
         text: "Make recurring"
         iconName: root.recurring ? "check" : ""
         selected: root.recurring
@@ -236,7 +312,7 @@ Rectangle {
 
       Column {
         width: parent.width
-        visible: root.recurring
+        visible: root.recurring && !root.editing
         spacing: Style.space(8)
 
         Text {
@@ -341,12 +417,18 @@ Rectangle {
         spacing: Style.space(6)
 
         IconTextButton {
-          text: root.controller && root.controller.creatingEvent ? "Creating" : "Create event"
-          iconName: "plus"
+          text: {
+            var busy = root.controller
+              && (root.controller.creatingEvent || root.controller.eventWriting)
+            if (root.editing) return busy ? "Saving" : "Save changes"
+            return busy ? "Creating" : "Create event"
+          }
+          iconName: root.editing ? "check" : "plus"
           foreground: root.textColor
           accent: root.accentColor
           fontFamily: root.panelFontFamily
           enabled: root.controller && !root.controller.creatingEvent
+            && !root.controller.eventWriting
           onClicked: root.submit()
         }
 
@@ -374,7 +456,18 @@ Rectangle {
 
   Connections {
     target: root.controller
+    // A completion is answered only while this form's own write is in flight:
+    // one the user cancelled out of belongs to no edit, and its failure is
+    // already on the view's banner.
     function onEventCreated(ok, error) {
+      if (!root.writePending) return
+      root.writePending = false
+      if (ok) root.close()
+      else resultText.text = error
+    }
+    function onEventUpdated(ok, error) {
+      if (!root.writePending) return
+      root.writePending = false
       if (ok) root.close()
       else resultText.text = error
     }

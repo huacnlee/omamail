@@ -83,6 +83,7 @@ Modules are grouped by responsibility rather than language or file type:
 - `providers/` owns service descriptions, authentication, protocol behavior, capabilities, and normalization into the shared Gmail-shaped resource.
 - `account/` owns accounts, a mailbox, and list behavior after actions.
 - `cache/` owns stored query results and message bodies.
+- `calendar/` owns event sources, the range cache, and event reads and writes.
 - `message/` owns parsing, sanitizing, calendar data, and other decisions about a message's content.
 - `keys/` owns the action and binding declaration.
 - `components/` owns views and reusable interaction primitives.

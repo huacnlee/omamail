@@ -191,6 +191,64 @@ function parse(text) {
   return root
 }
 
+// Replace selected top-level properties in the one VEVENT named by UID while
+// leaving every other line alone. CalDAV PUT replaces the whole resource, so
+// rebuilding a small event from parsed fields would erase alarms, attendees,
+// timezone definitions and server extensions the editor never showed. Nested
+// components such as VALARM are deliberately outside the replacement depth.
+function rewriteEvent(text, uid, replacementLines, propertyNames) {
+  var lines = unfoldLines(text)
+  var wantedUid = String(uid || "")
+  var matches = []
+  var start = -1
+  var depth = 0
+  var foundUid = ""
+  for (var i = 0; i < lines.length; i++) {
+    var parsed = parseProperty(lines[i])
+    if (!parsed) continue
+    if (start < 0 && parsed.name === "BEGIN"
+        && String(parsed.value || "").toUpperCase() === "VEVENT") {
+      start = i
+      depth = 1
+      foundUid = ""
+      continue
+    }
+    if (start < 0) continue
+    if (parsed.name === "BEGIN") { depth++; continue }
+    if (parsed.name === "END") {
+      if (depth === 1 && String(parsed.value || "").toUpperCase() === "VEVENT") {
+        if (foundUid === wantedUid) matches.push({ start: start, end: i })
+        start = -1
+        depth = 0
+        foundUid = ""
+      } else {
+        depth--
+      }
+      continue
+    }
+    if (depth === 1 && parsed.name === "UID") foundUid = unescapeText(parsed.value).trim()
+  }
+  if (matches.length !== 1) return ""
+
+  var replace = {}
+  var names = Array.isArray(propertyNames) ? propertyNames : []
+  for (var n = 0; n < names.length; n++) replace[String(names[n]).toUpperCase()] = true
+  var target = matches[0]
+  var out = lines.slice(0, target.start + 1)
+  depth = 1
+  for (var lineIndex = target.start + 1; lineIndex < target.end; lineIndex++) {
+    var property = parseProperty(lines[lineIndex])
+    if (property && property.name === "BEGIN") depth++
+    if (!(property && depth === 1 && replace[property.name] === true))
+      out.push(lines[lineIndex])
+    if (property && property.name === "END") depth--
+  }
+  var additions = Array.isArray(replacementLines) ? replacementLines : []
+  for (var addition = 0; addition < additions.length; addition++) out.push(additions[addition])
+  out.push(lines[target.end])
+  return out.concat(lines.slice(target.end + 1)).join("\r\n") + "\r\n"
+}
+
 function childNamed(component, name) {
   var children = component && Array.isArray(component.children) ? component.children : []
   var wanted = String(name || "").toUpperCase()

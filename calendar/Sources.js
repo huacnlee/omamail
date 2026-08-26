@@ -166,7 +166,11 @@ function withGoogleAccounts(list, accountSummaries) {
       name: trimmed(account.email || account.label || "Google Calendar"),
       accountId: accountId,
       enabled: saved ? saved.enabled !== false : true,
-      readOnly: true,
+      // A Google calendar accepts writes through the API. Older versions
+      // persisted readOnly on these synthesized sources, so it must not be
+      // inherited: keeping the stamp would hide Edit and Delete after an
+      // upgrade. Hand-configured CalDAV sources still keep their own flag.
+      readOnly: false,
       colorKey: saved ? saved.colorKey : Palette.defaultKey("google:" + accountId)
     })
   }
@@ -247,6 +251,28 @@ function groupByAccount(list, accountSummaries) {
     group.calendars.push(remaining)
   }
   return groups
+}
+
+// A calendar a write can be offered on. A read-only source still draws its
+// events; it is not offered as somewhere to put one.
+function writable(source) {
+  return !!source && source.readOnly !== true
+}
+
+// The picker groups with the read-only calendars left out, and a group left
+// empty by that left out too.
+function writableGroups(groups) {
+  var values = Array.isArray(groups) ? groups : []
+  var out = []
+  for (var i = 0; i < values.length; i++) {
+    var group = values[i] || {}
+    var calendars = (Array.isArray(group.calendars) ? group.calendars : [])
+      .filter(function(source) { return writable(source) })
+    if (calendars.length === 0) continue
+    out.push({ id: group.id, providerLabel: group.providerLabel,
+      accountLabel: group.accountLabel, calendars: calendars })
+  }
+  return out
 }
 
 function calendarEditorUrl(list) {

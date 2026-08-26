@@ -44,7 +44,7 @@ guided by an in-app four-step walkthrough.
 - Authorization Code + PKCE, loopback redirect `http://127.0.0.1:9481/oauth2callback`
 - Listener is a single-shot `socat`; the browser does the rest
 - Scopes: `gmail.modify` (read, label, archive, trash — cannot permanently
-  delete) and `gmail.send`
+  delete), `gmail.send` and `calendar.events` (read calendars, write events)
 - Refresh token → GNOME Keyring via `secret-tool`, keyed by client and account
 - Client id/secret → `~/.config/omamail/credentials.json`, mode 0600.
   Not plugin settings: `shell.json` is world-readable.
@@ -60,6 +60,8 @@ guided by an in-app four-step walkthrough.
 - Actions: read/unread, star, archive, trash, untrash, report spam, mark all read
 - Compose, reply, reply-all, forward
 - Calendar invitations: full meeting detail, RSVP, and one-click Meet join
+- Calendar: month and week views over Google Calendar and CalDAV, with event
+  create, edit and delete
 - One-click unsubscribe from mailing lists that support it
 - Search using Gmail's own operator syntax
 - Unread badge in the bar; merged desktop notification for new mail

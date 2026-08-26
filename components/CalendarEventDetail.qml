@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
+import "../calendar/Calendar.js" as Calendar
 
 Rectangle {
   id: root
@@ -16,6 +17,8 @@ Rectangle {
   required property string panelFontFamily
 
   signal closed()
+  signal editRequested(string sourceId, var event)
+  signal deleteRequested(string sourceId, var event)
 
   readonly property var source: {
     var sources = controller && controller.availableSources
@@ -26,6 +29,21 @@ Rectangle {
     }
     return null
   }
+  // The button rule: an operation that cannot really run is not drawn. A
+  // read-only calendar draws neither button. Google writes against the item
+  // id; CalDAV against the event's href, a recurring one is one ICS with
+  // state this panel does not re-serialize — and a modified occurrence
+  // carries only a RECURRENCE-ID, but its href is the series' shared file —
+  // and an href that resolves outside the source's own origin is refused by
+  // the same rule the controller applies before any credential is read.
+  readonly property bool canWrite: !!root.source && !!event
+    && root.source.readOnly !== true
+    && (root.source.kind === "google"
+      ? String(event.googleId || "") !== ""
+      : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
+        && Number(event.recurrenceIdMs || 0) <= 0
+        && String(event.source && event.source.recurrenceId || "") === ""
+        && Calendar.caldavEventUrl(root.source.url, event) !== "")
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
   readonly property string meetingLink: httpLink(event ? event.meetLink : "")
@@ -165,9 +183,29 @@ Rectangle {
 
       Flow {
         visible: root.meetingLink !== "" || root.locationLink !== ""
-          || root.providerLink !== ""
+          || root.providerLink !== "" || root.canWrite
         width: parent.width
         spacing: Style.space(7)
+
+        IconTextButton {
+          visible: root.canWrite
+          text: "Edit..."
+          iconName: "compose"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
+        }
+
+        IconTextButton {
+          visible: root.canWrite
+          text: "Delete..."
+          iconName: "trash"
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
+        }
 
         IconTextButton {
           visible: root.meetingLink !== ""

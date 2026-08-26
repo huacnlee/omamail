@@ -33,6 +33,8 @@ Item {
   signal createAt(double startMs)
   signal copyRequested(string text)
   signal openRequested(string url)
+  signal editRequested(string sourceId, var event)
+  signal deleteRequested(string sourceId, var event)
 
   CalendarPalette {
     id: calendarPalette
@@ -505,5 +507,12 @@ Item {
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily
     onClosed: root.closeDetail()
+    // Editing replaces the detail: the composer covers the view, and the
+    // event it rewrites is not the one these labels would go on showing.
+    onEditRequested: function(sourceId, event) {
+      root.closeDetail()
+      root.editRequested(sourceId, event)
+    }
+    onDeleteRequested: function(sourceId, event) { root.deleteRequested(sourceId, event) }
   }
 }

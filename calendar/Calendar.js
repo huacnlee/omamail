@@ -322,6 +322,10 @@ function eventsFromCaldav(xml, sourceId, rangeStart, rangeEnd) {
     for (var j = 0; j < events.length; j++) {
       events[j].sourceId = String(sourceId || "")
       events[j].href = responses[i].href
+      // A CalDAV update replaces this entire resource. Keep the source so the
+      // writer can change the fields it owns without dropping everything it
+      // does not model, such as alarms, attendees and server extensions.
+      events[j].calendarData = responses[i].data
       out.push(events[j])
     }
   }
@@ -356,6 +360,11 @@ function eventsFromGoogle(payload, sourceId) {
       !!(item.end && item.end.date && !item.end.dateTime))
     out.push({
       method: "", uid: String(item.iCalUID || item.id || ""),
+      // The write URL needs the item's own id, not the iCalUID: with
+      // singleEvents=true an expanded occurrence carries an instance id, and
+      // patching or deleting it does exactly what Google Calendar does to one
+      // occurrence of a series.
+      googleId: String(item.id || ""),
       sequence: Math.max(0, Math.floor(Number(item.sequence) || 0)),
       summary: String(item.summary || "Untitled event"),
       description: String(item.description || ""), location: String(item.location || ""),
@@ -386,6 +395,14 @@ function icsUtc(ms) {
   return new Date(Number(ms)).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")
 }
 
+// A date-only stamp is the local calendar day: the ms of an all-day boundary
+// is local midnight, so the fields are read back off the local clock and no
+// timezone can move the written date.
+function icsDate(ms) {
+  var date = new Date(Number(ms))
+  return date.getFullYear() + two(date.getMonth() + 1) + two(date.getDate())
+}
+
 function recurrenceRule(raw) {
   var value = raw || {}
   if (value.enabled !== true) return { ok: true, rule: "" }
@@ -410,7 +427,7 @@ function recurrenceIntervalUnit(frequency, interval) {
   return Number(interval) === 1 ? unit : unit + "s"
 }
 
-function createEvent(fields, nowMs) {
+function validateEventFields(fields) {
   var value = fields || {}
   var title = String(value.title || "").trim()
   var start = Number(value.startMs)
@@ -418,28 +435,173 @@ function createEvent(fields, nowMs) {
   if (title === "") return { ok: false, error: "Add an event title" }
   if (!isFinite(start) || !isFinite(end)) return { ok: false, error: "Add valid start and end times" }
   if (end <= start) return { ok: false, error: "End time must be after start time" }
-  var recurrence = recurrenceRule(value.recurrence)
+  return { ok: true, title: title, start: start, end: end,
+    description: String(value.description || ""), location: String(value.location || "") }
+}
+
+function veventLines(uid, sequence, stampMs, fields, rule, allDay) {
+  var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Omamail//Calendar//EN",
+    "BEGIN:VEVENT", "UID:" + uid, "DTSTAMP:" + icsUtc(stampMs)]
+  if (sequence > 0) lines.push("SEQUENCE:" + sequence)
+  // An all-day event is dates with an exclusive end, never midnight times.
+  if (allDay === true)
+    lines.push("DTSTART;VALUE=DATE:" + icsDate(fields.start),
+      "DTEND;VALUE=DATE:" + icsDate(fields.end))
+  else
+    lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end))
+  lines.push("SUMMARY:" + icsText(fields.title))
+  if (fields.description !== "") lines.push("DESCRIPTION:" + icsText(fields.description))
+  if (fields.location !== "") lines.push("LOCATION:" + icsText(fields.location))
+  if (rule !== "") lines.push("RRULE:" + rule)
+  lines.push("END:VEVENT", "END:VCALENDAR", "")
+  return lines
+}
+
+function editableEventLines(sequence, stampMs, fields, allDay) {
+  var lines = ["DTSTAMP:" + icsUtc(stampMs), "SEQUENCE:" + sequence]
+  if (allDay === true)
+    lines.push("DTSTART;VALUE=DATE:" + icsDate(fields.start),
+      "DTEND;VALUE=DATE:" + icsDate(fields.end))
+  else
+    lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end))
+  lines.push("SUMMARY:" + icsText(fields.title))
+  if (fields.description !== "") lines.push("DESCRIPTION:" + icsText(fields.description))
+  if (fields.location !== "") lines.push("LOCATION:" + icsText(fields.location))
+  return lines
+}
+
+function googleEventBody(fields, allDay) {
+  var body = {
+    summary: fields.title, description: fields.description, location: fields.location
+  }
+  // Google keeps the same distinction: an all-day event is start.date to the
+  // exclusive end date, a timed one is dateTime.
+  if (allDay === true) {
+    body.start = { date: isoDate(new Date(fields.start)) }
+    body.end = { date: isoDate(new Date(fields.end)) }
+  } else {
+    body.start = { dateTime: new Date(fields.start).toISOString() }
+    body.end = { dateTime: new Date(fields.end).toISOString() }
+  }
+  return body
+}
+
+function createEvent(fields, nowMs) {
+  var checked = validateEventFields(fields)
+  if (!checked.ok) return checked
+  var recurrence = recurrenceRule((fields || {}).recurrence)
   if (!recurrence.ok) return recurrence
   var uid = "omamail-" + Math.floor(Number(nowMs) || Date.now())
-  var description = String(value.description || "")
-  var location = String(value.location || "")
-  var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Omamail//Calendar//EN",
-    "BEGIN:VEVENT", "UID:" + uid, "DTSTAMP:" + icsUtc(nowMs || Date.now()),
-    "DTSTART:" + icsUtc(start), "DTEND:" + icsUtc(end), "SUMMARY:" + icsText(title)]
-  if (description !== "") lines.push("DESCRIPTION:" + icsText(description))
-  if (location !== "") lines.push("LOCATION:" + icsText(location))
-  if (recurrence.rule !== "") lines.push("RRULE:" + recurrence.rule)
-  lines.push("END:VEVENT", "END:VCALENDAR", "")
   var result = {
-    ok: true, uid: uid, ics: lines.join("\r\n"),
-    google: {
-      summary: title, description: description, location: location,
-      start: { dateTime: new Date(start).toISOString() },
-      end: { dateTime: new Date(end).toISOString() }
-    }
+    ok: true, uid: uid,
+    ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule).join("\r\n"),
+    google: googleEventBody(checked)
   }
   if (recurrence.rule !== "") result.google.recurrence = ["RRULE:" + recurrence.rule]
   return result
+}
+
+// Whether a write can run against this source at all. A read-only calendar
+// refuses every write. A recurring CalDAV event is one ICS holding a rule,
+// its exceptions and its exclusions; rewriting that file from the fields the
+// composer edits would drop the parts it keeps no model of, so the operation
+// is refused before anything is written — the same judgement the button rule
+// makes upstream. A modified occurrence carries no RRULE of its own, only a
+// RECURRENCE-ID, but its href is still the series' shared file, so it answers
+// the same way. Creation asks with no event: only the source's own rules
+// apply.
+function writeRefusal(source, event) {
+  if (!source) return "Choose a calendar"
+  if (source.readOnly === true) return "This calendar is read-only"
+  if (source.kind !== "caldav") return ""
+  // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
+  // the event's href still names the series' shared file — the raw line the
+  // parser kept answers for it.
+  var rawRecurrenceId = event && event.source
+    ? String(event.source.recurrenceId || "") : ""
+  if (String(event && event.recurrenceRule || "") !== ""
+      || Number(event && event.recurrenceIdMs) > 0 || rawRecurrenceId !== "")
+    return "Recurring CalDAV events can only be changed in a full calendar client"
+  return ""
+}
+
+// An edit rewrites the event on its own identity: the UID names it, and the
+// bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
+// not editable here — the Google patch omits the key so the server keeps the
+// rule, and a recurring CalDAV event is refused by writeRefusal before this
+// runs. Which shape the event has is likewise not a question an edit answers:
+// an all-day event stays VALUE=DATE and a Google date, a timed one stays a
+// date-time, so a title-only change cannot turn one into the other.
+function updateEvent(fields, existing, nowMs) {
+  var event = existing || {}
+  var uid = String(event.uid || "")
+  if (uid === "") return { ok: false, error: "The event has no identity to update" }
+  var checked = validateEventFields(fields)
+  if (!checked.ok) return checked
+  var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0)) + 1
+  var allDay = !!(event.start && event.start.allDay)
+  var stampMs = Number(nowMs) || Date.now()
+  var original = String(event.calendarData || "")
+  var rewritten = original === "" ? "" : Ics.rewriteEvent(original, uid,
+    editableEventLines(sequence, stampMs, checked, allDay),
+    ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
+      "DESCRIPTION", "LOCATION"])
+  return {
+    ok: true, uid: uid,
+    ics: rewritten !== "" ? rewritten
+      : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
+    google: googleEventBody(checked, allDay)
+  }
+}
+
+function googleEventUrl(eventId) {
+  return "https://www.googleapis.com/calendar/v3/calendars/primary/events/"
+    + encodeURIComponent(String(eventId || ""))
+}
+
+// The scheme and authority of an HTTPS URL. Anything else — http, a bare
+// path, junk — has no authority here, because a write address is HTTPS or
+// nothing.
+function urlAuthority(url) {
+  var match = /^(https):\/\/([^\/?#]+)/i.exec(String(url || ""))
+  return match ? match[1].toLowerCase() + "://" + match[2] : ""
+}
+
+// scheme://host:port with the port made explicit and the case-insensitive
+// parts folded, so two spellings of the same origin compare equal.
+function urlOrigin(url) {
+  var match = /^(https):\/\/([^\/?#:]+)(?::(\d+))?/i.exec(String(url || ""))
+  if (!match) return ""
+  return match[1].toLowerCase() + "://" + match[2].toLowerCase() + ":"
+    + (match[3] ? String(Number(match[3])) : "443")
+}
+
+// A REPORT answers with the event's own href, which the server may write as a
+// full URL or as a path against the host the collection lives on. An absolute
+// href is accepted only on the collection's own origin: anything else would
+// send this calendar's credentials to a server that merely named an address
+// in an answer. Raw whitespace is refused outright — a URL's spaces arrive
+// percent-encoded, and the resolved address becomes one quoted line of the
+// transport's curl config, where a line break would write more options.
+function caldavEventUrl(sourceUrl, event) {
+  var base = String(sourceUrl || "")
+  var origin = urlOrigin(base)
+  if (origin === "") return ""
+  var href = String(event && event.href || "")
+  if (/\s/.test(href)) return ""
+  if (/^https:\/\//i.test(href) || href.substring(0, 2) === "//") {
+    var candidate = href.substring(0, 2) === "//" ? "https:" + href : href
+    return urlOrigin(candidate) === origin ? candidate : ""
+  }
+  if (href.charAt(0) === "/") return urlAuthority(base) + href
+  if (href !== "") {
+    var collection = base.charAt(base.length - 1) === "/" ? base : base + "/"
+    return collection + href
+  }
+  var uid = String(event && event.uid || "")
+  if (uid === "") return ""
+  var root = base.charAt(base.length - 1) === "/" ? base : base + "/"
+  return root + encodeURIComponent(uid) + ".ics"
 }
 
 function compareEvents(left, right) {

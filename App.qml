@@ -646,6 +646,27 @@ Item {
     settingsVisible = true
   }
 
+  // A delete asks first, and asks naming the target. Only the confirmation
+  // reaches the controller, with the event the dialog named.
+  function requestEventDelete(sourceId, event) {
+    if (!event) return
+    confirmDeleteDialog.openFor({
+      kind: "event",
+      name: String(event.summary || "Untitled event"),
+      message: "This event will be permanently deleted.",
+      sourceId: String(sourceId || ""),
+      event: event
+    })
+  }
+
+  function confirmDelete(request) {
+    if (!service) return
+    if (request.kind === "event" && request.event) {
+      service.calendarController.deleteEvent(request.sourceId, request.event)
+      calendarView.closeDetail()
+    }
+  }
+
   FloatingWindow {
     id: window
     visible: root.opened
@@ -1160,6 +1181,8 @@ Item {
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
             onOpenRequested: function(url) { Qt.openUrlExternally(url) }
+            onEditRequested: function(sourceId, event) { eventComposer.beginEdit(sourceId, event) }
+            onDeleteRequested: function(sourceId, event) { root.requestEventDelete(sourceId, event) }
           }
         }
 
@@ -1441,6 +1464,18 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onConfirmed: function(request) { root.confirmAccountRemoval(request) }
+      }
+
+      ConfirmDeleteDialog {
+        id: confirmDeleteDialog
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        dangerColor: root.danger
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onConfirmed: function(request) { root.confirmDelete(request) }
       }
 
       MessageMenu {

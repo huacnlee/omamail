@@ -173,10 +173,14 @@ const google = feed.eventsFromGoogle({ items: [{
 }] }, "google:me")
 assert.strictEqual(google.length, 1)
 assert.strictEqual(google[0].uid, "g1")
+assert.strictEqual(google[0].googleId, "g1",
+  "the write URL needs the item id, separate from the iCalUID")
 assert.strictEqual(google[0].sourceId, "google:me")
 assert.strictEqual(google[0].start.ms, Date.parse("2026-08-24T10:00:00+02:00"))
 const googleUrl = feed.googleEventsUrl(Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
 assert.ok(googleUrl.indexOf("https://www.googleapis.com/calendar/v3/calendars/primary/events?") === 0)
+assert.strictEqual(feed.googleEventUrl("g1_20260824T080000Z"),
+  "https://www.googleapis.com/calendar/v3/calendars/primary/events/g1_20260824T080000Z")
 
 const created = feed.createEvent({
   title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
@@ -219,6 +223,165 @@ assert.strictEqual(feed.createEvent({ title: "", startMs: 1, endMs: 2 }, 1).erro
   "Add an event title")
 assert.strictEqual(feed.createEvent({ title: "x", startMs: 2, endMs: 1 }, 1).error,
   "End time must be after start time")
+
+// An edit keeps the event's identity and tells every copy which write is new.
+const updated = feed.updateEvent({
+  title: "Planning, moved", startMs: Date.UTC(2026, 7, 24, 10, 0),
+  endMs: Date.UTC(2026, 7, 24, 11, 0), location: "", description: "Weekly plan"
+}, { uid: "omamail-1234", sequence: 0 }, 5678)
+assert.strictEqual(updated.ok, true)
+assert.strictEqual(updated.uid, "omamail-1234")
+assert.ok(updated.ics.indexOf("UID:omamail-1234") > 0)
+assert.ok(updated.ics.indexOf("SEQUENCE:1") > 0,
+  "a rewrite bumps the sequence so older copies yield")
+assert.ok(updated.ics.indexOf("DTSTART:20260824T100000Z") > 0)
+assert.ok(updated.ics.indexOf("SUMMARY:Planning\\, moved") > 0,
+  "ical text escapes what the field carries")
+assert.ok(updated.ics.indexOf("RRULE") < 0,
+  "recurrence is not editable here, so none is written")
+assert.ok(updated.ics.indexOf("LOCATION") < 0, "a cleared field leaves the ICS")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(updated.google)), {
+  summary: "Planning, moved", description: "Weekly plan", location: "",
+  start: { dateTime: "2026-08-24T10:00:00.000Z" },
+  end: { dateTime: "2026-08-24T11:00:00.000Z" }
+})
+assert.ok(!("recurrence" in updated.google),
+  "omitting recurrence from the patch is what keeps the server's rule")
+const bumpedAgain = feed.updateEvent({
+  title: "x", startMs: 1, endMs: 2
+}, { uid: "u", sequence: 4 }, 1)
+assert.ok(bumpedAgain.ics.indexOf("SEQUENCE:5") > 0)
+assert.strictEqual(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1).error,
+  "The event has no identity to update")
+assert.strictEqual(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
+  { uid: "u" }, 1).error, "Add an event title")
+
+// A CalDAV update replaces the whole resource, so fields this editor does not
+// draw must survive a change to the ones it does. In particular, editing the
+// title must not remove the organiser, attendees, alarms, timezone rules or a
+// server extension from the VEVENT it puts back.
+const preservedXml = [
+  '<?xml version="1.0"?>',
+  '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+  '<d:response><d:href>/cal/preserved.ics</d:href><d:propstat><d:prop>',
+  '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n',
+  'BEGIN:VTIMEZONE\r\nTZID:Custom/Office\r\nEND:VTIMEZONE\r\n',
+  'BEGIN:VEVENT\r\nUID:preserved\r\nDTSTART:20260824T080000Z\r\n',
+  'DTEND:20260824T090000Z\r\nSUMMARY:Before\r\n',
+  'ORGANIZER:mailto:owner@example.com\r\nATTENDEE:mailto:guest@example.com\r\n',
+  'X-SERVER-FIELD:keep-me\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n',
+  'TRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR',
+  '</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'
+].join("")
+const preservedEvent = feed.eventsFromCaldav(preservedXml, "work")[0]
+const preservedUpdate = feed.updateEvent({
+  title: "After", startMs: Date.UTC(2026, 7, 24, 8, 0),
+  endMs: Date.UTC(2026, 7, 24, 9, 0), location: "", description: ""
+}, preservedEvent, 5678)
+assert.ok(preservedUpdate.ics.indexOf("SUMMARY:After") > 0)
+assert.ok(preservedUpdate.ics.indexOf("SUMMARY:Before") < 0)
+assert.ok(preservedUpdate.ics.indexOf("ORGANIZER:mailto:owner@example.com") > 0)
+assert.ok(preservedUpdate.ics.indexOf("ATTENDEE:mailto:guest@example.com") > 0)
+assert.ok(preservedUpdate.ics.indexOf("BEGIN:VALARM") > 0)
+assert.ok(preservedUpdate.ics.indexOf("X-SERVER-FIELD:keep-me") > 0)
+assert.ok(preservedUpdate.ics.indexOf("BEGIN:VTIMEZONE") > 0)
+
+// A write is refused where it cannot really run: no source, a read-only
+// calendar of any kind, or a recurring CalDAV event whose ICS state this
+// client does not re-serialize. A recurring Google event edits fine — the
+// server keeps the rule and one occurrence is patched.
+assert.strictEqual(feed.writeRefusal(null, null), "Choose a calendar")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav", readOnly: true }, null),
+  "This calendar is read-only")
+assert.strictEqual(feed.writeRefusal({ kind: "google", readOnly: true }, null),
+  "This calendar is read-only")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceRule: "FREQ=WEEKLY" }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
+// A modified occurrence carries a RECURRENCE-ID but no RRULE — and its href
+// is the series' shared file, so writing it would rewrite the whole series.
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceIdMs: new Date(2026, 7, 24).getTime() }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
+// A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0; the raw
+// line still answers for it, because the href names the series' shared file.
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+  { recurrenceIdMs: 0, source: { recurrenceId: "RECURRENCE-ID:not-a-date" } }),
+  "Recurring CalDAV events can only be changed in a full calendar client")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
+assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
+assert.strictEqual(feed.writeRefusal({ kind: "google" },
+  { recurrenceRule: "FREQ=WEEKLY" }), "")
+
+// An all-day event is edited as the dates it spans: the ICS keeps VALUE=DATE
+// with an exclusive end, the Google body carries date and never dateTime, and
+// a title-only change cannot turn it into midnight-to-midnight times.
+const allDayUpdate = feed.updateEvent({
+  title: "Conference, day one moved", startMs: new Date(2026, 7, 24).getTime(),
+  endMs: new Date(2026, 7, 26).getTime()
+}, { uid: "conf-1", sequence: 1,
+  start: { ms: new Date(2026, 7, 24).getTime(), allDay: true } }, 0)
+assert.ok(allDayUpdate.ok)
+assert.ok(allDayUpdate.ics.indexOf("DTSTART;VALUE=DATE:20260824") > 0)
+assert.ok(allDayUpdate.ics.indexOf("DTEND;VALUE=DATE:20260826") > 0,
+  "the exclusive end stays the day after the last one shown")
+assert.ok(allDayUpdate.ics.indexOf("SEQUENCE:2") > 0)
+assert.ok(allDayUpdate.ics.indexOf("DTSTART:") < 0,
+  "no date-time is written for an all-day event")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(allDayUpdate.google)), {
+  summary: "Conference, day one moved", description: "", location: "",
+  start: { date: "2026-08-24" }, end: { date: "2026-08-26" }
+})
+
+// The CalDAV write address is the event's own href, resolved the way the
+// server wrote it: absolute, absolute-path, or relative to the collection.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "/cal/me/a.ics" }), "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "a.ics" }), "https://dav.example/cal/me/a.ics")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me",
+  { href: "", uid: "omamail-1" }), "https://dav.example/cal/me/omamail-1.ics")
+assert.strictEqual(feed.caldavEventUrl("http://dav.example/cal/me/",
+  { href: "/cal/me/a.ics" }), "", "CalDAV writes stay on HTTPS")
+assert.strictEqual(feed.caldavEventUrl("", { href: "", uid: "" }), "")
+
+// An absolute href is accepted only on the collection's own origin: anything
+// else would send this calendar's credentials to a server that merely named
+// an address in an answer.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://other.example/cal/me/a.ics" }), "",
+  "a cross-origin href is refused before credentials go anywhere")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example.evil.com/a.ics" }), "",
+  "a host that merely starts with the source's is another origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics" }), "",
+  "a different port is a different origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example:443/cal/me/a.ics" }),
+  "https://dav.example:443/cal/me/a.ics",
+  "the default port spelled out is still the same origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "//other.example/a.ics" }), "",
+  "a scheme-relative href still names its own host")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "//dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics",
+  "a scheme-relative href on the same host resolves")
+
+// Raw whitespace is refused: a URL's spaces arrive percent-encoded, and the
+// resolved address becomes one quoted line of the transport's curl config,
+// where a line break would write more options.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics\noutput = elsewhere" }), "",
+  "a line break in an absolute href is refused")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "/cal/me/a.ics\r\nnext" }), "", "same for a path href")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "a b.ics" }), "", "a raw space is not a URL")
 assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)

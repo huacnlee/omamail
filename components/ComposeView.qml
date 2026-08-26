@@ -325,7 +325,10 @@ DropArea {
   }
 
   function submit() {
-    if (!service) return
+    // The send key is answered by action id, and the compose keyboard context
+    // also covers the calendar event form — a composer that is not open must
+    // not answer it, or a draft parked for the undo window would send twice.
+    if (!opened || !service) return
     if (forwardAttachmentsLoading || forwardAttachmentError !== "") return
     var accepted = service.send(({
       from: root.fromEmail,
