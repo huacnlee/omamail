@@ -391,6 +391,14 @@ function icsUtc(ms) {
   return new Date(Number(ms)).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")
 }
 
+// A date-only stamp is the local calendar day: the ms of an all-day boundary
+// is local midnight, so the fields are read back off the local clock and no
+// timezone can move the written date.
+function icsDate(ms) {
+  var date = new Date(Number(ms))
+  return date.getFullYear() + two(date.getMonth() + 1) + two(date.getDate())
+}
+
 function recurrenceRule(raw) {
   var value = raw || {}
   if (value.enabled !== true) return { ok: true, rule: "" }
@@ -427,12 +435,17 @@ function validateEventFields(fields) {
     description: String(value.description || ""), location: String(value.location || "") }
 }
 
-function veventLines(uid, sequence, stampMs, fields, rule) {
+function veventLines(uid, sequence, stampMs, fields, rule, allDay) {
   var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Omamail//Calendar//EN",
     "BEGIN:VEVENT", "UID:" + uid, "DTSTAMP:" + icsUtc(stampMs)]
   if (sequence > 0) lines.push("SEQUENCE:" + sequence)
-  lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end),
-    "SUMMARY:" + icsText(fields.title))
+  // An all-day event is dates with an exclusive end, never midnight times.
+  if (allDay === true)
+    lines.push("DTSTART;VALUE=DATE:" + icsDate(fields.start),
+      "DTEND;VALUE=DATE:" + icsDate(fields.end))
+  else
+    lines.push("DTSTART:" + icsUtc(fields.start), "DTEND:" + icsUtc(fields.end))
+  lines.push("SUMMARY:" + icsText(fields.title))
   if (fields.description !== "") lines.push("DESCRIPTION:" + icsText(fields.description))
   if (fields.location !== "") lines.push("LOCATION:" + icsText(fields.location))
   if (rule !== "") lines.push("RRULE:" + rule)
@@ -440,12 +453,20 @@ function veventLines(uid, sequence, stampMs, fields, rule) {
   return lines
 }
 
-function googleEventBody(fields) {
-  return {
-    summary: fields.title, description: fields.description, location: fields.location,
-    start: { dateTime: new Date(fields.start).toISOString() },
-    end: { dateTime: new Date(fields.end).toISOString() }
+function googleEventBody(fields, allDay) {
+  var body = {
+    summary: fields.title, description: fields.description, location: fields.location
   }
+  // Google keeps the same distinction: an all-day event is start.date to the
+  // exclusive end date, a timed one is dateTime.
+  if (allDay === true) {
+    body.start = { date: isoDate(new Date(fields.start)) }
+    body.end = { date: isoDate(new Date(fields.end)) }
+  } else {
+    body.start = { dateTime: new Date(fields.start).toISOString() }
+    body.end = { dateTime: new Date(fields.end).toISOString() }
+  }
+  return body
 }
 
 function createEvent(fields, nowMs) {
@@ -482,8 +503,10 @@ function writeRefusal(source, event) {
 // An edit rewrites the event on its own identity: the UID names it, and the
 // bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
 // not editable here — the Google patch omits the key so the server keeps the
-// rule, and a recurring CalDAV event never reaches this function because the
-// detail draws no Edit for one.
+// rule, and a recurring CalDAV event is refused by writeRefusal before this
+// runs. Which shape the event has is likewise not a question an edit answers:
+// an all-day event stays VALUE=DATE and a Google date, a timed one stays a
+// date-time, so a title-only change cannot turn one into the other.
 function updateEvent(fields, existing, nowMs) {
   var event = existing || {}
   var uid = String(event.uid || "")
@@ -491,10 +514,12 @@ function updateEvent(fields, existing, nowMs) {
   var checked = validateEventFields(fields)
   if (!checked.ok) return checked
   var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0)) + 1
+  var allDay = !!(event.start && event.start.allDay)
   return {
     ok: true, uid: uid,
-    ics: veventLines(uid, sequence, Number(nowMs) || Date.now(), checked, "").join("\r\n"),
-    google: googleEventBody(checked)
+    ics: veventLines(uid, sequence, Number(nowMs) || Date.now(), checked, "",
+      allDay).join("\r\n"),
+    google: googleEventBody(checked, allDay)
   }
 }
 

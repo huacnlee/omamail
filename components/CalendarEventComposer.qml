@@ -25,6 +25,10 @@ Rectangle {
   property var editingEvent: null
   property string editingSourceId: ""
   readonly property bool editing: editingEvent !== null
+  // An all-day event is edited as the dates it spans; the time fields stand
+  // down, because writing them back would turn the event into a timed one.
+  readonly property bool editingAllDay: editing
+    && !!(editingEvent.start && editingEvent.start.allDay)
   color: root.backgroundColor
 
   function localDate(date) {
@@ -73,6 +77,10 @@ Rectangle {
     dateField.text = localDate(start)
     startField.text = localTime(start)
     endField.text = localTime(end)
+    // The stored all-day end is the exclusive midnight after the last shown
+    // day, so the field shows a millisecond before it.
+    endDateField.text = event.start.allDay && event.end
+      ? localDate(new Date(Number(event.end.ms) - 1)) : localDate(end)
     locationField.text = String(event.location || "")
     notesField.text = String(event.description || "")
     intervalField.text = "1"
@@ -97,6 +105,13 @@ Rectangle {
     if (!controller) return
     var start = new Date(dateField.text + "T" + startField.text + ":00")
     var end = new Date(dateField.text + "T" + endField.text + ":00")
+    if (editingAllDay) {
+      start = new Date(dateField.text + "T00:00:00")
+      var lastDay = new Date(endDateField.text + "T00:00:00")
+      // The written end is exclusive: the midnight after the last shown day,
+      // reached by date fields so a daylight-saving boundary cannot shift it.
+      end = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1)
+    }
     var fields = {
       title: titleField.text,
       startMs: start.getTime(),
@@ -146,7 +161,8 @@ Rectangle {
       }
 
       Text {
-        text: root.editing ? "Edit event" : "Create event"
+        text: root.editingAllDay ? "Edit event · All day"
+          : root.editing ? "Edit event" : "Create event"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.heading
@@ -221,14 +237,25 @@ Rectangle {
 
         TextField {
           id: dateField
-          width: (parent.width - parent.spacing * 2) * 0.5
+          width: root.editingAllDay ? (parent.width - parent.spacing) * 0.5
+            : (parent.width - parent.spacing * 2) * 0.5
           foreground: root.textColor
           font.family: root.panelFontFamily
-          placeholderText: "YYYY-MM-DD"
+          placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
+        }
+
+        TextField {
+          id: endDateField
+          visible: root.editingAllDay
+          width: (parent.width - parent.spacing) * 0.5
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          placeholderText: "Last day (YYYY-MM-DD)"
         }
 
         TextField {
           id: startField
+          visible: !root.editingAllDay
           width: (parent.width - parent.spacing * 2) * 0.25
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -237,6 +264,7 @@ Rectangle {
 
         TextField {
           id: endField
+          visible: !root.editingAllDay
           width: (parent.width - parent.spacing * 2) * 0.25
           foreground: root.textColor
           font.family: root.panelFontFamily

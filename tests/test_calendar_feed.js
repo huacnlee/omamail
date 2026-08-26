@@ -273,6 +273,26 @@ assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" },
   { recurrenceRule: "FREQ=WEEKLY" }), "")
 
+// An all-day event is edited as the dates it spans: the ICS keeps VALUE=DATE
+// with an exclusive end, the Google body carries date and never dateTime, and
+// a title-only change cannot turn it into midnight-to-midnight times.
+const allDayUpdate = feed.updateEvent({
+  title: "Conference, day one moved", startMs: new Date(2026, 7, 24).getTime(),
+  endMs: new Date(2026, 7, 26).getTime()
+}, { uid: "conf-1", sequence: 1,
+  start: { ms: new Date(2026, 7, 24).getTime(), allDay: true } }, 0)
+assert.ok(allDayUpdate.ok)
+assert.ok(allDayUpdate.ics.indexOf("DTSTART;VALUE=DATE:20260824") > 0)
+assert.ok(allDayUpdate.ics.indexOf("DTEND;VALUE=DATE:20260826") > 0,
+  "the exclusive end stays the day after the last one shown")
+assert.ok(allDayUpdate.ics.indexOf("SEQUENCE:2") > 0)
+assert.ok(allDayUpdate.ics.indexOf("DTSTART:") < 0,
+  "no date-time is written for an all-day event")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(allDayUpdate.google)), {
+  summary: "Conference, day one moved", description: "", location: "",
+  start: { date: "2026-08-24" }, end: { date: "2026-08-26" }
+})
+
 // The CalDAV write address is the event's own href, resolved the way the
 // server wrote it: absolute, absolute-path, or relative to the collection.
 assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
