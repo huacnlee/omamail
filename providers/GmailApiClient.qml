@@ -302,7 +302,7 @@ Item {
   }
 
   function sendMessage(payload, callback) {
-    return request("POST", Api.sendPath(), null, Api.sendBody(payload),
+    return request("POST", Api.sendPath(), null, payload,
       function(status, body, error) {
         if (typeof callback === "function") callback(body, error)
       })

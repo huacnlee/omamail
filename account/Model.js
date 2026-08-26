@@ -252,27 +252,6 @@ function clampZoom(value) {
     Math.round(zoom * ZOOM_STEPS_PER_UNIT) / ZOOM_STEPS_PER_UNIT))
 }
 
-function windowPrefs(raw) {
-  var parsed = null
-  try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-  if (!parsed || typeof parsed !== "object") {
-    return {
-      sidebarCollapsed: false,
-      bodyZoom: 1,
-      plainTextForced: false,
-      alwaysShowImages: false,
-      windowOpen: false
-    }
-  }
-  return {
-    sidebarCollapsed: parsed.sidebarCollapsed === true,
-    bodyZoom: clampZoom(parsed.bodyZoom),
-    plainTextForced: parsed.plainTextForced === true,
-    alwaysShowImages: parsed.alwaysShowImages === true,
-    windowOpen: parsed.windowOpen === true
-  }
-}
-
 function zoomAfterStep(zoom, step) {
   var by = Number(step)
   return clampZoom(clampZoom(zoom) + (isFinite(by) ? by : 0))

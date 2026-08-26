@@ -401,12 +401,6 @@ key. What matters while working:
 
 ## Releasing
 
-- Release notes are derived from the final pull request descriptions for every
-  merged pull request in the release range, checked against the release diff.
-  Read those descriptions in full: commit subjects and pull request titles are
-  navigation, not a sufficient account of the user-visible results. If a
-  description no longer matches its final diff, correct the description before
-  assembling the notes so every shipped feature is represented.
 - `scripts/bump.sh 0.2.0` is the whole of it: it sets the manifest version,
   commits, tags and pushes both. The release workflow refuses a tag that
   disagrees with the manifest, and by then the tag is on the remote and has to

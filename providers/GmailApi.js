@@ -118,13 +118,6 @@ function trashPath(id) { return "/users/me/messages/" + encode(id) + "/trash" }
 function untrashPath(id) { return "/users/me/messages/" + encode(id) + "/untrash" }
 function batchModifyPath() { return "/users/me/messages/batchModify" }
 function sendPath() { return "/users/me/messages/send" }
-
-function sendBody(payload) {
-  var source = payload || {}
-  var body = { raw: String(source.raw || "") }
-  if (source.threadId) body.threadId = String(source.threadId)
-  return body
-}
 function threadPath(id) { return "/users/me/threads/" + encode(id) }
 function labelsPath() { return "/users/me/labels" }
 function labelPath(id) { return "/users/me/labels/" + encode(id) }

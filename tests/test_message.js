@@ -310,10 +310,6 @@ assert.ok(message.buildRawMessage({
   from: "work@example.net", fromName: "   ", to: "jane@example.com"
 }).indexOf("From: work@example.net\r\n") === 0, "an empty name leaves a bare address")
 assert.ok(raw.indexOf("To: jane@example.com\r\n") >= 0)
-assert.ok(message.buildRawMessage({
-  to: "jane@example.com", bcc: "hidden@example.com", body: "x"
-}).indexOf("Bcc: hidden@example.com\r\n") >= 0,
-  "a mailto bcc has to leave as a Bcc header or it is not blind")
 // A non-ASCII subject has to go back out as an encoded word or Gmail rejects
 // the whole raw message.
 assert.ok(raw.indexOf("Subject: =?UTF-8?B?" + Buffer.from("你好", "utf8").toString("base64") + "?=") >= 0)

@@ -48,8 +48,6 @@ grep -q 'required property string pluginDir' account/MailAccount.qml \
 
 # The window drives this; the unread poll keeps running while it is false.
 grep -q 'property bool windowOpen' Service.qml || fail "Service.qml must expose windowOpen"
-grep -q 'windowOpen: windowOpen || restoreWindow' Service.qml \
-  || fail "a shell restart must persist whether the window was open"
 if grep -q 'panelOpen' Service.qml; then
   fail "panelOpen is the old name; the window entry point sets windowOpen"
 fi

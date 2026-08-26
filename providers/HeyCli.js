@@ -299,35 +299,16 @@ function verbForLabels(addLabelIds, removeLabelIds) {
 function composeCommand(fields) {
   var values = fields || {}
   var thread = trimmed(values.threadId)
-  var command = []
-  if (thread !== "") {
-    command = ["reply", thread]
-  } else {
-    var to = trimmed(values.to)
-    if (to === "") return []
-    command = ["compose", "--to", to, "--subject", String(values.subject || "")]
-    var cc = trimmed(values.cc)
-    if (cc !== "") command = command.concat(["--cc", cc])
-    var bcc = trimmed(values.bcc)
-    if (bcc !== "") command = command.concat(["--bcc", bcc])
-  }
-  return command.concat(attachArgs(values.attachments))
-}
+  if (thread !== "") return ["reply", thread]
 
-function attachArgs(files) {
-  var list = Array.isArray(files) ? files : []
-  var out = []
-  for (var i = 0; i < list.length; i++) {
-    var entry = list[i]
-    var path = trimmed(typeof entry === "string" ? entry : (entry && entry.path))
-    if (path !== "") out = out.concat(["--attach", path])
-  }
-  return out
-}
-
-function isDroppableFlag(flag) {
-  var name = trimmed(flag)
-  return name === "--allow-partial" || name === "--html"
+  var to = trimmed(values.to)
+  if (to === "") return []
+  var command = ["compose", "--to", to, "--subject", String(values.subject || "")]
+  var cc = trimmed(values.cc)
+  if (cc !== "") command = command.concat(["--cc", cc])
+  var bcc = trimmed(values.bcc)
+  if (bcc !== "") command = command.concat(["--bcc", bcc])
+  return command
 }
 
 function statusCommand() {

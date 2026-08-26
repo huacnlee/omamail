@@ -71,8 +71,7 @@ Three parts, one plugin:
 - an **application window** — a real Hyprland window, tiled like any other,
   with your mailboxes, the message list, and the reader side by side
 - **compose and reply inside that same window**, because a second window would
-  take a region of its own under Omarchy's panel mechanism. A `mailto:` link
-  from elsewhere on the desktop opens that same compose form.
+  take a region of its own under Omarchy's panel mechanism
 
 ## Add it to Omarchy
 
@@ -90,10 +89,6 @@ Then click the envelope in the bar. To open it from the keyboard, add this to
 The target is `shell`, not the plugin id: the window is summoned by the shell,
 which is what loads it in the first place. A plugin-scoped target would have to
 be registered by code that is only running once the window is already open.
-
-Once the plugin is enabled, Omamail handles `mailto:` links. Clicking an
-address in a browser, a PDF, or a notification opens compose here.
-`xdg-open mailto:you@example.com` is the check.
 
 Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
 `curl` — all of which Omarchy already ships. A HEY mailbox additionally needs
@@ -176,12 +171,11 @@ secret-tool clear service omamail    # the refresh token and IMAP passwords
 hey auth logout                      # the HEY session, if you added one
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
-rm ~/.local/share/applications/omamail.desktop
 ```
 
 Signing out from inside the app clears the keyring entry on its own. The plugin
-never edits your shell, Hyprland or theme configuration. The keybinding above
-and the mailto desktop file are yours to add and yours to remove.
+never edits your shell, Hyprland or theme configuration — the one keybinding
+above is yours to add and yours to remove.
 
 ## Connecting your mailbox
 

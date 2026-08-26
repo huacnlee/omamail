@@ -45,7 +45,7 @@ function entries(value) {
 // ------------------------------------------------------------------ mailto
 
 function percentDecode(value) {
-  var text = String(value || "")
+  var text = String(value || "").replace(/\+/g, " ")
   try {
     return decodeURIComponent(text)
   } catch (e) {
