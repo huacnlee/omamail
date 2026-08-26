@@ -25,6 +25,10 @@ Rectangle {
   property var editingEvent: null
   property string editingSourceId: ""
   readonly property bool editing: editingEvent !== null
+  // Set when this form's own write is in flight. A completion is answered only
+  // while it is: a write the user cancelled out of — Escape, then a newer
+  // edit — must not close or report into this one.
+  property bool writePending: false
   // An all-day event is edited as the dates it spans; the time fields stand
   // down, because writing them back would turn the event into a timed one.
   readonly property bool editingAllDay: editing
@@ -50,6 +54,7 @@ Rectangle {
     var end = new Date(start.getTime() + 3600000)
     editingEvent = null
     editingSourceId = ""
+    writePending = false
     titleField.text = ""
     dateField.text = localDate(start)
     startField.text = localTime(start)
@@ -73,6 +78,7 @@ Rectangle {
     var end = event.end ? new Date(Number(event.end.ms)) : new Date(start.getTime() + 3600000)
     editingEvent = event
     editingSourceId = String(sourceId || "")
+    writePending = false
     titleField.text = String(event.summary || "")
     dateField.text = localDate(start)
     startField.text = localTime(start)
@@ -125,6 +131,7 @@ Rectangle {
         count: countField.text
       }
     }
+    writePending = true
     if (editing) controller.updateEvent(editingSourceId, editingEvent, fields)
     else controller.createEvent(selectedSourceId, fields)
   }
@@ -444,15 +451,18 @@ Rectangle {
 
   Connections {
     target: root.controller
-    // A completion can belong to a write the user already cancelled out of:
-    // a closed composer shows nothing and must not close a newer edit.
+    // A completion is answered only while this form's own write is in flight:
+    // one the user cancelled out of belongs to no edit, and its failure is
+    // already on the view's banner.
     function onEventCreated(ok, error) {
-      if (!root.opened) return
+      if (!root.writePending) return
+      root.writePending = false
       if (ok) root.close()
       else resultText.text = error
     }
     function onEventUpdated(ok, error) {
-      if (!root.opened) return
+      if (!root.writePending) return
+      root.writePending = false
       if (ok) root.close()
       else resultText.text = error
     }
