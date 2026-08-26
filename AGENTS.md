@@ -275,6 +275,11 @@ key. What matters while working:
   is world-readable.
 - Anything that could carry a credential passes through `OAuth.redact` before
   it can reach a label.
+- **CalDAV credentials go only to the configured source's own origin.** A
+  server-written event `href` is resolved against the collection and refused
+  when its scheme, host or port differs — `Calendar.caldavEventUrl` is the
+  one place that decides, and the controller judges it before the keyring is
+  touched.
 - **Every request that crosses the network is given up on eventually, and in
   QML that costs a `Timer`.** Qt's QML `XMLHttpRequest` has no `timeout` and no
   `ontimeout`: the properties do not exist, and assigning one reads back

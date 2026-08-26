@@ -270,6 +270,30 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me",
 assert.strictEqual(feed.caldavEventUrl("http://dav.example/cal/me/",
   { href: "/cal/me/a.ics" }), "", "CalDAV writes stay on HTTPS")
 assert.strictEqual(feed.caldavEventUrl("", { href: "", uid: "" }), "")
+
+// An absolute href is accepted only on the collection's own origin: anything
+// else would send this calendar's credentials to a server that merely named
+// an address in an answer.
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://other.example/cal/me/a.ics" }), "",
+  "a cross-origin href is refused before credentials go anywhere")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example.evil.com/a.ics" }), "",
+  "a host that merely starts with the source's is another origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+  { href: "https://dav.example/cal/me/a.ics" }), "",
+  "a different port is a different origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example:443/cal/me/a.ics" }),
+  "https://dav.example:443/cal/me/a.ics",
+  "the default port spelled out is still the same origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "//other.example/a.ics" }), "",
+  "a scheme-relative href still names its own host")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "//dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics",
+  "a scheme-relative href on the same host resolves")
 assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)

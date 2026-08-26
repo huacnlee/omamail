@@ -50,6 +50,9 @@ Item {
   property var writeSource: null
   property var writeEvent: null
   property var writeDraft: null
+  // The address the current CalDAV write goes to, judged before the keyring
+  // is touched and carried to the writer that runs after it.
+  property string writeUrl: ""
   property bool eventWriting: false
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
@@ -200,6 +203,7 @@ Item {
     writeSource = null
     writeEvent = null
     writeDraft = null
+    writeUrl = ""
     eventRequest = null
     eventRequestTimedOut = false
     if (op === "delete") eventDeleted(ok, String(error || ""))
@@ -243,7 +247,16 @@ Item {
     })
   }
 
+  // The address is judged before the keyring is touched: a write URL that
+  // does not resolve to the source's own origin stops the operation here,
+  // not after a password has been read for it.
   function startCaldavWrite() {
+    var url = Calendar.caldavEventUrl(writeSource ? writeSource.url : "", writeEvent)
+    if (url === "") {
+      finishWrite(false, "The event's address is outside this calendar's server")
+      return
+    }
+    writeUrl = url
     caldavWritePasswordLookup.command = ["secret-tool", "lookup"]
       .concat(Sources.keyringAttributes(writeSource.id))
     caldavWritePasswordLookup.running = true
@@ -682,12 +695,9 @@ Item {
         root.finishWrite(false, "Set this calendar's password in Settings")
         return
       }
-      var url = Calendar.caldavEventUrl(root.writeSource ? root.writeSource.url : "",
-        root.writeEvent)
-      if (url === "") {
-        root.finishWrite(false, "This event has no address to write against")
-        return
-      }
+      // The URL was resolved and judged in startCaldavWrite, before this
+      // lookup ran; here it is only read back.
+      var url = root.writeUrl
       var credentials = root.writeSource.username + ":" + password
       if (root.writeOp === "delete") {
         eventDeleter.command = [root.pluginDir + "/scripts/calendar-delete.sh"]

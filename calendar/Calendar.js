@@ -487,15 +487,38 @@ function googleEventUrl(eventId) {
     + encodeURIComponent(String(eventId || ""))
 }
 
+// The scheme and authority of an HTTPS URL. Anything else — http, a bare
+// path, junk — has no authority here, because a write address is HTTPS or
+// nothing.
+function urlAuthority(url) {
+  var match = /^(https):\/\/([^\/?#]+)/i.exec(String(url || ""))
+  return match ? match[1].toLowerCase() + "://" + match[2] : ""
+}
+
+// scheme://host:port with the port made explicit and the case-insensitive
+// parts folded, so two spellings of the same origin compare equal.
+function urlOrigin(url) {
+  var match = /^(https):\/\/([^\/?#:]+)(?::(\d+))?/i.exec(String(url || ""))
+  if (!match) return ""
+  return match[1].toLowerCase() + "://" + match[2].toLowerCase() + ":"
+    + (match[3] ? String(Number(match[3])) : "443")
+}
+
 // A REPORT answers with the event's own href, which the server may write as a
-// full URL or as a path against the host the collection lives on.
+// full URL or as a path against the host the collection lives on. An absolute
+// href is accepted only on the collection's own origin: anything else would
+// send this calendar's credentials to a server that merely named an address
+// in an answer.
 function caldavEventUrl(sourceUrl, event) {
-  var href = String(event && event.href || "")
-  if (/^https:\/\//i.test(href)) return href
   var base = String(sourceUrl || "")
-  var host = /^(https:\/\/[^/]+)/i.exec(base)
-  if (!host) return ""
-  if (href.charAt(0) === "/") return host[1] + href
+  var origin = urlOrigin(base)
+  if (origin === "") return ""
+  var href = String(event && event.href || "")
+  if (/^https:\/\//i.test(href) || href.substring(0, 2) === "//") {
+    var candidate = href.substring(0, 2) === "//" ? "https:" + href : href
+    return urlOrigin(candidate) === origin ? candidate : ""
+  }
+  if (href.charAt(0) === "/") return urlAuthority(base) + href
   if (href !== "") {
     var collection = base.charAt(base.length - 1) === "/" ? base : base + "/"
     return collection + href
