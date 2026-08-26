@@ -11,7 +11,7 @@
 // field. The body is allowed them — that is what a body is.
 
 function percentDecode(value) {
-  var text = String(value || "").replace(/\+/g, " ")
+  var text = String(value || "")
   try {
     return decodeURIComponent(text)
   } catch (e) {
