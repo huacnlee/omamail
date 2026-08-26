@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
+import "../message/Mailto.js" as Mailto
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -41,7 +42,16 @@ Item {
   signal zoomRequested(real step)
   signal zoomResetRequested()
   signal composeRequested(string mode)
+  signal mailtoRequested(string url)
   signal actionRequested(string action)
+
+  function openLink(url) {
+    if (Mailto.parse(url)) {
+      root.mailtoRequested(url)
+      return
+    }
+    Qt.openUrlExternally(url)
+  }
 
   readonly property var summary: service ? service.selectedMessage : null
   // Already sanitised by the service, remote images and all removed. Qt's rich
@@ -485,7 +495,7 @@ Item {
           if (image <= sources.length) imagePopover.show(sources[image - 1])
           return
         }
-        Qt.openUrlExternally(link)
+        root.openLink(link)
       }
 
       // NoButton so selecting text still works; this exists only to turn the

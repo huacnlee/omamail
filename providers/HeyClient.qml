@@ -131,7 +131,7 @@ Item {
       // because it only happens when the flag was in the command that just
       // ran, and each one removes it.
       var missing = Cli.unknownFlag(out === "" ? err : out)
-      if (missing !== "" && Cli.hasFlag(list, missing)) {
+      if (missing !== "" && Cli.isDroppableFlag(missing) && Cli.hasFlag(list, missing)) {
         root.dropFlag(missing)
         root.run(list, stdinText, callback, handle)
         return
@@ -546,7 +546,8 @@ Item {
 
     var parsed = Mail.parseRfc822(Mail.decodeBase64Url(raw))
     var body = Mail.extractBody(parsed).text
-    if (body === "") {
+    var files = payload && Array.isArray(payload.attachments) ? payload.attachments : []
+    if (body === "" && files.length === 0) {
       if (typeof callback === "function") callback(null, "Write something before sending")
       return handle
     }
@@ -561,7 +562,9 @@ Item {
       threadId: threadId,
       to: Mail.headerFrom(parsed.headers, "To"),
       cc: Mail.headerFrom(parsed.headers, "Cc"),
-      subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject"))
+      bcc: Mail.headerFrom(parsed.headers, "Bcc"),
+      subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject")),
+      attachments: files
     })
     if (command.length === 0) {
       if (typeof callback === "function") callback(null, "Add a recipient first")

@@ -16,15 +16,30 @@ mkdir -p "$work/bin"
 cat > "$work/bin/curl" <<'STUB'
 #!/bin/sh
 header_file=
+saw_fail_early=0
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--dump-header" ]; then
-    header_file=$2
-    shift 2
-  else
-    shift
-  fi
+  case "$1" in
+    --dump-header)
+      header_file=$2
+      shift 2
+      ;;
+    --fail-early)
+      saw_fail_early=1
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
 done
-if [ -n "${CURL_STUB_HEADER:-}" ] && [ -n "$header_file" ]; then
+if [ "${CURL_STUB_REQUIRE_FAIL_EARLY:-0}" = "1" ] && [ "$saw_fail_early" != "1" ]; then
+  cat >/dev/null
+  exit 99
+fi
+if [ -n "${CURL_STUB_STDOUT:-}" ]; then
+  cat >/dev/null
+  printf '%s' "$CURL_STUB_STDOUT"
+elif [ -n "${CURL_STUB_HEADER:-}" ] && [ -n "$header_file" ]; then
   printf '%s' "$CURL_STUB_HEADER" > "$header_file"
   cat >/dev/null
   printf '%s' "${CURL_STUB_BODY:-}"
@@ -128,6 +143,31 @@ else
   printf '  FAIL expected 2 url lines, found %s\n' "$sections"
   failures=$(( failures + 1 ))
 fi
+max_times=$(printf '%s' "$config" | grep -c '^max-time = 60$' || true)
+connect_timeouts=$(printf '%s' "$config" | grep -c '^connect-timeout = 20$' || true)
+if [ "$max_times" = "$sections" ] && [ "$connect_timeouts" = "$sections" ]; then
+  printf '  ok   every command section has its own deadlines\n'
+else
+  printf '  FAIL expected deadlines in all %s sections, found max-time=%s connect-timeout=%s\n' \
+    "$sections" "$max_times" "$connect_timeouts"
+  failures=$(( failures + 1 ))
+fi
+
+# curl otherwise reports only the final transfer's status after --next. A
+# failed earlier SEARCH window must stop the run instead of returning a short,
+# apparently successful result assembled from the remaining windows.
+partial_reply='* SEARCH 1 2 3'
+out=$(printf '%s\n' "$multi" \
+  | CURL_STUB_REQUIRE_FAIL_EARLY=1 CURL_STUB_STDOUT="$partial_reply" CURL_STUB_EXIT=21 \
+    PATH="$work/bin:$PATH" sh "$script")
+first=$(printf '%s\n' "$out" | sed -n '1p')
+decoded=$(printf '%s\n' "$out" | sed -n '2p' | base64 -d)
+if [ "$first" = "21" ] && [ "$decoded" = "$partial_reply" ]; then
+  printf '  ok   an earlier failed section cannot be hidden by a later success\n'
+else
+  printf '  FAIL expected fail-early status 21 with the partial SEARCH response\n'
+  failures=$(( failures + 1 ))
+fi
 
 # --------------------------------------------------------------- escaping
 #
@@ -180,6 +220,8 @@ check "the first recipient is set" "$config" 'mail-rcpt = "friend@example.com"'
 check "every recipient is set" "$config" 'mail-rcpt = "other@example.com"'
 check "the body is uploaded from a file, not passed as an argument" "$config" 'upload-file = "'
 check_absent "SMTP does not emit --next sections" "$config" 'next'
+check "SMTP keeps its transfer deadline" "$config" 'max-time = 60'
+check "SMTP keeps its connection deadline" "$config" 'connect-timeout = 20'
 
 # ------------------------------------------------------------- the framing
 
