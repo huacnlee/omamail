@@ -110,6 +110,8 @@ if [ "$mode" = "smtp" ]; then
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
   printf 'user = "%s"\n' "$escaped_credentials"
+  printf 'max-time = 60\n'
+  printf 'connect-timeout = 20\n'
   printf 'mail-from = "%s"\n' "$(escape "$sender")"
   for recipient in "$@"; do
     printf 'mail-rcpt = "%s"\n' "$(escape "$(decode "$recipient")")"
@@ -137,6 +139,10 @@ else
     # Repeated because `next` resets this curl option with the rest.
     printf 'noproxy = "*"\n'
     printf 'user = "%s"\n' "$escaped_credentials"
+    # These are per-transfer options too. Keeping them in every section makes
+    # every command give up eventually, rather than only the final one.
+    printf 'max-time = 60\n'
+    printf 'connect-timeout = 20\n'
     printf 'request = "%s"\n' "$(escape "$(decode "$argument")")"
   done
 fi
@@ -153,12 +159,11 @@ fi
 # config builder's.
 set +e
 build_config "$@" | curl \
+  --fail-early \
   --config - \
   --silent \
   --show-error \
   --dump-header "$work/headers" \
-  --max-time 60 \
-  --connect-timeout 20 \
   > "$work/out" 2> "$work/err"
 status=$?
 set -e

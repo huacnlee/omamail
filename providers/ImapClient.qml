@@ -200,9 +200,11 @@ Item {
 
   // ---------------------------------------------------------------- reads
 
-  // IMAP has no page token: SEARCH answers with every matching UID at once. So
-  // the "token" is an offset into that answer, and the count it reports is
-  // exact rather than the estimate Gmail returns.
+  // IMAP has no page token, so the "token" is an offset into a UID snapshot.
+  // FETCH makes that snapshot one short response line per message; an ordinary
+  // SEARCH would put every UID on one line and curl refuses that line once a
+  // folder grows past roughly ten thousand messages. A filtered listing then
+  // searches bounded ranges of the stable UIDs the snapshot reported.
   //
   // Newest first, which is the order the list is read in and the reverse of the
   // order UIDs are assigned in.
@@ -219,18 +221,27 @@ Item {
         return
       }
       var folder = root.folderFor(parsed.folder)
-      root.run(folder, [Imap.searchCommand(Imap.normalizeCriteria(parsed.criteria))],
-        function(text, error) {
+      root.run(folder, [Imap.uidListCommand()], function(snapshotText, snapshotError) {
+        if (handle.aborted) return
+        if (snapshotError) {
+          if (typeof callback === "function") callback(null, snapshotError)
+          return
+        }
+
+        var snapshot = Imap.parseUidList(snapshotText)
+        var criteria = Imap.normalizeCriteria(parsed.criteria)
+
+        function finish(uids, error) {
           if (handle.aborted) return
           if (typeof callback !== "function") return
           if (error) {
             callback(null, error)
             return
           }
-          var uids = Imap.parseSearch(text)
+          var ordered = Array.isArray(uids) ? uids.slice() : []
           // Ascending from the server; the newest message has the highest UID.
-          uids.reverse()
-          var page = uids.slice(offset, offset + limit)
+          ordered.reverse()
+          var page = ordered.slice(offset, offset + limit)
           var ids = []
           for (var i = 0; i < page.length; i++) ids.push(Imap.messageId(page[i], folder))
           callback({
@@ -238,10 +249,20 @@ Item {
             // IMAP has no server-side conversation id. Threading falls back to
             // References, which is what every other IMAP client does.
             threadIds: [],
-            nextPageToken: offset + limit < uids.length ? String(offset + limit) : "",
-            estimate: uids.length
+            nextPageToken: offset + limit < ordered.length ? String(offset + limit) : "",
+            estimate: ordered.length
           }, "")
+        }
+
+        var commands = Imap.searchCommands(criteria, snapshot)
+        if (criteria === "" || commands.length === 0) {
+          finish(criteria === "" ? snapshot : [], "")
+          return
+        }
+        root.run(folder, commands, function(searchText, searchError) {
+          finish(Imap.parseSearch(searchText), searchError)
         }, handle)
+      }, handle)
     })
     return handle
   }

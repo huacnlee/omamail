@@ -364,10 +364,50 @@ function sequenceSet(uids) {
 // a hand-rolled IMAP client ruins a mailbox.
 var LIST_HEADERS = "HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REPLY-TO LIST-UNSUBSCRIBE)"
 
-function searchCommand(criteria) {
+// curl holds one IMAP response line in a 64 KiB buffer. SEARCH answers with
+// every matching UID on one line, so an unbounded `UID SEARCH ALL` fails with
+// CURLE_TOO_LARGE once a folder has around ten thousand messages. FETCH puts
+// each UID on its own response line instead, which makes this the stable
+// snapshot every listing starts from.
+function uidListCommand() {
+  return "UID FETCH 1:* (UID)"
+}
+
+// A SEARCH over a known UID snapshot can be split without using message
+// sequence numbers. UIDs do not move when another client expunges a message,
+// and a message delivered after the snapshot has a UID above its last one.
+//
+// 4096 UIDs per response. A UID is at most ten digits, so the matching SEARCH
+// line stays below 45 KiB even when every UID in the batch matches. The range
+// endpoints may be far apart in a sparse mailbox, but the snapshot proves that
+// at most 4096 existing messages lie between them.
+var SEARCH_WINDOW = 4096
+
+function sortedUids(values) {
+  var list = Array.isArray(values) ? values : []
+  var found = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var uid = Math.floor(Number(list[i]))
+    if (!isFinite(uid) || uid < 1 || found[uid]) continue
+    found[uid] = true
+    out.push(uid)
+  }
+  out.sort(function(a, b) { return a - b })
+  return out
+}
+
+function searchCommands(criteria, snapshot) {
   var text = trimmed(criteria)
-  // ALL rather than an empty criteria list, which is a syntax error.
-  return "UID SEARCH " + (text === "" ? "ALL" : text)
+  var uids = sortedUids(snapshot)
+  var commands = []
+  if (text === "" || uids.length === 0) return commands
+
+  for (var i = 0; i < uids.length; i += SEARCH_WINDOW) {
+    var last = Math.min(uids.length - 1, i + SEARCH_WINDOW - 1)
+    commands.push("UID SEARCH UID " + uids[i] + ":" + uids[last] + " " + text)
+  }
+  return commands
 }
 
 function summaryFetchCommand(uids) {
@@ -516,7 +556,17 @@ function parseSearch(text) {
       if (isFinite(uid) && uid > 0) uids.push(uid)
     }
   }
-  return uids
+  return sortedUids(uids)
+}
+
+// `UID FETCH 1:* (UID)` returns one FETCH response per message. The UID is the
+// only data item it carries; sorting and de-duplicating here makes the snapshot
+// independent of the order in which a server chose to report those responses.
+function parseUidList(text) {
+  var entries = parseFetch(text)
+  var uids = []
+  for (var i = 0; i < entries.length; i++) uids.push(entries[i].uid)
+  return sortedUids(uids)
 }
 
 // Reads the value of one FETCH data item out of a response line. The items are
@@ -526,7 +576,7 @@ function fetchItem(line, name) {
   var index = line.indexOf(name)
   if (index < 0) return ""
   var rest = line.substring(index + name.length)
-  var match = rest.match(/^\s*("(?:[^"\\]|\\.)*"|\S+)/)
+  var match = rest.match(/^\s*("(?:[^"\\]|\\.)*"|[^()\s]+)/)
   return match ? match[1] : ""
 }
 

@@ -250,6 +250,12 @@ key. What matters while working:
   the end of one response into the middle of the next — which is also how a
   message body could forge a response of its own. Base64 keeps one character
   per octet, so counting characters is counting octets.
+- **A response line has curl's 64 KiB ceiling.** SEARCH returns every matching
+  UID on one line, so an unbounded `UID SEARCH ALL` fails around ten thousand
+  messages. A listing first takes a UID snapshot with `UID FETCH 1:* (UID)`,
+  whose response is one short line per message. Filtered searches split those
+  stable UIDs into batches of at most 4096; never replace them with message
+  sequence-number windows, which move when another client expunges mail.
 - `BODY.PEEK`, never `BODY`. Reading a list must not mark the mailbox seen, and
   that is the most common way a hand-rolled IMAP client ruins a mailbox.
 - `UID EXPUNGE`, never bare `EXPUNGE`: the latter removes every `\Deleted`
