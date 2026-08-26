@@ -1596,7 +1596,7 @@ function documentFor(bodyHtml, colors) {
 // of it are not, so the result looks accidental rather than deliberately plain.
 //
 // This builds a new tree instead. Nothing is carried across from the sender's
-// document but four kinds of value:
+// document but four kinds of sender value:
 //
 //   text          collapsed the way HTML says whitespace collapses
 //   href          on <a>, and only mailto: or http(s) at a public host
@@ -1604,10 +1604,12 @@ function documentFor(bodyHtml, colors) {
 //   width/height  on <img>, numeric and capped to an inline-image size
 //
 // Every element the reader emits is constructed here with an empty attribute
-// list and only these checked values are added, so a class, an id, a bgcolor,
-// an align, a style, a background or a url() cannot survive this pass by being
-// missed. That is the whole security argument for reading mode: structural,
-// with a narrow numeric exception rather than a list of removals.
+// list and only these checked values are added. The reader may also add fixed
+// layout attributes of its own to a compact avatar row; none is copied from
+// the sender. A class, an id, a bgcolor, an align, a style, a background or a
+// url() therefore cannot survive this pass by being missed. That is the whole
+// security argument for reading mode: structural, with a narrow numeric
+// exception rather than a list of removals.
 //
 // The type, the spacing, the measure and the colours are then Omamail's, and
 // are applied by `readerDocumentFor` from the theme.
@@ -2388,6 +2390,8 @@ function readerTidy(blocks) {
       if (out.length === 0) continue
       if (out[out.length - 1].name === "hr") continue
     }
+    var avatar = readerAvatarRow(block)
+    if (avatar !== null) block = avatar
     // Responsive mail often spells a horizontal social strip as one table row
     // per icon. Once layout tables are flattened those rows are consecutive
     // paragraphs; join only paragraphs made entirely from bounded small images,
@@ -2404,6 +2408,42 @@ function readerTidy(blocks) {
   }
   while (out.length > 0 && out[out.length - 1].name === "hr") out.pop()
   return out
+}
+
+// QTextDocument keeps an image in an ordinary paragraph on the text baseline,
+// which leaves a small avatar visibly below the name it identifies. A leading
+// bounded image followed by words is the one unambiguous identity-row shape.
+// Build that row ourselves so Qt can use the vertical alignment it implements
+// for table cells. Pure image strips stay paragraphs and continue to flow
+// horizontally; pictures inside prose stay prose.
+function readerAvatarRow(block) {
+  if (block.name !== "p") return null
+  var children = readerTrimmed(block.children)
+  if (children.length < 2 || readerSmallImageCount([children[0]]) !== 1) return null
+  var words = children.slice(1)
+  if (!readerMeaningful(words) || readerContainsImage(words)) return null
+
+  var table = readerElement("table")
+  table.attrs = [{ name: "cellspacing", value: "4" }, { name: "cellpadding", value: "0" }]
+  var row = readerElement("tr")
+  var picture = readerElement("td")
+  var text = readerElement("td")
+  picture.attrs = [{ name: "valign", value: "middle" }]
+  text.attrs = [{ name: "valign", value: "middle" }]
+  picture.children = [children[0]]
+  text.children = words
+  row.children = [picture, text]
+  table.children = [row]
+  return table
+}
+
+function readerContainsImage(nodes) {
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i]
+    if (node.type === "text") continue
+    if (node.name === "img" || readerContainsImage(node.children)) return true
+  }
+  return false
 }
 
 function readerSmallImageCount(nodes) {
@@ -2492,7 +2532,6 @@ function readerDocumentFor(source, colors) {
     + "td,th{padding-top:" + rule + "px;padding-bottom:" + rule
       + "px;padding-right:" + gap + "px;}"
     + "th{font-weight:bold;text-align:left;}"
-    + "img{vertical-align:middle;}"
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body>"
     + serialize(documentTree(source))

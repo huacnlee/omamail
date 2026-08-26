@@ -186,7 +186,7 @@ Anything supplied by a sender is plain data unless it passes through the specifi
 
 `message/Html.js` is a security boundary, not a presentation helper. The body cache keeps source content; the sanitizer decides what Qt may render; remote resource policy remains centralized. Component extraction must not move any of those decisions into a reader view or a generic rich-text primitive.
 
-Reading mode lives there for the same reason and is a rebuild rather than a filter: it constructs a fresh document whose elements begin with empty attribute lists, and carries across only text, a checked `href`, a checked `src`, and numeric image dimensions capped to a small inline size. That is a structural guarantee rather than a list of removals, and it holds only while every element in the output is built here and every copied value is bounded where it is added. A resource-bearing attribute is refused before any appearance option is consulted, because no appearance option may buy a network request.
+Reading mode lives there for the same reason and is a rebuild rather than a filter: it constructs a fresh document whose elements begin with empty attribute lists, and carries across only text, a checked `href`, a checked `src`, and numeric image dimensions capped to a small inline size. Fixed attributes the reader adds to its own compact avatar row carry no sender value. That is a structural guarantee rather than a list of removals, and it holds only while every element in the output is built here and every copied value is bounded where it is added. A resource-bearing attribute is refused before any appearance option is consulted, because no appearance option may buy a network request.
 
 ## Testing boundaries
 

@@ -900,7 +900,9 @@ function reading(source, options) {
   for (const pair of attributesOf(ready.reader.document, [])) kinds[pair] = true
   for (const pair of Object.keys(kinds)) {
     assert.ok(pair === "a/href" || pair === "img/src"
-      || pair === "img/width" || pair === "img/height",
+      || pair === "img/width" || pair === "img/height"
+      || pair === "table/cellspacing" || pair === "table/cellpadding"
+      || pair === "td/valign",
       "reading mode emitted " + pair + ", which is a sender attribute it cannot have")
   }
   // The attribute list is only half of it. An element the reader never built
@@ -1413,6 +1415,19 @@ function activityMail() {
     "<p><a href=\"https://social.example.com/a\"><img src=\"https://cdn.example.com/a.png\" width=\"32\" height=\"32\"></a> "
       + "<a href=\"https://social.example.com/b\"><img src=\"https://cdn.example.com/b.png\" width=\"32\" height=\"32\"></a></p>")
 
+  // An avatar at the start of a line is interface-like identity content, not
+  // a picture sitting on the text baseline. Qt ignores image alignment in the
+  // paragraph here, so the reader builds one compact, vertically centred row.
+  const avatar = reading("<p><a href=\"https://example.com/alice\">"
+    + "<img src=\"https://cdn.example.com/alice.png\" width=\"20\" height=\"20\"></a>"
+    + "<strong>Alice</strong> left a comment</p>", { allowRemoteImages: true }).html
+  assert.strictEqual(avatar,
+    "<table cellspacing=\"4\" cellpadding=\"0\"><tr>"
+      + "<td valign=\"middle\"><a href=\"https://example.com/alice\">"
+      + "<img src=\"https://cdn.example.com/alice.png\" width=\"20\" height=\"20\"></a></td>"
+      + "<td valign=\"middle\"><strong>Alice</strong> left a comment</td>"
+      + "</tr></table>")
+
   // One parse answers for all three readings, which is what makes changing mode
   // free: the reader is built from the tree the sanitiser is about to clean,
   // and reading that tree does not change it.
@@ -1440,8 +1455,6 @@ function activityMail() {
   assert.ok(document.indexOf("body{color:#cacccc;background-color:#101315;}") > 0)
   assert.ok(document.indexOf("a{color:#7aa2f7;}") > 0)
   assert.ok(document.indexOf("img{max-width:420px;}") > 0)
-  assert.ok(document.indexOf("vertical-align:middle") > 0,
-    "inline avatars and icons align with the text beside them")
   assert.ok(document.indexOf(read.html) > 0, "the document is the reading, unaltered")
 
   // The rhythm follows the size it is read at rather than standing still while
