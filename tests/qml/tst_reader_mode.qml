@@ -210,6 +210,10 @@ Item {
         "the segmented toggle and Open Web are aligned on the toolbar: track="
           + track.y + "/" + track.height + " web=" + web.y + "/" + web.height
           + " group=" + viewTools.height)
+      compare(web.y, track.y,
+        "Open Web starts on the same toolbar line as the segmented control")
+      compare(web.height, track.height,
+        "Open Web has the same toolbar control box, not only the same centre")
 
       reader.width = 300
       tryCompare(toolbar, "stacked", true)

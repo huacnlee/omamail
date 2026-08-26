@@ -754,7 +754,8 @@ Item {
           objectName: "openWebButton"
           visible: !root.service || root.service.canOpenOnWeb
           x: modeTrack.width + Style.space(6)
-          y: Math.round((parent.height - height) / 2)
+          y: modeTrack.y
+          height: modeTrack.height
           iconName: "browser"; tooltipText: "Open in browser"
           foreground: root.dimColor; hoverColor: root.textColor
           fontFamily: root.panelFontFamily
