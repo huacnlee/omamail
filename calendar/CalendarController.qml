@@ -127,12 +127,15 @@ Item {
   }
 
   function createEvent(sourceId, fields) {
-    if (creatingEvent || eventWriting) return
+    if (creatingEvent || eventWriting) {
+      eventCreated(false, "Another event change is still in progress")
+      return false
+    }
     var source = findSource(sourceId)
     var refusal = Calendar.writeRefusal(source, null)
-    if (refusal !== "") { eventCreated(false, refusal); return }
+    if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
-    if (!built.ok) { eventCreated(false, built.error); return }
+    if (!built.ok) { eventCreated(false, built.error); return false }
     eventSource = source
     eventDraft = built
     creatingEvent = true
@@ -142,6 +145,7 @@ Item {
         .concat(Sources.keyringAttributes(source.id))
       eventPasswordLookup.running = true
     }
+    return true
   }
 
   function finishEvent(ok, error) {
@@ -156,12 +160,15 @@ Item {
   }
 
   function updateEvent(sourceId, event, fields) {
-    if (creatingEvent || eventWriting) return
+    if (creatingEvent || eventWriting) {
+      eventUpdated(false, "Another event change is still in progress")
+      return false
+    }
     var source = findSource(sourceId)
     var refusal = Calendar.writeRefusal(source, event)
-    if (refusal !== "") { eventUpdated(false, refusal); return }
+    if (refusal !== "") { eventUpdated(false, refusal); return false }
     var built = Calendar.updateEvent(fields, event, Date.now())
-    if (!built.ok) { eventUpdated(false, built.error); return }
+    if (!built.ok) { eventUpdated(false, built.error); return false }
     writeOp = "update"
     writeSource = source
     writeEvent = event
@@ -169,13 +176,17 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else startCaldavWrite()
+    return true
   }
 
   function deleteEvent(sourceId, event) {
-    if (creatingEvent || eventWriting) return
+    if (creatingEvent || eventWriting) {
+      eventDeleted(false, "Another event change is still in progress")
+      return false
+    }
     var source = findSource(sourceId)
     var refusal = Calendar.writeRefusal(source, event)
-    if (refusal !== "") { eventDeleted(false, refusal); return }
+    if (refusal !== "") { eventDeleted(false, refusal); return false }
     writeOp = "delete"
     writeSource = source
     writeEvent = event
@@ -183,6 +194,7 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else startCaldavWrite()
+    return true
   }
 
   function finishWrite(ok, error) {

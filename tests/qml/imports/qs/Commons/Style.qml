@@ -5,7 +5,7 @@ QtObject {
   readonly property real cornerRadius: 2
   readonly property real normalBorderWidth: 1
   readonly property var font: ({
-    family: "monospace", body: 14, bodySmall: 13, caption: 11,
+    family: "monospace", title: 22, heading: 18, body: 14, bodySmall: 13, caption: 11,
     icon: 16, iconSmall: 14
   })
   readonly property var spacing: ({

@@ -109,6 +109,10 @@ Rectangle {
 
   function submit() {
     if (!controller) return
+    // Create, update and delete share one controller write slot. Do not mark
+    // this form pending unless that slot is free: otherwise an older write's
+    // completion could be mistaken for this form's and close it.
+    if (controller.creatingEvent || controller.eventWriting) return
     var start = new Date(dateField.text + "T" + startField.text + ":00")
     var end = new Date(dateField.text + "T" + endField.text + ":00")
     if (editingAllDay) {
@@ -414,16 +418,17 @@ Rectangle {
 
         IconTextButton {
           text: {
-            if (root.editing)
-              return root.controller && root.controller.eventWriting ? "Saving" : "Save changes"
-            return root.controller && root.controller.creatingEvent ? "Creating" : "Create event"
+            var busy = root.controller
+              && (root.controller.creatingEvent || root.controller.eventWriting)
+            if (root.editing) return busy ? "Saving" : "Save changes"
+            return busy ? "Creating" : "Create event"
           }
           iconName: root.editing ? "check" : "plus"
           foreground: root.textColor
           accent: root.accentColor
           fontFamily: root.panelFontFamily
-          enabled: root.controller && (root.editing
-            ? !root.controller.eventWriting : !root.controller.creatingEvent)
+          enabled: root.controller && !root.controller.creatingEvent
+            && !root.controller.eventWriting
           onClicked: root.submit()
         }
 
