@@ -24,6 +24,11 @@ if [[ -z $runtime ]]; then
 fi
 
 printf '\n'
+# QML's console.log is qDebug, and on a systemd desktop Qt sends that to the
+# journal rather than to stderr unless it is told otherwise — so the column that
+# matters printed nothing at all and exited 0, which reads exactly like a
+# benchmark with no rows in it.
+export QT_FORCE_STDERR_LOGGING=1
 # A benchmark, not a test: a QML runtime that will not start is worth saying out
 # loud, but it is not a reason to fail the target.
 if ! "$runtime" tests/bench_html.qml; then

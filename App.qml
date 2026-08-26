@@ -85,10 +85,10 @@ Item {
   property string currentView: "list"
   readonly property bool calendarVisible: currentView === "calendar"
   property string cursorId: ""
-  // Kept across messages, and across the window being closed: somebody who
-  // wants plain text wants it for their mail, not for one message. The service
-  // holds it because that is what writes it to disk.
-  readonly property bool plainTextForced: !!service && service.plainTextForced
+  // Kept across messages, and across the window being closed: how somebody
+  // reads their mail is a fact about them, not about the message that made them
+  // reach for it. The service holds it because that is what writes it to disk.
+  readonly property string bodyMode: service ? service.bodyMode : "reader"
   // Reading zoom for the message body only. The window's own chrome follows
   // the theme's font scale, which is Omarchy's to set, not this app's. The
   // service holds it because it is written to disk: a size somebody reached for
@@ -195,8 +195,8 @@ Item {
     else close()
   }
 
-  // Plain text is a preference and survives; the heavy-document override is a
-  // per-message decision about one specific message and does not.
+  // How a message is read is a preference and survives; the heavy-document
+  // override is a per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""
@@ -1080,9 +1080,10 @@ Item {
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
           showBack: root.compact
-          forcePlainText: root.plainTextForced
-          onTogglePlainTextRequested: if (root.service)
-            root.service.setPlainTextForced(!root.service.plainTextForced)
+          bodyMode: root.bodyMode
+          onBodyModeRequested: function(mode) {
+            if (root.service) root.service.setBodyMode(mode)
+          }
           onZoomRequested: function(step) { root.zoomBy(step) }
           onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
           onBackRequested: root.backToList()

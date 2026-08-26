@@ -159,14 +159,37 @@ Item {
   // tree rather than the string is the difference between one parse per message
   // and one per drag step.
   property var selectedDocument: null
-  // Off for every message, every time it is opened. Fetching a sender's images
-  // tells them the mail was read, from which address and when, so it happens
-  // only when the reader has asked — and asking covers this message alone.
+  // The same message read a second way, off the same parse. Reading mode is a
+  // document of its own rather than a restyling of the one above: the sender's
+  // presentation is discarded and what the message says is rebuilt out of
+  // paragraphs, headings, lists and links. Built whenever a body is, so
+  // changing how a message is read costs neither a fetch nor a parse.
+  property var selectedReaderDocument: null
+  property bool selectedReaderTooHeavy: false
+  // A message whose every word was inside a picture reads as nothing at all,
+  // and the sender's own formatting is the honest answer for it.
+  property bool selectedReaderEmpty: true
+  // Reading mode drops beacons and everything a sender hid, so it has fewer
+  // pictures to offer than the sanitised document does. The notice counts
+  // what the reading on screen is missing, not what some other one would be.
+  property int selectedReaderRemoteImages: 0
+  // Fetching a sender's images tells them the mail was read, from which address
+  // and when, so it happens only after the standing preference allows it.
   // The window's standing answer about remote images, which is where a
   // message starts. Off, and every message begins blocked and is asked about
   // one at a time.
   property bool alwaysShowImages: false
   property bool remoteImagesAllowed: false
+  property bool remoteImagesLoading: false
+  property var remoteImageData: ({})
+  property var selectedRemoteImageSources: []
+  property var imageFetchQueue: []
+  property var imageFetchProcess: null
+  property int imageFetchSerial: 0
+  // Prepared remote bytes stay separate from the source body. Qt receives only
+  // completed data URIs, never an address whose pending load would draw its
+  // built-in broken placeholder or whose redirect could escape the URL gate.
+
   // The sender's images, in the order htmlToText numbers them, so a marker in
   // the plain-text body can be traced back to the picture it replaced.
   property var selectedImages: []
@@ -650,8 +673,21 @@ Item {
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
     selectedDocument = null
+    selectedReaderDocument = null
+    selectedReaderTooHeavy = false
+    selectedReaderEmpty = true
+    selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = alwaysShowImages
+    remoteImagesLoading = false
+    remoteImageData = ({})
+    selectedRemoteImageSources = []
+    imageFetchQueue = []
+    imageFetchSerial++
+    if (imageFetchProcess) {
+      imageFetchProcess.destroy()
+      imageFetchProcess = null
+    }
     selectedBlockedImages = 0
     selectedRemoteImages = 0
     selectedImages = []
@@ -685,7 +721,7 @@ Item {
       // disk beside it, on the same grounds the document is: what the cache
       // holds is the sender's HTML, so a fix to how a message reads reaches
       // every message already there instead of only the ones fetched after it.
-      // Both readings come off the one parse, and the picture list comes with
+      // Every reading comes off the one parse, and the picture list comes with
       // them — a marker and the list it points into have to be numbered by the
       // same walk or a marker opens somebody else's picture.
       var reread = root.renderSource(cached.html, cached.source === "html")
@@ -725,7 +761,7 @@ Item {
       root.selectedMessage = summary
       var decoded = Mail.extractBody(payload.payload)
       var rawHtml = Mail.extractHtml(payload.payload)
-      // Both readings of the body out of one parse. The markers in the
+      // Every reading of the body out of one parse. The markers in the
       // plain-text one and the pictures they stand for are numbered by the same
       // walk over the same tree, so a marker cannot open somebody else's image
       // — and it is only asked for when the text came from the HTML, because a
@@ -799,20 +835,76 @@ Item {
     sourceHtml = String(source || "")
     var ready = Html.sanitize(sourceHtml, ({
       allowRemoteImages: remoteImagesAllowed,
-      withPlainText: withPlainText === true
+      remoteImageData: remoteImagesAllowed ? remoteImageData : null,
+      withPlainText: withPlainText === true,
+      withReader: true
     }))
     selectedHtml = ready.html
     selectedDocument = ready.document
+    selectedReaderDocument = ready.reader ? ready.reader.document : null
+    selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
+    selectedReaderEmpty = !ready.reader || ready.reader.empty
+    selectedReaderRemoteImages = ready.reader ? ready.reader.blockedImages : 0
     selectedBlockedImages = ready.blockedImages
     selectedRemoteImages = ready.remoteImages
+    selectedRemoteImageSources = ready.remoteImageSources || []
     selectedTooHeavy = ready.tooHeavy
+    if (remoteImagesAllowed && !remoteImagesLoading
+      && Object.keys(remoteImageData).length === 0
+      && selectedRemoteImageSources.length > 0)
+      Qt.callLater(root.prepareRemoteImages)
     return ready
   }
 
   function showRemoteImages() {
     if (remoteImagesAllowed || sourceHtml === "") return
     remoteImagesAllowed = true
+    remoteImageData = ({})
     renderSource(sourceHtml)
+  }
+
+  function prepareRemoteImages() {
+    if (!remoteImagesAllowed || remoteImagesLoading || sourceHtml === ""
+      || selectedRemoteImageSources.length === 0) return
+    imageFetchQueue = selectedRemoteImageSources.slice(0)
+    remoteImagesLoading = true
+    imageFetchSerial++
+    fetchNextImage(imageFetchSerial)
+  }
+
+  function fetchNextImage(serial) {
+    if (serial !== imageFetchSerial) return
+    if (imageFetchQueue.length === 0) {
+      remoteImagesLoading = false
+      imageFetchProcess = null
+      return
+    }
+    var queue = imageFetchQueue.slice(0)
+    var source = String(queue.shift())
+    imageFetchQueue = queue
+    var request = imageFetchComponent.createObject(root, {
+      command: [pluginDir + "/scripts/image-fetch.sh"],
+      requestLine: Mail.encodeBase64(source)
+    })
+    imageFetchProcess = request
+    if (!request) {
+      fetchNextImage(serial)
+      return
+    }
+    request.finished.connect(function(data) {
+      request.destroy()
+      if (serial !== root.imageFetchSerial) return
+      root.imageFetchProcess = null
+      if (data !== "") {
+        var prepared = ({})
+        for (var key in root.remoteImageData) prepared[key] = root.remoteImageData[key]
+        prepared[source] = data
+        root.remoteImageData = prepared
+        root.renderSource(root.sourceHtml)
+      }
+      root.fetchNextImage(serial)
+    })
+    request.running = true
   }
 
 
@@ -827,8 +919,21 @@ Item {
     selectedBody = { text: "", source: "" }
     selectedHtml = ""
     selectedDocument = null
+    selectedReaderDocument = null
+    selectedReaderTooHeavy = false
+    selectedReaderEmpty = true
+    selectedReaderRemoteImages = 0
     sourceHtml = ""
     remoteImagesAllowed = false
+    remoteImagesLoading = false
+    remoteImageData = ({})
+    selectedRemoteImageSources = []
+    imageFetchQueue = []
+    imageFetchSerial++
+    if (imageFetchProcess) {
+      imageFetchProcess.destroy()
+      imageFetchProcess = null
+    }
     selectedImages = []
     selectedBlockedImages = 0
     selectedRemoteImages = 0
@@ -1376,6 +1481,27 @@ Item {
   // the mail transport uses, for the same reason: the URL crosses on stdin
   // base64-encoded, so a header a stranger wrote never reaches the process
   // table and nothing has to be escaped on the way.
+  Component {
+    id: imageFetchComponent
+
+    Process {
+      id: imageFetchRequest
+      property string requestLine: ""
+      signal finished(string data)
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+      onStarted: {
+        write(requestLine + "\n")
+        requestLine = ""
+      }
+      onExited: function(exitCode) {
+        var data = String(imageFetchRequest.stdout.text || "").trim()
+        imageFetchRequest.finished(exitCode === 0 && /^data:image\//.test(data) ? data : "")
+      }
+    }
+  }
+
   Component {
     id: unsubscribeComponent
 

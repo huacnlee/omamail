@@ -16,6 +16,9 @@ QtObject {
     Bench.run({
       sanitize: function(source, options) { return Html.sanitize(source, options) },
       documentFor: function(document, palette) { return Html.documentFor(document, palette) },
+      readerDocumentFor: function(document, palette) {
+        return Html.readerDocumentFor(document, palette)
+      },
       limits: {
         richText: Html.MAX_RICH_TEXT,
         elements: Html.MAX_ELEMENTS,

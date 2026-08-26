@@ -10,7 +10,7 @@ QtObject {
   })
   readonly property var spacing: ({
     controlPaddingX: 8, controlPaddingY: 5, inputPaddingY: 5,
-    controlHeight: 30, controlGap: 6, md: 6
+    controlHeight: 30, controlGap: 6, sm: 3, md: 6
   })
 
   function space(value) { return Number(value) }

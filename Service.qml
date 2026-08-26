@@ -11,6 +11,7 @@ import "providers/Registry.js" as Provider
 import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
+import "message/Html.js" as Html
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -347,10 +348,15 @@ Item {
 
   property bool sidebarCollapsed: false
   // Somebody who needed the text bigger needs it bigger for their mail, not for
-  // the message that made them reach for it. The same goes for reading it as
-  // plain text: that is a way of reading mail, not a way of reading one.
+  // the message that made them reach for it. The same goes for `bodyMode`:
+  // both of these are ways of reading mail, not ways of reading one message.
   property real bodyZoom: 1.0
-  property bool plainTextForced: false
+  // How a message is read: rebuilt for reading, the sender's own formatting, or
+  // text. Reading is the default because it is the one that answers the same
+  // way for every sender — a newsletter, a receipt and a reply all arrive as
+  // this window's type at this window's measure — and the other two are there
+  // for the messages whose own layout is carrying something.
+  property string bodyMode: "reader"
   // Off until somebody says otherwise, and then it stays said. Loading a
   // remote image tells its host that this address opened this message, at this
   // moment — the reason the answer was once asked for one message at a time.
@@ -367,7 +373,7 @@ Item {
     var prefs = Model.windowPrefs(raw)
     sidebarCollapsed = prefs.sidebarCollapsed
     bodyZoom = prefs.bodyZoom
-    plainTextForced = prefs.plainTextForced
+    bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
     restoreWindow = prefs.windowOpen
     restoreAttempts = 0
@@ -403,7 +409,7 @@ Item {
     windowWritePayload = JSON.stringify({
       sidebarCollapsed: sidebarCollapsed,
       bodyZoom: bodyZoom,
-      plainTextForced: plainTextForced,
+      bodyMode: bodyMode,
       alwaysShowImages: alwaysShowImages,
       windowOpen: windowOpen || restoreWindow
     })
@@ -425,10 +431,13 @@ Item {
     saveWindowPrefs()
   }
 
-  function setPlainTextForced(value) {
-    var next = value === true
-    if (next === plainTextForced) return
-    plainTextForced = next
+  function setBodyMode(value) {
+    // The message on screen is not read again for this: all three readings came
+    // off the one parse when the body arrived, so choosing between them is a
+    // preference and nothing else.
+    var next = Html.bodyModeOf(value, bodyMode)
+    if (next === bodyMode) return
+    bodyMode = next
     saveWindowPrefs()
   }
 
@@ -600,6 +609,10 @@ Item {
   readonly property var selectedBody: current ? current.selectedBody : ({ text: "", source: "" })
   readonly property string selectedHtml: current ? current.selectedHtml : ""
   readonly property var selectedDocument: current ? current.selectedDocument : null
+  readonly property var selectedReaderDocument: current ? current.selectedReaderDocument : null
+  readonly property bool selectedReaderTooHeavy: !!current && current.selectedReaderTooHeavy
+  readonly property bool selectedReaderEmpty: !current || current.selectedReaderEmpty
+  readonly property int selectedReaderRemoteImages: current ? current.selectedReaderRemoteImages : 0
   readonly property var selectedImages: current ? current.selectedImages : []
   readonly property int selectedBlockedImages: current ? current.selectedBlockedImages : 0
   readonly property int selectedRemoteImages: current ? current.selectedRemoteImages : 0

@@ -92,10 +92,6 @@ Canvas {
       move(9, 2); line(14, 2); line(14, 7)
       move(14, 2); line(7.5, 8.5)
       move(12, 9.5); line(12, 13.5); line(2, 13.5); line(2, 3.5); line(6, 3.5)
-    } else if (root.name === "plain") {
-      move(3, 3.5); line(13, 3.5)
-      move(3, 7); line(13, 7)
-      move(3, 10.5); line(9, 10.5)
     } else if (root.name === "refresh") {
       // One circular arrow with the gap at the top right. Two arrows chasing
       // each other were more faithful to "go and ask", but at sixteen pixels

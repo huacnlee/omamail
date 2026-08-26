@@ -259,15 +259,18 @@ function windowPrefs(raw) {
     return {
       sidebarCollapsed: false,
       bodyZoom: 1,
-      plainTextForced: false,
+      bodyMode: "reader",
       alwaysShowImages: false,
       windowOpen: false
     }
   }
+  var bodyMode = String(parsed.bodyMode || "")
+  if (bodyMode !== "reader" && bodyMode !== "original" && bodyMode !== "plain")
+    bodyMode = parsed.plainTextForced === true ? "plain" : "reader"
   return {
     sidebarCollapsed: parsed.sidebarCollapsed === true,
     bodyZoom: clampZoom(parsed.bodyZoom),
-    plainTextForced: parsed.plainTextForced === true,
+    bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
     windowOpen: parsed.windowOpen === true
   }

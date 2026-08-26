@@ -48,7 +48,7 @@ Use these lifetimes to choose that owner:
 | Lifetime                | Owner                                   | Examples                                                    |
 | ----------------------- | --------------------------------------- | ----------------------------------------------------------- |
 | Installation or account | service/domain storage                  | accounts, credentials, cached messages                      |
-| Across window openings  | `Service.qml` plus its store            | collapsed sidebar, reader zoom, future persisted pane sizes |
+| Across window openings  | `Service.qml` plus its store            | collapsed sidebar, reading mode, reader zoom, future persisted pane sizes |
 | Current window          | `App.qml`                               | visible page, list cursor, open reader, compose mode        |
 | Open interaction        | the relevant popup or overlay component | popup selection, drag origin, submenu path                  |
 | One rendering           | the view                                | hover, pressed appearance, measured bounds                  |
@@ -184,7 +184,9 @@ Every scrollable region has one owner. That owner fills the panel viewport and p
 
 Anything supplied by a sender is plain data unless it passes through the specific message-body renderer. Subjects, names, snippets, filenames, and labels explicitly use plain text. A reusable component cannot weaken that rule by relying on `Text.AutoText`.
 
-`message/Html.js` is a security boundary, not a presentation helper. The body cache keeps source content; the sanitizer decides what Qt may render; remote resource policy remains centralized. Component extraction must not move any of those decisions into a reader view or a generic rich-text primitive.
+`message/Html.js` is a security boundary, not a presentation helper. The body cache keeps source content; the sanitizer decides what Qt may render; remote resource policy remains centralized. Approved remote images are collected from that same parse, fetched by `scripts/image-fetch.sh` without redirects and handed back as validated `data:` URIs, so Qt sees neither a pending remote source nor its broken loading placeholder. Component extraction must not move any of those decisions into a reader view or a generic rich-text primitive.
+
+Reading mode lives there for the same reason and is a rebuild rather than a filter: it constructs a fresh document whose elements begin with empty attribute lists, and carries across only text, a checked `href`, a checked `src`, and numeric image dimensions capped to a small inline size. Fixed alignment and spacing attributes the reader adds to its own compact avatar row carry no sender value. That is a structural guarantee rather than a list of removals, and it holds only while every element in the output is built here and every copied value is bounded where it is added. A resource-bearing attribute is refused before any appearance option is consulted, because no appearance option may buy a network request.
 
 ## Testing boundaries
 

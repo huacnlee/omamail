@@ -400,9 +400,13 @@ assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
 assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
-  sidebarCollapsed: false, bodyZoom: 1, plainTextForced: false,
+  sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
   alwaysShowImages: false, windowOpen: false
 })
+assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
+  "the old two-mode preference migrates to the three-mode setting")
+assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "original")
+assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
 

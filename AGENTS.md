@@ -296,18 +296,17 @@ key. What matters while working:
   one-click unsubscribe goes out through `scripts/unsubscribe.sh`, which is
   curl, which follows nothing unless told to — and a 3xx is reported as a list
   that did not unsubscribe rather than as an address to chase.
-- **Remote images are the part of that which is not closed.** Qt's own image
-  loader performs those fetches and takes no policy from QML, so a sender who
-  redirects an image can still reach an address the gate would have refused.
-  What holds the line meanwhile is that nothing is fetched until the reader
-  asks. Closing it properly means fetching the bytes here — curl, no redirects
-  — and handing the renderer a `data:` URI, which is a day's work and a change
-  to the rule that the string handed over is the only control point. Do not
-  paper over it with a second check on the same first address.
+- **Qt never fetches a remote message image itself.** Its loader takes no policy
+  from QML, follows redirects, and draws a broken placeholder while a resource
+  is pending. Once the reader has allowed images, `scripts/image-fetch.sh`
+  fetches each approved public HTTP(S) source with curl, no redirects, a size
+  ceiling and deadlines. Only a successful supported image comes back as a
+  `data:` URI; until then the source is absent from both rich documents. Do not
+  hand the original remote URL back to Qt or replace this with a QML request,
+  because that reopens both redirect SSRF and the loading-placeholder defect.
 - Remote images in a message body are blocked until the reader asks for them.
-  Qt's rich text engine really does fetch them, so rendering one fires every
-  tracking pixel in the message, and the fetch tells the host that this address
-  opened this message at this moment.
+  Fetching one still tells its host that this address opened this message at
+  this moment, so tracking pixels and hidden images never enter the fetch list.
 - The answer is a standing one, off until it is given. Asking per message meant
   answering the same question on every newsletter and remembering none of it,
   so the cost of asking fell on somebody who had already decided. The notice's
@@ -338,9 +337,50 @@ key. What matters while working:
   then applies to every message already on disk instead of only to the ones
   fetched afterwards.
 - This runs on the GUI thread of the shell that draws the user's whole desktop.
-  Count the parses: opening a message is one `sanitize`, plus one
-  `readPlainText` when the message had no text/plain part of its own. Anything
-  that needs to know how heavy the result is asks the call that produced it.
+  **Count the parses.** Opening a message is one `sanitize`, and every reading of
+  that message comes out of it: the sanitised document, the rebuilt reading
+  document, and — when the message shipped no `text/plain` part of its own —
+  the plain text. Anything that needs to know how heavy a result
+  is asks the call that produced it, and a view never parses a body itself.
+- **Reading mode is a rebuild, not a filter, and that is the whole of its
+  security argument.** The sanitiser walks the sender's tree and removes; the
+  reader builds a new tree and copies across text, a checked `href`, a checked
+  `src`, and numeric image dimensions capped to the small-inline-image limit.
+  Every element starts with an empty attribute list and only those checked
+  values are added, so there is no path by which a `class`, a `bgcolor`, an
+  `align`, a `style` or a `background` reaches the output *at all*. Do not keep
+  another sender attribute: the argument is structural, and every exception has
+  to be bounded where it is added.
+- **A text node is not safe just because the tokenizer called it text.** It goes
+  back out with its `<` and `>` escaped, because this file joins text the sender
+  had kept apart — `collapse` unwraps a span and welds its neighbours together,
+  reading mode rebuilds a paragraph out of pieces and drops the characters that
+  draw as nothing. A `<` that started no tag on the way in can start one on the
+  way out, and the element it makes was never seen by the image policy, the link
+  rule or anything else here: by then it is a string. For the same reason a style
+  attribute has its character references decoded before it is split into
+  declarations — `&#117;rl(` carries the `;` that separates one from the next.
+- **An HTML `background` is an address, not a colour.** It sat in the colour list
+  because senders write it beside `bgcolor`, and `keepColors` therefore let it
+  through — a real message reached its sender's host with remote images off.
+  Resource-bearing attributes are their own class now and are refused before
+  the colour question is asked, because no appearance option may ever buy a
+  network request. `tests/test_source.sh` asserts that order.
+- **Not everything small is hidden.** A preheader is written `display:none`,
+  `visibility:hidden`, a one-pixel type size, `opacity:0`, or no height with
+  the overflow clipped. Three near-misses are not: `font-size:0` on a container
+  closes the gaps between the boxes it holds and every box re-declares a size —
+  read as hiding, it emptied whole messages; `max-height:0` hides nothing unless
+  what overflows is clipped; and `mso-hide:all` hides from *Outlook*, which
+  makes it the version meant for everybody else, so treating it as hidden throws
+  away the call to action and keeps nothing, because the Outlook branch is in a
+  conditional comment the parser drops. When a reading comes out empty, suspect
+  this before suspecting the walk.
+- Reading mode's link rule is stricter than the formatted view's on purpose:
+  `mailto:` or http(s) at a public host, nothing else. A message must not be
+  able to put the machine this runs on, or the network behind the user's front
+  door, under the pointer. Where the address is refused the label still shows —
+  the words are the message, the address was not.
 
 ## Anything a stranger wrote
 
