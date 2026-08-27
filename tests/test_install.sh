@@ -37,6 +37,27 @@ XDG_CONFIG_HOME="$test_root/config" XDG_CACHE_HOME="$test_root/cache" \
 [ ! -e "$test_root/config/omarchy-gmail" ] || fail "legacy config directory remains"
 [ ! -e "$test_root/cache/omarchy-gmail" ] || fail "legacy cache directory remains"
 
+# A stale service instance from before a plugin reload must not be able to
+# replace a real account list with the first-run setup row. The writer is the
+# one boundary both old and new service code still cross.
+saved_accounts='{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com"}],"activeId":"imap:me@example.com"}'
+setup_accounts='{"version":1,"accounts":[{"id":"","email":""}],"activeId":""}'
+printf '%s\n' "$saved_accounts" \
+  | XDG_CONFIG_HOME="$test_root/config" sh scripts/config-store.sh accounts.json >/dev/null
+if printf '%s\n' "$setup_accounts" \
+  | XDG_CONFIG_HOME="$test_root/config" sh scripts/config-store.sh accounts.json >/dev/null 2>&1; then
+  fail "config-store.sh replaced saved accounts with setup state"
+fi
+actual_accounts=$(cat "$test_root/config/omamail/accounts.json")
+[ "$actual_accounts" = "$saved_accounts" ] \
+  || fail "config-store.sh changed the account list after refusing setup state"
+updated_accounts='{"version":1,"accounts":[{"id":"imap:you@example.com","email":"you@example.com"}],"activeId":"imap:you@example.com"}'
+printf '%s\n' "$updated_accounts" \
+  | XDG_CONFIG_HOME="$test_root/config" sh scripts/config-store.sh accounts.json >/dev/null
+actual_accounts=$(cat "$test_root/config/omamail/accounts.json")
+[ "$actual_accounts" = "$updated_accounts" ] \
+  || fail "config-store.sh refused a replacement that still contains a saved account"
+
 # The keyring helper takes attribute pairs now, because keying a refresh token
 # on the OAuth client alone lets two accounts sharing one client overwrite each
 # other. An empty value is a secret-tool wildcard, so it is refused outright.

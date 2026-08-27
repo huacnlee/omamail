@@ -37,6 +37,16 @@ function parseJson(text, fallback) {
   }
 }
 
+// Whether text is an accounts file rather than a failed or half-finished read.
+// `load` deliberately turns either into an empty list for first run; a service
+// that already has accounts needs the distinction so a transient FileView
+// failure cannot replace them with the first-run placeholder.
+function isSerializedList(text) {
+  var raw = parseJson(text, null)
+  return isObject(raw) && Number(raw.version) === VERSION
+    && Array.isArray(raw.accounts)
+}
+
 function isValidEmail(value) {
   return EMAIL_PATTERN.test(trimmed(value))
 }
@@ -285,8 +295,7 @@ function setActive(list, id) {
 // failure leaves them with nothing to do it from.
 function load(text) {
   var raw = parseJson(text, null)
-  if (!isObject(raw)) return emptyList()
-  if (Number(raw.version) !== VERSION) return emptyList()
+  if (!isSerializedList(text)) return emptyList()
 
   var next = emptyList()
   var entries = Array.isArray(raw.accounts) ? raw.accounts : []

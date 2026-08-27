@@ -26,9 +26,36 @@ if "sendPending" in block:
     raise SystemExit(
         "test_service_source.sh: a pending send must not block account switching"
     )
+if "Accounts.find(accountList, id)" not in block:
+    raise SystemExit(
+        "test_service_source.sh: a stale account switch must be refused before changing state"
+    )
+same_start = block.index("if (String(id) === activeAccountId)")
+same_end = block.index("accountList = Accounts.setActive", same_start)
+same_block = block[same_start:same_end]
+if "activeIndex = -1" not in same_block or "refreshCurrent()" not in same_block:
+    raise SystemExit(
+        "test_service_source.sh: switching from a draft to the saved active account must refresh"
+    )
 if "pendingSendHost" not in text:
     raise SystemExit(
         "test_service_source.sh: undo must remain reachable after account switching"
+    )
+
+save_start = text.index("function saveAccounts()")
+save_end = text.index("function applyAccounts(raw)", save_start)
+save_block = text[save_start:save_end]
+if "Accounts.hasSavedAccounts(accountList)" not in save_block:
+    raise SystemExit(
+        "test_service_source.sh: first-run state must never overwrite saved accounts"
+    )
+
+apply_start = save_end
+apply_end = text.index("signal accountAdded()", apply_start)
+apply_block = text[apply_start:apply_end]
+if "accountsLoaded && !Accounts.isSerializedList(raw)" not in apply_block:
+    raise SystemExit(
+        "test_service_source.sh: a transient account read must not erase the loaded list"
     )
 PY
 
