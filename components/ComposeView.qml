@@ -95,6 +95,7 @@ DropArea {
     if (mode === "reply") return "Reply"
     if (mode === "replyAll") return "Reply all"
     if (mode === "forward") return "Forward"
+    if (mode === "draft") return "Draft"
     return "New message"
   }
 
@@ -298,6 +299,25 @@ DropArea {
       })
   }
 
+  function loadDraftAttachments(messageId, attachments) {
+    var listed = Array.isArray(attachments) ? attachments.slice() : []
+    originalAttachments = listed
+    if (!service || listed.length === 0) return
+    var serial = ++forwardLoadSerial
+    forwardAttachmentsLoading = true
+    forwardAttachmentError = ""
+    service.loadAttachments(messageId, listed, function(loaded, error) {
+      if (serial !== root.forwardLoadSerial || !root.opened || root.mode !== "draft") return
+      root.forwardAttachmentsLoading = false
+      root.forwardAttachmentError = String(error || "")
+      if (error) {
+        if (root.service && typeof root.service.fail === "function") root.service.fail(error)
+        return
+      }
+      root.draftAttachments = Array.isArray(loaded) ? loaded : []
+    })
+  }
+
   function begin(nextMode, summary, bodyText, attachments) {
     clearCurrentDraft(true)
     mode = String(nextMode || "new")
@@ -342,9 +362,12 @@ DropArea {
 
   // A mailto: link is a new message with the fields already named. Reply and
   // forward stay on `begin`; they fill from a message, not from a URL.
-  function beginDraft(draft) {
+  function beginDraft(draft, messageId, attachments) {
     begin("new", null, "", [])
     var values = draft || ({})
+    mode = String(values.mode || "new") === "draft" ? "draft" : "new"
+    threadId = String(values.threadId || "")
+    inReplyTo = String(values.inReplyTo || "")
     toField.text = String(values.to || "")
     ccField.text = String(values.cc || "")
     ccVisible = ccField.text !== ""
@@ -352,6 +375,12 @@ DropArea {
     bccVisible = bccField.text !== ""
     subjectField.text = String(values.subject || "")
     bodyEdit.text = String(values.body || "")
+    var chosenFrom = String(values.from || "")
+    if (chosenFrom !== "") {
+      fromEmail = chosenFrom
+      fromWasChosen = true
+    }
+    if (mode === "draft") loadDraftAttachments(messageId, attachments)
   }
 
   // Where the keyboard goes when composing becomes the context. A reply starts

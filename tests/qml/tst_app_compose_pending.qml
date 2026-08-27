@@ -60,6 +60,7 @@ Item {
     property var sendIdentities: []
     property var calendarController: null
     property var lastSavedDraft: null
+    property string lastLoadedAttachmentId: ""
     property bool failDraftSave: false
     property var selectedBody: ({ text: "Original body" })
     property var selectedMessage: ({
@@ -78,6 +79,28 @@ Item {
     function refreshRecipientContacts() {}
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {}
+    function select(id) {
+      selectedId = String(id || "")
+      selectedMessage = null
+      selectedBody = ({ text: "", source: "" })
+      selectedAttachments = []
+      detailPainted = false
+      detailLoading = true
+    }
+    function loadAttachments(messageId, attachments, callback) {
+      lastLoadedAttachmentId = String(messageId || "")
+      var listed = Array.isArray(attachments) ? attachments : []
+      var loaded = []
+      for (var i = 0; i < listed.length; i++) {
+        loaded.push({
+          filename: String(listed[i].filename || "attachment"),
+          mimeType: String(listed[i].mimeType || "application/octet-stream"),
+          size: Number(listed[i].size || 0),
+          data: "ZHJhZnQgZmlsZQ"
+        })
+      }
+      callback(loaded, "")
+    }
     function send(_fields) {
       sendPending = true
       return true
@@ -130,6 +153,27 @@ Item {
       mailService.failDraftSave = false
       mailService.lastError = ""
       mailService.actionStatus = ""
+      mailService.lastLoadedAttachmentId = ""
+      mailService.mailboxKey = "inbox"
+      mailService.detailLoading = false
+      mailService.detailPainted = false
+      mailService.selectedId = "message-1"
+      mailService.selectedBody = ({ text: "Original body", source: "plain" })
+      mailService.selectedAttachments = []
+      mailService.selectedMessage = ({
+        id: "message-1",
+        messageId: "<message-1@example.com>",
+        threadId: "thread-1",
+        subject: "Original subject",
+        from: ({ email: "sender@example.com", display: "Sender" }),
+        replyTo: ({ email: "sender@example.com" }),
+        to: [],
+        cc: [],
+        bcc: [],
+        fullTime: "today"
+      })
+      app.currentView = "list"
+      app.cursorId = ""
       var compose = composeView()
       if (compose) {
         compose.reset()
@@ -209,6 +253,57 @@ Item {
       compare(mailService.lastSavedDraft.body, "First draft")
       compare(app.composing, false)
       compare(app.draftSavedNotice, "Draft saved")
+    }
+
+    function test_opening_a_draft_row_waits_for_the_body_then_opens_compose() {
+      var compose = composeView()
+      mailService.mailboxKey = "drafts"
+      app.cursorId = "draft-7"
+
+      app.runShortcut("open", "o")
+
+      compare(mailService.selectedId, "draft-7")
+      compare(app.currentView, "list",
+        "a draft must not open the message reader while its body loads")
+      compare(app.composing, false)
+
+      mailService.selectedMessage = ({
+        id: "draft-7",
+        messageId: "<draft-7@example.com>",
+        threadId: "thread-7",
+        inReplyTo: "<earlier@example.com>",
+        subject: "Saved subject",
+        from: ({ email: "me@example.com", display: "Me" }),
+        replyTo: ({ email: "" }),
+        to: [{ email: "first@example.com" }, { email: "second@example.com" }],
+        cc: [{ email: "copy@example.com" }],
+        bcc: [{ email: "hidden@example.com" }],
+        fullTime: "today",
+        isDraft: true
+      })
+      mailService.selectedBody = ({ text: "Saved body", source: "plain" })
+      mailService.selectedAttachments = [{
+        filename: "plan.txt", mimeType: "text/plain", size: 10,
+        attachmentId: "part:1"
+      }]
+      mailService.detailPainted = true
+      mailService.detailLoading = false
+      wait(30)
+
+      compare(app.composing, true)
+      compare(compose.mode, "draft")
+      compare(compose.fromEmail, "me@example.com")
+      compare(named(compose, "compose-to-field").text,
+        "first@example.com, second@example.com")
+      compare(named(compose, "compose-cc-field").text, "copy@example.com")
+      compare(named(compose, "compose-bcc-field").text, "hidden@example.com")
+      compare(named(compose, "compose-subject-field").text, "Saved subject")
+      compare(named(compose, "compose-body-editor").text, "Saved body")
+      compare(compose.threadId, "thread-7")
+      compare(compose.inReplyTo, "<earlier@example.com>")
+      compare(mailService.lastLoadedAttachmentId, "draft-7")
+      compare(compose.draftAttachments.length, 1)
+      compare(compose.draftAttachments[0].filename, "plan.txt")
     }
   }
 }

@@ -9,6 +9,7 @@ import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
 import "keys/Keymap.js" as Keymap
 import "message/Mailto.js" as Mailto
+import "message/Message.js" as Message
 import "components"
 import "calendar"
 
@@ -201,14 +202,23 @@ Item {
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""
+    pendingDraftId = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
+    if (service.mailboxKey === "drafts") {
+      composeReturnView = currentView
+      pendingDraftId = cursorId
+      service.select(cursorId)
+      Qt.callLater(root.resumeHeldDraft)
+      return
+    }
     service.select(cursorId)
     currentView = "reader"
   }
 
   function backToList() {
     pendingComposeMode = ""
+    pendingDraftId = ""
     if (service) service.clearSelection()
     currentView = "list"
     Qt.callLater(function() { focusScope.applyContextFocus() })
@@ -246,6 +256,7 @@ Item {
   // draft in the same breath addressed nobody and quoted nothing, which is what
   // the list row's own Reply menu did. Held until the fetch lands instead.
   property string pendingComposeMode: ""
+  property string pendingDraftId: ""
   // Where the draft was raised from, so that leaving it goes back there.
   // Answering from the list opens the message being answered — that is the
   // reply's doing, not somewhere the reader asked to be — so closing the draft
@@ -255,6 +266,7 @@ Item {
 
   function startCompose(mode) {
     if (!service) return
+    pendingDraftId = ""
     var next = String(mode || "new")
     if (next !== "new" && !service.selectedMessage) {
       pendingComposeMode = next
@@ -269,6 +281,7 @@ Item {
   // already open when this runs — summon delivers the payload to open().
   function openDraft(draft) {
     if (!draft) return
+    pendingDraftId = ""
     composeReturnView = currentView
     compose.beginDraft(draft)
   }
@@ -278,6 +291,16 @@ Item {
     var mode = pendingComposeMode
     pendingComposeMode = ""
     startCompose(mode)
+  }
+
+  function resumeHeldDraft() {
+    if (pendingDraftId === "" || !service) return
+    if (service.selectedId !== pendingDraftId || service.detailLoading
+        || !service.detailPainted || !service.selectedMessage) return
+    var messageId = pendingDraftId
+    pendingDraftId = ""
+    compose.beginDraft(Message.draftFields(service.selectedMessage,
+      service.selectedBody.text), messageId, service.selectedAttachments)
   }
 
   // Answering from the list opens what is being answered first, the way the
@@ -519,8 +542,14 @@ Item {
     // markup has not changed, so the body is not written a second time and
     // nothing fires again. Reply, reply-all and forward raised from the list
     // opened the message and stopped there.
-    function onSelectedBodyChanged() { Qt.callLater(root.resumeHeldCompose) }
-    function onSelectedMessageChanged() { Qt.callLater(root.resumeHeldCompose) }
+    function onSelectedBodyChanged() { Qt.callLater(function() {
+      root.resumeHeldCompose()
+      root.resumeHeldDraft()
+    }) }
+    function onSelectedMessageChanged() { Qt.callLater(function() {
+      root.resumeHeldCompose()
+      root.resumeHeldDraft()
+    }) }
 
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
