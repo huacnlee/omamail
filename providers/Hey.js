@@ -83,6 +83,7 @@ var MAILBOXES = [
   // is no unseen box to ask for, so the client lists and filters — which is
   // also what the unread badge counts.
   { key: "unread", label: "New for you", icon: "unread", query: "box:imbox unseen" },
+  { key: "drafts", label: "Drafts", icon: "compose", query: "drafts:" },
   { key: "later", label: "Reply Later", icon: "reply", query: "box:laterbox" },
   { key: "aside", label: "Set Aside", icon: "pin", query: "box:asidebox" },
   { key: "feed", label: "The Feed", icon: "label", query: "box:feedbox" },

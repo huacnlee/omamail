@@ -573,6 +573,72 @@ Item {
 
   // ----------------------------------------------------------------- send
 
+  function saveDraft(payload, callback) {
+    var handle = newHandle()
+    var raw = payload && payload.raw ? String(payload.raw) : ""
+    if (raw === "") {
+      if (typeof callback === "function") callback(null, "There is no draft to save")
+      return handle
+    }
+
+    ensureFolders(function(folderError) {
+      if (handle.aborted) return
+      if (folderError) {
+        if (typeof callback === "function") callback(null, folderError)
+        return
+      }
+      var folder = root.special["\\drafts"] || ""
+      if (folder === "") {
+        if (typeof callback === "function")
+          callback(null, "This server did not report a Drafts folder")
+        return
+      }
+
+      root.inFlight++
+      auth.withCredentials(function(credentials, credentialError) {
+        if (!root) return
+        if (handle.aborted) {
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          return
+        }
+        if (!credentials) {
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          if (typeof callback === "function") callback(null, credentialError || "Not signed in")
+          return
+        }
+        var url = Imap.imapUrl(auth.settings, folder)
+        var message = Mail.decodeBase64Url(raw)
+        var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
+          Mail.encodeBase64(message)]
+        var process = transportComponent.createObject(root, {
+          command: [root.transport],
+          requestLine: "imap-append " + fields.join(" ")
+        })
+        if (!process) {
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          if (typeof callback === "function") callback(null, "Could not start the mail transport")
+          return
+        }
+        handle.process = process
+        process.finished.connect(function(status, out, err) {
+          if (!root) return
+          if (handle.process === process) handle.process = null
+          process.destroy()
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          if (handle.aborted || typeof callback !== "function") return
+          if (status !== 0) {
+            var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
+            callback(null, Imap.responseError(status, detail, "The draft could not be saved"))
+            return
+          }
+          callback({}, "")
+        })
+        process.running = true
+      })
+    })
+    return handle
+  }
+
   // `MailAccount` builds the same payload for either provider: a base64url
   // `raw` field, because that is what Gmail's send endpoint takes. SMTP wants
   // the message itself and the envelope separately, so it is decoded back and

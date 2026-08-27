@@ -108,7 +108,7 @@ used to exist, and they had.
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return` | compose | Send |
-| `undoSend` | `Ctrl+Z` | mail+calendar | Undo send |
+| `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
@@ -129,7 +129,7 @@ used to exist, and they had.
 The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
 opens the complete key sheet from every context.
 
-The delayed-send toast does not create a keyboard context. The list, reader, or calendar keeps its normal keys while the toast is visible. `Ctrl+Z` and the toast button undo the pending send. `Escape` keeps its normal navigation meaning.
+The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback. Back and `Escape` save a non-empty composition before leaving it. The explicit Discard button remains the destructive exit.
 
 ## Why the rail is numbered and not chorded
 

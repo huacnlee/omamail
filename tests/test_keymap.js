@@ -53,14 +53,11 @@ function byId(id) {
 
 const undoSend = byId("undoSend")
 assert.ok(undoSend, "the delayed-send state offers an undo action")
-assert.strictEqual(keymap.displayFor(undoSend), "Ctrl+Z")
-assert.strictEqual(keymap.isEnabled(undoSend, "list", false), true)
-assert.strictEqual(keymap.isEnabled(undoSend, "reader", false), true)
-assert.strictEqual(keymap.isEnabled(undoSend, "calendar", false), true)
-assert.strictEqual(keymap.isEnabled(undoSend, "compose", false), false,
-  "Ctrl+Z remains text undo while a draft is open")
-assert.strictEqual(keymap.isEnabled(undoSend, "search", false), false,
-  "Ctrl+Z remains text undo while a query is being edited")
+assert.strictEqual(keymap.displayFor(undoSend), "Alt+Z")
+keymap.CONTEXTS.forEach(function (context) {
+  assert.strictEqual(keymap.isEnabled(undoSend, context, false), true,
+    "Alt+Z must undo a delayed send from " + context)
+})
 
 assert.strictEqual(keymap.contextFor({
   sendPending: true,

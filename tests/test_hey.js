@@ -37,6 +37,8 @@ deepEqual(hey.parseQuery("search:dentist"),
   { kind: "search", box: "", label: "", text: "dentist", unseen: false })
 deepEqual(hey.parseQuery("box:trash"),
   { kind: "trash", box: "trash", label: "", text: "", unseen: false })
+deepEqual(hey.parseQuery("drafts:"),
+  { kind: "drafts", box: "", label: "", text: "", unseen: false })
 
 // A search takes the rest of the string verbatim, so typing a mailbox name into
 // the search field searches for those words rather than switching mailbox.
@@ -66,6 +68,28 @@ deepEqual(hey.listCommand(hey.parseQuery("search:dentist"), 25, ""),
   ["search", "dentist", "--json"])
 deepEqual(hey.listCommand(hey.parseQuery("box:trash"), 25, ""),
   ["search", "--in", "trash", "--json"])
+deepEqual(hey.listCommand(hey.parseQuery("drafts:"), 25, ""),
+  ["draft", "list", "--json"])
+deepEqual(hey.listCommand(hey.parseQuery("drafts:"), 25, "0|draft-cursor-2"),
+  ["draft", "list", "--json", "--page", "draft-cursor-2"])
+
+deepEqual(hey.parseDraftListing([
+  { id: 101, summary: "Agenda and decisions", subject: "Quarterly planning",
+    updated_at: "2026-08-20T09:30:00Z" }
+]), [{
+  id: "draft:101", draftId: "101", subject: "Quarterly planning",
+  snippet: "Agenda and decisions", from: { name: "", email: "" }, to: [],
+  date: "2026-08-20T09:30:00Z", seen: true, box: "", appUrl: "", isDraft: true
+}])
+deepEqual(hey.draftShowCommand("draft:101"), ["draft", "show", "101", "--json"])
+deepEqual(hey.parseDraft({ id: 101, subject: "Quarterly planning", body: "Agenda",
+  to: ["maria@example.com"], cc: ["team@example.com"], bcc: [],
+  updated_at: "2026-08-20T09:30:00Z" }), {
+  id: "draft:101", draftId: "101", subject: "Quarterly planning", body: "Agenda",
+  to: [{ name: "", email: "maria@example.com" }],
+  cc: [{ name: "", email: "team@example.com" }], bcc: [],
+  date: "2026-08-20T09:30:00Z", isDraft: true
+})
 
 // The one query that does name a number. Filtering on unseen happens here
 // rather than on the server, so a page of one would find at most one unseen
@@ -142,6 +166,13 @@ deepEqual(hey.composeCommand({
   "compose", "--to", "jane@example.com", "--subject", "Lunch",
   "--attach", "/tmp/menu.pdf"
 ])
+deepEqual(hey.draftCommand({ subject: "Nobody yet" }),
+  ["compose", "--subject", "Nobody yet", "--draft"],
+  "a draft may be saved before it has a recipient")
+deepEqual(hey.draftCommand({
+  threadId: "2106437143",
+  attachments: [{ path: "/tmp/menu.pdf" }]
+}), ["reply", "2106437143", "--draft", "--attach", "/tmp/menu.pdf"])
 assert.strictEqual(hey.isDroppableFlag("--attach"), false)
 assert.strictEqual(hey.isDroppableFlag("--html"), true)
 

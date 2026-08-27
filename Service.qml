@@ -666,6 +666,16 @@ Item {
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
   function send(fields) { return current ? current.send(fields) : false }
+  function saveDraft(fields, callback) {
+    var values = fields || ({})
+    var target = String(values.accountId || "")
+    var host = target !== "" ? findAccount(target) : current
+    if (!host) {
+      if (typeof callback === "function") callback(null, "The mailbox for this draft is unavailable")
+      return null
+    }
+    return host.saveDraft(values, callback)
+  }
   function fail(text) { if (current) current.fail(text) }
   function note(text) { if (current) current.note(text) }
   function undoSend() {

@@ -11,6 +11,7 @@ Rectangle {
   property color background: "transparent"
   property bool bordered: false
   property bool selected: false
+  property bool hasCursor: false
   property bool leftAlign: false
   property bool focusable: false
   property string fontFamily: "monospace"
@@ -18,6 +19,7 @@ Rectangle {
   property real horizontalPadding: 8
   property real verticalPadding: 5
   signal clicked()
+  signal hovered(bool isHovered)
   implicitWidth: Math.max(40, label.implicitWidth + horizontalPadding * 2)
   implicitHeight: label.implicitHeight + verticalPadding * 2
   color: background

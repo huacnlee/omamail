@@ -307,4 +307,11 @@ Item {
         if (typeof callback === "function") callback(body, error)
       })
   }
+
+  function saveDraft(payload, callback) {
+    return request("POST", Api.draftsPath(), null, Api.draftBody(payload),
+      function(status, body, error) {
+        if (typeof callback === "function") callback(body, error)
+      })
+  }
 }

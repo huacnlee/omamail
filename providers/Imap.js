@@ -46,6 +46,7 @@ var MAILBOXES = [
   { key: "unread", label: "Unread", icon: "unread", query: "folder:INBOX UNSEEN" },
   { key: "starred", label: "Flagged", icon: "star", query: "folder:INBOX FLAGGED" },
   { key: "sent", label: "Sent", icon: "send", query: "folder:\\Sent" },
+  { key: "drafts", label: "Drafts", icon: "compose", query: "folder:\\Drafts" },
   { key: "archive", label: "Archive", icon: "archive", query: "folder:\\Archive", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "folder:\\Trash", optional: true }
 ]

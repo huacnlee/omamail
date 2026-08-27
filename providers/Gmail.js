@@ -73,6 +73,7 @@ var MAILBOXES = [
     query: "in:inbox is:unread -category:promotions -category:social -category:forums" },
   { key: "starred", label: "Starred", icon: "star", query: "is:starred" },
   { key: "sent", label: "Sent", icon: "send", query: "in:sent" },
+  { key: "drafts", label: "Drafts", icon: "compose", query: "in:drafts" },
   // Optional: the first to go when the row cannot hold every mailbox. Neither
   // is somewhere anyone works from — they are places you go looking for
   // something specific, and search reaches both.

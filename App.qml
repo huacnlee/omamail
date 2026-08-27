@@ -26,6 +26,7 @@ Item {
   property var service: null
   property bool opened: false
   property bool closingFromHost: false
+  property string draftSavedNotice: ""
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
@@ -253,7 +254,7 @@ Item {
   property string composeReturnView: ""
 
   function startCompose(mode) {
-    if (!service || service.sendPending || service.sending) return
+    if (!service) return
     var next = String(mode || "new")
     if (next !== "new" && !service.selectedMessage) {
       pendingComposeMode = next
@@ -268,7 +269,6 @@ Item {
   // already open when this runs — summon delivers the payload to open().
   function openDraft(draft) {
     if (!draft) return
-    if (service && (service.sendPending || service.sending)) return
     composeReturnView = currentView
     compose.beginDraft(draft)
   }
@@ -298,10 +298,51 @@ Item {
     if (from === "list" && currentView === "reader") backToList()
   }
 
+  function saveAndLeaveCompose() {
+    if (!service || !compose.hasMeaningfulDraft()) {
+      compose.finish()
+      return
+    }
+    var saved = compose.detachForSave()
+    var fields = compose.fieldsForDraft(saved)
+    service.saveDraft(fields, function(result, error) {
+      if (!root) return
+      if (error) {
+        compose.recoverDetachedSave(saved)
+        service.fail("Could not save draft: " + String(error))
+        return
+      }
+      compose.completeDetachedSave(saved)
+      root.draftSavedNotice = "Draft saved"
+      draftSavedTimer.restart()
+      if (service.mailboxKey === "drafts") service.refresh()
+    })
+  }
+
   function undoPendingSend() {
     if (!service || !service.undoSend()) return false
-    compose.resumePendingSend()
+    if (!compose.resumePendingSend()) return true
+    var interrupted = compose.interruptedDraft
+    var fields = compose.interruptedFields()
+    if (!interrupted || !fields) return true
+    service.saveDraft(fields, function(saved, error) {
+      if (!root) return
+      if (error) {
+        service.fail("Could not save the newer draft: " + String(error))
+        return
+      }
+      if (!compose.completeInterruptedSave(interrupted)) return
+      root.draftSavedNotice = "Draft saved"
+      draftSavedTimer.restart()
+    })
     return true
+  }
+
+  Timer {
+    id: draftSavedTimer
+    interval: 4000
+    repeat: false
+    onTriggered: root.draftSavedNotice = ""
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -449,7 +490,7 @@ Item {
       focusScope.parkKeyboard()
     }
     else if (eventComposer.opened) eventComposer.close()
-    else if (compose.opened) compose.finish()
+    else if (compose.opened) saveAndLeaveCompose()
     else if (setupVisible) setupVisible = false
     else if (settingsVisible) settingsVisible = false
     else if (currentView === "calendar" && calendarView.detailOpen) calendarView.closeDetail()
@@ -461,7 +502,7 @@ Item {
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onReplySent() { compose.finish() }
+    function onReplySent() { compose.completePendingSend() }
     // Every time the list is replaced — first arrival, a mailbox switch, a
     // search, a refresh that dropped things. A cursor whose message survived
     // keeps its place; one whose message is gone would be unfindable, and an
@@ -1139,6 +1180,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           onClosed: root.leaveCompose()
+          onCloseRequested: root.saveAndLeaveCompose()
           onSendQueued: root.backToList()
         }
 
@@ -1289,6 +1331,21 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onUndoRequested: root.undoPendingSend()
+      }
+
+      DraftSavedToast {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(16)
+        anchors.bottom: statusBar.top
+        anchors.bottomMargin: Style.space(12)
+        z: 80
+        visible: root.draftSavedNotice !== ""
+        message: root.draftSavedNotice
+        textColor: root.foreground
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
       }
 
       // --------------------------------------------------------- status bar

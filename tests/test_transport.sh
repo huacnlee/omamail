@@ -223,6 +223,17 @@ check_absent "SMTP does not emit --next sections" "$config" 'next'
 check "SMTP keeps its transfer deadline" "$config" 'max-time = 60'
 check "SMTP keeps its connection deadline" "$config" 'connect-timeout = 20'
 
+# --------------------------------------------------------- IMAP draft upload
+
+append="imap-append $(b64 'imaps://imap.example.org:993/Drafts') $(b64 'jane:pw') $(b64 'Subject: saved draft
+
+body')"
+config=$(config_for "$append")
+check "a draft is appended to its resolved mailbox" "$config" 'url = "imaps://imap.example.org:993/Drafts"'
+check "a draft upload uses the RFC 5322 message file" "$config" 'upload-file = "'
+check "an IMAP upload carries the draft flag" "$config" 'upload-flags = "draft"'
+check_absent "an IMAP draft is not sent as a custom request" "$config" 'request = '
+
 # ------------------------------------------------------------- the framing
 
 # The exit code is curl's own, so a transport failure is distinguishable from
