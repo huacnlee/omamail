@@ -34,6 +34,18 @@ Item {
   readonly property real allDayHeight: allDayCount > 0
     ? Style.space(6 + allDayCount * 20) : 0
 
+  // The line has to move on its own, so the view carries a clock. It ticks only
+  // while the week is on screen: a minute timer left running behind the month
+  // view, or behind the whole window, wakes the shell to redraw nothing.
+  property double nowMs: Date.now()
+  Timer {
+    interval: 60000
+    repeat: true
+    running: root.visible
+    triggeredOnStart: true
+    onTriggered: root.nowMs = Date.now()
+  }
+
   CalendarPalette {
     id: calendarPalette
     textColor: root.textColor
@@ -211,6 +223,33 @@ Item {
         }
       }
 
+      // Read off the rail rather than off the line: the hour labels stop at the
+      // hour, so a line between two of them otherwise says only "somewhere in
+      // here". Hidden when today is not the week on screen.
+      Rectangle {
+        readonly property real offset: Calendar.weekNowOffset(
+          root.days, root.firstHour, root.lastHour, timeline.hourHeight, root.nowMs)
+        visible: offset >= 0
+        x: Style.space(4)
+        y: offset - height / 2
+        width: nowLabel.implicitWidth + Style.space(6)
+        height: nowLabel.implicitHeight + Style.space(2)
+        radius: Style.cornerRadius
+        color: root.urgentColor
+        z: 2
+        Text {
+          id: nowLabel
+          anchors.centerIn: parent
+          text: Calendar.two(new Date(root.nowMs).getHours()) + ":"
+            + Calendar.two(new Date(root.nowMs).getMinutes())
+          color: root.backgroundColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          textFormat: Text.PlainText
+        }
+      }
+
       Row {
         anchors.left: parent.left
         anchors.leftMargin: root.timeRailWidth
@@ -297,6 +336,36 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.eventActivated(eventBlock.modelData)
                 }
+              }
+            }
+
+            // After the events, so a meeting in progress is crossed by the line
+            // rather than covering it. The dot is what survives a theme whose
+            // urgent colour sits close to an event's border: a bare rule reads
+            // as one more hour separator, a rule with a bead on it does not.
+            Item {
+              readonly property real offset: Calendar.nowOffset(
+                dayColumn.modelData, root.firstHour, root.lastHour,
+                timeline.hourHeight, root.nowMs)
+              visible: offset >= 0
+              y: offset
+              width: parent.width
+              height: 0
+              z: 1
+              Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                height: Math.max(root.calendarBorderWidth, 2)
+                color: root.urgentColor
+              }
+              Rectangle {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(7)
+                height: width
+                radius: width / 2
+                color: root.urgentColor
               }
             }
           }

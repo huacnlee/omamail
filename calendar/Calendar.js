@@ -681,6 +681,35 @@ function eventHeight(event, day, hourHeight) {
   return Math.max(Number(hourHeight) * 0.42, (end - start) / 3600000 * Number(hourHeight))
 }
 
+// Where "now" sits in a day column, or -1 when it does not belong on the grid:
+// another day, or an hour outside the range the week view drew. The caller
+// draws nothing on -1 rather than clamping to an edge, because a line pinned to
+// the top of the grid states a time that is not the time — and the range here
+// is elastic, since weekHourRange widens it to whatever the week's events need.
+function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
+  if (!day) return -1
+  var now = Number(nowMs)
+  if (!isFinite(now)) return -1
+  if (now < Number(day.startMs) || now >= Number(day.endMs)) return -1
+  var minutes = (now - Number(day.startMs)) / 60000
+  var first = Number(firstHour) * 60
+  var last = Number(lastHour) * 60
+  if (minutes < first || minutes > last) return -1
+  return (minutes - first) / 60 * Number(hourHeight)
+}
+
+// The same offset for the week as a whole, so the time rail can label the line
+// without the view having to work out which of the seven columns is today.
+// Returns -1 when today is not in view at all, which is every week but this one.
+function weekNowOffset(days, firstHour, lastHour, hourHeight, nowMs) {
+  var values = Array.isArray(days) ? days : []
+  for (var i = 0; i < values.length; i++) {
+    var offset = nowOffset(values[i], firstHour, lastHour, hourHeight, nowMs)
+    if (offset >= 0) return offset
+  }
+  return -1
+}
+
 function eventsOnDay(events, day) {
   var values = Array.isArray(events) ? events : []
   var out = []

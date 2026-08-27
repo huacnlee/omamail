@@ -71,6 +71,34 @@ assert.strictEqual(feed.maxAllDayEvents(allDayEvents, week), 2)
 assert.strictEqual(feed.slotStart(week[1], 93, 7, 60, 30),
   new Date(2026, 7, 18, 8, 30).getTime(), "empty slots snap to half hours")
 
+// The now line. Same geometry as eventTop, so 9:30 on a 7:00 grid at 64px an
+// hour lands at 160 — but bounded at both ends and to the one day it belongs
+// to, because the alternative is a line claiming a time it is not at.
+const halfNine = new Date(2026, 7, 18, 9, 30).getTime()
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, halfNine), 160)
+assert.strictEqual(feed.nowOffset(week[2], 7, 19, 64, halfNine), -1,
+  "the line belongs to one column, not to the week")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 6, 0).getTime()), -1, "before the first drawn hour")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 21, 0).getTime()), -1, "after the last drawn hour")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 7, 0).getTime()), 0, "the first hour itself is on the grid")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 19, 0).getTime()), 768, "and so is the last")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, NaN), -1)
+assert.strictEqual(feed.nowOffset(null, 7, 19, 64, halfNine), -1)
+
+// A day whose range weekHourRange widened to the whole day still places it.
+assert.strictEqual(feed.nowOffset(week[1], 0, 24, 64,
+  new Date(2026, 7, 18, 0, 30).getTime()), 32)
+
+assert.strictEqual(feed.weekNowOffset(week, 7, 19, 64, halfNine), 160,
+  "the rail finds today without being told which column it is")
+assert.strictEqual(feed.weekNowOffset(splitWeek, 7, 19, 64, halfNine), -1,
+  "another week on screen gets no line")
+assert.strictEqual(feed.weekNowOffset([], 7, 19, 64, halfNine), -1)
+
 const report = feed.caldavReport(
   Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
 assert.ok(report.indexOf('start="20260801T000000Z"') >= 0)
