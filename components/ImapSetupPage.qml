@@ -40,14 +40,14 @@ Column {
   spacing: Style.space(16)
 
   function currentSettings() {
-    return {
+    return Imap.setupSettings({
+      address: addressField.text,
       imapHost: imapHostField.text.trim(),
-      imapPort: imapPortField.text.trim() === "" ? 993 : Number(imapPortField.text.trim()),
+      imapPort: imapPortField.text,
       smtpHost: smtpHostField.text.trim(),
-      smtpPort: smtpPortField.text.trim() === "" ? 465 : Number(smtpPortField.text.trim()),
-      username: (usernameField.text.trim() || addressField.text.trim()),
-      insecure: false
-    }
+      smtpPort: smtpPortField.text,
+      username: usernameField.text
+    })
   }
 
   // The address drives the servers until the user takes them over. Once a field

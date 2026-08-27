@@ -508,6 +508,11 @@ if grep -qE 'signal (signIn|signOut|remove)Requested' components/SettingsPage.qm
 fi
 grep -q 'signal removeRequested()' components/ImapSetupPage.qml \
   || fail "the IMAP edit page needs to own account removal"
+
+# The tested protocol helper owns the setup decision; the form must not grow a
+# second, untested copy that can drop Proton Bridge's local transport again.
+grep -q 'return Imap\.setupSettings({' components/ImapSetupPage.qml \
+  || fail "the IMAP setup form must use the tested settings builder"
 grep -q 'service\.discardCurrentDraft()' App.qml \
   || fail "leaving Add account must discard its unnamed draft"
 if awk '

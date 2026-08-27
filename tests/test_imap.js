@@ -37,6 +37,19 @@ const proton = imap.suggestedSettings("jane@proton.me")
 assert.strictEqual(proton.imapHost, "127.0.0.1")
 assert.strictEqual(proton.insecure, true)
 
+// A Proton mailbox may use a custom domain, so its address cannot select the
+// Proton preset. The server fields still identify a local Bridge and must
+// produce plain local IMAP rather than implicit TLS on Bridge's STARTTLS port.
+const customDomainBridge = imap.setupSettings({
+  address: "jane@example.com",
+  username: "jane@example.com",
+  imapHost: "127.0.0.1", imapPort: "1143",
+  smtpHost: "127.0.0.1", smtpPort: "1025"
+})
+assert.strictEqual(customDomainBridge.insecure, true)
+assert.strictEqual(imap.imapUrl(customDomainBridge, "INBOX"),
+  "imap://127.0.0.1:1143/INBOX")
+
 // ------------------------------------------------------------- host safety
 //
 // Every one of these ends up inside a URL handed to an authenticated client.
