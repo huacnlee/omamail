@@ -199,6 +199,22 @@ function isLoopback(host) {
   return name === "127.0.0.1" || name === "::1" || name === "localhost"
 }
 
+// Turn the setup form's visible fields into the same validated shape every
+// client call consumes. The server, not the mailbox's email domain, decides
+// whether this is a local bridge: Proton can serve addresses on custom domains
+// that never select its address preset.
+function setupSettings(raw) {
+  var values = raw || {}
+  return normalizeSettings({
+    imapHost: values.imapHost,
+    imapPort: values.imapPort,
+    smtpHost: values.smtpHost,
+    smtpPort: values.smtpPort,
+    username: trimmed(values.username) || trimmed(values.address),
+    insecure: isLoopback(values.imapHost)
+  })
+}
+
 // Reported one at a time and in the order the form reads, so the message names
 // the first field the user has to go back to rather than all of them at once.
 function validateSettings(raw) {
@@ -230,7 +246,9 @@ function imapUrl(settings, folder) {
 function smtpUrl(settings) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.smtpHost)) return ""
-  var scheme = values.insecure ? "smtp" : "smtps"
+  // IMAP and SMTP may name different hosts. The shared local-transport flag
+  // cannot let a loopback IMAP server downgrade a remote SMTP connection.
+  var scheme = values.insecure && isLoopback(values.smtpHost) ? "smtp" : "smtps"
   return scheme + "://" + values.smtpHost + ":" + values.smtpPort
 }
 
