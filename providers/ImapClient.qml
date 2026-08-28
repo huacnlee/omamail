@@ -748,7 +748,20 @@ Item {
             callback(null, Imap.responseError(status, detail, "The draft could not be saved"))
             return
           }
-          callback({}, "")
+          var sourceId = payload ? String(payload.draftId || "") : ""
+          if (sourceId === "") {
+            callback({}, "")
+            return
+          }
+          var commands = Imap.draftReplacementCommands(sourceId, folder)
+          if (commands.length === 0) {
+            callback(null, "That draft is no longer in the mailbox")
+            return
+          }
+          root.run(folder, commands, function(text, replaceError) {
+            if (handle.aborted || typeof callback !== "function") return
+            callback(replaceError ? null : {}, replaceError)
+          }, handle)
         })
         process.running = true
       })

@@ -269,6 +269,11 @@ assert.strictEqual(imap.fullFetchCommand([]), "")
 // Two STOREs, because IMAP has no combined add-and-remove.
 deepEqual(imap.storeCommand([4], ["\\Seen"], []), ["UID STORE 4 +FLAGS.SILENT (\\Seen)"])
 deepEqual(imap.storeCommand([4], [], ["\\Seen"]), ["UID STORE 4 -FLAGS.SILENT (\\Seen)"])
+deepEqual(imap.draftReplacementCommands("42:Drafts", "Drafts"), [
+  "UID STORE 42 +FLAGS.SILENT (\\Deleted)",
+  "UID EXPUNGE 42"
+])
+deepEqual(imap.draftReplacementCommands("42:Archive", "Drafts"), [])
 deepEqual(imap.storeCommand([4, 5], ["\\Seen"], ["\\Flagged"]), [
   "UID STORE 4,5 +FLAGS.SILENT (\\Seen)",
   "UID STORE 4,5 -FLAGS.SILENT (\\Flagged)"

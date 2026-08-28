@@ -548,6 +548,15 @@ function expungeCommand(uids) {
   return set === "" ? "" : "UID EXPUNGE " + set
 }
 
+function draftReplacementCommands(id, draftsFolder) {
+  var parsed = parseMessageId(id)
+  if (parsed.uid < 1 || parsed.folder !== String(draftsFolder || "")) return []
+  return [
+    "UID STORE " + parsed.uid + " +FLAGS.SILENT (\\Deleted)",
+    expungeCommand([parsed.uid])
+  ]
+}
+
 function statusCommand(folder) {
   return "STATUS " + quote(folder) + " (MESSAGES UNSEEN)"
 }

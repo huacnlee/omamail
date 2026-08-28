@@ -43,6 +43,8 @@ DropArea {
   // A failed provider save stays reachable after Back or Escape.
   property var recoveryDrafts: []
   property string accountId: ""
+  // The provider message that this form replaces when it is saved.
+  property string sourceDraftId: ""
   property int restoreRevision: 0
   property real restoreFlashOpacity: 0
   property string mode: "new"
@@ -65,6 +67,20 @@ DropArea {
   property var attachJobs: []
   property bool attaching: false
   property bool pasteInFlight: false
+
+  function noteDraftChanged() {
+    if (opened) draftChanged()
+  }
+
+  onAccountIdChanged: noteDraftChanged()
+  onModeChanged: noteDraftChanged()
+  onThreadIdChanged: noteDraftChanged()
+  onInReplyToChanged: noteDraftChanged()
+  onCcVisibleChanged: noteDraftChanged()
+  onBccVisibleChanged: noteDraftChanged()
+  onFromEmailChanged: noteDraftChanged()
+  onDraftAttachmentsChanged: noteDraftChanged()
+  onForwardedAttachmentsChanged: noteDraftChanged()
 
   readonly property string attachScript: service && service.pluginDir
     ? service.pluginDir + "/scripts/attachment.sh" : ""
@@ -116,6 +132,7 @@ DropArea {
     subjectField.text = ""
     bodyEdit.text = ""
     accountId = ""
+    sourceDraftId = ""
     mode = "new"
     threadId = ""
     inReplyTo = ""
@@ -147,6 +164,7 @@ DropArea {
       subject: subjectField.text,
       body: bodyEdit.text,
       accountId: accountId,
+      sourceDraftId: sourceDraftId,
       mode: mode,
       threadId: threadId,
       inReplyTo: inReplyTo,
@@ -165,6 +183,7 @@ DropArea {
     var saved = draft || ({})
     mode = String(saved.mode || "new")
     accountId = String(saved.accountId || "")
+    sourceDraftId = String(saved.sourceDraftId || "")
     threadId = String(saved.threadId || "")
     inReplyTo = String(saved.inReplyTo || "")
     ccVisible = saved.ccVisible === true
@@ -185,6 +204,24 @@ DropArea {
     subjectField.text = String(saved.subject || "")
     bodyEdit.text = String(saved.body || "")
     opened = true
+    rehydrateDraftAttachments()
+  }
+
+  function rehydrateDraftAttachments() {
+    var listed = draftAttachments.slice()
+    var kept = []
+    var recover = []
+    for (var i = 0; i < listed.length; i++) {
+      var file = listed[i] || ({})
+      if (String(file.path || "") !== "" && String(file.data || "") === "")
+        recover.push(file)
+      else kept.push(file)
+    }
+    if (recover.length === 0) return
+    draftAttachments = kept
+    for (var r = 0; r < recover.length; r++)
+      enqueueAttach(recover[r].owned === true ? "recover-owned" : "recover",
+        String(recover[r].path || ""))
   }
 
   function reset() {
@@ -366,6 +403,7 @@ DropArea {
     begin("new", null, "", [])
     var values = draft || ({})
     mode = String(values.mode || "new") === "draft" ? "draft" : "new"
+    sourceDraftId = String(messageId || values.sourceDraftId || "")
     threadId = String(values.threadId || "")
     inReplyTo = String(values.inReplyTo || "")
     toField.text = String(values.to || "")
@@ -403,6 +441,7 @@ DropArea {
   signal closed()
   signal closeRequested()
   signal sendQueued()
+  signal draftChanged()
 
   function finish() {
     clearCurrentDraft(true)
@@ -445,6 +484,7 @@ DropArea {
     for (i = 0; i < owned.length; i++) attachments.push(owned[i])
     return ({
       accountId: String(draft.accountId || ""),
+      draftId: String(draft.sourceDraftId || ""),
       from: String(draft.fromEmail || ""),
       to: String(draft.to || ""),
       cc: String(draft.cc || ""),
@@ -674,7 +714,7 @@ DropArea {
       size: Math.max(0, Math.floor(Number(result.size) || 0)),
       data: String(result.data || ""),
       path: String(result.path || ""),
-      owned: mode === "clipboard"
+      owned: mode === "clipboard" || mode === "recover-owned"
     })
     var next = root.draftAttachments.slice()
     next.push(entry)
@@ -924,7 +964,10 @@ DropArea {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "recipient@example.com"
-        onTextChanged: root.updateRecipientSuggestions()
+        onTextChanged: {
+          root.updateRecipientSuggestions()
+          root.noteDraftChanged()
+        }
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
@@ -1004,7 +1047,10 @@ DropArea {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        onTextChanged: root.updateRecipientSuggestions()
+        onTextChanged: {
+          root.updateRecipientSuggestions()
+          root.noteDraftChanged()
+        }
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
@@ -1079,7 +1125,10 @@ DropArea {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        onTextChanged: root.updateRecipientSuggestions()
+        onTextChanged: {
+          root.updateRecipientSuggestions()
+          root.noteDraftChanged()
+        }
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
@@ -1159,6 +1208,7 @@ DropArea {
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
         KeyNavigation.tab: bodyEdit
+        onTextChanged: root.noteDraftChanged()
         onAccepted: bodyEdit.forceActiveFocus()
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: root.pasteKey(event)
@@ -1376,6 +1426,7 @@ DropArea {
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
+      onTextChanged: root.noteDraftChanged()
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }

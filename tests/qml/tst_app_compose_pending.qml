@@ -37,6 +37,7 @@ Item {
     property real bodyZoom: 1
     property string bodyMode: "reader"
     property string providerId: "gmail"
+    property string pluginDir: ""
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
     property string mailboxKey: "inbox"
@@ -115,6 +116,7 @@ Item {
       callback(failDraftSave ? null : "draft-1",
         failDraftSave ? "server refused it" : "")
     }
+    function refresh() {}
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
     signal replySent()
@@ -147,6 +149,10 @@ Item {
     }
 
     function init() {
+      app.opened = false
+      app.composeSavePending = false
+      app.loadComposeRecovery("")
+      app.clearComposeRecovery()
       mailService.sendPending = false
       mailService.sending = false
       mailService.lastSavedDraft = null
@@ -179,6 +185,29 @@ Item {
         compose.reset()
         compose.opened = false
       }
+    }
+
+    function test_shell_close_flushes_and_restores_the_current_draft() {
+      var compose = composeView()
+      app.open("{}")
+      app.startCompose("new")
+      named(compose, "compose-subject-field").text = "Quarterly plan"
+      named(compose, "compose-body-editor").text = "Keep every word"
+
+      app.close()
+
+      compare(app.composeRecovery.active, true)
+      compare(app.composeRecovery.draft.subject, "Quarterly plan")
+      compare(app.composeRecovery.draft.body, "Keep every word")
+
+      compose.reset()
+      compose.opened = false
+      app.open("{}")
+      wait(20)
+
+      compare(compose.opened, true)
+      compare(named(compose, "compose-subject-field").text, "Quarterly plan")
+      compare(named(compose, "compose-body-editor").text, "Keep every word")
     }
 
     function test_reply_starts_while_another_send_is_pending() {
@@ -255,7 +284,7 @@ Item {
       compare(app.draftSavedNotice, "Draft saved")
     }
 
-    function test_opening_a_draft_row_waits_for_the_body_then_opens_compose() {
+    function test_open_previews_a_draft_and_compose_edits_it() {
       var compose = composeView()
       mailService.mailboxKey = "drafts"
       app.cursorId = "draft-7"
@@ -263,8 +292,8 @@ Item {
       app.runShortcut("open", "o")
 
       compare(mailService.selectedId, "draft-7")
-      compare(app.currentView, "list",
-        "a draft must not open the message reader while its body loads")
+      compare(app.currentView, "reader",
+        "a draft opens in the same reader as every other message")
       compare(app.composing, false)
 
       mailService.selectedMessage = ({
@@ -290,6 +319,12 @@ Item {
       mailService.detailLoading = false
       wait(30)
 
+      compare(app.composing, false,
+        "loading the draft body must not turn the preview into an editor")
+
+      app.runShortcut("compose", "c")
+      wait(30)
+
       compare(app.composing, true)
       compare(compose.mode, "draft")
       compare(compose.fromEmail, "me@example.com")
@@ -304,6 +339,14 @@ Item {
       compare(mailService.lastLoadedAttachmentId, "draft-7")
       compare(compose.draftAttachments.length, 1)
       compare(compose.draftAttachments[0].filename, "plan.txt")
+
+      named(compose, "compose-subject-field").text = "Updated subject"
+      app.goBack()
+
+      verify(mailService.lastSavedDraft)
+      compare(mailService.lastSavedDraft.draftId, "draft-7",
+        "closing an edited draft must update the source draft")
+      compare(mailService.lastSavedDraft.subject, "Updated subject")
     }
   }
 }

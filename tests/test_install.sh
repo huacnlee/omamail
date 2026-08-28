@@ -58,6 +58,11 @@ actual_accounts=$(cat "$test_root/config/omamail/accounts.json")
 [ "$actual_accounts" = "$updated_accounts" ] \
   || fail "config-store.sh refused a replacement that still contains a saved account"
 
+printf '%s\n' '{"version":1,"active":true}' \
+  | XDG_CONFIG_HOME="$test_root/config" sh scripts/config-store.sh compose.json >/dev/null
+[ "$(stat -c '%a' "$test_root/config/omamail/compose.json")" = 600 ] \
+  || fail "compose recovery must be owner-readable only"
+
 # The keyring helper takes attribute pairs now, because keying a refresh token
 # on the OAuth client alone lets two accounts sharing one client overwrite each
 # other. An empty value is a secret-tool wildcard, so it is refused outright.
