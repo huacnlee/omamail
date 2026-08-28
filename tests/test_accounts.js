@@ -196,6 +196,14 @@ deepEqual(accounts.load("{not json"), accounts.emptyList())
 deepEqual(accounts.load("[]"), accounts.emptyList(), "an array is not a list of accounts")
 deepEqual(accounts.load("null"), accounts.emptyList())
 deepEqual(accounts.load(null), accounts.emptyList())
+assert.strictEqual(accounts.isSerializedList(""), false)
+assert.strictEqual(accounts.isSerializedList("{not json"), false)
+assert.strictEqual(accounts.isSerializedList(JSON.stringify({
+  version: accounts.VERSION, accounts: []
+})), true, "a real empty first-run file is distinguishable from a failed read")
+assert.strictEqual(accounts.isSerializedList(JSON.stringify({
+  version: accounts.VERSION + 1, accounts: []
+})), false, "a newer format must not be mistaken for this build's list")
 deepEqual(accounts.load(JSON.stringify({ accounts: [] })), accounts.emptyList(), "no version at all")
 deepEqual(accounts.load(JSON.stringify({
   version: accounts.VERSION + 99,

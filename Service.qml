@@ -156,7 +156,18 @@ Item {
   // each account keeps its own cache on disk. A queued send belongs to its
   // account host and remains reachable after the visible account changes.
   function switchTo(id) {
-    if (String(id) === activeAccountId && activeIndex < 0) return true
+    // A notification can outlive the account it names. Refuse it before it can
+    // disturb either the visible account or what is persisted on disk.
+    if (!Accounts.find(accountList, id)) return false
+    // The saved account can already be active while Add account has put its
+    // draft on screen. Switching back still has work to do, just no file write.
+    if (String(id) === activeAccountId) {
+      if (activeIndex >= 0) {
+        activeIndex = -1
+        refreshCurrent()
+      }
+      return true
+    }
     activeIndex = -1
     accountList = Accounts.setActive(accountList, id)
     saveAccounts()
@@ -307,6 +318,11 @@ Item {
 
   function saveAccounts() {
     if (!accountsLoaded) return
+    // A nameless row is setup state, never a mailbox. There is no legitimate
+    // path that persists only one — Add waits for configureAccount, and the UI
+    // does not remove the final saved account — so refusing this write is the
+    // last line of defence against replacing every account with first-run.
+    if (!Accounts.hasSavedAccounts(accountList)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
       return
@@ -318,6 +334,11 @@ Item {
   }
 
   function applyAccounts(raw) {
+    // FileView can report a failed read while an atomically replaced watched
+    // file is settling. First run still gets its placeholder below, but once a
+    // real list is in memory an unreadable instant must not erase the UI and
+    // become the next value written back to disk.
+    if (accountsLoaded && !Accounts.isSerializedList(raw)) return
     var loaded = Accounts.load(raw)
     // First run, or an install that predates several accounts: one nameless
     // row so the existing credentials file still has somewhere to live.
