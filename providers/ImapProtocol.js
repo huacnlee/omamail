@@ -246,7 +246,9 @@ function imapUrl(settings, folder) {
 function smtpUrl(settings) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.smtpHost)) return ""
-  var scheme = values.insecure ? "smtp" : "smtps"
+  // IMAP and SMTP may name different hosts. The shared local-transport flag
+  // cannot let a loopback IMAP server downgrade a remote SMTP connection.
+  var scheme = values.insecure && isLoopback(values.smtpHost) ? "smtp" : "smtps"
   return scheme + "://" + values.smtpHost + ":" + values.smtpPort
 }
 
