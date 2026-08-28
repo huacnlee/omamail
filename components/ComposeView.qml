@@ -33,11 +33,18 @@ DropArea {
   readonly property int formInset: Style.space(18)
   readonly property int formLabelWidth: Style.space(52)
   readonly property int formLabelGap: Style.space(10)
-  readonly property bool deliveryLocked: !!root.service
-    && (root.service.sendPending || root.service.sending)
 
   property bool opened: false
   property bool parkedForSend: false
+  // The timer owns this draft while the visible composer remains free.
+  property var pendingDraft: null
+  // Undo temporarily replaces a newer draft. Closing or resending returns here.
+  property var interruptedDraft: null
+  // A failed provider save stays reachable after Back or Escape.
+  property var recoveryDrafts: []
+  property string accountId: ""
+  property int restoreRevision: 0
+  property real restoreFlashOpacity: 0
   property string mode: "new"
   property string threadId: ""
   property string inReplyTo: ""
@@ -88,10 +95,19 @@ DropArea {
     if (mode === "reply") return "Reply"
     if (mode === "replyAll") return "Reply all"
     if (mode === "forward") return "Forward"
+    if (mode === "draft") return "Draft"
     return "New message"
   }
 
-  function reset() {
+  function forgetOwned(attachments) {
+    var owned = Array.isArray(attachments) ? attachments : []
+    for (var i = 0; i < owned.length; i++) {
+      if (owned[i] && owned[i].owned && owned[i].path)
+        enqueueAttach("forget", owned[i].path)
+    }
+  }
+
+  function clearCurrentDraft(forgetAttachments) {
     forwardLoadSerial++
     fromMenu.close()
     toField.text = ""
@@ -99,6 +115,7 @@ DropArea {
     bccField.text = ""
     subjectField.text = ""
     bodyEdit.text = ""
+    accountId = ""
     mode = "new"
     threadId = ""
     inReplyTo = ""
@@ -114,16 +131,74 @@ DropArea {
     forwardedAttachments = []
     forwardAttachmentsLoading = false
     forwardAttachmentError = ""
-    parkedForSend = false
     var owned = draftAttachments
     draftAttachments = []
     attachJobs = []
     attaching = false
     pasteInFlight = false
-    for (var i = 0; i < owned.length; i++) {
-      if (owned[i] && owned[i].owned && owned[i].path)
-        enqueueAttach("forget", owned[i].path)
-    }
+    if (forgetAttachments) forgetOwned(owned)
+  }
+
+  function snapshotDraft() {
+    return ({
+      to: toField.text,
+      cc: ccField.text,
+      bcc: bccField.text,
+      subject: subjectField.text,
+      body: bodyEdit.text,
+      accountId: accountId,
+      mode: mode,
+      threadId: threadId,
+      inReplyTo: inReplyTo,
+      ccVisible: ccVisible,
+      bccVisible: bccVisible,
+      fromEmail: fromEmail,
+      replyRecipients: replyRecipients.slice(),
+      fromWasChosen: fromWasChosen,
+      originalAttachments: originalAttachments.slice(),
+      forwardedAttachments: forwardedAttachments.slice(),
+      draftAttachments: draftAttachments.slice()
+    })
+  }
+
+  function restoreDraft(draft) {
+    var saved = draft || ({})
+    mode = String(saved.mode || "new")
+    accountId = String(saved.accountId || "")
+    threadId = String(saved.threadId || "")
+    inReplyTo = String(saved.inReplyTo || "")
+    ccVisible = saved.ccVisible === true
+    bccVisible = saved.bccVisible === true
+    fromEmail = String(saved.fromEmail || "")
+    replyRecipients = Array.isArray(saved.replyRecipients)
+      ? saved.replyRecipients.slice() : []
+    fromWasChosen = saved.fromWasChosen === true
+    originalAttachments = Array.isArray(saved.originalAttachments)
+      ? saved.originalAttachments.slice() : []
+    forwardedAttachments = Array.isArray(saved.forwardedAttachments)
+      ? saved.forwardedAttachments.slice() : []
+    draftAttachments = Array.isArray(saved.draftAttachments)
+      ? saved.draftAttachments.slice() : []
+    toField.text = String(saved.to || "")
+    ccField.text = String(saved.cc || "")
+    bccField.text = String(saved.bcc || "")
+    subjectField.text = String(saved.subject || "")
+    bodyEdit.text = String(saved.body || "")
+    opened = true
+  }
+
+  function reset() {
+    clearCurrentDraft(true)
+    forgetOwned(pendingDraft ? pendingDraft.draftAttachments : [])
+    forgetOwned(interruptedDraft ? interruptedDraft.draftAttachments : [])
+    for (var i = 0; i < recoveryDrafts.length; i++)
+      forgetOwned(recoveryDrafts[i] ? recoveryDrafts[i].draftAttachments : [])
+    pendingDraft = null
+    interruptedDraft = null
+    recoveryDrafts = []
+    parkedForSend = false
+    restoreRevision = 0
+    restoreFlashOpacity = 0
   }
 
   function selectPreferredFrom() {
@@ -138,8 +213,8 @@ DropArea {
     fromMenu.close()
     var accountId = String(row.accountId || "")
     if (accountId === "" || !root.service) return
+    root.accountId = accountId
     if (String(root.service.activeAccountId || "") === accountId) return
-    if (root.deliveryLocked) return
     if (typeof root.service.switchTo === "function") root.service.switchTo(accountId)
   }
 
@@ -224,9 +299,29 @@ DropArea {
       })
   }
 
+  function loadDraftAttachments(messageId, attachments) {
+    var listed = Array.isArray(attachments) ? attachments.slice() : []
+    originalAttachments = listed
+    if (!service || listed.length === 0) return
+    var serial = ++forwardLoadSerial
+    forwardAttachmentsLoading = true
+    forwardAttachmentError = ""
+    service.loadAttachments(messageId, listed, function(loaded, error) {
+      if (serial !== root.forwardLoadSerial || !root.opened || root.mode !== "draft") return
+      root.forwardAttachmentsLoading = false
+      root.forwardAttachmentError = String(error || "")
+      if (error) {
+        if (root.service && typeof root.service.fail === "function") root.service.fail(error)
+        return
+      }
+      root.draftAttachments = Array.isArray(loaded) ? loaded : []
+    })
+  }
+
   function begin(nextMode, summary, bodyText, attachments) {
-    reset()
+    clearCurrentDraft(true)
     mode = String(nextMode || "new")
+    accountId = root.service ? String(root.service.activeAccountId || "") : ""
     opened = true
 
     if (summary && mode !== "new") {
@@ -267,9 +362,12 @@ DropArea {
 
   // A mailto: link is a new message with the fields already named. Reply and
   // forward stay on `begin`; they fill from a message, not from a URL.
-  function beginDraft(draft) {
+  function beginDraft(draft, messageId, attachments) {
     begin("new", null, "", [])
     var values = draft || ({})
+    mode = String(values.mode || "new") === "draft" ? "draft" : "new"
+    threadId = String(values.threadId || "")
+    inReplyTo = String(values.inReplyTo || "")
     toField.text = String(values.to || "")
     ccField.text = String(values.cc || "")
     ccVisible = ccField.text !== ""
@@ -277,6 +375,12 @@ DropArea {
     bccVisible = bccField.text !== ""
     subjectField.text = String(values.subject || "")
     bodyEdit.text = String(values.body || "")
+    var chosenFrom = String(values.from || "")
+    if (chosenFrom !== "") {
+      fromEmail = chosenFrom
+      fromWasChosen = true
+    }
+    if (mode === "draft") loadDraftAttachments(messageId, attachments)
   }
 
   // Where the keyboard goes when composing becomes the context. A reply starts
@@ -294,34 +398,146 @@ DropArea {
     }
   }
 
-  // Every way out of a draft: this view's own Back, Discard, the window's
-  // Escape, and the send that succeeded. The window is told because only the
-  // window knows where the draft was raised from.
+  // The Back control asks the window to save. Discard stays local and
+  // destructive. The window owns the save because it owns the provider.
   signal closed()
+  signal closeRequested()
   signal sendQueued()
 
   function finish() {
-    reset()
+    clearCurrentDraft(true)
+    if (interruptedDraft) {
+      var held = interruptedDraft
+      interruptedDraft = null
+      restoreDraft(held)
+      return
+    }
+    if (recoveryDrafts.length > 0) {
+      var queued = recoveryDrafts.slice()
+      var recovered = queued.shift()
+      recoveryDrafts = queued
+      restoreDraft(recovered)
+      restoreRevision++
+      restoreFlash.restart()
+      return
+    }
     opened = false
     closed()
   }
 
+  function hasMeaningfulDraft() {
+    if (String(toField.text || "").trim() !== "") return true
+    if (String(ccField.text || "").trim() !== "") return true
+    if (String(bccField.text || "").trim() !== "") return true
+    if (String(subjectField.text || "").trim() !== "") return true
+    if (String(bodyEdit.text || "").trim() !== "") return true
+    return allOutgoingAttachments().length > 0
+  }
+
+  function fieldsForDraft(saved) {
+    var draft = saved || ({})
+    var attachments = []
+    var forwarded = draft.mode === "forward" && Array.isArray(draft.forwardedAttachments)
+      ? draft.forwardedAttachments : []
+    var owned = Array.isArray(draft.draftAttachments) ? draft.draftAttachments : []
+    var i
+    for (i = 0; i < forwarded.length; i++) attachments.push(forwarded[i])
+    for (i = 0; i < owned.length; i++) attachments.push(owned[i])
+    return ({
+      accountId: String(draft.accountId || ""),
+      from: String(draft.fromEmail || ""),
+      to: String(draft.to || ""),
+      cc: String(draft.cc || ""),
+      bcc: String(draft.bcc || ""),
+      subject: String(draft.subject || ""),
+      body: String(draft.body || ""),
+      attachments: attachments,
+      threadId: draft.mode === "forward" ? "" : String(draft.threadId || ""),
+      inReplyTo: draft.mode === "forward" ? "" : String(draft.inReplyTo || "")
+    })
+  }
+
+  function detachForSave() {
+    var saved = snapshotDraft()
+    clearCurrentDraft(false)
+    if (interruptedDraft) {
+      var held = interruptedDraft
+      interruptedDraft = null
+      restoreDraft(held)
+    } else {
+      opened = false
+      closed()
+    }
+    return saved
+  }
+
+  function completeDetachedSave(saved) {
+    forgetOwned(saved && saved.draftAttachments ? saved.draftAttachments : [])
+  }
+
+  function recoverDetachedSave(saved) {
+    if (!saved) return
+    if (!opened) {
+      restoreDraft(saved)
+      restoreRevision++
+      restoreFlash.restart()
+      return
+    }
+    var queued = recoveryDrafts.slice()
+    queued.push(saved)
+    recoveryDrafts = queued
+  }
+
   function parkForSend() {
+    pendingDraft = snapshotDraft()
+    clearCurrentDraft(false)
     opened = false
     parkedForSend = true
-    sendQueued()
+    if (interruptedDraft) {
+      var held = interruptedDraft
+      interruptedDraft = null
+      restoreDraft(held)
+    } else {
+      sendQueued()
+    }
   }
 
   function resumePendingSend() {
-    if (!parkedForSend) return false
+    if (!parkedForSend || !pendingDraft) return false
+    if (opened) interruptedDraft = snapshotDraft()
+    clearCurrentDraft(false)
+    var draft = pendingDraft
+    pendingDraft = null
     parkedForSend = false
-    opened = true
+    restoreDraft(draft)
+    restoreRevision++
+    restoreFlash.restart()
+    return true
+  }
+
+  function interruptedFields() {
+    var saved = interruptedDraft
+    if (!saved) return null
+    return fieldsForDraft(saved)
+  }
+
+  function completeInterruptedSave(expected) {
+    if (!interruptedDraft || interruptedDraft !== expected) return false
+    forgetOwned(interruptedDraft.draftAttachments)
+    interruptedDraft = null
+    return true
+  }
+
+  function completePendingSend() {
+    if (!parkedForSend || !pendingDraft) return false
+    forgetOwned(pendingDraft.draftAttachments)
+    pendingDraft = null
+    parkedForSend = false
     return true
   }
 
   function cancelOrFinish() {
-    if (root.service && root.service.sendPending) root.service.undoSend()
-    else finish()
+    closeRequested()
   }
 
   function submit() {
@@ -342,7 +558,7 @@ DropArea {
       threadId: root.mode === "forward" ? "" : root.threadId,
       inReplyTo: root.mode === "forward" ? "" : root.inReplyTo
     }))
-    if (accepted === true || service.sendPending || service.sending) parkForSend()
+    if (accepted === true) parkForSend()
   }
 
   function allOutgoingAttachments() {
@@ -505,6 +721,19 @@ DropArea {
   }
   onContactBookChanged: updateRecipientSuggestions()
 
+  SequentialAnimation {
+    id: restoreFlash
+    running: false
+    NumberAnimation {
+      target: root
+      property: "restoreFlashOpacity"
+      from: 0.32
+      to: 0
+      duration: 720
+      easing.type: Easing.OutCubic
+    }
+  }
+
   // ----------------------------------------------------------- header
   //
   // One compact title band. Back is the exit path and the title names the
@@ -607,7 +836,7 @@ DropArea {
         verticalPadding: Style.spacing.inputPaddingY
         leftAlign: true
         selected: fromMenu.opened
-        enabled: root.canChooseFrom && !root.deliveryLocked
+        enabled: root.canChooseFrom
         onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
 
         // The kit's own chevron is a font glyph, which at this size renders
@@ -668,7 +897,6 @@ DropArea {
           foreground: root.ccVisible ? root.textColor : root.dimColor
           bordered: false
           fontSize: Style.font.caption
-          enabled: !root.deliveryLocked
           onClicked: root.ccVisible = !root.ccVisible
         }
 
@@ -679,7 +907,6 @@ DropArea {
           foreground: root.bccVisible ? root.textColor : root.dimColor
           bordered: false
           fontSize: Style.font.caption
-          enabled: !root.deliveryLocked
           onClicked: root.bccVisible = !root.bccVisible
         }
       }
@@ -697,7 +924,6 @@ DropArea {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "recipient@example.com"
-        enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
@@ -778,7 +1004,6 @@ DropArea {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
@@ -854,7 +1079,6 @@ DropArea {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        enabled: !root.deliveryLocked
         onTextChanged: root.updateRecipientSuggestions()
         onActiveFocusChanged: root.updateRecipientSuggestions()
         Keys.priority: Keys.BeforeItem
@@ -934,7 +1158,6 @@ DropArea {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
-        enabled: !root.deliveryLocked
         KeyNavigation.tab: bodyEdit
         onAccepted: bodyEdit.forceActiveFocus()
         Keys.priority: Keys.BeforeItem
@@ -1028,6 +1251,15 @@ DropArea {
         foreground: root.textColor
       }
     }
+  }
+
+  Rectangle {
+    objectName: "compose-fields-restore-flash"
+    anchors.fill: fields
+    z: 20
+    enabled: false
+    color: root.accentColor
+    opacity: root.restoreFlashOpacity
   }
 
   QQC.Popup {
@@ -1144,10 +1376,18 @@ DropArea {
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
-      enabled: !root.deliveryLocked
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }
+  }
+
+  Rectangle {
+    objectName: "compose-body-restore-flash"
+    anchors.fill: bodyFlick
+    z: bodyFlick.z + 1
+    enabled: false
+    color: root.accentColor
+    opacity: root.restoreFlashOpacity
   }
 
   Item {
@@ -1238,7 +1478,6 @@ DropArea {
                 hoverColor: root.textColor
                 fontFamily: root.panelFontFamily
                 iconSize: Style.font.iconSmall
-                enabled: !root.deliveryLocked
                 onClicked: root.removeAttachment(attachItem.index)
               }
             }
@@ -1270,21 +1509,14 @@ DropArea {
       spacing: Style.space(10)
 
       IconTextButton {
-        iconName: root.service && root.service.sendPending ? "undo" : "send"
-        tooltipText: root.service && root.service.sendPending
-          ? "Undo send · Ctrl+Z" : "Send · Ctrl+Enter"
-        text: root.service && root.service.sendPending
-          ? "Undo send (" + root.service.sendSecondsRemaining + "s)"
-          : (root.service && root.service.sending ? "Sending" : "Send")
+        iconName: "send"
+        tooltipText: "Send · Ctrl+Enter"
+        text: root.service && root.service.sending ? "Sending" : "Send"
         foreground: root.textColor
         fontFamily: root.panelFontFamily
-        enabled: !!root.service && !root.service.sending
-          && (root.service.sendPending || (!root.forwardAttachmentsLoading
-            && root.forwardAttachmentError === ""))
-        onClicked: {
-          if (root.service.sendPending) root.service.undoSend()
-          else root.submit()
-        }
+        enabled: !!root.service && !root.service.sending && !root.service.sendPending
+          && !root.forwardAttachmentsLoading && root.forwardAttachmentError === ""
+        onClicked: root.submit()
       }
 
       IconTextButton {
@@ -1293,7 +1525,7 @@ DropArea {
         text: root.attaching ? "Attaching" : "Attach..."
         foreground: root.textColor
         fontFamily: root.panelFontFamily
-        enabled: !!root.service && !root.attaching && !root.deliveryLocked
+        enabled: !!root.service && !root.attaching
         onClicked: root.chooseFiles()
       }
 
@@ -1302,7 +1534,6 @@ DropArea {
         foreground: root.dimColor
         bordered: false
         fontSize: Style.font.bodySmall
-        enabled: !root.deliveryLocked
         onClicked: root.finish()
       }
     }

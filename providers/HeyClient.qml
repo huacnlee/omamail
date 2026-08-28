@@ -202,6 +202,16 @@ Item {
       addressed.push(Mail.addressHeader(recipients[i].email, recipients[i].name))
     }
     if (addressed.length > 0) headers.push({ name: "To", value: addressed.join(", ") })
+    var copied = Array.isArray(known.cc) ? known.cc : []
+    var copiedHeaders = []
+    for (var c = 0; c < copied.length; c++)
+      copiedHeaders.push(Mail.addressHeader(copied[c].email, copied[c].name))
+    if (copiedHeaders.length > 0) headers.push({ name: "Cc", value: copiedHeaders.join(", ") })
+    var hidden = Array.isArray(known.bcc) ? known.bcc : []
+    var hiddenHeaders = []
+    for (var b = 0; b < hidden.length; b++)
+      hiddenHeaders.push(Mail.addressHeader(hidden[b].email, hidden[b].name))
+    if (hiddenHeaders.length > 0) headers.push({ name: "Bcc", value: hiddenHeaders.join(", ") })
     if (String(known.subject || "") !== "")
       headers.push({ name: "Subject", value: String(known.subject) })
     if (String(known.date || "") !== "")
@@ -223,13 +233,14 @@ Item {
     var labels = []
     if (!known.seen) labels.push("UNREAD")
     if (String(known.box || "") === "imbox") labels.push("INBOX")
+    if (known.isDraft === true) labels.push("DRAFT")
 
     var date = String(known.date || "")
     var stamp = date === "" ? 0 : Date.parse(date)
     return {
       id: String(id || ""),
       // HEY's own conversation id, which is what makes a thread a thread here.
-      threadId: Cli.topicIdOf(id),
+      threadId: known.isDraft === true ? "" : Cli.topicIdOf(id),
       labelIds: labels,
       internalDate: isFinite(stamp) && stamp > 0 ? String(stamp) : "",
       sizeEstimate: payload.body.size,
@@ -256,11 +267,15 @@ Item {
         callback(null, answer.error)
         return
       }
-      var found = Cli.filterRows(parsed, Cli.parseListing(answer.data))
+      var found = parsed.kind === "drafts"
+        ? Cli.parseDraftListing(answer.data)
+        : Cli.filterRows(parsed, Cli.parseListing(answer.data))
       // One of HEY's pages was read; the size the user configured decides how
       // much of it this request gets, and the token says where to carry on —
       // further into this page, or on to HEY's next one.
-      var page = Cli.pageOf(parsed, answer.data, found, maxResults, pageToken)
+      var pageData = parsed.kind === "drafts"
+        ? ({ next_page: Cli.envelopeNextPage(text) }) : answer.data
+      var page = Cli.pageOf(parsed, pageData, found, maxResults, pageToken)
       var ids = []
       for (var i = 0; i < page.rows.length; i++) {
         root.remember(page.rows[i])
@@ -351,7 +366,9 @@ Item {
       return handle
     }
 
-    var command = Cli.threadCommand(messageId)
+    var draftId = Cli.draftIdOf(messageId)
+    var command = draftId !== ""
+      ? Cli.draftShowCommand(messageId) : Cli.threadCommand(messageId)
     if (command.length === 0) {
       if (typeof callback === "function") {
         Qt.callLater(function() {
@@ -366,6 +383,17 @@ Item {
       if (typeof callback !== "function") return
       if (error) {
         callback(null, error)
+        return
+      }
+      if (draftId !== "") {
+        var draftAnswer = Cli.payload(text)
+        if (!draftAnswer.ok) {
+          callback(null, draftAnswer.error)
+          return
+        }
+        var draft = Cli.parseDraft(draftAnswer.data)
+        root.remember(draft)
+        callback(root.toMessage(messageId, draft, ({ text: draft.body, html: "" })), "")
         return
       }
       var thread = Cli.parseThread(text)
@@ -574,6 +602,37 @@ Item {
     run(command, body, function(text, error) {
       if (handle.aborted) return
       if (typeof callback === "function") callback(error ? null : {}, error)
+    }, handle)
+    return handle
+  }
+
+  function saveDraft(payload, callback) {
+    var handle = newHandle()
+    var raw = payload && payload.raw ? String(payload.raw) : ""
+    if (raw === "") {
+      if (typeof callback === "function") callback(null, "There is no draft to save")
+      return handle
+    }
+
+    var parsed = Mail.parseRfc822(Mail.decodeBase64Url(raw))
+    var body = Mail.extractBody(parsed).text
+    var files = payload && Array.isArray(payload.attachments) ? payload.attachments : []
+    var threadId = payload && payload.threadId ? Cli.topicIdOf(String(payload.threadId)) : ""
+    if (threadId === "" && payload && payload.threadId)
+      threadId = String(payload.threadId)
+
+    var command = Cli.draftCommand({
+      threadId: threadId,
+      to: Mail.headerFrom(parsed.headers, "To"),
+      cc: Mail.headerFrom(parsed.headers, "Cc"),
+      bcc: Mail.headerFrom(parsed.headers, "Bcc"),
+      subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject")),
+      attachments: files
+    })
+    run(command, body, function(text, error) {
+      if (handle.aborted) return
+      var answer = error ? null : Cli.payload(text)
+      if (typeof callback === "function") callback(error ? null : (answer ? answer.data : {}), error)
     }, handle)
     return handle
   }

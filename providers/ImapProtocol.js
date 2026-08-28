@@ -912,15 +912,30 @@ function redact(text) {
     .replace(/(password|pass|pwd)\s*[=:]\s*\S+/gi, "$1=[redacted]")
 }
 
-// Whether the tagged completion said OK. curl hides the tag from us for a
-// custom request, so this reads what it does surface.
+// Whether a tagged completion said NO or BAD. This has to inspect parsed IMAP
+// responses rather than search the whole byte string: a FETCH response holds
+// the message as a literal, and an ordinary message header such as
+// `X-Spam-Flag: NO` is not the server refusing the command.
+function failureCompletion(text) {
+  var lines = splitResponse(text)
+  for (var i = 0; i < lines.length; i++) {
+    // A response containing a literal includes the literal's own lines in this
+    // string. Only its first protocol line can be a completion, and spaces or
+    // tabs — not \s, which also crosses a newline — separate its fields.
+    var first = String(lines[i] || "").split(/\r?\n/)[0]
+    var match = first.match(/^([^+*\s]\S*)[ \t]+(NO|BAD)(?:[ \t]+(.*))?$/i)
+    if (match) return { detail: trimmed(match[3]) }
+  }
+  return null
+}
+
 function isFailure(text) {
-  return /^\S+\s+(NO|BAD)\s/im.test(String(text || ""))
+  return failureCompletion(text) !== null
 }
 
 function failureDetail(text) {
-  var match = String(text || "").match(/^\S+\s+(?:NO|BAD)\s+([\s\S]*)$/im)
-  return match ? trimmed(match[1].split(/[\r\n]/)[0]) : ""
+  var completion = failureCompletion(text)
+  return completion ? completion.detail : ""
 }
 
 // ------------------------------------------------------------- capabilities

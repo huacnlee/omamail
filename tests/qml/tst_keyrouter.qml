@@ -99,16 +99,20 @@ Item {
         "Ctrl+K opens the shortcut sheet from inside a draft")
     }
 
-    function test_undo_and_mail_navigation_share_the_mail_context() {
+    function test_alt_z_undoes_send_while_composing() {
       host.context = "compose"
       wait(20)
       keyClick(Qt.Key_Z, Qt.ControlModifier)
       compare(host.lastId, "", "Ctrl+Z remains text undo while composing")
+      keyClick(Qt.Key_Z, Qt.AltModifier)
+      compare(host.lastId, "undoSend",
+        "Alt+Z must reach the queued send while composing")
 
+      host.lastId = ""
       host.context = "reader"
       scope.applyContextFocus()
       wait(20)
-      keyClick(Qt.Key_Z, Qt.ControlModifier)
+      keyClick(Qt.Key_Z, Qt.AltModifier)
       compare(host.lastId, "undoSend")
       host.lastId = ""
       keyClick(Qt.Key_Down)

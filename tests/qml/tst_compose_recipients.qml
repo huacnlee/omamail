@@ -205,5 +205,69 @@ Item {
       compare(toField.text, "person@example.com")
       compare(bodyEditor.text, "Keep this draft intact")
     }
+
+    function test_a_pending_send_keeps_a_new_reply_editable() {
+      compose.begin("new", null, "", [])
+      named(compose, "compose-to-field").text = "first@example.com"
+      named(compose, "compose-body-editor").text = "First message"
+      compose.submit()
+
+      compose.begin("reply", ({
+        messageId: "<second@example.com>",
+        threadId: "thread-2",
+        subject: "Second subject",
+        from: ({ email: "second@example.com", display: "Second Person" }),
+        replyTo: ({ email: "second@example.com" }),
+        to: [],
+        cc: [],
+        fullTime: "today"
+      }), "Second body", [])
+
+      compare(compose.opened, true)
+      compare(compose.parkedForSend, true,
+        "the first draft must remain available to undo")
+      compare(named(compose, "compose-to-field").enabled, true)
+      compare(named(compose, "compose-body-editor").enabled, true)
+    }
+
+    function test_undo_does_not_discard_the_new_reply() {
+      compose.begin("new", null, "", [])
+      named(compose, "compose-to-field").text = "first@example.com"
+      named(compose, "compose-body-editor").text = "First message"
+      compose.submit()
+
+      compose.beginDraft({
+        to: "second@example.com", cc: "", bcc: "",
+        subject: "Second subject", body: "Second message"
+      })
+      verify(mailService.undoSend())
+      verify(compose.resumePendingSend())
+      compare(named(compose, "compose-to-field").text, "first@example.com")
+      compare(named(compose, "compose-body-editor").text, "First message")
+
+      compose.finish()
+      compare(compose.opened, true,
+        "closing the restored send must return to the new reply")
+      compare(named(compose, "compose-to-field").text, "second@example.com")
+      compare(named(compose, "compose-subject-field").text, "Second subject")
+      compare(named(compose, "compose-body-editor").text, "Second message")
+    }
+
+    function test_delivery_does_not_close_the_new_reply() {
+      compose.begin("new", null, "", [])
+      named(compose, "compose-to-field").text = "first@example.com"
+      named(compose, "compose-body-editor").text = "First message"
+      compose.submit()
+
+      compose.beginDraft({
+        to: "second@example.com", cc: "", bcc: "",
+        subject: "Second subject", body: "Second message"
+      })
+      mailService.sendPending = false
+      verify(compose.completePendingSend())
+      compare(compose.opened, true)
+      compare(named(compose, "compose-to-field").text, "second@example.com")
+      compare(named(compose, "compose-body-editor").text, "Second message")
+    }
   }
 }

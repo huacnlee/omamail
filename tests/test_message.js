@@ -225,7 +225,9 @@ const resource = {
       { name: "From", value: "=?UTF-8?B?" + Buffer.from("李四", "utf8").toString("base64") + "?= <li@example.com>" },
       { name: "To", value: "me@example.com" },
       { name: "Cc", value: "team@example.com, work@example.net" },
+      { name: "Bcc", value: "hidden@example.org" },
       { name: "Subject", value: "  Invoice   for   August  " },
+      { name: "In-Reply-To", value: "<earlier@example.net>" },
       { name: "Date", value: "Wed, 19 Aug 2026 14:50:00 +0000" }
     ]
   }
@@ -239,7 +241,11 @@ assert.strictEqual(summary.from.email, "li@example.com")
 assert.strictEqual(summary.subject, "Invoice for August", "runs of whitespace collapse")
 assert.strictEqual(summary.cc.length, 2, "Cc is carried: a reply picks its alias out of it")
 assert.strictEqual(summary.cc[1].email, "work@example.net")
+deepEqual(summary.bcc || [], [{ name: "hidden", email: "hidden@example.org",
+  display: "hidden" }], "Bcc is carried when a stored draft is reopened")
+assert.strictEqual(summary.inReplyTo, "<earlier@example.net>")
 assert.strictEqual(message.summarize({ payload: { headers: [] } }, now).cc.length, 0)
+assert.strictEqual(message.summarize({ payload: { headers: [] } }, now).bcc.length, 0)
 assert.strictEqual(summary.snippet, "Your receipt is attached & ready")
 assert.strictEqual(summary.time, "10m")
 assert.strictEqual(summary.unread, true)
@@ -274,6 +280,29 @@ const withReplyTo = message.summarize({
 }, now)
 assert.strictEqual(withReplyTo.replyTo.email, "help@example.com")
 assert.strictEqual(withReplyTo.messageId, "<abc@mail.example.com>")
+
+assert.strictEqual(typeof message.draftFields, "function",
+  "stored messages need one provider-neutral path back into compose")
+deepEqual(message.draftFields({
+  from: { email: "me@example.com" },
+  to: [{ email: "first@example.com" }, { email: "second@example.com" }],
+  cc: [{ email: "copy@example.com" }],
+  bcc: [{ email: "hidden@example.com" }],
+  subject: "Saved subject",
+  threadId: "thread-7",
+  inReplyTo: "<earlier@example.com>"
+}, "Saved body"), {
+  mode: "draft",
+  from: "me@example.com",
+  to: "first@example.com, second@example.com",
+  cc: "copy@example.com",
+  bcc: "hidden@example.com",
+  subject: "Saved subject",
+  body: "Saved body",
+  threadId: "thread-7",
+  inReplyTo: "<earlier@example.com>"
+})
+assert.strictEqual(message.draftFields({ subject: "(no subject)" }, "").subject, "")
 
 // ------------------------------------------------------------ composition
 

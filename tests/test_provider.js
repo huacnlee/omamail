@@ -82,7 +82,7 @@ assert.strictEqual(provider.unavailableReason("hey"), "")
 
 // The glyphs ActionIcon actually draws. A mailbox naming anything else renders
 // as nothing at all.
-const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash", "reply", "pin", "label"]
+const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash", "reply", "pin", "label", "compose"]
 
 // Every provider's first mailbox is its inbox: `mailboxFor` falls back to it,
 // which is what a key belonging to another provider lands on mid-switch.
@@ -110,6 +110,9 @@ assert.strictEqual(provider.mailboxes("gmail").length, boxes.length - 1,
 assert.strictEqual(provider.hasMailbox("gmail", "all"), true)
 assert.strictEqual(provider.hasMailbox("imap", "all"), false, "IMAP has Archive, not All mail")
 assert.strictEqual(provider.hasMailbox("imap", "archive"), true)
+assert.strictEqual(provider.hasMailbox("gmail", "drafts"), true)
+assert.strictEqual(provider.hasMailbox("hey", "drafts"), true)
+assert.strictEqual(provider.hasMailbox("imap", "drafts"), true)
 assert.strictEqual(provider.mailboxFor("gmail", "nonesuch").key, "inbox",
   "an unknown mailbox key falls back to the inbox rather than to undefined")
 assert.strictEqual(provider.mailboxFor("imap", "starred").label, "Flagged",
@@ -121,11 +124,13 @@ assert.strictEqual(provider.mailboxFor("imap", "starred").label, "Flagged",
 assert.strictEqual(provider.query("gmail", "inbox", "", ""), "in:inbox")
 assert.strictEqual(provider.query("gmail", "starred", "", ""), "is:starred")
 assert.strictEqual(provider.query("gmail", "trash", "", ""), "in:trash")
+assert.strictEqual(provider.query("gmail", "drafts", "", ""), "in:drafts")
 
 // IMAP's are the folder DSL.
 assert.strictEqual(provider.query("imap", "inbox", "", ""), "folder:INBOX")
 assert.strictEqual(provider.query("imap", "unread", "", ""), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.query("imap", "sent", "", ""), "folder:\\Sent")
+assert.strictEqual(provider.query("imap", "drafts", "", ""), "folder:\\Drafts")
 
 // A typed search wins over everything, and is shaped by the provider.
 assert.strictEqual(provider.query("gmail", "trash", "from:jane", ""), "from:jane",
@@ -155,6 +160,7 @@ assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
 assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
 assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
 assert.strictEqual(provider.query("hey", "trash", "", ""), "box:trash")
+assert.strictEqual(provider.query("hey", "drafts", "", ""), "drafts:")
 assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentist")
 
 // The badge counts what the Unread mailbox holds, by lookup rather than by a

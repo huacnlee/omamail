@@ -12,6 +12,7 @@
 # One line, fields separated by spaces:
 #
 #   imap <b64 url> <b64 user:password> <b64 command> [<b64 command> ...]
+#   imap-append <b64 url> <b64 user:password> <b64 message>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
 #
 # base64 rather than the values themselves, for three reasons that each bite
@@ -76,8 +77,8 @@ credentials=$(decode "$3")
 shift 3
 
 case "$mode" in
-  imap|smtp) ;;
-  *) fail 'mail-transport.sh: mode must be imap or smtp' ;;
+  imap|imap-append|smtp) ;;
+  *) fail 'mail-transport.sh: mode must be imap, imap-append or smtp' ;;
 esac
 
 # The URL is built and validated by Imap.js, which has already refused anything
@@ -120,6 +121,14 @@ if [ "$mode" = "smtp" ]; then
   # from a file rather than from a string — stdin is already carrying this
   # config. It lands in the 0700 directory the trap removes on any exit.
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
+elif [ "$mode" = "imap-append" ]; then
+  printf 'url = "%s"\n' "$escaped_url"
+  printf 'noproxy = "*"\n'
+  printf 'user = "%s"\n' "$escaped_credentials"
+  printf 'max-time = 60\n'
+  printf 'connect-timeout = 20\n'
+  printf 'upload-file = "%s"\n' "$(escape "$work/message")"
+  printf 'upload-flags = "draft"\n'
 else
   # IMAP: one section per command, so a sequence — search a folder, then fetch
   # what came back — runs on a single connection. curl reuses the connection
@@ -153,6 +162,9 @@ fi
 if [ "$mode" = "smtp" ]; then
   [ $# -ge 3 ] || fail 'mail-transport.sh: smtp needs a sender, a message and a recipient'
   decode "$2" > "$work/message"
+elif [ "$mode" = "imap-append" ]; then
+  [ $# -eq 1 ] || fail 'mail-transport.sh: imap-append needs one message'
+  decode "$1" > "$work/message"
 fi
 
 # curl is the last stage, so `$?` is curl's own exit code rather than the

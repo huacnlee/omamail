@@ -31,6 +31,20 @@ if [ -z "$payload" ]; then
   exit 3
 fi
 
+# A plugin reload can briefly leave the retiring service with only its setup
+# row in memory. If that stale instance reaches this writer after a real list
+# has already been stored, accepting the write would replace every mailbox
+# with first-run state. A saved account always has a validated email address;
+# a draft has an empty one. Keep this invariant at the final write boundary so
+# it also protects an old service instance during an upgrade.
+if [ "$name" = accounts.json ] && [ -s "$target" ] \
+  && grep -Eq '"email"[[:space:]]*:[[:space:]]*"[^"]+"' "$target" \
+  && ! printf '%s\n' "$payload" \
+    | grep -Eq '"email"[[:space:]]*:[[:space:]]*"[^"]+"'; then
+  printf '%s\n' 'refusing to replace saved accounts with setup state' >&2
+  exit 4
+fi
+
 mkdir -p "$target_dir"
 chmod 700 "$target_dir" 2>/dev/null || true
 

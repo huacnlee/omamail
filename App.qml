@@ -9,6 +9,7 @@ import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
 import "keys/Keymap.js" as Keymap
 import "message/Mailto.js" as Mailto
+import "message/Message.js" as Message
 import "components"
 import "calendar"
 
@@ -26,6 +27,7 @@ Item {
   property var service: null
   property bool opened: false
   property bool closingFromHost: false
+  property string draftSavedNotice: ""
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
@@ -200,14 +202,23 @@ Item {
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""
+    pendingDraftId = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
+    if (service.mailboxKey === "drafts") {
+      composeReturnView = currentView
+      pendingDraftId = cursorId
+      service.select(cursorId)
+      Qt.callLater(root.resumeHeldDraft)
+      return
+    }
     service.select(cursorId)
     currentView = "reader"
   }
 
   function backToList() {
     pendingComposeMode = ""
+    pendingDraftId = ""
     if (service) service.clearSelection()
     currentView = "list"
     Qt.callLater(function() { focusScope.applyContextFocus() })
@@ -245,6 +256,7 @@ Item {
   // draft in the same breath addressed nobody and quoted nothing, which is what
   // the list row's own Reply menu did. Held until the fetch lands instead.
   property string pendingComposeMode: ""
+  property string pendingDraftId: ""
   // Where the draft was raised from, so that leaving it goes back there.
   // Answering from the list opens the message being answered — that is the
   // reply's doing, not somewhere the reader asked to be — so closing the draft
@@ -253,7 +265,8 @@ Item {
   property string composeReturnView: ""
 
   function startCompose(mode) {
-    if (!service || service.sendPending || service.sending) return
+    if (!service) return
+    pendingDraftId = ""
     var next = String(mode || "new")
     if (next !== "new" && !service.selectedMessage) {
       pendingComposeMode = next
@@ -268,7 +281,7 @@ Item {
   // already open when this runs — summon delivers the payload to open().
   function openDraft(draft) {
     if (!draft) return
-    if (service && (service.sendPending || service.sending)) return
+    pendingDraftId = ""
     composeReturnView = currentView
     compose.beginDraft(draft)
   }
@@ -278,6 +291,16 @@ Item {
     var mode = pendingComposeMode
     pendingComposeMode = ""
     startCompose(mode)
+  }
+
+  function resumeHeldDraft() {
+    if (pendingDraftId === "" || !service) return
+    if (service.selectedId !== pendingDraftId || service.detailLoading
+        || !service.detailPainted || !service.selectedMessage) return
+    var messageId = pendingDraftId
+    pendingDraftId = ""
+    compose.beginDraft(Message.draftFields(service.selectedMessage,
+      service.selectedBody.text), messageId, service.selectedAttachments)
   }
 
   // Answering from the list opens what is being answered first, the way the
@@ -298,10 +321,51 @@ Item {
     if (from === "list" && currentView === "reader") backToList()
   }
 
+  function saveAndLeaveCompose() {
+    if (!service || !compose.hasMeaningfulDraft()) {
+      compose.finish()
+      return
+    }
+    var saved = compose.detachForSave()
+    var fields = compose.fieldsForDraft(saved)
+    service.saveDraft(fields, function(result, error) {
+      if (!root) return
+      if (error) {
+        compose.recoverDetachedSave(saved)
+        service.fail("Could not save draft: " + String(error))
+        return
+      }
+      compose.completeDetachedSave(saved)
+      root.draftSavedNotice = "Draft saved"
+      draftSavedTimer.restart()
+      if (service.mailboxKey === "drafts") service.refresh()
+    })
+  }
+
   function undoPendingSend() {
     if (!service || !service.undoSend()) return false
-    compose.resumePendingSend()
+    if (!compose.resumePendingSend()) return true
+    var interrupted = compose.interruptedDraft
+    var fields = compose.interruptedFields()
+    if (!interrupted || !fields) return true
+    service.saveDraft(fields, function(saved, error) {
+      if (!root) return
+      if (error) {
+        service.fail("Could not save the newer draft: " + String(error))
+        return
+      }
+      if (!compose.completeInterruptedSave(interrupted)) return
+      root.draftSavedNotice = "Draft saved"
+      draftSavedTimer.restart()
+    })
     return true
+  }
+
+  Timer {
+    id: draftSavedTimer
+    interval: 4000
+    repeat: false
+    onTriggered: root.draftSavedNotice = ""
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -449,7 +513,7 @@ Item {
       focusScope.parkKeyboard()
     }
     else if (eventComposer.opened) eventComposer.close()
-    else if (compose.opened) compose.finish()
+    else if (compose.opened) saveAndLeaveCompose()
     else if (setupVisible) setupVisible = false
     else if (settingsVisible) settingsVisible = false
     else if (currentView === "calendar" && calendarView.detailOpen) calendarView.closeDetail()
@@ -461,7 +525,7 @@ Item {
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onReplySent() { compose.finish() }
+    function onReplySent() { compose.completePendingSend() }
     // Every time the list is replaced — first arrival, a mailbox switch, a
     // search, a refresh that dropped things. A cursor whose message survived
     // keeps its place; one whose message is gone would be unfindable, and an
@@ -478,8 +542,14 @@ Item {
     // markup has not changed, so the body is not written a second time and
     // nothing fires again. Reply, reply-all and forward raised from the list
     // opened the message and stopped there.
-    function onSelectedBodyChanged() { Qt.callLater(root.resumeHeldCompose) }
-    function onSelectedMessageChanged() { Qt.callLater(root.resumeHeldCompose) }
+    function onSelectedBodyChanged() { Qt.callLater(function() {
+      root.resumeHeldCompose()
+      root.resumeHeldDraft()
+    }) }
+    function onSelectedMessageChanged() { Qt.callLater(function() {
+      root.resumeHeldCompose()
+      root.resumeHeldDraft()
+    }) }
 
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
@@ -1139,6 +1209,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           onClosed: root.leaveCompose()
+          onCloseRequested: root.saveAndLeaveCompose()
           onSendQueued: root.backToList()
         }
 
@@ -1289,6 +1360,21 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onUndoRequested: root.undoPendingSend()
+      }
+
+      DraftSavedToast {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(16)
+        anchors.bottom: statusBar.top
+        anchors.bottomMargin: Style.space(12)
+        z: 80
+        visible: root.draftSavedNotice !== ""
+        message: root.draftSavedNotice
+        textColor: root.foreground
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
       }
 
       // --------------------------------------------------------- status bar

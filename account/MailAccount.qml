@@ -1231,6 +1231,36 @@ Item {
     return true
   }
 
+  function saveDraft(fields, callback) {
+    if (!ready || !api || typeof api.saveDraft !== "function") {
+      if (typeof callback === "function") callback(null, "The mailbox is not ready to save drafts")
+      return null
+    }
+    var values = fields || ({})
+    var from = String(values.from || "").trim()
+    var alias = from === "" ? null : Api.sendAsFor(availableSendAsAliases, from)
+    if (from !== "" && !alias) {
+      if (typeof callback === "function") callback(null, "Choose a valid From address")
+      return null
+    }
+    var payload = Mail.buildSendPayload({
+      from: from,
+      fromName: alias ? String(alias.displayName || "") : "",
+      to: String(values.to || "").trim(),
+      cc: String(values.cc || "").trim(),
+      bcc: String(values.bcc || "").trim(),
+      subject: String(values.subject || ""),
+      body: String(values.body || ""),
+      attachments: Array.isArray(values.attachments) ? values.attachments : [],
+      threadId: values.threadId,
+      inReplyTo: values.inReplyTo,
+      references: values.references
+    })
+    return api.saveDraft(payload, function(saved, error) {
+      if (typeof callback === "function") callback(saved, error)
+    })
+  }
+
   function send(fields) {
     if (!ready || sending || sendPending) return false
     var values = fields || ({})

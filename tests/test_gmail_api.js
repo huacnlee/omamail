@@ -38,6 +38,11 @@ assert.strictEqual(api.trashPath("18f3a"), "/users/me/messages/18f3a/trash")
 assert.strictEqual(api.labelPath("INBOX"), "/users/me/labels/INBOX")
 assert.strictEqual(api.sendAsPath(), "/users/me/settings/sendAs")
 assert.strictEqual(api.attachmentPath("m1", "a1"), "/users/me/messages/m1/attachments/a1")
+assert.strictEqual(api.draftsPath(), "/users/me/drafts")
+assert.strictEqual(api.draftPath("draft/a"), "/users/me/drafts/draft%2Fa")
+deepEqual(api.draftBody({ raw: "encoded", threadId: "thread-1" }), {
+  message: { raw: "encoded", threadId: "thread-1" }
+})
 
 deepEqual(api.listQuery("in:inbox", 25, ""), { q: "in:inbox", maxResults: 25, pageToken: "" })
 assert.strictEqual(api.listQuery("", 500).maxResults, 100, "Gmail caps maxResults at 100")

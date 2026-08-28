@@ -512,8 +512,27 @@ assert.strictEqual(imap.isFailure("A1 OK completed\r\n"), false)
 assert.strictEqual(imap.isFailure("A1 NO [AUTHENTICATIONFAILED] nope\r\n"), true)
 assert.strictEqual(imap.isFailure("A1 BAD syntax\r\n"), true)
 assert.strictEqual(imap.isFailure("* OK still going\r\n"), false, "untagged OK is not a failure")
+assert.strictEqual(imap.isFailure("* NO [ALERT] mailbox maintenance\r\n"), false,
+  "an untagged status response is not a command failure")
 assert.strictEqual(imap.failureDetail("A1 NO [AUTHENTICATIONFAILED] Invalid credentials\r\n"),
   "[AUTHENTICATIONFAILED] Invalid credentials")
+assert.strictEqual(imap.isFailure("+ NO is continuation text\r\n"), false,
+  "a continuation response is not a tagged failure")
+
+// A fetched message is an opaque literal. This is the shape of the
+// Outlook-originated message that exposed the bug: its spam verdict was read
+// as the IMAP server saying NO, and the following header was shown as the
+// error while the successfully fetched body was discarded.
+const spamHeaders = "X-Spam-Flag: NO\r\nUI-OutboundReport: notjunk:1;M01:P0:signature\r\n\r\nbody"
+const fetchedSpamHeaders =
+  "* 1 FETCH (UID 87340 BODY[] {" + spamHeaders.length + "}\r\n" + spamHeaders + ")\r\n"
+assert.strictEqual(imap.isFailure(fetchedSpamHeaders), false,
+  "NO inside a message literal is not an IMAP failure")
+assert.strictEqual(imap.failureDetail(fetchedSpamHeaders), "")
+assert.strictEqual(imap.isFailure(fetchedSpamHeaders + "A1 NO message unavailable\r\n"), true,
+  "a real tagged failure after the literal is still reported")
+assert.strictEqual(imap.failureDetail(fetchedSpamHeaders + "A1 NO message unavailable\r\n"),
+  "message unavailable")
 
 // ------------------------------------------------------------ capabilities
 
