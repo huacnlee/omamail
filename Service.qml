@@ -623,6 +623,7 @@ Item {
   readonly property string rawQuery: current ? current.rawQuery : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
+  readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
   readonly property bool hasMore: !!current && current.hasMore
   readonly property string resultSummary: current ? current.resultSummary : ""
   readonly property string selectedId: current ? current.selectedId : ""
@@ -683,7 +684,9 @@ Item {
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
   function selectLabel(name) { if (current) current.selectLabel(name) }
-  function act(id, action, quiet) { if (current) current.act(id, action, quiet) }
+  function act(id, action, quiet) {
+    return current ? current.act(id, action, quiet) : false
+  }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
   function send(fields) { return current ? current.send(fields) : false }

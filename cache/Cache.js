@@ -11,6 +11,7 @@
 
 var VERSION = 1
 var MAX_QUERIES = 12
+var MAX_SUMMARIES_PER_QUERY = 100
 // Bodies are the one thing worth keeping deep: a message body never changes, so
 // a hit is always correct and always saves a round trip. They live one file per
 // message rather than in this store — measured against a real mailbox a body
@@ -58,6 +59,10 @@ function serialize(store) {
 function queryKey(query, maxResults) {
   return String(query || "").replace(/^\s+|\s+$/g, "")
     + "|" + Math.max(1, Math.floor(Number(maxResults) || 25))
+}
+
+function queryFromKey(key) {
+  return String(key || "").replace(/\|\d+$/, "")
 }
 
 // ------------------------------------------------------------- hydration
@@ -115,10 +120,17 @@ function putQuery(store, key, page, nowMs) {
   var next = copyStore(store)
   var queries = {}
   for (var existing in next.queries) queries[existing] = next.queries[existing]
+  var source = page && Array.isArray(page.summaries) ? page.summaries : []
+  var capped = source.slice(0, MAX_SUMMARIES_PER_QUERY)
   queries[String(key)] = {
-    summaries: dehydrate(page && page.summaries),
+    summaries: dehydrate(capped),
     estimate: Math.max(0, Math.floor(Number(page && page.estimate) || 0)),
-    nextPageToken: String(page && page.nextPageToken ? page.nextPageToken : ""),
+    // A token that follows rows omitted from the cache would skip them after a
+    // restart. The live first-page refresh supplies a new token shortly after
+    // the capped preview is painted, so closing pagination meanwhile is the
+    // only honest answer.
+    nextPageToken: source.length > capped.length ? ""
+      : String(page && page.nextPageToken ? page.nextPageToken : ""),
     at: Number(nowMs) || 0
   }
   next.queries = queries
@@ -129,6 +141,139 @@ function getQuery(store, key) {
   var source = store || emptyStore()
   var entry = source.queries ? source.queries[String(key)] : null
   return isObject(entry) ? entry : null
+}
+
+// --------------------------------------------------------- local search
+//
+// A typed search has no cache entry the first time it is made, but the store
+// already holds the sender, recipients, subject and snippet of every row the
+// account has shown. Those rows are enough for a useful immediate answer while
+// the provider searches headers and bodies on the server.
+//
+// This is deliberately a conservative subset of provider search syntax. A
+// term carrying `:` or a leading `-` may be an operator whose meaning belongs
+// to Gmail, HEY or IMAP; pretending it is ordinary text would put rows on
+// screen that do not answer the query. An exact cached query is still painted
+// by MailAccount before this fallback is considered.
+
+function localSearchTerms(query) {
+  var text = String(query === undefined || query === null ? "" : query)
+    .replace(/^\s+|\s+$/g, "").toLowerCase()
+  if (text === "") return []
+
+  var terms = []
+  var current = ""
+  var quoted = false
+  for (var i = 0; i < text.length; i++) {
+    var character = text.charAt(i)
+    if (character === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (/\s/.test(character) && !quoted) {
+      if (current !== "") terms.push(current)
+      current = ""
+    } else {
+      current += character
+    }
+  }
+  if (current !== "") terms.push(current)
+
+  for (var j = 0; j < terms.length; j++) {
+    if (terms[j].charAt(0) === "-" || terms[j].indexOf(":") >= 0) return []
+  }
+  return terms
+}
+
+function addressSearchText(address) {
+  if (!address) return ""
+  return String(address.display || "") + " " + String(address.name || "")
+    + " " + String(address.email || "")
+}
+
+function addressListSearchText(addresses) {
+  var list = Array.isArray(addresses) ? addresses : []
+  var text = ""
+  for (var i = 0; i < list.length; i++) text += " " + addressSearchText(list[i])
+  return text
+}
+
+function summarySearchText(summary) {
+  var row = summary || {}
+  return (addressSearchText(row.from)
+    + addressListSearchText(row.to)
+    + addressListSearchText(row.cc)
+    + " " + String(row.subject || "")
+    + " " + String(row.snippet || "")).toLowerCase()
+}
+
+function matchesLocalSearch(summary, terms) {
+  var wanted = Array.isArray(terms) ? terms : []
+  if (wanted.length === 0) return false
+  var text = summarySearchText(summary)
+  for (var i = 0; i < wanted.length; i++) {
+    if (text.indexOf(wanted[i]) < 0) return false
+  }
+  return true
+}
+
+// All matching rows from eligible cached queries, newest first and only once
+// per message. Which cached mailbox belongs to a provider search is a provider
+// fact, so the caller supplies that predicate. Queries are read newest first;
+// the newest copy decides both the row and its current scope, while older
+// copies may still supply searchable fields an earlier build omitted.
+function searchSummaries(store, query, includes) {
+  var terms = localSearchTerms(query)
+  if (terms.length === 0) return []
+  var source = store || emptyStore()
+  var queries = source.queries || {}
+  var keys = []
+  for (var key in queries) keys.push(key)
+  keys.sort(function(a, b) {
+    return (Number(queries[b] && queries[b].at) || 0)
+      - (Number(queries[a] && queries[a].at) || 0)
+  })
+
+  var positions = {}
+  var candidates = []
+  var order = 0
+  for (var i = 0; i < keys.length; i++) {
+    var sourceQuery = queryFromKey(keys[i])
+    var rows = hydrate(queries[keys[i]] && queries[keys[i]].summaries)
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j]
+      var id = String(row && row.id ? row.id : "")
+      if (id === "") continue
+      if (positions[id] === undefined) {
+        positions[id] = candidates.length
+        candidates.push({
+          row: row,
+          order: order++,
+          eligible: typeof includes !== "function" || includes(sourceQuery, row),
+          matched: false
+        })
+      }
+      // Match against every cached copy: an older entry may carry recipients
+      // that a cache written by an earlier build did not put on every row. The
+      // candidate itself stays the newest copy because keys are newest first.
+      if (candidates[positions[id]].eligible && matchesLocalSearch(row, terms))
+        candidates[positions[id]].matched = true
+    }
+  }
+
+  var found = []
+  for (var candidate = 0; candidate < candidates.length; candidate++) {
+    if (candidates[candidate].matched) found.push(candidates[candidate])
+  }
+  found.sort(function(a, b) {
+    var aTime = a.row && a.row.date ? Number(a.row.date.getTime()) : 0
+    var bTime = b.row && b.row.date ? Number(b.row.date.getTime()) : 0
+    if (aTime !== bTime) return bTime - aTime
+    return a.order - b.order
+  })
+  var out = []
+  for (var k = 0; k < found.length; k++) out.push(found[k].row)
+  return out
 }
 
 
@@ -289,6 +434,19 @@ function keepNewest(bucket, limit) {
 function prune(store) {
   var next = copyStore(store)
   next.queries = keepNewest(next.queries, MAX_QUERIES)
+  var capped = {}
+  for (var key in next.queries) {
+    var entry = next.queries[key] || {}
+    var summaries = Array.isArray(entry.summaries) ? entry.summaries : []
+    capped[key] = {
+      summaries: summaries.slice(0, MAX_SUMMARIES_PER_QUERY),
+      estimate: Math.max(0, Math.floor(Number(entry.estimate) || 0)),
+      nextPageToken: summaries.length > MAX_SUMMARIES_PER_QUERY
+        ? "" : String(entry.nextPageToken || ""),
+      at: Number(entry.at) || 0
+    }
+  }
+  next.queries = capped
   return next
 }
 

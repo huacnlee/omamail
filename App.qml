@@ -370,24 +370,25 @@ Item {
 
   // Acting on the open message closes it: it is about to leave this list.
   function actOnCursor(action) {
-    if (!service || cursorId === "") return
+    if (!service || cursorId === "") return false
     var acted = cursorId
     var wasOpen = currentView === "reader" && service.selectedId === acted
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(service.messages, acted)
     var leaves = !Model.survivesAction(service.mailboxKey, action)
-    service.act(acted, action)
-    if (!leaves) return
+    if (!service.act(acted, action)) return false
+    if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a
     // message that is no longer listed cannot be found, so the next j restarts
     // at the top. Archiving one message used to send it back to the first row.
     if (wasOpen) {
       if (next !== "") openMessage(next)
       else backToList()
-      return
+      return true
     }
     cursorId = next
     revealCursorRow()
+    return true
   }
 
   function goMailbox(key) {
@@ -909,6 +910,7 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           panelFontFamily: root.fontFamily
+          serverSearching: !!root.service && root.service.serverSearchLoading
           // A search replaces the list, so the message still open in the
           // reader is almost certainly not in the results any more.
           onSubmitted: function(query) {

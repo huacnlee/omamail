@@ -173,6 +173,13 @@ deepEqual(imap.groupByFolder(["3:INBOX", "5:Archive", "4:INBOX"]), [
 ])
 deepEqual(imap.groupByFolder(["bad", "3:INBOX"]), [{ folder: "INBOX", uids: [3] }],
   "an unparseable id is dropped rather than aimed at some default folder")
+deepEqual(imap.groupByFolder([
+  "8:INBOX", "7:INBOX", "6:INBOX", "2:Archive"
+], 2), [
+  { folder: "INBOX", uids: [8, 7] },
+  { folder: "INBOX", uids: [6] },
+  { folder: "Archive", uids: [2] }
+], "a streamed metadata read keeps each folder in small ordered batches")
 deepEqual(imap.groupByFolder([]), [])
 deepEqual(imap.groupByFolder(null), [])
 
@@ -201,21 +208,47 @@ assert.strictEqual(imap.sequenceSet(null), "")
 
 assert.strictEqual(imap.uidListCommand(), "UID FETCH 1:* (UID)",
   "a UID snapshot is one bounded FETCH response line per message")
+assert.strictEqual(imap.uidCeilingCommand(), "UID FETCH *:* (UID)",
+  "an interactive search learns its stable ceiling without reading every UID")
+deepEqual(imap.searchWindow("TEXT \"invoice\"", 9000), {
+  command: "UID SEARCH UID 4905:9000 TEXT \"invoice\"", nextUid: 4904
+}, "the first interactive SEARCH window starts at the newest UID")
+deepEqual(imap.searchWindow("TEXT \"invoice\"", 4904), {
+  command: "UID SEARCH UID 809:4904 TEXT \"invoice\"", nextUid: 808
+}, "the next interactive SEARCH window continues backwards")
+deepEqual(imap.searchWindow("TEXT \"invoice\"", 808), {
+  command: "UID SEARCH UID 1:808 TEXT \"invoice\"", nextUid: 0
+}, "the final interactive SEARCH window stops at UID one")
+deepEqual(imap.searchWindow("", 9000), { command: "", nextUid: 0 })
+deepEqual(imap.searchWindow("UNSEEN", 0), { command: "", nextUid: 0 })
 deepEqual(imap.searchCommands("", [1, 2, 3]), [],
   "an unfiltered listing already has its answer in the UID snapshot")
 deepEqual(imap.searchCommands("UNSEEN", [3, 40, 9000000]), [
   "UID SEARCH UID 3:9000000 UNSEEN"
 ], "a sparse range is bounded by the number of UIDs known to exist inside it")
+deepEqual(imap.searchCommands("UNSEEN", [3, 40, 4904, 4905, 9000000], 4904), [
+  "UID SEARCH UID 3:4904 UNSEEN"
+], "the snapshot fallback does not search the streamed first window twice")
 
 const manyUids = []
 for (let uid = 1; uid <= 9000; uid++) manyUids.push(uid)
 deepEqual(imap.searchCommands("FLAGGED", manyUids), [
-  "UID SEARCH UID 1:4096 FLAGGED",
-  "UID SEARCH UID 4097:8192 FLAGGED",
-  "UID SEARCH UID 8193:9000 FLAGGED"
-], "no SEARCH response can contain more than 4096 UIDs")
-assert.ok(imap.searchCommands("UNSEEN", manyUids)[2].indexOf("*") < 0,
+  "UID SEARCH UID 4905:9000 FLAGGED",
+  "UID SEARCH UID 809:4904 FLAGGED",
+  "UID SEARCH UID 1:808 FLAGGED"
+], "SEARCH windows are bounded and the newest one answers first")
+assert.ok(imap.searchCommands("UNSEEN", manyUids)[0].indexOf("*") < 0,
   "mail delivered after the snapshot cannot enter its last search window")
+
+deepEqual(imap.searchPage([9000, 8999, 8000], 0, 2, true), {
+  uids: [9000, 8999], nextOffset: "2", estimate: 3
+}, "an unfinished streamed search exposes its stable newest prefix")
+deepEqual(imap.searchPage([9000, 8999, 8000], 2, 2, false), {
+  uids: [8000], nextOffset: "", estimate: 3
+}, "the final window closes pagination at the real end")
+deepEqual(imap.searchPage([], 0, 25, true), {
+  uids: [], nextOffset: "25", estimate: 26
+}, "unscanned windows keep an empty partial answer open")
 
 // BODY.PEEK, never BODY: reading the list must not mark the mailbox seen.
 const summaryFetch = imap.summaryFetchCommand([7, 9])

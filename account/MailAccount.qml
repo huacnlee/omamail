@@ -302,10 +302,18 @@ Item {
   property string lastError: ""
   property string actionStatus: ""
   property string pendingAction: ""
+  property string pendingActionQuery: ""
+  property var deferredListLoad: null
+  property var queuedQuietActions: []
   property bool sending: false
   property var pendingSend: null
   property int sendSecondsRemaining: 0
   readonly property bool sendPending: pendingSend !== null
+
+  onPendingActionChanged: {
+    if (pendingAction === "" && queuedQuietActions.length > 0)
+      Qt.callLater(root.runQueuedQuietAction)
+  }
 
   // Notifications only start once the first successful load has established
   // what was already there.
@@ -345,6 +353,11 @@ Item {
   readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
     : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
   readonly property bool hasMore: nextPageToken !== ""
+  // A cached search can already have rows on screen while this stays true.
+  // Kept separate from the generic list state so the view can say that the
+  // visible answer is still being extended by the server.
+  readonly property bool serverSearchLoading: searchQuery !== ""
+    && rawQuery === "" && listLoading
   readonly property string resultSummary: Model.resultSummary(messages, resultEstimate, hasMore)
   readonly property string barTooltip: Model.barTooltip(setupState, accountEmail, inboxUnread,
     Provider.badge(providerId), Provider.authKind(providerId))
@@ -530,21 +543,31 @@ Item {
     return Api.preferredSendAs(availableSendAsAliases, recipients)
   }
 
-  // Paints whatever the last visit to this query left behind. Switching
-  // mailboxes should never show an empty column while the network decides.
+  // Paints whatever the last visit to this query left behind. A new typed
+  // search has no entry of its own yet, so it also searches every cached row's
+  // sender, recipients, subject and snippet. The provider keeps searching the
+  // server underneath; this is the immediate answer, not the final boundary of
+  // what can be found.
   function paintFromCache() {
     if (!cacheStore.loaded) return false
     var entry = cacheStore.get(cacheKey)
-    if (!entry || !entry.summaries || entry.summaries.length === 0) return false
+    var restored = entry && entry.summaries ? Cache.hydrate(entry.summaries) : []
+    if (searchQuery !== "" && rawQuery === "") {
+      restored = Model.mergeSearchResults(restored,
+        Cache.searchSummaries(cacheStore.store, searchQuery,
+          function(sourceQuery, summary) {
+            return Provider.cachedSummaryInSearch(root.providerId, sourceQuery, summary)
+          }))
+    }
+    if (restored.length === 0) return false
 
     var now = new Date()
-    var restored = Cache.hydrate(entry.summaries)
     for (var i = 0; i < restored.length; i++)
       restored[i].time = Mail.relativeTime(restored[i].date, now)
 
     messages = restored
-    resultEstimate = entry.estimate
-    nextPageToken = entry.nextPageToken
+    resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
+    nextPageToken = entry ? entry.nextPageToken : ""
     listLoaded = true
     lastError = ""
 
@@ -561,14 +584,46 @@ Item {
     return true
   }
 
-  function loadMessages(append) {
+  function loadMessages(append, skipCache, preservedError) {
+    // An optimistic action may have stopped this query's live list specifically
+    // so its stale snapshots cannot settle over the edit. Polling and F5 for
+    // that same query wait for the action callback's deliberate revalidation,
+    // but navigation has a different cache key and must still be allowed to
+    // load its new view.
     if (!ready) return
+    if (pendingAction !== "" && cacheKey === pendingActionQuery) {
+      var cleared = !listLoaded
+      // A→B→A can arrive here while B still owns the active request. The
+      // deferred A load needs a fresh serial now, otherwise B may settle into
+      // A before the action callback gets a chance to resume it.
+      if (cleared) {
+        listSerial++
+        abortRequest(listHandle)
+        listHandle = null
+        listLoading = false
+      }
+      deferredListLoad = ({
+        cacheKey: cacheKey,
+        append: append === true,
+        skipCache: skipCache === true,
+        preservedError: String(preservedError || ""),
+        cleared: cleared
+      })
+      return
+    }
+    // A deferred refresh belongs to the view that requested it. Once the user
+    // navigates somewhere else, that newer view supersedes the old request.
+    if (deferredListLoad && deferredListLoad.cacheKey !== cacheKey)
+      deferredListLoad = null
     var serial = ++listSerial
+    var keptError = String(preservedError || "")
     abortRequest(listHandle)
     if (!append) {
       // Cache first: paint, then revalidate. The page tokens and the estimate
-      // come back with the live answer.
-      if (!paintFromCache()) {
+      // come back with the live answer. An action that interrupted the prior
+      // load already has the newest optimistic state on screen and must not
+      // re-import the removed row from another cached query.
+      if (skipCache !== true && !paintFromCache()) {
         nextPageToken = ""
         resultEstimate = 0
       }
@@ -576,11 +631,20 @@ Item {
     listLoading = true
     var token = append ? nextPageToken : ""
 
+    // A typed search accepts ids while the provider is still finding them.
+    // Mailbox and label listings have no long-running search phase, so their
+    // simpler page-at-once path stays below.
+    if (searchQuery !== "" && rawQuery === "") {
+      loadSearchMessages(append, token, serial, keptError)
+      return
+    }
+
     listHandle = api.listMessages(effectiveQuery, maxMessages, token,
       function(page, error) {
         if (serial !== root.listSerial) return
         if (error || !page) {
           root.listLoading = false
+          if (!append) root.nextPageToken = ""
           root.fail(error || "Gmail returned nothing")
           return
         }
@@ -602,37 +666,226 @@ Item {
               nextPageToken: root.nextPageToken
             }))
           }
-          root.lastError = ""
+          root.lastError = keptError
           root.listRefreshed()
           return
         }
-        root.fetchSummaries(page.ids, append, serial)
+        root.fetchSummaries(page.ids, append, serial, keptError)
       })
   }
 
-  function fetchSummaries(ids, append, serial) {
-    api.getMessages(ids, false, function(payloads, error) {
-      if (serial !== root.listSerial) return
-      root.listLoading = false
-      if (error && payloads.length === 0) {
-        root.fail(error)
-        return
-      }
+  function deferredLoadCleared(query) {
+    return !!deferredListLoad && deferredListLoad.cacheKey === query
+      && deferredListLoad.cleared === true
+  }
+
+  function resumeDeferredListLoad(actionQuery, actionError) {
+    var request = deferredListLoad
+    deferredListLoad = null
+    if (!request || request.cacheKey !== cacheKey) return false
+    var sameActionQuery = cacheKey === actionQuery
+    // After a failed action the repaired cache is authoritative enough to
+    // repaint a navigation-cleared view. After success even an exact-query
+    // cache can be broadened by local-search fallback from other cached views,
+    // so revalidate without cache rather than flash the moved row again.
+    var useCache = sameActionQuery && request.cleared === true
+      && String(actionError || "") !== ""
+    loadMessages(sameActionQuery ? false : request.append === true,
+      sameActionQuery ? !useCache : request.skipCache === true,
+      String(actionError || request.preservedError || ""))
+    return true
+  }
+
+  // The two stages of a server search overlap here. `listMessages` reports id
+  // fragments as its search windows settle; each fragment starts its metadata
+  // read immediately, and those payloads paint without waiting for either the
+  // rest of the ids or the slowest metadata request. The final list callback
+  // remains authoritative for paging and for when "Checking" may stop.
+  function loadSearchMessages(append, token, serial, preservedError) {
+    var previewSearch = messages.slice()
+    var settledBase = append ? messages.slice() : []
+    var liveSummaries = []
+    var requested = {}
+    var painted = {}
+    var fetchQueue = []
+    var fetchActive = false
+    var listingDone = false
+    var finalPage = null
+    var listingError = ""
+    var summaryError = ""
+
+    function summariesOf(payloads) {
       var now = new Date()
       var summaries = []
-      for (var i = 0; i < payloads.length; i++) summaries.push(Mail.summarize(payloads[i], now))
-      root.applySummaries(summaries, append)
-      if (!append) cacheStore.putQuery(root.cacheKey, ({
-        summaries: summaries,
+      var list = Array.isArray(payloads) ? payloads : []
+      for (var i = 0; i < list.length; i++) summaries.push(Mail.summarize(list[i], now))
+      return summaries
+    }
+
+    function paintPayloads(payloads) {
+      if (serial !== root.listSerial) return
+      var fresh = []
+      var list = Array.isArray(payloads) ? payloads : []
+      for (var i = 0; i < list.length; i++) {
+        var id = String(list[i] && list[i].id ? list[i].id : "")
+        if (id === "" || painted[id]) continue
+        painted[id] = true
+        fresh.push(list[i])
+      }
+      var summaries = summariesOf(fresh)
+      if (summaries.length === 0) return
+      liveSummaries = Model.mergeSearchResults(liveSummaries, summaries)
+      root.messages = Model.mergeSearchResults(previewSearch, liveSummaries)
+      root.listLoaded = true
+      root.lastError = preservedError
+      root.listRefreshed()
+    }
+
+    function finishIfReady() {
+      if (serial !== root.listSerial || !listingDone || fetchActive
+          || fetchQueue.length > 0) return
+      root.listLoading = false
+      if (!finalPage) {
+        // Cache-first may have restored an old continuation, but a failed page
+        // one has not revalidated the ids before it. Keeping that offset would
+        // let Load more skip or duplicate rows while the preview remains.
+        root.nextPageToken = ""
+        root.fail(listingError || "The mail server returned nothing")
+        return
+      }
+
+      root.resultEstimate = finalPage.estimate
+      var missingSummaries = Model.missingSearchSummaryIds(liveSummaries,
+        finalPage.ids)
+      var metadataError = summaryError
+      if (metadataError === "" && missingSummaries.length > 0)
+        metadataError = "Some search results could not be read"
+      var complete = listingError === "" && metadataError === ""
+      root.nextPageToken = complete ? finalPage.nextPageToken : ""
+      var settled = Model.settledSearchResults(settledBase, previewSearch,
+        liveSummaries, finalPage.ids, append)
+      root.applySummaries(settled, false, true, complete)
+      if (listingError !== "") {
+        root.fail(listingError)
+        return
+      }
+      if (metadataError !== "") {
+        root.fail(metadataError)
+        return
+      }
+      cacheStore.putQuery(root.cacheKey, ({
+        summaries: root.messages,
         estimate: root.resultEstimate,
         nextPageToken: root.nextPageToken
       }))
+      if (preservedError !== "") root.fail(preservedError)
+    }
+
+    // Progress can report another id fragment while the previous fragment's
+    // headers are still loading. One metadata call at a time gives the IMAP
+    // client's own two-way batching a shared ceiling across the whole search,
+    // rather than multiplying it by the number of settled windows.
+    function startNextFetch() {
+      if (serial !== root.listSerial || fetchActive || fetchQueue.length === 0) {
+        finishIfReady()
+        return
+      }
+      var wanted = fetchQueue.shift()
+      fetchActive = true
+      api.getMessages(wanted, false, function(payloads, error) {
+        if (serial !== root.listSerial) return
+        paintPayloads(payloads)
+        if (error && summaryError === "") summaryError = error
+        fetchActive = false
+        startNextFetch()
+      }, listHandle, paintPayloads)
+    }
+
+    function fetchIds(ids) {
+      if (serial !== root.listSerial) return
+      var source = Array.isArray(ids) ? ids : []
+      var wanted = []
+      for (var i = 0; i < source.length; i++) {
+        var id = String(source[i] || "")
+        if (id === "" || requested[id]) continue
+        requested[id] = true
+        wanted.push(id)
+      }
+      if (wanted.length === 0) {
+        finishIfReady()
+        return
+      }
+      fetchQueue.push(wanted)
+      startNextFetch()
+    }
+
+    function idsArrived(page) {
+      if (serial !== root.listSerial || !page) return
+      root.resultEstimate = Math.max(root.resultEstimate,
+        Math.max(0, Math.floor(Number(page.estimate)) || 0))
+      root.nextPageToken = String(page.nextPageToken || "")
+      fetchIds(page.ids)
+    }
+
+    listHandle = api.listMessages(effectiveQuery, maxMessages, token,
+      function(page, error) {
+        if (serial !== root.listSerial) return
+        finalPage = page
+        listingError = String(error || "")
+        listingDone = true
+        if (page) fetchIds(page.ids)
+        finishIfReady()
+      }, idsArrived)
+  }
+
+  function fetchSummaries(ids, append, serial, preservedError) {
+    api.getMessages(ids, false, function(payloads, error) {
+      if (serial !== root.listSerial) return
+      root.listLoading = false
+      var now = new Date()
+      var summaries = []
+      var list = Array.isArray(payloads) ? payloads : []
+      for (var i = 0; i < list.length; i++)
+        summaries.push(Mail.summarize(list[i], now))
+      var missingSummaries = Model.missingSearchSummaryIds(summaries, ids)
+      var metadataError = String(error || "")
+      if (metadataError === "" && missingSummaries.length > 0)
+        metadataError = "Some messages could not be read"
+      if (metadataError !== "" && summaries.length === 0) {
+        // Keep the cache-first page when no metadata arrived, but never its
+        // continuation: that token follows an entirely missing live page.
+        root.nextPageToken = ""
+        root.fail(metadataError)
+        return
+      }
+      root.applySummaries(summaries, append, false, metadataError === "")
+      if (metadataError !== "") {
+        // The list endpoint's token follows every id it returned, including a
+        // row whose metadata failed. Paging with it would skip that row just as
+        // surely as in the streamed search path.
+        root.nextPageToken = ""
+        root.fail(metadataError)
+        return
+      }
+      // The cache keeps a bounded prefix of the list the window actually
+      // showed, including later pages until that cap is reached. Keeping only
+      // page one made a later local search forget rows plainly seen here.
+      cacheStore.putQuery(root.cacheKey, ({
+        summaries: root.messages,
+        estimate: root.resultEstimate,
+        nextPageToken: root.nextPageToken
+      }))
+      if (preservedError !== "") root.fail(preservedError)
     }, listHandle)
   }
 
-  function applySummaries(summaries, append) {
+  function applySummaries(summaries, append, suppressArrivals, markSynced) {
     var merged = append ? root.messages.concat(summaries) : summaries
-    var arrivals = append ? [] : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+    // A manual search may uncover an old unread row the current mailbox page
+    // never held. That is a result, not newly arrived mail, so it must not turn
+    // into a desktop notification.
+    var arrivals = append || suppressArrivals === true ? []
+      : Model.newArrivals(summaries, seenIds, notificationsPrimed)
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
@@ -645,7 +898,7 @@ Item {
     messages = merged
     listLoaded = true
     lastError = ""
-    lastSyncedMs = Date.now()
+    if (markSynced !== false) lastSyncedMs = Date.now()
     listRefreshed()
 
     if (notifyNewMail && arrivals.length > 0) notify(arrivals)
@@ -953,12 +1206,82 @@ Item {
 
   // -------------------------------------------------------------- actions
 
+  function queueQuietAction(messageId, action, actionQuery) {
+    var queued = queuedQuietActions.slice()
+    for (var i = 0; i < queued.length; i++) {
+      if (queued[i].id === messageId && queued[i].action === action) return
+    }
+    queued.push({ id: messageId, action: action, cacheKey: actionQuery })
+    queuedQuietActions = queued
+  }
+
+  function runQueuedQuietAction() {
+    if (pendingAction !== "" || queuedQuietActions.length === 0) return
+    var queued = queuedQuietActions.slice()
+    var request = queued.shift()
+    queuedQuietActions = queued
+
+    // Prefer the normal optimistic path while the row is still in either
+    // account view. Navigation may have removed it meanwhile; marking a
+    // message read because it was opened is still owed to the server then.
+    if (cacheKey === request.cacheKey
+        && (Model.indexById(messages, request.id) >= 0
+        || Model.indexById(previewMessages, request.id) >= 0)) {
+      act(request.id, request.action, true)
+      return
+    }
+
+    var change = Model.labelChangesFor(request.action)
+    if (request.action !== "trash" && request.action !== "untrash" && !change) {
+      if (queuedQuietActions.length > 0) Qt.callLater(root.runQueuedQuietAction)
+      return
+    }
+    // The prior action may just have resumed this query's deferred list before
+    // the queued quiet mutation got its callLater turn. That stream still owns
+    // pre-mutation summaries, so serialize it exactly like the visible action
+    // path and revalidate deliberately after the mutation finishes.
+    if (cacheKey === request.cacheKey && listLoading) {
+      listSerial++
+      abortRequest(listHandle)
+      listHandle = null
+      listLoading = false
+      nextPageToken = ""
+    }
+    pendingActionQuery = request.cacheKey
+    pendingAction = request.action
+    var done = function(payload, error) {
+      root.pendingAction = ""
+      root.pendingActionQuery = ""
+      if (error) root.fail(error)
+      else {
+        // The detached row is not available for an optimistic cache edit, but
+        // its provider offset is certainly no longer safe after the mutation.
+        var entry = root.cacheStore.loaded ? root.cacheStore.get(request.cacheKey) : null
+        if (entry) root.cacheStore.putQuery(request.cacheKey, ({
+          summaries: entry.summaries,
+          estimate: entry.estimate,
+          nextPageToken: ""
+        }))
+        root.refreshCounts()
+      }
+      if (root.resumeDeferredListLoad(request.cacheKey, String(error || ""))) return
+      // The message may also be visible in the mailbox navigated to while it
+      // waited. Its list was allowed to load during the A-scoped mutation, so
+      // replace any pre-mutation summary there as soon as the server answers.
+      if (root.active)
+        root.loadMessages(false, true, String(error || ""))
+    }
+    if (request.action === "trash") api.trashMessage(request.id, done)
+    else if (request.action === "untrash") api.untrashMessage(request.id, done)
+    else api.modifyMessage(request.id, change.add, change.remove, done)
+  }
+
   // Every action moves the list immediately and reconciles afterwards. Waiting
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
   function act(id, action, quiet) {
     var messageId = String(id || "")
-    if (!ready || messageId === "") return
+    if (!ready || messageId === "") return false
     // Before the optimistic update, not after it. A key is not a button: `e`
     // and `s` are bound in every mail context, so an action the provider cannot
     // honour reaches here even though the panel drew no button for it — and the
@@ -967,11 +1290,40 @@ Item {
     var needs = Model.actionCapability(action)
     if (needs !== "" && !Provider.can(providerId, needs)) {
       note(Model.actionUnavailable(action, Provider.badge(providerId)))
-      return
+      return false
+    }
+    if (pendingAction !== "") {
+      if (quiet === true) {
+        queueQuietAction(messageId, action, cacheKey)
+        return true
+      }
+      note("Another action is still finishing")
+      return false
     }
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
-    if (index < 0 && previewIndex < 0) return
+    if (index < 0 && previewIndex < 0) return false
+    var actionQuery = cacheKey
+    var actionEstimate = resultEstimate
+    var actionToken = nextPageToken
+    var beforeMessages = messages.slice()
+    // A live list owns snapshots taken before this action. Letting it finish
+    // would rebuild and persist those stale rows over the optimistic edit — a
+    // trashed search hit visibly came back when the slowest metadata request
+    // answered. Stop that load, then revalidate this same query after the
+    // mutation succeeds.
+    var interruptedQuery = ""
+    if (index >= 0 && listLoading) {
+      interruptedQuery = actionQuery
+      listSerial++
+      abortRequest(listHandle)
+      listHandle = null
+      listLoading = false
+      // A provisional streamed offset can cross ids the interrupted search
+      // never settled. No Load-more action is safer than one that skips them.
+      nextPageToken = ""
+      actionToken = ""
+    }
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var updated = Model.applyLabelChange(before, action)
     var survives = Model.survivesAction(mailboxKey, action)
@@ -986,11 +1338,15 @@ Item {
     // is next loaded, which is also what Gmail's own clients do.
     var keepOpen = quiet === true && selectedId === messageId
     var removed = !survives && !keepOpen
+    var opaqueQuery = effectiveQuery
+      !== Provider.query(providerId, mailboxKey, "", "")
+    var invalidatesPage = !survives || opaqueQuery
+    if (invalidatesPage) nextPageToken = ""
 
     if (index >= 0) {
       if (removed) messages = Model.removeById(messages, messageId)
       else messages = Model.replaceById(messages, updated)
-      rememberList()
+      if (interruptedQuery === "") rememberList()
     }
     if (previewIndex >= 0) {
       previewMessages = updated.unread
@@ -1001,13 +1357,26 @@ Item {
       if (removed) clearSelection()
       else selectedMessage = updated
     }
+    var optimisticMessages = messages.slice()
+    var optimisticToken = nextPageToken
 
     function restore(error) {
-      if (index >= 0) {
+      if (index >= 0 && root.cacheKey === actionQuery
+          && !root.deferredLoadCleared(actionQuery)) {
+        root.nextPageToken = actionToken
         root.messages = removed
           ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
           : Model.replaceById(root.messages, before)
-        root.rememberList()
+        if (interruptedQuery === "") root.rememberList()
+      } else if (index >= 0 && root.cacheStore.loaded) {
+        // Navigation may have replaced the visible list while the request was
+        // in flight. Repair the old query's optimistic cache without inserting
+        // its row into the newly selected mailbox.
+        root.cacheStore.putQuery(actionQuery, ({
+          summaries: beforeMessages,
+          estimate: actionEstimate,
+          nextPageToken: actionToken
+        }))
       }
       if (previewIndex >= 0) {
         var previewKnown = Model.indexById(root.previewMessages, messageId)
@@ -1020,15 +1389,50 @@ Item {
       root.fail(error)
     }
 
+    pendingActionQuery = actionQuery
     pendingAction = action
     var done = function(payload, error) {
       root.pendingAction = ""
+      root.pendingActionQuery = ""
       if (error) {
         restore(error)
+        if (root.resumeDeferredListLoad(actionQuery, error)) return
+        if (interruptedQuery !== "" && root.cacheKey === interruptedQuery)
+          root.loadMessages(false, true, error)
         return
       }
       if (!quiet) root.note(root.actionLabel(action))
       root.refreshCounts()
+      if (interruptedQuery !== "" && root.deferredLoadCleared(actionQuery)
+          && root.cacheStore.loaded) {
+        root.cacheStore.putQuery(actionQuery, ({
+          summaries: optimisticMessages,
+          estimate: actionEstimate,
+          nextPageToken: optimisticToken
+        }))
+      }
+      if (root.resumeDeferredListLoad(actionQuery, "")) return
+      if (interruptedQuery !== "" && root.cacheKey === interruptedQuery) {
+        // Save the optimistic success for the next visit, then keep this list
+        // on screen while a live request revalidates it without reading cache.
+        root.rememberList()
+        root.loadMessages(false, true, "")
+      } else if (interruptedQuery !== "" && root.cacheStore.loaded) {
+        // The action succeeded after navigation. Keep the old query's cache in
+        // step without disturbing the view that is now on screen.
+        root.cacheStore.putQuery(actionQuery, ({
+          summaries: optimisticMessages,
+          estimate: actionEstimate,
+          nextPageToken: optimisticToken
+        }))
+      } else if (invalidatesPage && root.cacheKey === actionQuery) {
+        // An offset cannot survive removing a row before it. Revalidate now so
+        // Load more returns with a fresh provider token instead of remaining
+        // unavailable until the next poll.
+        root.loadMessages(false, true, "")
+      }
+      if (root.active && root.cacheKey !== actionQuery)
+        root.loadMessages(false, true, "")
     }
 
     if (action === "trash") api.trashMessage(messageId, done)
@@ -1037,10 +1441,12 @@ Item {
       var change = Model.labelChangesFor(action)
       if (!change) {
         pendingAction = ""
-        return
+        pendingActionQuery = ""
+        return false
       }
       api.modifyMessage(messageId, change.add, change.remove, done)
     }
+    return true
   }
 
   // What is on screen, written back to the query cache.
@@ -1085,29 +1491,91 @@ Item {
   }
 
   function markAllRead() {
-    if (!ready || messages.length === 0) return
+    if (!ready || messages.length === 0) return false
+    if (pendingAction !== "") {
+      note("Another action is still finishing")
+      return false
+    }
     var ids = []
     for (var i = 0; i < messages.length; i++) {
       if (messages[i].unread) ids.push(messages[i].id)
     }
-    if (ids.length === 0) return
+    if (ids.length === 0) return false
+    var actionQuery = cacheKey
+    var actionEstimate = resultEstimate
+    var actionToken = nextPageToken
     var before = messages.slice()
+    var interrupted = listLoading
+    if (interrupted) {
+      listSerial++
+      abortRequest(listHandle)
+      listHandle = null
+      listLoading = false
+      nextPageToken = ""
+      actionToken = ""
+    }
     var next = []
     for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
-    messages = Model.survivesAction(mailboxKey, "markRead") ? next : []
-    rememberList()
+    var survives = Model.survivesAction(mailboxKey, "markRead")
+    var opaqueQuery = effectiveQuery
+      !== Provider.query(providerId, mailboxKey, "", "")
+    var invalidatesPage = !survives || opaqueQuery
+    messages = survives ? next : []
+    if (invalidatesPage) nextPageToken = ""
+    var optimistic = messages.slice()
+    var optimisticToken = nextPageToken
+    if (!interrupted) rememberList()
+    pendingActionQuery = actionQuery
     pendingAction = "markRead"
     api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
+      root.pendingActionQuery = ""
       if (error) {
-        root.messages = before
-        root.rememberList()
+        if (root.cacheKey === actionQuery
+            && !root.deferredLoadCleared(actionQuery)) {
+          root.nextPageToken = actionToken
+          root.messages = before
+          if (!interrupted) root.rememberList()
+        } else if (root.cacheStore.loaded) {
+          root.cacheStore.putQuery(actionQuery, ({
+            summaries: before,
+            estimate: actionEstimate,
+            nextPageToken: actionToken
+          }))
+        }
         root.fail(error)
+        if (root.resumeDeferredListLoad(actionQuery, error)) return
+        if (interrupted && root.cacheKey === actionQuery)
+          root.loadMessages(false, true, error)
         return
       }
       root.note(Model.pluralize(ids.length, "message") + " marked read")
       root.refreshCounts()
+      if (interrupted && root.deferredLoadCleared(actionQuery)
+          && root.cacheStore.loaded) {
+        root.cacheStore.putQuery(actionQuery, ({
+          summaries: optimistic,
+          estimate: actionEstimate,
+          nextPageToken: optimisticToken
+        }))
+      }
+      if (root.resumeDeferredListLoad(actionQuery, "")) return
+      if (interrupted && root.cacheKey === actionQuery) {
+        root.rememberList()
+        root.loadMessages(false, true, "")
+      } else if (interrupted && root.cacheStore.loaded) {
+        root.cacheStore.putQuery(actionQuery, ({
+          summaries: optimistic,
+          estimate: actionEstimate,
+          nextPageToken: optimisticToken
+        }))
+      } else if (invalidatesPage && root.cacheKey === actionQuery) {
+        root.loadMessages(false, true, "")
+      }
+      if (root.active && root.cacheKey !== actionQuery)
+        root.loadMessages(false, true, "")
     })
+    return true
   }
 
   // ---------------------------------------------------------------- reply
