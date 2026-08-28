@@ -344,6 +344,49 @@ function mergeSearchResults(cached, live) {
   return out
 }
 
+// Cached matches are only a preview. Once the provider has answered, its ids
+// are the boundary of the page: live metadata wins, a cached row may fill in
+// for a confirmed id whose metadata read failed, and every unconfirmed cache
+// hit disappears. Appending preserves the already settled earlier pages.
+function settledSearchResults(existing, preview, live, ids, append) {
+  var known = {}
+  var cached = Array.isArray(preview) ? preview : []
+  var fresh = Array.isArray(live) ? live : []
+  for (var i = 0; i < cached.length; i++) {
+    if (cached[i] && cached[i].id) known[String(cached[i].id)] = cached[i]
+  }
+  for (var j = 0; j < fresh.length; j++) {
+    if (fresh[j] && fresh[j].id) known[String(fresh[j].id)] = fresh[j]
+  }
+
+  var page = []
+  var wanted = Array.isArray(ids) ? ids : []
+  for (var k = 0; k < wanted.length; k++) {
+    var id = String(wanted[k] || "")
+    if (known[id]) page.push(known[id])
+  }
+  return append === true ? mergeSearchResults(existing, page) : page
+}
+
+// Server ids without a freshly read summary are a hole in the page. Keeping
+// the provider's continuation token would step over that hole forever, even if
+// a cached copy can temporarily draw it, so finalisation asks this separately
+// from `settledSearchResults`' display fallback.
+function missingSearchSummaryIds(summaries, ids) {
+  var known = {}
+  var rows = Array.isArray(summaries) ? summaries : []
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i] && rows[i].id) known[String(rows[i].id)] = true
+  }
+  var missing = []
+  var wanted = Array.isArray(ids) ? ids : []
+  for (var j = 0; j < wanted.length; j++) {
+    var id = String(wanted[j] || "")
+    if (id !== "" && !known[id]) missing.push(id)
+  }
+  return missing
+}
+
 // The row a message becomes once it has been opened.
 //
 // A detail read is authoritative about everything it carries and silent about

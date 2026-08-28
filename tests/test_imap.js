@@ -184,7 +184,7 @@ assert.strictEqual(imap.sequenceSet(null), "")
 
 assert.strictEqual(imap.uidListCommand(), "UID FETCH 1:* (UID)",
   "a UID snapshot is one bounded FETCH response line per message")
-assert.strictEqual(imap.uidCeilingCommand(), "UID FETCH * (UID)",
+assert.strictEqual(imap.uidCeilingCommand(), "UID FETCH *:* (UID)",
   "an interactive search learns its stable ceiling without reading every UID")
 deepEqual(imap.searchWindow("TEXT \"invoice\"", 9000), {
   command: "UID SEARCH UID 4905:9000 TEXT \"invoice\"", nextUid: 4904
@@ -202,6 +202,9 @@ deepEqual(imap.searchCommands("", [1, 2, 3]), [],
 deepEqual(imap.searchCommands("UNSEEN", [3, 40, 9000000]), [
   "UID SEARCH UID 3:9000000 UNSEEN"
 ], "a sparse range is bounded by the number of UIDs known to exist inside it")
+deepEqual(imap.searchCommands("UNSEEN", [3, 40, 4904, 4905, 9000000], 4904), [
+  "UID SEARCH UID 3:4904 UNSEEN"
+], "the snapshot fallback does not search the streamed first window twice")
 
 const manyUids = []
 for (let uid = 1; uid <= 9000; uid++) manyUids.push(uid)

@@ -11,6 +11,7 @@
 
 var VERSION = 1
 var MAX_QUERIES = 12
+var MAX_SUMMARIES_PER_QUERY = 100
 // Bodies are the one thing worth keeping deep: a message body never changes, so
 // a hit is always correct and always saves a round trip. They live one file per
 // message rather than in this store — measured against a real mailbox a body
@@ -58,6 +59,10 @@ function serialize(store) {
 function queryKey(query, maxResults) {
   return String(query || "").replace(/^\s+|\s+$/g, "")
     + "|" + Math.max(1, Math.floor(Number(maxResults) || 25))
+}
+
+function queryFromKey(key) {
+  return String(key || "").replace(/\|\d+$/, "")
 }
 
 // ------------------------------------------------------------- hydration
@@ -115,10 +120,17 @@ function putQuery(store, key, page, nowMs) {
   var next = copyStore(store)
   var queries = {}
   for (var existing in next.queries) queries[existing] = next.queries[existing]
+  var source = page && Array.isArray(page.summaries) ? page.summaries : []
+  var capped = source.slice(0, MAX_SUMMARIES_PER_QUERY)
   queries[String(key)] = {
-    summaries: dehydrate(page && page.summaries),
+    summaries: dehydrate(capped),
     estimate: Math.max(0, Math.floor(Number(page && page.estimate) || 0)),
-    nextPageToken: String(page && page.nextPageToken ? page.nextPageToken : ""),
+    // A token that follows rows omitted from the cache would skip them after a
+    // restart. The live first-page refresh supplies a new token shortly after
+    // the capped preview is painted, so closing pagination meanwhile is the
+    // only honest answer.
+    nextPageToken: source.length > capped.length ? ""
+      : String(page && page.nextPageToken ? page.nextPageToken : ""),
     at: Number(nowMs) || 0
   }
   next.queries = queries
@@ -205,10 +217,12 @@ function matchesLocalSearch(summary, terms) {
   return true
 }
 
-// All matching rows from every cached query, newest first and only once per
-// message. Queries are read newest first too, so where two cached pages carry
-// the same id the most recently written flags and snippet win.
-function searchSummaries(store, query) {
+// All matching rows from eligible cached queries, newest first and only once
+// per message. Which cached mailbox belongs to a provider search is a provider
+// fact, so the caller supplies that predicate. Queries are read newest first;
+// the newest copy decides both the row and its current scope, while older
+// copies may still supply searchable fields an earlier build omitted.
+function searchSummaries(store, query, includes) {
   var terms = localSearchTerms(query)
   if (terms.length === 0) return []
   var source = store || emptyStore()
@@ -224,6 +238,7 @@ function searchSummaries(store, query) {
   var candidates = []
   var order = 0
   for (var i = 0; i < keys.length; i++) {
+    var sourceQuery = queryFromKey(keys[i])
     var rows = hydrate(queries[keys[i]] && queries[keys[i]].summaries)
     for (var j = 0; j < rows.length; j++) {
       var row = rows[j]
@@ -231,12 +246,18 @@ function searchSummaries(store, query) {
       if (id === "") continue
       if (positions[id] === undefined) {
         positions[id] = candidates.length
-        candidates.push({ row: row, order: order++, matched: false })
+        candidates.push({
+          row: row,
+          order: order++,
+          eligible: typeof includes !== "function" || includes(sourceQuery, row),
+          matched: false
+        })
       }
       // Match against every cached copy: an older entry may carry recipients
       // that a cache written by an earlier build did not put on every row. The
       // candidate itself stays the newest copy because keys are newest first.
-      if (matchesLocalSearch(row, terms)) candidates[positions[id]].matched = true
+      if (candidates[positions[id]].eligible && matchesLocalSearch(row, terms))
+        candidates[positions[id]].matched = true
     }
   }
 
@@ -413,6 +434,19 @@ function keepNewest(bucket, limit) {
 function prune(store) {
   var next = copyStore(store)
   next.queries = keepNewest(next.queries, MAX_QUERIES)
+  var capped = {}
+  for (var key in next.queries) {
+    var entry = next.queries[key] || {}
+    var summaries = Array.isArray(entry.summaries) ? entry.summaries : []
+    capped[key] = {
+      summaries: summaries.slice(0, MAX_SUMMARIES_PER_QUERY),
+      estimate: Math.max(0, Math.floor(Number(entry.estimate) || 0)),
+      nextPageToken: summaries.length > MAX_SUMMARIES_PER_QUERY
+        ? "" : String(entry.nextPageToken || ""),
+      at: Number(entry.at) || 0
+    }
+  }
+  next.queries = capped
   return next
 }
 

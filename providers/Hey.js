@@ -103,6 +103,14 @@ function searchQuery(text) {
   return value === "" ? "" : "search:" + value
 }
 
+// An unrefined `hey search` searches across the mailbox. Its `--in` refinement
+// can name only Imbox, Feed, Paper Trail or Trash, but a typed search here does
+// not apply that refinement — so every cached box and label is eligible for
+// the conservative text match.
+function cachedSummaryInSearch(sourceQuery, summary) {
+  return true
+}
+
 // Selecting a label in the sidebar. HEY addresses a label by id, not by name —
 // `hey label <id>` takes nothing else — so the id is what the sidebar carries
 // as a label's `rawName` and what arrives here.

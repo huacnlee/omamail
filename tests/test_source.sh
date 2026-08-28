@@ -492,10 +492,16 @@ fi
 # accepts provider results without waiting for the last metadata request. The
 # progress argument is part of the shared client interface, not a Gmail branch
 # in MailAccount.
-grep -q 'Cache\.searchSummaries(cacheStore\.store, searchQuery)' account/MailAccount.qml \
-  || fail "typed searches must inspect every cached message summary first"
+grep -q 'Cache\.searchSummaries(cacheStore\.store, searchQuery,' account/MailAccount.qml \
+  || fail "typed searches must inspect eligible cached message summaries first"
+grep -q 'Provider\.cachedSummaryInSearch' account/MailAccount.qml \
+  || fail "cached search previews must stay inside the provider's live scope"
 grep -q 'function loadSearchMessages' account/MailAccount.qml \
   || fail "typed searches need a progressive list pipeline"
+grep -q 'Model\.settledSearchResults' account/MailAccount.qml \
+  || fail "the final server ids must replace the cached search preview"
+grep -q 'Model\.missingSearchSummaryIds' account/MailAccount.qml \
+  || fail "a partial metadata page must close paging before a missing row"
 grep -q '}, idsArrived)' account/MailAccount.qml \
   || fail "server ids must be consumed before the final list callback"
 grep -q 'readonly property bool serverSearchLoading:' account/MailAccount.qml \
@@ -516,8 +522,99 @@ grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
 grep -q 'Imap\.uidCeilingCommand()' providers/ImapClient.qml \
   || fail "interactive IMAP search must not wait for the complete UID snapshot"
+grep -q 'Imap\.searchCommands(criteria, snapshot, nextUid)' providers/ImapClient.qml \
+  || fail "a sparse interactive search must reuse a UID snapshot after its first window"
 grep -q 'streamedSummaryBatch' providers/ImapClient.qml \
   || fail "streamed IMAP results must fetch headers in visible batches"
+grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
+  || fail "streamed metadata reads need one shared queue"
+grep -q 'if (index >= 0 && listLoading)' account/MailAccount.qml \
+  || fail "an action must stop a live list before stale snapshots can settle"
+grep -q 'pendingAction !== "" && cacheKey === pendingActionQuery' account/MailAccount.qml \
+  || fail "an action may only suppress refreshes for its own query"
+grep -q 'deferredListLoad = ({' account/MailAccount.qml \
+  || fail "navigation back to an action query must defer rather than lose its load"
+grep -q 'resumeDeferredListLoad(actionQuery' account/MailAccount.qml \
+  || fail "an action callback must resume a deferred navigation load"
+awk '
+  /function act\(/ { in_act = 1 }
+  in_act && /if \(pendingAction !== ""\)/ { guarded = 1 }
+  in_act && /pendingAction = action/ { exit !guarded }
+  END { exit !guarded }
+' account/MailAccount.qml \
+  || fail "a second row action must not overwrite the pending action slot"
+awk '
+  /function markAllRead\(\)/ { in_mark_all = 1 }
+  in_mark_all && /if \(pendingAction !== ""\)/ { guarded = 1 }
+  in_mark_all && /pendingAction = "markRead"/ { exit !guarded }
+  END { exit !guarded }
+' account/MailAccount.qml \
+  || fail "mark-all must not overwrite the pending action slot"
+awk '
+  /function loadMessages\(/ { in_load = 1 }
+  in_load && /if \(error \|\| !page\)/ { in_page_error = 1 }
+  in_page_error && /if \(!append\) root\.nextPageToken = ""/ { cleared = 1 }
+  in_page_error && /return/ { exit !cleared }
+  END { exit !cleared }
+' account/MailAccount.qml \
+  || fail "a failed page-one refresh must clear its stale continuation token"
+grep -q 'if (invalidatesPage) nextPageToken = ""' account/MailAccount.qml \
+  || fail "a membership-changing action must invalidate its offset token"
+grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml \
+  || fail "mark-all must invalidate opaque search offsets too"
+grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml \
+  || fail "paging membership must not follow the reader's keep-open decision"
+grep -q 'if (!service.act(acted, action)) return false' App.qml \
+  || fail "a refused action must not move the keyboard cursor"
+grep -q 'queueQuietAction(messageId, action, cacheKey)' account/MailAccount.qml \
+  || fail "automatic mark-read must wait rather than disappear behind another action"
+awk '
+  /function runQueuedQuietAction\(\)/ { in_quiet = 1 }
+  in_quiet && /listSerial\+\+/ { interrupts = 1 }
+  in_quiet && /root\.loadMessages\(false, true/ { reloads = 1 }
+  /function act\(/ { exit !(interrupts && reloads) }
+  END { exit !(interrupts && reloads) }
+' account/MailAccount.qml \
+  || fail "a detached quiet action must stop and revalidate its query stream"
+test "$(grep -c 'root.active && root.cacheKey !== actionQuery' account/MailAccount.qml)" -ge 2 \
+  || fail "successful actions must revalidate a mailbox opened while they were pending"
+awk '
+  /function markAllRead\(\)/ { in_mark_all = 1 }
+  in_mark_all && /if \(interrupted\)/ { saw_interrupt = 1 }
+  in_mark_all && /root\.loadMessages\(false, true, error\)/ { saw_retry = 1 }
+  in_mark_all && /^  }/ { exit !(saw_interrupt && saw_retry) }
+  END { exit !(saw_interrupt && saw_retry) }
+' account/MailAccount.qml \
+  || fail "mark-all must stop and revalidate a live list too"
+grep -q 'root\.loadMessages(false, true, error)' account/MailAccount.qml \
+  || fail "a failed action must resume the list without losing its error"
+grep -q 'root\.loadMessages(false, true, "")' account/MailAccount.qml \
+  || fail "a successful action must revalidate without repainting stale cache"
+awk '
+  /if \(!finalPage\)/ { in_null_page = 1 }
+  in_null_page && /root\.nextPageToken = ""/ { cleared = 1 }
+  in_null_page && /return/ { exit !cleared }
+  END { exit !cleared }
+' account/MailAccount.qml \
+  || fail "a failed page-one search must clear cached pagination"
+awk '
+  /function fetchSummaries/ { in_fetch = 1 }
+  in_fetch && /Model\.missingSearchSummaryIds\(summaries, ids\)/ { checks_ids = 1 }
+  in_fetch && /root\.nextPageToken = ""/ { clears_page = 1 }
+  /function applySummaries/ { exit !(checks_ids && clears_page) }
+  END { exit !(checks_ids && clears_page) }
+' account/MailAccount.qml \
+  || fail "ordinary metadata reads must detect holes and close paging"
+grep -q 'if (error && prefixSettled !== true)' providers/ImapClient.qml \
+  || fail "an IMAP failure before SEARCH answers must keep the cached preview"
+for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
+  grep -q 'callback(ordered, firstError)' "$client" \
+    || fail "$client must report partial metadata failures"
+done
+grep -q 'progressTimerComponent' providers/GmailApiClient.qml \
+  || fail "parallel Gmail metadata replies must be coalesced before repainting"
+grep -q 'MAX_SUMMARIES_PER_QUERY' cache/Cache.js \
+  || fail "each cached query needs a row cap"
 
 # New-mail notifications use the application's own mark, not the desktop's
 # generic unread-mail glyph.

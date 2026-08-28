@@ -316,7 +316,7 @@ Item {
             for (var j = 0; j < results.length; j++) {
               if (results[j]) ordered.push(results[j])
             }
-            callback(ordered, ordered.length > 0 ? "" : firstError)
+            callback(ordered, firstError)
           })
           handle.children.push(child)
         })(i)

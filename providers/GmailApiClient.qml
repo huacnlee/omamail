@@ -187,27 +187,60 @@ Item {
   // order the ids were given rather than the order Google answered in. A list
   // search may also take `progress`, which receives the payloads as Google
   // answers so cached rows can be filled in without waiting for the slowest
-  // request on the page.
+  // request on the page. Answers close enough to share a frame are batched:
+  // repainting and sorting the whole list once per one of 25 parallel replies
+  // costs far more than the few milliseconds of extra latency reveal.
   function getMessages(ids, full, callback, existingHandle, progress) {
     var handle = existingHandle || newHandle()
     var list = Array.isArray(ids) ? ids : []
     var results = new Array(list.length)
     var remaining = list.length
     var firstError = ""
+    var pendingProgress = []
+    var progressTimer = null
 
     if (remaining === 0) {
       if (typeof callback === "function") callback([], "")
       return handle
     }
 
+    function flushProgress() {
+      if (progressTimer) {
+        progressTimer.stop()
+        progressTimer.destroy()
+        progressTimer = null
+      }
+      if (handle.aborted || pendingProgress.length === 0) return
+      var ready = pendingProgress
+      pendingProgress = []
+      if (typeof progress === "function") progress(ready)
+    }
+
+    function queueProgress(payload) {
+      if (!payload || typeof progress !== "function") return
+      pendingProgress.push(payload)
+      if (progressTimer) return
+      progressTimer = progressTimerComponent.createObject(root, { interval: 16 })
+      if (!progressTimer) {
+        flushProgress()
+        return
+      }
+      progressTimer.triggered.connect(flushProgress)
+      progressTimer.start()
+    }
+
     function finish() {
       if (handle.aborted) return
       if (typeof callback !== "function") return
+      flushProgress()
       var ordered = []
       for (var i = 0; i < results.length; i++) {
         if (results[i]) ordered.push(results[i])
       }
-      callback(ordered, ordered.length > 0 ? "" : firstError)
+      // A partial page is still a failed page: hiding one failed request just
+      // because another answered would let the caller keep a continuation
+      // token beyond the missing row.
+      callback(ordered, firstError)
     }
 
     for (var i = 0; i < list.length; i++) {
@@ -216,7 +249,7 @@ Item {
           if (handle.aborted) return
           if (error && !firstError) firstError = error
           results[index] = payload
-          if (payload && typeof progress === "function") progress([payload])
+          queueProgress(payload)
           remaining--
           if (remaining === 0) finish()
         })
@@ -299,6 +332,14 @@ Item {
   // whatever order Google answers.
   Component {
     id: deadlineComponent
+
+    Timer {
+      repeat: false
+    }
+  }
+
+  Component {
+    id: progressTimerComponent
 
     Timer {
       repeat: false

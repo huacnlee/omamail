@@ -86,6 +86,19 @@ function searchQuery(text) {
   return String(text === undefined || text === null ? "" : text).trim()
 }
 
+// Gmail searches every ordinary mailbox but excludes Spam and Trash unless a
+// query asks for them. The local preview only understands plain text, so a row
+// already known to live there is outside the server search being previewed.
+function cachedSummaryInSearch(sourceQuery, summary) {
+  var labels = summary && Array.isArray(summary.labelIds) ? summary.labelIds : []
+  for (var i = 0; i < labels.length; i++) {
+    var label = String(labels[i] || "").toUpperCase()
+    if (label === "SPAM" || label === "TRASH") return false
+  }
+  var source = String(sourceQuery || "").toLowerCase()
+  return !/(^|\s)in:(spam|trash)(\s|$)/.test(source)
+}
+
 // Selecting a label in the sidebar. A Gmail label is a search operator, which
 // is why this is a different string from the one a typed search produces.
 function labelQuery(name) {

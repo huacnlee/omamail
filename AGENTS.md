@@ -257,15 +257,20 @@ key. What matters while working:
   `UID FETCH 1:* (UID)`, whose response is one short line per message, then
   split those stable UIDs into batches of at most 4096. An interactive search
   cannot wait for that whole snapshot: it reads the highest UID with
-  `UID FETCH * (UID)` and walks numeric UID ranges at most 4096 wide, newest
-  first. Both are UID windows; never replace them with message sequence-number
-  windows, which move when another client expunges mail.
-- **An interactive search walks those UID windows newest first and reports
-  each settled prefix.** That ordering is what makes a row safe to draw before
-  the older windows answer: nothing still in flight can belong in front of it.
-  It stops once the requested page is full and keeps a next-page offset while
-  older windows remain. Counts and other non-interactive reads supply no
-  progress callback and still scan every window, because their total has to be exact.
+  `UID FETCH *:* (UID)` and searches one numeric UID range at most 4096 wide.
+  If that range does not fill the page, it takes the snapshot in the background
+  and sends every older message-bounded search on one reused connection. Never
+  replace UID windows with message sequence-number windows, which move when
+  another client expunges mail.
+- **An interactive search reports its settled newest prefix.** That ordering is
+  what makes a row safe to draw before the older windows answer: nothing still
+  in flight can belong in front of it. The numeric first window is what makes
+  that prefix early; the snapshot fallback is what stops a sparse, long-lived
+  mailbox from paying one TLS handshake and LOGIN for thousands of empty UID
+  numbers. It stops once the requested page is full and keeps a next-page
+  offset only while every preceding match is known. Counts and other
+  non-interactive reads supply no progress callback and still scan every
+  window, because their total has to be exact.
 - `BODY.PEEK`, never `BODY`. Reading a list must not mark the mailbox seen, and
   that is the most common way a hand-rolled IMAP client ruins a mailbox.
 - `UID EXPUNGE`, never bare `EXPUNGE`: the latter removes every `\Deleted`

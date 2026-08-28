@@ -387,7 +387,7 @@ function uidListCommand() {
 // short FETCH learns the immutable upper boundary of the mailbox; an empty
 // mailbox answers with no FETCH row at all.
 function uidCeilingCommand() {
-  return "UID FETCH * (UID)"
+  return "UID FETCH *:* (UID)"
 }
 
 // A SEARCH over a known UID snapshot can be split without using message
@@ -431,11 +431,24 @@ function sortedUids(values) {
   return out
 }
 
-function searchCommands(criteria, snapshot) {
+function searchCommands(criteria, snapshot, highestUid) {
   var text = trimmed(criteria)
   var uids = sortedUids(snapshot)
   var commands = []
   if (text === "" || uids.length === 0) return commands
+
+  // The first numeric window of an interactive search has already settled.
+  // When it did not fill the page, its next lower UID is handed in here so the
+  // snapshot fallback neither searches nor reports that newest prefix twice.
+  var ceiling = Math.floor(Number(highestUid))
+  if (isFinite(ceiling) && ceiling > 0) {
+    var below = []
+    for (var i = 0; i < uids.length; i++) {
+      if (uids[i] <= ceiling) below.push(uids[i])
+    }
+    uids = below
+  }
+  if (uids.length === 0) return commands
 
   // Interactive search can paint a page before every window has answered only
   // if no later answer can put a newer message in front of it. UIDs grow with

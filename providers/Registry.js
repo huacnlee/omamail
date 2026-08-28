@@ -98,6 +98,8 @@ function define(source) {
     capabilities: capabilities(raw.CAPABILITIES),
     mailboxes: boxes,
     searchQuery: typeof raw.searchQuery === "function" ? raw.searchQuery : function() { return "" },
+    cachedSummaryInSearch: typeof raw.cachedSummaryInSearch === "function"
+      ? raw.cachedSummaryInSearch : function() { return false },
     labelQuery: typeof raw.labelQuery === "function" ? raw.labelQuery : function() { return "" },
     // Where a message and a mailbox live on the web, for the provider that has
     // a web UI worth opening. A provider that declares no `web` capability
@@ -215,6 +217,10 @@ function query(id, mailboxKey, searchText, defaultQuery) {
   if (custom !== "" && String(mailboxKey) === "inbox") return custom
 
   return mailboxFor(id, mailboxKey).query
+}
+
+function cachedSummaryInSearch(id, sourceQuery, summary) {
+  return get(id).cachedSummaryInSearch(sourceQuery, summary)
 }
 
 // Selecting a label in the sidebar, which is a different act from typing in the

@@ -157,6 +157,21 @@ assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
 assert.strictEqual(provider.query("hey", "trash", "", ""), "box:trash")
 assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentist")
 
+// A cached preview may only draw rows the provider's live search could return.
+assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:inbox",
+  { labelIds: ["INBOX"] }), true)
+assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:trash",
+  { labelIds: ["TRASH"] }), false)
+assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:inbox",
+  { labelIds: ["SPAM"] }), false)
+assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:INBOX UNSEEN", {}), true)
+assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:\\Sent", {}), false)
+assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:\"Project Mail\"", {}), false)
+assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:feedbox", {}), true)
+assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:laterbox", {}), true)
+assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:asidebox", {}), true)
+assert.strictEqual(provider.cachedSummaryInSearch("hey", "label:4711", {}), true)
+
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.
 assert.strictEqual(provider.unreadQuery("gmail"),
