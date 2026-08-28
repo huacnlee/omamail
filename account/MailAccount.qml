@@ -1673,7 +1673,8 @@ Item {
         root.fail(error)
         return
       }
-      root.note("Sent")
+      var warning = sentPayload ? String(sentPayload.warning || "") : ""
+      root.note(warning || "Sent")
       root.replySent()
     })
     return true

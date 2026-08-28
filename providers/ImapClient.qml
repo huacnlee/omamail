@@ -726,7 +726,7 @@ Item {
         var url = Imap.imapUrl(auth.settings, folder)
         var message = Mail.decodeBase64Url(raw)
         var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
-          Mail.encodeBase64(message)]
+          Mail.encodeBase64("draft"), Mail.encodeBase64(message)]
         var process = transportComponent.createObject(root, {
           command: [root.transport],
           requestLine: "imap-append " + fields.join(" ")
@@ -828,7 +828,42 @@ Item {
           callback(null, Imap.responseError(status, detail, "The message could not be sent"))
           return
         }
-        callback({}, "")
+        var sentFolder = root.special["\\sent"] || ""
+        if (sentFolder === "") {
+          callback({ warning: "Sent, but this server did not report a Sent folder" }, "")
+          return
+        }
+        var sentUrl = Imap.imapUrl(auth.settings, sentFolder)
+        var appendFields = [Mail.encodeBase64(sentUrl), Mail.encodeBase64(credentials),
+          Mail.encodeBase64("seen"), Mail.encodeBase64(message)]
+        root.inFlight++
+        var appendProcess = transportComponent.createObject(root, {
+          command: [root.transport],
+          requestLine: "imap-append " + appendFields.join(" ")
+        })
+        if (!appendProcess) {
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          callback({ warning: "Sent, but the Sent copy could not be saved" }, "")
+          return
+        }
+        handle.process = appendProcess
+        appendProcess.finished.connect(function(appendStatus, appendOut, appendErr) {
+          if (!root) return
+          if (handle.process === appendProcess) handle.process = null
+          appendProcess.destroy()
+          root.inFlight = Math.max(0, root.inFlight - 1)
+          if (handle.aborted || typeof callback !== "function") return
+          if (appendStatus !== 0) {
+            var appendDetail = Imap.decodeResponse(appendErr,
+              Mail.base64ToBytes, Mail.bytesToLatin1)
+            var warning = Imap.responseError(appendStatus, appendDetail,
+              "the Sent copy could not be saved")
+            callback({ warning: "Sent, but " + warning }, "")
+            return
+          }
+          callback({}, "")
+        })
+        appendProcess.running = true
       })
       process.running = true
     })
