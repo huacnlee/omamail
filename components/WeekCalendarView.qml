@@ -8,6 +8,7 @@ Item {
 
   required property var controller
   required property var days
+  required property double nowMs
   required property color textColor
   required property color backgroundColor
   required property color accentColor
@@ -33,18 +34,6 @@ Item {
     controller ? controller.events : [], days)
   readonly property real allDayHeight: allDayCount > 0
     ? Style.space(6 + allDayCount * 20) : 0
-
-  // The line has to move on its own, so the view carries a clock. It ticks only
-  // while the week is on screen: a minute timer left running behind the month
-  // view, or behind the whole window, wakes the shell to redraw nothing.
-  property double nowMs: Date.now()
-  Timer {
-    interval: 60000
-    repeat: true
-    running: root.visible
-    triggeredOnStart: true
-    onTriggered: root.nowMs = Date.now()
-  }
 
   CalendarPalette {
     id: calendarPalette
@@ -240,8 +229,7 @@ Item {
         Text {
           id: nowLabel
           anchors.centerIn: parent
-          text: Calendar.two(new Date(root.nowMs).getHours()) + ":"
-            + Calendar.two(new Date(root.nowMs).getMinutes())
+          text: Calendar.timeLabel(root.nowMs)
           color: root.backgroundColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption

@@ -99,6 +99,38 @@ assert.strictEqual(feed.weekNowOffset(splitWeek, 7, 19, 64, halfNine), -1,
   "another week on screen gets no line")
 assert.strictEqual(feed.weekNowOffset([], 7, 19, 64, halfNine), -1)
 
+// The grid names wall-clock hours, not elapsed hours since midnight. On a DST
+// transition those differ by one, so the marker must still sit beside the time
+// its label names.
+const previousTimezone = process.env.TZ
+process.env.TZ = "America/New_York"
+const springDay = feed.weekDays(new Date(2026, 2, 8, 12).getTime(), 0)[0]
+const springHalfThree = new Date(2026, 2, 8, 3, 30).getTime()
+assert.strictEqual(feed.nowOffset(springDay, 0, 24, 60, springHalfThree), 210,
+  "spring-forward now follows the wall-clock hour")
+assert.strictEqual(feed.timeLabel(springHalfThree), "03:30",
+  "the tested marker position and its label use the same local time")
+const springEvent = {
+  start: { ms: springHalfThree, allDay: false },
+  end: { ms: new Date(2026, 2, 8, 4, 30).getTime(), allDay: false }
+}
+assert.strictEqual(feed.eventTop(springEvent, springDay, 0, 60), 210,
+  "an event and now share the wall-clock grid")
+assert.strictEqual(feed.eventHeight(springEvent, springDay, 60), 60,
+  "event height follows the labeled wall-clock interval")
+assert.strictEqual(feed.slotStart(springDay, 210, 0, 60, 30), springHalfThree,
+  "clicking the 03:30 row creates an event at 03:30")
+const springRange = feed.weekHourRange([springEvent], [springDay], 7, 19)
+assert.strictEqual(springRange.first, 3,
+  "a DST-day event widens the labeled hours it occupies")
+assert.strictEqual(springRange.last, 19)
+const autumnDay = feed.weekDays(new Date(2026, 10, 1, 12).getTime(), 0)[0]
+assert.strictEqual(feed.nowOffset(autumnDay, 0, 24, 60,
+  new Date(2026, 10, 1, 3, 30).getTime()), 210,
+  "fall-back now follows the wall-clock hour")
+if (previousTimezone === undefined) delete process.env.TZ
+else process.env.TZ = previousTimezone
+
 const report = feed.caldavReport(
   Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
 assert.ok(report.indexOf('start="20260801T000000Z"') >= 0)

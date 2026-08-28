@@ -667,10 +667,21 @@ function weekTitle(days) {
     + last.day + " " + months[last.month] + " " + last.year
 }
 
+// Minutes on the labeled local-time grid. Subtracting from midnight measures
+// elapsed time instead, which is an hour short or long after a DST transition.
+function dayMinutes(timeMs, day) {
+  var value = Number(timeMs)
+  if (value <= Number(day.startMs)) return 0
+  if (value >= Number(day.endMs)) return 1440
+  var local = new Date(value)
+  return local.getHours() * 60 + local.getMinutes()
+    + local.getSeconds() / 60 + local.getMilliseconds() / 60000
+}
+
 function eventTop(event, day, firstHour, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
-  var minutes = (start - Number(day.startMs)) / 60000 - Number(firstHour) * 60
+  var minutes = dayMinutes(start, day) - Number(firstHour) * 60
   return Math.max(0, minutes / 60 * Number(hourHeight))
 }
 
@@ -678,7 +689,8 @@ function eventHeight(event, day, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
   var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
-  return Math.max(Number(hourHeight) * 0.42, (end - start) / 3600000 * Number(hourHeight))
+  return Math.max(Number(hourHeight) * 0.42,
+    (dayMinutes(end, day) - dayMinutes(start, day)) / 60 * Number(hourHeight))
 }
 
 // Where "now" sits in a day column, or -1 when it does not belong on the grid:
@@ -691,11 +703,17 @@ function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
   var now = Number(nowMs)
   if (!isFinite(now)) return -1
   if (now < Number(day.startMs) || now >= Number(day.endMs)) return -1
-  var minutes = (now - Number(day.startMs)) / 60000
+  var minutes = dayMinutes(now, day)
   var first = Number(firstHour) * 60
   var last = Number(lastHour) * 60
   if (minutes < first || minutes > last) return -1
   return (minutes - first) / 60 * Number(hourHeight)
+}
+
+function timeLabel(timeMs) {
+  var time = new Date(Number(timeMs))
+  if (!isFinite(time.getTime())) return ""
+  return two(time.getHours()) + ":" + two(time.getMinutes())
 }
 
 // The same offset for the week as a whole, so the time rail can label the line
@@ -759,8 +777,8 @@ function weekHourRange(events, days, defaultFirst, defaultLast) {
       var segmentStart = Math.max(startMs, Number(day.startMs))
       var segmentEnd = Math.min(endMs, Number(day.endMs))
       if (segmentEnd <= segmentStart) continue
-      var startMinutes = (segmentStart - Number(day.startMs)) / 60000
-      var endMinutes = (segmentEnd - Number(day.startMs)) / 60000
+      var startMinutes = dayMinutes(segmentStart, day)
+      var endMinutes = dayMinutes(segmentEnd, day)
       first = Math.min(first, Math.floor(startMinutes / 60))
       last = Math.max(last, Math.min(24, Math.ceil(endMinutes / 60)))
     }
@@ -773,5 +791,7 @@ function slotStart(day, y, firstHour, hourHeight, minuteStep) {
   var step = Math.max(1, Math.floor(Number(minuteStep) || 30))
   var minutes = Number(firstHour) * 60 + Math.max(0, Number(y)) / height * 60
   minutes = Math.floor(minutes / step) * step
-  return Number(day.startMs) + minutes * 60000
+  var localDay = new Date(Number(day.startMs))
+  return new Date(localDay.getFullYear(), localDay.getMonth(), localDay.getDate(),
+    Math.floor(minutes / 60), minutes % 60).getTime()
 }
