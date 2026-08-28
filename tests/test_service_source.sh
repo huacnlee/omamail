@@ -13,6 +13,12 @@ grep -q '__sourceDir' Service.qml || fail "pluginDir must come from manifest.__s
 grep -q 'function applySettings' Service.qml || fail "the bar widget pushes settings in via applySettings"
 grep -q 'function setUndoSendSeconds' Service.qml \
   || fail "the in-app settings page must be able to change the undo window"
+grep -q 'function setAlwaysRenderHeavyMessages' Service.qml \
+  || fail "the in-app settings page must be able to change large-message rendering"
+grep -q 'alwaysRenderHeavyMessages' App.qml \
+  || fail "the reader must receive the persistent large-message preference"
+grep -q 'setAlwaysRenderHeavyMessages' components/SettingsPage.qml \
+  || fail "the in-app settings page must expose large-message rendering"
 grep -q 'shell.updateEntryInline(pluginId, entry)' Service.qml \
   || fail "the undo window must persist in shell settings"
 python3 - <<'PY'

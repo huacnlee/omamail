@@ -105,6 +105,53 @@ Column {
     }
   }
 
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(heavyText.implicitHeight, heavySwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: heavyText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: heavySwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Always render heavy messages"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Renders without falling back first; layout can stall the shell while it works"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: heavySwitch
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.alwaysRenderHeavyMessages
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setAlwaysRenderHeavyMessages(!root.service.alwaysRenderHeavyMessages)
+    }
+  }
+
   // --------------------------------------------------------------- writing
 
   Text {

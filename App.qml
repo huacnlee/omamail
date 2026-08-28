@@ -1102,6 +1102,7 @@ Item {
           zoom: root.bodyZoom
           showBack: root.compact
           bodyMode: root.bodyMode
+          alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
