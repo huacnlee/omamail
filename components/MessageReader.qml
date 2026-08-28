@@ -29,6 +29,7 @@ Item {
   // because a message can be too heavy to draw the chosen way.
   property string bodyMode: "reader"
   property real zoom: 1.0
+  property bool alwaysRenderHeavyMessages: false
   // A way back only means something when something is behind it. At desktop
   // width the list is on screen and clicking another row is the navigation;
   // in a single column the reader has replaced the list, so it needs one.
@@ -84,7 +85,7 @@ Item {
     reader: !!root.readerDocument && !!root.service && !root.service.selectedReaderEmpty,
     readerHeavy: !!root.service && root.service.selectedReaderTooHeavy,
     originalHeavy: !!root.service && root.service.selectedTooHeavy,
-    forced: root.forceRichAnyway
+    forced: root.alwaysRenderHeavyMessages || root.forceRichAnyway
   })
   // The mode on screen, which is the chosen one unless this message cannot be
   // drawn that way.

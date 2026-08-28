@@ -1519,6 +1519,12 @@ function activityMail() {
 // that cannot be drawn the chosen way falls through to one that can rather than
 // leaving an empty panel.
 {
+  assert.strictEqual(html.alwaysRenderHeavyMessages("Always render"), true)
+  assert.strictEqual(html.alwaysRenderHeavyMessages("Show plain text first"), false)
+  assert.strictEqual(html.alwaysRenderHeavyMessages("unknown"), false)
+  assert.strictEqual(html.heavyMessageRendering(true), "Always render")
+  assert.strictEqual(html.heavyMessageRendering(false), "Show plain text first")
+
   const full = { html: true, reader: true }
   assert.strictEqual(html.resolveBodyMode("reader", full), "reader")
   assert.strictEqual(html.resolveBodyMode("original", full), "original")

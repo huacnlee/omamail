@@ -37,6 +37,7 @@
     "defaults": {
       "refreshIntervalSec": 120,
       "maxMessages": 25,
+      "heavyMessageRendering": "Show plain text first",
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
       "oauthPort": 9481,
@@ -62,6 +63,17 @@
         "max": 100,
         "step": 5,
         "defaultValue": 25
+      },
+      {
+        "key": "heavyMessageRendering",
+        "type": "enum",
+        "label": "Heavy message rendering",
+        "options": [
+          "Show plain text first",
+          "Always render"
+        ],
+        "defaultValue": "Show plain text first",
+        "description": "Choose whether potentially expensive rich text falls back to plain text with a Show anyway action."
       },
       {
         "key": "defaultQuery",

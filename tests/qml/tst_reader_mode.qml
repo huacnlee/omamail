@@ -123,6 +123,7 @@ Item {
     function init() {
       reader.bodyMode = "reader"
       reader.forceRichAnyway = false
+      reader.alwaysRenderHeavyMessages = false
       mailService.fetches = 0
       mailService.renders = 0
     }
@@ -268,6 +269,12 @@ Item {
       reader.forceRichAnyway = true
       compare(reader.shownMode, "reader")
       compare(reader.tooHeavy, false)
+      reader.forceRichAnyway = false
+      reader.alwaysRenderHeavyMessages = true
+      compare(reader.shownMode, "reader", "the persistent preference also skips the refusal")
+      compare(reader.tooHeavy, false)
+      reader.bodyMode = "original"
+      compare(reader.shownMode, "original", "the preference applies to the sender's document too")
       mailService.selectedReaderTooHeavy = false
       mailService.selectedTooHeavy = false
     }

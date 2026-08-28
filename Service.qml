@@ -47,6 +47,7 @@ Item {
   readonly property var defaultSettingValues: ({
     refreshIntervalSec: 120,
     maxMessages: 25,
+    heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -55,6 +56,8 @@ Item {
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
+  readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
+    settings ? settings.heavyMessageRendering : null)
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -98,6 +101,10 @@ Item {
 
   function setUndoSendSeconds(value) {
     persistSetting("undoSendSeconds", Outbox.normalizeDelay(value))
+  }
+
+  function setAlwaysRenderHeavyMessages(value) {
+    persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
   }
 
   // ---------------------------------------------------------- the accounts
