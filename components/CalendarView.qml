@@ -36,6 +36,13 @@ Item {
   signal editRequested(string sourceId, var event)
   signal deleteRequested(string sourceId, var event)
 
+  Binding {
+    target: root.controller
+    property: "clockRunning"
+    value: root.visible && root.viewMode === "week"
+    when: root.controller !== null
+  }
+
   CalendarPalette {
     id: calendarPalette
     textColor: root.textColor
@@ -475,6 +482,7 @@ Item {
       height: parent.height - y
       visible: root.viewMode === "week"
       controller: root.controller
+      nowMs: root.controller ? root.controller.nowMs : 0
       days: root.weekDays
       textColor: root.textColor
       backgroundColor: root.backgroundColor

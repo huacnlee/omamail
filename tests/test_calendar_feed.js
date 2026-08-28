@@ -71,6 +71,66 @@ assert.strictEqual(feed.maxAllDayEvents(allDayEvents, week), 2)
 assert.strictEqual(feed.slotStart(week[1], 93, 7, 60, 30),
   new Date(2026, 7, 18, 8, 30).getTime(), "empty slots snap to half hours")
 
+// The now line. Same geometry as eventTop, so 9:30 on a 7:00 grid at 64px an
+// hour lands at 160 — but bounded at both ends and to the one day it belongs
+// to, because the alternative is a line claiming a time it is not at.
+const halfNine = new Date(2026, 7, 18, 9, 30).getTime()
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, halfNine), 160)
+assert.strictEqual(feed.nowOffset(week[2], 7, 19, 64, halfNine), -1,
+  "the line belongs to one column, not to the week")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 6, 0).getTime()), -1, "before the first drawn hour")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 21, 0).getTime()), -1, "after the last drawn hour")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 7, 0).getTime()), 0, "the first hour itself is on the grid")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+  new Date(2026, 7, 18, 19, 0).getTime()), 768, "and so is the last")
+assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, NaN), -1)
+assert.strictEqual(feed.nowOffset(null, 7, 19, 64, halfNine), -1)
+
+// A day whose range weekHourRange widened to the whole day still places it.
+assert.strictEqual(feed.nowOffset(week[1], 0, 24, 64,
+  new Date(2026, 7, 18, 0, 30).getTime()), 32)
+
+assert.strictEqual(feed.weekNowOffset(week, 7, 19, 64, halfNine), 160,
+  "the rail finds today without being told which column it is")
+assert.strictEqual(feed.weekNowOffset(splitWeek, 7, 19, 64, halfNine), -1,
+  "another week on screen gets no line")
+assert.strictEqual(feed.weekNowOffset([], 7, 19, 64, halfNine), -1)
+
+// The grid names wall-clock hours, not elapsed hours since midnight. On a DST
+// transition those differ by one, so the marker must still sit beside the time
+// its label names.
+const previousTimezone = process.env.TZ
+process.env.TZ = "America/New_York"
+const springDay = feed.weekDays(new Date(2026, 2, 8, 12).getTime(), 0)[0]
+const springHalfThree = new Date(2026, 2, 8, 3, 30).getTime()
+assert.strictEqual(feed.nowOffset(springDay, 0, 24, 60, springHalfThree), 210,
+  "spring-forward now follows the wall-clock hour")
+assert.strictEqual(feed.timeLabel(springHalfThree), "03:30",
+  "the tested marker position and its label use the same local time")
+const springEvent = {
+  start: { ms: springHalfThree, allDay: false },
+  end: { ms: new Date(2026, 2, 8, 4, 30).getTime(), allDay: false }
+}
+assert.strictEqual(feed.eventTop(springEvent, springDay, 0, 60), 210,
+  "an event and now share the wall-clock grid")
+assert.strictEqual(feed.eventHeight(springEvent, springDay, 60), 60,
+  "event height follows the labeled wall-clock interval")
+assert.strictEqual(feed.slotStart(springDay, 210, 0, 60, 30), springHalfThree,
+  "clicking the 03:30 row creates an event at 03:30")
+const springRange = feed.weekHourRange([springEvent], [springDay], 7, 19)
+assert.strictEqual(springRange.first, 3,
+  "a DST-day event widens the labeled hours it occupies")
+assert.strictEqual(springRange.last, 19)
+const autumnDay = feed.weekDays(new Date(2026, 10, 1, 12).getTime(), 0)[0]
+assert.strictEqual(feed.nowOffset(autumnDay, 0, 24, 60,
+  new Date(2026, 10, 1, 3, 30).getTime()), 210,
+  "fall-back now follows the wall-clock hour")
+if (previousTimezone === undefined) delete process.env.TZ
+else process.env.TZ = previousTimezone
+
 const report = feed.caldavReport(
   Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
 assert.ok(report.indexOf('start="20260801T000000Z"') >= 0)

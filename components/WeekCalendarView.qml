@@ -8,6 +8,7 @@ Item {
 
   required property var controller
   required property var days
+  required property double nowMs
   required property color textColor
   required property color backgroundColor
   required property color accentColor
@@ -211,6 +212,32 @@ Item {
         }
       }
 
+      // Read off the rail rather than off the line: the hour labels stop at the
+      // hour, so a line between two of them otherwise says only "somewhere in
+      // here". Hidden when today is not the week on screen.
+      Rectangle {
+        readonly property real offset: Calendar.weekNowOffset(
+          root.days, root.firstHour, root.lastHour, timeline.hourHeight, root.nowMs)
+        visible: offset >= 0
+        x: Style.space(4)
+        y: offset - height / 2
+        width: nowLabel.implicitWidth + Style.space(6)
+        height: nowLabel.implicitHeight + Style.space(2)
+        radius: Style.cornerRadius
+        color: root.urgentColor
+        z: 2
+        Text {
+          id: nowLabel
+          anchors.centerIn: parent
+          text: Calendar.timeLabel(root.nowMs)
+          color: root.backgroundColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          textFormat: Text.PlainText
+        }
+      }
+
       Row {
         anchors.left: parent.left
         anchors.leftMargin: root.timeRailWidth
@@ -297,6 +324,36 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.eventActivated(eventBlock.modelData)
                 }
+              }
+            }
+
+            // After the events, so a meeting in progress is crossed by the line
+            // rather than covering it. The dot is what survives a theme whose
+            // urgent colour sits close to an event's border: a bare rule reads
+            // as one more hour separator, a rule with a bead on it does not.
+            Item {
+              readonly property real offset: Calendar.nowOffset(
+                dayColumn.modelData, root.firstHour, root.lastHour,
+                timeline.hourHeight, root.nowMs)
+              visible: offset >= 0
+              y: offset
+              width: parent.width
+              height: 0
+              z: 1
+              Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                height: Math.max(root.calendarBorderWidth, 2)
+                color: root.urgentColor
+              }
+              Rectangle {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(7)
+                height: width
+                radius: width / 2
+                color: root.urgentColor
               }
             }
           }

@@ -37,6 +37,8 @@ Item {
   property string sourceSecret: ""
   property var sourceBeingSaved: null
   property bool savingSource: false
+  property bool clockRunning: false
+  property double nowMs: Date.now()
   property bool refreshAfterSourceWrite: false
   property bool creatingEvent: false
   property var eventSource: null
@@ -61,6 +63,14 @@ Item {
     contextSources, service ? service.accountSummaries : [])
   // The composer offers only calendars a write can run against.
   readonly property var writableSourceGroups: Sources.writableGroups(sourceGroups)
+
+  Timer {
+    interval: 60000
+    repeat: true
+    running: root.clockRunning
+    triggeredOnStart: true
+    onTriggered: root.nowMs = Date.now()
+  }
 
   onAccountIdChanged: {
     if (!rangeStart || !rangeEnd || !eventCache.loaded) return
