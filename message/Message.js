@@ -769,6 +769,8 @@ function summarize(message, now) {
     messageId: headerValue(message, "Message-ID"),
     to: parseAddressList(headerValue(message, "To")),
     cc: parseAddressList(headerValue(message, "Cc")),
+    bcc: parseAddressList(headerValue(message, "Bcc")),
+    inReplyTo: headerValue(message, "In-Reply-To"),
     subject: subject || "(no subject)",
     snippet: decodeSnippet(message && message.snippet),
     date: date,
@@ -782,6 +784,34 @@ function summarize(message, now) {
     isDraft: hasLabel(message, "DRAFT"),
     labelIds: labelIds(message).slice(),
     sizeEstimate: Math.max(0, Math.floor(Number(message && message.sizeEstimate) || 0))
+  }
+}
+
+function draftAddressText(addresses) {
+  var list = Array.isArray(addresses) ? addresses : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var email = String(list[i] && list[i].email ? list[i].email : "").trim()
+    if (email !== "") out.push(email)
+  }
+  return out.join(", ")
+}
+
+// A full draft read has the same provider-neutral summary and body as any
+// message. Compose needs the addresses as editable text rather than row data.
+function draftFields(summary, body) {
+  var source = summary || ({})
+  var subject = String(source.subject || "")
+  return {
+    mode: "draft",
+    from: String(source.from && source.from.email ? source.from.email : ""),
+    to: draftAddressText(source.to),
+    cc: draftAddressText(source.cc),
+    bcc: draftAddressText(source.bcc),
+    subject: subject === "(no subject)" ? "" : subject,
+    body: String(body || ""),
+    threadId: String(source.threadId || ""),
+    inReplyTo: String(source.inReplyTo || "")
   }
 }
 

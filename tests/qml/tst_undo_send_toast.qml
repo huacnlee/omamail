@@ -56,7 +56,7 @@ Item {
     function test_button_requests_undo() {
       var button = named(toast, "undo-send-button")
       verify(button)
-      compare(button.text, "Undo  Ctrl+Z")
+      compare(button.text, "Undo  Alt+Z")
       mouseClick(button, button.width / 2, button.height / 2)
       compare(undoSpy.count, 1)
     }

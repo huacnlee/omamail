@@ -89,7 +89,7 @@ var BINDINGS = [
     group: "Calendar", label: "Show month view" },
   { id: "send", keys: ["Ctrl+Return"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
-  { id: "undoSend", keys: ["Ctrl+Z"], contexts: ["list", "reader", "calendar"],
+  { id: "undoSend", keys: ["Alt+Z"], contexts: ANY,
     survivesOverlay: true,
     group: "Writing", label: "Undo send" },
 
@@ -164,7 +164,7 @@ var BINDINGS = [
 
 // A pending send is a transient action over the screen, not a screen of its
 // own. It does not replace this context, so mailbox navigation stays live while
-// the toast offers Ctrl+Z and its button.
+// the toast offers Alt+Z and its button.
 function contextFor(state) {
   var value = state || ({})
   if (value.showPage) return "page"

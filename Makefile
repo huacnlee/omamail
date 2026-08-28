@@ -34,6 +34,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ComposeView.qml \
 	components/RecipientSuggestions.qml \
 	components/UndoSendToast.qml \
+	components/DraftSavedToast.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
 	components/AccountSwitcher.qml \

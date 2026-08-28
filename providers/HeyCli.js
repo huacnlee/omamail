@@ -107,6 +107,9 @@ function topicIdOf(id) {
 // selecting a mailbox.
 function parseQuery(query) {
   var text = trimmed(query)
+  if (text === "drafts:") {
+    return { kind: "drafts", box: "", label: "", text: "", unseen: false }
+  }
   if (text.indexOf("label:") === 0) {
     return { kind: "label", box: "", label: trimmed(text.slice(6)), text: "", unseen: false }
   }
@@ -178,6 +181,12 @@ function listCommand(parsed, maxResults, pageToken) {
   var limit = scanLimit(query)
   var cursor = tokenCursor(pageToken)
 
+  if (query.kind === "drafts") {
+    var drafts = ["draft", "list", "--json"]
+    if (cursor !== "") drafts = drafts.concat(["--page", cursor])
+    return drafts
+  }
+
   if (query.kind === "label") {
     var label = ["label", query.label, "--json"]
     if (limit > 0) label = label.concat(["--limit", String(limit)])
@@ -221,6 +230,16 @@ function threadCommand(id) {
   // people have, and an unknown flag fails the whole command — see
   // `unknownFlag`.
   return ["threads", topic, "--allow-partial", "--html"]
+}
+
+function draftIdOf(id) {
+  var match = /^draft:(\d+)$/.exec(trimmed(id))
+  return match ? match[1] : ""
+}
+
+function draftShowCommand(id) {
+  var draft = draftIdOf(id)
+  return draft === "" ? [] : ["draft", "show", draft, "--json"]
 }
 
 // The flag `hey` said it did not know, out of its own usage error. A release
@@ -314,6 +333,28 @@ function composeCommand(fields) {
   return command.concat(attachArgs(values.attachments))
 }
 
+// Saving has the same two shapes as sending, but a new draft needs no
+// recipient. HEY keeps the body on stdin and answers the draft id.
+function draftCommand(fields) {
+  var values = fields || {}
+  var thread = trimmed(values.threadId)
+  var command = []
+  if (thread !== "") {
+    command = ["reply", thread, "--draft"]
+  } else {
+    command = ["compose"]
+    var to = trimmed(values.to)
+    if (to !== "") command = command.concat(["--to", to])
+    command = command.concat(["--subject", String(values.subject || "")])
+    var cc = trimmed(values.cc)
+    if (cc !== "") command = command.concat(["--cc", cc])
+    var bcc = trimmed(values.bcc)
+    if (bcc !== "") command = command.concat(["--bcc", bcc])
+    command.push("--draft")
+  }
+  return command.concat(attachArgs(values.attachments))
+}
+
 function attachArgs(files) {
   var list = Array.isArray(files) ? files : []
   var out = []
@@ -369,6 +410,11 @@ function payload(text) {
     return { ok: false, data: null, error: trimmed(body.error) || "HEY refused that request" }
   }
   return { ok: true, data: body.data === undefined ? null : body.data, error: "" }
+}
+
+function envelopeNextPage(text) {
+  var body = parseJson(text, null)
+  return body && body.meta ? trimmed(body.meta.next_page) : ""
 }
 
 // Whether what came back is a thread as HTML rather than the JSON envelope.
@@ -472,6 +518,56 @@ function parseListing(data) {
   return rows
 }
 
+function parseDraftListing(data) {
+  var list = Array.isArray(data) ? data : []
+  var rows = []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i] || {}
+    var id = trimmed(entry.id)
+    if (!/^\d+$/.test(id)) continue
+    rows.push({
+      id: "draft:" + id,
+      draftId: id,
+      subject: trimmed(entry.subject),
+      snippet: trimmed(entry.summary),
+      from: { name: "", email: "" },
+      to: [],
+      date: trimmed(entry.updated_at),
+      seen: true,
+      box: "",
+      appUrl: "",
+      isDraft: true
+    })
+  }
+  return rows
+}
+
+function draftAddresses(values) {
+  var list = Array.isArray(values) ? values : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var email = trimmed(list[i])
+    if (email !== "") out.push({ name: "", email: email })
+  }
+  return out
+}
+
+function parseDraft(data) {
+  var entry = data || {}
+  var id = trimmed(entry.id)
+  return {
+    id: /^\d+$/.test(id) ? "draft:" + id : "",
+    draftId: /^\d+$/.test(id) ? id : "",
+    subject: String(entry.subject || ""),
+    body: String(entry.body || ""),
+    to: draftAddresses(entry.to),
+    cc: draftAddresses(entry.cc),
+    bcc: draftAddresses(entry.bcc),
+    date: trimmed(entry.updated_at),
+    isDraft: true
+  }
+}
+
 // What HEY offers after the page just read, in its own terms. A box and a label
 // carry an opaque cursor; a search is numbered, so the number after this one is
 // the answer.
@@ -481,6 +577,8 @@ function nextCursor(parsed, data, cursor, rowCount) {
   // its end there is nothing to continue with, because continuing would page
   // the box while the filter kept discarding.
   if (query.unseen === true) return ""
+  if (query.kind === "drafts")
+    return data && !Array.isArray(data) ? trimmed(data.next_page) : ""
   if (query.kind === "search" || query.kind === "trash") {
     if (rowCount === 0) return ""
     var page = Math.floor(Number(trimmed(cursor))) || 1
