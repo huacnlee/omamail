@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omamail",
   "name": "Omamail",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": "Jason Lee <huacnlee@gmail.com>",
   "license": "MIT",
   "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
