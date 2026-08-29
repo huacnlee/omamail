@@ -279,7 +279,8 @@ function validateSettings(raw) {
 function imapUrl(settings, folder) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.imapHost)) return ""
-  var scheme = values.insecure ? "imap" : "imaps"
+  var isTls = Number(values.imapPort) === 993 && !values.insecure
+  var scheme = isTls ? "imaps" : "imap"
   var url = scheme + "://" + values.imapHost + ":" + values.imapPort
   var box = trimmed(folder)
   // The mailbox is a path segment, so anything that could end the segment or
@@ -292,9 +293,9 @@ function imapUrl(settings, folder) {
 function smtpUrl(settings) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.smtpHost)) return ""
-  // IMAP and SMTP may name different hosts. The shared local-transport flag
-  // cannot let a loopback IMAP server downgrade a remote SMTP connection.
-  var scheme = values.insecure && isLoopback(values.smtpHost) ? "smtp" : "smtps"
+  // Port 465 is implicit TLS (smtps). Port 587 and others use STARTTLS over smtp.
+  var isTls = Number(values.smtpPort) === 465 && !(values.insecure && isLoopback(values.smtpHost))
+  var scheme = isTls ? "smtps" : "smtp"
   return scheme + "://" + values.smtpHost + ":" + values.smtpPort
 }
 

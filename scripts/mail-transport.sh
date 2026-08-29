@@ -113,6 +113,10 @@ if [ "$mode" = "smtp" ]; then
   printf 'user = "%s"\n' "$escaped_credentials"
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
+  case "$url" in
+    smtp://127.0.0.1:*|smtp://localhost:*|smtp://::1:*) ;;
+    smtp://*) printf 'ssl-reqd\n' ;;
+  esac
   printf 'mail-from = "%s"\n' "$(escape "$sender")"
   for recipient in "$@"; do
     printf 'mail-rcpt = "%s"\n' "$(escape "$(decode "$recipient")")"
@@ -127,6 +131,10 @@ elif [ "$mode" = "imap-append" ]; then
   printf 'user = "%s"\n' "$escaped_credentials"
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
+  case "$url" in
+    imap://127.0.0.1:*|imap://localhost:*|imap://::1:*) ;;
+    imap://*) printf 'ssl-reqd\n' ;;
+  esac
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
   printf 'upload-flags = "draft"\n'
 else
@@ -152,6 +160,10 @@ else
     # every command give up eventually, rather than only the final one.
     printf 'max-time = 60\n'
     printf 'connect-timeout = 20\n'
+    case "$url" in
+      imap://127.0.0.1:*|imap://localhost:*|imap://::1:*) ;;
+      imap://*) printf 'ssl-reqd\n' ;;
+    esac
     printf 'request = "%s"\n' "$(escape "$(decode "$argument")")"
   done
 fi
