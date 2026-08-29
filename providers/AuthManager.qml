@@ -776,13 +776,11 @@ Item {
 
   Process {
     id: secretLookup
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handleSecretLookup(line) }
-    }
+    stdout: StdioCollector { id: secretLookupOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      if (!root.lookupHandled) root.handleSecretLookup("")
+      var value = (exitCode === 0 && secretLookupOutput.text) ? String(secretLookupOutput.text).trim() : ""
+      root.handleSecretLookup(value)
     }
   }
 
