@@ -11,9 +11,20 @@ fail() {
 
 command -v curl >/dev/null 2>&1 || fail 'image-fetch.sh: curl is not installed'
 
-IFS= read -r encoded || fail 'image-fetch.sh: no request on stdin'
-[ -n "$encoded" ] || fail 'image-fetch.sh: empty request'
-url=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail 'image-fetch.sh: bad base64 field'
+decode() {
+  printf '%s' "$1" | base64 -d 2>/dev/null || fail 'image-fetch.sh: bad base64 field'
+}
+
+IFS= read -r line || fail 'image-fetch.sh: no request on stdin'
+[ -n "$line" ] || fail 'image-fetch.sh: empty request'
+# The URL and every host-resolver pin are base64 fields. Pins come from the
+# host's checked DNS answer and bind curl to those exact addresses, so a second
+# lookup cannot redirect the request into the local network.
+# shellcheck disable=SC2086
+set -- $line
+[ $# -ge 1 ] || fail 'image-fetch.sh: usage: <b64 url> [<b64 resolve> ...]'
+url=$(decode "$1")
+shift
 
 case "$url" in
   http://*|https://*) ;;
@@ -32,6 +43,13 @@ escaped_body=$(escape "$body")
 
 build_config() {
   printf 'url = "%s"\n' "$escaped_url"
+  # A proxy would resolve the hostname itself and bypass the host-provided
+  # address pins, so this request must connect directly.
+  printf 'noproxy = "*"\n'
+  for encoded_pin in "$@"; do
+    pin=$(decode "$encoded_pin")
+    printf 'resolve = "%s"\n' "$(escape "$pin")"
+  done
   printf 'output = "%s"\n' "$escaped_body"
   printf 'max-redirs = 0\n'
   printf 'proto = "=http,https"\n'
@@ -45,7 +63,7 @@ build_config() {
 }
 
 set +e
-answer=$(build_config | curl --config - 2>/dev/null)
+answer=$(build_config "$@" | curl --config - 2>/dev/null)
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail 'image-fetch.sh: download failed'

@@ -1,4 +1,5 @@
 .pragma library
+// @ts-check
 
 // Gmail has no shared public client the way Spotify does: every user brings
 // their own Google Cloud OAuth client. This module turns whatever they have in
@@ -141,7 +142,7 @@ function parse(text) {
 var FILE_VERSION = 2
 
 function emptyStore() {
-  return { accounts: [] }
+  return { accounts: /** @type {Array<ReturnType<typeof accountEntry>>} */ ([]) }
 }
 
 // The id is whatever the caller knows the account by — the address once a

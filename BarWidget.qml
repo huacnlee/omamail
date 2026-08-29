@@ -1,9 +1,11 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "components"
 import "bar"
+import "bar/Status.js" as Status
 
 // The bar's job is one number and one click. Everything the widget knows comes
 // from the shared service, which keeps running whether or not the window is
@@ -15,6 +17,27 @@ BarWidget {
 
   readonly property var gmail: bar && bar.shell
     ? bar.shell.serviceFor("omamail") : null
+  readonly property string pluginDir: gmail && gmail.pluginDir
+    ? String(gmail.pluginDir) : ""
+
+  // The standalone application is the future owner of mail state. Until its
+  // replacement work is complete the legacy service remains available below,
+  // but a fresh snapshot is already authoritative for the bar as soon as the
+  // standalone process publishes one.
+  readonly property string companionStatusPath: Status.snapshotPath(
+    Quickshell.env("XDG_STATE_HOME"), Quickshell.env("HOME"))
+  property string companionStatusText: ""
+  property double companionNowMs: Date.now()
+  readonly property var companionStatus: Status.presentation(
+    companionStatusText, companionNowMs, 120000)
+  readonly property bool standaloneRunning: companionStatus.running
+  readonly property int standaloneUnread: companionStatus.unread
+  // This is intentionally false until the standalone equivalence matrix has
+  // passed and the host exposes reliable single-instance activation. A fresh
+  // snapshot is useful evidence, not permission to replace the working QML
+  // client's primary entry point.
+  readonly property bool companionCutover: false
+  property bool companionMenuOpen: false
 
   // `barForeground` belongs to qs.Ui.Panel, not to BarWidget: reading it here
   // yields undefined, and assigning undefined to a colour leaves the icon
@@ -23,7 +46,10 @@ BarWidget {
   property bool previewOpen: false
   property bool popoutSwitchClosing: false
 
-  function close() { previewOpen = false }
+  function close() {
+    previewOpen = false
+    companionMenuOpen = false
+  }
   function closeForPopoutSwitch() {
     popoutSwitchClosing = true
     close()
@@ -52,6 +78,15 @@ BarWidget {
     else if (typeof bar.shell.summon === "function") bar.shell.summon("omamail", "{}")
   }
 
+  function runCompanion(action, payload) {
+    if (!companionCutover || !standaloneRunning || companionCommand.running || pluginDir === "") return
+    var command = [pluginDir + "/scripts/omamail-companion.sh", String(action || "open")]
+    if (String(action || "") === "compose-mailto" && String(payload || "") !== "")
+      command.push(String(payload))
+    companionCommand.command = command
+    companionCommand.running = true
+  }
+
   function openMessage(accountId, messageId) {
     close()
     if (!bar || !bar.shell) return
@@ -75,6 +110,31 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  FileView {
+    id: companionStatusFile
+    path: root.companionStatusPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.companionStatusText = text()
+    onFileChanged: reload()
+    // Atomic replacement has a small no-file interval. Treating it exactly
+    // like a missing application is why the widget never keeps an old count.
+    onLoadFailed: root.companionStatusText = ""
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: root.companionNowMs = Date.now()
+  }
+
+  Process {
+    id: companionCommand
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
@@ -88,7 +148,7 @@ BarWidget {
     // A trigger holds a selected style for as long as what it opened is on
     // screen, which is what answers "which of these opened that window". The
     // service is what knows: it outlives the window and is told either way.
-    readonly property bool windowOpen: root.previewOpen
+    readonly property bool windowOpen: root.previewOpen || root.companionMenuOpen
       || (!!root.gmail && root.gmail.windowOpen)
     readonly property color glyphColor: connected
       ? root.foreground
@@ -178,6 +238,64 @@ BarWidget {
         Qt.openUrlExternally(url)
       }
       onEventRequested: function(eventData) { root.openEvent(eventData) }
+    }
+  }
+
+  // This menu carries no message, account, calendar, or provider data. A
+  // right click is still useful while the standalone window is closed because
+  // it can ask the single-instance command router to refresh.
+  KeyboardPanel {
+    id: companionMenu
+    anchorItem: button
+    owner: root
+    bar: root.bar
+    open: root.companionMenuOpen
+    contentWidth: fittedContentWidth(Style.space(160))
+    contentHeight: fittedContentHeight(menuContent.implicitHeight, Style.space(120))
+
+    Column {
+      id: menuContent
+      width: parent ? parent.width : 0
+      spacing: Style.space(2)
+
+      Text {
+        text: "Omamail"
+        color: Color.popups.text
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
+        textFormat: Text.PlainText
+      }
+
+      Rectangle {
+        width: parent.width
+        height: Style.space(30)
+        radius: Style.cornerRadius
+        color: refreshMouse.containsMouse
+          ? Style.hoverFillFor(Color.popups.text, Color.accent) : "transparent"
+
+        Text {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Refresh"
+          color: Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+          textFormat: Text.PlainText
+        }
+
+        MouseArea {
+          id: refreshMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            root.close()
+            root.runCompanion("refresh")
+          }
+        }
+      }
     }
   }
 }

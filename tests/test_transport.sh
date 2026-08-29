@@ -211,6 +211,36 @@ done
 
 # ---------------------------------------------------------------- SMTP mode
 
+# Setup verifies SMTP authentication without sending a message. The single
+# sentinel keeps the stdin frame unambiguous but must never become a curl
+# request or body.
+verify="smtp-verify $(b64 'smtps://smtp.example.org:465') $(b64 'jane:pw') $(b64 'verify')"
+config=$(config_for "$verify")
+check "SMTP verification gives curl the exact URL" "$config" 'url = "smtps://smtp.example.org:465"'
+check "SMTP verification gives curl the credentials" "$config" 'user = "jane:pw"'
+check "SMTP verification bypasses desktop proxies" "$config" 'noproxy = "*"'
+check "SMTP verification keeps its transfer deadline" "$config" 'max-time = 60'
+check "SMTP verification keeps its connection deadline" "$config" 'connect-timeout = 20'
+check_absent "SMTP verification has no sender" "$config" 'mail-from = '
+check_absent "SMTP verification has no recipient" "$config" 'mail-rcpt = '
+check_absent "SMTP verification uploads no body" "$config" 'upload-file = '
+check_absent "SMTP verification sends no custom request" "$config" 'request = '
+check_absent "SMTP verification opens no next section" "$config" 'next'
+check_absent "SMTP verification sentinel never reaches curl" "$config" 'verify'
+
+for malformed_verify in \
+  "smtp-verify $(b64 'smtps://smtp.example.org:465') $(b64 'jane:pw')" \
+  "smtp-verify $(b64 'smtps://smtp.example.org:465') $(b64 'jane:pw') $(b64 'verify') $(b64 'extra')"; do
+  if printf '%s\n' "$malformed_verify" | PATH="$work/bin:$PATH" sh "$script" >/dev/null 2>&1; then
+    printf '  FAIL malformed SMTP verification was accepted\n'
+    failures=$(( failures + 1 ))
+  else
+    printf '  ok   malformed SMTP verification is refused\n'
+  fi
+done
+
+# ---------------------------------------------------------------- SMTP send
+
 send="smtp $(b64 'smtps://smtp.example.org:465') $(b64 'jane:pw') $(b64 'jane@example.org') $(b64 'Subject: hi
 
 body') $(b64 'friend@example.com') $(b64 'other@example.com')"

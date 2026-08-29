@@ -41,6 +41,7 @@ function makeSource(raw) {
   return {
     id: id, kind: kind, name: trimmed(value.name),
     url: trimmed(value.url), username: trimmed(value.username),
+    remoteCalendarId: trimmed(value.remoteCalendarId),
     accountId: trimmed(value.accountId), enabled: value.enabled !== false,
     readOnly: value.readOnly === true, colorKey: colorKey
   }
@@ -165,6 +166,7 @@ function withGoogleAccounts(list, accountSummaries) {
       // mailbox's short display label cannot say which grant needs attention.
       name: trimmed(account.email || account.label || "Google Calendar"),
       accountId: accountId,
+      remoteCalendarId: saved && saved.remoteCalendarId ? saved.remoteCalendarId : "primary",
       enabled: saved ? saved.enabled !== false : true,
       // A Google calendar accepts writes through the API. Older versions
       // persisted readOnly on these synthesized sources, so it must not be

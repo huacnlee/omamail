@@ -8,3 +8,6 @@ node_modules/
 # repository; see AGENTS.md for what is kept and why.
 docs/design/
 docs/superpowers/
+target/
+Cargo.lock
+app/**/gpui.d.ts

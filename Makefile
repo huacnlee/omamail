@@ -54,13 +54,14 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
 
-.PHONY: test test-js test-shell test-qml qml-check validate bench
+.PHONY: test test-js test-app test-shell test-qml qml-check validate bench
 
-test: test-js test-shell test-qml
+test: test-js test-app test-shell test-qml
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node tests/test_bar_status.js
 	node tests/test_outbox.js
 	node tests/test_recipients.js
 	node tests/test_senders.js
@@ -85,6 +86,40 @@ test-js:
 	node tests/test_provider.js
 	node tests/test_imap.js
 	node tests/test_hey.js
+
+test-app:
+	node tests/test_omarchy_ui.mjs
+	node tests/test_account_store.mjs
+	node tests/test_app_keymap.mjs
+	node tests/test_app_actions.mjs
+	node tests/test_app_state.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_integration.mjs
+	node tests/test_application_controller.mjs
+	node tests/test_app_adapters_effect_port.mjs
+	node tests/test_app_adapters_factory.mjs
+	node tests/test_app_adapters_gmail.mjs
+	node tests/test_app_adapters_hey.mjs
+	node tests/test_app_adapters_imap.mjs
+	node tests/test_setup_adapters.mjs
+	node tests/test_setup_controller.mjs
+	node tests/test_settings_controller.mjs
+	node tests/test_mail_state.mjs
+	node tests/test_compose_controller.mjs
+	node tests/test_calendar_controller.mjs
+	node tests/test_qml_js_to_esm.mjs
+	node tests/test_generated_app_modules.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_omarchy_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_layout.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_composition.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_states.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_security.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_compose_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_setup_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_settings_ui_render.mjs
+	BUN_TMPDIR=/tmp/omamail-bun BUN_INSTALL=/tmp/omamail-bun/install bunx tsc -p app/jsconfig.json
+	cargo test
 
 test-shell:
 	python3 tests/test_contacts.py

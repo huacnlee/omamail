@@ -258,6 +258,21 @@ const reloaded = accounts.load(text)
 deepEqual(reloaded, saved, "order, ids and the selection all survive")
 assert.strictEqual(reloaded.activeId, "bob@example.com")
 assert.strictEqual(accounts.label(reloaded.accounts[0]), "工作邮箱", "non-ASCII labels survive")
+
+const hostileText = accounts.serialize(accounts.add(accounts.emptyList(), {
+  email: "hostile@example.com",
+  clientId: "public-client-id",
+  clientSecret: "client-secret-value",
+  password: "password-value",
+  token: "token-value",
+  refreshToken: "refresh-token-value",
+  nested: { password: "nested-password-value" }
+}))
+for (const forbidden of [
+  "clientSecret", "client-secret-value", "password", "password-value",
+  "token", "token-value", "refreshToken", "refresh-token-value",
+  "nested-password-value"
+]) assert.strictEqual(hostileText.indexOf(forbidden), -1, forbidden + " must not persist")
 assert.strictEqual(accounts.count(reloaded), 3)
 
 // A label with a newline in it is still one line on disk.

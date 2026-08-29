@@ -67,11 +67,12 @@ IFS= read -r line || fail 'unsubscribe.sh: no request on stdin'
 # and needs no quoting rules.
 # shellcheck disable=SC2086
 set -- $line
-[ $# -eq 3 ] || fail 'unsubscribe.sh: usage: <b64 url> <b64 content-type> <b64 body>'
+[ $# -ge 3 ] || fail 'unsubscribe.sh: usage: <b64 url> <b64 content-type> <b64 body> [<b64 resolve> ...]'
 
 url=$(decode "$1")
 content_type=$(decode "$2")
 body=$(decode "$3")
+shift 3
 
 # The gate that ran in `Unsubscribe.js`, run again down here where the request
 # is actually made. Two checks of one rule is the point: this one cannot be
@@ -88,6 +89,13 @@ escaped_body=$(escape "$body")
 
 build_config() {
   printf 'url = "%s"\n' "$escaped_url"
+  # A proxy would resolve the hostname itself and bypass the host-provided
+  # address pins, so this request must connect directly.
+  printf 'noproxy = "*"\n'
+  for encoded_pin in "$@"; do
+    pin=$(decode "$encoded_pin")
+    printf 'resolve = "%s"\n' "$(escape "$pin")"
+  done
   printf 'request = "POST"\n'
   printf 'header = "Content-Type: %s"\n' "$escaped_type"
   printf 'data-binary = "%s"\n' "$escaped_body"
@@ -109,7 +117,7 @@ build_config() {
 }
 
 set +e
-status=$(build_config | curl --config - 2>/dev/null)
+status=$(build_config "$@" | curl --config - 2>/dev/null)
 code=$?
 set -e
 

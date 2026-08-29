@@ -760,6 +760,7 @@ function summarize(message, now) {
   var subject = decodedHeader(message, "Subject").replace(/\s+/g, " ").trim()
   return {
     id: String(message && message.id ? message.id : ""),
+    draftId: String(message && message.draftId ? message.draftId : ""),
     threadId: String(message && message.threadId ? message.threadId : ""),
     from: from,
     // Reply-To and Message-ID only arrive with the full format, so a list row
@@ -771,6 +772,7 @@ function summarize(message, now) {
     cc: parseAddressList(headerValue(message, "Cc")),
     bcc: parseAddressList(headerValue(message, "Bcc")),
     inReplyTo: headerValue(message, "In-Reply-To"),
+    references: headerValue(message, "References"),
     subject: subject || "(no subject)",
     snippet: decodeSnippet(message && message.snippet),
     date: date,

@@ -87,4 +87,60 @@ if grep -q 'panelOpen' Service.qml; then
   fail "panelOpen is the old name; the window entry point sets windowOpen"
 fi
 
+# The companion's input is one atomic, schema-versioned status file. Parsing
+# and stale handling belong in the QML JS module so neither the bar nor a view
+# guesses what a partially replaced file means.
+[ -f bar/Status.js ] || fail "the companion status parser is missing"
+grep -q '^\.pragma library$' bar/Status.js \
+  || fail "the companion status parser must run in the QML engine"
+grep -q 'function snapshotPath' bar/Status.js \
+  || fail "the companion must derive the XDG status path in one place"
+grep -q 'import Quickshell.Io' BarWidget.qml \
+  || fail "the companion bar must read its status through FileView"
+grep -q 'import "bar/Status.js" as Status' BarWidget.qml \
+  || fail "the companion bar must use the shared status parser"
+grep -q 'readonly property string pluginDir: gmail && gmail.pluginDir' BarWidget.qml \
+  || fail "the companion bar must receive its activation script directory from the service"
+grep -q 'watchChanges: true' BarWidget.qml \
+  || fail "the companion bar must watch atomic status replacements"
+grep -q 'Status.presentation' BarWidget.qml \
+  || fail "the companion bar must treat a missing or stale snapshot safely"
+grep -q 'readonly property bool companionCutover: false' BarWidget.qml \
+  || fail "the staged companion must stay behind the equivalence cutover gate"
+if grep -q 'if (standaloneRunning)' BarWidget.qml; then
+  fail "a fresh staged snapshot must not steal the legacy bar actions"
+fi
+grep -q 'scripts/omamail-companion.sh' BarWidget.qml \
+  || fail "the companion bar must dispatch only through its activation script"
+[ -x scripts/omamail-companion.sh ] \
+  || fail "the companion activation script must be executable"
+command_probe=$(mktemp)
+trap 'rm -f "$command_probe"' EXIT
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$command_probe"
+chmod +x "$command_probe"
+for args in 'open' 'refresh' 'compose-mailto mailto:a@example.com'; do
+  set -- $args
+  if OMAMAIL_BIN="$command_probe" scripts/omamail-companion.sh "$@" >/dev/null 2>&1; then
+    fail "the staged activation script must not launch a second host"
+  fi
+done
+for args in 'compose-mailto https://example.com' 'compose-mailto mailto:a@example.com extra' 'open extra' 'shell'; do
+  set -- $args
+  if scripts/omamail-companion.sh "$@" >/dev/null 2>&1; then
+    fail "the future activation contract must reject invalid arguments"
+  fi
+done
+
+# The legacy panel remains the declared entry point until the standalone
+# equivalence matrix is complete. This prevents a partial companion from
+# silently deleting the only usable mail UI.
+python3 - <<'PY'
+import json
+
+manifest = json.load(open("manifest.json"))
+entries = manifest["entryPoints"]
+if entries.get("service") != "Service.qml" or entries.get("panel") != "App.qml":
+    raise SystemExit("test_service_source.sh: keep legacy shell entries until equivalence is proven")
+PY
+
 printf 'test_service_source.sh ok\n'

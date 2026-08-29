@@ -128,7 +128,6 @@ function makeAccount(account) {
     email: email,
     provider: provider,
     clientId: trimmed(raw.clientId),
-    clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
     label: trimmed(raw.label)
   }

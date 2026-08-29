@@ -1,0 +1,43 @@
+[package]
+name = "omamail"
+version = "0.6.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui-shell = { git = "https://github.com/longbridge/gpui-component" }
+gpui-base = { git = "https://github.com/longbridge/gpui-component" }
+gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+sha2 = "0.10"
+keyring = { version = "4", features = ["v1"] }
+libc = "0.2"
+url = "2"
+wait-timeout = "0.2"
+zeroize = "1"
+getrandom = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = "0.41"
+time = { version = "0.3", features = ["formatting"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", features = ["test-support"] }
+tempfile = "3"
+
+[profile.dev]
+codegen-units = 16
+debug = "limited"
+split-debuginfo = "unpacked"
+
+[profile.dev.package]
+gpui = { opt-level = 3 }
+gpui-base = { opt-level = 3 }
+gpui_platform = { opt-level = 3 }
+gpui-shell = { opt-level = 3 }
+rquickjs = { opt-level = 3 }

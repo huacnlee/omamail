@@ -20,7 +20,8 @@ while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
 
 JS_FILES=()
 while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
-  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
+  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' \
+    -not -path './app/*' -print0)
 
 # A developer machine may point /bin/sh at bash while the release runner points
 # it at dash. Bash's global parameter replacement then passes locally and dies
@@ -39,8 +40,8 @@ if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' 
   fail "named display colour in QML: use Color.* instead"
 fi
 
-# 2. The JS libraries are read by the QML engine, which does not accept ES6.
-#    tests/ is node-only and exempt.
+# 2. The legacy JS libraries are read by the QML engine, which does not accept
+#    ES6. tests/ is node-only and app/ is the gpui-shell ES-module application.
 for file in "${JS_FILES[@]}"; do
   head -1 "$file" | grep -q '^\.pragma library$' || fail "$file must start with .pragma library"
   # Comments quote code with backticks and say things like "a => b", so the

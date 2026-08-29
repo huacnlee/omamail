@@ -1,4 +1,5 @@
 .pragma library
+// @ts-check
 
 // Google's OAuth 2.0 flow for installed apps: authorization code with PKCE,
 // answered on a loopback listener. Everything here is pure string work so the
@@ -56,7 +57,7 @@ function formBody(values) {
 }
 
 function parseQuery(raw) {
-  var result = {}
+  var result = /** @type {Record<string, string>} */ ({})
   var query = String(raw || "")
   if (query.charAt(0) === "?") query = query.substring(1)
   var parts = query.split("&")
