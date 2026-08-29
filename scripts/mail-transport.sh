@@ -184,6 +184,9 @@ fi
 set +e
 build_config "$@" | curl \
   --fail-early \
+  --retry 2 \
+  --retry-all-errors \
+  --retry-delay 1 \
   --config - \
   --silent \
   --show-error \
