@@ -599,8 +599,11 @@ function newArrivals(summaries, seenIds, primed, sessionStartMs) {
     var summary = list[i]
     if (!summary || !summary.unread || !summary.inInbox) continue
     if (seen[summary.id]) continue
-    if (minTime > 0 && summary.date && typeof summary.date.getTime === "function"
-        && summary.date.getTime() < minTime) continue
+    if (minTime > 0) {
+      if (!summary.date || typeof summary.date.getTime !== "function") continue
+      var time = summary.date.getTime()
+      if (isNaN(time) || time < minTime) continue
+    }
     arrivals.push(summary)
   }
   return arrivals

@@ -58,6 +58,7 @@ Item {
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -105,6 +106,10 @@ Item {
 
   function setAlwaysRenderHeavyMessages(value) {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
+  }
+
+  function setNotifyNewMail(value) {
+    persistSetting("notifyNewMail", value ? "On" : "Off")
   }
 
   // ---------------------------------------------------------- the accounts
