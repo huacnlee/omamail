@@ -102,6 +102,39 @@ function portOr(value, fallback) {
   return port
 }
 
+function normalizeAliases(value) {
+  if (!value) return []
+  var rawList = []
+  if (Array.isArray(value)) {
+    rawList = value
+  } else if (typeof value === "string") {
+    rawList = value.split(/[\r\n,]+/)
+  }
+  var out = []
+  var seen = {}
+  for (var i = 0; i < rawList.length; i++) {
+    var item = rawList[i]
+    var email = ""
+    var displayName = ""
+    if (typeof item === "string") {
+      email = trimmed(item).toLowerCase()
+    } else if (item && typeof item === "object") {
+      email = trimmed(item.email || item.sendAsEmail).toLowerCase()
+      displayName = trimmed(item.displayName || item.name)
+    }
+    if (!email || !isValidEmail(email)) continue
+    if (seen[email]) continue
+    seen[email] = true
+    out.push({
+      email: email,
+      displayName: displayName,
+      isPrimary: false,
+      isDefault: false
+    })
+  }
+  return out
+}
+
 function makeImapSettings(raw) {
   var values = raw || {}
   return {
@@ -110,6 +143,7 @@ function makeImapSettings(raw) {
     smtpHost: trimmed(values.smtpHost),
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
+    aliases: normalizeAliases(values.aliases),
     insecure: values.insecure === true
   }
 }

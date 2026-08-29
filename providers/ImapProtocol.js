@@ -172,6 +172,50 @@ function isValidHost(value) {
   return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)
 }
 
+var EMAIL_PATTERN = /^[^\s@]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/
+
+function parseAliases(value) {
+  if (!value) return []
+  var rawList = []
+  if (Array.isArray(value)) {
+    rawList = value
+  } else if (typeof value === "string") {
+    rawList = value.split(/[\r\n,]+/)
+  }
+  var out = []
+  var seen = {}
+  for (var i = 0; i < rawList.length; i++) {
+    var item = rawList[i]
+    var email = ""
+    var displayName = ""
+    if (typeof item === "string") {
+      email = trimmed(item).toLowerCase()
+    } else if (item && typeof item === "object") {
+      email = trimmed(item.email || item.sendAsEmail).toLowerCase()
+      displayName = trimmed(item.displayName || item.name)
+    }
+    if (!email || !EMAIL_PATTERN.test(email)) continue
+    if (seen[email]) continue
+    seen[email] = true
+    out.push({
+      email: email,
+      displayName: displayName,
+      isPrimary: false,
+      isDefault: false
+    })
+  }
+  return out
+}
+
+function formatAliases(aliases) {
+  var list = parseAliases(aliases)
+  var emails = []
+  for (var i = 0; i < list.length; i++) {
+    emails.push(list[i].email)
+  }
+  return emails.join(", ")
+}
+
 function normalizedPort(value, fallback) {
   var port = Math.floor(Number(value))
   var backup = Math.floor(Number(fallback)) || DEFAULT_IMAP_PORT
@@ -187,6 +231,7 @@ function normalizeSettings(raw) {
     smtpHost: trimmed(values.smtpHost),
     smtpPort: normalizedPort(values.smtpPort, DEFAULT_SMTP_PORT),
     username: trimmed(values.username),
+    aliases: parseAliases(values.aliases),
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
@@ -211,6 +256,7 @@ function setupSettings(raw) {
     smtpHost: values.smtpHost,
     smtpPort: values.smtpPort,
     username: trimmed(values.username) || trimmed(values.address),
+    aliases: values.aliases,
     insecure: isLoopback(values.imapHost)
   })
 }

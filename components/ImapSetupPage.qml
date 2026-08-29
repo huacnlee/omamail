@@ -46,7 +46,8 @@ Column {
       imapPort: imapPortField.text,
       smtpHost: smtpHostField.text.trim(),
       smtpPort: smtpPortField.text,
-      username: usernameField.text
+      username: usernameField.text,
+      aliases: aliasesField.text
     })
   }
 
@@ -73,6 +74,9 @@ Column {
     addressField.text = service ? service.accountAddress : ""
     if (settings.username !== "") {
       usernameField.text = settings.username
+    }
+    if (settings.aliases) {
+      aliasesField.text = Imap.formatAliases(settings.aliases)
     }
     if (settings.imapHost !== "") {
       imapHostField.text = settings.imapHost
@@ -347,6 +351,15 @@ Column {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Username — only if it is not the address"
+      }
+
+      TextField {
+        id: aliasesField
+        width: parent.width
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Send-as aliases — comma-separated (e.g. alias@icloud.com)"
       }
     }
 

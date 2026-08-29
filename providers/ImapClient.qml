@@ -561,20 +561,41 @@ Item {
     return newHandle()
   }
 
-  // IMAP has no send-as settings endpoint. Its one sender is the mailbox
-  // address the user configured, returned in the same shape as Gmail aliases
-  // so everything above the provider boundary can stay provider-neutral.
+  // IMAP has no send-as settings endpoint. Its senders are the mailbox
+  // address and any aliases configured by the user, returned in the same shape
+  // as Gmail aliases so everything above the provider boundary stays provider-neutral.
   function getSendAs(callback) {
     if (typeof callback !== "function") return newHandle()
     var address = String(root.email || "")
+    var settings = auth ? auth.settings : null
+    var customAliases = settings && Array.isArray(settings.aliases) ? settings.aliases : []
     Qt.callLater(function() {
       if (!root) return
-      callback(address === "" ? [] : [{
-        email: address,
-        displayName: "",
-        isPrimary: true,
-        isDefault: true
-      }], "")
+      var list = []
+      var seen = ({})
+      if (address !== "") {
+        list.push({
+          email: address,
+          displayName: "",
+          isPrimary: true,
+          isDefault: true
+        })
+        seen[address.toLowerCase()] = true
+      }
+      for (var i = 0; i < customAliases.length; i++) {
+        var item = customAliases[i]
+        var email = (typeof item === "string" ? item : (item ? item.email : "")).trim()
+        if (email !== "" && !seen[email.toLowerCase()]) {
+          seen[email.toLowerCase()] = true
+          list.push({
+            email: email,
+            displayName: (item && item.displayName) ? String(item.displayName).trim() : "",
+            isPrimary: false,
+            isDefault: false
+          })
+        }
+      }
+      callback(list, "")
     })
     return newHandle()
   }
@@ -802,7 +823,10 @@ Item {
         if (typeof callback === "function") callback(null, credentialError || "Not signed in")
         return
       }
-      var sender = settings ? String(settings.username || "") : ""
+      var fromAddresses = Mail.parseAddressList(Mail.headerFrom(parsed.headers, "From"))
+      var sender = (fromAddresses.length > 0 && fromAddresses[0].email)
+        ? fromAddresses[0].email
+        : (settings ? String(settings.username || "") : "") || root.email
       var fields = [Mail.encodeBase64(smtp), Mail.encodeBase64(credentials),
         Mail.encodeBase64(sender), Mail.encodeBase64(message)]
       for (var k = 0; k < recipients.length; k++) fields.push(Mail.encodeBase64(recipients[k]))
