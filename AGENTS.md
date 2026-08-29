@@ -76,6 +76,47 @@ three directories away from the client that calls it.
   accuracy: "Mark these read" acts on the messages that are loaded, so it does
   not claim to mark all of them.
 
+## Direction
+
+Which way a message runs is a fact about the mail, not about the window. The
+interface is not mirrored and there is no `LayoutMirroring` anywhere;
+`tests/test_source.sh` enforces that, because "RTL support" is the name of two
+different features and only one of them is here.
+
+- Qt already resolves each paragraph and each `Text` from its own first strong
+  character, and it is good at it. Leave it alone wherever it is right. It
+  elides the *logical* end of a right-to-left string under `Text.ElideRight`,
+  resolves each `<br>`-separated line of a plain body separately, and needs no
+  help with an Arabic subject or an Arabic paragraph.
+- `message/Direction.js` exists for the three places it is wrong or absent, and
+  for nothing else. Adding a fourth caller is a decision, not a formality.
+- **A subject is asked with `resolveSubject`, never `resolve`.** A reply prefix
+  is Latin whatever the thread is written in, so `Re: مرحبا` reads left-to-right
+  to anything taking the first strong character at face value — which is every
+  message in a thread after the first, and most of a mailbox.
+- **Qt honours the `dir` attribute and ignores the CSS `direction` property.**
+  `promoteDirection` translates one into the other next to
+  `promoteImageDimensions`, which is there for the same reason on `width`. A
+  template written for a browser states direction only in CSS.
+- **The body's `dir` and the stylesheet's physical sides are one statement.**
+  Qt reads `margin-left` and has never heard of `margin-inline-start`, so a side
+  is chosen when the sheet is built; and Qt places a list marker on the side the
+  block runs from, so a sheet that indents a list from the right while the block
+  is still left-to-right does not move the bullet, it **drops** it. Writing one
+  without the other was tried and looked exactly like that.
+  `baseDirectionAttribute` keeps them together and `tests/test_source.sh` keeps
+  them that way.
+- A base direction is a **default, not an override**: a sender's own `dir` — or
+  a `direction` in their CSS, which `promoteDirection` turns into the same thing
+  — still wins element by element inside it. That is what makes supplying one
+  safe on a message nobody has inspected.
+- A `Text` with no answer to give is left alone rather than assigned Qt's own
+  default back. `undefined` on `horizontalAlignment` restores natural alignment;
+  it does not warn.
+- Qt ignores `dir` on a `<td>` — on a wrapping `<div>` inside one, too. Nothing
+  is done about it: text inside a cell still resolves from its own first strong
+  character, which covers the case that actually arrives.
+
 ## Popups and their triggers
 
 - A control that opens a popup holds a selected style for as long as that popup

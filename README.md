@@ -55,6 +55,14 @@ other IMAP server — including one you run yourself.
 - **Images stay blocked.** Loading a sender's pictures tells them the mail was
   read, from which address and when. They load when you ask, for that one
   message.
+- **Right-to-left mail reads right to left.** An Arabic, Hebrew or Persian
+  message lays out from the right — subject, list row, bar preview and body —
+  and an English one alongside it does not. A reply keeps its direction where
+  most clients lose it: `Re:` is Latin whatever the thread is written in, and
+  the prefix is set aside before the question is asked rather than answering it.
+  A sender who states direction only in CSS is understood too, which Qt's own
+  renderer does not do. Set **Message direction** to a fixed direction to have
+  every message read that way instead. The interface itself is unaffected.
 - **Your theme.** Every colour comes from the active Omarchy theme, so the
   mailbox changes the moment the desktop does.
 - **Keyring-backed.** The Gmail refresh token and every IMAP password live in

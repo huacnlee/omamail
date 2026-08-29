@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 
 // One message in the list. Unread is carried by weight and by the dot on the
 // left, never by colour alone — the accent is a theme value that some themes
@@ -18,6 +19,9 @@ Rectangle {
   property bool canArchive: true
   property bool hasCursor: false
   property bool selected: false
+  // How the direction of this message's own text is arrived at. Passed down
+  // like every other fact a row draws, because a row decides nothing.
+  property string contentDirection: Direction.MODE_DEFAULT
 
   signal activated()
   signal starToggled()
@@ -26,6 +30,26 @@ Rectangle {
   signal menuRequested(real sceneX, real sceneY)
 
   readonly property bool hot: mouse.containsMouse || hasCursor
+
+  // The subject is asked on its own account: a reply prefix is Latin whatever
+  // the thread is written in, so `Re: مرحبا` reads left-to-right to anything
+  // that takes the first strong character at face value — which is every
+  // message in a thread after the first.
+  //
+  // The sender and the snippet are not. Qt resolves both correctly from their
+  // own text, so on Auto there is nothing to add; only a direction the reader
+  // has actually chosen has to be carried to them.
+  readonly property var subjectAlignment: alignmentFor(
+    Direction.resolveSubject(root.summary.subject, root.contentDirection))
+  readonly property var textAlignment: alignmentFor(
+    Direction.forced(root.contentDirection))
+
+  // `undefined` leaves a Text following the direction of its own text, which is
+  // what should happen wherever there is no answer to give it.
+  function alignmentFor(direction) {
+    if (!Direction.hasAnswer(direction)) return undefined
+    return Direction.isRightToLeft(direction) ? Text.AlignRight : Text.AlignLeft
+  }
 
   width: parent ? parent.width : 0
   implicitHeight: body.implicitHeight + Style.space(14)
@@ -98,6 +122,7 @@ Rectangle {
         font.pixelSize: Style.font.body
         font.bold: root.summary.unread
         elide: Text.ElideRight
+        horizontalAlignment: root.subjectAlignment
       }
 
       Text {
@@ -120,6 +145,7 @@ Rectangle {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       elide: Text.ElideRight
+      horizontalAlignment: root.textAlignment
     }
 
     Text {
@@ -132,6 +158,7 @@ Rectangle {
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
       maximumLineCount: 1
+      horizontalAlignment: root.textAlignment
     }
   }
 

@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 import "../message/Message.js" as Mail
 import "../compose/Recipients.js" as Recipients
 import "../compose/Senders.js" as Senders
@@ -400,6 +401,17 @@ DropArea {
 
   // The Back control asks the window to save. Discard stays local and
   // destructive. The window owns the save because it owns the provider.
+  // Which way what is being written runs. Qt resolves an editable field from
+  // the text already in it, so Auto needs nothing added; a direction the writer
+  // has chosen has to be carried to the fields, including the empty ones — a
+  // reply begun in a right-to-left mailbox should put the caret on the right
+  // before there is any text to work it out from.
+  property string contentDirection: Direction.MODE_DEFAULT
+  readonly property string writingDirection: Direction.forced(root.contentDirection)
+  readonly property var composeAlignment: Direction.hasAnswer(root.writingDirection)
+    ? (Direction.isRightToLeft(root.writingDirection) ? Text.AlignRight : Text.AlignLeft)
+    : undefined
+
   signal closed()
   signal closeRequested()
   signal sendQueued()
@@ -1158,6 +1170,7 @@ DropArea {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
+        horizontalAlignment: root.composeAlignment
         KeyNavigation.tab: bodyEdit
         onAccepted: bodyEdit.forceActiveFocus()
         Keys.priority: Keys.BeforeItem
@@ -1371,6 +1384,7 @@ DropArea {
       selectByMouse: true
       wrapMode: TextEdit.Wrap
       textFormat: TextEdit.PlainText
+      horizontalAlignment: root.composeAlignment
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor

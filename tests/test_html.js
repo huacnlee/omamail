@@ -1594,4 +1594,69 @@ function activityMail() {
   assert.strictEqual(html.readingColumnOffset(0, 80), 0)
 }
 
+// ------------------------------------------------------------------ direction
+//
+// Qt's rich text engine reads the `dir` attribute and ignores the CSS
+// `direction` property, so a template written for a browser states its
+// direction in the one spelling that will be thrown away.
+{
+  const rtl = html.sanitize('<div style="direction:rtl">مرحبا</div>', {})
+  assert.ok(/dir="rtl"/.test(rtl.html),
+    "a CSS direction is promoted to the attribute Qt reads")
+  assert.ok(/direction:\s*rtl/.test(rtl.html),
+    "and the sender's own declaration is left where it was")
+
+  const ltr = html.sanitize('<div style="direction:ltr">hello</div>', {})
+  assert.ok(/dir="ltr"/.test(ltr.html))
+
+  // The sender's own attribute is the more specific statement of the two.
+  const both = html.sanitize('<div dir="ltr" style="direction:rtl">x</div>', {})
+  assert.ok(/dir="ltr"/.test(both.html), "an existing attribute is not overwritten")
+  assert.ok(!/dir="rtl"/.test(both.html))
+
+  // Only the two values mean anything. `inherit` and friends are not directions
+  // a renderer can be handed.
+  const junk = html.sanitize('<div style="direction:inherit">x</div>', {})
+  assert.ok(!/ dir=/.test(junk.html), "an unusable value promotes nothing")
+}
+
+// The stylesheet's physical sides follow the document's direction; the `dir` on
+// the body is written only when the reader has actually chosen one.
+{
+  const reader = html.readerDocumentFor("<p>مرحبا</p>", { direction: "rtl" })
+  assert.ok(/margin-right:26px/.test(reader), "a list indents from the start edge")
+  assert.ok(/text-align:right/.test(reader), "a header aligns to the start edge")
+  assert.ok(/padding-left:/.test(reader), "a cell's gutter follows its text")
+  // The side and the `dir` are one statement: Qt puts a list marker on the side
+  // the block runs from, so a right-hand indent without a right-to-left block
+  // loses the bullet entirely.
+  assert.ok(/<body dir="rtl">/.test(reader),
+    "the sheet's sides and the body's direction agree")
+
+  const ltr = html.readerDocumentFor("<p>hello</p>", { direction: "ltr" })
+  assert.ok(/margin-left:26px/.test(ltr))
+  assert.ok(/text-align:left/.test(ltr))
+  assert.ok(/<body dir="ltr">/.test(ltr))
+
+  // No answer at all leaves every side where it was.
+  const unknown = html.readerDocumentFor("<p>123</p>", { direction: "" })
+  assert.ok(/margin-left:26px/.test(unknown))
+  assert.ok(!/<body dir=/.test(unknown))
+}
+
+{
+  const formatted = html.documentFor("<p>مرحبا</p>", { direction: "rtl" })
+  assert.ok(/margin-right:8px/.test(formatted), "the quote bar sits on the start edge")
+  assert.ok(/<body dir="rtl">/.test(formatted))
+
+  const plain = html.plainTextDocument("مرحبا", { direction: "rtl" }, false)
+  assert.ok(/<body dir="rtl">/.test(plain))
+
+  // A base direction is a default. A sender who states one of their own keeps
+  // it, which is why supplying one is safe.
+  const sender = html.sanitize('<div dir="ltr">hello</div>', {})
+  assert.ok(/dir="ltr"/.test(sender.html),
+    "the sender's own direction survives into the document it is wrapped in")
+}
+
 console.log("test_html.js ok")
