@@ -589,15 +589,18 @@ function barTooltip(state, email, unread, provider, authKind) {
 // Only messages the panel has not seen before, and only ones that are actually
 // new rather than merely newly fetched: the first load after start must not
 // fire a notification for every message already sitting in the inbox.
-function newArrivals(summaries, seenIds, primed) {
+function newArrivals(summaries, seenIds, primed, sessionStartMs) {
   if (!primed) return []
   var list = Array.isArray(summaries) ? summaries : []
   var seen = seenIds || {}
   var arrivals = []
+  var minTime = typeof sessionStartMs === "number" && sessionStartMs > 0 ? sessionStartMs : 0
   for (var i = 0; i < list.length; i++) {
     var summary = list[i]
     if (!summary || !summary.unread || !summary.inInbox) continue
     if (seen[summary.id]) continue
+    if (minTime > 0 && summary.date && typeof summary.date.getTime === "function"
+        && summary.date.getTime() < minTime) continue
     arrivals.push(summary)
   }
   return arrivals

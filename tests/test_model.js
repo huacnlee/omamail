@@ -182,6 +182,14 @@ deepEqual(model.newArrivals(inbox, { a: true }, true).map(entry => entry.id), ["
 deepEqual(model.newArrivals(inbox, { a: true, c: true }, true), [])
 deepEqual(model.newArrivals([], {}, true), [])
 
+const now = Date.now()
+const timeInbox = [
+  { id: "old", unread: true, inInbox: true, date: new Date(now - 1000000) },
+  { id: "new", unread: true, inInbox: true, date: new Date(now + 1000) }
+]
+deepEqual(model.newArrivals(timeInbox, {}, true, now).map(entry => entry.id), ["new"],
+  "messages older than session start are ignored for notifications")
+
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "Due Friday" }), "Invoice\nDue Friday")
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "" }), "Invoice")
 assert.strictEqual(model.notificationBody(null), "")

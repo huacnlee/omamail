@@ -319,6 +319,7 @@ Item {
   // what was already there.
   property var seenIds: ({})
   property bool notificationsPrimed: false
+  readonly property double sessionStartedAt: Date.now()
   // The unread count needs a baseline of its own, separate from the message
   // cache: a mailbox that has never been opened has no cached page to prime
   // from, and would otherwise never be allowed to announce anything.
@@ -885,7 +886,7 @@ Item {
     // never held. That is a result, not newly arrived mail, so it must not turn
     // into a desktop notification.
     var arrivals = append || suppressArrivals === true ? []
-      : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+      : Model.newArrivals(summaries, seenIds, notificationsPrimed, sessionStartedAt)
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
