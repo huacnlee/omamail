@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use omamail::{
-    imap_host::{Action, ImapAccount, MailOperation, plan},
+    imap_host::{Action, ImapAccount, MailOperation, OutgoingFile, plan},
     platform::secrets::Secret,
 };
 use std::{
@@ -222,6 +222,7 @@ fn smtp_threading_headers_are_explicit_and_forward_can_omit_them() {
             body: "reply",
             in_reply_to: Some("<message@example.net>"),
             references: Some("<root@example.net> <message@example.net>"),
+            attachments: vec![],
         },
     )
     .unwrap();
@@ -240,12 +241,161 @@ fn smtp_threading_headers_are_explicit_and_forward_can_omit_them() {
             body: "forward",
             in_reply_to: None,
             references: None,
+            attachments: vec![],
         },
     )
     .unwrap();
     let message = String::from_utf8(fields(forward.stdin())[3].clone()).unwrap();
     assert!(!message.contains("In-Reply-To:"));
     assert!(!message.contains("References:"));
+}
+
+#[test]
+fn smtp_carries_an_attachment_as_a_base64_part_beside_a_base64_body() {
+    let planned = plan(
+        &account(),
+        MailOperation::SendThreaded {
+            from: "me@example.com",
+            to: vec!["you@example.net"],
+            cc: vec![],
+            bcc: vec![],
+            subject: "With a file",
+            body: "see attached",
+            in_reply_to: None,
+            references: None,
+            attachments: vec![OutgoingFile {
+                filename: "report.pdf",
+                mime_type: "application/pdf",
+                data: b"%PDF-1.7 body",
+            }],
+        },
+    )
+    .unwrap();
+    let message = String::from_utf8(fields(planned.stdin())[3].clone()).unwrap();
+    let boundary = message
+        .split("boundary=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    // The boundary carries a character base64 has none of, so no part can
+    // contain the line that separates the parts.
+    assert!(boundary.contains('_'));
+    assert!(message.contains("Content-Type: multipart/mixed; boundary=\""));
+    assert!(message.contains(&format!(
+        "--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+        STANDARD.encode("see attached")
+    )));
+    assert!(message.contains(&format!(
+        "--{boundary}\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\r\n{}\r\n",
+        STANDARD.encode("%PDF-1.7 body")
+    )));
+    assert!(message.ends_with(&format!("--{boundary}--\r\n")));
+}
+
+#[test]
+fn a_filename_that_is_not_printable_ascii_becomes_an_encoded_word() {
+    let planned = plan(
+        &account(),
+        MailOperation::SendThreaded {
+            from: "me@example.com",
+            to: vec!["you@example.net"],
+            cc: vec![],
+            bcc: vec![],
+            subject: "With a file",
+            body: "see attached",
+            in_reply_to: None,
+            references: None,
+            attachments: vec![OutgoingFile {
+                filename: "rapport-été.pdf",
+                mime_type: "application/pdf",
+                data: b"bytes",
+            }],
+        },
+    )
+    .unwrap();
+    let message = String::from_utf8(fields(planned.stdin())[3].clone()).unwrap();
+    // A raw 8-bit byte is not a filename every server will carry, so the name
+    // goes out the way `Message.js` writes one.
+    let encoded = format!("=?UTF-8?B?{}?=", STANDARD.encode("rapport-été.pdf"));
+    assert!(message.contains(&format!("name={encoded}\r\n")));
+    assert!(message.contains(&format!("filename={encoded}\r\n")));
+    assert!(!message.contains("rapport-été.pdf"));
+}
+
+#[test]
+fn smtp_refuses_a_filename_or_media_type_that_could_forge_a_header() {
+    for (filename, mime_type) in [
+        ("re\"port.pdf", "application/pdf"),
+        ("report.pdf\\", "application/pdf"),
+        ("report.pdf; x=1", "application/pdf"),
+        ("../etc/passwd", "application/pdf"),
+        ("re\rport.pdf", "application/pdf"),
+        ("", "application/pdf"),
+        ("report.pdf", "application/pdf; boundary=x"),
+        ("report.pdf", "application/pdf\r\nBcc: stolen@example.net"),
+        ("report.pdf", "not-a-media-type"),
+    ] {
+        assert!(
+            plan(
+                &account(),
+                MailOperation::SendThreaded {
+                    from: "me@example.com",
+                    to: vec!["you@example.net"],
+                    cc: vec![],
+                    bcc: vec![],
+                    subject: "With a file",
+                    body: "see attached",
+                    in_reply_to: None,
+                    references: None,
+                    attachments: vec![OutgoingFile {
+                        filename,
+                        mime_type,
+                        data: b"bytes",
+                    }],
+                },
+            )
+            .is_err(),
+            "{filename} / {mime_type} must not reach a header"
+        );
+    }
+}
+
+#[test]
+fn smtp_refuses_more_files_or_more_bytes_than_a_message_may_carry() {
+    let big = vec![0u8; 20 * 1024 * 1024 + 1];
+    let file = OutgoingFile {
+        filename: "big.bin",
+        mime_type: "application/octet-stream",
+        data: &big,
+    };
+    let send = |attachments: Vec<OutgoingFile<'_>>| {
+        plan(
+            &account(),
+            MailOperation::SendThreaded {
+                from: "me@example.com",
+                to: vec!["you@example.net"],
+                cc: vec![],
+                bcc: vec![],
+                subject: "With a file",
+                body: "see attached",
+                in_reply_to: None,
+                references: None,
+                attachments,
+            },
+        )
+    };
+    assert!(send(vec![file]).is_err());
+    let small = vec![0u8; 8];
+    let one = OutgoingFile {
+        filename: "small.bin",
+        mime_type: "application/octet-stream",
+        data: &small,
+    };
+    assert!(send(vec![one; 20]).is_ok());
+    assert!(send(vec![one; 21]).is_err());
 }
 
 #[test]
@@ -407,6 +557,137 @@ fn account_identity_and_transport_urls_are_closed_and_validated() {
             "other@example.com",
             "https://mail.example.com/",
             "smtp://mail.example.com/",
+            "me@example.com",
+            Secret::new("x")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_subject_that_is_not_printable_ascii_becomes_an_encoded_word() {
+    let encoded = format!("=?UTF-8?B?{}?=", STANDARD.encode("Rapport d'été"));
+    // Both SMTP plans, because both write a Subject and only one of them is
+    // reached by a reply. A header is US-ASCII by RFC 5322 and a raw UTF-8 one
+    // is not something every server on the way carries unmodified, which is
+    // why `Message.js` has put every Subject through `foldHeader` since the
+    // QML client could send at all.
+    let threaded = plan(
+        &account(),
+        MailOperation::SendThreaded {
+            from: "me@example.com",
+            to: vec!["you@example.net"],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Rapport d'été",
+            body: "voici",
+            in_reply_to: None,
+            references: None,
+            attachments: vec![],
+        },
+    )
+    .unwrap();
+    let message = String::from_utf8(fields(threaded.stdin())[3].clone()).unwrap();
+    assert!(message.contains(&format!("Subject: {encoded}\r\n")));
+    assert!(!message.contains("Rapport d'été"));
+
+    let simple = plan(
+        &account(),
+        MailOperation::Send {
+            from: "me@example.com",
+            recipients: vec!["you@example.net"],
+            subject: "Rapport d'été",
+            body: "voici",
+        },
+    )
+    .unwrap();
+    let message = String::from_utf8(fields(simple.stdin())[3].clone()).unwrap();
+    assert!(message.contains(&format!("Subject: {encoded}\r\n")));
+
+    // An ASCII subject is written as it stands: an encoded word around one
+    // would be noise in every reader that shows a raw header.
+    let plain = plan(
+        &account(),
+        MailOperation::SendThreaded {
+            from: "me@example.com",
+            to: vec!["you@example.net"],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Quarterly report",
+            body: "here",
+            in_reply_to: None,
+            references: None,
+            attachments: vec![],
+        },
+    )
+    .unwrap();
+    let message = String::from_utf8(fields(plain.stdin())[3].clone()).unwrap();
+    assert!(message.contains("Subject: Quarterly report\r\n"));
+}
+
+// A mailbox with no SMTP server still reads. The setup form offers that state
+// — "leave empty to read only" — and it has to survive as far as the plan,
+// where a send becomes a refusal about the mailbox rather than a connection to
+// a server nobody named.
+#[test]
+fn a_mailbox_with_no_smtp_server_reads_and_refuses_to_send() {
+    let account = ImapAccount::new(
+        "imap:me@example.com",
+        "me@example.com",
+        "imaps://mail.example.com/",
+        "",
+        "me@example.com",
+        Secret::new("top-secret"),
+    )
+    .unwrap();
+
+    let planned = plan(&account, MailOperation::List { folder: "INBOX" }).unwrap();
+    assert_eq!(planned.mode(), "imap");
+    assert_eq!(
+        fields(planned.stdin())[0],
+        b"imaps://mail.example.com/INBOX"
+    );
+
+    // Asked before the message is looked at, so a valid draft is refused for
+    // the same reason an empty one is: the answer is about the account.
+    let refused = plan(
+        &account,
+        MailOperation::Send {
+            from: "me@example.com",
+            recipients: vec!["you@example.net"],
+            subject: "Hello",
+            body: "body",
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "this mailbox has no SMTP server set, so it cannot send"
+    );
+    let threaded = plan(
+        &account,
+        MailOperation::SendThreaded {
+            from: "me@example.com",
+            to: vec!["you@example.net"],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Hello",
+            body: "body",
+            in_reply_to: None,
+            references: None,
+            attachments: vec![],
+        },
+    );
+    assert!(threaded.is_err());
+
+    // An SMTP URL that is present and wrong is still an error rather than a
+    // read-only mailbox: only the empty string means "no server".
+    assert!(
+        ImapAccount::new(
+            "imap:me@example.com",
+            "me@example.com",
+            "imaps://mail.example.com/",
+            "https://mail.example.com/",
             "me@example.com",
             Secret::new("x")
         )

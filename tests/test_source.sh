@@ -909,6 +909,32 @@ grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \
   || fail "HEY must pass a mailto Bcc through to hey compose"
 grep -q 'signal mailtoRequested(string url)' components/MessageReader.qml \
   || fail "a mailto in a message body must compose here, not leave through xdg-open"
+
+# The standalone client has no shell to summon it, so the same link arrives on
+# its own argument vector and its own socket. Both halves of that are one line
+# each in main.js, and one line is exactly what a whole-file rewrite loses.
+grep -q 'command_router::parse_arguments' src/main.rs \
+  || fail "the standalone client must read a mailto: URL off its argument vector"
+grep -q 'claim_single_instance' src/main.rs \
+  || fail "a second launch must reach the running window, not open another"
+grep -q 'startCommandListener(this, cx)' app/main.js \
+  || fail "the window must wait on the command router for desktop links"
+grep -q 'from "./application/commands.js"' app/main.js \
+  || fail "the mailto dispatch lives in app/application/commands.js"
+grep -q 'exec "\$@"' scripts/mailto.sh \
+  || fail "the mailto handler must hand the URL to the standalone client when there is one"
+
+# The bar's number. The host writes ~/.local/state/omamail/status.json and the
+# widget reads it through bar/Status.js; nothing publishes it unless the window
+# hands the controller a companion.
+grep -q 'companion: companionPublisher()' app/main.js \
+  || fail "the window must publish its unread total to the Omarchy bar"
+grep -q 'values.companion.setUnread(total)' app/application/controller.js \
+  || fail "the unread total the bar draws must be the one the window counted"
+grep -q 'omarchy-companion' app/application/companion.js \
+  || fail "the bar's count must cross through the omarchy-companion host module"
+grep -qF '{\"version\":1,\"unread\":{},\"running\":{},\"updatedAt\":{}}' src/lib.rs \
+  || fail "the status snapshot must keep the four fields bar/Status.js reads"
 if awk '
   /onLinkActivated:/ { in_link = 1 }
   in_link && /Qt.openUrlExternally\(link\)/ { found = 1 }
@@ -975,5 +1001,90 @@ if "FileDialog" in block or "execDetached" in block:
         "test_source.sh: Attach must not open an in-process dialog or a detached file manager"
     )
 PY
+
+# The keyring's name for a Gmail refresh token is written by the Rust host and
+# read back by the window. They are two literals in two languages, and they were
+# briefly two different strings: the token was filed under the scope list and
+# looked up under the grant, so a mailbox signed in and then had no credential.
+# Neither side can see the other, so the agreement is asserted here.
+python3 - <<'PY'
+import re
+from pathlib import Path
+
+host_source = Path("src/gmail_setup.rs").read_text()
+host = re.search(r'pub const GRANT: &str = "([^"]*)"', host_source)
+window = re.search(
+    r'const AUDITED_GOOGLE_GRANT = "([^"]*)"', Path("app/main.js").read_text()
+)
+if not host or not window:
+    raise SystemExit(
+        "test_source.sh: the Gmail grant constant is missing from the host or the window"
+    )
+if host.group(1) != window.group(1):
+    raise SystemExit(
+        "test_source.sh: src/gmail_setup.rs GRANT and app/main.js AUDITED_GOOGLE_GRANT "
+        f"must be the same string; got {host.group(1)!r} and {window.group(1)!r}"
+    )
+if re.search(r"pub const GRANT: &str = SCOPES", host_source):
+    raise SystemExit(
+        "test_source.sh: the grant names the credential and must not follow the scope list"
+    )
+PY
+
+# Three more literals that no compiler and no import can hold together.
+#
+# The superseded grants are the names a Gmail refresh token has been filed
+# under before, and one of them is the QML plugin's own — the plugin is still
+# installed beside the standalone window and its `Credentials.js` is the only
+# statement of that name. The signed-out sentence crosses the same boundary in
+# the other direction: the host writes it, `mail-state.js` reads it, and a
+# mailbox that has lost its credential says nothing useful when they disagree.
+python3 - <<'GRANTS'
+import re
+from pathlib import Path
+
+secrets = Path("src/platform/secrets.rs").read_text()
+superseded = re.search(
+    r"pub const SUPERSEDED_GMAIL_GRANTS: \[&str; \d+\] = \[(.*?)\n\];", secrets, re.S
+)
+if not superseded:
+    raise SystemExit(
+        "test_source.sh: SUPERSEDED_GMAIL_GRANTS is missing from src/platform/secrets.rs"
+    )
+plugin = re.search(
+    r'var KEYRING_GRANT = "([^"]*)"', Path("providers/Credentials.js").read_text()
+)
+if not plugin:
+    raise SystemExit("test_source.sh: providers/Credentials.js KEYRING_GRANT is missing")
+if '"%s"' % plugin.group(1) not in superseded.group(1):
+    raise SystemExit(
+        "test_source.sh: SUPERSEDED_GMAIL_GRANTS must name the plugin's own grant "
+        "%r, or every mailbox signed in through the plugin loses its token"
+        % plugin.group(1)
+    )
+if '"omarchy-gmail"' not in secrets:
+    raise SystemExit(
+        "test_source.sh: the superseded keyring service is `omarchy-gmail`, the name this "
+        "was released under; no other spelling has ever stored anything"
+    )
+
+host = re.search(
+    r'ProviderFailure::SignedOut => "([^"]*)"',
+    Path("src/provider_effects.rs").read_text(),
+)
+window = re.search(
+    r'export const SIGNED_OUT = "([^"]*)"',
+    Path("app/application/mail-state.js").read_text(),
+)
+if not host or not window:
+    raise SystemExit(
+        "test_source.sh: the signed-out failure is missing from the host or the window"
+    )
+if host.group(1) != window.group(1):
+    raise SystemExit(
+        "test_source.sh: ProviderFailure::SignedOut and mail-state.js SIGNED_OUT must be "
+        "the same string; got %r and %r" % (host.group(1), window.group(1))
+    )
+GRANTS
 
 printf 'test_source.sh ok\n'

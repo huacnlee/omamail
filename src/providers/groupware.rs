@@ -19,6 +19,15 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_ID_BYTES: usize = 2048;
 const MAX_DEADLINE_MS: u64 = 120_000;
+// The ceilings a draft's files are held to. They repeat the ones the client
+// applies on purpose: the client is a separate process, so what it sends is a
+// request and not a fact, and these are what the host opens files on.
+pub const MAX_ATTACHMENTS: usize = 20;
+pub const MAX_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
+pub const MAX_ATTACHMENT_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_PATH_BYTES: usize = 4096;
+const MAX_FILENAME_BYTES: usize = 255;
+const MAX_MIME_TYPE_BYTES: usize = 129;
 
 pub struct Secret(Zeroizing<String>);
 
@@ -75,7 +84,6 @@ pub enum BackendCall {
         range: CalendarRange,
     },
     CaldavWrite {
-        create: bool,
         source_id: String,
         url: String,
         payload: String,
@@ -116,6 +124,10 @@ pub enum BackendError {
     Unavailable,
     TimedOut,
     Failed,
+    /// An attached file was not there to read when the message was built.
+    AttachmentUnreadable,
+    /// An attached file, or the set of them, is past what a message may carry.
+    AttachmentTooLarge,
 }
 
 pub trait Backend {
@@ -140,6 +152,8 @@ pub enum HostError {
     Unavailable,
     TimedOut,
     BackendFailed,
+    AttachmentUnreadable,
+    AttachmentTooLarge,
 }
 
 impl fmt::Display for HostError {
@@ -155,6 +169,13 @@ impl fmt::Display for HostError {
             Self::Unavailable => "groupware provider is unavailable",
             Self::TimedOut => "groupware operation timed out",
             Self::BackendFailed => "groupware operation failed",
+            // Named without the path or the filename in it: this string is
+            // shown, logged and copied, and both are the user's own content.
+            // What is actionable is which of the two things went wrong.
+            Self::AttachmentUnreadable => {
+                "an attached file could not be read - it may have been moved, renamed or deleted"
+            }
+            Self::AttachmentTooLarge => "an attached file is larger than the 20 MB send limit",
         })
     }
 }
@@ -214,6 +235,8 @@ fn map_backend_error(error: BackendError) -> HostError {
         BackendError::Unavailable => HostError::Unavailable,
         BackendError::TimedOut => HostError::TimedOut,
         BackendError::Failed => HostError::BackendFailed,
+        BackendError::AttachmentUnreadable => HostError::AttachmentUnreadable,
+        BackendError::AttachmentTooLarge => HostError::AttachmentTooLarge,
     }
 }
 
@@ -370,6 +393,87 @@ pub struct ComposeDraft {
     in_reply_to: String,
     #[serde(default)]
     references: String,
+    #[serde(default)]
+    attachments: Vec<ComposeAttachment>,
+}
+
+/// One file a draft carries, named by the path the host will open. Bytes never
+/// cross in the request: a request large enough to hold them would not fit
+/// under [`MAX_REQUEST_BYTES`], and the file has to be measured where it is
+/// read rather than where it was described.
+#[derive(Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ComposeAttachment {
+    path: String,
+    filename: String,
+    #[serde(default)]
+    mime_type: String,
+    #[serde(default)]
+    size: u64,
+}
+
+// A path and a filename are the user's own content and a stranger's naming;
+// neither belongs in diagnostic output.
+impl fmt::Debug for ComposeAttachment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ComposeAttachment { .. }")
+    }
+}
+
+impl ComposeAttachment {
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+    /// Empty when the client named none; the caller supplies the default.
+    pub fn mime_type(&self) -> &str {
+        &self.mime_type
+    }
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn valid(&self) -> bool {
+        // Absolute, bounded, free of control characters — the host opens this
+        // path, and the transport carrying the message is line-oriented — and
+        // with no segment left to walk, because a resolved path is what a file
+        // picker answers with.
+        self.path.starts_with('/')
+            && valid_text(&self.path, MAX_PATH_BYTES)
+            && !self
+                .path
+                .split('/')
+                .any(|segment| segment == "." || segment == "..")
+            // The name goes into `Content-Type` and `Content-Disposition`. A
+            // quote or a backslash could close the parameter it sits in and a
+            // semicolon could open one of its own, so a file's own name cannot
+            // be allowed to write a header nobody agreed to. "/" is refused
+            // because a name is not a path.
+            && !self.filename.is_empty()
+            && valid_text(&self.filename, MAX_FILENAME_BYTES)
+            && !self.filename.contains(['"', '\\', ';', '/'])
+            // Two RFC 2045 tokens or nothing at all: it is written into a
+            // header verbatim, and `file --mime-type` reports what the file
+            // claims about itself.
+            && (self.mime_type.is_empty() || valid_mime_type(&self.mime_type))
+            && self.size <= MAX_ATTACHMENT_BYTES
+    }
+}
+
+fn valid_mime_type(value: &str) -> bool {
+    fn token(part: &str) -> bool {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$&^_.+-".contains(&byte))
+    }
+    value.len() <= MAX_MIME_TYPE_BYTES
+        && value
+            .split_once('/')
+            .is_some_and(|(kind, subtype)| token(kind) && token(subtype))
 }
 pub(crate) type ComposeParts = (
     String,
@@ -392,6 +496,10 @@ impl ComposeDraft {
     }
     pub(crate) fn has_reply_context(&self) -> bool {
         !self.thread_id.is_empty() && !self.in_reply_to.is_empty()
+    }
+    /// The files to inline, already checked by [`ComposeDraft::valid`].
+    pub fn attachments(&self) -> &[ComposeAttachment] {
+        &self.attachments
     }
     #[allow(dead_code)]
     pub(crate) fn into_parts(self) -> ComposeParts {
@@ -433,6 +541,16 @@ impl ComposeDraft {
             })
             && !self.draft_id.contains(':')
             && self.body.len() <= MAX_REQUEST_BYTES
+            && self.attachments.len() <= MAX_ATTACHMENTS
+            && self.attachments.iter().all(ComposeAttachment::valid)
+            // The declared total, which is what makes an impossible request
+            // cheap to refuse. The real total is measured as the files are
+            // read, because a size a client stated is not a size.
+            && self
+                .attachments
+                .iter()
+                .try_fold(0u64, |total, file| total.checked_add(file.size))
+                .is_some_and(|total| total <= MAX_ATTACHMENT_TOTAL_BYTES)
             && (save
                 || [&self.to, &self.cc, &self.bcc]
                     .into_iter()
@@ -844,10 +962,22 @@ impl CaldavWriteRequest {
             return Err(HostError::InvalidRequest);
         }
         let url = exact_origin_url(&self.source_url, &self.url)?;
+        // A write goes to the event's own resource, never to the collection.
+        // A PUT at the collection is not how a CalDAV event is created — the
+        // client names the new resource, `collection + uid + ".ics"` — and a
+        // server that answered one at all would answer it by replacing the
+        // collection. The address arriving as the collection means the client
+        // could not work out where the event goes, which is a refusal here
+        // rather than a request sent anyway.
+        // Judged with a trailing slash disregarded: the same collection is
+        // spelled both ways, and only one of the two spellings being refused
+        // is not a refusal at all.
         let collection = collection_url(&self.source_url)?;
+        if url.trim_end_matches('/') == collection.trim_end_matches('/') {
+            return Err(HostError::InvalidRequest);
+        }
         Ok((
             BackendCall::CaldavWrite {
-                create: url == collection,
                 source_id: self.source_id.clone(),
                 url,
                 payload: self.payload,

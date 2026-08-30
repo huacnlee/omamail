@@ -11,3 +11,7 @@ docs/superpowers/
 target/
 Cargo.lock
 app/**/gpui.d.ts
+
+# The Google OAuth client lives in ~/.config/omamail; an old build wrote it
+# here, and a client id and secret must never be committed.
+oauth-client.json

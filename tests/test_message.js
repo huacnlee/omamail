@@ -731,4 +731,35 @@ assert.strictEqual(message.fromHeader("jane@example.com", "Jane Roe"),
 assert.strictEqual(message.parseAddress(message.addressHeader("jane@example.com", "Jane Roe")).name,
   "Jane Roe", "what is written comes back")
 
+// A date that parsed to nothing is no time at all, not "undefined NaN, NaN".
+//
+// An Invalid Date is still an object, so it walked past the null check; every
+// comparison inside is false against NaN, so it fell out the bottom as
+// `MONTHS[NaN] + " " + NaN + ", " + NaN`. That string was on every row of the
+// Gmail list, because the window was rebuilding the date from the summary's
+// `time` — which `summarize` has already rendered as "23m" or "Fri".
+assert.strictEqual(message.relativeTime(new Date("Fri"), new Date()), "")
+assert.strictEqual(message.relativeTime(new Date("nonsense"), new Date()), "")
+assert.strictEqual(message.fullTime(new Date("Fri")), "")
+assert.strictEqual(message.relativeTime(null, new Date()), "")
+
+// And a row that has been through `summarize` and the list cache — where the
+// `Date` became the ISO string `JSON.stringify` left behind — still renders a
+// real time from its `date`, in every branch the format has.
+var reference = new Date("2026-08-30T18:30:00Z")
+function cachedRow(agoMs) {
+  var summary = message.summarize({
+    id: "1",
+    internalDate: String(reference.getTime() - agoMs),
+    payload: { headers: [{ name: "Subject", value: "Hi" }] }
+  }, reference)
+  return JSON.parse(JSON.stringify(summary))
+}
+;[30e3, 23 * 60e3, 3 * 864e5, 40 * 864e5, 730 * 864e5].forEach(function(ago) {
+  var rendered = message.relativeTime(new Date(cachedRow(ago).date), reference)
+  assert.strictEqual(rendered.indexOf("NaN"), -1, "no NaN in " + rendered)
+  assert.strictEqual(rendered.indexOf("undefined"), -1, "no undefined in " + rendered)
+  assert.ok(rendered.length > 0, "a cached row still knows when it arrived")
+})
+
 console.log("test_message.js ok")

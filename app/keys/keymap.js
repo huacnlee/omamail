@@ -146,6 +146,29 @@ var BINDINGS = [
   { id: "zoomReset", keys: ["Ctrl+Shift+0"], contexts: ["reader"],
     group: "Reading", label: "Reset the zoom" },
 
+  // The two rows this table has that the QML one does not, and the second
+  // deliberate divergence in this file — `helpGroups`' `available` argument is
+  // the first, and both exist for the same reason: what a key can mean here is
+  // decided by what the host can do.
+  //
+  // Qt's reader needs neither. `MessageReader.qml` draws the body in a
+  // read-only `TextEdit` with `selectByMouse`, so dragging, copying and — once
+  // it holds the keyboard — select-all are the widget's own, and no binding has
+  // to exist for any of them. This host cannot register
+  // a text element with the shell's selection layer at all, so the two things
+  // that were free there are two rows here. `docs/KEYS.md` says so beneath the
+  // table it shares with the plugin, and `tests/test_app_keymap.mjs` holds it
+  // to that.
+  //
+  // `Ctrl+A` is safe to claim: the context is `reader` alone, so it is not live
+  // in a draft or a query, and inside the selecting mode's own surface the
+  // host's editor binds it one level deeper in the dispatch path — the deepest
+  // matching context wins, so a focused textarea keeps its own select-all.
+  { id: "copyBody", keys: ["y"], contexts: ["reader"],
+    group: "Reading", label: "Copy the message text" },
+  { id: "selectAll", keys: ["Ctrl+A"], contexts: ["reader"],
+    group: "Reading", label: "Select the message text" },
+
   { id: "refresh", keys: ["F5"], contexts: ANY,
     group: "Mailbox", label: "Check for mail" },
   { id: "settings", keys: ["Ctrl+,"], contexts: ANY,
@@ -296,11 +319,20 @@ function hintTextFor(binding, context) {
 
 // Grouped in the order the groups first appear in the table, so the sheet's
 // shape is a property of the table rather than a second list to maintain.
-function helpGroups() {
+//
+// `available` is the ids the host actually answers to, and it is a divergence
+// from the QML copy of this table on purpose: the plugin's KeyRouter installs
+// every row, and this host cannot — gpui gives an `Input` no focus handle to
+// move the keyboard into, so `/` has nowhere to go. A sheet is a promise about
+// the keyboard, and a row for a key nothing answers breaks it. Omitted, every
+// row is drawn, which is what the QML wants.
+function helpGroups(available) {
   var groups = []
   var byName = ({})
+  var only = available && typeof available.has === "function" ? available : null
   for (var i = 0; i < BINDINGS.length; i++) {
     var binding = BINDINGS[i]
+    if (only && !only.has(binding.id)) continue
     if (!byName[binding.group]) {
       byName[binding.group] = ({ name: binding.group, rows: [] })
       groups.push(byName[binding.group])
@@ -350,8 +382,8 @@ function helpWeight(group) {
 // Split in order rather than packed by size: a reader who knows the sheet finds
 // a group where it has always been, and "smallest column so far" moves them
 // about every time a binding is added.
-function helpColumns(count) {
-  var groups = helpGroups()
+function helpColumns(count, available) {
+  var groups = helpGroups(available)
   var columns = Math.max(1, Math.min(groups.length, Math.floor(Number(count)) || 1))
   var out = []
   for (var c = 0; c < columns; c++) out.push([])

@@ -217,6 +217,25 @@ OMAMAIL_PICK_OUT=
 export OMAMAIL_PICK_EXIT OMAMAIL_PICK_OUT
 answer=$(sh "$script" pick)
 check "a cancelled picker is cancelled, not an error" "$(json_field error "$answer")" "cancelled"
+
+# `choose` is the same chooser answering with what each file is rather than
+# only where it is. The GPUI client sends an attachment by path and its host
+# opens the file when the message goes, so the bytes never need to cross.
+printf '%%PDF-1.4\n' > "$work/chosen.pdf"
+OMAMAIL_PICK_EXIT=0
+OMAMAIL_PICK_OUT="$work/chosen.pdf"
+export OMAMAIL_PICK_EXIT OMAMAIL_PICK_OUT
+answer=$(sh "$script" choose)
+check "choose says ok" "$(json_field ok "$answer")" "True"
+chosen=$(printf '%s' "$answer" | python3 -c 'import json,sys
+files = json.load(sys.stdin)["files"]
+print(len(files), files[0]["filename"], files[0]["mimeType"], files[0]["size"], "data" in files[0])')
+check "choose describes the file without its bytes" "$chosen" "1 chosen.pdf application/pdf 9 False"
+OMAMAIL_PICK_EXIT=1
+OMAMAIL_PICK_OUT=
+export OMAMAIL_PICK_EXIT OMAMAIL_PICK_OUT
+answer=$(sh "$script" choose)
+check "a cancelled choose is cancelled, not an error" "$(json_field error "$answer")" "cancelled"
 unset OMAMAIL_PICK_OUT OMAMAIL_PICK_EXIT
 
 # forget only deletes files this script wrote into the compose dir.

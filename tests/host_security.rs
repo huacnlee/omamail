@@ -18,14 +18,15 @@ fn serial_process_test() -> MutexGuard<'static, ()> {
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
+use omamail::gmail_setup::{GRANT, SCOPES};
 use omamail::platform::{
     commands::{
         CommandError, CommandPolicy, HeyOperation, ProcessRunner, Resolver, SystemProcessRunner,
         TransportOperation,
     },
     secrets::{
-        MemorySecretStore, Secret, SecretKey, SecretStore, SecretStoreError, SystemSecretStore,
-        keyring_error_class,
+        MemorySecretStore, SUPERSEDED_GMAIL_GRANTS, Secret, SecretKey, SecretStore,
+        SecretStoreError, SystemSecretStore, keyring_error_class,
     },
 };
 
@@ -134,49 +135,67 @@ fn secret_key_preserves_existing_linux_attributes_and_avoids_binary_key_collisio
 
 #[test]
 fn gmail_secret_key_has_ordered_exact_legacy_identities_without_placeholder_attributes() {
-    let key = SecretKey::gmail(
-        "omamail",
-        "omarchy-gmail",
-        "desktop-client",
-        "me@example.com",
-        "calendar-events-v1",
-    )
-    .unwrap();
+    let key = SecretKey::gmail("desktop-client", "me@example.com", GRANT).unwrap();
 
-    assert_eq!(
-        key.secret_service_lookup_attributes(),
+    fn account_id<'a>(service: &'a str, grant: Option<&'a str>) -> Vec<(&'a str, &'a str)> {
+        let mut identity = vec![
+            ("service", service),
+            ("kind", "refresh-token"),
+            ("client-id", "desktop-client"),
+            ("account", "me@example.com"),
+        ];
+        if let Some(grant) = grant {
+            identity.push(("grant", grant));
+        }
+        identity
+    }
+    fn client_only(service: &str) -> Vec<(&str, &str)> {
         vec![
-            vec![
-                ("service", "omamail"),
-                ("kind", "refresh-token"),
-                ("client-id", "desktop-client"),
-                ("account", "me@example.com"),
-                ("grant", "calendar-events-v1"),
-            ],
-            vec![
-                ("service", "omamail"),
-                ("kind", "refresh-token"),
-                ("client-id", "desktop-client"),
-                ("account", "me@example.com"),
-            ],
-            vec![
-                ("service", "omamail"),
-                ("kind", "refresh-token"),
-                ("client-id", "desktop-client"),
-            ],
-            vec![
-                ("service", "omarchy-gmail"),
-                ("kind", "refresh-token"),
-                ("client-id", "desktop-client"),
-                ("account", "me@example.com"),
-            ],
-            vec![
-                ("service", "omarchy-gmail"),
-                ("kind", "refresh-token"),
-                ("client-id", "desktop-client"),
-            ],
+            ("service", service),
+            ("kind", "refresh-token"),
+            ("client-id", "desktop-client"),
+        ]
+    }
+    // Canonical first, then every name this credential has been filed under
+    // before it: the account-and-grant shapes identify exactly one entry, so
+    // they come ahead of the shapes that drop `account` and have to be gated
+    // on the store holding a single match. The superseded service is
+    // `omarchy-gmail` — what the plugin was called — and no other spelling.
+    let mut expected = vec![account_id("omamail", Some(GRANT))];
+    expected.extend(
+        SUPERSEDED_GMAIL_GRANTS
+            .iter()
+            .map(|superseded| account_id("omamail", Some(superseded))),
+    );
+    expected.extend([
+        account_id("omamail", None),
+        client_only("omamail"),
+        account_id("omarchy-gmail", None),
+        client_only("omarchy-gmail"),
+    ]);
+    assert_eq!(key.secret_service_lookup_attributes(), expected);
+}
+
+/// The grant is a name, not a permission list, and the names below all stood
+/// for the same three permissions. A narrower one appearing here would hand a
+/// mailbox a token that cannot do what the window offers.
+#[test]
+fn superseded_gmail_grants_are_frozen_names_of_the_current_permissions() {
+    assert_eq!(
+        SUPERSEDED_GMAIL_GRANTS,
+        [
+            "calendar-events-v1",
+            "openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events",
         ]
     );
+    // Every superseded name is a name, so none of them may be the current one:
+    // a duplicate would have the reader look twice in the same place and call
+    // the second look a migration.
+    assert!(!SUPERSEDED_GMAIL_GRANTS.contains(&GRANT));
+    // The scope string is not the grant, and the day it becomes one again is
+    // the day every stored credential is renamed out from under the reader.
+    assert_ne!(GRANT, SCOPES);
 }
 
 #[test]
@@ -258,7 +277,8 @@ fn linux_store_migrates_first_legacy_match_to_canonical_and_clears_it() {
 command="$1"
 shift
 case "$command:$*" in
-  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant calendar-events-v1") exit 1 ;;
+  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant gmail.modify gmail.send calendar.events") exit 1 ;;
+  search:*grant*) exit 1 ;;
   search:*)
     printf '[legacy]\n'
     printf 'attribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = me@example.com\n' >&2
@@ -272,17 +292,44 @@ esac
     );
     let log = _directory.path().join("log");
     let store = SystemSecretStore::with_secret_tool(&tool, Duration::from_secs(1), true);
-    let key = SecretKey::gmail(
-        "omamail",
-        "omarchy-gmail",
-        "desktop-client",
-        "me@example.com",
-        "calendar-events-v1",
-    )
-    .unwrap();
+    let key = SecretKey::gmail("desktop-client", "me@example.com", GRANT).unwrap();
 
     assert_eq!(store.get(&key).unwrap().unwrap().expose(), "legacy-secret");
     assert_eq!(fs::read_to_string(log).unwrap(), "searchlookupstoreclear");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_store_adopts_a_superseded_grant_name_without_taking_it_away() {
+    let _process_guard = serial_process_test();
+    let (_directory, tool) = executable_fixture(
+        r##"#!/bin/sh
+command="$1"
+shift
+case "$command:$*" in
+  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant gmail.modify gmail.send calendar.events") exit 1 ;;
+  "search:--all --unlock service omamail kind refresh-token client-id desktop-client account me@example.com grant calendar-events-v1")
+    printf '[plugin]\n'
+    printf 'attribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = me@example.com\nattribute.grant = calendar-events-v1\n' >&2
+    printf search >> "@DIR@/log" ;;
+  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant calendar-events-v1")
+    printf plugin-secret; printf lookup >> "@DIR@/log" ;;
+  "store:--label=Omamail secret service omamail kind refresh-token client-id desktop-client account me@example.com grant gmail.modify gmail.send calendar.events")
+    IFS= read -r secret; [ "$secret" = plugin-secret ] || exit 9; printf store >> "@DIR@/log" ;;
+  clear:*) printf clear >> "@DIR@/log" ;;
+  *) exit 8 ;;
+esac
+"##,
+    );
+    let log = _directory.path().join("log");
+    let store = SystemSecretStore::with_secret_tool(&tool, Duration::from_secs(1), true);
+    let key = SecretKey::gmail("desktop-client", "me@example.com", GRANT).unwrap();
+
+    assert_eq!(store.get(&key).unwrap().unwrap().expose(), "plugin-secret");
+    // Copied under today's name and left where it was. The QML plugin ships
+    // from this repository, reads `calendar-events-v1`, and is still installed
+    // beside this window: adopting the credential must not sign it out.
+    assert_eq!(fs::read_to_string(log).unwrap(), "searchlookupstore");
 }
 
 #[cfg(target_os = "linux")]
@@ -294,7 +341,8 @@ fn linux_store_never_reads_an_account_fallback_when_search_finds_named_siblings(
 command="$1"
 shift
 case "$command:$*" in
-  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant calendar-events-v1") exit 1 ;;
+  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant gmail.modify gmail.send calendar.events") exit 1 ;;
+  search:*grant*) exit 1 ;;
   search:*)
     printf '[one]\n[other]\n[legacy]\n'
     printf 'attribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = me@example.com\nattribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = other@example.com\nattribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\n' >&2
@@ -306,14 +354,7 @@ esac
     );
     let log = _directory.path().join("log");
     let store = SystemSecretStore::with_secret_tool(&tool, Duration::from_secs(1), true);
-    let key = SecretKey::gmail(
-        "omamail",
-        "omarchy-gmail",
-        "desktop-client",
-        "me@example.com",
-        "calendar-events-v1",
-    )
-    .unwrap();
+    let key = SecretKey::gmail("desktop-client", "me@example.com", GRANT).unwrap();
 
     assert_eq!(store.get(&key).unwrap(), None);
     assert_eq!(fs::read_to_string(log).unwrap(), "searchsearchsearchsearch");
@@ -328,7 +369,8 @@ fn linux_store_refuses_multiple_accountless_legacy_entries() {
 command="$1"
 shift
 case "$command:$*" in
-  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant calendar-events-v1") exit 1 ;;
+  "lookup:service omamail kind refresh-token client-id desktop-client account me@example.com grant gmail.modify gmail.send calendar.events") exit 1 ;;
+  search:*grant*) exit 1 ;;
   search:*)
     printf '[old-one]\n[old-two]\n'
     printf 'attribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = me@example.com\nattribute.service = omamail\nattribute.kind = refresh-token\nattribute.client-id = desktop-client\nattribute.account = me@example.com\n' >&2
@@ -340,14 +382,7 @@ esac
     );
     let log = _directory.path().join("log");
     let store = SystemSecretStore::with_secret_tool(&tool, Duration::from_secs(1), true);
-    let key = SecretKey::gmail(
-        "omamail",
-        "omarchy-gmail",
-        "desktop-client",
-        "me@example.com",
-        "calendar-events-v1",
-    )
-    .unwrap();
+    let key = SecretKey::gmail("desktop-client", "me@example.com", GRANT).unwrap();
 
     assert_eq!(store.get(&key).unwrap(), None);
     assert_eq!(fs::read_to_string(log).unwrap(), "searchsearchsearchsearch");

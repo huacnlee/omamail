@@ -65,8 +65,6 @@ impl GoogleProcessRunner for Runner {
 fn run(transport: &RestrictedGoogleTransport<'_>) -> Result<(), GmailError> {
     let store = MemorySecretStore::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify",
@@ -78,8 +76,6 @@ fn run(transport: &RestrictedGoogleTransport<'_>) -> Result<(), GmailError> {
         transport,
         &TOKENS,
         GmailExecutorConfig::new(
-            "omamail",
-            "old",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify",
@@ -107,8 +103,6 @@ fn run_with_tokens(
 ) -> Result<(), GmailError> {
     let store = MemorySecretStore::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify",
@@ -120,8 +114,6 @@ fn run_with_tokens(
         transport,
         tokens,
         GmailExecutorConfig::new(
-            "omamail",
-            "old",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify",
@@ -201,7 +193,7 @@ printf '%s\n' "$@" >> '{}'
 config=$(cat)
 printf '%s\n---\n' "$config" >> '{}'
 case "$config" in
-  *oauth2.googleapis.com/token*) printf '{{"access_token":"access-secret","token_type":"Bearer","expires_in":3600}}\nOMAMAIL-STATUS:200\n' ;;
+  *oauth2.googleapis.com/token*) printf '{{"access_token":"access-secret","token_type":"Bearer","expires_in":3600,"scope":"openid https://www.googleapis.com/auth/gmail.modify","id_token":"header.payload.signature","refresh_token_expires_in":604800}}\nOMAMAIL-STATUS:200\n' ;;
   *) printf '{{"messages":[]}}\nOMAMAIL-STATUS:200\n' ;;
 esac
 "#, args.display(), capture.display())).unwrap();
@@ -234,6 +226,12 @@ esac
     assert!(configs.contains("Authorization: Bearer access-secret"));
     assert!(!configs.contains("Authorization: Bearer refresh-secret"));
     assert!(!format!("{tokens:?} {transport:?}").contains("secret"));
+    // The reply above is the one Google actually sends this client, not a
+    // trimmed one: `openid` is in the scope list so every refresh carries an
+    // `id_token`, and a project still in Testing carries
+    // `refresh_token_expires_in` too. Reading it strictly refused every access
+    // token and left the message list empty on a machine where nothing else was
+    // wrong — the fixture being minimal is why no test saw it.
 }
 
 #[cfg(unix)]
@@ -258,6 +256,20 @@ fn fake_curl_receives_secret_url_and_pins_only_in_config_stdin() {
     assert!(config.contains("max-redirs = 0"));
     assert!(config.contains("resolve = \"gmail.googleapis.com:443:142.250.1.1\""));
     assert!(config.contains("https://gmail.googleapis.com/gmail/v1/users/me/messages"));
+    // A curl boolean takes no value. `location = false` reads like it turns
+    // redirect-following off; curl 8 calls it trailing garbage and exits 2
+    // before opening a socket, which reached the window as "Google could not
+    // be reached" and made every Gmail call fail on a machine whose network was
+    // fine. Redirects are off by default and `max-redirs = 0` says so again, so
+    // the line was never needed. The shell transports never had it — this is
+    // the Rust port's own regression, and this assertion is what stops it
+    // coming back for `location` or for any other flag.
+    assert!(
+        !config
+            .lines()
+            .any(|line| line.ends_with(" = true") || line.ends_with(" = false")),
+        "a curl boolean is written bare or not at all, never with a value"
+    );
 }
 
 #[test]
@@ -310,5 +322,59 @@ fn system_google_transport_fails_closed_on_windows() {
     assert_eq!(
         run(&transport).unwrap_err(),
         GmailError::PlatformUnavailable
+    );
+}
+
+// A machine whose resolver belongs to a proxy answers every proxied name out of
+// the benchmarking range. Refusing that address refused the only address that
+// worked, and `InvalidRequest` was all anybody saw — so the fixed Google hosts
+// go unpinned there and let TLS do the authenticating. A mixture is still the
+// rebinding signature and is still refused.
+struct FakeIpResolver;
+impl GoogleResolver for FakeIpResolver {
+    fn resolve(&self, _: &str, _: u16) -> std::io::Result<Vec<std::net::IpAddr>> {
+        Ok(vec!["198.18.2.176".parse().unwrap()])
+    }
+}
+
+struct MixedResolver;
+impl GoogleResolver for MixedResolver {
+    fn resolve(&self, _: &str, _: u16) -> std::io::Result<Vec<std::net::IpAddr>> {
+        Ok(vec![
+            "142.250.1.1".parse().unwrap(),
+            "127.0.0.1".parse().unwrap(),
+        ])
+    }
+}
+
+struct PublicResolver;
+impl GoogleResolver for PublicResolver {
+    fn resolve(&self, _: &str, _: u16) -> std::io::Result<Vec<std::net::IpAddr>> {
+        Ok(vec!["142.250.1.1".parse().unwrap()])
+    }
+}
+
+#[test]
+fn a_wholly_proxied_resolver_is_carried_unpinned_and_a_mixed_one_is_still_refused() {
+    let public =
+        omamail::providers::google_transport::pins_for("oauth2.googleapis.com", &PublicResolver);
+    assert_eq!(
+        public.as_deref(),
+        Ok(["142.250.1.1".parse().unwrap()].as_slice()),
+        "an ordinary machine still pins every address it was given"
+    );
+
+    let proxied =
+        omamail::providers::google_transport::pins_for("oauth2.googleapis.com", &FakeIpResolver);
+    assert_eq!(
+        proxied.as_deref(),
+        Ok([].as_slice()),
+        "a fake-IP answer carries no pin rather than refusing the call"
+    );
+
+    assert!(
+        omamail::providers::google_transport::pins_for("oauth2.googleapis.com", &MixedResolver)
+            .is_err(),
+        "one public answer beside one loopback answer is rebinding, not a proxy"
     );
 }

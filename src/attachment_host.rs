@@ -15,6 +15,14 @@ use serde::Deserialize;
 
 const MAX_ENCODED: usize = 1_398_104;
 const MAX_DECODED: usize = 1_048_576;
+/// Twenty files at four kilobytes of path each, and room for the JSON around
+/// them. The chooser answers with metadata only, so a large answer is a
+/// malformed one rather than a big attachment.
+const MAX_CHOICE_BYTES: usize = 128 * 1024;
+/// The same ceilings the send path holds — `MAX_ATTACHMENTS` and
+/// `MAX_ATTACHMENT_TOTAL_BYTES` in `imap_host` and in `main.js`.
+const MAX_CHOICES: usize = 20;
+const MAX_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct AttachmentError;
@@ -156,6 +164,144 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
             .push((directory, filename.to_owned()));
         Ok(())
     }
+}
+
+/// How the user names the files a draft carries.
+///
+/// GPUI has no file dialog of its own and this window must not grow one: a
+/// chooser drawn here would be a second file browser on a desktop that already
+/// ships one, and it would be drawing it from the process that is holding the
+/// draft. The QML plugin answered the same question with
+/// `scripts/attachment.sh pick`, which asks the desktop's FileChooser portal
+/// through `omarchy-file-select` and falls back to `zenity` — a chooser in its
+/// own process, so one that dies leaves the draft standing. That script is
+/// already in this checkout and already tested, and the standalone client reads
+/// its other helpers (`mail-transport.sh`, `image-fetch.sh`) from the same
+/// place, so it is what this asks too.
+///
+/// It asks for `choose` rather than `pick`: this client sends an attachment by
+/// path and its host opens the file at send time, so what it needs back is what
+/// each file *is* — name, media type, size — and never the bytes.
+pub trait FileChooser: Send + Sync {
+    fn choose(&self) -> Result<String, AttachmentError>;
+}
+
+/// The shipped helper, run as a child process. No deadline, deliberately: the
+/// user is looking at a file browser, and a picker killed out from under
+/// somebody choosing a file is worse than one that stays open.
+pub struct ScriptChooser {
+    script: PathBuf,
+}
+impl ScriptChooser {
+    pub fn new(script: PathBuf) -> Self {
+        Self { script }
+    }
+}
+impl FileChooser for ScriptChooser {
+    fn choose(&self) -> Result<String, AttachmentError> {
+        let output = Command::new(&self.script)
+            .arg("choose")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| AttachmentError)?;
+        if !output.status.success() || output.stdout.len() > MAX_CHOICE_BYTES {
+            return Err(AttachmentError);
+        }
+        String::from_utf8(output.stdout).map_err(|_| AttachmentError)
+    }
+}
+
+/// What the chooser said, checked before the window is allowed to believe it.
+///
+/// The names come off a stranger's disk and go into a `Content-Type` and a
+/// `Content-Disposition` parameter, so they are held to what `main.js` and
+/// `imap_host::validate_attachments` hold them to — and held here as well as
+/// there, because a file the send would refuse should be refused while the user
+/// is still looking at the picker rather than after they press Send.
+pub fn choose_files(chooser: &dyn FileChooser) -> String {
+    let answer = match chooser.choose() {
+        Ok(text) => text,
+        Err(_) => return refused("The file picker could not be run"),
+    };
+    let value: serde_json::Value = match serde_json::from_str(&answer) {
+        Ok(value) => value,
+        Err(_) => return refused("The file picker could not be read"),
+    };
+    if value.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        let error = value
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .filter(|text| text.len() <= 256)
+            .unwrap_or("No file was attached");
+        return refused(error);
+    }
+    let Some(listed) = value.get("files").and_then(serde_json::Value::as_array) else {
+        return refused("The file picker could not be read");
+    };
+    if listed.is_empty() || listed.len() > MAX_CHOICES {
+        return refused("That is more files than one message can carry");
+    }
+    let mut files = Vec::with_capacity(listed.len());
+    let mut total: u64 = 0;
+    for entry in listed {
+        let path = entry.get("path").and_then(serde_json::Value::as_str);
+        let filename = entry.get("filename").and_then(serde_json::Value::as_str);
+        let media = entry.get("mimeType").and_then(serde_json::Value::as_str);
+        let size = entry.get("size").and_then(serde_json::Value::as_u64);
+        let (Some(path), Some(filename), Some(media), Some(size)) = (path, filename, media, size)
+        else {
+            return refused("The file picker could not be read");
+        };
+        // Absolute and unwalked: the host opens this path, and one that still
+        // has a "." or ".." in it is a traversal assembled out of a name.
+        if !path.starts_with('/')
+            || path.len() > 4096
+            || path.chars().any(char::is_control)
+            || path.split('/').any(|part| part == "." || part == "..")
+        {
+            return refused("That file cannot be attached from where it is");
+        }
+        if checked_filename(filename).is_err() || filename.contains(['"', '\\', ';']) {
+            return refused("That file cannot be attached under its own name");
+        }
+        if !valid_media_type(media) {
+            return refused("That file cannot be attached under its own type");
+        }
+        total = total.saturating_add(size);
+        if size > MAX_ATTACHMENT_BYTES || total > MAX_ATTACHMENT_BYTES {
+            return refused("That is more than the 20 MB a message can carry");
+        }
+        files.push(serde_json::json!({
+            "path": path,
+            "filename": filename,
+            "mimeType": media,
+            "size": size,
+        }));
+    }
+    serde_json::to_string(&serde_json::json!({"ok": true, "files": files}))
+        .unwrap_or_else(|_| refused("The file picker could not be read"))
+}
+
+fn refused(error: &str) -> String {
+    serde_json::to_string(&serde_json::json!({"ok": false, "error": error}))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"No file was attached"}"#.to_owned())
+}
+
+/// Two RFC 2045 tokens and nothing else, the way `imap_host` writes one into a
+/// header. A copy rather than a shared helper: this is the boundary check, and
+/// the send-side one has to stay standing whatever happens here.
+fn valid_media_type(value: &str) -> bool {
+    fn token(part: &str) -> bool {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$&^_.+-".contains(&byte))
+    }
+    value
+        .split_once('/')
+        .is_some_and(|(kind, subtype)| token(kind) && token(subtype))
 }
 
 #[cfg(unix)]

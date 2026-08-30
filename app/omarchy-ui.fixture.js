@@ -70,8 +70,11 @@ export default class OmarchyUiFixture extends View {
             )
             .child(rowShell("fixture-row", true, cx).child("Selected row"))
             .child(
+              // Bordered, not accent-filled: the Omarchy kit has no primary
+              // variant, and a solid accent block is louder than anything else
+              // on the desktop.
               button("fixture-action", "Continue", () => {}, cx, {
-                variant: "primary",
+                bordered: true,
               }),
             )
             .child(

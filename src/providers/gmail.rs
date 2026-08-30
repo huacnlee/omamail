@@ -12,6 +12,13 @@ use url::Url;
 
 pub const MAX_RESPONSE_BYTES: usize = 1_048_576;
 pub const MAX_REQUEST_BYTES: usize = 1_048_576;
+// A message being sent carries its attachments inside `raw`, base64 inside the
+// MIME and base64url again around the whole message, so a set of files near
+// the 20 MB send limit is several times the ceiling every other request here
+// is held to. This is deliberately larger than any provider accepts: what a
+// mailbox will take is the provider's answer to give, and a locally invented
+// limit would refuse messages Gmail would have accepted.
+pub const MAX_SEND_BYTES: usize = 40 * 1024 * 1024;
 const MAX_DEADLINE: Duration = Duration::from_secs(120);
 const MAX_ID_BYTES: usize = 2048;
 const MAX_ACTION_IDS: usize = 100;
@@ -23,6 +30,7 @@ const MAX_EMAIL_BYTES: usize = 320;
 const MAX_SAFE_REVISION: u64 = 9_007_199_254_740_991;
 const GMAIL_BASE: &str = "https://gmail.googleapis.com/gmail/v1";
 const CALENDAR_BASE: &str = "https://www.googleapis.com/calendar/v3";
+const MAX_CALENDAR_RESULTS: u16 = 2500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestIdentity {
@@ -323,24 +331,17 @@ pub struct GmailExecutor<'a> {
 }
 
 pub struct GmailExecutorConfig<'a> {
-    pub service: &'a str,
-    pub renamed_service: &'a str,
     pub client_id: &'a str,
     pub account: &'a str,
     pub grant: &'a str,
 }
 
 impl<'a> GmailExecutorConfig<'a> {
-    pub fn new(
-        service: &'a str,
-        renamed_service: &'a str,
-        client_id: &'a str,
-        account: &'a str,
-        grant: &'a str,
-    ) -> Self {
+    /// Names no keyring service: `SecretKey::gmail` owns every name a Gmail
+    /// refresh token is filed under, so the reader cannot be pointed at one
+    /// the writer never used.
+    pub fn new(client_id: &'a str, account: &'a str, grant: &'a str) -> Self {
         Self {
-            service,
-            renamed_service,
             client_id,
             account,
             grant,
@@ -360,14 +361,8 @@ impl<'a> GmailExecutor<'a> {
         if !valid_email(config.account) {
             return Err(GmailError::InvalidRequest);
         }
-        let key = SecretKey::gmail(
-            config.service,
-            config.renamed_service,
-            config.client_id,
-            config.account,
-            config.grant,
-        )
-        .map_err(|_| GmailError::InvalidRequest)?;
+        let key = SecretKey::gmail(config.client_id, config.account, config.grant)
+            .map_err(|_| GmailError::InvalidRequest)?;
         Ok(Self {
             secrets,
             transport,
@@ -512,7 +507,7 @@ fn build_request(
         } => action_request(action, message_ids, deadline),
         GmailOperation::Send { raw, thread_id } => {
             if raw.is_empty()
-                || raw.len() > MAX_REQUEST_BYTES
+                || raw.len() > MAX_SEND_BYTES
                 || thread_id.as_ref().is_some_and(|value| !valid_id(value))
             {
                 return Err(GmailError::InvalidRequest);
@@ -524,33 +519,36 @@ fn build_request(
                 }
                 body["threadId"] = Value::String(thread);
             }
-            request_json(
+            request_json_bounded(
                 "POST",
                 gmail_url("/users/me/messages/send")?,
                 body,
                 deadline,
+                MAX_SEND_BYTES,
             )
         }
         GmailOperation::DraftCreate { raw } => {
-            if raw.is_empty() || raw.len() > MAX_REQUEST_BYTES {
+            if raw.is_empty() || raw.len() > MAX_SEND_BYTES {
                 return Err(GmailError::InvalidRequest);
             }
-            request_json(
+            request_json_bounded(
                 "POST",
                 gmail_url("/users/me/drafts")?,
                 json!({"message":{"raw":raw}}),
                 deadline,
+                MAX_SEND_BYTES,
             )
         }
         GmailOperation::DraftUpdate { draft_id, raw } => {
-            if !valid_draft_id(&draft_id) || raw.is_empty() || raw.len() > MAX_REQUEST_BYTES {
+            if !valid_draft_id(&draft_id) || raw.is_empty() || raw.len() > MAX_SEND_BYTES {
                 return Err(GmailError::InvalidRequest);
             }
-            request_json(
+            request_json_bounded(
                 "PUT",
                 gmail_url(&format!("/users/me/drafts/{}", path_segment(&draft_id)?))?,
                 json!({"message":{"raw":raw}}),
                 deadline,
+                MAX_SEND_BYTES,
             )
         }
         GmailOperation::DraftDelete { draft_id } if valid_draft_id(&draft_id) => {
@@ -563,14 +561,15 @@ fn build_request(
         }
         GmailOperation::DraftDelete { .. } => Err(GmailError::InvalidRequest),
         GmailOperation::DraftSend { draft_id, raw } => {
-            if !valid_draft_id(&draft_id) || raw.is_empty() || raw.len() > MAX_REQUEST_BYTES {
+            if !valid_draft_id(&draft_id) || raw.is_empty() || raw.len() > MAX_SEND_BYTES {
                 return Err(GmailError::InvalidRequest);
             }
-            request_json(
+            request_json_bounded(
                 "POST",
                 gmail_url("/users/me/drafts/send")?,
                 json!({"id":draft_id,"message":{"raw":raw}}),
                 deadline,
+                MAX_SEND_BYTES,
             )
         }
         GmailOperation::DraftList {
@@ -617,7 +616,13 @@ fn build_request(
                 .append_pair("timeMin", &time_min)
                 .append_pair("timeMax", &time_max)
                 .append_pair("singleEvents", "true")
-                .append_pair("orderBy", "startTime");
+                .append_pair("orderBy", "startTime")
+                // Google's own default is 250, which is a quiet ceiling on a
+                // busy month rather than an error: the events past it are
+                // simply not in the answer and nothing says so. 2500 is the
+                // most the API will give for one range, and it is what the
+                // window asks for.
+                .append_pair("maxResults", &MAX_CALENDAR_RESULTS.to_string());
             Ok(GmailHttpRequest::new("GET", url, None, deadline))
         }
         GmailOperation::CalendarCreate { calendar_id, event } => {
@@ -627,7 +632,7 @@ fn build_request(
             calendar_id,
             event_id,
             event,
-        } => calendar_write("PUT", calendar_id, Some(event_id), event, deadline),
+        } => calendar_write("PATCH", calendar_id, Some(event_id), event, deadline),
         GmailOperation::CalendarDelete {
             calendar_id,
             event_id,
@@ -754,8 +759,20 @@ fn request_json(
     body: Value,
     deadline: Duration,
 ) -> Result<GmailHttpRequest, GmailError> {
+    request_json_bounded(method, url, body, deadline, MAX_REQUEST_BYTES)
+}
+
+/// The same, with the ceiling named by the caller: a message being sent is the
+/// one request whose size the files a user attached decide.
+fn request_json_bounded(
+    method: &str,
+    url: Url,
+    body: Value,
+    deadline: Duration,
+    cap: usize,
+) -> Result<GmailHttpRequest, GmailError> {
     let body = serde_json::to_string(&body).map_err(|_| GmailError::InvalidRequest)?;
-    if body.len() > MAX_REQUEST_BYTES {
+    if body.len() > cap {
         return Err(GmailError::InvalidRequest);
     }
     Ok(GmailHttpRequest::new(method, url, Some(body), deadline))
@@ -797,14 +814,22 @@ impl CalendarEvent {
     }
 
     fn to_json(&self) -> Value {
-        json!({
+        let mut body = json!({
             "summary": self.summary,
             "description": self.description,
             "location": self.location,
             "start": self.start.to_json(),
             "end": self.end.to_json(),
-            "recurrence": self.recurrence,
-        })
+        });
+        // A key that is absent is a rule the server keeps. An update is a
+        // PATCH and carries no recurrence at all — the composer does not edit
+        // one, and an explicit empty list is Google's instruction to turn a
+        // series into a single event, which is what writing the key
+        // unconditionally did to every edited event.
+        if !self.recurrence.is_empty() {
+            body["recurrence"] = json!(self.recurrence);
+        }
+        body
     }
 }
 

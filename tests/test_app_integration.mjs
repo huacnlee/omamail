@@ -11,6 +11,7 @@ import Omamail, {
 } from "../app/main.js";
 import { createListCache } from "../app/application/list-cache.js";
 import { renderRail } from "../app/ui/rail.js";
+import { focusHandle } from "./gpui_stub.mjs";
 
 function memoryStorage(initial = null) {
   const values = new Map(
@@ -70,6 +71,7 @@ const cx = {
     spacing: { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
     radius: { sm: 4, md: 8 },
   }),
+  focus_handle: focusHandle,
   bind_keys: (bindings) => {
     boundActions = bindings;
     return 1;
@@ -112,12 +114,17 @@ function expiringContext() {
     taskCx,
   };
 }
+// The rail's user bar shows the mailbox in use and opens the switcher; it is
+// the switcher's rows that change account, the way `AccountSwitcher.qml` does.
+// Clicking the bar itself must not switch anything — there is nothing to
+// switch to until the card is up.
 const railEventCx = { notify() {} };
 let forwardedRailCx = null;
 const rail = renderRail(
   {
     accounts: [{ id: "one", label: "One", provider: "hey", selected: false }],
     mailboxes: [],
+    switcherOpen: true,
     onAccount: (_id, _event, eventCx) => {
       forwardedRailCx = eventCx;
     },
@@ -125,7 +132,7 @@ const rail = renderRail(
   },
   cx,
 );
-elementById(rail, "account-one").clickHandler({}, railEventCx);
+elementById(rail, "account-switcher-one").clickHandler({}, railEventCx);
 assert.equal(forwardedRailCx, railEventCx);
 
 let themeTask = null;
@@ -214,9 +221,42 @@ assert.equal(
       "mail::calendarWeek",
       "mail::calendarMonth",
       "mail::settings",
+      "mail::help",
+      "mail::refresh",
+      "mail::toggleSidebar",
+      "mail::switchAccount",
+      "mail::zoomIn",
+      "mail::zoomOut",
+      "mail::zoomReset",
+      // The two the QML reader had from Qt: it drew the body in a
+      // read-only TextEdit that selected by mouse, and this host cannot
+      // register a text element with the shell's selection layer at all.
+      "mail::copyBody",
+      "mail::selectAll",
+      // The two numbered rows carry their slot in the action's own name: an
+      // action is handed to a handler as a name and nothing else, so ten keys
+      // on one name are ten keys nothing can tell apart.
+      ...Array.from({ length: 10 }, (_value, slot) => [
+        `mail::goMailbox::${slot}`,
+        `mail::goAccount::${slot}`,
+      ]).flat(),
     ].includes(binding.action),
   ),
   true,
+);
+assert.equal(
+  boundActions.some((binding) => binding.action === "mail::search"),
+  false,
+  "gpui gives an Input no focus handle, so `/` is a key this host cannot honour",
+);
+assert.equal(
+  boundActions.some(
+    (binding) =>
+      binding.action === "mail::goMailbox::2" &&
+      binding.keystroke === "secondary-3",
+  ),
+  true,
+  "Ctrl+3 opens the third row of the rail",
 );
 assert.equal(
   boundActions.some((binding) => binding.action === "mail::archive"),
@@ -853,10 +893,18 @@ assert.deepEqual(
 let rendered = ids(app.render(cx));
 assert.ok(rendered.includes("account-reader@example.com"));
 assert.ok(rendered.includes("message-cached-cursor"));
-assert.ok(rendered.includes("mail-list-pane-fixed"));
+assert.ok(rendered.includes("mail-list-pane"));
+// 1024 units is a three-column window in `App.qml` — the sidebar stands, the
+// list is pinned to its resolved width, and the reader is beside it holding
+// its blank slate. The older assertion here said the reader stayed away,
+// which was true only of the 1194px split threshold this branch replaced.
 assert.ok(
-  !rendered.includes("reader-blank"),
-  "a 1024-unit viewport keeps the reader out of the list route",
+  rendered.includes("mail-rail"),
+  "a 1024-unit viewport is wide enough for the sidebar",
+);
+assert.ok(
+  rendered.includes("reader-blank"),
+  "with no message chosen the reader shows its blank slate rather than nothing",
 );
 
 app.compose.update({ subject: "Keep this draft", body: "Unfinished" });
@@ -946,7 +994,17 @@ assert.deepEqual(
 );
 
 app.openCursor(cx);
-assert.ok(ids(app.render(cx)).includes("reader-loading"));
+// The reader opens on what the list already knows and skeletons the body
+// alone. A whole-pane skeleton hid the sender and the subject, which are the
+// very things that had just become available.
+const opening = app.render(cx);
+assert.ok(!ids(opening).includes("reader-loading"));
+assert.ok(ids(opening).includes("reader-message-header"));
+assert.ok(ids(opening).includes("reader-body-loading"));
+assert.ok(
+  text(opening).includes("Live"),
+  "the header is seeded from the row the reader was opened on",
+);
 completions.shift()({
   ok: true,
   value: {
@@ -972,7 +1030,9 @@ assert.ok(
   "normalized host detail reaches the reader",
 );
 assert.ok(text(app.render(cx)).includes("host body"));
-assert.ok(ids(app.render(cx)).includes("reader-reading-mode"));
+// The mode picker is a segmented track — Reader / Original / Plain — the way
+// `MessageReader.qml` draws it, not a single toggle.
+assert.ok(ids(app.render(cx)).includes("reader-mode-track"));
 assert.ok(ids(app.render(cx)).includes("reader-remote-images-blocked"));
 assert.ok(text(app.render(cx)).includes("Host heading"));
 assert.equal(
@@ -1042,8 +1102,19 @@ const delayedCx = {
 const completionsBeforeDelayedSend = completions.length;
 actionHandler(app.renderCompose(delayedCx), "mail::send")({}, delayedCx);
 assert.equal(completions.length, completionsBeforeDelayedSend);
-assert.ok(requestedSleep > 6900 && requestedSleep <= 7000);
+// A beat, not one sleep for the whole delay. The countdown is worked out from
+// the clock, so something has to make the clock move — sleeping the delay out
+// in one go is why the toast read "Sending in 10s" for ten seconds.
+assert.equal(requestedSleep, 250);
 assert.ok(app.compose.snapshot().pending, "the preference delays delivery");
+// The draft has left the form: the window is back on the list, and the fields
+// behind the toast belong to the next message rather than to the queued one.
+assert.equal(app.state.route, "mail");
+assert.equal(app.compose.snapshot().draft.subject, "");
+assert.equal(
+  app.compose.snapshot().pending.payload.subject,
+  "A retained draft",
+);
 actionHandler(app.render(delayedCx), "mail::undoSend")({}, delayedCx);
 assert.equal(app.compose.snapshot().pending, null);
 assert.equal(app.compose.snapshot().sending, false);
@@ -1092,7 +1163,15 @@ assert.equal(
 while (completions.length > 1)
   completions.shift()({ ok: false, error: "stale calendar request" });
 completions.shift()({ ok: false, error: "calendar unavailable" });
-assert.ok(text(app.render(cx)).includes("calendar unavailable"));
+// Every enabled calendar is read at once now, so a failure names the one that
+// failed rather than leaving the user to guess which of several is down. A
+// signed-in Gmail account's calendar is synthesised from the account, so the
+// name it reports itself under is that address.
+assert.ok(
+  text(app.render(cx)).some((value) =>
+    /^\S+: calendar unavailable$/.test(String(value)),
+  ),
+);
 app.back(cx);
 assert.ok(
   ids(app.render(cx)).includes("calendar"),
@@ -1228,6 +1307,104 @@ assert.equal(
   hostRequestFor({ operation: "configure", contexts: mixedPlan.contexts }),
   null,
   "the generic effect dispatcher cannot configure host contexts",
+);
+// A mailbox with no SMTP server is a supported setup rather than an invalid
+// one: `Imap.validateSettings` has always accepted an empty SMTP host and
+// `Imap.smtpUrl` answers "" for one. It reaches the host as a context carrying
+// no outgoing server, and nothing else about it is relaxed.
+const readOnlyPlan = hostContextsFor(
+  [
+    {
+      id: "imap:read@example.test",
+      email: "read@example.test",
+      provider: "imap",
+      imap: {
+        imapHost: "mail.example.test",
+        imapPort: 993,
+        // What the account store leaves behind for a mailbox that names no
+        // server: an empty host beside its default port.
+        smtpHost: "",
+        smtpPort: 465,
+        username: "read",
+      },
+    },
+  ],
+  [],
+);
+assert.deepEqual(readOnlyPlan.accountErrors, {});
+assert.equal(readOnlyPlan.contexts.length, 1);
+assert.equal(readOnlyPlan.contexts[0].smtpHost, "");
+assert.equal(
+  readOnlyPlan.contexts[0].smtpPort,
+  0,
+  "a mailbox that names no server carries no port for one",
+);
+// The loopback rule still judges whatever hosts are present. A clear-text
+// account with a remote SMTP server is refused as before, and one with none is
+// judged on its IMAP host alone.
+assert.equal(
+  hostContextsFor(
+    [
+      {
+        id: "imap:bridge@example.test",
+        email: "bridge@example.test",
+        provider: "imap",
+        imap: {
+          imapHost: "127.0.0.1",
+          imapPort: 1143,
+          smtpHost: "smtp.example.test",
+          smtpPort: 587,
+          username: "bridge",
+          insecure: true,
+        },
+      },
+    ],
+    [],
+  ).accountErrors["imap:bridge@example.test"],
+  "IMAP settings are invalid",
+);
+assert.equal(
+  hostContextsFor(
+    [
+      {
+        id: "imap:bridge@example.test",
+        email: "bridge@example.test",
+        provider: "imap",
+        imap: {
+          imapHost: "127.0.0.1",
+          imapPort: 1143,
+          smtpHost: "",
+          smtpPort: 0,
+          username: "bridge",
+          insecure: true,
+        },
+      },
+    ],
+    [],
+  ).contexts.length,
+  1,
+);
+// And a host that is present and unusable is still invalid rather than being
+// read as an absent one.
+assert.equal(
+  hostContextsFor(
+    [
+      {
+        id: "imap:bad@example.test",
+        email: "bad@example.test",
+        provider: "imap",
+        imap: {
+          imapHost: "mail.example.test",
+          imapPort: 993,
+          smtpHost: "smtp host.example",
+          smtpPort: 465,
+          username: "bad",
+        },
+      },
+    ],
+    [],
+  ).accountErrors["imap:bad@example.test"],
+  "IMAP settings are invalid",
 );
 const canonicalPlan = hostContextsFor(
   [
@@ -1746,6 +1923,16 @@ imapApp.init(
           id: "imap:reader@example.test",
           email: "reader@example.test",
           provider: "imap",
+          // A mailbox that can answer, which is what the reply below is
+          // about. An IMAP account with no SMTP server is a different
+          // mailbox — see the read-only case further down.
+          imap: {
+            username: "reader@example.test",
+            imapHost: "imap.example.test",
+            imapPort: 993,
+            smtpHost: "smtp.example.test",
+            smtpPort: 465,
+          },
         },
       ],
     }),
@@ -1808,5 +1995,136 @@ assert.equal(
   imapApp.compose.snapshot().draft.references,
   "<imap-root@example.test> <imap-message@example.test>",
 );
+
+// The same mailbox with no SMTP server. `Imap.validateSettings` accepts one and
+// the setup form offers it — "leave empty to read only" — so it opens, lists
+// and reads. What it must not do is offer a Compose, a Reply or a Forward that
+// the send would refuse afterwards, with the message already written: that is
+// the promise `Registry.capabilities` exists to stop, made about an account
+// rather than about a service.
+const readOnlyCalls = [];
+const readOnlyApp = new Omamail();
+readOnlyApp.init(
+  {
+    storage: memoryStorage({
+      version: 1,
+      activeId: "imap:silent@example.test",
+      accounts: [
+        {
+          id: "imap:silent@example.test",
+          email: "silent@example.test",
+          provider: "imap",
+          imap: {
+            username: "silent@example.test",
+            imapHost: "imap.example.test",
+            imapPort: 993,
+            smtpHost: "",
+            smtpPort: 465,
+          },
+        },
+      ],
+    }),
+    execute(effect, complete) {
+      readOnlyCalls.push({ effect, complete });
+      return { cancel() {} };
+    },
+    width: 1024,
+  },
+  cx,
+);
+assert.equal(readOnlyCalls[0].effect.kind, "imap.runtime");
+readOnlyCalls.shift().complete({
+  ok: true,
+  value: { specialUse: {}, supportsMove: false },
+});
+assert.equal(readOnlyCalls[0].effect.kind, "imap.list");
+readOnlyCalls.shift().complete({
+  ok: true,
+  value: { responseBase64: Buffer.from(imapWire).toString("base64") },
+});
+assert.equal(
+  readOnlyApp.hostConfigurationError,
+  "",
+  "a mailbox with no SMTP server is a configured mailbox",
+);
+const readOnlyHeader = elementById(readOnlyApp.render(cx), "mail-header-right");
+assert.ok(readOnlyHeader, "the mail screen is drawn");
+assert.ok(
+  ids(readOnlyHeader).includes("mail-refresh"),
+  "and keeps everything the mailbox can still do",
+);
+assert.equal(
+  ids(readOnlyHeader).includes("compose"),
+  false,
+  "no Compose where the mailbox has nowhere to hand a message to",
+);
+assert.equal(
+  text(readOnlyApp.render(cx)).some((line) => String(line).includes("compose")),
+  false,
+  "and the status row does not offer the key either",
+);
+// A key is not a button, so `c` has to be refused as well — it is bound in
+// every mail context whatever mailbox is open.
+readOnlyApp.openCompose(cx);
+assert.equal(
+  readOnlyApp.controller.snapshot().mail.status,
+  "This mailbox has no SMTP server set, so it cannot send",
+);
+assert.equal(
+  readOnlyApp.state.route,
+  "mail",
+  "the refusal happens before the compose form opens",
+);
+readOnlyApp.openResponse("reply", cx);
+assert.equal(
+  readOnlyApp.controller.snapshot().mail.status,
+  "This mailbox has no SMTP server set, so it cannot send",
+);
+assert.equal(readOnlyApp.state.route, "mail");
+
+// And the reader itself. The message opens and reads — everything this mailbox
+// is for still works — but the three answering buttons are gone with the
+// Compose, because a mailbox that cannot send cannot answer either.
+readOnlyApp.openCursor(cx);
+assert.equal(readOnlyCalls[0].effect.kind, "imap.transport");
+readOnlyCalls.shift().complete({
+  ok: true,
+  value: { responseBase64: Buffer.from(imapWire).toString("base64") },
+});
+const readOnlyReader = ids(readOnlyApp.render(cx));
+assert.ok(readOnlyReader.includes("reader-content-9:INBOX"));
+assert.ok(
+  readOnlyReader.includes("reader-action-trash"),
+  "what is left of the toolbar is what the mailbox can still do",
+);
+for (const action of ["reply", "reply-all", "forward"])
+  assert.equal(
+    readOnlyReader.includes(`reader-action-${action}`),
+    false,
+    `${action} is not offered by a mailbox that cannot send`,
+  );
+
+// The thunk between Settings and the controller. Both ends have tests of their
+// own; this is the wire, and a page size that stopped at `localStorage` is the
+// defect it exists to catch.
+await imapApp.settings.setPreference("maxMessages", 50);
+imapCalls.length = 0;
+assert.equal(imapApp.controller.refresh(), true);
+assert.equal(imapCalls.at(-1).effect.maxResults, 50);
+assert.equal(imapCalls.at(-1).effect.hostOperation.maxResults, 50);
+
+// A default search already saved is in the box when the page opens. It is the
+// one preference drawn as a text field, and an empty one beside a stored value
+// says there is no default search when there is.
+{
+  const storage = memoryStorage();
+  storage.setItem("omamail.defaultQuery", "in:inbox -category:promotions");
+  const seeded = new Omamail();
+  seeded.init({ storage, execute() { return { cancel() {} }; } }, cx);
+  assert.equal(
+    seeded.settingsDefaultQuery.value(),
+    "in:inbox -category:promotions",
+  );
+}
 
 console.log("app integration tests passed");

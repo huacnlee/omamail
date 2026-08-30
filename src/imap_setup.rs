@@ -146,11 +146,17 @@ impl<V: SetupVerifier, S: SecretStore> ImapSetupAuthority<V, S> {
         let started = Instant::now();
         let credentials = Secret::new(format!("{}:{}", setup.username, setup.password.expose()));
         self.verifier.verify(&setup.imap, &credentials, deadline)?;
-        let remaining = deadline
-            .checked_sub(started.elapsed())
-            .filter(|value| !value.is_zero())
-            .ok_or(SetupError::TimedOut)?;
-        self.verifier.verify(&setup.smtp, &credentials, remaining)?;
+        // A mailbox with no SMTP server has nothing to verify a password
+        // against on that side, and verifying against a server the user did not
+        // name would be inventing one. The form says "leave empty to read
+        // only"; this is what makes that true.
+        if let Some(smtp) = &setup.smtp {
+            let remaining = deadline
+                .checked_sub(started.elapsed())
+                .filter(|value| !value.is_zero())
+                .ok_or(SetupError::TimedOut)?;
+            self.verifier.verify(smtp, &credentials, remaining)?;
+        }
         if started.elapsed() >= deadline {
             return Err(SetupError::TimedOut);
         }
@@ -237,7 +243,9 @@ struct ValidatedSetup {
     smtp_port: u16,
     insecure: bool,
     imap: SetupTarget,
-    smtp: SetupTarget,
+    // Absent for a read-only mailbox, whose `smtp_host` is "" and whose
+    // `smtp_port` is 0 all the way to the stored account.
+    smtp: Option<SetupTarget>,
 }
 impl ValidatedSetup {
     fn new(request: VerifyRequest) -> Result<Self, SetupError> {
@@ -250,17 +258,33 @@ impl ValidatedSetup {
             return Err(SetupError::Invalid);
         }
         let imap_host = canonical_host(&request.imap_host)?;
-        let smtp_host = canonical_host(&request.smtp_host)?;
-        if request.insecure && (!literal_loopback(&imap_host) || !literal_loopback(&smtp_host)) {
+        // An empty SMTP server is the one waiver here. A named one is still
+        // canonicalised, still needs a port, and still has to be loopback when
+        // the session is in clear text — a read-only mailbox must not become a
+        // way to skip that rule for a server that is present.
+        let smtp_host = if request.smtp_host.trim().is_empty() {
+            None
+        } else {
+            Some(canonical_host(&request.smtp_host)?)
+        };
+        if request.insecure
+            && (!literal_loopback(&imap_host)
+                || smtp_host
+                    .as_deref()
+                    .is_some_and(|host| !literal_loopback(host)))
+        {
             return Err(SetupError::InsecureRemote);
         }
         let imap_port = request
             .imap_port
             .unwrap_or(if request.insecure { 143 } else { 993 });
-        let smtp_port = request
-            .smtp_port
-            .unwrap_or(if request.insecure { 587 } else { 465 });
-        if imap_port == 0 || smtp_port == 0 {
+        let smtp_port = match smtp_host {
+            Some(_) => request
+                .smtp_port
+                .unwrap_or(if request.insecure { 587 } else { 465 }),
+            None => 0,
+        };
+        if imap_port == 0 || (smtp_host.is_some() && smtp_port == 0) {
             return Err(SetupError::Invalid);
         }
         let imap = SetupTarget {
@@ -271,13 +295,16 @@ impl ValidatedSetup {
                 imap_port,
             )?,
         };
-        let smtp = SetupTarget {
-            protocol: SetupProtocol::Smtp,
-            url: transport_url(
-                if request.insecure { "smtp" } else { "smtps" },
-                &smtp_host,
-                smtp_port,
-            )?,
+        let smtp = match &smtp_host {
+            Some(host) => Some(SetupTarget {
+                protocol: SetupProtocol::Smtp,
+                url: transport_url(
+                    if request.insecure { "smtp" } else { "smtps" },
+                    host,
+                    smtp_port,
+                )?,
+            }),
+            None => None,
         };
         Ok(Self {
             deadline_ms: request.deadline_ms,
@@ -287,7 +314,7 @@ impl ValidatedSetup {
             password: Secret::new(request.password),
             imap_host,
             imap_port,
-            smtp_host,
+            smtp_host: smtp_host.unwrap_or_default(),
             smtp_port,
             insecure: request.insecure,
             imap,

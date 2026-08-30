@@ -323,17 +323,30 @@ struct ImapRequest {
 impl ImapRequest {
     fn context(&self) -> Result<ImapContext, ContextError> {
         let imap_host = canonical_host(&self.imap_host).ok_or(ContextError::InvalidRequest)?;
-        let smtp_host = canonical_host(&self.smtp_host).ok_or(ContextError::InvalidRequest)?;
+        // No SMTP server is a mailbox that can be read and not answered, which
+        // the setup form offers in as many words and `Imap.smtpUrl` answers ""
+        // for. Absent is the only thing waived: a host that *is* named goes
+        // through the same canonicalisation, the same port check and the same
+        // loopback rule as before, because a downgrade this file waved through
+        // would put a password on the wire.
+        let smtp_host = if self.smtp_host.is_empty() {
+            None
+        } else {
+            Some(canonical_host(&self.smtp_host).ok_or(ContextError::InvalidRequest)?)
+        };
         if self.account_id != format!("imap:{}", self.email)
             || !valid_email(&self.email)
             || self.username.is_empty()
             || self.username.len() > MAX_USERNAME_BYTES
             || self.username.chars().any(char::is_control)
             || self.imap_port == 0
-            || self.smtp_port == 0
+            || (smtp_host.is_some() && self.smtp_port == 0)
             || !valid_host(&self.imap_host)
-            || !valid_host(&self.smtp_host)
-            || (self.insecure && (!loopback_host(&imap_host) || !loopback_host(&smtp_host)))
+            || (self.insecure
+                && (!loopback_host(&imap_host)
+                    || smtp_host
+                        .as_deref()
+                        .is_some_and(|host| !loopback_host(host))))
         {
             return Err(ContextError::InvalidRequest);
         }
@@ -344,9 +357,12 @@ impl ImapRequest {
             email: self.email.clone(),
             username: self.username.clone(),
             imap_host: imap_host.clone(),
-            smtp_host: smtp_host.clone(),
+            smtp_host: smtp_host.clone().unwrap_or_default(),
             imap_url: mail_url(imap_scheme, &imap_host, self.imap_port)?,
-            smtp_url: mail_url(smtp_scheme, &smtp_host, self.smtp_port)?,
+            smtp_url: match &smtp_host {
+                Some(host) => mail_url(smtp_scheme, host, self.smtp_port)?,
+                None => String::new(),
+            },
         })
     }
 }

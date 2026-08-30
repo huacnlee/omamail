@@ -14,6 +14,43 @@
 - `tests/test_source.sh` enforces the no-literal-colors rule. Keep it updated
   rather than working around it.
 
+## The GPUI client's design system
+
+The standalone client in `app/` draws the same window the QML plugin does, on a
+different engine. It is held to the QML by porting the shell's own tokens rather
+than by eyeballing the result, so the two stay in step when a theme changes.
+
+- `app/lib/omarchy-ui/style.js` is a port of the shell's `Style.qml` singleton.
+  It reads `theme/shell.toml` plus Hyprland's `decoration:rounding` through the
+  `omarchy-theme` host module, and exposes `style()` — `space(px)`, the spacing
+  scale, the type scale, the state alphas, the corner radius, the resolved font
+  family. **Views ask `style()` for a token; they never invent a `rem` value.**
+  gpui's own semantic theme carries seventeen colour tokens, seven spacing steps
+  and six radii and nothing else, which is why the rest lives here.
+- Write a measurement as the pixel value the QML uses — `style().space(14)`, not
+  `14` and not `"0.875rem"`. That is what makes a port diffable against the
+  component it came from, and what lets `[spacing] scale` move the whole window
+  at once.
+- Colours that gpui's token set has no room for — `dim`, `dimmer`, `link`,
+  `urgent`, the popup surface — live beside the theme in `theme.js` as
+  `role(name, fallback)`. Writing them into the theme writes them nowhere: gpui
+  drops tokens it does not know, silently.
+- A fill or a border is the control's own colour at one of the theme's alphas,
+  via `alpha()`. Never a literal gray, and never a second palette.
+- **There is no accent-filled "primary" button.** The Omarchy kit has none: a
+  solid accent block is louder than anything else on the desktop, and the accent
+  is reserved for the small marks that carry state — the unread dot, the focus
+  ring, a selected row. `button()` is transparent when idle unless it is
+  `bordered`.
+- Icons are `app/assets/icons/*.svg`, generated from `components/ActionIcon.qml`
+  by `scripts/build-icons.mjs`. Regenerate rather than hand-editing an SVG.
+  **gpui paints an SVG as a single mask in the element's text colour**, so
+  nothing inside a file carries a colour of its own: a filled star is a second
+  file, and the two-tone Gmail mark is two files stacked.
+- gpui reads assets from the directory holding `gpui-shell.json`, which is
+  `app/`. An asset referenced as `assets/x.svg` must be at `app/assets/x.svg`;
+  the repository root's `assets/` is the QML plugin's.
+
 ## Layout
 
 **Grouped by module, not by file type.** A module holds whatever doing its job
@@ -154,6 +191,25 @@ key. What matters while working:
 
 ## Providers
 
+- **A reply from Google is read for the fields we need and silent about the
+  rest.** `deny_unknown_fields` belongs on shapes this repo defines — the
+  request envelopes the window sends the host — and never on a shape Google
+  owns. Neither is frozen: asking for `openid` gets an `id_token` back on the
+  token *and* refresh replies, and a Cloud project still in Testing (which is
+  every project until somebody presses "Publish app") gets
+  `refresh_token_expires_in` beside it. Refusing a whole reply over a field
+  nothing reads has twice cost a working mailbox — once as a sign-in that could
+  not complete, once as a message list that stayed empty because no access
+  token could be refreshed. What the fields we *do* read contain is still
+  checked, which is the part that is this side's business.
+- **A machine whose resolver belongs to a proxy answers every proxied name out
+  of `198.18.0.0/15`.** The fixed Google hosts are pinned with `--resolve` when
+  every address resolves public, carry no pin when every address is non-public,
+  and are refused only on a *mixture* — one public answer beside one loopback
+  answer is the signature of DNS rebinding, not of a proxy. Refusing the
+  non-public case outright made Gmail unreachable on a perfectly ordinary
+  desktop, with `InvalidRequest` as the only clue.
+
 - A mailbox is a **provider**: `gmail`, `hey`, or `imap`, listed in that order
   because IMAP is the answer for a server the other two do not name and a
   chooser that opened with it would ask the question backwards. `Provider.js` is
@@ -245,6 +301,14 @@ key. What matters while working:
   it base64-encoded on one line of stdin, so a password never reaches the
   process table and nothing needs escaping on the way; the config carrying it
   goes to curl's own stdin rather than to a file that would be on disk.
+- **A curl boolean is written bare or not at all — never with a value.** curl 8
+  rejects `location = false` as "unsupported trailing garbage" and exits 2
+  before opening a socket, so a config carrying one fails every request on a
+  machine whose network is fine. The Rust transports wrote exactly that, and it
+  reached the window as "Google could not be reached". Redirects are off by
+  default; `max-redirs = 0` is how this repo says so a second time, and
+  `tests/google_transport.rs` and `tests/gmail_setup.rs` both refuse a config
+  line ending in `= true` or `= false`.
 - **The response comes back base64 too, and that is load-bearing.** IMAP
   measures a literal in octets. Read as UTF-8 text, 2048 octets of a message
   with an accent in it is fewer than 2048 characters, and the parser walks off

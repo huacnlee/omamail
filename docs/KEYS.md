@@ -129,6 +129,19 @@ used to exist, and they had.
 The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
 opens the complete key sheet from every context.
 
+### Two keys only the standalone client has
+
+The table above is the plugin's, and `app/keys/keymap.js` is a copy of it that carries two rows more. They are listed here rather than in the table because the table is asserted against `keys/Keymap.js`, and a row in it that `App.qml` answers to nothing would be exactly the promise this whole design exists to stop.
+
+| id | keys | contexts | action |
+|---|---|---|---|
+| `copyBody` | `y` | reader | Copy the message text |
+| `selectAll` | `Ctrl+A` | reader | Select the message text |
+
+**Why the plugin needs neither.** `components/MessageReader.qml` draws the message body in a read-only `TextEdit` with `selectByMouse: true`, so dragging across it highlights and the copy key takes what was highlighted, and once that widget holds the keyboard it answers the platform's select-all itself. All of it is Qt's, and none of it is a binding. The GPUI client has no equivalent: the shell renders a text-selection layer and binds copy to it, but nothing a plugin builds from JavaScript can register a run with that layer, so a paragraph drawn there is not text as far as a selection is concerned. `y` copies the whole body without needing one; `Ctrl+A` puts the body into a plain-text surface that can be selected inside, which is the toolbar's `Select` toggle said with a key.
+
+`Ctrl+A` is bound in `reader` and nowhere else, so it is not live in a draft or in a query, and each of those fields keeps its own select-all. Inside the reader's own plain-text surface the host's editor binds it one level deeper in the dispatch path, and the deepest matching context wins — so once the pointer has landed in the surface, select-all there is the host's real one.
+
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback. Back and `Escape` save a non-empty composition before leaving it. The explicit Discard button remains the destructive exit.
 
 ## Why the rail is numbered and not chorded
@@ -243,6 +256,8 @@ different row under the still pointer, and the cursor snapped back to it — so
 3. Add the row to the table above. The test will tell you if you forget.
 
 That is all. The shortcut sheet and the status hints pick it up on their own.
+
+A key the standalone client needs and the plugin does not takes a fourth step instead of the second: the row goes in `app/keys/keymap.js` and in `app/keys/actions.js`'s `HANDLED_ACTIONS`, and it is documented in "Two keys only the standalone client has" rather than in the table — a row in the table that `App.qml` answers nothing to is the promise the whole design exists to stop. `tests/test_app_keymap.mjs` holds both halves of that.
 
 ## Why it looks like this
 

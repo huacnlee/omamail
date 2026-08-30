@@ -3,8 +3,23 @@
 #
 # The desktop file's Exec is this script with %u. xdg-open, xdg-email and
 # anything else that asks the system to write a message all land here.
+#
+# Two clients, one link, and they are reached differently because they are
+# differently shaped. The standalone client is an ordinary process: it takes the
+# URL on its own argument vector, and its single-instance router — see
+# `src/command_router.rs` — decides whether that opens a window or reaches the
+# one that is already up. The shell plugin is not a process this script can talk
+# to at all; it lives inside the Omarchy shell, so the link goes through
+# `omarchy-shell shell summon`, which delivers the payload to the plugin the
+# shell is already hosting.
+#
 # Summon, not toggle: a link while the window is already open must fill a
-# draft, not close the mailbox.
+# draft, not close the mailbox. The standalone router says the same thing in
+# its own vocabulary — `compose-mailto` never closes anything.
+#
+# Resolved at run time rather than written into the desktop file, so building
+# the standalone client is enough to start using it for links; there is no
+# second install step and nothing to undo when it is removed again.
 set -eu
 
 plugin_id=omamail
@@ -19,10 +34,33 @@ json_string() {
   python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"
 }
 
-if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
+url=${1:-}
+
+standalone=${OMAMAIL_BIN:-}
+[ -n "$standalone" ] || standalone=$(command -v omamail 2>/dev/null || true)
+
+if [ -n "$standalone" ] && [ -x "$standalone" ]; then
+  # The scheme is checked here as well as in the router. A desktop handler is
+  # reachable by anything on the machine that can call xdg-open, and the vector
+  # it builds should not be the first place a non-link is noticed.
+  if [ -n "$url" ]; then
+    scheme=$(printf '%s' "$url" | cut -c1-7 | tr 'A-Z' 'a-z')
+    [ "$scheme" = "mailto:" ] || fail 'omamail: that is not a mailto: link'
+    set -- "$standalone" "$url"
+  else
+    set -- "$standalone"
+  fi
+  if [ -n "${OMAMAIL_MAILTO_PRINT:-}" ]; then
+    printf '%s\n' "$*"
+    exit 0
+  fi
+  exec "$@"
+fi
+
+if [ -z "$url" ]; then
   payload='{}'
 else
-  payload="{\"mailto\":$(json_string "$1")}"
+  payload="{\"mailto\":$(json_string "$url")}"
 fi
 
 if [ -n "${OMAMAIL_MAILTO_PRINT:-}" ]; then

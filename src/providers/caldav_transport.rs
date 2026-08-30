@@ -263,7 +263,7 @@ struct CurlConfig<'a> {
 impl CurlConfig<'_> {
     fn render(&self) -> String {
         let mut c = format!(
-            "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nlocation = false\nmax-redirs = 0\nproto = \"=https\"\nproto-redir = \"=https\"\nrequest = \"{}\"\nuser = \"{}\"\nheader = \"Content-Type: {}\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
+            "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nmax-redirs = 0\nproto = \"=https\"\nproto-redir = \"=https\"\nrequest = \"{}\"\nuser = \"{}\"\nheader = \"Content-Type: {}\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
             esc(self.url.as_str()),
             self.method,
             esc(self.credential),

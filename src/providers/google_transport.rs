@@ -182,6 +182,14 @@ impl<'a> FixedGoogleClient<'a> {
             .map_err(map_command_error)?;
         let (status, response) = parse_framed(output, 65_536)?;
         if !(200..300).contains(&status) {
+            // The status, on the host's own stderr and nowhere else. Every
+            // status outside 200..300 becomes one `AuthRequired` — which is the
+            // right thing to *show*, since none of the distinctions are the
+            // reader's to act on, but it makes 401 (this token is not accepted)
+            // indistinguishable from 403 (the API is not enabled on the project,
+            // or the quota is spent) from the outside, and those want opposite
+            // fixes. A status code is not a credential.
+            eprintln!("Gmail: {} answered HTTP {status}", destination.host);
             return Err(GmailError::AuthRequired);
         }
         Ok(response)
@@ -281,11 +289,15 @@ impl fmt::Debug for GoogleAccessTokenProvider<'_> {
     }
 }
 
+// Google issues desktop clients with and without a secret, so the field is
+// absent rather than empty when there is none: an empty string would be a
+// secret the token endpoint would be sent.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OAuthClientFile {
     client_id: String,
-    client_secret: String,
+    #[serde(default)]
+    client_secret: Option<String>,
 }
 
 impl OAuthClientFile {
@@ -294,7 +306,7 @@ impl OAuthClientFile {
     }
 
     pub fn client_secret(&self) -> Secret {
-        Secret::new(self.client_secret.clone())
+        Secret::new(self.client_secret.clone().unwrap_or_default())
     }
 }
 
@@ -307,8 +319,15 @@ impl fmt::Debug for OAuthClientFile {
     }
 }
 
+// The refresh reply, read for the fields this needs and silent about the rest —
+// the same rule `gmail_setup.rs` states for the two setup replies, and it was
+// missed here. `deny_unknown_fields` turned every field Google has ever added
+// into a dead mailbox: asking for `openid` gets an `id_token` back on refresh,
+// and a project still in Testing gets `refresh_token_expires_in` beside it, so
+// every access token this asked for was refused over fields nothing reads and
+// the message list never loaded. What the fields below *contain* is still
+// checked below, which is the part that is this side's business.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TokenReply {
     access_token: String,
     token_type: String,
@@ -324,16 +343,17 @@ impl AccessTokenProvider for GoogleAccessTokenProvider<'_> {
         deadline: std::time::Duration,
     ) -> Result<AccessToken, GmailError> {
         let client = read_client_file(&self.credentials_file)?;
+        let client_secret = client.client_secret.clone().unwrap_or_default();
         if client.client_id != self.client_id
-            || client.client_secret.is_empty()
-            || client.client_secret.chars().any(char::is_control)
+            || client_secret.is_empty()
+            || client_secret.chars().any(char::is_control)
         {
             return Err(GmailError::InvalidRequest);
         }
         let destination = oauth_destination(self.resolver)?;
         let form = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("client_id", &client.client_id)
-            .append_pair("client_secret", &client.client_secret)
+            .append_pair("client_secret", &client_secret)
             .append_pair("refresh_token", refresh_token.expose())
             .append_pair("grant_type", "refresh_token")
             .finish();
@@ -353,6 +373,7 @@ impl AccessTokenProvider for GoogleAccessTokenProvider<'_> {
             .map_err(map_command_error)?;
         let (status, body) = parse_framed(output, 65_536)?;
         if !(200..300).contains(&status) {
+            eprintln!("Gmail: the token refresh answered HTTP {status}");
             return Err(GmailError::AuthRequired);
         }
         let reply: TokenReply =
@@ -375,6 +396,40 @@ struct Destination {
     pins: Vec<IpAddr>,
 }
 
+/// The addresses to pin a fixed Google host to, or none at all.
+///
+/// Pinning is defence in depth against a DNS answer that points this at
+/// something on the machine or the LAN. It cannot be satisfied on a host whose
+/// resolver is owned by a proxy: a split tunnel in fake-IP mode answers every
+/// proxied name out of `198.18.0.0/15`, so refusing a non-public address there
+/// refuses the only address that works. The QML client never met this, because
+/// Qt's network stack resolved and connected on its own. The refusal is
+/// something this port added, and on such a machine it did not make Gmail safer
+/// — it made Gmail unreachable, with `InvalidRequest` as the only clue.
+///
+/// So: every address public, pin them all, which is what happens on an ordinary
+/// machine and leaves that case exactly as it was. Every address non-public,
+/// pin nothing and let curl resolve and connect for itself — TLS is what
+/// actually authenticates the far end, and anything standing in front of
+/// `oauth2.googleapis.com` still has to present a certificate this machine
+/// already trusts. A *mixture* stays refused: one public answer beside one
+/// loopback answer is the signature of rebinding, not of a proxy.
+pub fn pins_for(host: &str, resolver: &dyn GoogleResolver) -> Result<Vec<IpAddr>, GmailError> {
+    let addresses = resolver
+        .resolve(host, 443)
+        .map_err(|_| GmailError::InvalidRequest)?;
+    if addresses.is_empty() {
+        return Err(GmailError::InvalidRequest);
+    }
+    if addresses.iter().all(|address| is_public(*address)) {
+        return Ok(addresses);
+    }
+    if addresses.iter().any(|address| is_public(*address)) {
+        return Err(GmailError::InvalidRequest);
+    }
+    Ok(Vec::new())
+}
+
 fn validate_destination(
     raw: &str,
     resolver: &dyn GoogleResolver,
@@ -395,12 +450,7 @@ fn validate_destination(
     {
         return Err(GmailError::InvalidRequest);
     }
-    let pins = resolver
-        .resolve(&host, 443)
-        .map_err(|_| GmailError::InvalidRequest)?;
-    if pins.is_empty() || pins.iter().any(|address| !is_public(*address)) {
-        return Err(GmailError::InvalidRequest);
-    }
+    let pins = pins_for(&host, resolver)?;
     Ok(Destination { url, host, pins })
 }
 
@@ -408,12 +458,7 @@ fn oauth_destination(resolver: &dyn GoogleResolver) -> Result<Destination, Gmail
     let url = Url::parse("https://oauth2.googleapis.com/token")
         .map_err(|_| GmailError::InvalidRequest)?;
     let host = "oauth2.googleapis.com".to_owned();
-    let pins = resolver
-        .resolve(&host, 443)
-        .map_err(|_| GmailError::InvalidRequest)?;
-    if pins.is_empty() || pins.iter().any(|address| !is_public(*address)) {
-        return Err(GmailError::InvalidRequest);
-    }
+    let pins = pins_for(&host, resolver)?;
     Ok(Destination { url, host, pins })
 }
 
@@ -432,12 +477,7 @@ fn fixed_destination(
         ),
     };
     let url = Url::parse(raw).map_err(|_| GmailError::InvalidRequest)?;
-    let pins = resolver
-        .resolve(host, 443)
-        .map_err(|_| GmailError::InvalidRequest)?;
-    if pins.is_empty() || pins.iter().any(|address| !is_public(*address)) {
-        return Err(GmailError::InvalidRequest);
-    }
+    let pins = pins_for(host, resolver)?;
     Ok(Destination {
         url,
         host: host.to_owned(),
@@ -487,7 +527,7 @@ fn base_curl_config(
     deadline: std::time::Duration,
 ) -> String {
     let mut config = format!(
-        "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nproto = \"=https\"\nproto-redir = \"=https\"\nlocation = false\nmax-redirs = 0\nrequest = \"{}\"\nheader = \"Accept: application/json\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
+        "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nproto = \"=https\"\nproto-redir = \"=https\"\nmax-redirs = 0\nrequest = \"{}\"\nheader = \"Accept: application/json\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
         escape(destination.url.as_str()),
         method,
         deadline.as_secs_f64()
@@ -518,7 +558,7 @@ fn curl_config(
         return Err(GmailError::InvalidRequest);
     }
     let mut config = format!(
-        "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nproto = \"=https\"\nproto-redir = \"=https\"\nlocation = false\nmax-redirs = 0\nrequest = \"{}\"\nheader = \"Authorization: Bearer {}\"\nheader = \"Accept: application/json\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
+        "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nproto = \"=https\"\nproto-redir = \"=https\"\nmax-redirs = 0\nrequest = \"{}\"\nheader = \"Authorization: Bearer {}\"\nheader = \"Accept: application/json\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
         escape(destination.url.as_str()),
         request.method(),
         escape(credential),
@@ -548,6 +588,10 @@ fn parse_framed(
     max_body: usize,
 ) -> Result<(u16, Vec<u8>), GmailError> {
     if output.status != Some(0) {
+        // curl's own exit code, which says whether this was a name that would
+        // not resolve, a connection refused, or a TLS failure. Three very
+        // different faults that all reach the window as "could not be reached".
+        eprintln!("Gmail: curl exited {:?}", output.status);
         return Err(GmailError::RemoteFailure);
     }
     let text = std::str::from_utf8(&output.stdout).map_err(|_| GmailError::InvalidResponse)?;

@@ -1,37 +1,46 @@
 // @ts-check
 
-import { div } from "gpui";
+import { div, svg } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
+import { resolveSurfaceColor, style } from "./style.js";
+import { role } from "./theme.js";
+
+// Type sizes are the shell's own scale in pixels, not rem: Omarchy sets a
+// 12px monospace root and every token derives from it, so a window that talks
+// in rem is sized by gpui's idea of a root rather than by the desktop's.
 
 /** @param {string | number} value @param {import("gpui").Context} cx */
 export const label = (value, cx) =>
   div()
-    .text_size("1rem")
-    .line_height(1.25)
+    .text_size(style().font.body)
+    .line_height(1.35)
     .text_color(cx.theme().colors.foreground)
     .child(value);
 
 /** @param {string | number} value @param {import("gpui").Context} cx */
 export const muted = (value, cx) =>
   div()
-    .text_size("1rem")
-    .line_height(1.25)
+    .text_size(style().font.body)
+    .line_height(1.35)
     .text_color(cx.theme().colors.muted_foreground)
     .child(value);
 
 /** @param {string} value @param {import("gpui").Context} cx */
 export const title = (value, cx) =>
   div()
-    .text_size("1.25rem")
-    .font_semibold()
+    .text_size(style().font.title)
     .text_color(cx.theme().colors.foreground)
     .child(value);
 
-/** @param {string} value @param {import("gpui").Context} cx */
+/**
+ * A section rule's caption — "LABELS" over the user's own folders. Upper-case
+ * at the caption size and never bold: on a monospace face the weight change is
+ * the loud part, and the case already says this is a heading.
+ * @param {string} value @param {import("gpui").Context} cx
+ */
 export const sectionLabel = (value, cx) =>
   div()
-    .text_xs()
-    .font_semibold()
+    .text_size(style().font.caption)
     .text_color(cx.theme().colors.muted_foreground)
     .child(String(value).toUpperCase());
 
@@ -49,42 +58,75 @@ export const panelHeader = (id, heading, actions, cx) =>
     .flex_none()
     .items_center()
     .justify_between()
-    .gap(cx.theme().spacing.md)
-    .h("3rem")
-    .px(cx.theme().spacing.md)
-    .border_b(1)
-    .border_color(cx.theme().colors.border)
+    .gap(style().spacing.controlGap)
+    .h(style().space(34))
+    .px(style().spacing.rowPaddingX)
+    .border_b(style().spacing.hairline)
+    .border_color(role("separator", cx.theme().colors.border))
     .children([heading, actions].filter(Boolean));
 
-/** @param {import("gpui").Context} cx */
-export const brandLockup = (cx) =>
-  h_flex()
+/**
+ * Identity first, controls after: the mark and the name say what this window
+ * is, and everything to their right does something.
+ *
+ * The mark is two stacked files rather than one — gpui paints an SVG as a
+ * single mask in the element's text colour, so the envelope and the M inside it
+ * cannot be two colours from inside one file. The M is what makes this the mail
+ * mark rather than a generic envelope, and it carries the theme accent.
+ *
+ * The name goes when the window is narrow. The mark still says which window
+ * this is, and at that width the row is needed for the search field.
+ * @param {import("gpui").Context} cx
+ * @param {{compact?: boolean}} [options]
+ */
+export const brandLockup = (cx, options = {}) => {
+  const tokens = style();
+  const extent = tokens.font.iconLarge;
+  return h_flex()
     .id("application-brand")
     .flex_none()
     .items_center()
-    .gap(cx.theme().spacing.sm)
+    .gap(tokens.space(8))
     .child(
       div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .size("1.5rem")
+        .relative()
         .flex_none()
-        .border(1)
-        .border_color(cx.theme().colors.ring)
-        .text_color(cx.theme().colors.primary)
-        .child("M"),
+        .size(extent)
+        .text_color(cx.theme().colors.foreground)
+        .child(svg("assets/icons/gmail-envelope.svg").flex_none().size(extent))
+        .child(
+          svg("assets/icons/gmail-mark.svg")
+            .absolute()
+            .inset_0()
+            .size(extent)
+            .text_color(cx.theme().colors.primary),
+        ),
     )
-    .child(label("Omamail", cx).font_semibold())
-    .child(muted("☰", cx));
+    .when(!options.compact, (lockup) =>
+      lockup.child(
+        div()
+          .flex_none()
+          .text_size(tokens.font.title)
+          .text_color(cx.theme().colors.foreground)
+          .child("Omamail"),
+      ),
+    );
+};
 
-/** @param {import("gpui").Context} cx */
+/**
+ * The window's own surface, and the one place the desktop's typography is
+ * declared: gpui has no font alias support, so the family the host resolved
+ * from fontconfig is set here and inherited by everything below.
+ * @param {import("gpui").Context} cx
+ */
 export const appFrame = (cx) =>
   v_flex()
     .id("application-frame")
     .size_full()
     .min_w_0()
     .min_h_0()
+    .font_family(style().fontFamily)
+    .text_size(style().font.body)
     .bg(cx.theme().colors.background)
     .text_color(cx.theme().colors.foreground);
 
@@ -95,14 +137,14 @@ export const appFrame = (cx) =>
 export const topBar = (options, cx) =>
   h_flex()
     .id("application-top-bar")
-    .h("5rem")
+    .h(style().space(48))
     .flex_none()
     .items_center()
     .justify_between()
-    .gap(cx.theme().spacing.md)
-    .px(cx.theme().spacing.lg)
-    .border_b(1)
-    .border_color(cx.theme().colors.border)
+    .gap(style().space(14))
+    .px(style().space(14))
+    .border_b(style().spacing.hairline)
+    .border_color(role("separator", cx.theme().colors.border))
     .bg(cx.theme().colors.background)
     .children([options.brand, options.center, options.actions].filter(Boolean));
 
@@ -113,14 +155,14 @@ export const topBar = (options, cx) =>
 export const bottomBar = (options, cx) =>
   h_flex()
     .id("application-bottom-bar")
-    .h("3.5rem")
+    .h(style().space(28))
     .flex_none()
     .items_center()
     .justify_between()
-    .gap(cx.theme().spacing.md)
-    .px(cx.theme().spacing.lg)
-    .border_t(1)
-    .border_color(cx.theme().colors.border)
+    .gap(style().spacing.controlGap)
+    .px(style().space(14))
+    .border_t(style().spacing.hairline)
+    .border_color(role("separator", cx.theme().colors.border))
     .bg(cx.theme().colors.background)
     .children([options.status, options.hints].filter(Boolean));
 
@@ -136,22 +178,27 @@ export const actionBar = (id, options, cx) =>
     .role("toolbar")
     .flex_none()
     .items_center()
-    .gap(cx.theme().spacing.sm)
-    .px(cx.theme().spacing.lg)
-    .py(cx.theme().spacing.sm)
-    .border_t(1)
-    .border_color(cx.theme().colors.border)
+    .gap(style().spacing.controlGap)
+    .px(style().spacing.panelPadding)
+    .py(style().spacing.sm)
+    .border_t(style().spacing.hairline)
+    .border_color(role("separator", cx.theme().colors.border))
     .children([options.actions].filter(Boolean))
     .child(div().flex_1())
     .children([options.status, options.hints].filter(Boolean));
 
 /**
- * @param {{top:any,content:any,bottom:any}} options
+ * The window: a strip on top, the work in the middle, a line at the bottom.
+ *
+ * Both strips are optional. Composing takes the header away — the form carries
+ * its own title band, and a window header above it would be two answers to
+ * "what am I looking at".
+ * @param {{top?:any,content:any,bottom?:any}} options
  * @param {import("gpui").Context} cx
  */
 export const appShell = (options, cx) =>
   appFrame(cx)
-    .child(options.top)
+    .children([options.top].filter(Boolean))
     .child(
       v_flex()
         .id("application-content")
@@ -161,7 +208,7 @@ export const appShell = (options, cx) =>
         .overflow_hidden()
         .child(options.content),
     )
-    .child(options.bottom);
+    .children([options.bottom].filter(Boolean));
 
 /**
  * The single scroll owner for a centered settings, setup, or detail page.
@@ -172,6 +219,10 @@ export const appShell = (options, cx) =>
 export const centeredWorkspace = (id, content, cx) =>
   h_flex()
     .id(id)
+    // Top-aligned, not centred on the cross axis: `h_flex` centres by default,
+    // and a page taller than the window would then hang off the top with its
+    // first line unreachable above the scroll.
+    .items_start()
     .size_full()
     .min_w_0()
     .min_h_0()
@@ -189,9 +240,12 @@ export const pageColumn = (id, cx, options = {}) =>
   v_flex()
     .id(id)
     .w_full()
-    .max_w(options.maxWidth ?? "50rem")
-    .gap(cx.theme().spacing.lg)
-    .p(cx.theme().spacing.lg);
+    // The QML's own reading width for a form. Wider than this and a helper
+    // line runs past the distance an eye tracks back comfortably; the window
+    // is roomy, the column is not.
+    .max_w(options.maxWidth ?? style().space(560))
+    .gap(style().spacing.panelGap)
+    .p(style().spacing.panelPadding);
 
 /** @param {import("gpui").Context} cx */
 export const surface = (cx) =>
@@ -199,7 +253,51 @@ export const surface = (cx) =>
     .min_w_0()
     .min_h_0()
     .bg(cx.theme().colors.surface)
-    .border(1)
+    .border(style().spacing.hairline)
     .border_color(cx.theme().colors.border)
-    .rounded(cx.theme().radius.sm)
+    .rounded(style().cornerRadius)
     .overflow_hidden();
+
+/**
+ * A menu or popover card.
+ *
+ * Its ground and its edge are their own theme roles rather than the window's:
+ * a card floating over the mailbox has to read as a separate surface, and
+ * Omarchy's `[popups]` section says so per theme — typically the compositor's
+ * own active-window border, so a menu's edge matches the frame Hyprland draws
+ * around the window it belongs to.
+ * @param {string} id @param {import("gpui").Context} cx
+ */
+export const popupSurface = (id, cx) => {
+  const tokens = style();
+  return v_flex()
+    .id(id)
+    .flex_none()
+    .p(tokens.space(4))
+    .gap(tokens.space(2))
+    .rounded(tokens.cornerRadius)
+    .bg(
+      resolveSurfaceColor(
+        tokens,
+        tokens.surfaces.popupBackground,
+        cx.theme().colors.background,
+        tokens.surfaces.popupBackgroundAlpha,
+      ),
+    )
+    .border(tokens.state.normalBorderWidth)
+    .border_color(
+      resolveSurfaceColor(
+        tokens,
+        tokens.surfaces.popupBorder,
+        cx.theme().colors.ring,
+        tokens.surfaces.popupBorderAlpha,
+      ),
+    )
+    .text_color(
+      resolveSurfaceColor(
+        tokens,
+        tokens.surfaces.popupText,
+        cx.theme().colors.foreground,
+      ),
+    );
+};

@@ -683,4 +683,219 @@ assert.equal(
   );
 }
 
+// Star, unstar, and the three the reader and the row menu need from a
+// controller that used to have only `act`.
+{
+  const calls = [];
+  const replies = [];
+  const starring = createApplicationController({
+    storage: storageFor({
+      version: 1,
+      activeId: "star@example.com",
+      accounts: [
+        { id: "star@example.com", email: "star@example.com", provider: "gmail" },
+      ],
+    }),
+    execute(effect, complete) {
+      calls.push(effect);
+      replies.push(complete);
+      return { cancel() {} };
+    },
+  });
+  starring.start();
+  replies.shift()({
+    ok: true,
+    value: {
+      messages: [
+        gmailResource("plain", ["INBOX"]),
+        gmailResource("lit", ["INBOX", "STARRED"]),
+      ],
+    },
+  });
+  const listed = starring.snapshot().mail.messages;
+  assert.deepEqual(
+    listed.map((message) => message.id),
+    ["plain", "lit"],
+  );
+
+  starring.toggleStar("plain");
+  assert.equal(calls.at(-1).hostOperation.action, "star");
+  assert.deepEqual(calls.at(-1).body.addLabelIds, ["STARRED"]);
+  starring.toggleStar("lit");
+  assert.equal(
+    calls.at(-1).hostOperation.action,
+    "unstar",
+    "a star that only ever added one could never be taken off",
+  );
+  assert.deepEqual(calls.at(-1).body.removeLabelIds, ["STARRED"]);
+
+  // The cursor is where the keyboard is; the selection is what the reader
+  // shows. Closing the reader puts the selection down and leaves the cursor.
+  starring.openMessage("lit");
+  assert.equal(starring.snapshot().mail.selectedId, "lit");
+  starring.clearSelection();
+  assert.equal(starring.snapshot().mail.selectedId, null);
+  assert.equal(starring.snapshot().mail.cursorId, "lit");
+  assert.equal(starring.snapshot().detail, null);
+
+  starring.placeCursor("plain");
+  assert.equal(starring.snapshot().mail.cursorId, "plain");
+  starring.placeCursor("not-here");
+  assert.equal(
+    starring.snapshot().mail.cursorId,
+    "plain",
+    "a cursor is only ever put on a row that is listed",
+  );
+
+  // A search replaces the list; a refresh reloads it.
+  starring.search("invoice");
+  assert.deepEqual(starring.snapshot().mail.messages, []);
+  assert.equal(starring.snapshot().mail.loaded, false);
+  replies.at(-1)({ ok: true, value: { messages: [gmailResource("hit")] } });
+  assert.equal(starring.snapshot().mail.loaded, true);
+  starring.refresh();
+  assert.deepEqual(
+    starring.snapshot().mail.messages.map((message) => message.id),
+    ["hit"],
+    "a refresh keeps the rows it is refreshing",
+  );
+
+  // A first read that failed is not an empty mailbox.
+  const failing = createApplicationController({
+    storage: storageFor({
+      version: 1,
+      activeId: "fail@example.com",
+      accounts: [
+        { id: "fail@example.com", email: "fail@example.com", provider: "gmail" },
+      ],
+    }),
+    execute(_effect, complete) {
+      replies.push(complete);
+      return { cancel() {} };
+    },
+  });
+  failing.start();
+  replies.at(-1)({ ok: false, error: "Mail is unavailable" });
+  assert.equal(failing.snapshot().mail.loaded, false);
+  assert.equal(failing.snapshot().mail.status, "Mail is unavailable");
+}
+
+// ------------------------------------------------ what the settings change
+//
+// Three of the shell's four mail settings are answered here, because all three
+// are properties of a read: how many messages it asks for, what it asks for,
+// and whether what came back is worth saying out loud. Each is asserted
+// against the request the adapter built or the notification it raised — a
+// stored value nothing reads is the defect these cover.
+{
+  const preferences = {
+    maxMessages: 25,
+    defaultQuery: "in:inbox",
+    notifyNewMail: "On",
+  };
+  const requests = [];
+  const replies = [];
+  const notifications = [];
+  const tuned = createApplicationController({
+    storage: storageFor(saved),
+    preference: (key) => preferences[key],
+    notify: (request) => notifications.push(request),
+    execute(effect, complete) {
+      requests.push(effect);
+      replies.push(complete);
+      return { cancel() {} };
+    },
+  });
+  const settle = (messages) =>
+    replies.shift()({ status: 200, value: { messages } });
+
+  tuned.start();
+  assert.equal(requests.at(-1).query.maxResults, 25);
+  assert.equal(requests.at(-1).query.q, "in:inbox");
+  // The first answer of a session is the baseline it is compared against, not
+  // eleven notifications for mail that was already sitting in the inbox.
+  settle([gmailResource("first", ["UNREAD", "INBOX"])]);
+  assert.deepEqual(notifications, []);
+
+  // Messages per page reaches the request the adapter builds.
+  preferences.maxMessages = 50;
+  assert.equal(tuned.refresh(), true);
+  assert.equal(requests.at(-1).query.maxResults, 50);
+  assert.equal(
+    requests.at(-1).hostOperation.maxResults,
+    50,
+    "the native runtime is told the same number the HTTP query carries",
+  );
+
+  // A message the list has not held before is new mail; one it already showed
+  // is not, however many times it comes back.
+  settle([
+    gmailResource("first", ["UNREAD", "INBOX"]),
+    gmailResource("second", ["UNREAD", "INBOX"]),
+  ]);
+  assert.deepEqual(notifications, [
+    { summary: "Sender", body: "Subject second" },
+  ]);
+  tuned.refresh();
+  settle([
+    gmailResource("first", ["UNREAD", "INBOX"]),
+    gmailResource("second", ["UNREAD", "INBOX"]),
+  ]);
+  assert.equal(
+    notifications.length,
+    1,
+    "a message already announced is not announced again",
+  );
+
+  // A batch is announced once. One notification per message turns a sync into
+  // a wall of popups nobody dismissed.
+  tuned.refresh();
+  settle([
+    gmailResource("third", ["UNREAD", "INBOX"]),
+    gmailResource("fourth", ["UNREAD", "INBOX"]),
+    gmailResource("first", ["UNREAD", "INBOX"]),
+  ]);
+  assert.deepEqual(notifications.at(-1), {
+    summary: "2 new messages",
+    body: "Sender, Sender",
+  });
+
+  // Read mail, and mail outside the inbox, are not arrivals.
+  tuned.refresh();
+  settle([
+    gmailResource("read", ["INBOX"]),
+    gmailResource("archived", ["UNREAD"]),
+  ]);
+  assert.equal(notifications.length, 2);
+
+  // The default search applies to the inbox, and applies to the next read
+  // rather than waiting for the account to be switched.
+  preferences.defaultQuery = "in:inbox -category:promotions";
+  tuned.refresh();
+  assert.equal(requests.at(-1).query.q, "in:inbox -category:promotions");
+  settle([]);
+  // Only the inbox: applying it to Starred would quietly filter a mailbox
+  // nobody asked to filter.
+  tuned.selectMailbox("starred");
+  assert.equal(requests.at(-1).query.q, "is:starred");
+  settle([]);
+  // A typed search wins over it, the way `Registry.query` orders them.
+  tuned.selectMailbox("inbox");
+  settle([]);
+  tuned.search("invoice");
+  assert.equal(requests.at(-1).query.q, "invoice");
+  settle([gmailResource("hit", ["UNREAD", "INBOX"])]);
+  assert.equal(
+    notifications.length,
+    2,
+    "a search that turned up an old unread message is a result, not new mail",
+  );
+
+  // Off is off.
+  preferences.notifyNewMail = "Off";
+  tuned.search("");
+  settle([gmailResource("silent", ["UNREAD", "INBOX"])]);
+  assert.equal(notifications.length, 2);
+}
+
 console.log("application controller tests passed");

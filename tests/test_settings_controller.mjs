@@ -1,6 +1,51 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { createSettingsController } from "../app/settings/controller.js";
+import {
+  createSettingsController,
+  preferenceSchema,
+} from "../app/settings/controller.js";
+
+// The standalone window has no shell dialog, so every setting `manifest.json`
+// declares to the bar widget is drawn by this page instead. The table is a
+// transcription; this is what stops it becoming a second, disagreeing set of
+// bounds.
+{
+  const manifest = JSON.parse(
+    readFileSync(new URL("../manifest.json", import.meta.url), "utf8"),
+  );
+  const declared = manifest.barWidget.schema;
+  const table = preferenceSchema();
+  for (const setting of declared) {
+    const entry = table.find((row) => row.schema === setting.key);
+    assert.ok(entry, `${setting.key} is missing from the settings page`);
+    assert.ok(entry.detail, `${setting.key} has no helper text`);
+    assert.ok(entry.section, `${setting.key} belongs to no section`);
+    if (setting.type === "integer") {
+      assert.equal(entry.kind, "number", setting.key);
+      assert.equal(entry.min, setting.min, setting.key);
+      assert.equal(entry.max, setting.max, setting.key);
+      assert.equal(entry.step, setting.step, setting.key);
+      assert.equal(entry.defaultValue, setting.defaultValue, setting.key);
+    } else if (setting.type === "string") {
+      assert.equal(entry.kind, "text", setting.key);
+      assert.equal(entry.defaultValue, setting.defaultValue, setting.key);
+    } else {
+      // A two-option enum is a boolean wearing a hat; the page may draw it as
+      // a switch, but it still has to carry the shell's own two option strings.
+      assert.ok(["choice", "toggle"].includes(entry.kind), setting.key);
+      assert.deepEqual(entry.options, setting.options, setting.key);
+      if (entry.kind === "choice")
+        assert.equal(entry.defaultValue, setting.defaultValue, setting.key);
+      else
+        assert.equal(
+          entry.defaultValue,
+          setting.defaultValue === setting.options[1],
+          setting.key,
+        );
+    }
+  }
+}
 
 const gmail = {
   id: "one@example.com",
@@ -121,12 +166,119 @@ function harness({
   const { controller } = harness();
   const snapshot = controller.snapshot();
   assert.equal(snapshot.accounts.length, 2);
-  assert.equal(snapshot.accounts[0].status, "Active");
-  assert.equal(snapshot.remoteImages.enabled, false);
-  assert.equal(snapshot.remoteImages.disabled, false);
-  assert.match(snapshot.remoteImages.detail, /tell senders/i);
-  assert.equal(snapshot.heavyMessages.enabled, false);
+  assert.equal(snapshot.accounts[0].active, true);
+  assert.equal(snapshot.accounts[0].detail, "Showing now");
+  assert.equal(snapshot.accounts[1].active, false);
+  assert.equal(snapshot.accounts[1].providerName, "IMAP");
+  const named = Object.fromEntries(
+    snapshot.preferences.map((entry) => [entry.key, entry]),
+  );
+  assert.equal(named.remoteImages.value, false);
+  assert.equal(named.remoteImages.disabled, false);
+  assert.match(named.remoteImages.detail, /tells its host/i);
+  assert.equal(named.heavyMessageRendering.value, false);
   assert.equal(snapshot.undoSend.seconds, 10);
+  // A preference the host cannot store is still on the page, disabled, and
+  // says why — a control that fails after it is pressed is worse than one
+  // that never offered.
+  assert.equal(named.maxMessages.disabled, true);
+  assert.match(named.maxMessages.detail, /nowhere to store/i);
+  assert.equal(named.maxMessages.value, 25);
+  // Sections are the table's, in the order the page draws them.
+  assert.deepEqual(
+    [...new Set(snapshot.preferences.map((entry) => entry.section))],
+    ["Reading", "Writing", "In the bar", "Google OAuth client"],
+  );
+}
+
+// Anything the host is willing to keep is writable through one pair, and the
+// arithmetic on a stepped number belongs here rather than in the view.
+{
+  const stored = {};
+  const controller = createSettingsController({
+    readAccounts: () => ({ version: 1, activeId: "", accounts: [] }),
+    saveAccounts() {},
+    configure: async () => {},
+    readPreference: (key) => stored[key],
+    savePreference: async (key, value) => {
+      stored[key] = value;
+    },
+  });
+  assert.deepEqual(await controller.setPreference("maxMessages", 40), {
+    ok: true,
+    value: 40,
+  });
+  assert.equal(stored.maxMessages, 40);
+  // Bounds are the manifest's, and a value outside them is clamped rather than
+  // stored.
+  assert.equal((await controller.setPreference("oauthPort", 70000)).value, 65535);
+  assert.equal((await controller.setPreference("oauthPort", 3)).value, 1024);
+  // An option the schema does not name falls back to the default.
+  assert.equal(
+    (await controller.setPreference("notifyNewMail", "Sometimes")).value,
+    "On",
+  );
+  assert.equal((await controller.setPreference("notifyNewMail", "Off")).value, "Off");
+  // A default search goes back out to Gmail and to an IMAP server, so it loses
+  // its line breaks before it is stored.
+  assert.equal(
+    (await controller.setPreference("defaultQuery", " in:inbox\n-in:spam ")).value,
+    "in:inbox -in:spam",
+  );
+  // Stepping snaps onto the manifest's own grid before it moves.
+  assert.equal((await controller.setPreference("refreshIntervalSec", 125)).value, 125);
+  assert.equal((await controller.stepPreference("refreshIntervalSec", 1)).value, 120);
+  assert.equal((await controller.stepPreference("refreshIntervalSec", 1)).value, 150);
+  assert.equal((await controller.stepPreference("refreshIntervalSec", -1)).value, 120);
+  // And stops at the ends rather than running past them.
+  await controller.setPreference("undoSendSeconds", 0);
+  assert.equal((await controller.stepPreference("undoSendSeconds", -1)).value, 0);
+  assert.equal((await controller.setPreference("nonsense", 1)).ok, false);
+}
+
+// A source the host reports reaches the page; a Google calendar is served by
+// its mailbox and carries no remove of its own.
+{
+  const controller = createSettingsController({
+    readAccounts: () => ({ version: 1, activeId: "", accounts: [] }),
+    saveAccounts() {},
+    configure: async () => {},
+    readOauthClient: () => ({ present: true, description: "Omamail desktop client" }),
+    readCalendarSources: () => [
+      { id: "google:one", kind: "google", name: "Personal" },
+      { id: "caldav:family", kind: "caldav", name: "Family", url: "https://example.test/dav/" },
+    ],
+  });
+  const snapshot = controller.snapshot();
+  assert.equal(snapshot.oauthClient.present, true);
+  assert.equal(snapshot.oauthClient.description, "Omamail desktop client");
+  assert.deepEqual(
+    snapshot.calendars.sources.map((source) => [source.id, source.removable]),
+    [
+      ["google:one", false],
+      ["caldav:family", true],
+    ],
+  );
+}
+
+// The row's second line is the QML page's, when the host has a status to give.
+{
+  const controller = createSettingsController({
+    readAccounts: () => ({
+      version: 1,
+      activeId: "one@example.com",
+      accounts: [gmail, imap],
+    }),
+    saveAccounts() {},
+    configure: async () => {},
+    readAccountStatus: () => ({
+      "one@example.com": { signedIn: true, unread: 4 },
+      "imap:two@example.com": { signedIn: false },
+    }),
+  });
+  const accounts = controller.snapshot().accounts;
+  assert.equal(accounts[0].detail, "4 unread messages · showing now");
+  assert.equal(accounts[1].detail, "Signed out");
 }
 
 {
@@ -151,13 +303,13 @@ function harness({
   const { controller, remoteImageWrites } = harness({
     initialRemoteImages: true,
   });
-  assert.equal(controller.snapshot().remoteImages.enabled, true);
+  assert.equal(controller.preference("remoteImages"), true);
   assert.deepEqual(await controller.toggleRemoteImages(false), {
     ok: true,
     enabled: false,
   });
   assert.deepEqual(remoteImageWrites, [false]);
-  assert.equal(controller.snapshot().remoteImages.enabled, false);
+  assert.equal(controller.preference("remoteImages"), false);
   assert.equal(controller.snapshot().error, "");
 }
 
@@ -175,7 +327,7 @@ function harness({
   );
   assert.match(result.error, /could not be saved/i);
   assert.deepEqual(remoteImageWrites, [false]);
-  assert.equal(controller.snapshot().remoteImages.enabled, true);
+  assert.equal(controller.preference("remoteImages"), true);
   assert.equal(controller.snapshot().busy, false);
   assert.equal(controller.snapshot().error, result.error);
 }

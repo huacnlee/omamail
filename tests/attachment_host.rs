@@ -149,3 +149,83 @@ fn attachment_module_is_registered_separately_from_generic_effects() {
     assert!(source.contains("HostModule::new(\"omamail-attachment\")"));
     assert!(source.contains(".async_function(\"open\""));
 }
+
+// ---------------------------------------------------------------- the picker
+
+struct Chooser(&'static str);
+impl omamail::attachment_host::FileChooser for Chooser {
+    fn choose(&self) -> Result<String, AttachmentError> {
+        Ok(self.0.to_owned())
+    }
+}
+struct BrokenChooser;
+impl omamail::attachment_host::FileChooser for BrokenChooser {
+    fn choose(&self) -> Result<String, AttachmentError> {
+        Err(AttachmentError)
+    }
+}
+
+fn chosen(answer: &'static str) -> serde_json::Value {
+    serde_json::from_str(&omamail::attachment_host::choose_files(&Chooser(answer))).unwrap()
+}
+
+#[test]
+fn a_chosen_file_crosses_as_metadata_and_never_as_bytes() {
+    let answer = chosen(
+        r#"{"ok":true,"files":[{"path":"/home/person/report.pdf","filename":"report.pdf","mimeType":"application/pdf","size":2048}]}"#,
+    );
+    assert_eq!(answer["ok"], serde_json::Value::Bool(true));
+    assert_eq!(answer["files"][0]["path"], "/home/person/report.pdf");
+    assert_eq!(answer["files"][0]["filename"], "report.pdf");
+    assert_eq!(answer["files"][0]["mimeType"], "application/pdf");
+    assert_eq!(answer["files"][0]["size"], 2048);
+    assert!(answer["files"][0].get("data").is_none());
+}
+
+#[test]
+fn cancelling_is_an_answer_rather_than_a_failure() {
+    // Opening a file dialog and closing it again is what the ordinary user does
+    // half the time. A rejected promise would have the composer report it as a
+    // failure to attach.
+    let answer = chosen(r#"{"ok":false,"error":"cancelled"}"#);
+    assert_eq!(answer["ok"], serde_json::Value::Bool(false));
+    assert_eq!(answer["error"], "cancelled");
+
+    let broken: serde_json::Value =
+        serde_json::from_str(&omamail::attachment_host::choose_files(&BrokenChooser)).unwrap();
+    assert_eq!(broken["ok"], serde_json::Value::Bool(false));
+    assert!(broken["error"].as_str().unwrap().len() < 128);
+}
+
+#[test]
+fn a_chosen_file_that_could_forge_a_header_or_a_path_is_refused_at_the_picker() {
+    // The same rules the send path holds — `main.js`'s `composeAttachments` and
+    // `imap_host::validate_attachments` — applied while the user is still
+    // looking at the dialog, rather than after they press Send.
+    for answer in [
+        r#"{"ok":true,"files":[{"path":"report.pdf","filename":"report.pdf","mimeType":"application/pdf","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/person/../../etc/passwd","filename":"passwd","mimeType":"text/plain","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a\nb.pdf","filename":"a.pdf","mimeType":"application/pdf","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a.pdf","filename":"a\".pdf","mimeType":"application/pdf","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a.pdf","filename":"a.pdf; x=1","mimeType":"application/pdf","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a.pdf","filename":"../a.pdf","mimeType":"application/pdf","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a.pdf","filename":"a.pdf","mimeType":"application/pdf; x=1","size":1}]}"#,
+        r#"{"ok":true,"files":[{"path":"/home/a.pdf","filename":"a.pdf","mimeType":"application/pdf","size":20971521}]}"#,
+        r#"{"ok":true,"files":[]}"#,
+        r#"not json at all"#,
+    ] {
+        let refused = chosen(answer);
+        assert_eq!(
+            refused["ok"],
+            serde_json::Value::Bool(false),
+            "accepted {answer}"
+        );
+    }
+}
+
+#[test]
+fn the_picker_is_registered_beside_the_opener() {
+    let source = include_str!("../src/effects.rs");
+    assert!(source.contains(".async_function(\"pick\""));
+    assert!(source.contains("scripts/attachment.sh"));
+}

@@ -715,7 +715,11 @@ function pad(value) {
 // Compact enough for a list row: minutes for the last hour, then the clock
 // time for today, a weekday inside the week, and a date beyond it.
 function relativeTime(date, now) {
-  if (!date) return ""
+  // An Invalid Date is an object, so it walks straight past a null check and
+  // out the bottom of this function as "undefined NaN, NaN" — `MONTHS[NaN]`
+  // and two NaNs. Every comparison below is false against NaN, so there is no
+  // earlier branch to catch it either.
+  if (!date || isNaN(date.getTime())) return ""
   var reference = now instanceof Date ? now : new Date(Number(now) || Date.now())
   var elapsed = reference.getTime() - date.getTime()
   if (elapsed < 0) elapsed = 0
@@ -734,7 +738,7 @@ function relativeTime(date, now) {
 }
 
 function fullTime(date) {
-  if (!date) return ""
+  if (!date || isNaN(date.getTime())) return ""
   return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear()
     + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
 }

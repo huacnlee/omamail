@@ -1594,4 +1594,36 @@ function activityMail() {
   assert.strictEqual(html.readingColumnOffset(0, 80), 0)
 }
 
+// ------------------------------------------------- named character references
+//
+// Qt decoded the whole HTML set itself, so the QML reader never carried a
+// table. This one does, and it was a thirty-entry allowlist of punctuation:
+// every accented letter reached the screen written out as its own source, so a
+// sender in Kraków was shown "Krak&oacute;w".
+{
+  assert.strictEqual(html.decodeReferences("Krak&oacute;w"), "Krak\u00f3w")
+  assert.strictEqual(html.decodeReferences("Jos&eacute;"), "Jos\u00e9")
+  assert.strictEqual(html.decodeReferences("Stra&szlig;e"), "Stra\u00dfe")
+  assert.strictEqual(html.decodeReferences("S&oslash;ren"), "S\u00f8ren")
+
+  // A named reference is case sensitive, and the table now carries both cases,
+  // so lowercasing every name would have turned "&Oacute;" into "ó".
+  assert.strictEqual(html.decodeReferences("&Oacute;"), "\u00d3")
+  assert.strictEqual(html.decodeReferences("&oacute;"), "\u00f3")
+  // The lowercase attempt stays as a second chance, so the entries that were
+  // only ever spelled one way keep tolerating a shouted spelling.
+  assert.strictEqual(html.decodeReferences("&NBSP;"), " ")
+
+  // A name may carry digits after its first letter. `[a-zA-Z]+` stopped at the
+  // letters, so "&frac12;" never matched the table at all.
+  assert.strictEqual(html.decodeReferences("&frac12;"), "\u00bd")
+  assert.strictEqual(html.decodeReferences("x&sup2;"), "x\u00b2")
+
+  // Everything that was already true stays true: numeric references both ways,
+  // and a name nobody knows is left exactly as it was written.
+  assert.strictEqual(html.decodeReferences("&#104;i &#x68;i"), "hi hi")
+  assert.strictEqual(html.decodeReferences("&notareal;"), "&notareal;")
+  assert.strictEqual(html.decodeReferences("&amp;"), "&")
+}
+
 console.log("test_html.js ok")

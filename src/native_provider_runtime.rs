@@ -379,13 +379,7 @@ impl NativeProviderBackend for ProductionProviderBackend {
             &self.secrets,
             &transport,
             &tokens,
-            GmailExecutorConfig::new(
-                "omamail",
-                "omamail-gmail",
-                context.client_id(),
-                context.account_id(),
-                context.grant(),
-            ),
+            GmailExecutorConfig::new(context.client_id(), context.account_id(), context.grant()),
         )
         .map_err(gmail_error)?;
         let payload = executor
@@ -817,12 +811,28 @@ fn imap_operations<'a>(call: &'a ImapCall) -> Result<Vec<MailOperation<'a>>, Pro
         ImapCall::Action { .. } => Err(ProviderFailure::Unavailable),
     }
 }
+/// The class a failed Gmail call is reported as, and the host's own note of it.
+///
+/// `ProviderFailure` is three words wide, so a credential the keyring would not
+/// give up, a token Google would not accept and a mailbox that simply is not
+/// there all reach the window as "Unavailable". That is the right thing to show
+/// somebody — none of the distinctions are theirs to act on — but it left no way
+/// at all to tell them apart from outside the process, which is how "Gmail will
+/// not load the list" became a question nobody could answer.
+///
+/// The line names the class and nothing else. `GmailError` is a fieldless enum:
+/// there is no address, request, reply or token in it to leak.
 fn gmail_error(error: gmail::GmailError) -> ProviderFailure {
+    eprintln!("Gmail: a call returned {error:?}");
     match error {
         gmail::GmailError::DeadlineExceeded => ProviderFailure::TimedOut,
-        gmail::GmailError::PlatformUnavailable
-        | gmail::GmailError::SecretUnavailable
-        | gmail::GmailError::AuthRequired => ProviderFailure::Unavailable,
+        // The keyring answered and had nothing under any name this credential
+        // has ever been filed under. That is a mailbox to sign in to, not a
+        // service to try again in a minute.
+        gmail::GmailError::AuthRequired => ProviderFailure::SignedOut,
+        gmail::GmailError::PlatformUnavailable | gmail::GmailError::SecretUnavailable => {
+            ProviderFailure::Unavailable
+        }
         _ => ProviderFailure::Failed,
     }
 }

@@ -305,3 +305,72 @@ fn partial_secret_store_failure_is_rolled_back() {
     .unwrap();
     assert!(setup.store().get(&key).unwrap().is_none());
 }
+
+// "Leave empty to read only" is what the setup form says next to the SMTP
+// field, and this is the whole of what makes it true: nothing is verified
+// against a server the user did not name, the password is still stored against
+// the IMAP endpoint, and the account comes back declaring no SMTP server.
+#[test]
+fn no_smtp_server_verifies_only_imap_and_stores_a_read_only_account() {
+    let setup = ImapSetupAuthority::new(Verifier::default(), MemorySecretStore::default());
+    let value: serde_json::Value = serde_json::from_str(
+        &setup.dispatch(
+            &serde_json::json!({
+                "operation":"imap.setup.verifyAndStore",
+                "deadlineMs":1000,
+                "email":"me@example.test",
+                "username":"mail-user",
+                "password":"top secret",
+                "imapHost":"imap.example.test",
+                "smtpHost":"",
+                "insecure":false
+            })
+            .to_string(),
+        ),
+    )
+    .unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["account"]["imap"]["smtpHost"], "");
+    assert_eq!(value["data"]["account"]["imap"]["smtpPort"], 0);
+    assert_eq!(value["data"]["context"]["smtpHost"], "");
+    assert_eq!(value["data"]["context"]["smtpPort"], 0);
+    let calls = setup.verifier().calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "no server is verified that nobody named");
+    assert_eq!(calls[0].0, SetupProtocol::Imap);
+    drop(calls);
+    let key = SecretKey::imap_endpoint(
+        "omamail",
+        "imap:me@example.test",
+        "imap.example.test",
+        993,
+        "mail-user",
+    )
+    .unwrap();
+    assert_eq!(
+        setup.store().get(&key).unwrap().unwrap().expose(),
+        "top secret"
+    );
+
+    // The clear-text rule still holds for the server that is there. A named
+    // remote SMTP server on an insecure account is refused as it always was.
+    let insecure = ImapSetupAuthority::new(Verifier::default(), MemorySecretStore::default());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            &insecure.dispatch(
+                &serde_json::json!({
+                    "operation":"imap.setup.verifyAndStore",
+                    "deadlineMs":1000,
+                    "email":"me@example.test",
+                    "username":"mail-user",
+                    "password":"top secret",
+                    "imapHost":"127.0.0.1",
+                    "smtpHost":"smtp.example.test",
+                    "insecure":true
+                })
+                .to_string(),
+            )
+        )
+        .unwrap()["error"],
+        "Insecure mail servers must use loopback addresses"
+    );
+}

@@ -1,11 +1,28 @@
 // @ts-check
 
 import { View, div } from "gpui";
-import { InputState, TextareaState, set_theme, v_flex } from "gpui-base";
+import { InputState, TextareaState, h_flex, set_theme, v_flex } from "gpui-base";
 import { platform } from "process";
 import { ALL as PROVIDERS } from "./providers/Registry.js";
 import * as Registry from "./providers/Registry.js";
-import { actionBindings } from "./keys/actions.js";
+import {
+  HANDLED_ACTIONS,
+  OVERLAY_CONTEXT,
+  actionBindings,
+} from "./keys/actions.js";
+import {
+  closeShortcuts,
+  openShortcuts,
+  scrollShortcuts,
+  shortcutSheetModel,
+} from "./keys/overlay.js";
+import { createFocusHomes, focusOverlay, parkKeyboard } from "./keys/focus.js";
+import { mailActionHost, mailKeyContext } from "./keys/mail-host.js";
+
+// Re-exported: the integration test reaches for it here, because it is a fact
+// about this window even though it lives beside the handlers that need it.
+export { mailKeyContext };
+import { hintsFor } from "./keys/keymap.js";
 import {
   createApplicationState,
   reduceApplicationState,
@@ -15,33 +32,89 @@ import {
   loadAccounts,
   saveAccounts,
 } from "./application/account-store.js";
+import { startCommandListener } from "./application/commands.js";
+import { companionPublisher } from "./application/companion.js";
 import { createApplicationController } from "./application/controller.js";
+import { startMailClock } from "./application/mail-clock.js";
 import { createListCache } from "./application/list-cache.js";
+import {
+  accountIn,
+  senderRows,
+  providerFor,
+  sendRefusal,
+} from "./application/account-capabilities.js";
 import {
   appShell,
   bottomBar,
+  keyHints,
+  statusLine,
   brandLockup,
   button,
   muted,
   omarchyTheme,
+  applyOmarchyRoles,
+  applyOmarchyStyle,
+  style,
   surface,
   topBar,
   title,
 } from "./lib/omarchy-ui/index.js";
 import { renderMail } from "./ui/mail.js";
+import { mailModel } from "./application/mail-model.js";
+import { composeModel } from "./application/compose-model.js";
+import { bindComposeFields } from "./application/compose-fields.js";
+import {
+  bindReaderSelection,
+  endReaderSelection,
+} from "./application/reader-selection.js";
+import { saveDraftOnLeave } from "./application/compose-exit.js";
+import {
+  composeContacts,
+  loadAddressBook,
+} from "./application/compose-contacts.js";
+import { calendarModel } from "./application/calendar-model.js";
+import {
+  availableCalendarSources,
+  bindCalendarSources,
+  calendarSourceModel,
+} from "./application/calendar-sources.js";
+import { AUTHOR_URL, PROJECT_URL } from "./application/links.js";
 import { createReaderController } from "./ui/reader-controller.js";
+import {
+  allowRemoteImages,
+  applyReadingPreferences,
+  closeMessageMenu,
+  moveAccountSwitcher,
+  moveAppMenu,
+  moveMessageMenu,
+  openAccountSwitcher,
+  runAccountSwitcherCursor,
+  runAppMenuCursor,
+  runMessageMenuCursor,
+} from "./application/mail-actions.js";
 import * as HeyCli from "./providers/HeyCli.js";
+import * as Mail from "./message/Message.js";
 import * as Accounts from "./account/Accounts.js";
+import * as Model from "./account/Model.js";
+import { displayAddress } from "./application/addresses.js";
+
+// Re-exported: the integration test reaches for it here, and it reads as a
+// property of the window even though it lives beside the model that needs it.
+export { displayAddress };
 import { createComposeController } from "./compose/controller.js";
 import { createCalendarController } from "./calendar/controller.js";
-import { renderCompose } from "./ui/compose.js";
+import { composeToasts, renderCompose } from "./ui/compose.js";
 import { renderCalendar } from "./ui/calendar.js";
 import { redactError } from "./adapters/effect-port.js";
 import { createSetupController } from "./setup/controller.js";
+import { bindImapAutofill } from "./application/imap-autofill.js";
 import { createSetupAdapters } from "./setup/adapters.js";
 import { renderSetupFooter, renderSetupForm } from "./ui/setup.js";
 import { createSettingsController } from "./settings/controller.js";
 import { renderSettings } from "./ui/settings.js";
+import { renderShortcutSheet } from "./ui/shortcuts.js";
+import { mailLayout, viewportSize } from "./ui/layout.js";
+import { renderAppMenu } from "./ui/menu.js";
 
 const nativeSetupAdapters = createSetupAdapters({
   gmail: async (request) =>
@@ -51,55 +124,46 @@ const nativeSetupAdapters = createSetupAdapters({
   hey: async (request) => (await import("omamail-hey-setup")).dispatch(request),
 });
 
-const HANDLED_ACTIONS = new Set([
-  "cursorDown",
-  "cursorUp",
-  "open",
-  "backToList",
-  "back",
-  "compose",
-  "archive",
-  "trash",
-  "star",
-  "spam",
-  "markRead",
-  "markUnread",
-  "reply",
-  "replyAll",
-  "forward",
-  "calendar",
-  "calendarView",
-  "mailView",
-  "send",
-  "undoSend",
-  "createEvent",
-  "calendarNext",
-  "calendarPrevious",
-  "openCalendarEvent",
-  "calendarPreviousPeriod",
-  "calendarNextPeriod",
-  "calendarToday",
-  "calendarWeek",
-  "calendarMonth",
-  "settings",
-]);
+// A minute is finer than the marker can show: the week grid is an hour to
+// roughly thirty pixels, so a minute moves it half a pixel. Anything shorter
+// would be a wake-up nobody could see the result of.
+const CALENDAR_CLOCK_INTERVAL_MS = 60_000;
 
-/** @param {unknown} value */
-export function displayAddress(value) {
-  if (!value || typeof value !== "object") return String(value ?? "");
-  const address = /** @type {Record<string, unknown>} */ (value);
-  const name = String(address.name ?? address.display ?? "").trim();
-  const email = String(address.email ?? address.email_address ?? "").trim();
-  return name && email ? `${name} <${email}>` : name || email;
-}
+// `MailAccount`'s `sendCountdownTimer` interval. Four beats a second is what
+// makes a one-second countdown land on the second rather than near it.
+const OUTBOX_TICK_INTERVAL_MS = 250;
 
-async function currentOmarchyColors() {
-  if (platform !== "linux") return "";
+// How long the loopback listener waits for Google, and how often it is asked
+// whether the redirect has arrived. The window is the host's own ceiling; the
+// interval is short because a browser is sitting on the socket for all of it.
+// Under both ceilings — the host's `MAX_DEADLINE` and the setup adapter's —
+// rather than exactly on them, so neither refuses the request that asks for it.
+const SIGN_IN_WINDOW_MS = 240_000;
+const SIGN_IN_POLL_INTERVAL_MS = 500;
+
+
+// The palette, the structural tokens, and the two values that come from
+// Hyprland rather than from a file. All three are read together because a
+// window painted in the theme's colors at gpui's density and roundness still
+// does not belong on the desktop.
+async function currentOmarchyTheme() {
+  const none = { colors: "", shell: "", cornerRadius: 0, fontFamily: "" };
+  if (platform !== "linux") return none;
   try {
-    const { current_colors } = await import("omarchy-theme");
-    return current_colors();
+    const {
+      current_colors,
+      current_shell,
+      current_corner_radius,
+      current_font_family,
+    } = await import("omarchy-theme");
+    return {
+      colors: current_colors(),
+      shell: current_shell(),
+      cornerRadius: current_corner_radius(),
+      fontFamily: current_font_family(),
+    };
   } catch (_error) {
-    return "";
+    return none;
   }
 }
 
@@ -179,20 +243,107 @@ export default class Omamail extends View {
   calendarEnd = /** @type {import("gpui-base").InputState} */ (
     /** @type {unknown} */ (null)
   );
+  /** @type {boolean} */ sidebarCollapsed = false;
+  /** @type {boolean} */ appMenuOpen = false;
+  /** @type {boolean} */ accountSwitcherOpen = false;
+  // Where the keyboard is standing in each of the two menus, which is not where
+  // the mouse is: a row draws its own hover, and a hover that wrote this would
+  // drag the cursor back to whatever the pointer happened to rest on.
+  /** @type {number} */ appMenuCursor = 0;
+  /** @type {number} */ accountSwitcherCursor = 0;
+  // Whether the search field holds the keyboard. The context is the only guard
+  // there is, so this is what stands the bare mailbox keys down while a query
+  // is being typed.
+  /** @type {boolean} */ searchFocused = false;
+  // Proportional until somebody drags the divider, then whatever they dragged
+  // it to. Zero is "proportional", which is what a double-click restores.
+  /** @type {number} */ listWidth = 0;
+  /** @type {{x:number,width:number}|null} */ listDrag = null;
+  // How far the shortcut sheet has been scrolled, in pixels.
+  /** @type {number} */ shortcutScroll = 0;
+  /** @type {string} */ hoveredMessageId = "";
+  /** @type {any} */ messageMenu = null;
+  /** @type {boolean} */ shortcutHelpOpen = false;
+  /** @type {number} */ bodyZoom = 1;
+  /** @type {string} */ omarchyColors = "";
+  /** @type {boolean} */ calendarClockRunning = false;
+  /** @type {boolean} */ outboxClockRunning = false;
+  /** @type {boolean} */ signInPolling = false;
+  /** @type {boolean} */ setupDetailVisible = false;
+  /** @type {boolean} */ setupPasswordVisible = false;
+  /** @type {boolean} */ setupClientSecretVisible = false;
   /** @type {any} */ readerPresentationDetail = null;
   /** @type {ReturnType<typeof createReaderController>|null} */ readerController = null;
+  // The body held as plain text so it can be selected, and whether it is on
+  // screen. `application/reader-selection.js` owns both.
+  /** @type {any} */ readerSelection = null;
+  /** @type {boolean} */ readerSelecting = false;
+  /** @type {string} */ readerSelectionText = "";
+  // Where the keyboard lives. `keys/focus.js` says why there are two. Both are
+  // made in `init`, because a handle built during render would be a new one
+  // every frame — so the type is the handle and the null is the moment before
+  // there is a window to make one in.
+  /** @type {import("gpui").FocusHandle} */
+  keyboardHome = /** @type {import("gpui").FocusHandle} */ (
+    /** @type {unknown} */ (null)
+  );
+  /** @type {import("gpui").FocusHandle} */
+  overlayFocus = /** @type {import("gpui").FocusHandle} */ (
+    /** @type {unknown} */ (null)
+  );
 
   /** @param {unknown} props @param {import("gpui").AsyncContext} cx */
   init(props = {}, cx) {
     const options = /** @type {any} */ (props);
     this.storage = options.storage ?? localStorage;
     this.width = Number(options.width) || 1024;
-    this.search = InputState.new({ placeholder: "Search mail" });
+    // The operator examples earn their place: they are the whole reason the
+    // field takes the provider's search syntax straight through, and nowhere
+    // else says so at the moment somebody would use it.
+    this.search = InputState.new({
+      placeholder: "Search mail — from:jane has:attachment",
+    });
     this.search.on("change", (_event, eventCx) => {
       this.controller?.search(this.search.value());
       eventCx.notify();
     });
+    // A query being typed beats the list underneath it. The context is the only
+    // guard there is — a text-entry context binds no bare key but Escape — so
+    // without these two the field sat inside `MailList` and typing a query
+    // archived, trashed and replied instead of typing: gpui matches a binding
+    // against every ancestor's context, and on Linux a binding always wins over
+    // the character.
+    this.search.on("focus", (_event, eventCx) => {
+      this.searchFocused = true;
+      eventCx.notify();
+    });
+    this.search.on("blur", (_event, eventCx) => {
+      this.searchFocused = false;
+      eventCx.notify();
+    });
+    // The window's own focus homes, and the first thing the keyboard is given:
+    // an unfocused window dispatches every key from the tree root, where none
+    // of the window's contexts are, so nothing at all is bound.
+    const homes = createFocusHomes(cx);
+    this.keyboardHome = homes.home;
+    this.overlayFocus = homes.overlay;
+    parkKeyboard(this);
     this.readerHidden = false;
+    // The rail used to come back open on every restart, which is a preference
+    // somebody had already expressed and the window kept forgetting.
+    this.sidebarCollapsed =
+      this.storage.getItem("omamail.sidebarCollapsed") === "true";
+    // Where the divider was left. Zero is the proportional default, which is
+    // both the first run and what a double-click on the divider restores.
+    this.listWidth = Math.max(
+      0,
+      Number(this.storage.getItem("omamail.listWidth")) || 0,
+    );
+    // Reading zoom for the message body only. The window's own chrome follows
+    // the theme's font scale, which is Omarchy's to set, not this app's.
+    this.bodyZoom = Model.clampZoom(
+      Number(this.storage.getItem("omamail.bodyZoom")) || 1,
+    );
     /** @type {import("./application/state.js").ApplicationState} */
     this.state = createApplicationState();
     this.accountList = loadAccounts(this.storage);
@@ -202,6 +353,10 @@ export default class Omamail extends View {
       : options.calendarSource
         ? [options.calendarSource]
         : [];
+    // And then whatever `calendars.json` holds, which is where the user's own
+    // calendars have always been: the option above is only what a test hands
+    // over instead.
+    bindCalendarSources(this, cx, options.calendarHost);
     this.hostConfigurationError = "";
     this.configureNativeHost = options.configureHostContexts
       ? (
@@ -269,6 +424,13 @@ export default class Omamail extends View {
     };
     this.compose = createComposeController({
       currentAccountId: () => activeAccount()?.id ?? "",
+      // A queued send has left the composer: the form is empty behind it, so
+      // the window belongs back on the list with the mailbox keys live and the
+      // countdown running over them. `App.qml` does this on `onSendQueued`.
+      onQueued: () => {
+        this.state = { ...this.state, route: "mail" };
+        this.syncComposeFields();
+      },
       onSent: (payload) => {
         this.controller?.invalidateDrafts(payload.accountId);
         this.state = { ...this.state, route: "mail" };
@@ -291,8 +453,34 @@ export default class Omamail extends View {
         );
       },
       notify: () => cx.notify(),
+      // A toast retires on a beat of the outbox clock, so raising one has to
+      // make sure that clock is running. See `note` in the compose controller.
+      onNotice: () => this.startOutboxClock(cx),
     });
-    this.composeTo = InputState.new({ placeholder: "Recipient" });
+    // The QML's own placeholders: an example address says what the field
+    // takes far better than the word "Recipient" does.
+    this.composeTo = InputState.new({ placeholder: "recipient@example.com" });
+    // The Google OAuth client every Gmail mailbox signs in through. Held as
+    // window state rather than in the setup controller because they are text
+    // fields, and a field's contents belong to the window that owns it.
+    this.setupClientId = InputState.new({
+      placeholder: "Client ID — 000000-xxxx.apps.googleusercontent.com",
+    });
+    this.setupClientSecret = InputState.new({
+      placeholder: "Client secret — optional",
+    });
+    // Masked by default, because a credential on a shoulder-surfable window is
+    // the worse default — readable on demand, so it can be checked against the
+    // console. `SetupPage.qml` says the same thing about the same field.
+    this.setupClientSecret.set_masked(true);
+    this.settingsDefaultQuery = InputState.new({ placeholder: "in:inbox" });
+    this.settingsDefaultQuery.on("change", (_event, eventCx) => {
+      void /** @type {any} */ (this.settings)?.setPreference(
+        "defaultQuery",
+        this.settingsDefaultQuery?.value() ?? "",
+      );
+      eventCx.notify();
+    });
     this.composeCc = InputState.new({ placeholder: "Cc" });
     this.composeBcc = InputState.new({ placeholder: "Bcc" });
     this.composeSubject = InputState.new({ placeholder: "Subject" });
@@ -300,28 +488,24 @@ export default class Omamail extends View {
       placeholder: "Write a message",
       rows: 12,
     });
-    this.composeTo.on("change", (_event, eventCx) => {
-      this.compose.update({ to: this.composeTo.value() });
-      eventCx.notify();
-    });
-    this.composeCc.on("change", (_event, eventCx) => {
-      this.compose.update({ cc: this.composeCc.value() });
-      eventCx.notify();
-    });
-    this.composeBcc.on("change", (_event, eventCx) => {
-      this.compose.update({ bcc: this.composeBcc.value() });
-      eventCx.notify();
-    });
-    this.composeSubject.on("change", (_event, eventCx) => {
-      this.compose.update({ subject: this.composeSubject.value() });
-      eventCx.notify();
-    });
-    this.composeBody.on("change", (_event, eventCx) => {
-      this.compose.update({ body: this.composeBody.value() });
-      eventCx.notify();
-    });
+    bindComposeFields(this);
+    bindReaderSelection(this);
     this.calendar = createCalendarController({
-      sources: this.calendarSources,
+      // A thunk, not the array: the list changes when an account is removed and
+      // when the stored calendars are read, and a controller holding the
+      // construction-time array sees neither.
+      sources: () => this.calendarSources,
+      // Where the range cache is kept between runs, so the grid is drawn from
+      // disk before the network answers.
+      storage: this.storage,
+      // Only the open mailbox's calendars, which is what the QML controller
+      // shows: without it every account's Google calendar lands on one grid.
+      accountId: () => String(this.state.activeAccountId || ""),
+      // A thunk: the desktop's colours arrive from the host a beat after the
+      // window is built, and a calendar with no palette falls to one dim tone
+      // for every source, which is the one thing colouring by calendar is for.
+      palette: () => this.omarchyColors,
+      accountSummaries: () => accountSummaries(this.accountList),
       execute: (effect, done) => {
         const source = effect?.source;
         if (!source || (effect?.sourceId && effect.sourceId !== source.id)) {
@@ -339,6 +523,28 @@ export default class Omamail extends View {
       placeholder: "2026-09-01T09:00:00Z",
     });
     this.calendarEnd = InputState.new({ placeholder: "2026-09-01T10:00:00Z" });
+    // The rest of the event form. The composer draws a field per state it is
+    // given, so a missing one is a missing row rather than a broken page.
+    this.calendarDate = InputState.new({ placeholder: "2026-09-01" });
+    this.calendarEndDate = InputState.new({ placeholder: "2026-09-01" });
+    this.calendarLocation = InputState.new({ placeholder: "Where" });
+    this.calendarNotes = InputState.new({ placeholder: "Notes" });
+    this.calendarInterval = InputState.new({ placeholder: "1" });
+    this.calendarCount = InputState.new({ placeholder: "10" });
+    for (const [field, state] of /** @type {Array<[string, any]>} */ ([
+      ["date", this.calendarDate],
+      ["endDate", this.calendarEndDate],
+      ["location", this.calendarLocation],
+      ["notes", this.calendarNotes],
+      ["interval", this.calendarInterval],
+      ["count", this.calendarCount],
+    ]))
+      state.on("change", (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+        /** @type {any} */ (this.calendar).updateDraft({
+          [field]: state.value(),
+        });
+        eventCx.notify();
+      });
     this.calendarTitle.on("change", (_event, eventCx) => {
       this.calendar.updateDraft({ title: this.calendarTitle.value() });
       eventCx.notify();
@@ -367,6 +573,8 @@ export default class Omamail extends View {
     this.setupSmtpHost = InputState.new({ placeholder: "smtp.example.com" });
     this.setupSmtpPort = InputState.new({ placeholder: "465", value: "465" });
     this.setupAuthorizationUrl = TextareaState.new({ rows: 2 });
+    // The address fills the four server fields in until somebody edits one.
+    bindImapAutofill(this, cx);
     // Do not advertise a shortcut unless this host installs a handler for it.
     // Provider actions arrive with their full controller/UI integration, not as
     // silent global bindings in this first host surface.
@@ -385,10 +593,28 @@ export default class Omamail extends View {
             complete(reply);
             cx.notify();
           }),
+        // A thunk, not the values: Settings writes them while the window is
+        // up, and a page size or a default search copied at construction would
+        // go on being the one the window opened with.
+        preference: (/** @type {string} */ key) =>
+          /** @type {any} */ (this.settings)?.preference(key),
+        notify: (/** @type {any} */ request) => this.postNotification(request),
+        // The bar's number. Published from the same count `recordUnread` keeps,
+        // so the envelope in the panel and the list in this window are never
+        // two different answers.
+        companion: companionPublisher(),
       });
       this.controller.start();
+      startMailClock(this, cx);
     };
     this.settings = createSettingsController({
+      // The generic pair behind every preference the table describes. Without
+      // it a setting is drawn disabled with the reason on its helper line,
+      // which is better than a control that fails after it is pressed.
+      readPreference: (/** @type {string} */ key) =>
+        this.storage.getItem(`omamail.${key}`),
+      savePreference: (/** @type {string} */ key, /** @type {any} */ value) =>
+        this.storage.setItem(`omamail.${key}`, String(value)),
       readRemoteImages: () =>
         this.storage.getItem("omamail.remoteImages") === "true",
       saveRemoteImages: (/** @type {boolean} */ enabled) =>
@@ -435,7 +661,19 @@ export default class Omamail extends View {
       },
       clearCache: (/** @type {string} */ accountId) =>
         this.listCache.clearAccount?.(accountId),
+      readCalendarSources: () => availableCalendarSources(this),
     });
+    // The reader is told the two standing reading answers before it opens
+    // anything: a preference somebody has already given should not have to be
+    // given again on the first message.
+    applyReadingPreferences(this);
+    // And the default search, whose control is the one text field on the page.
+    // A box left empty beside a saved value reads as "no default search", and
+    // now that the value actually decides what the inbox asks for, the field is
+    // where somebody goes to find out what it is.
+    this.settingsDefaultQuery.set_value(
+      String(/** @type {any} */ (this.settings).preference("defaultQuery") ?? ""),
+    );
     if (options.execute || this.hostContextPlan.contexts.length === 0)
       this.startController();
     else {
@@ -449,11 +687,22 @@ export default class Omamail extends View {
         },
       );
     }
+    // Before the accounts and before the theme: a mailto: link is what started
+    // this process, and the command it queued is already waiting.
+    startCommandListener(this, cx);
     const fallbackTheme = cx.theme();
     cx.spawn(async () => {
-      const source = await currentOmarchyColors();
-      const theme = omarchyTheme(source, fallbackTheme);
+      const { colors, shell, cornerRadius, fontFamily } =
+        await currentOmarchyTheme();
+      this.omarchyColors = colors;
+      const tokens = applyOmarchyStyle(shell, { cornerRadius, fontFamily });
+      // The roles gpui's own token set has no room for — the link tone, the
+      // two dim tones, the popup surface — kept beside the theme rather than
+      // written into it, because gpui drops what it does not know.
+      applyOmarchyRoles(colors);
+      const theme = omarchyTheme(colors, fallbackTheme, tokens);
       if (theme) set_theme(theme);
+      cx.notify();
     });
   }
 
@@ -505,12 +754,45 @@ export default class Omamail extends View {
       providerId,
     });
     this.setup.choose(providerId);
+    // Gmail's first step is the OAuth client, so the page has to know what the
+    // host already has before it draws "No client yet" over a working one.
+    if (providerId === "gmail") this.refreshOauthClient(cx);
     cx.notify();
+  }
+
+  /** @param {import("gpui").Context} cx */
+  refreshOauthClient(cx) {
+    void cx.spawn(async (/** @type {any} */ asyncCx) => {
+      // With the secret: a box that cannot show what is stored is a box that
+      // can only overwrite it, and there would be no way to read the client
+      // back off this machine. `SetupPage.qml`'s `syncFromStore` does the same.
+      const next = await /** @type {any} */ (this.setup).readClient({
+        includeSecret: true,
+      });
+      this.applyOauthClientFields(next?.client);
+      asyncCx.notify();
+    });
+  }
+
+  /**
+   * Put the stored client back in the two boxes. Both, always: leaving the
+   * secret blank after a save is what made it look as though the save had
+   * thrown the secret away.
+   * @param {any} client
+   */
+  applyOauthClientFields(client) {
+    this.setupClientId?.set_value(String(client?.clientId ?? ""));
+    if (typeof client?.clientSecret === "string")
+      this.setupClientSecret?.set_value(client.clientSecret);
   }
 
   /** @param {import("gpui").Context} cx */
   submitSetup(cx) {
     const provider = this.state.setupProviderId;
+    // A browser sign-in is a person's deadline, not a request's: they pick an
+    // account, read an unverified-app warning and tick three boxes. Verifying
+    // an IMAP password is a round trip and keeps the short one.
+    const deadline = provider === "imap" ? 30000 : SIGN_IN_WINDOW_MS;
     const form =
       provider === "imap"
         ? {
@@ -525,11 +807,30 @@ export default class Omamail extends View {
           }
         : {};
     return cx.spawn(async (asyncCx) => {
-      const snapshot = await this.setup.submit(form, 30000);
-      if (snapshot.intent?.url)
-        this.setupAuthorizationUrl.set_value(snapshot.intent.url);
-      if (snapshot.phase === "ready")
-        await this.commitSetup(snapshot.commitIntent);
+      try {
+        const snapshot = await this.setup.submit(form, deadline);
+        if (snapshot.intent?.url) {
+          this.setupAuthorizationUrl.set_value(snapshot.intent.url);
+          // The QML runs `xdg-open` on this the moment the flow begins, and the
+          // notice under it says "if the browser did not open" — which is only
+          // honest if something tried. Opening it is the whole of step 2.
+          if (snapshot.intent.kind === "open-browser")
+            asyncCx.open_url(snapshot.intent.url);
+        }
+        // Nothing else accepts the loopback callback. The QML leaves a socat
+        // listener running and the redirect lands in it; here the listener only
+        // accepts while it is being polled, so without this the browser sits on
+        // "This site can't be reached" until somebody presses Check status.
+        if (snapshot.phase === "authenticating")
+          this.startSignInPolling(asyncCx);
+        if (snapshot.phase === "ready")
+          await this.commitSetup(snapshot.commitIntent);
+      } catch (_error) {
+        // Opening the browser is the one step here that can throw, and losing
+        // the notify below it left the page on the form with the flow already
+        // running — the button pressed, and nothing to show for it.
+        this.setupFailure = "The sign-in could not be started";
+      }
       asyncCx.notify();
     });
   }
@@ -541,6 +842,43 @@ export default class Omamail extends View {
       if (snapshot.phase === "ready")
         await this.commitSetup(snapshot.commitIntent);
       asyncCx.notify();
+    });
+  }
+
+  /**
+   * Answer the browser while it is waiting on the loopback redirect.
+   *
+   * Polls rather than listens because that is the shape the host offers: each
+   * poll accepts a pending connection if there is one. The loop stops the
+   * moment the flow leaves `authenticating` — completed, cancelled or expired —
+   * so it cannot outlive the sign-in it belongs to.
+   * @param {import("gpui").Context} cx
+   */
+  startSignInPolling(cx) {
+    if (this.signInPolling) return;
+    this.signInPolling = true;
+    void cx.spawn(async (/** @type {any} */ asyncCx) => {
+      try {
+        while (this.setup.snapshot().phase === "authenticating") {
+          await asyncCx.sleep(SIGN_IN_POLL_INTERVAL_MS);
+          if (this.setup.snapshot().phase !== "authenticating") break;
+          const snapshot = await this.setup.poll(30000);
+          if (snapshot.phase === "ready")
+            await this.commitSetup(snapshot.commitIntent);
+          asyncCx.notify();
+        }
+      } catch (_error) {
+        // This is the only loop in the window whose failure nobody would see.
+        // A rejection used to end it with the page still reading "Waiting for
+        // sign-in" and nothing left that would ever poll again: the browser sat
+        // on the loopback redirect, and the sign-in was over without saying so.
+        this.setupFailure = "The sign-in could not be checked";
+      } finally {
+        this.signInPolling = false;
+        // In the `finally`, so the frame that stopped waiting is drawn whichever
+        // way the loop ended.
+        asyncCx.notify();
+      }
     });
   }
 
@@ -588,6 +926,19 @@ export default class Omamail extends View {
       this.startController?.();
       this.hostConfigurationError = "";
       this.setupFailure = "";
+      // Leave the form. The mailbox exists and is already loading — the page
+      // the browser just showed says so in as many words — and a setup page
+      // still asking to connect an account that is connected is the window
+      // failing to notice its own success.
+      //
+      // Settings when the list is not up yet: `renderMail` falls back to the
+      // setup route without a controller, which would land the user back on
+      // the provider chooser they just finished with.
+      this.state = {
+        ...this.state,
+        route: this.controller ? "mail" : "settings",
+        setupProviderId: null,
+      };
     } catch (_) {
       saveAccounts(this.storage, previous);
       this.accountList = previous;
@@ -613,12 +964,39 @@ export default class Omamail extends View {
 
   /** @param {number} offset @param {import("gpui").Context} cx */
   moveCursor(offset, cx) {
+    // The menu is on top, so moving moves it. The QML's row menu is a
+    // `QQC.Popup` and answers `j`/`k` itself for the same reason; here the
+    // window still owns the keys, so the branch is the window's.
+    if (this.messageMenu) {
+      moveMessageMenu(this, offset, cx);
+      return;
+    }
+    if (this.accountSwitcherOpen) {
+      moveAccountSwitcher(this, offset, cx);
+      return;
+    }
+    if (this.appMenuOpen) {
+      moveAppMenu(this, offset, cx);
+      return;
+    }
     this.controller?.moveCursor(offset);
     cx.notify();
   }
 
   /** @param {import("gpui").Context} cx */
   openCursor(cx) {
+    if (this.messageMenu) {
+      runMessageMenuCursor(this, cx);
+      return;
+    }
+    if (this.accountSwitcherOpen) {
+      runAccountSwitcherCursor(this, cx);
+      return;
+    }
+    if (this.appMenuOpen) {
+      runAppMenuCursor(this, cx);
+      return;
+    }
     this.readerHidden = false;
     /** @type {(detail:any) => void} */
     let completeOpen = () => {};
@@ -637,6 +1015,40 @@ export default class Omamail extends View {
 
   /** @param {import("gpui").Context} cx */
   back(cx) {
+    // The nearest thing to leave, and the row menu is the nearest of all.
+    //
+    // The QML has no branch for any of these three: a `QQC.Popup` with
+    // CloseOnEscape consumes the key itself, so one written there would never
+    // run. This host has no popup that takes keys, so the window owns Escape
+    // here as it owns every other key, and the layers it closes are written
+    // down rather than implied.
+    if (this.messageMenu) {
+      closeMessageMenu(this, cx);
+      return;
+    }
+    if (this.accountSwitcherOpen) {
+      this.accountSwitcherOpen = false;
+      cx.notify();
+      return;
+    }
+    if (this.appMenuOpen) {
+      this.appMenuOpen = false;
+      cx.notify();
+      return;
+    }
+    // A query being typed is the nearest thing on the mailbox to leave: clear
+    // it if there is one, then hand the keyboard back. Parked here rather than
+    // left to the context, which still reads as "search" at this point — the
+    // field has not lost the focus yet.
+    if (this.searchFocused) {
+      if (this.search.value() !== "") {
+        this.search.set_value("");
+        this.controller?.search("");
+      }
+      parkKeyboard(this);
+      cx.notify();
+      return;
+    }
     if (this.state.route === "setup" && this.state.setupProviderId) {
       this.setup.cancel();
       this.pendingAccountDraft = null;
@@ -644,12 +1056,41 @@ export default class Omamail extends View {
       cx.notify();
       return;
     }
-    if (this.state.route === "calendar" && this.calendar.snapshot().editing) {
-      this.calendar.cancelEdit();
+    if (this.state.route === "calendar") {
+      const calendar = /** @type {any} */ (this.calendar);
+      const snapshot = calendar.snapshot();
+      // One layer at a time, innermost first: the delete confirmation, then
+      // the editor, then the event being looked at, and only then the calendar
+      // itself. Escape that skips a layer takes away work somebody has not
+      // finished.
+      if (snapshot.confirm) {
+        calendar.cancelDelete();
+        cx.notify();
+        return;
+      }
+      if (snapshot.editing) {
+        calendar.cancelEdit();
+        cx.notify();
+        return;
+      }
+      if (snapshot.detail) {
+        calendar.closeDetail();
+        cx.notify();
+        return;
+      }
+    }
+    if (this.state.route === "compose") {
+      // Leaving the composer writes the draft to Drafts, which is
+      // `App.saveAndLeaveCompose`. Back and Escape are the same question there
+      // and the same one here, and the answer is not "hide the form": a
+      // half-written reply that only exists in this process is one the process
+      // takes with it.
+      saveDraftOnLeave(this, cx);
+      this.state = { ...this.state, route: "mail" };
       cx.notify();
       return;
     }
-    if (this.state.route === "compose" || this.state.route === "calendar") {
+    if (this.state.route === "calendar") {
       this.state = { ...this.state, route: "mail" };
       cx.notify();
       return;
@@ -660,12 +1101,62 @@ export default class Omamail extends View {
       cx.notify();
       return;
     }
-    this.readerHidden = true;
+    // Leaving the reader puts the open message down as well as hiding it. The
+    // cursor is where the keyboard is and the selection is what the reader was
+    // showing; a selection left standing behind a closed reader is a message
+    // the next `e` could still act on, three rows away from the cursor.
+    //
+    // Only from the reader, though. Escape in the list has no reader to close,
+    // and hiding one that was never open is how a mailbox came to answer the
+    // key by doing nothing visible at all.
+    if (!this.readerHidden && this.controller?.snapshot().mail?.selectedId) {
+      this.readerHidden = true;
+      this.controller?.clearSelection();
+      cx.notify();
+      return;
+    }
+    // The last layer the list has: a search that is still narrowing it, with
+    // the field no longer holding the keyboard. `requestClose()` is what the
+    // QML does after this one, and it has no port — this host gives a script no
+    // way to close its window — so Escape stops here.
+    if (this.search.value() !== "") {
+      this.search.set_value("");
+      this.controller?.search("");
+    }
     cx.notify();
+  }
+
+  /**
+   * Hand the composer what it needs to offer a From address and complete a
+   * recipient. Identities are the signed-in mailboxes; contacts are the people
+   * this mailbox has been corresponding with plus the desktop's own address
+   * book, which is the pair `compose-contacts.js` explains.
+   * @param {import("gpui").Context} cx
+   */
+  primeCompose(cx) {
+    const accounts = this.controller?.snapshot().accounts ?? this.accountList;
+    // Mapped rather than passed straight through: `Senders.identities` reads a
+    // live `ready`, which a stored record has no field for. See `senderRows`.
+    /** @type {any} */ (this.compose).useIdentities(
+      senderRows(accounts.accounts, this.hostContextPlan?.accountErrors ?? {}),
+    );
+    loadAddressBook(this, cx);
+    /** @type {any} */ (this.compose).useContacts(composeContacts(this));
   }
 
   /** @param {import("gpui").Context} cx */
   openCompose(cx) {
+    // A key is not a button. `c` is bound in every mail context whatever
+    // mailbox is open, so a mailbox that draws no Compose has to refuse the
+    // key too — otherwise the form opens and the send fails with a message
+    // already written.
+    const refusal = sendRefusal(accountIn(this.controller?.snapshot()));
+    if (refusal) {
+      this.controller?.refuse(refusal);
+      cx.notify();
+      return;
+    }
+    this.primeCompose(cx);
     const accounts = this.controller?.snapshot().accounts ?? this.accountList;
     const current = /** @type {any} */ (this.compose).snapshot().draft;
     const hasDraft = [
@@ -687,18 +1178,18 @@ export default class Omamail extends View {
 
   /** @param {"reply"|"replyAll"|"forward"} mode @param {import("gpui").Context} cx */
   openResponse(mode, cx) {
+    this.primeCompose(cx);
     const snapshot = this.controller?.snapshot();
-    const provider = Registry.get(
-      snapshot?.accounts.accounts.find(
-        (/** @type {any} */ entry) => entry.id === snapshot.accounts.activeId,
-      )?.provider ?? "gmail",
-    );
+    const provider = providerFor(accountIn(snapshot));
     const supported =
       mode === "replyAll"
         ? ["gmail", "imap"].includes(provider.id)
         : ["gmail", "hey", "imap"].includes(provider.id);
     if (!supported || !provider.capabilities.send) {
-      this.controller?.refuse(`${provider.name} cannot reply from Omamail`);
+      this.controller?.refuse(
+        sendRefusal(accountIn(snapshot)) ||
+          `${provider.name} cannot reply from Omamail`,
+      );
       cx.notify();
       return;
     }
@@ -815,10 +1306,86 @@ export default class Omamail extends View {
     });
   }
 
-  /** @param {string} action @param {import("gpui").Context} cx */
+  /**
+   * Act on the row the keyboard is on.
+   *
+   * The list cursor and the open message are two different things: `u` closes
+   * the reader and `j` walks away from what was read. Reading the selection
+   * first meant `e` archived the message somebody had already finished with,
+   * silently, while the cursor stood over a different row.
+   * @param {string} action @param {import("gpui").Context} cx
+   */
   actCurrent(action, cx) {
     const mail = this.controller?.snapshot().mail;
-    const id = mail?.selectedId || mail?.cursorId;
+    const id = mail?.cursorId;
+    if (!id) {
+      cx.notify();
+      return;
+    }
+    // Through the same guard the rest of the actions apply rather than around
+    // it: starring with nothing under the cursor used to call through with an
+    // empty id, and the star is a toggle rather than one verb.
+    if (action === "star") {
+      this.controller?.toggleStar(id);
+      cx.notify();
+      return;
+    }
+    const wasOpen = !this.readerHidden && mail.selectedId === id;
+    // Worked out before the action, while the departing row still has
+    // neighbours: the one below takes its place, or the one above at the end.
+    const next = Model.cursorAfterRemoval(mail.messages, id);
+    this.controller?.act(action, [id]);
+    // Acting on the open message closes it: it has just left this list. The
+    // next one takes the reader, and where there is no next one the list does
+    // — without this the reader sat on a message the list no longer had.
+    const after = this.controller?.snapshot().mail;
+    const left =
+      Boolean(after) &&
+      !after.messages.some((/** @type {any} */ message) => message.id === id);
+    if (wasOpen && left) {
+      if (next) this.controller?.openMessage(next);
+      else {
+        this.readerHidden = true;
+        this.controller?.clearSelection();
+      }
+    }
+    cx.notify();
+  }
+
+  /**
+   * A verb from the reader's own toolbar, which acts on the message the reader
+   * is showing. That is not always the row the keyboard is on — `j` walks the
+   * list with the reader up — so the cursor is put on it first and the one path
+   * that decides what the list does afterwards takes over.
+   * @param {string} action @param {import("gpui").Context} cx
+   */
+  readerAct(action, cx) {
+    const selectedId = this.controller?.snapshot().mail?.selectedId;
+    if (!selectedId) {
+      cx.notify();
+      return;
+    }
+    this.controller?.placeCursor(selectedId);
+    this.actCurrent(action, cx);
+  }
+
+  /**
+   * Star, or unstar, one named message. The row's own button needs this: the
+   * pointer can be on a row the keyboard is not.
+   * @param {string} id @param {import("gpui").Context} cx
+   */
+  toggleStar(id, cx) {
+    if (id) this.controller?.toggleStar(id);
+    cx.notify();
+  }
+
+  /**
+   * Act on one named message rather than on whatever the cursor is over. The
+   * row's own star, archive and trash buttons need this: the pointer can be on
+   * a row the keyboard is not.
+   * @param {string} action @param {string} id @param {import("gpui").Context} cx
+   */
+  actOn(action, id, cx) {
     if (id) this.controller?.act(action, [id]);
     cx.notify();
   }
@@ -839,17 +1406,53 @@ export default class Omamail extends View {
     this.state = { ...this.state, route: "calendar" };
     const calendar = /** @type {any} */ (this.calendar);
     if (calendar.snapshot().readRevision === 0) calendar.showMonth(Date.now());
+    this.startCalendarClock(cx);
     cx.notify();
+  }
+
+  /**
+   * Move the week grid's now marker.
+   *
+   * The marker reads the clock on every snapshot, so a notify is all it needs;
+   * this is only what makes a notify happen while nobody is touching the
+   * window. It runs while the week grid is on screen and stops the moment it
+   * is not, because a timer that outlives its reason is a window that never
+   * goes idle.
+   * @param {import("gpui").Context} cx
+   */
+  startCalendarClock(cx) {
+    if (this.calendarClockRunning) return;
+    this.calendarClockRunning = true;
+    void cx.spawn(async (/** @type {any} */ asyncCx) => {
+      try {
+        while (
+          this.state.route === "calendar" &&
+          /** @type {any} */ (this.calendar).snapshot().view === "week"
+        ) {
+          await asyncCx.sleep(CALENDAR_CLOCK_INTERVAL_MS);
+          asyncCx.notify();
+        }
+      } finally {
+        this.calendarClockRunning = false;
+      }
+    });
   }
 
   syncCalendarFields() {
     const editing = /** @type {any} */ (this.calendar).snapshot().editing;
     if (!editing) return;
-    this.calendarTitle.set_value(editing.fields.title);
-    this.calendarStart.set_value(
-      new Date(editing.fields.startMs).toISOString(),
-    );
-    this.calendarEnd.set_value(new Date(editing.fields.endMs).toISOString());
+    const fields = editing.fields;
+    // Every box, not three. A field left holding the previous event's text is
+    // one the user then edits from somebody else's value.
+    this.calendarTitle.set_value(fields.title);
+    this.calendarStart.set_value(new Date(fields.startMs).toISOString());
+    this.calendarEnd.set_value(new Date(fields.endMs).toISOString());
+    this.calendarDate?.set_value(String(fields.date ?? ""));
+    this.calendarEndDate?.set_value(String(fields.endDate ?? ""));
+    this.calendarLocation?.set_value(String(fields.location ?? ""));
+    this.calendarNotes?.set_value(String(fields.description ?? ""));
+    this.calendarInterval?.set_value(String(fields.recurrence?.interval ?? ""));
+    this.calendarCount?.set_value(String(fields.recurrence?.count ?? ""));
   }
 
   /** @param {import("gpui").Context} cx */
@@ -920,24 +1523,305 @@ export default class Omamail extends View {
             : this.state.route === "mail" && this.controller
               ? this.renderMail(cx)
               : this.renderSetup(cx);
-    return view.on_action("mail::undoSend", (_event, eventCx) => {
-      this.compose.undo();
-      eventCx.notify();
-    });
+    const framed = view.on_action("mail::undoSend", (_event, eventCx) =>
+      this.undoSend(eventCx),
+    );
+    // Both toasts stand over whatever screen is on, which is where `App.qml`
+    // has them. A queued send has left the composer, so a card drawn inside the
+    // compose page would be a card on a page that is no longer rendered.
+    const toasts = composeToasts(
+      {
+        .../** @type {any} */ (this.compose).snapshot(),
+        onUndo: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+          this.undoSend(eventCx),
+      },
+      cx,
+    );
+    const layered = toasts
+      ? div()
+          .id("window-with-toasts")
+          .relative()
+          .size_full()
+          .min_w_0()
+          .min_h_0()
+          .child(framed)
+          .child(toasts)
+      : framed;
+    // The sheet is the one screen that stands over the window rather than
+    // replacing it: it is a reference for the keys of the screen behind it, and
+    // taking that screen away to show it would defeat the point.
+    if (!this.shortcutHelpOpen)
+      return layered.on_action("mail::help", (_event, eventCx) =>
+        openShortcuts(this, eventCx),
+      );
+    // `Overlay` is the sheet's own context and the whole of `survivesOverlay`
+    // here. The sheet holds the keyboard while it is up, so the screen behind it
+    // is off the dispatch path and its bindings cannot fire — which is what
+    // `KeyRouter` gets by disabling every Shortcut the table does not mark. The
+    // four rows that do survive are answered on this wrapper, above the sheet
+    // and below nothing: an inner handler for `mail::back` would otherwise win
+    // over this one, which is how Escape came to leave the reader rather than
+    // close the sheet standing over it.
+    return div()
+      .id("window-with-overlay")
+      .relative()
+      .size_full()
+      .min_w_0()
+      .min_h_0()
+      .key_context(OVERLAY_CONTEXT)
+      .child(layered)
+      .child(
+        renderShortcutSheet(
+          {
+            ...shortcutSheetModel(this),
+            focus: this.overlayFocus,
+            onDismiss: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+              closeShortcuts(this, eventCx),
+            onScroll: (/** @type {number} */ steps, /** @type {any} */ eventCx) =>
+              scrollShortcuts(this, steps, eventCx),
+          },
+          cx,
+        ),
+      )
+      .on_action("mail::help", (_event, eventCx) => closeShortcuts(this, eventCx))
+      .on_action("mail::back", (_event, eventCx) => closeShortcuts(this, eventCx))
+      .on_action("mail::cursorDown", (_event, eventCx) =>
+        scrollShortcuts(this, 1, eventCx),
+      )
+      .on_action("mail::cursorUp", (_event, eventCx) =>
+        scrollShortcuts(this, -1, eventCx),
+      )
+      .on_action("mail::undoSend", (_event, eventCx) => this.undoSend(eventCx));
+  }
+
+
+  /**
+   * A reading size somebody reached for is theirs until they change it, so it
+   * outlives the message it was set on.
+   * @param {number} step @param {import("gpui").Context} cx
+   */
+  zoomBy(step, cx) {
+    this.bodyZoom = Model.zoomAfterStep(this.bodyZoom, step);
+    this.storage.setItem("omamail.bodyZoom", String(this.bodyZoom));
+    cx.notify();
+  }
+
+  /** @param {import("gpui").Context} cx */
+  toggleSidebar(cx) {
+    this.sidebarCollapsed = !this.sidebarCollapsed;
+    this.storage.setItem(
+      "omamail.sidebarCollapsed",
+      this.sidebarCollapsed ? "true" : "false",
+    );
+    cx.notify();
+  }
+
+  /**
+   * The divider between the list and the message.
+   *
+   * A press records where the pointer was and how wide the list was under it;
+   * the drag is read from the window rather than from the handle, because a
+   * five-pixel strip loses the pointer the moment it moves faster than the
+   * frame — so the row the panes sit in reports the movement while a drag is
+   * live, and the handle only starts and ends one.
+   * @param {any} event @param {import("gpui").Context} cx
+   */
+  beginListDrag(event, cx) {
+    // Back to the proportional default, which is what most people want after
+    // one bad drag.
+    if (Number(event?.click_count) > 1) {
+      this.listWidth = 0;
+      this.listDrag = null;
+      this.storage.setItem("omamail.listWidth", "0");
+      cx.notify();
+      return;
+    }
+    this.listDrag = {
+      x: Number(event?.position?.x) || 0,
+      width: mailLayout(
+        viewportSize(this.width).width,
+        Boolean(this.controller?.snapshot().mail?.selectedId),
+        {
+          sidebarCollapsed: this.sidebarCollapsed === true,
+          listWidth: this.listWidth,
+        },
+      ).listWidth,
+    };
+    cx.notify();
+  }
+
+  /** @param {any} event @param {import("gpui").Context} cx */
+  dragList(event, cx) {
+    if (!this.listDrag) return;
+    // Unclamped here on purpose: `mailLayout` is the one place that decides how
+    // narrow either column may be, and clamping twice would let the two
+    // disagree about it.
+    this.listWidth =
+      this.listDrag.width + ((Number(event?.position?.x) || 0) - this.listDrag.x);
+    cx.notify();
+  }
+
+  /** @param {import("gpui").Context} cx */
+  endListDrag(cx) {
+    if (!this.listDrag) return;
+    this.listDrag = null;
+    this.storage.setItem("omamail.listWidth", String(Math.round(this.listWidth)));
+    cx.notify();
   }
 
   /** @param {import("gpui").Context} cx */
   sendCompose(cx) {
-    const delaySeconds = this.settings.snapshot().undoSend.seconds;
-    const snapshot = this.compose.send(Date.now(), delaySeconds);
-    const dueAt = snapshot.pending?.dueAt;
-    if (dueAt !== undefined)
-      cx.spawn(async (asyncCx) => {
-        await asyncCx.sleep(Math.max(0, dueAt - Date.now()));
-        this.compose.flush(Date.now(), dueAt);
-        asyncCx.notify();
-      });
+    this.compose.send(Date.now(), this.settings.snapshot().undoSend.seconds);
+    this.startOutboxClock(cx);
     cx.notify();
+  }
+
+  /**
+   * The clock the undo toast is drawn against — `MailAccount`'s
+   * `sendCountdownTimer`, at the same 250ms. It runs while the outbox or a
+   * toast has something to say and stops the moment neither does, because a
+   * beat that outlives its reason is a window that never goes idle.
+   *
+   * One sleep for the whole delay could not draw a countdown: the seconds are
+   * worked out from the clock, and nothing was making the clock move, so the
+   * toast read "Sending in 10s" for ten seconds.
+   * @param {import("gpui").Context} cx
+   */
+  startOutboxClock(cx) {
+    if (this.outboxClockRunning) return;
+    this.outboxClockRunning = true;
+    void cx.spawn(async (/** @type {any} */ asyncCx) => {
+      try {
+        while (/** @type {any} */ (this.compose).snapshot().needsTick) {
+          await asyncCx.sleep(OUTBOX_TICK_INTERVAL_MS);
+          const queued = Boolean(this.compose.snapshot().pending);
+          // Closing spends the rest of the undo window rather than the message.
+          if (await this.outboxGate(queued))
+            /** @type {any} */ (this.compose).drain();
+          else /** @type {any} */ (this.compose).tick(Date.now());
+          asyncCx.notify();
+        }
+      } finally {
+        this.outboxClockRunning = false;
+        await this.outboxGate(false);
+      }
+    });
+  }
+
+  /**
+   * Tell the window whether the outbox holds anything, and find out whether the
+   * window has been asked to close. Two booleans and nothing else: the payload
+   * never crosses, because the window has no way to send one.
+   *
+   * A host without the gate cannot refuse a close, so there is nothing to
+   * answer — which is also what makes this safe under the test harness.
+   * @param {boolean} queued
+   */
+  async outboxGate(queued) {
+    try {
+      const host = await import("omamail-outbox");
+      host.hold(queued);
+      return host.close_requested();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Say that mail has arrived, on the desktop rather than in this window.
+   *
+   * `MailAccount.notify`'s `execDetached`, on a host that has no shell to hand
+   * a command line to: the summary and the body cross as data and the host
+   * builds the argument vector, so nothing a sender wrote can be read as an
+   * option. Swallowed on failure, and silent on a host that does not carry the
+   * module: a notification that could not be raised is not a reason to stop
+   * showing the mail it was about.
+   * @param {{summary: string, body: string}} request
+   */
+  postNotification(request) {
+    void (async () => {
+      try {
+        const host = await import("omamail-notify");
+        await host.send(JSON.stringify(request));
+      } catch (_) {}
+    })();
+  }
+
+  /**
+   * Take the queued message back.
+   *
+   * Undo restores the parked draft into the form, so the window goes back to
+   * the composer holding it. Anything started meanwhile is handed over rather
+   * than written over: `App.undoPendingSend` saves that one to the provider's
+   * Drafts and says whether it landed.
+   * @param {import("gpui").Context} cx
+   */
+  undoSend(cx) {
+    const result = /** @type {any} */ (this.compose).undo();
+    if (!result.restored) {
+      cx.notify();
+      return;
+    }
+    this.syncComposeFields();
+    this.state = { ...this.state, route: "compose" };
+    const displaced = result.interrupted;
+    if (displaced) {
+      const account = (
+        this.controller?.snapshot().accounts ?? this.accountList
+      ).accounts.find(
+        (/** @type {any} */ entry) => entry.id === displaced.accountId,
+      );
+      cx.spawn((/** @type {any} */ asyncCx) => {
+        this.executeEffect(
+          {
+            type: "compose.draft",
+            provider: account?.provider ?? "",
+            accountId: account?.id ?? "",
+            draft: displaced,
+          },
+          (/** @type {any} */ saved) => {
+            /** @type {any} */ (this.compose).setNotice(
+              saved?.ok === false
+                ? `Could not save the newer draft: ${saved.error}`
+                : "Draft saved",
+            );
+            this.startOutboxClock(asyncCx);
+            asyncCx.notify();
+          },
+        );
+      });
+    }
+    this.startOutboxClock(cx);
+    cx.notify();
+  }
+
+  /**
+   * The window's menu as the pages get it: no mailbox is on screen, so the
+   * rows that act on one are absent rather than disabled.
+   * @param {import("gpui").Context} _cx
+   */
+  pageMenuModel(_cx) {
+    return {
+      open: this.appMenuOpen,
+      signedIn: false,
+      canOpenWebInbox: false,
+      accountCount: 1,
+      onOpenChange: (
+        /** @type {boolean} */ next,
+        /** @type {any} */ eventCx,
+      ) => {
+        this.appMenuOpen = next;
+        eventCx.notify();
+      },
+      onSettings: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        this.openSettings(eventCx),
+      onShortcuts: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        openShortcuts(this, eventCx),
+      onProject: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        eventCx.open_url(PROJECT_URL),
+      onAuthor: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        eventCx.open_url(AUTHOR_URL),
+    };
   }
 
   /** @param {import("gpui").Context} cx */
@@ -947,14 +1831,13 @@ export default class Omamail extends View {
       {
         top: topBar(
           {
-            brand: brandLockup(cx),
-            center: muted("Settings", cx),
-            actions: button(
-              "settings-back",
-              "Back",
-              (_event, eventCx) => this.back(eventCx),
-              cx,
-            ),
+            brand: h_flex()
+              .id("settings-header-left")
+              .flex_none()
+              .items_center()
+              .gap(style().space(8))
+              .child(brandLockup(cx))
+              .child(renderAppMenu(this.pageMenuModel(cx), cx)),
           },
           cx,
         ),
@@ -1000,6 +1883,9 @@ export default class Omamail extends View {
               void eventCx.spawn(
                 async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
                   await this.settings.toggleRemoteImages(enabled);
+                  // The message on screen is one the answer was given about,
+                  // so it answers now rather than at the next message.
+                  applyReadingPreferences(this);
                   asyncCx.notify();
                 },
               ),
@@ -1010,6 +1896,7 @@ export default class Omamail extends View {
               void eventCx.spawn(
                 async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
                   await this.settings.toggleHeavyMessages(enabled);
+                  applyReadingPreferences(this);
                   asyncCx.notify();
                 },
               ),
@@ -1023,16 +1910,96 @@ export default class Omamail extends View {
                   asyncCx.notify();
                 },
               ),
+            fields: { defaultQuery: this.settingsDefaultQuery },
+            // One client for every Gmail mailbox, so it is described here and
+            // set up on the Gmail page that needs it.
+            oauthClient: {
+              present: this.setup.snapshot().client?.present === true,
+              description: this.setup.snapshot().client?.description ?? "",
+              detail: "Shared by every mailbox above",
+            },
+            onClientSetup: (/** @type {any} */ eventCx) =>
+              this.chooseProvider("gmail", eventCx),
+            onPreference: (
+              /** @type {string} */ key,
+              /** @type {any} */ value,
+              /** @type {any} */ eventCx,
+            ) =>
+              void eventCx.spawn(
+                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                  await /** @type {any} */ (this.settings).setPreference(
+                    key,
+                    value,
+                  );
+                  asyncCx.notify();
+                },
+              ),
+            onStepPreference: (
+              /** @type {string} */ key,
+              /** @type {number} */ direction,
+              /** @type {any} */ eventCx,
+            ) =>
+              void eventCx.spawn(
+                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                  await /** @type {any} */ (this.settings).stepPreference(
+                    key,
+                    direction,
+                  );
+                  asyncCx.notify();
+                },
+              ),
+            onEdit: (
+              /** @type {string} */ accountId,
+              /** @type {any} */ eventCx,
+            ) => {
+              const account = /** @type {any} */ (
+                this.accountList.accounts.find(
+                  (/** @type {any} */ entry) => entry.id === accountId,
+                )
+              );
+              this.state = {
+                ...this.state,
+                route: "setup",
+                setupProviderId: account?.provider ?? null,
+              };
+              eventCx.notify();
+            },
+            onOpenUrl: (
+              /** @type {string} */ url,
+              /** @type {any} */ eventCx,
+            ) => eventCx.open_url(url),
+            ...calendarSourceModel(this),
           },
           cx,
         ),
         bottom: bottomBar(
-          { status: muted("Settings", cx), hints: muted("Esc Back", cx) },
+          {
+            status: statusLine(
+              snapshot.error ||
+                Model.syncedLabel(
+                  false,
+                  this.controller?.snapshot().mail?.syncedAtMs
+                    ? Mail.relativeTime(
+                        new Date(this.controller.snapshot().mail.syncedAtMs),
+                        Date.now(),
+                      )
+                    : "",
+                ),
+              snapshot.error ? "error" : "ready",
+              cx,
+            ),
+            hints: keyHints(hintsFor("page"), cx),
+          },
           cx,
         ),
       },
       cx,
     )
+      // The keyboard's home on this screen. Without it nothing in the window
+      // is focusable, every key dispatches from the tree root where none of
+      // these contexts are, and a press on anything that is not a control
+      // blurs the window — see `keys/focus.js`.
+      .track_focus(this.keyboardHome)
       .key_context("Page")
       .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
       .on_action("mail::settings", (_event, eventCx) =>
@@ -1048,117 +2015,31 @@ export default class Omamail extends View {
     const account = accounts.accounts.find(
       (/** @type {any} */ entry) => entry.id === draft.draft.accountId,
     );
-    const canSaveDraft = account?.provider === "gmail";
-    const composeTitle =
-      draft.draft.mode === "forward"
-        ? "Forward message"
-        : ["reply", "replyAll"].includes(draft.draft.mode)
-          ? "Reply"
-          : "New message";
     return appShell(
       {
-        top: topBar(
-          {
-            brand: button(
-              "compose-back",
-              "← Back",
-              (_event, eventCx) => this.back(eventCx),
-              cx,
-            ),
-            center: muted(composeTitle, cx),
-            actions: div().id("compose-title-balance").w("5.5rem").flex_none(),
-          },
-          cx,
-        ),
+        // No window header while composing: the QML hides it and the form
+        // carries its own title band, because a reply is this window doing
+        // something rather than a second place to be.
+        top: null,
         content: renderCompose(
-          {
-            from: String(account?.email || account?.id || ""),
-            to: this.composeTo,
-            cc: this.composeCc,
-            bcc: this.composeBcc,
-            ccVisible: this.composeCcVisible,
-            bccVisible: this.composeBccVisible,
-            subject: this.composeSubject,
-            body: this.composeBody,
-            status: draft.status,
-            sending: draft.sending,
-            onSend: (_event, eventCx) => {
-              this.sendCompose(eventCx);
-            },
-            onShowCc: (_event, eventCx) => {
-              this.composeCcVisible = !this.composeCcVisible;
-              eventCx.notify();
-            },
-            onShowBcc: (_event, eventCx) => {
-              this.composeBccVisible = !this.composeBccVisible;
-              eventCx.notify();
-            },
-            ...(canSaveDraft
-              ? {
-                  onSave: (_event, eventCx) => {
-                    compose.save();
-                    eventCx.notify();
-                  },
-                }
-              : {}),
-            onDiscard: (_event, eventCx) => {
-              const current = compose.snapshot().draft;
-              const discardRevision = compose.snapshot().revision;
-              const finish = (
-                /** @type {import("gpui").Context} */ activeCx,
-              ) => {
-                compose.discard();
-                this.syncComposeFields();
-                this.state = { ...this.state, route: "mail" };
-                activeCx.notify();
-              };
-              if (current.draftId)
-                eventCx.spawn(
-                  (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                    this.executeEffect(
-                      {
-                        type: "compose.draft.delete",
-                        provider: "gmail",
-                        accountId: current.accountId,
-                        draftId: current.draftId,
-                      },
-                      (/** @type {any} */ result) => {
-                        const latest = compose.snapshot();
-                        if (
-                          latest.revision !== discardRevision ||
-                          latest.draft.accountId !== current.accountId ||
-                          latest.draft.draftId !== current.draftId ||
-                          this.controller?.snapshot().accounts.activeId !==
-                            current.accountId
-                        )
-                          return;
-                        if (result?.ok === false)
-                          compose.setStatus?.(
-                            String(
-                              result.error || "Draft could not be discarded",
-                            ),
-                          );
-                        else {
-                          this.controller?.invalidateDrafts(current.accountId);
-                          finish(asyncCx);
-                        }
-                        asyncCx.notify();
-                      },
-                    );
-                  },
-                );
-              else finish(eventCx);
-            },
-          },
+          composeModel(this, draft, account),
           cx,
         ),
         bottom: bottomBar(
-          { status: muted("Compose", cx), hints: muted("Esc Back", cx) },
+          {
+            status: statusLine(draft.status || "", "ready", cx),
+            hints: keyHints(hintsFor("compose"), cx),
+          },
           cx,
         ),
       },
       cx,
     )
+      // The keyboard's home on this screen. Without it nothing in the window
+      // is focusable, every key dispatches from the tree root where none of
+      // these contexts are, and a press on anything that is not a control
+      // blurs the window — see `keys/focus.js`.
+      .track_focus(this.keyboardHome)
       .key_context("Compose")
       .on_action("mail::send", (_event, eventCx) => {
         this.sendCompose(eventCx);
@@ -1180,6 +2061,11 @@ export default class Omamail extends View {
       .size_full()
       .min_w_0()
       .min_h_0()
+      // The keyboard's home on this screen. Without it nothing in the window
+      // is focusable, every key dispatches from the tree root where none of
+      // these contexts are, and a press on anything that is not a control
+      // blurs the window — see `keys/focus.js`.
+      .track_focus(this.keyboardHome)
       .key_context(view.editing ? "Page" : "Calendar")
       .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx))
       .on_action("mail::calendar", (_event, eventCx) =>
@@ -1202,11 +2088,11 @@ export default class Omamail extends View {
         calendar.moveSelection(-1);
         eventCx.notify();
       })
+      // Enter opens the event, which means showing it — the editor is behind
+      // its own Edit control, because opening an event to look at it is what
+      // somebody does far more often than opening one to change it.
       .on_action("mail::openCalendarEvent", (_event, eventCx) => {
-        if (view.selected) {
-          calendar.beginEdit(view.selected);
-          this.syncCalendarFields();
-        }
+        calendar.activateSelection();
         eventCx.notify();
       })
       .on_action("mail::calendarPreviousPeriod", (_event, eventCx) => {
@@ -1223,6 +2109,7 @@ export default class Omamail extends View {
       })
       .on_action("mail::calendarWeek", (_event, eventCx) => {
         calendar.showWeek(view.anchorMs);
+        this.startCalendarClock(eventCx);
         eventCx.notify();
       })
       .on_action("mail::calendarMonth", (_event, eventCx) => {
@@ -1231,147 +2118,13 @@ export default class Omamail extends View {
       })
       .child(
         renderCalendar(
-          {
-            title: "Calendar",
-            status: view.status,
-            readStatus: view.readStatus,
-            writeStatus: view.writeStatus,
-            view: view.view,
-            anchorMs: view.anchorMs,
-            grid: view.grid,
-            sourceLabel: view.source?.name || view.source?.id || "",
-            hasSource: Boolean(view.source),
-            sources: view.sources,
-            selectedSourceId: view.selectedSourceId,
-            pending: view.pending,
-            editing: view.editing
-              ? {
-                  id: view.editing.id,
-                  title: this.calendarTitle,
-                  start: this.calendarStart,
-                  end: this.calendarEnd,
-                }
-              : null,
-            selected: view.selected,
-            selectedId: view.selected?.id || null,
-            events: view.events,
-            navigation: mailSnapshot
-              ? {
-                  accounts: mailSnapshot.accounts.accounts.map(
-                    (/** @type {any} */ entry) => ({
-                      id: entry.id,
-                      label: entry.label ?? entry.email ?? entry.id,
-                      provider: entry.provider,
-                      selected: entry.id === mailSnapshot.accounts.activeId,
-                    }),
-                  ),
-                  mailboxes: Registry.mailboxes(activeProvider.id).map(
-                    (box) => ({
-                      id: box.key,
-                      label: box.label,
-                      count: mail?.counts?.[box.key] ?? 0,
-                      selected: false,
-                    }),
-                  ),
-                  onAccount: (
-                    /** @type {string} */ id,
-                    /** @type {any} */ _event,
-                    /** @type {any} */ eventCx,
-                  ) => {
-                    this.switchAccount(id, eventCx);
-                    this.openMail(eventCx);
-                  },
-                  onMailbox: (
-                    /** @type {string} */ key,
-                    /** @type {any} */ _event,
-                    /** @type {any} */ eventCx,
-                  ) => {
-                    this.controller?.selectMailbox(key);
-                    this.openMail(eventCx);
-                  },
-                  onCalendar: (
-                    /** @type {any} */ _event,
-                    /** @type {any} */ eventCx,
-                  ) => this.openCalendar(eventCx),
-                  calendarSelected: true,
-                }
-              : null,
-            onEvent: (/** @type {any} */ event, /** @type {any} */ eventCx) => {
-              calendar.select(event);
-              eventCx.notify();
-            },
-            onCloseEvent: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.select(null);
-              eventCx.notify();
-            },
-            onNew: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              calendar.beginCreate();
-              this.syncCalendarFields();
-              eventCx.notify();
-            },
-            onEdit: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              calendar.beginEdit(view.selected);
-              this.syncCalendarFields();
-              eventCx.notify();
-            },
-            onDelete: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.deleteSelected();
-              eventCx.notify();
-            },
-            onSave: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              calendar.save();
-              eventCx.notify();
-            },
-            onCancel: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.cancelEdit();
-              eventCx.notify();
-            },
-            onPrevious: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.previous();
-              eventCx.notify();
-            },
-            onNext: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              calendar.next();
-              eventCx.notify();
-            },
-            onToday: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.today();
-              eventCx.notify();
-            },
-            onMonth: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.showMonth(view.anchorMs);
-              eventCx.notify();
-            },
-            onWeek: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              calendar.showWeek(view.anchorMs);
-              eventCx.notify();
-            },
-            onSource: (
-              /** @type {string} */ sourceId,
-              /** @type {any} */ eventCx,
-            ) => {
-              calendar.selectSource(sourceId);
-              eventCx.notify();
-            },
-          },
+          calendarModel(
+            this,
+            view,
+            mailSnapshot,
+            mail,
+            activeProvider,
+          ),
           cx,
         ),
       );
@@ -1387,10 +2140,18 @@ export default class Omamail extends View {
       committing: "Saving account",
       ready: "Account connected",
     };
-    const providerId = this.state.setupProviderId;
+    // The provider the form is actually on. `state.setupProviderId` is the one
+    // the window navigated to and the controller's own is the one it settled
+    // on; they differ for a beat while a page is being rebuilt, and reading
+    // the stale one is what left the heading saying "Add a mailbox mailbox".
+    const providerId = String(
+      setupSnapshot.provider || this.state.setupProviderId || "",
+    );
     const setupModel = {
       provider: providerId,
-      providerName: providerId ? Registry.get(providerId).name : "",
+      providerName: Registry.exists(providerId)
+        ? Registry.get(providerId).name
+        : "",
       providers: PROVIDERS,
       ...setupSnapshot,
       phase: this.setupFailure ? "error" : setupSnapshot.phase,
@@ -1399,12 +2160,60 @@ export default class Omamail extends View {
       ),
       insecure: this.setupInsecure,
       advanced: this.setupAdvanced,
+      // The disclosures. Without these the controls draw but answer to
+      // nothing, which is worse than not drawing them.
+      detailVisible: this.setupDetailVisible,
+      onDetail: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+        this.setupDetailVisible = !this.setupDetailVisible;
+        eventCx.notify();
+      },
+      passwordVisible: this.setupPasswordVisible,
+      client: setupSnapshot.client,
+      clientSecretVisible: this.setupClientSecretVisible,
+      onRevealClientSecret: (
+        /** @type {boolean} */ next,
+        /** @type {any} */ eventCx,
+      ) => {
+        this.setupClientSecretVisible =
+          typeof next === "boolean" ? next : !this.setupClientSecretVisible;
+        this.setupClientSecret?.set_masked(!this.setupClientSecretVisible);
+        eventCx.notify();
+      },
+      onSaveClient: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        void eventCx.spawn(async (/** @type {any} */ asyncCx) => {
+          const saved = await /** @type {any} */ (this.setup).saveClient(
+            this.setupClientId?.value() ?? "",
+            this.setupClientSecret?.value() ?? "",
+          );
+          // Show what was stored rather than clearing the boxes. The reveal
+          // goes back to masked, because a secret left on screen after the
+          // press that saved it is a secret nobody asked to keep looking at.
+          this.applyOauthClientFields(saved?.client);
+          this.setupClientSecretVisible = false;
+          this.setupClientSecret?.set_masked(true);
+          asyncCx.notify();
+        }),
+      onRevealPassword: (
+        /** @type {boolean} */ next,
+        /** @type {any} */ eventCx,
+      ) => {
+        this.setupPasswordVisible =
+          typeof next === "boolean" ? next : !this.setupPasswordVisible;
+        eventCx.notify();
+      },
+      onOpenUrl: (/** @type {string} */ url, /** @type {any} */ eventCx) =>
+        eventCx.open_url(url),
+      suggestion: /** @type {any} */ (this.setup).imapSuggestion?.(
+        this.setupEmail?.value?.() ?? "",
+      ),
       fields: {
         email: this.setupEmail,
         username: this.setupUsername,
         password: this.setupPassword,
         imapHost: this.setupImapHost,
         imapPort: this.setupImapPort,
+        clientId: this.setupClientId,
+        clientSecret: this.setupClientSecret,
         smtpHost: this.setupSmtpHost,
         smtpPort: this.setupSmtpPort,
         authorizationUrl: this.setupAuthorizationUrl,
@@ -1450,16 +2259,46 @@ export default class Omamail extends View {
       {
         top: topBar(
           {
-            brand: brandLockup(cx),
-            center: muted("Add an email account", cx),
+            brand: h_flex()
+              .id("setup-header-left")
+              .flex_none()
+              .items_center()
+              .gap(style().space(8))
+              .child(brandLockup(cx))
+              .child(renderAppMenu(this.pageMenuModel(cx), cx)),
           },
           cx,
         ),
         content: renderSetupForm(setupModel, cx),
-        bottom: bottomBar({ status: renderSetupFooter(setupModel, cx) }, cx),
+        bottom: bottomBar(
+          {
+            status: setupModel.status
+              ? renderSetupFooter(setupModel, cx)
+              : statusLine(
+                  Model.syncedLabel(
+                    false,
+                    this.controller?.snapshot().mail?.syncedAtMs
+                      ? Mail.relativeTime(
+                          new Date(this.controller.snapshot().mail.syncedAtMs),
+                          Date.now(),
+                        )
+                      : "",
+                  ),
+                  "ready",
+                  cx,
+                ),
+            hints: keyHints(hintsFor("page"), cx),
+          },
+          cx,
+        ),
       },
       cx,
     )
+      // The keyboard's home on this screen. Without it nothing in the window
+      // is focusable, every key dispatches from the tree root where none of
+      // these contexts are, and a press on anything that is not a control
+      // blurs the window — see `keys/focus.js`.
+      .track_focus(this.keyboardHome)
       .key_context("Page")
       .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
       .on_action("mail::compose", (_event, eventCx) =>
@@ -1483,62 +2322,22 @@ export default class Omamail extends View {
     const account = snapshot.accounts.accounts.find(
       (/** @type {any} */ entry) => entry.id === snapshot.accounts.activeId,
     );
-    const provider = Registry.get(account?.provider ?? "gmail");
+    const provider = providerFor(account);
     if (this.readerPresentationDetail !== snapshot.detail) {
       this.readerPresentationDetail = snapshot.detail;
       if (snapshot.detail) this.readerController?.open(snapshot.detail);
+      // A different message, or none: the selecting surface holds the
+      // previous one's words and there is nothing here that could re-seed
+      // it mid-drag, so it goes away with the message it came from.
+      endReaderSelection(this);
     }
     const readerSnapshot = this.readerController?.snapshot();
     const lastError =
       snapshot.lastOperation && !snapshot.lastOperation.ok
         ? snapshot.lastOperation.error
         : mail?.status || this.hostConfigurationError || "";
-    return v_flex()
-      .id("mail-action-host")
-      .size_full()
-      .min_w_0()
-      .min_h_0()
-      .key_context(mailKeyContext(mail, this.readerHidden === true))
-      .on_action("mail::cursorDown", (_event, eventCx) =>
-        this.moveCursor(1, eventCx),
-      )
-      .on_action("mail::cursorUp", (_event, eventCx) =>
-        this.moveCursor(-1, eventCx),
-      )
-      .on_action("mail::open", (_event, eventCx) => this.openCursor(eventCx))
-      .on_action("mail::backToList", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::settings", (_event, eventCx) =>
-        this.openSettings(eventCx),
-      )
-      .on_action("mail::archive", (_event, eventCx) =>
-        this.actCurrent("archive", eventCx),
-      )
-      .on_action("mail::trash", (_event, eventCx) =>
-        this.actCurrent("trash", eventCx),
-      )
-      .on_action("mail::star", (_event, eventCx) =>
-        this.actCurrent("star", eventCx),
-      )
-      .on_action("mail::spam", (_event, eventCx) =>
-        this.actCurrent("spam", eventCx),
-      )
-      .on_action("mail::markRead", (_event, eventCx) =>
-        this.actCurrent("markRead", eventCx),
-      )
-      .on_action("mail::markUnread", (_event, eventCx) =>
-        this.actCurrent("markUnread", eventCx),
-      )
-      .on_action("mail::reply", (_event, eventCx) =>
-        this.openResponse("reply", eventCx),
-      )
-      .on_action("mail::replyAll", (_event, eventCx) =>
-        this.openResponse("replyAll", eventCx),
-      )
-      .on_action("mail::forward", (_event, eventCx) =>
-        this.openResponse("forward", eventCx),
-      )
-      .child(
+    const now = Date.now();
+    return mailActionHost(this, mail).child(
         div()
           .id("message-reader")
           .size_full()
@@ -1546,208 +2345,15 @@ export default class Omamail extends View {
           .min_h_0()
           .child(
             renderMail(
-              {
-                width: this.width,
-                accounts: snapshot.accounts.accounts.map(
-                  (/** @type {any} */ entry) => ({
-                    id: entry.id,
-                    label: entry.label ?? entry.email ?? entry.id,
-                    provider: entry.provider,
-                    selected: entry.id === snapshot.accounts.activeId,
-                  }),
-                ),
-                mailboxes: Registry.mailboxes(provider.id).map((box) => ({
-                  id: box.key,
-                  label: box.label,
-                  count: mail?.counts?.[box.key] ?? 0,
-                  selected: box.key === (mail?.mailboxKey ?? "inbox"),
-                })),
-                search: { state: this.search, onChange() {} },
-                header: {
-                  title: Registry.mailboxFor(
-                    provider.id,
-                    mail?.mailboxKey ?? "inbox",
-                  ).label,
-                  onCompose: (
-                    /** @type {any} */ _event,
-                    /** @type {any} */ eventCx,
-                  ) => this.openCompose(eventCx),
-                  onSettings: (
-                    /** @type {any} */ _event,
-                    /** @type {any} */ eventCx,
-                  ) => this.openSettings(eventCx),
-                },
-                messages: (mail?.messages ?? []).map(
-                  (/** @type {any} */ message) => ({
-                    id: String(message.id),
-                    sender: displayAddress(message.sender ?? message.from),
-                    subject: String(message.subject ?? ""),
-                    snippet: String(message.snippet ?? ""),
-                    time: String(message.time ?? message.date ?? ""),
-                    unread:
-                      message.unread === true ||
-                      message.labelIds?.includes("UNREAD"),
-                  }),
-                ),
-                cursorId: mail?.cursorId ?? null,
-                selectedId: this.readerHidden
-                  ? null
-                  : (mail?.selectedId ?? null),
-                reader:
-                  !this.readerHidden && mail?.selectedId
-                    ? snapshot.detail?.id === mail.selectedId
-                      ? {
-                          state: "content",
-                          message: {
-                            ...snapshot.detail,
-                            id: mail.selectedId,
-                            subject:
-                              typeof snapshot.detail.subject === "string" ||
-                              typeof snapshot.detail.subject === "number"
-                                ? String(snapshot.detail.subject)
-                                : "",
-                            sender: displayAddress(
-                              snapshot.detail.sender ?? snapshot.detail.from,
-                            ),
-                          },
-                          presentation: readerSnapshot?.presentation
-                            ? {
-                                ...readerSnapshot.presentation,
-                                blockedImages: readerSnapshot.blockedImages,
-                                remoteImagesBlocked:
-                                  readerSnapshot.blockedImages > 0,
-                              }
-                            : null,
-                          onMode: (
-                            /** @type {"reader"|"original"|"plain"} */ mode,
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => {
-                            this.readerController?.setMode(mode);
-                            eventCx.notify();
-                          },
-                          capabilities: {
-                            ...provider.capabilities,
-                            reply:
-                              ["gmail", "hey", "imap"].includes(provider.id) &&
-                              provider.capabilities.send,
-                            replyAll:
-                              ["gmail", "imap"].includes(provider.id) &&
-                              provider.capabilities.send,
-                            forward:
-                              ["gmail", "hey", "imap"].includes(provider.id) &&
-                              provider.capabilities.send,
-                            trash: true,
-                          },
-                          onBack: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.back(eventCx),
-                          onReply: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.openResponse("reply", eventCx),
-                          onEditDraft: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.openDraft(eventCx),
-                          onAttachment:
-                            provider.id === "hey"
-                              ? undefined
-                              : (
-                                  /** @type {any} */ attachment,
-                                  /** @type {any} */ _event,
-                                  /** @type {import("gpui").Context} */ eventCx,
-                                ) => this.openAttachment(attachment, eventCx),
-                          onReplyAll: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.openResponse("replyAll", eventCx),
-                          onForward: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.openResponse("forward", eventCx),
-                          onArchive: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.actCurrent("archive", eventCx),
-                          onStar: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.actCurrent("star", eventCx),
-                          onSpam: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.actCurrent("spam", eventCx),
-                          onTrash: (
-                            /** @type {any} */ _event,
-                            /** @type {import("gpui").Context} */ eventCx,
-                          ) => this.actCurrent("trash", eventCx),
-                        }
-                      : { state: "loading" }
-                    : { state: "blank" },
-                status: {
-                  label:
-                    lastError ||
-                    (mail?.loading
-                      ? "Loading…"
-                      : `${mail?.messages.length ?? 0} messages`),
-                  state: lastError
-                    ? "error"
-                    : mail?.loading
-                      ? "loading"
-                      : "ready",
-                  hints: [
-                    { key: "j/k", label: "Move" },
-                    { key: "Enter", label: "Open" },
-                  ],
-                },
-                loadingMore: mail?.loadingMore === true,
-                canLoadMore: Boolean(mail?.nextPageToken) && !mail?.loadingMore,
-                canRetry: mail?.canRetry === true,
-                onLoadMore: (
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => {
-                  this.controller?.loadMore();
-                  eventCx.notify();
-                },
-                onRetry: (
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => {
-                  this.controller?.retry();
-                  eventCx.notify();
-                },
-                onAccount: (
-                  /** @type {string} */ id,
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => this.switchAccount(id, eventCx),
-                onMailbox: (
-                  /** @type {string} */ key,
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => {
-                  this.controller?.selectMailbox(key);
-                  this.search.set_value("");
-                  eventCx.notify();
-                },
-                onMessage: (
-                  /** @type {string} */ id,
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => {
-                  this.readerHidden = false;
-                  this.controller?.openMessage(id);
-                  eventCx.notify();
-                },
-                onCalendar: (
-                  /** @type {any} */ _event,
-                  /** @type {any} */ eventCx,
-                ) => this.openCalendar(eventCx),
-                calendarSelected: false,
-              },
+              mailModel(
+                this,
+                snapshot,
+                mail,
+                provider,
+                account,
+                lastError,
+                now,
+              ),
               cx,
             ),
           ),
@@ -1926,15 +2532,23 @@ export function hostContextsFor(accounts, sources) {
       const imapHost = String(imap?.imapHost || "");
       const smtpHost = String(imap?.smtpHost || "");
       const insecure = imap?.insecure === true;
+      // No SMTP server is a mailbox that reads and cannot answer, which the
+      // setup form offers and `Imap.validateSettings` accepts. Only its
+      // absence is waived: a host that is named still faces every check,
+      // including the loopback rule that keeps a clear-text session on this
+      // machine.
+      const sends = smtpHost !== "";
       if (
         account?.id !== `imap:${email}` ||
         !contextEmail(email) ||
         !contextField(imap?.username, 1024) ||
         !contextHost(imapHost) ||
-        !contextHost(smtpHost) ||
+        (sends && !contextHost(smtpHost)) ||
         !contextPort(imap?.imapPort) ||
-        !contextPort(imap?.smtpPort) ||
-        (insecure && (!contextLoopback(imapHost) || !contextLoopback(smtpHost)))
+        (sends && !contextPort(imap?.smtpPort)) ||
+        (insecure &&
+          (!contextLoopback(imapHost) ||
+            (sends && !contextLoopback(smtpHost))))
       ) {
         if (account?.id)
           accountErrors[String(account.id)] = "IMAP settings are invalid";
@@ -1948,7 +2562,10 @@ export function hostContextsFor(accounts, sources) {
         imapHost,
         imapPort: imap.imapPort,
         smtpHost,
-        smtpPort: imap.smtpPort,
+        // Zero rather than the account store's default, so a mailbox that
+        // names no server carries no port either — there is nothing for one
+        // to be the port of.
+        smtpPort: sends ? imap.smtpPort : 0,
         insecure,
       });
       accountKinds.set(String(account.id), "imap");
@@ -2010,10 +2627,6 @@ export function configureHostContexts(
 const hostExecutor = createHostExecutor;
 
 /** @param {string} _route */
-/** @param {any} mail @param {boolean} hidden */
-export function mailKeyContext(mail, hidden) {
-  return mail?.selectedId && !hidden ? "MailReader" : "MailList";
-}
 
 /** @param {any} effect */
 export function hostRequestFor(effect) {
@@ -2210,6 +2823,10 @@ export function hostRequestFor(effect) {
       if (
         !/^hey:[^\s@]+@[^\s@]+\.[^\s@]+$/.test(effect.accountId) ||
         recipientLists.some((value) => value === null) ||
+        // The HEY host command carries no files. Sending anyway would drop
+        // them without saying so, which is the defect this whole path exists
+        // to stop, so a HEY draft that has any is refused instead.
+        (Array.isArray(draft.attachments) && draft.attachments.length > 0) ||
         !["reply", "forward"].includes(draft.mode) ||
         !safeOptionalField(String(draft.subject ?? ""), 16384) ||
         String(draft.body ?? "").length > 16384
@@ -2257,6 +2874,8 @@ export function hostRequestFor(effect) {
       return null;
     const recipientLists = [draft.to, draft.cc, draft.bcc].map(addresses);
     if (recipientLists.some((value) => value === null)) return null;
+    const files = composeAttachments(draft.attachments);
+    if (files === null) return null;
     if (
       recipientLists.reduce((count, list) => count + (list?.length ?? 0), 0) >
         100 ||
@@ -2288,6 +2907,10 @@ export function hostRequestFor(effect) {
         references: String(draft.references ?? ""),
         ...(draft.from ? { from: String(draft.from) } : {}),
         ...(draft.draftId ? { draftId: String(draft.draftId) } : {}),
+        // Rebuilt entry by entry by `composeAttachments`, never spread from
+        // the draft: the host reads every path here, so nothing reaches it
+        // that this function did not put there itself.
+        ...(files.length > 0 ? { attachments: files } : {}),
       },
     };
   }
@@ -2537,6 +3160,88 @@ function validImapAccount(value) {
 /** @param {unknown} value */
 function validDraftId(value) {
   return safeField(value, 2048) && !String(value).includes(":");
+}
+
+// The same 20 MB a file is refused at when it is picked, so a draft cannot
+// carry one the picker would never have accepted, and the same ceiling on the
+// whole set — one message, not one file, is what a server measures.
+const MAX_ATTACHMENTS = 20;
+// Two RFC 2045 tokens with nothing around them.
+const MEDIA_TYPE = /^[A-Za-z0-9!#$&^_.+-]{1,64}\/[A-Za-z0-9!#$&^_.+-]{1,64}$/;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
+
+/**
+ * A draft's files cross to the host as paths, not as bytes: the host opens
+ * each one itself, which keeps the request small and keeps the encoding in the
+ * one place that already does it. That makes every string here an argument to
+ * a file the host will open and to a MIME header it will write, so each is
+ * rebuilt and checked rather than copied.
+ *
+ * Returns the list to send, `[]` for a draft with no files, and `null` for one
+ * this function refuses — which fails the send loudly instead of sending a
+ * message that quietly lacks what the user attached.
+ * @param {unknown} value
+ */
+function composeAttachments(value) {
+  if (value === undefined || value === null) return [];
+  // An object, a string or a number is not a list of files.
+  if (!Array.isArray(value)) return null;
+  // Bounds how many files one send makes the host open.
+  if (value.length > MAX_ATTACHMENTS) return null;
+  const files = [];
+  let total = 0;
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry))
+      return null;
+    const path = String(entry.path ?? "");
+    // Absolute, and no NUL, newline or other control character: the host opens
+    // this path, a relative one would resolve against whatever directory the
+    // host happens to be in, and a newline is what a line-oriented transport
+    // reads as the end of the request. `safeField` refuses every C0 character
+    // and DEL, so it covers NUL and both line endings.
+    //
+    // This is also what refuses a file the draft carries as bytes and not as a
+    // path — a forwarded attachment downloaded into memory. Those are dropped
+    // by the *host*, not by the user, so the send is refused rather than
+    // completed without them.
+    if (!safeField(path, 4096) || !path.startsWith("/")) return null;
+    // No "." or ".." segment. A picker hands back a resolved path; one that
+    // still has to be walked is a traversal assembled out of a name.
+    if (path.split("/").some((part) => part === "." || part === ".."))
+      return null;
+    // The name the recipient sees, and the name the host writes into
+    // `Content-Type` and `Content-Disposition`. A quote or a backslash could
+    // close that parameter's string and a semicolon could start a parameter of
+    // its own — a filename is written by whoever named the file, so a header
+    // it could forge is a header nobody agreed to. "/" is refused because a
+    // name is not a path. An entry with no name of its own takes the path's
+    // last segment, so the host is never left to invent one.
+    const filename =
+      String(entry.filename ?? "") || (path.split("/").pop() ?? "");
+    if (!safeField(filename, 255) || /["\\;/]/.test(filename)) return null;
+    // The size the draft declares, capped per file and over the whole set, so
+    // a draft cannot ask the host to read far more than a message could carry
+    // before the host's own check of the real file gets a say. The host
+    // measures the file it opened; this only refuses a request that is already
+    // impossible.
+    if (
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0 ||
+      entry.size > MAX_ATTACHMENT_BYTES
+    )
+      return null;
+    total += entry.size;
+    if (total > MAX_ATTACHMENT_TOTAL_BYTES) return null;
+    // Two RFC 2045 tokens and nothing else — no parameters, no spaces, no
+    // quotes — because this is written into a Content-Type header as it
+    // stands. `file --mime-type` answers with whatever the file claims, so it
+    // is a stranger's string too.
+    const mimeType = String(entry.mimeType ?? "") || "application/octet-stream";
+    if (!MEDIA_TYPE.test(mimeType)) return null;
+    files.push({ path, filename, mimeType, size: entry.size });
+  }
+  return files;
 }
 /** @param {unknown} value */
 function addresses(value) {

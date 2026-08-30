@@ -7,6 +7,9 @@ use std::{
 extern crate self as omamail;
 
 pub mod attachment_host;
+pub mod calendar_store;
+pub mod command_router;
+pub mod contacts_host;
 pub mod effects;
 pub mod gmail_setup;
 pub mod hey_setup;
@@ -15,6 +18,7 @@ pub mod imap_host;
 pub mod imap_setup;
 pub mod native_groupware_runtime;
 pub mod native_provider_runtime;
+pub mod notify_host;
 pub mod platform;
 pub mod provider_effects;
 pub mod providers;
@@ -66,10 +70,74 @@ fn is_application_dir(path: &Path) -> bool {
 }
 
 pub fn omarchy_palette_path(home: Option<&Path>, platform: &str) -> Option<PathBuf> {
+    omarchy_theme_file(home, platform, "colors.toml")
+}
+
+/// The structural half of the theme: typography, the spacing scale, and the
+/// state alphas every control's chrome is built from. `colors.toml` alone
+/// describes the palette and says nothing about density, which is why the
+/// window needs both files to look like the rest of the desktop.
+pub fn omarchy_shell_path(home: Option<&Path>, platform: &str) -> Option<PathBuf> {
+    omarchy_theme_file(home, platform, "shell.toml")
+}
+
+/// Where the Google OAuth client is kept.
+///
+/// Under `~/.config/omamail`, beside the QML client's `credentials.json` and
+/// for the same reason: a client id *and secret* inside the checkout is a
+/// credential in a directory the user clones, shares and may `git add`. The
+/// checkout path is still read when nothing is there yet, so a client saved by
+/// an earlier build is not silently lost — it is never written back to.
+pub fn oauth_client_path(home: Option<&Path>) -> Option<PathBuf> {
+    omamail_config_path(home, "oauth-client.json")
+}
+
+/// Where the calendars the user configured are listed.
+///
+/// The same file `CalendarController.qml` reads and `scripts/config-store.sh`
+/// writes, at the same path, because one machine has one set of calendars: a
+/// user who has both clients installed configures a calendar once.
+pub fn calendars_path(home: Option<&Path>) -> Option<PathBuf> {
+    omamail_config_path(home, "calendars.json")
+}
+
+/// One of the files under `~/.config/omamail`, wherever the desktop puts the
+/// config home. `XDG_CONFIG_HOME` first and the `HOME` fallback second, which
+/// is the order `config-store.sh` resolves them in.
+fn omamail_config_path(home: Option<&Path>, name: &str) -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home.map(|root| root.join(".config")))?;
+    Some(base.join("omamail").join(name))
+}
+
+/// The client file this machine should use.
+///
+/// The config path when there is one to have; the checkout's own file only
+/// while it is the only one that exists, so an install that saved a client
+/// before it moved keeps working. A save always lands on the config path,
+/// because that resolution runs again on the next request.
+pub fn oauth_client_file(checkout_root: &Path) -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let configured = oauth_client_path(home.as_deref());
+    let legacy = checkout_root.join("oauth-client.json");
+    match configured {
+        Some(path) if path.is_file() => path,
+        Some(path) if legacy.is_file() => {
+            let _ = path;
+            legacy
+        }
+        Some(path) => path,
+        None => legacy,
+    }
+}
+
+fn omarchy_theme_file(home: Option<&Path>, platform: &str, name: &str) -> Option<PathBuf> {
     if platform != "linux" {
         return None;
     }
-    home.map(|root| root.join(".local/state/omarchy/current/theme/colors.toml"))
+    home.map(|root| root.join(".local/state/omarchy/current/theme").join(name))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

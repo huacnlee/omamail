@@ -293,10 +293,9 @@ Item {
   property int syncTick: 0
   readonly property string syncedLabel: {
     var ignored = syncTick
-    if (listLoading) return "Checking for mail"
-    if (lastSyncedMs <= 0) return ""
-    var ago = Mail.relativeTime(new Date(lastSyncedMs), new Date())
-    return ago === "now" ? "Synced just now" : "Synced " + ago + " ago"
+    if (lastSyncedMs <= 0) return Model.syncedLabel(listLoading, "")
+    return Model.syncedLabel(listLoading,
+      Mail.relativeTime(new Date(lastSyncedMs), new Date()))
   }
 
   property string lastError: ""

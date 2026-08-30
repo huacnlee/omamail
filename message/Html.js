@@ -508,14 +508,40 @@ var NAMED_REFERENCES = {
   lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201c", rdquo: "\u201d",
   middot: "\u00b7", copy: "\u00a9", reg: "\u00ae", trade: "\u2122",
   deg: "\u00b0", times: "\u00d7", laquo: "\u00ab", raquo: "\u00bb",
-  euro: "\u20ac", pound: "\u00a3", yen: "\u00a5", cent: "\u00a2", sect: "\u00a7"
-}
+  euro: "\u20ac", pound: "\u00a3", yen: "\u00a5", cent: "\u00a2", sect: "\u00a7",
+  // The Latin-1 letters, which is what a European sender's own name or city
+  // actually needs. Qt decoded the full HTML set itself, so the QML reader
+  // never had to carry a table; this one does, and without these "Krak&oacute;w"
+  // reached the screen written out as its own source.
+  Agrave: "\u00c0", Aacute: "\u00c1", Acirc: "\u00c2", Atilde: "\u00c3", Auml: "\u00c4", Aring: "\u00c5",
+  AElig: "\u00c6", Ccedil: "\u00c7", Egrave: "\u00c8", Eacute: "\u00c9", Ecirc: "\u00ca", Euml: "\u00cb",
+  Igrave: "\u00cc", Iacute: "\u00cd", Icirc: "\u00ce", Iuml: "\u00cf", ETH: "\u00d0", Ntilde: "\u00d1",
+  Ograve: "\u00d2", Oacute: "\u00d3", Ocirc: "\u00d4", Otilde: "\u00d5", Ouml: "\u00d6", Oslash: "\u00d8",
+  Ugrave: "\u00d9", Uacute: "\u00da", Ucirc: "\u00db", Uuml: "\u00dc", Yacute: "\u00dd", THORN: "\u00de",
+  szlig: "\u00df", agrave: "\u00e0", aacute: "\u00e1", acirc: "\u00e2", atilde: "\u00e3", auml: "\u00e4",
+  aring: "\u00e5", aelig: "\u00e6", ccedil: "\u00e7", egrave: "\u00e8", eacute: "\u00e9", ecirc: "\u00ea",
+  euml: "\u00eb", igrave: "\u00ec", iacute: "\u00ed", icirc: "\u00ee", iuml: "\u00ef", eth: "\u00f0",
+  ntilde: "\u00f1", ograve: "\u00f2", oacute: "\u00f3", ocirc: "\u00f4", otilde: "\u00f5", ouml: "\u00f6",
+  oslash: "\u00f8", ugrave: "\u00f9", uacute: "\u00fa", ucirc: "\u00fb", uuml: "\u00fc", yacute: "\u00fd",
+  thorn: "\u00fe", yuml: "\u00ff", iexcl: "\u00a1", iquest: "\u00bf", curren: "\u00a4", brvbar: "\u00a6",
+  uml: "\u00a8", ordf: "\u00aa", not: "\u00ac", shy: "\u00ad", macr: "\u00af", sup2: "\u00b2",
+  sup3: "\u00b3", acute: "\u00b4", micro: "\u00b5", para: "\u00b6", cedil: "\u00b8", sup1: "\u00b9",
+  ordm: "\u00ba", frac14: "\u00bc", frac12: "\u00bd", frac34: "\u00be", divide: "\u00f7", plusmn: "\u00b1",}
 
 function decodeReferences(text) {
-  return String(text).replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);?/g,
+  // A named reference may carry digits after its first letter — `&frac12;`,
+  // `&sup2;`. `[a-zA-Z]+` stopped at the letters, so the name never matched the
+  // table and the whole reference reached the screen written out as its source.
+  return String(text).replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);?/g,
     function(match, body) {
       if (body.charAt(0) !== "#") {
-        var named = NAMED_REFERENCES[body.toLowerCase()]
+        // Exact first: a named reference is case sensitive, and now that the
+        // table carries both cases of the Latin-1 letters, lowercasing would
+        // turn "&Oacute;" into "ó". The lowercase attempt stays as a second
+        // chance so the entries that were only ever spelled one way keep
+        // tolerating "&NBSP;" the way they always have.
+        var named = NAMED_REFERENCES[body]
+        if (named === undefined) named = NAMED_REFERENCES[body.toLowerCase()]
         return named === undefined ? match : named
       }
       var code = body.charAt(1) === "x" || body.charAt(1) === "X"

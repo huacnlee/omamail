@@ -4,6 +4,7 @@
 #   attachment.sh read <path>
 #   attachment.sh clipboard <dir>
 #   attachment.sh pick
+#   attachment.sh choose
 #   attachment.sh forget <dir> <path>
 #
 # One JSON object on stdout. Quickshell's Process.write() never closes stdin,
@@ -254,20 +255,75 @@ forget_file() {
 # talks to the desktop FileChooser portal. With Omafiles v1.2 that portal
 # is Omafiles; without it the portal still answers from a separate GTK
 # process, never from Quickshell.
-pick_files() {
-  list=
+#
+# The chosen list lands in $chosen rather than on stdout, because both callers
+# below answer a cancelled picker with their own JSON and a command
+# substitution would swallow it.
+run_picker() {
+  chosen=
   if command -v omarchy-file-select >/dev/null 2>&1; then
-    list=$(omarchy-file-select --title 'Attach files' --multiple 2>/dev/null || true)
+    chosen=$(omarchy-file-select --title 'Attach files' --multiple 2>/dev/null || true)
   elif command -v zenity >/dev/null 2>&1; then
-    list=$(zenity --file-selection --multiple --separator='
+    chosen=$(zenity --file-selection --multiple --separator='
 ' --title='Attach files' 2>/dev/null || true)
   else
-    fail_json "No file picker is available"
+    return 1
   fi
-  if [ -z "$list" ]; then
+  return 0
+}
+
+pick_files() {
+  run_picker || fail_json "No file picker is available"
+  [ -n "$chosen" ] || fail_json "cancelled"
+  emit_paths "$chosen"
+}
+
+# The same chooser, answering with what each file *is* rather than only where
+# it is. The GPUI client sends an attachment by path and its host opens the
+# file at send time, so the picker there never needs the bytes — `read` would
+# carry a 20 MB base64 string across the script boundary and then across the
+# JavaScript boundary for nothing.
+describe_paths() {
+  list=$1
+  json='{"ok":true,"files":['
+  sep=
+  set -f
+  oldifs=$IFS
+  IFS='
+'
+  # shellcheck disable=SC2086
+  set -- $list
+  IFS=$oldifs
+  set +f
+  for path in "$@"; do
+    [ -n "$path" ] || continue
+    if has_newline "$path"; then
+      continue
+    fi
+    if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+      continue
+    fi
+    size=$(size_of "$path")
+    if [ "$size" -gt "$MAX" ]; then
+      fail_json "That file is larger than the 20 MB send limit"
+    fi
+    json=$json$sep'{"path":"'$(json_escape "$path")'"'
+    json=$json',"filename":"'$(json_escape "$(basename_of "$path")")'"'
+    json=$json',"mimeType":"'$(json_escape "$(mime_of "$path")")'"'
+    json=$json',"size":'$size'}'
+    sep=,
+  done
+  json=$json']}'
+  if [ "$sep" = "" ]; then
     fail_json "cancelled"
   fi
-  emit_paths "$list"
+  printf '%s\n' "$json"
+}
+
+choose_files() {
+  run_picker || fail_json "No file picker is available"
+  [ -n "$chosen" ] || fail_json "cancelled"
+  describe_paths "$chosen"
 }
 
 command=${1:-}
@@ -283,12 +339,15 @@ case "$command" in
   pick)
     pick_files
     ;;
+  choose)
+    choose_files
+    ;;
   forget)
     [ -n "${2:-}" ] && [ -n "${3:-}" ] || fail_json "That file is not a draft attachment"
     forget_file "$2" "$3"
     ;;
   *)
-    printf '%s\n' 'usage: attachment.sh read <path> | clipboard <dir> | pick | forget <dir> <path>' >&2
+    printf '%s\n' 'usage: attachment.sh read <path> | clipboard <dir> | pick | choose | forget <dir> <path>' >&2
     exit 2
     ;;
 esac

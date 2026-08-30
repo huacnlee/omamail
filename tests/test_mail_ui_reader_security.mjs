@@ -73,10 +73,11 @@ const rendered = collect(
     cx,
   ),
 );
-assert.ok(rendered.ids.includes("reader-reading-mode"));
+assert.ok(rendered.ids.includes("reader-message-body"));
+assert.ok(rendered.ids.includes("reader-message-column"));
+// The reader says the pictures were refused and offers the standing answer,
+// which is the only place a remote source is ever mentioned to the user.
 assert.ok(rendered.ids.includes("reader-remote-images-blocked"));
-assert.ok(rendered.ids.includes("reader-formatted-unavailable"));
-assert.ok(rendered.ids.includes("reader-complexity"));
 assert.ok(rendered.text.includes("Safe heading"));
 assert.ok(rendered.text.includes("Quoted words"));
 assert.equal(
@@ -100,7 +101,9 @@ const structuredHeaders = collect(
   ),
 );
 assert.equal(structuredHeaders.text.includes("[object Object]"), false);
-assert.ok(structuredHeaders.text.includes("Sender <sender@example.test>"));
+// Two spaces before the angle brackets: in a monospace face one space reads as
+// part of the name, which is why `MessageReader.qml` writes two.
+assert.ok(structuredHeaders.text.includes("Sender  <sender@example.test>"));
 
 const empty = prepareReadingPresentation("<style>body{display:none}</style>");
 assert.equal(empty.empty, true);

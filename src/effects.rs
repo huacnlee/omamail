@@ -322,16 +322,17 @@ impl EffectHost {
     }
     fn native(app_root: &Path, hey_runner: Arc<dyn HeyRunner>) -> (Self, NativeConfigure) {
         let checkout_root = app_root.parent().unwrap_or(app_root);
+        let client_path = crate::oauth_client_file(checkout_root);
         let (runtime, setup) = NativeProviderRuntime::production(
             checkout_root.to_path_buf(),
             PathBuf::from("curl"),
-            checkout_root.join("oauth-client.json"),
+            client_path.clone(),
         );
         let runtime = Arc::new(runtime);
         let (groupware, groupware_setup) = NativeGroupwareRuntime::production(
             checkout_root.to_path_buf(),
             PathBuf::from("curl"),
-            checkout_root.join("oauth-client.json"),
+            client_path,
         );
         let context = Arc::new(HostContextRegistry::new());
         let mut host = Self::with_runners(
@@ -1153,7 +1154,9 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
     let configure_host = Arc::new(configure_host);
     let checkout_root = app_root.parent().unwrap_or(app_root);
     let imap_setup = Arc::new(crate::imap_setup::production(checkout_root.to_path_buf()));
-    let gmail_setup = Arc::new(crate::gmail_setup::production(checkout_root));
+    let gmail_setup = Arc::new(crate::gmail_setup::production(crate::oauth_client_file(
+        checkout_root,
+    )));
     let hey_setup = Arc::new(
         crate::hey_setup::ProductionHeySetup::new(
             crate::hey_setup::standard_hey_candidates(),
@@ -1212,15 +1215,78 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
                 Ok(async move { Ok(HostValue::from(hey_setup.dispatch(&request))) })
             }),
     )?;
+    let chooser = Arc::new(crate::attachment_host::ScriptChooser::new(
+        checkout_root.join("scripts/attachment.sh"),
+    ));
+    let contacts = Arc::new(crate::contacts_host::ScriptContacts::new(
+        checkout_root.join("scripts/contact-suggestions.py"),
+    ));
+    gpui_shell::export_module(
+        HostModule::new("omamail-contacts")
+            .declarations("export function read(): Promise<string>;")
+            .async_function("read", move |_arguments| {
+                let contacts = Arc::clone(&contacts);
+                Ok(async move {
+                    Ok(HostValue::from(crate::contacts_host::read_contacts(
+                        contacts.as_ref(),
+                    )))
+                })
+            }),
+    )?;
     gpui_shell::export_module(
         HostModule::new("omamail-attachment")
-            .declarations("export function open(request: string): Promise<string>;")
+            .declarations(
+                "export function open(request: string): Promise<string>;\n\
+                 export function pick(): Promise<string>;",
+            )
             .async_function("open", move |arguments| {
                 let request = arguments.string(0)?.to_owned();
                 let attachment_host = Arc::clone(&attachment_host);
                 Ok(async move {
                     attachment_host
                         .open_json(&request)
+                        .map(|_| HostValue::from("{}"))
+                        .map_err(|error| gpui_shell::HostError::from(error.to_string()))
+                })
+            })
+            // A refusal is an answer here rather than an error: "cancelled" is
+            // the ordinary outcome of opening a file dialog, and a rejected
+            // promise would make the composer report it as a failure.
+            .async_function("pick", move |_arguments| {
+                let chooser = Arc::clone(&chooser);
+                Ok(async move {
+                    Ok(HostValue::from(crate::attachment_host::choose_files(
+                        chooser.as_ref(),
+                    )))
+                })
+            }),
+    )?;
+    // The calendars the user configured. Read at start-up and written back
+    // whenever one is added, removed, switched off or recoloured — the window
+    // has no `FileView` to watch the file for it, so the host owns both halves.
+    let calendar_store = Arc::new(crate::calendar_store::production());
+    gpui_shell::export_module(
+        HostModule::new("omamail-calendars")
+            .declarations("export function dispatch(request: string): Promise<string>;")
+            .async_function("dispatch", move |arguments| {
+                let request = arguments.string(0)?.to_owned();
+                let calendar_store = Arc::clone(&calendar_store);
+                Ok(async move { Ok(HostValue::from(calendar_store.dispatch(&request))) })
+            }),
+    )?;
+    let notify_host = Arc::new(crate::notify_host::NotifyHost::new(
+        app_root,
+        crate::notify_host::NotifySendLauncher,
+    ));
+    gpui_shell::export_module(
+        HostModule::new("omamail-notify")
+            .declarations("export function send(request: string): Promise<string>;")
+            .async_function("send", move |arguments| {
+                let request = arguments.string(0)?.to_owned();
+                let notify_host = Arc::clone(&notify_host);
+                Ok(async move {
+                    notify_host
+                        .send_json(&request)
                         .map(|_| HostValue::from("{}"))
                         .map_err(|error| gpui_shell::HostError::from(error.to_string()))
                 })

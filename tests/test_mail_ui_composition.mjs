@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { renderMail } from "../app/ui/mail.js";
+import { renderMessageList } from "../app/ui/message-list.js";
 
 const colors = new Proxy(
   {},
@@ -52,6 +53,7 @@ const model = {
       snippet: "Revenue & margin",
       time: "09:10",
       unread: true,
+      starred: true,
     },
     {
       id: "m-2",
@@ -60,6 +62,7 @@ const model = {
       snippet: "Tomorrow?",
       time: "Yesterday",
       unread: false,
+      starred: false,
     },
   ],
   cursorId: "m-2",
@@ -102,11 +105,10 @@ const model = {
 
 const rendered = collect(renderMail(model, cx));
 assert.ok(rendered.ids.includes("mail-topbar"));
-assert.ok(rendered.ids.includes("mail-workspace"));
 assert.ok(rendered.ids.includes("mail-rail-accounts"));
-assert.ok(rendered.ids.includes("mail-list-pane-fixed"));
+assert.ok(rendered.ids.includes("mail-list-pane"));
 assert.ok(rendered.ids.includes("mail-reader-pane"));
-assert.ok(rendered.ids.includes("mail-status-hints"));
+assert.ok(rendered.ids.includes("key-hints"));
 assert.ok(rendered.ids.includes("account-gmail:me"));
 assert.ok(rendered.ids.includes("mailbox-inbox"));
 assert.ok(rendered.ids.includes("message-m-1-selected"));
@@ -118,17 +120,23 @@ assert.ok(rendered.ids.includes("message-row-m-1-snippet"));
 assert.ok(rendered.ids.includes("message-unread-m-1"));
 assert.ok(!rendered.ids.includes("message-unread-m-2"));
 assert.equal(
-  find(renderMail(model, cx), "message-m-1-selected").childNodes[0].elementId,
+  collect(find(renderMail(model, cx), "message-m-1-selected").childNodes[0])
+    .ids[0],
   "message-unread-m-1",
   "the unread marker stays in the leading column of a dense row",
 );
+// A starred message keeps its star whether or not the row is hot, because that
+// is state; archive and trash are affordances and appear under the cursor.
+assert.ok(rendered.ids.includes("message-star-m-1"));
+assert.ok(!rendered.ids.includes("message-archive-m-1"));
+assert.ok(rendered.ids.includes("message-star-m-2"));
+assert.ok(rendered.ids.includes("message-archive-m-2"));
+assert.ok(rendered.ids.includes("message-trash-m-2"));
 assert.ok(rendered.ids.includes("reader-content-m-1"));
 assert.ok(rendered.ids.includes("reader-action-reply"));
 assert.ok(rendered.ids.includes("reader-action-trash"));
 assert.ok(!rendered.ids.includes("reader-action-archive"));
 assert.ok(!rendered.ids.includes("reader-action-star"));
-assert.ok(rendered.text.includes("Compose…"));
-assert.ok(rendered.text.includes("Settings…"));
 assert.ok(rendered.text.includes("Load more"));
 assert.ok(rendered.text.includes("Quarterly <results>"));
 assert.ok(rendered.text.includes("j/k"));
@@ -140,8 +148,84 @@ const narrowReader = renderMail({
 }, cx);
 const narrow = collect(narrowReader);
 assert.ok(!narrow.ids.includes("mail-rail"));
-assert.ok(!narrow.ids.includes("mail-list-pane-fixed"));
+assert.ok(!narrow.ids.includes("mail-list-pane"));
 assert.ok(narrow.ids.includes("mail-reader-pane"));
 assert.ok(narrow.ids.includes("reader-back"));
+
+// The list's own states, which the mail view has no way to reach through the
+// four fields it passes down.
+const listModel = {
+  messages: model.messages,
+  cursorId: "m-2",
+  selectedId: "m-1",
+  onMessage: noop,
+};
+
+const loadingList = collect(
+  renderMessageList({ ...listModel, messages: [], loading: true }, cx),
+);
+assert.ok(loadingList.ids.includes("message-list-skeleton"));
+assert.ok(!loadingList.ids.includes("message-list-empty"));
+
+const emptyList = collect(
+  renderMessageList({ ...listModel, messages: [], loaded: true }, cx),
+);
+assert.ok(emptyList.text.includes("Nothing here"));
+
+const emptySearch = collect(
+  renderMessageList(
+    { ...listModel, messages: [], loaded: true, searchQuery: "invoice" },
+    cx,
+  ),
+);
+assert.ok(emptySearch.text.includes("Nothing matches that search"));
+
+const unloaded = collect(renderMessageList({ ...listModel, messages: [] }, cx));
+assert.ok(
+  unloaded.ids.includes("message-list-empty") &&
+    !unloaded.text.includes("Nothing here"),
+  "nothing loaded yet is not the same answer as loaded and empty",
+);
+
+// Refusing a verb the provider does not have, rather than offering one that
+// would quietly do nothing.
+let menuAction = null;
+const menuList = renderMessageList(
+  {
+    ...listModel,
+    capabilities: { archive: false, spam: false },
+    menu: {
+      messageId: "m-1",
+      x: 40,
+      y: 12,
+      cursorIndex: 0,
+      onAction: (action, id) => {
+        menuAction = [action, id];
+      },
+    },
+  },
+  cx,
+);
+const menuIds = collect(menuList).ids;
+assert.ok(
+  collect(find(menuList, "message-m-1-selected")).ids.includes("message-menu"),
+  "the menu is anchored inside the row it was opened on",
+);
+assert.ok(menuIds.includes("message-menu-reply"));
+assert.ok(menuIds.includes("message-menu-trash"));
+assert.ok(menuIds.includes("message-menu-browser"));
+assert.ok(!menuIds.includes("message-menu-archive"));
+assert.ok(!menuIds.includes("message-menu-spam"));
+assert.ok(
+  collect(menuList).text.includes("Mark as read"),
+  "the read row names what the item does to an unread message",
+);
+assert.ok(collect(menuList).text.includes("Unstar"));
+find(menuList, "message-menu-trash").clickHandler({}, cx);
+assert.deepEqual(menuAction, ["trash", "m-1"]);
+assert.ok(
+  !collect(renderMessageList(listModel, cx)).ids.includes("message-menu"),
+  "a closed menu adds no layer over the list",
+);
 
 console.log("mail UI composition tests passed");

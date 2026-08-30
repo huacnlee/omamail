@@ -655,6 +655,20 @@ function statusSummary(syncLabel) {
   return String(syncLabel || "")
 }
 
+// How current the list is, in the words the status line uses.
+//
+// Takes the elapsed time already formatted rather than a timestamp, so this
+// file keeps no dependency on the message module for one line of wording — and
+// so both clients phrase it identically. Empty before the first answer: a
+// mailbox that has never been read has nothing to say about when it last was,
+// and "Synced never" is worse than silence.
+function syncedLabel(loading, ago) {
+  if (loading) return "Checking for mail"
+  var text = String(ago || "")
+  if (text === "") return ""
+  return text === "now" ? "Synced just now" : "Synced " + text + " ago"
+}
+
 // A title cut around the one word in it that is a link.
 //
 // Only the brand is the link — "Add a HEY mailbox" opens HEY's website from the
@@ -681,4 +695,4 @@ function truncate(text, limit) {
   return value.length <= max ? value : value.substring(0, max - 1) + "…"
 }
 
-export { setupProvider, mailboxAfterAccountSwitch, setupState, providerName, setupHeadline, setupDetail, setupActionLabel, survivesAction, labelChangesFor, actionCapability, actionUnavailable, unavailableActions, applyLabelChange, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS_PER_UNIT, clampZoom, windowPrefs, zoomAfterStep, showInitialListSkeleton, showListFooter, removeById, replaceById, mergeSearchResults, settledSearchResults, missingSearchSummaryIds, detailSummary, indexById, messageById, sidebarSlots, slotNumberOf, wrappedIndex, cursorAfterOffset, cursorAfterRemoval, cursorAfterReload, contentYToReveal, unreadCount, badgeText, barTooltip, newArrivals, notificationText, notificationTitle, notificationBody, pluralize, resultSummary, statusSummary, splitBrand, truncate }
+export { setupProvider, mailboxAfterAccountSwitch, setupState, providerName, setupHeadline, setupDetail, setupActionLabel, survivesAction, labelChangesFor, actionCapability, actionUnavailable, unavailableActions, applyLabelChange, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS_PER_UNIT, clampZoom, windowPrefs, zoomAfterStep, showInitialListSkeleton, showListFooter, removeById, replaceById, mergeSearchResults, settledSearchResults, missingSearchSummaryIds, detailSummary, indexById, messageById, sidebarSlots, slotNumberOf, wrappedIndex, cursorAfterOffset, cursorAfterRemoval, cursorAfterReload, contentYToReveal, unreadCount, badgeText, barTooltip, newArrivals, notificationText, notificationTitle, notificationBody, pluralize, resultSummary, statusSummary, syncedLabel, splitBrand, truncate }

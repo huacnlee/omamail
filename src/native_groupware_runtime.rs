@@ -1,4 +1,9 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use base64::{
     Engine as _,
@@ -11,7 +16,10 @@ use crate::{
         CalendarContext, CalendarProvider, GmailContext, HostContext, HostContextRegistry,
         ImapContext,
     },
-    imap_host::{self, ImapAccount, MailOperation, MailTransportExecutor},
+    imap_host::{
+        self, ImapAccount, MailOperation, MailTransportExecutor, OutgoingFile, mime_boundary,
+        multipart_body,
+    },
     platform::{
         commands::SystemProcessRunner,
         secrets::{SecretKey, SecretStore, SystemSecretStore},
@@ -25,7 +33,10 @@ use crate::{
         google_transport::{
             GoogleAccessTokenProvider, RestrictedGoogleTransport, SystemGoogleResolver,
         },
-        groupware::{Backend, BackendCall, BackendError, Secret},
+        groupware::{
+            Backend, BackendCall, BackendError, ComposeAttachment, MAX_ATTACHMENT_BYTES,
+            MAX_ATTACHMENT_TOTAL_BYTES, Secret,
+        },
     },
 };
 
@@ -217,6 +228,12 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     password,
                 )
                 .map_err(|_| BackendError::Failed)?;
+                // Read before the transport is planned: a missing or oversized
+                // file stops the send with its own error rather than letting
+                // the message go out without what the user attached.
+                let files = load_attachments(draft.attachments())?;
+                let parts: Vec<OutgoingFile<'_>> =
+                    files.iter().map(LoadedAttachment::part).collect();
                 let (
                     mode,
                     to,
@@ -247,6 +264,7 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     } else {
                         references.as_str()
                     }),
+                    attachments: parts,
                 };
                 let planned =
                     imap_host::plan(&account, operation).map_err(|_| BackendError::Failed)?;
@@ -271,6 +289,9 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                 let account = account
                     .filter(|x| x.account_id() == account_id)
                     .ok_or(BackendError::Unavailable)?;
+                // Before the draft is taken apart, and before anything is sent:
+                // a file that cannot be read stops the send here.
+                let files = load_attachments(draft.attachments())?;
                 let (
                     mode,
                     to,
@@ -302,6 +323,7 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     &body,
                     (!in_reply_to.is_empty())
                         .then_some((in_reply_to.as_str(), references.as_str())),
+                    &files,
                 )?;
                 let operation = if !save && !draft_id.is_empty() {
                     GmailOperation::DraftSend { draft_id, raw }
@@ -440,13 +462,7 @@ impl ProductionGroupwareOps {
             &self.secrets,
             &transport,
             &tokens,
-            GmailExecutorConfig::new(
-                "omamail",
-                "omamail-gmail",
-                account.client_id(),
-                account.account_id(),
-                account.grant(),
-            ),
+            GmailExecutorConfig::new(account.client_id(), account.account_id(), account.grant()),
         )
         .map_err(map_gmail)?;
         executor
@@ -497,6 +513,85 @@ fn caldav_source(
         .filter(|x| x.source_id() == id && x.provider() == CalendarProvider::Caldav)
         .ok_or(BackendError::Unavailable)
 }
+/// One attached file, read. The bytes are held here rather than in the request
+/// because the host is what opens the file and what measures it.
+pub(crate) struct LoadedAttachment {
+    pub(crate) filename: String,
+    pub(crate) mime_type: String,
+    pub(crate) data: Vec<u8>,
+}
+
+// A filename and the bytes of a file are the message's content; only how much
+// of it there is may be said out loud.
+impl std::fmt::Debug for LoadedAttachment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoadedAttachment")
+            .field("bytes", &self.data.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl LoadedAttachment {
+    fn part(&self) -> OutgoingFile<'_> {
+        OutgoingFile {
+            filename: &self.filename,
+            mime_type: &self.mime_type,
+            data: &self.data,
+        }
+    }
+}
+
+/// Opens every file a draft named. A file that has gone missing, that is not a
+/// regular file, or that is past the send limit stops the send with a distinct
+/// error, because a message that quietly left out what the user attached is
+/// worse than one that was not sent: the user cannot tell it happened.
+pub(crate) fn load_attachments(
+    files: &[ComposeAttachment],
+) -> Result<Vec<LoadedAttachment>, BackendError> {
+    let mut loaded = Vec::with_capacity(files.len());
+    let mut total: u64 = 0;
+    for file in files {
+        let path = Path::new(file.path());
+        // Follows a symlink deliberately — the user picked it — but a
+        // directory, a socket or a device is not a file that was attached, and
+        // reading one would either hang or send something nobody chose.
+        let metadata = fs::metadata(path).map_err(|_| BackendError::AttachmentUnreadable)?;
+        if !metadata.is_file() {
+            return Err(BackendError::AttachmentUnreadable);
+        }
+        // Measured before the read, so an enormous file is refused rather than
+        // pulled into memory first.
+        if metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(BackendError::AttachmentTooLarge);
+        }
+        let data = fs::read(path).map_err(|_| BackendError::AttachmentUnreadable)?;
+        // And again after it: the file could have grown between the two, and
+        // what was read is what would go out.
+        let length = data.len() as u64;
+        if length > MAX_ATTACHMENT_BYTES {
+            return Err(BackendError::AttachmentTooLarge);
+        }
+        total = total
+            .checked_add(length)
+            .ok_or(BackendError::AttachmentTooLarge)?;
+        if total > MAX_ATTACHMENT_TOTAL_BYTES {
+            return Err(BackendError::AttachmentTooLarge);
+        }
+        loaded.push(LoadedAttachment {
+            filename: file.filename().to_owned(),
+            mime_type: if file.mime_type().is_empty() {
+                "application/octet-stream".to_owned()
+            } else {
+                file.mime_type().to_owned()
+            },
+            data,
+        });
+    }
+    Ok(loaded)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn message(
     from: &str,
     to: &[String],
@@ -505,6 +600,7 @@ fn message(
     subject: &str,
     body: &str,
     reply: Option<(&str, &str)>,
+    files: &[LoadedAttachment],
 ) -> Result<String, BackendError> {
     if [from, subject]
         .iter()
@@ -530,12 +626,28 @@ fn message(
             }
         ));
     }
-    raw.push_str(&format!("Subject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n", folded_base64(body)));
+    // Encoded rather than written through, the way `Message.js` writes a
+    // Subject: Gmail refuses a raw message carrying an 8-bit header.
+    raw.push_str(&format!(
+        "Subject: {}\r\nMIME-Version: 1.0\r\n",
+        imap_host::header_text(subject)
+    ));
+    if files.is_empty() {
+        raw.push_str(&format!(
+            "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+            folded_base64(body)
+        ));
+    } else {
+        // Assembled by the one MIME builder the SMTP path also uses, so a
+        // Gmail message and an IMAP one carry a file the same way.
+        let parts: Vec<OutgoingFile<'_>> = files.iter().map(LoadedAttachment::part).collect();
+        raw.push_str(&multipart_body(body, &parts, &mime_boundary()));
+    }
     Ok(URL_SAFE_NO_PAD.encode(raw))
 }
 fn folded_base64(value: &str) -> String {
     STANDARD
-        .encode(value)
+        .encode(value.as_bytes())
         .as_bytes()
         .chunks(76)
         .map(|line| std::str::from_utf8(line).expect("base64 ASCII"))
@@ -589,6 +701,197 @@ fn event(payload: crate::providers::groupware::GoogleEventPayload) -> CalendarEv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write as _;
+
+    fn file(dir: &std::path::Path, name: &str, bytes: &[u8]) -> String {
+        let path = dir.join(name);
+        let mut handle = fs::File::create(&path).unwrap();
+        handle.write_all(bytes).unwrap();
+        path.to_str().unwrap().to_owned()
+    }
+
+    fn attachment(path: &str, filename: &str, mime_type: &str, size: u64) -> ComposeAttachment {
+        serde_json::from_value(json!({
+            "path": path,
+            "filename": filename,
+            "mimeType": mime_type,
+            "size": size,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_gmail_subject_that_is_not_ascii_goes_out_as_an_encoded_word() {
+        let raw = message(
+            "me@example.test",
+            &["you@example.test".to_owned()],
+            &[],
+            &[],
+            "Rapport d'\u{e9}t\u{e9}",
+            "voici",
+            None,
+            &[],
+        )
+        .unwrap();
+        let decoded = String::from_utf8(URL_SAFE_NO_PAD.decode(raw).unwrap()).unwrap();
+        // Gmail refuses a raw message carrying an 8-bit header outright, so the
+        // port writing the value straight in was a subject that could not be
+        // sent at all rather than one that arrived wrong.
+        assert!(decoded.contains(&format!(
+            "Subject: =?UTF-8?B?{}?=\r\n",
+            STANDARD.encode("Rapport d'\u{e9}t\u{e9}")
+        )));
+        assert!(!decoded.contains("Rapport d'\u{e9}t\u{e9}"));
+
+        let plain = message(
+            "me@example.test",
+            &["you@example.test".to_owned()],
+            &[],
+            &[],
+            "Quarterly report",
+            "here",
+            None,
+            &[],
+        )
+        .unwrap();
+        let decoded = String::from_utf8(URL_SAFE_NO_PAD.decode(plain).unwrap()).unwrap();
+        assert!(decoded.contains("Subject: Quarterly report\r\n"));
+    }
+
+    #[test]
+    fn reads_an_attached_file_and_defaults_a_media_type_it_was_not_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(dir.path(), "notes.txt", b"hello");
+        let loaded = load_attachments(&[
+            attachment(&path, "notes.txt", "text/plain", 5),
+            attachment(&path, "second.bin", "", 5),
+        ])
+        .unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].data, b"hello");
+        assert_eq!(loaded[0].mime_type, "text/plain");
+        assert_eq!(loaded[1].mime_type, "application/octet-stream");
+    }
+
+    #[test]
+    fn a_file_that_is_gone_or_is_not_a_file_stops_the_send_rather_than_being_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone.txt");
+        assert_eq!(
+            load_attachments(&[attachment(
+                missing.to_str().unwrap(),
+                "gone.txt",
+                "text/plain",
+                5
+            )])
+            .unwrap_err(),
+            BackendError::AttachmentUnreadable
+        );
+        assert_eq!(
+            load_attachments(&[attachment(
+                dir.path().to_str().unwrap(),
+                "a-directory",
+                "text/plain",
+                0
+            )])
+            .unwrap_err(),
+            BackendError::AttachmentUnreadable
+        );
+    }
+
+    #[test]
+    fn the_size_on_disk_decides_not_the_size_the_request_declared() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = file(
+            dir.path(),
+            "big.bin",
+            &vec![0u8; MAX_ATTACHMENT_BYTES as usize + 1],
+        );
+        // The request understates it; the host measures the file it opened.
+        assert_eq!(
+            load_attachments(&[attachment(&big, "big.bin", "application/octet-stream", 1)])
+                .unwrap_err(),
+            BackendError::AttachmentTooLarge
+        );
+    }
+
+    #[test]
+    fn files_that_fit_one_at_a_time_are_refused_once_they_do_not_fit_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let half = file(
+            dir.path(),
+            "half.bin",
+            &vec![7u8; (MAX_ATTACHMENT_TOTAL_BYTES / 2) as usize + 1],
+        );
+        let one = attachment(&half, "half.bin", "application/octet-stream", 0);
+        assert!(load_attachments(std::slice::from_ref(&one)).is_ok());
+        assert_eq!(
+            load_attachments(&[one.clone(), one]).unwrap_err(),
+            BackendError::AttachmentTooLarge
+        );
+    }
+
+    #[test]
+    fn an_attached_file_reaches_the_wire_as_its_own_base64_mime_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(dir.path(), "report.pdf", b"%PDF-1.7 body");
+        let files =
+            load_attachments(&[attachment(&path, "report.pdf", "application/pdf", 13)]).unwrap();
+        let encoded = message(
+            "me@example.test",
+            &["you@example.test".into()],
+            &[],
+            &[],
+            "Subject",
+            "the note",
+            None,
+            &files,
+        )
+        .unwrap();
+        let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap();
+        let boundary = raw
+            .split("boundary=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_owned();
+        assert!(raw.contains("Content-Type: multipart/mixed; boundary=\""));
+        // The text the user typed is a part of its own, and base64 like every
+        // other part, so nothing in a message can be read as the boundary.
+        assert!(raw.contains(&format!(
+            "--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+            STANDARD.encode("the note")
+        )));
+        assert!(raw.contains(&format!(
+            "--{boundary}\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\r\n{}\r\n",
+            STANDARD.encode("%PDF-1.7 body")
+        )));
+        assert!(raw.ends_with(&format!("--{boundary}--\r\n")));
+        // A message with no files keeps the single-part shape it always had.
+        let plain = String::from_utf8(
+            URL_SAFE_NO_PAD
+                .decode(
+                    message(
+                        "me@example.test",
+                        &["you@example.test".into()],
+                        &[],
+                        &[],
+                        "Subject",
+                        "the note",
+                        None,
+                        &[],
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(plain.contains("Content-Type: text/plain; charset=utf-8"));
+        assert!(!plain.contains("multipart/mixed"));
+    }
+
     #[test]
     fn mime_body_is_folded_at_76_columns_and_round_trips_with_terminal_crlf() {
         let encoded = message(
@@ -599,6 +902,7 @@ mod tests {
             "Subject",
             &"é".repeat(200),
             None,
+            &[],
         )
         .unwrap();
         let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap();

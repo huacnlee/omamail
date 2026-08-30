@@ -98,8 +98,6 @@ fn executor<'a>(
         transport,
         &TOKENS,
         GmailExecutorConfig::new(
-            "omamail",
-            "old-omamail",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify gmail.send calendar.events",
@@ -114,8 +112,6 @@ fn oauth_refresh_and_transport_share_one_absolute_deadline() {
     let transport = RecordingTransport::default();
     let tokens = SlowTokens(Mutex::new(vec![]));
     let key = SecretKey::gmail(
-        "omamail",
-        "old-omamail",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify gmail.send calendar.events",
@@ -135,8 +131,6 @@ fn oauth_refresh_and_transport_share_one_absolute_deadline() {
         &transport,
         &tokens,
         GmailExecutorConfig::new(
-            "omamail",
-            "old-omamail",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify gmail.send calendar.events",
@@ -188,8 +182,6 @@ fn real_executor_allows_empty_list_identity_but_not_empty_object_identity() {
     let store = MemorySecretStore::default();
     let transport = RecordingTransport::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old-omamail",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify gmail.send calendar.events",
@@ -254,8 +246,6 @@ fn list_uses_closed_google_endpoint_and_keeps_token_out_of_request_debug() {
     let store = MemorySecretStore::default();
     let transport = RecordingTransport::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old-omamail",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify gmail.send calendar.events",
@@ -299,8 +289,6 @@ fn action_send_and_calendar_are_closed_requests_with_stale_identity_preserved() 
     let store = MemorySecretStore::default();
     let transport = RecordingTransport::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old-omamail",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify gmail.send calendar.events",
@@ -385,6 +373,9 @@ fn calendar_event_and_draft_operations_use_exact_google_methods_and_endpoints() 
     assert_eq!(list.method(), "GET");
     assert!(list.url().contains("/calendars/primary/events?"));
     assert!(list.url().contains("timeMin=2026-08-01T00%3A00%3A00Z"));
+    // Google answers 250 events and says nothing about the rest; a month of a
+    // busy calendar is quietly cut off without this.
+    assert!(list.url().contains("maxResults=2500"));
     let draft =
         request_for_test(GmailOperation::DraftCreate { raw: "cmF3".into() }, deadline).unwrap();
     assert_eq!(
@@ -483,8 +474,6 @@ fn invalid_payload_is_rejected_before_secret_access_and_request_debug_hides_quer
         &transport,
         &TOKENS,
         GmailExecutorConfig::new(
-            "omamail",
-            "old-omamail",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify gmail.send calendar.events",
@@ -495,7 +484,11 @@ fn invalid_payload_is_rejected_before_secret_access_and_request_debug_hides_quer
         .execute(
             identity(),
             GmailOperation::Send {
-                raw: "x".repeat(gmail::MAX_REQUEST_BYTES + 1),
+                // A message being sent is bounded by `MAX_SEND_BYTES`, not by the
+                // ceiling every other request has: its size is decided by the
+                // files the user attached, which are base64 twice over by the
+                // time they reach `raw`.
+                raw: "x".repeat(gmail::MAX_SEND_BYTES + 1),
                 thread_id: None,
             },
             Duration::from_secs(5),
@@ -526,7 +519,18 @@ fn calendar_event_is_closed_and_executor_configuration_never_panics() {
             &store,
             &transport,
             &TOKENS,
-            GmailExecutorConfig::new("", "old", "client", "account", "grant")
+            GmailExecutorConfig::new("client", "account", "grant")
+        ),
+        Err(GmailError::InvalidRequest)
+    ));
+    // An empty attribute value is a secret-tool wildcard, so a key that would
+    // carry one is refused before the keyring is touched.
+    assert!(matches!(
+        GmailExecutor::new(
+            &store,
+            &transport,
+            &TOKENS,
+            GmailExecutorConfig::new("client", "me@example.test", "")
         ),
         Err(GmailError::InvalidRequest)
     ));
@@ -576,8 +580,6 @@ fn configured_and_request_identities_are_bounded_before_secret_access() {
             &transport,
             &TOKENS,
             GmailExecutorConfig::new(
-                "omamail",
-                "old-omamail",
                 "client.apps.googleusercontent.com",
                 "not-an-email",
                 "gmail.modify"
@@ -592,8 +594,6 @@ fn configured_and_request_identities_are_bounded_before_secret_access() {
         &transport,
         &TOKENS,
         GmailExecutorConfig::new(
-            "omamail",
-            "old-omamail",
             "client.apps.googleusercontent.com",
             "me@example.test",
             "gmail.modify",
@@ -631,8 +631,6 @@ fn rejects_zero_deadline_and_oversized_or_non_json_output_without_echoing_secret
     let store = MemorySecretStore::default();
     let transport = RecordingTransport::default();
     let key = SecretKey::gmail(
-        "omamail",
-        "old-omamail",
         "client.apps.googleusercontent.com",
         "me@example.test",
         "gmail.modify gmail.send calendar.events",
@@ -677,4 +675,57 @@ fn rejects_zero_deadline_and_oversized_or_non_json_output_without_echoing_secret
         .unwrap_err();
     assert_eq!(error, GmailError::RemoteFailure);
     assert!(!format!("{error:?}").contains("refresh-token"));
+}
+
+// An edit is a PATCH carrying only the fields the form owns. A PUT replaces the
+// event with the body, and a body with an empty `recurrence` in it is Google's
+// instruction to turn a series into a single event: an edited title used to
+// take the rule, the attendees, the reminders and the conference link with it.
+#[test]
+fn a_calendar_update_patches_and_leaves_the_series_rule_with_the_server() {
+    let update = request_for_test(
+        GmailOperation::CalendarUpdate {
+            calendar_id: "primary".into(),
+            event_id: "event-7".into(),
+            event: CalendarEvent {
+                summary: "Review".into(),
+                description: "Notes".into(),
+                location: "".into(),
+                start: CalendarMoment::DateTime("2026-08-29T10:00:00Z".into()),
+                end: CalendarMoment::DateTime("2026-08-29T11:00:00Z".into()),
+                recurrence: vec![],
+            },
+        },
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(update.method(), "PATCH");
+    assert!(update.url().ends_with("/calendars/primary/events/event-7"));
+    let body = update.body().unwrap();
+    assert!(!body.contains("recurrence"), "{body}");
+    assert!(body.contains("\"description\":\"Notes\""));
+
+    // A create that was asked for a rule still carries one.
+    let create = request_for_test(
+        GmailOperation::CalendarCreate {
+            calendar_id: "primary".into(),
+            event: CalendarEvent {
+                summary: "Standup".into(),
+                description: "".into(),
+                location: "".into(),
+                start: CalendarMoment::DateTime("2026-08-29T10:00:00Z".into()),
+                end: CalendarMoment::DateTime("2026-08-29T11:00:00Z".into()),
+                recurrence: vec!["RRULE:FREQ=WEEKLY;INTERVAL=1".into()],
+            },
+        },
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(create.method(), "POST");
+    assert!(
+        create
+            .body()
+            .unwrap()
+            .contains("\"recurrence\":[\"RRULE:FREQ=WEEKLY;INTERVAL=1\"]")
+    );
 }

@@ -252,6 +252,7 @@ fn errors_are_fixed_and_never_echo_input() {
     assert!(!format!("{reply:?}").contains("top-secret"));
     let _errors = [
         ProviderFailure::Unavailable,
+        ProviderFailure::SignedOut,
         ProviderFailure::TimedOut,
         ProviderFailure::Failed,
         ProviderFailure::Uncertain,

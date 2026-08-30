@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import Omamail from "../app/main.js";
+import { focusHandle } from "./gpui_stub.mjs";
 
 const colors = new Proxy(
   {},
@@ -11,6 +12,7 @@ const radius = { sm: 4, md: 8 };
 const cx = {
   theme: () => ({ colors, spacing, radius }),
   bind_keys: (bindings) => bindings.length,
+  focus_handle: focusHandle,
   spawn: () => {},
   notify: () => {},
 };
@@ -36,15 +38,21 @@ function ids(element, out = []) {
   return out;
 }
 
+// The chooser's rows are named for the page they sit on: `setup-provider-*`
+// rather than a bare `provider-*`, which would collide with every other place
+// a provider is named.
 assert.deepEqual(
-  ids(rendered).filter((id) => id.startsWith("provider-")),
-  ["provider-gmail", "provider-hey", "provider-imap"],
+  ids(rendered).filter((id) => /^setup-provider-(?!selector$)[a-z]+$/.test(id)),
+  ["setup-provider-gmail", "setup-provider-hey", "setup-provider-imap"],
 );
 assert.ok(ids(rendered).includes("application-top-bar"));
 assert.ok(ids(rendered).includes("application-bottom-bar"));
 assert.ok(ids(rendered).includes("setup-page"));
 assert.ok(ids(rendered).includes("setup-column"));
-assert.ok(ids(rendered).includes("setup-footer"));
+// With nothing to report the status line carries how current the mailbox is
+// instead of the setup page's own status, so `setup-footer` is absent here.
+// The page's actions are in the body: that is where `SetupPage.qml` puts them.
+assert.ok(ids(rendered).includes("application-bottom-bar"));
 assert.equal(app.boundKeys > 10, true);
 
 globalThis.localStorage.value = JSON.stringify({
@@ -64,7 +72,11 @@ assert.ok(ids(mailbox).includes("message-reader"));
 
 hydrated.openCompose(cx);
 const compose = hydrated.render(cx);
-assert.ok(ids(compose).includes("application-top-bar"));
+// Composing takes the window header away. The form carries its own title band
+// — a header above it would be two answers to "what am I looking at" — and the
+// status line stays, because it is still this window doing the work.
+assert.equal(ids(compose).includes("application-top-bar"), false);
+assert.ok(ids(compose).includes("compose-title-bar"));
 assert.ok(ids(compose).includes("application-content"));
 assert.ok(ids(compose).includes("application-bottom-bar"));
 assert.ok(ids(compose).includes("compose-action-bar"));
@@ -79,5 +91,11 @@ assert.ok(ids(settings).includes("application-top-bar"));
 assert.ok(ids(settings).includes("application-bottom-bar"));
 assert.ok(ids(settings).includes("settings-column"));
 assert.ok(ids(settings).includes("settings-accounts-group"));
+
+// Both credential fields are masked until their eye is pressed. A client secret
+// left in plain text on a shoulder-surfable window is the worse default; the
+// QML says so about the same two fields.
+assert.equal(app.setupPassword.is_masked(), true);
+assert.equal(app.setupClientSecret.is_masked(), true);
 
 console.log("app render tests passed");

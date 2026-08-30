@@ -174,6 +174,15 @@ pub enum ImapMoveStrategy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderFailure {
     Unavailable,
+    /// This mailbox has no stored credential to work with, so nothing it is
+    /// asked to do can succeed until somebody signs in again.
+    ///
+    /// It is its own class because it is the only failure here the user can
+    /// act on, and the only one where retrying is pointless: filed under
+    /// `Unavailable` it reached the window as "provider unavailable" beside a
+    /// Retry button, which is how a Gmail mailbox that had lost its refresh
+    /// token looked exactly like a Gmail that was briefly down.
+    SignedOut,
     TimedOut,
     Failed,
     Uncertain,
@@ -567,6 +576,9 @@ fn checked_deadline(ms: u64) -> Result<Duration, &'static str> {
 fn provider_error(error: ProviderFailure) -> &'static str {
     match error {
         ProviderFailure::Unavailable => "provider unavailable",
+        // `app/application/mail-state.js`'s `SIGNED_OUT` reads this exact
+        // sentence; `tests/test_source.sh` fails when the two drift apart.
+        ProviderFailure::SignedOut => "provider requires sign-in",
         ProviderFailure::TimedOut => "provider timed out",
         ProviderFailure::Failed => "provider operation failed",
         ProviderFailure::Uncertain => "provider state uncertain; reload required",

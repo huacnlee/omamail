@@ -22,10 +22,92 @@ use super::commands::{CommandError, PreparedCommand, ProcessRunner as _, SystemP
 #[cfg(target_os = "linux")]
 const LEGACY_UNNAMED_ACCOUNT: &[u8] = b"attribute.account = default";
 
+// Every name a Gmail refresh token is or has been filed under, in one place.
+//
+// The two ends of that name live in different modules — `gmail_setup` writes
+// the credential and `providers::gmail` reads it — and they used to be handed
+// the names as arguments. One passed `omarchy-mail` for the superseded service,
+// the other `omamail-gmail`, and neither has ever been a service this
+// application stored anything under: the reader was looking in a place no
+// writer had ever written, both sides compiled, and the test that pinned the
+// shape passed a third pair of names of its own. They are constants here so
+// there is nothing left to pass and nothing left to disagree about.
+const GMAIL_SERVICE: &str = "omamail";
+// What the service was called before the rename, and the reason
+// `scripts/migrate-storage.sh` moves `omarchy-gmail` directories.
+// `providers/Credentials.js` calls it `RENAMED_KEYRING_SERVICE`.
+const GMAIL_RENAMED_SERVICE: &str = "omarchy-gmail";
+const GMAIL_KIND: &str = "refresh-token";
+
+/// The grant names a Gmail refresh token has been filed under before the
+/// current one, most recent first.
+///
+/// A grant is the credential's *name* rather than its scopes, so renaming it
+/// renames every entry already stored out from under the next read — the
+/// mailbox is signed in, the keyring answers, and there is nothing there. Only
+/// a name that stood for **exactly** the permissions the current one does may
+/// be listed here, because a token found under one of these is used as if it
+/// carried today's grant. All three below are Gmail modify, Gmail send and
+/// Calendar events; `openid` and `email` name the address and grant nothing
+/// further.
+pub const SUPERSEDED_GMAIL_GRANTS: [&str; 3] = [
+    // `providers/Credentials.js`'s `KEYRING_GRANT` — the shell plugin's name
+    // for the same three permissions, and what every mailbox signed in through
+    // the QML plugin still carries.
+    "calendar-events-v1",
+    // The two shapes of the scope string this host filed tokens under while the
+    // grant *was* the scope string. Widening those scopes to the full URLs
+    // Google requires renamed the credential as a side effect, which is the
+    // defect `gmail_setup::GRANT`'s comment describes and this list repairs.
+    concat!(
+        "openid email",
+        " https://www.googleapis.com/auth/gmail.modify",
+        " https://www.googleapis.com/auth/gmail.send",
+        " https://www.googleapis.com/auth/calendar.events",
+    ),
+    concat!(
+        "https://www.googleapis.com/auth/gmail.modify",
+        " https://www.googleapis.com/auth/gmail.send",
+        " https://www.googleapis.com/auth/calendar.events",
+    ),
+];
+
+/// One of the older names a credential may still be stored under, and whether
+/// finding it there is allowed to take it away from that name.
+///
+/// A name this application itself retired is *moved*: nothing else reads it,
+/// and leaving a second copy of a refresh token in the keyring is a copy
+/// nothing will ever clean up. A name another client of the same credential
+/// still reads — the QML plugin ships from this repository and looks under
+/// `calendar-events-v1` — is *copied*: the entry is one grant seen by two
+/// programs, and adopting it must not sign the other one out of a mailbox
+/// nobody asked to leave.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Fallback {
+    identity: Vec<(String, String)>,
+    retire: bool,
+}
+
+impl Fallback {
+    fn moved(identity: Vec<(String, String)>) -> Self {
+        Self {
+            identity,
+            retire: true,
+        }
+    }
+
+    fn copied(identity: Vec<(String, String)>) -> Self {
+        Self {
+            identity,
+            retire: false,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SecretKey {
     canonical: Vec<(String, String)>,
-    fallbacks: Vec<Vec<(String, String)>>,
+    fallbacks: Vec<Fallback>,
 }
 
 impl SecretKey {
@@ -52,17 +134,17 @@ impl SecretKey {
         Self::from_identities(canonical, Vec::new())
     }
 
-    pub fn gmail(
-        service: &str,
-        renamed_service: &str,
-        client_id: &str,
-        account: &str,
-        grant: &str,
-    ) -> Result<Self, SecretStoreError> {
+    /// The Gmail refresh token for one account of one OAuth client.
+    ///
+    /// Takes no service name: see `GMAIL_SERVICE`. The superseded grants come
+    /// first among the fallbacks because they name the account as well as the
+    /// client and so identify exactly one entry, where the older shapes below
+    /// them drop `account` and have to be gated on there being a single match.
+    pub fn gmail(client_id: &str, account: &str, grant: &str) -> Result<Self, SecretStoreError> {
         let identity = |service: &str, account: Option<&str>, grant: Option<&str>| {
             let mut attributes = vec![
                 ("service".into(), service.to_owned()),
-                ("kind".into(), "refresh-token".into()),
+                ("kind".into(), GMAIL_KIND.to_owned()),
                 ("client-id".into(), client_id.to_owned()),
             ];
             if let Some(account) = account {
@@ -73,14 +155,22 @@ impl SecretKey {
             }
             attributes
         };
-        Self::from_identities(
-            identity(service, Some(account), Some(grant)),
-            vec![
-                identity(service, Some(account), None),
-                identity(service, None, None),
-                identity(renamed_service, Some(account), None),
-                identity(renamed_service, None, None),
-            ],
+        let mut fallbacks = SUPERSEDED_GMAIL_GRANTS
+            .iter()
+            .filter(|superseded| **superseded != grant)
+            .map(|superseded| {
+                Fallback::copied(identity(GMAIL_SERVICE, Some(account), Some(superseded)))
+            })
+            .collect::<Vec<_>>();
+        fallbacks.extend([
+            Fallback::moved(identity(GMAIL_SERVICE, Some(account), None)),
+            Fallback::moved(identity(GMAIL_SERVICE, None, None)),
+            Fallback::moved(identity(GMAIL_RENAMED_SERVICE, Some(account), None)),
+            Fallback::moved(identity(GMAIL_RENAMED_SERVICE, None, None)),
+        ]);
+        Self::from_fallbacks(
+            identity(GMAIL_SERVICE, Some(account), Some(grant)),
+            fallbacks,
         )
     }
 
@@ -127,11 +217,11 @@ impl SecretKey {
             return Err(SecretStoreError::InvalidKey);
         }
         let mut key = Self::imap_endpoint(service, account, host, port, username)?;
-        key.fallbacks.push(vec![
+        key.fallbacks.push(Fallback::moved(vec![
             ("service".into(), service.to_owned()),
             ("kind".into(), "imap-password".into()),
             ("account".into(), account.to_owned()),
-        ]);
+        ]));
         Ok(key)
     }
 
@@ -150,12 +240,22 @@ impl SecretKey {
         canonical: Vec<(String, String)>,
         fallbacks: Vec<Vec<(String, String)>>,
     ) -> Result<Self, SecretStoreError> {
+        Self::from_fallbacks(
+            canonical,
+            fallbacks.into_iter().map(Fallback::moved).collect(),
+        )
+    }
+
+    fn from_fallbacks(
+        canonical: Vec<(String, String)>,
+        fallbacks: Vec<Fallback>,
+    ) -> Result<Self, SecretStoreError> {
         if canonical
             .iter()
             .any(|(name, value)| name.is_empty() || value.is_empty())
             || fallbacks
                 .iter()
-                .flatten()
+                .flat_map(|fallback| &fallback.identity)
                 .any(|(name, value)| name.is_empty() || value.is_empty())
         {
             return Err(SecretStoreError::InvalidKey);
@@ -164,6 +264,17 @@ impl SecretKey {
             canonical,
             fallbacks,
         })
+    }
+
+    /// Every identity a read tries, canonical first, each with whether adopting
+    /// it may also retire it. One walk, so a store cannot answer from a name
+    /// it would then fail to clean up.
+    fn lookups(&self) -> impl Iterator<Item = (&Vec<(String, String)>, bool)> {
+        std::iter::once((&self.canonical, false)).chain(
+            self.fallbacks
+                .iter()
+                .map(|fallback| (&fallback.identity, fallback.retire)),
+        )
     }
 
     pub fn keyring_service(&self) -> String {
@@ -182,9 +293,8 @@ impl SecretKey {
     }
 
     pub fn secret_service_lookup_attributes(&self) -> Vec<Vec<(&str, &str)>> {
-        std::iter::once(&self.canonical)
-            .chain(&self.fallbacks)
-            .map(|identity| {
+        self.lookups()
+            .map(|(identity, _)| {
                 identity
                     .iter()
                     .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -363,10 +473,7 @@ impl SecretStore for SystemSecretStore {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            for (index, identity) in std::iter::once(&key.canonical)
-                .chain(&key.fallbacks)
-                .enumerate()
-            {
+            for (index, (identity, retire)) in key.lookups().enumerate() {
                 match self.entry_for(identity)?.get_password() {
                     Ok(value) => {
                         let secret = Secret::new(value);
@@ -374,7 +481,7 @@ impl SecretStore for SystemSecretStore {
                             self.entry(key)?
                                 .set_password(secret.expose())
                                 .map_err(map_keyring_error)?;
-                            if self.clear_legacy {
+                            if retire && self.clear_legacy {
                                 match self.entry_for(identity)?.delete_credential() {
                                     Ok(()) | Err(keyring::Error::NoEntry) => {}
                                     Err(error) => return Err(map_keyring_error(error)),
@@ -428,10 +535,7 @@ fn secret_tool_get(
     store: &SystemSecretStore,
     key: &SecretKey,
 ) -> Result<Option<Secret>, SecretStoreError> {
-    for (index, attributes) in std::iter::once(&key.canonical)
-        .chain(&key.fallbacks)
-        .enumerate()
-    {
+    for (index, (attributes, retire)) in key.lookups().enumerate() {
         if index != 0 && !secret_tool_has_lone_legacy_entry(store, attributes)? {
             continue;
         }
@@ -445,7 +549,7 @@ fn secret_tool_get(
             );
             if index != 0 {
                 secret_tool_set(store, &key.canonical, secret.clone())?;
-                if store.clear_legacy {
+                if retire && store.clear_legacy {
                     secret_tool_delete(store, attributes)?;
                 }
             }

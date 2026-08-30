@@ -1,5 +1,7 @@
 // @ts-check
 
+import { suggestedSettings } from "../providers/ImapProtocol.js";
+
 const PROVIDERS = Object.freeze({ gmail: true, imap: true, hey: true });
 const BUSY = Object.freeze(["authenticating", "verifying", "committing"]);
 
@@ -31,17 +33,20 @@ function safeAccount(value, provider) {
     const smtpHost = String(imap?.smtpHost || "");
     const imapPort = Number(imap?.imapPort);
     const smtpPort = Number(imap?.smtpPort);
+    // No SMTP server is a mailbox that reads and cannot answer — the form
+    // offers it, `Imap.validateSettings` accepts it, and the host reports it
+    // back as an empty server on port zero. A server that is named still needs
+    // a port in range.
+    const sends = smtpHost !== "";
     if (
       id !== `imap:${email}` ||
       !username ||
       !imapHost ||
-      !smtpHost ||
       !Number.isInteger(imapPort) ||
       !Number.isInteger(smtpPort) ||
       imapPort < 1 ||
       imapPort > 65535 ||
-      smtpPort < 1 ||
-      smtpPort > 65535
+      (sends ? smtpPort < 1 || smtpPort > 65535 : smtpPort !== 0)
     )
       return null;
     return {
@@ -109,6 +114,23 @@ function safeContext(value, provider, account) {
   return provider === "hey" ? { kind: "hey", accountId: account.id } : null;
 }
 
+/**
+ * What an address says about the mailbox behind it: the servers to fill in,
+ * and the note about what that provider wants instead of its website password.
+ *
+ * A decision rather than a view's business, so it lives beside the rest of
+ * setup's rules — the form itself is still the host's, which is why this takes
+ * the address rather than reading a field.
+ * @param {unknown} address
+ */
+export function imapSuggestion(address) {
+  try {
+    return suggestedSettings(String(address ?? ""));
+  } catch (_) {
+    return { note: "", imapHost: "", smtpHost: "", username: "" };
+  }
+}
+
 /** @param {any} adapters */
 export function createSetupController(adapters) {
   if (!adapters?.gmail || !adapters?.imap || !adapters?.hey)
@@ -118,23 +140,67 @@ export function createSetupController(adapters) {
   let state = /** @type {any} */ ({ phase: "choose", provider: "", error: "" });
 
   function snapshot() {
-    return JSON.parse(JSON.stringify(state));
+    // The OAuth client is kept beside `state` rather than in it: `state` is
+    // replaced wholesale on every phase change, and the client outlives all of
+    // them — it is a fact about the app, not about the sign-in in progress.
+    return { ...JSON.parse(JSON.stringify(state)), client: { ...client } };
   }
+  /**
+   * The Google OAuth client. `clientSecret` is present only after a read that
+   * asked for one — the setup page's, so its field can show what is stored.
+   * @type {{present:boolean,clientId:string,description:string,busy:boolean,error:string,clientSecret?:string}}
+   */
+  let client = {
+    present: false,
+    clientId: "",
+    description: "",
+    busy: false,
+    error: "",
+  };
+
   /** @param {number} token */
   function current(token) {
     return token === revision && state.phase !== "cancelled";
   }
-  /** @param {unknown} _error */
-  function fail(_error) {
-    state = { phase: "error", provider: state.provider, error: "Setup failed" };
+  /**
+   * The host's own reason, when the adapter carried one.
+   *
+   * Only `.reason` is trusted. `.message` is whatever an ordinary JavaScript
+   * fault would carry — a `TypeError` from this file, a stack from somewhere
+   * else — and none of that is a sentence to put on a setup page.
+   * @param {unknown} error
+   */
+  function reasonFrom(error) {
+    const said = /** @type {any} */ (error)?.reason;
+    return typeof said === "string" && said ? said : "";
+  }
+
+  /**
+   * @param {unknown} error the failure, whose reason is shown when it has one.
+   *
+   * "Setup failed" is the fallback rather than the answer. Flattening every
+   * refusal to it is what made a sign-in that Google, the keyring or the host
+   * had already explained arrive as a page with nothing to say.
+   */
+  function fail(error) {
+    state = {
+      phase: "error",
+      provider: state.provider,
+      error: reasonFrom(error) || "Setup failed",
+    };
     return snapshot();
   }
   /** @param {any} account @param {any} context */
   function ready(account, context) {
+    // Named rather than blank. These two refusals are this file's own, and a
+    // sign-in that got all the way to a signed-in account and then stopped is
+    // exactly where "Setup failed" tells somebody the least.
     const normalized = safeAccount(account, state.provider);
-    if (!normalized) return fail(null);
+    if (!normalized)
+      return fail({ reason: "The host returned an account this cannot use" });
     const cleanContext = safeContext(context, state.provider, normalized);
-    if (!cleanContext) return fail(null);
+    if (!cleanContext)
+      return fail({ reason: "The host returned an account with no settings" });
     const compensation =
       state.provider === "gmail"
         ? {
@@ -166,6 +232,73 @@ export function createSetupController(adapters) {
 
   return {
     snapshot,
+
+    /**
+     * Read back the Google OAuth client every Gmail mailbox signs in through.
+     * A host with no client is not an error — it is the state the setup page
+     * exists to change — so a failure here leaves `present` false and says so
+     * rather than refusing the page.
+     */
+    /** @param {{includeSecret?: boolean}} [options] */
+    async readClient(options = {}) {
+      if (typeof adapters.gmail?.readClient !== "function") return snapshot();
+      try {
+        const next = await adapters.gmail.readClient(options);
+        // Replaced rather than merged where the secret is concerned: a merge
+        // would let a read that did not ask for one keep the last one it saw,
+        // which is how a settings page ends up holding a credential it never
+        // requested.
+        const { clientSecret, ...rest } = next;
+        client = { ...client, ...rest, busy: false, error: "" };
+        if (options.includeSecret === true) client.clientSecret = clientSecret;
+        else delete client.clientSecret;
+      } catch (error) {
+        client = {
+          ...client,
+          busy: false,
+          error: reasonFrom(error) || "The client could not be read",
+        };
+      }
+      return snapshot();
+    },
+
+    /**
+     * Store it. The secret is optional — Google's desktop clients may have
+     * none — but the id is not, and a blank one is refused here rather than
+     * writing a client that can never sign anything in.
+     * @param {string} clientId @param {string} clientSecret
+     */
+    async saveClient(clientId, clientSecret) {
+      const id = String(clientId || "").trim();
+      if (!id) {
+        client = { ...client, error: "A client ID is required" };
+        return snapshot();
+      }
+      if (typeof adapters.gmail?.saveClient !== "function") {
+        client = { ...client, error: "This host cannot store a client" };
+        return snapshot();
+      }
+      client = { ...client, busy: true, error: "" };
+      try {
+        await adapters.gmail.saveClient(id, clientSecret);
+      } catch (error) {
+        // The host is the one that knows why — "That is not a Google client ID.
+        // It ends in .apps.googleusercontent.com" is a fix, and "The client
+        // could not be saved" is a shrug.
+        client = {
+          ...client,
+          busy: false,
+          error: reasonFrom(error) || "The client could not be saved",
+        };
+        return snapshot();
+      }
+      // Read it back rather than assuming: the host is what decides whether a
+      // client is usable, and saying "saved" over a file it refused would be
+      // the setup page lying about the one thing it is for. With the secret,
+      // so the field can show what was actually stored.
+      return this.readClient({ includeSecret: true });
+    },
+
     /** @param {string} provider */
     choose(provider) {
       if (!Object.prototype.hasOwnProperty.call(PROVIDERS, provider))
@@ -255,7 +388,8 @@ export function createSetupController(adapters) {
           }
           const result = await adapters.hey.accounts(deadlineMs);
           if (!current(token)) return snapshot();
-          if (result.accounts.length === 0) return fail(null);
+          if (result.accounts.length === 0)
+            return fail({ reason: "The HEY CLI is signed in to no mailbox" });
           if (result.accounts.length > 1) {
             const accounts = result.accounts
               .map((/** @type {any} */ account) => safeAccount(account, "hey"))

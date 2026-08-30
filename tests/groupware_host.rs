@@ -69,6 +69,145 @@ fn dispatches_send_reply_and_draft_without_putting_content_in_debug() {
     assert!(!format!("{:?}", calls[0]).contains("private"));
 }
 
+fn compose_with(attachments: Value) -> Value {
+    json!({
+        "type": "compose.send",
+        "provider": "gmail",
+        "accountId": "me@example.test",
+        "deadlineMs": 2000,
+        "draft": {"mode": "new", "to": "you@example.test", "cc": "", "bcc": "",
+                  "subject": "Subject", "body": "Body", "attachments": attachments}
+    })
+}
+
+#[test]
+fn carries_a_drafts_files_as_paths_and_keeps_them_out_of_debug_output() {
+    let backend = FakeBackend::default();
+    run(
+        &backend,
+        compose_with(json!([
+            {"path":"/home/person/report.pdf","filename":"report.pdf",
+             "mimeType":"application/pdf","size":12},
+            {"path":"/home/person/notes.txt","filename":"notes.txt"}
+        ])),
+    )
+    .unwrap();
+    let calls = backend.calls.lock().unwrap();
+    let BackendCall::GmailCompose { draft, .. } = &calls[0] else {
+        panic!("a compose call");
+    };
+    let files = draft.attachments();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].path(), "/home/person/report.pdf");
+    assert_eq!(files[0].filename(), "report.pdf");
+    assert_eq!(files[0].mime_type(), "application/pdf");
+    assert_eq!(files[0].size(), 12);
+    // A media type the request omitted stays empty here; the host that reads
+    // the file supplies the default, so there is one place that decides.
+    assert_eq!(files[1].mime_type(), "");
+    assert!(!format!("{:?}", calls[0]).contains("report.pdf"));
+    assert!(!format!("{:?}", files[0]).contains("person"));
+}
+
+#[test]
+fn refuses_every_attachment_shape_that_could_reach_a_file_or_a_header_unchecked() {
+    let backend = FakeBackend::default();
+    let big = 20 * 1024 * 1024;
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "a relative path",
+            json!([{"path":"report.pdf","filename":"report.pdf"}]),
+        ),
+        (
+            "a path with a walk in it",
+            json!([{"path":"/home/person/../../etc/passwd","filename":"passwd"}]),
+        ),
+        (
+            "a path with a newline",
+            json!([{"path":"/home/person/a\nb.pdf","filename":"a.pdf"}]),
+        ),
+        (
+            "a path with a NUL",
+            json!([{"path":"/home/person/a\u{0}b.pdf","filename":"a.pdf"}]),
+        ),
+        ("an empty path", json!([{"path":"","filename":"a.pdf"}])),
+        (
+            "a quoted filename",
+            json!([{"path":"/home/person/a.pdf","filename":"a\".pdf"}]),
+        ),
+        (
+            "a filename with a backslash",
+            json!([{"path":"/home/person/a.pdf","filename":"a\\b.pdf"}]),
+        ),
+        (
+            "a filename starting a parameter",
+            json!([{"path":"/home/person/a.pdf","filename":"a.pdf; x=1"}]),
+        ),
+        (
+            "a filename that is a path",
+            json!([{"path":"/home/person/a.pdf","filename":"../a.pdf"}]),
+        ),
+        (
+            "a filename with a newline",
+            json!([{"path":"/home/person/a.pdf","filename":"a\r\nBcc: x@y.test"}]),
+        ),
+        (
+            "an empty filename",
+            json!([{"path":"/home/person/a.pdf","filename":""}]),
+        ),
+        ("no filename at all", json!([{"path":"/home/person/a.pdf"}])),
+        (
+            "a media type with a parameter",
+            json!([{"path":"/home/person/a.pdf","filename":"a.pdf","mimeType":"application/pdf; boundary=x"}]),
+        ),
+        (
+            "a media type that is not one",
+            json!([{"path":"/home/person/a.pdf","filename":"a.pdf","mimeType":"application"}]),
+        ),
+        (
+            "a file over the size limit",
+            json!([{"path":"/home/person/a.pdf","filename":"a.pdf","size":big + 1}]),
+        ),
+        (
+            "files over the size limit together",
+            json!([
+            {"path":"/home/person/a.pdf","filename":"a.pdf","size":big},
+            {"path":"/home/person/b.pdf","filename":"b.pdf","size":1}]),
+        ),
+        (
+            "a field nobody declared",
+            json!([{"path":"/home/person/a.pdf","filename":"a.pdf","data":"AAAA"}]),
+        ),
+        (
+            "a file with bytes and no path",
+            json!([{"filename":"a.pdf","data":"AAAA"}]),
+        ),
+        (
+            "a list that is not one",
+            json!({"path":"/home/person/a.pdf","filename":"a.pdf"}),
+        ),
+        ("a bare string", json!(["/home/person/a.pdf"])),
+    ];
+    for (name, attachments) in cases {
+        assert!(
+            run(&backend, compose_with(attachments)).is_err(),
+            "{name} must not reach the backend"
+        );
+    }
+    let many: Vec<Value> = (0..21)
+        .map(|index| json!({"path":format!("/home/person/{index}.pdf"),"filename":format!("{index}.pdf")}))
+        .collect();
+    assert!(run(&backend, compose_with(json!(many))).is_err());
+    assert!(
+        backend.calls.lock().unwrap().is_empty(),
+        "nothing refused here may reach the backend"
+    );
+    assert!(
+        backend.secret_reads.lock().unwrap().is_empty(),
+        "and no credential is read to find out"
+    );
+}
+
 #[test]
 fn dispatches_closed_gmail_draft_delete() {
     let backend = FakeBackend::default();
@@ -197,8 +336,11 @@ fn dispatches_caldav_list_create_and_update() {
             "range":{"startMs":1,"endMs":2}}),
     )
     .unwrap();
+    // A create and an update are the same request to the same kind of address:
+    // the client names the resource, `collection + uid + ".ics"`, because that
+    // is what a CalDAV create is.
     for url in [
-        "https://calendar.example.test/users/me/",
+        "https://calendar.example.test/users/me/omamail-1756000000000.ics",
         "https://calendar.example.test/users/me/event-1.ics",
     ] {
         run(
@@ -211,14 +353,36 @@ fn dispatches_caldav_list_create_and_update() {
     }
     let calls = backend.calls.lock().unwrap();
     assert!(matches!(calls[0], BackendCall::CaldavList { .. }));
-    assert!(matches!(
-        calls[1],
-        BackendCall::CaldavWrite { create: true, .. }
-    ));
-    assert!(matches!(
-        calls[2],
-        BackendCall::CaldavWrite { create: false, .. }
-    ));
+    assert!(matches!(&calls[1], BackendCall::CaldavWrite { url, .. }
+        if url == "https://calendar.example.test/users/me/omamail-1756000000000.ics"));
+    assert!(matches!(&calls[2], BackendCall::CaldavWrite { url, .. }
+        if url == "https://calendar.example.test/users/me/event-1.ics"));
+}
+
+// A PUT at the collection is not how an event is created, and a server that
+// answered one would answer it by replacing the collection. The address
+// arriving as the collection means the client did not know where the event
+// goes, so nothing is sent and no credential is read.
+#[test]
+fn caldav_refuses_a_write_aimed_at_the_collection() {
+    let backend = FakeBackend::default();
+    for url in [
+        "https://calendar.example.test/users/me/",
+        "https://calendar.example.test/users/me",
+    ] {
+        assert_eq!(
+            run(
+                &backend,
+                json!({"type":"calendar.caldav.write", "sourceId":"work",
+                    "sourceUrl":"https://calendar.example.test/users/me/", "deadlineMs":3000,
+                    "url":url, "payload":ICS}),
+            )
+            .unwrap_err(),
+            HostError::InvalidRequest
+        );
+    }
+    assert!(backend.secret_reads.lock().unwrap().is_empty());
+    assert!(backend.calls.lock().unwrap().is_empty());
 }
 
 #[test]

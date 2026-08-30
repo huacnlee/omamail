@@ -89,11 +89,15 @@ test-js:
 
 test-app:
 	node tests/test_omarchy_ui.mjs
+	node tests/test_omarchy_ui_style.mjs
 	node tests/test_account_store.mjs
 	node tests/test_app_keymap.mjs
 	node tests/test_app_actions.mjs
 	node tests/test_app_state.mjs
+	node tests/test_imap_autofill.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_integration.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_attachments.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_flows.mjs
 	node tests/test_application_controller.mjs
 	node tests/test_app_adapters_effect_port.mjs
 	node tests/test_app_adapters_factory.mjs
@@ -104,6 +108,8 @@ test-app:
 	node tests/test_setup_controller.mjs
 	node tests/test_settings_controller.mjs
 	node tests/test_mail_state.mjs
+	node tests/test_mail_clock.mjs
+	node tests/test_app_commands.mjs
 	node tests/test_compose_controller.mjs
 	node tests/test_calendar_controller.mjs
 	node tests/test_qml_js_to_esm.mjs
@@ -112,13 +118,20 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_layout.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_composition.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_chrome.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_list.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_actions.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_states.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_security.mjs
 	node tests/test_reader_controller.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_reader_selection.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_compose_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_ui_chrome.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_setup_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_settings_ui_render.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_sources_wiring.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_icons.mjs
 	BUN_TMPDIR=/tmp/omamail-bun BUN_INSTALL=/tmp/omamail-bun/install bunx tsc -p app/jsconfig.json
 	cargo test
 
