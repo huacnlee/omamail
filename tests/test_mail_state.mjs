@@ -4,6 +4,27 @@ import {
   createMailState,
   reduceMailState,
 } from "../app/application/mail-state.js";
+import { detailSummary } from "../app/account/Model.js";
+
+const mergedHeyDetail = detailSummary(
+  {
+    id: "1:2",
+    subject: "Lunch on Friday",
+    from: { name: "Jane", email: "jane@example.com" },
+    date: "2026-08-20T10:00:00Z",
+    time: "10:00",
+    fullTime: "Aug 20, 2026 10:00",
+  },
+  {
+    id: "1:2",
+    threadId: "2",
+    body: "Hello",
+    date: "2026-08-20T10:00:00Z",
+  },
+);
+assert.equal(mergedHeyDetail.subject, "Lunch on Friday");
+assert.equal(mergedHeyDetail.from.email, "jane@example.com");
+assert.equal(mergedHeyDetail.fullTime, "Aug 20, 2026 10:00");
 
 const empty = createMailState("one@example.com", "gmail");
 assert.equal(empty.accountId, "one@example.com");

@@ -1,7 +1,7 @@
 // @ts-check
 
 import { View, div } from "gpui";
-import { InputState, TextareaState, set_theme } from "gpui-base";
+import { InputState, TextareaState, set_theme, v_flex } from "gpui-base";
 import { platform } from "process";
 import { ALL as PROVIDERS } from "./providers/Registry.js";
 import * as Registry from "./providers/Registry.js";
@@ -18,11 +18,14 @@ import {
 import { createApplicationController } from "./application/controller.js";
 import { createListCache } from "./application/list-cache.js";
 import {
-  appFrame,
+  appShell,
+  bottomBar,
+  brandLockup,
   button,
   muted,
   omarchyTheme,
   surface,
+  topBar,
   title,
 } from "./lib/omarchy-ui/index.js";
 import { renderMail } from "./ui/mail.js";
@@ -36,7 +39,7 @@ import { renderCalendar } from "./ui/calendar.js";
 import { redactError } from "./adapters/effect-port.js";
 import { createSetupController } from "./setup/controller.js";
 import { createSetupAdapters } from "./setup/adapters.js";
-import { renderSetupForm } from "./ui/setup.js";
+import { renderSetupFooter, renderSetupForm } from "./ui/setup.js";
 import { createSettingsController } from "./settings/controller.js";
 import { renderSettings } from "./ui/settings.js";
 
@@ -142,6 +145,14 @@ export default class Omamail extends View {
   );
   /** @type {import("gpui-base").InputState} */
   composeTo = /** @type {import("gpui-base").InputState} */ (
+    /** @type {unknown} */ (null)
+  );
+  /** @type {import("gpui-base").InputState} */
+  composeCc = /** @type {import("gpui-base").InputState} */ (
+    /** @type {unknown} */ (null)
+  );
+  /** @type {import("gpui-base").InputState} */
+  composeBcc = /** @type {import("gpui-base").InputState} */ (
     /** @type {unknown} */ (null)
   );
   /** @type {import("gpui-base").InputState} */
@@ -268,6 +279,8 @@ export default class Omamail extends View {
       notify: () => cx.notify(),
     });
     this.composeTo = InputState.new({ placeholder: "Recipient" });
+    this.composeCc = InputState.new({ placeholder: "Cc" });
+    this.composeBcc = InputState.new({ placeholder: "Bcc" });
     this.composeSubject = InputState.new({ placeholder: "Subject" });
     this.composeBody = TextareaState.new({
       placeholder: "Write a message",
@@ -275,6 +288,14 @@ export default class Omamail extends View {
     });
     this.composeTo.on("change", (_event, eventCx) => {
       this.compose.update({ to: this.composeTo.value() });
+      eventCx.notify();
+    });
+    this.composeCc.on("change", (_event, eventCx) => {
+      this.compose.update({ cc: this.composeCc.value() });
+      eventCx.notify();
+    });
+    this.composeBcc.on("change", (_event, eventCx) => {
+      this.compose.update({ bcc: this.composeBcc.value() });
       eventCx.notify();
     });
     this.composeSubject.on("change", (_event, eventCx) => {
@@ -354,6 +375,13 @@ export default class Omamail extends View {
       this.controller.start();
     };
     this.settings = createSettingsController({
+      readRemoteImages: () =>
+        this.storage.getItem("omamail.remoteImages") === "true",
+      saveRemoteImages: (/** @type {boolean} */ enabled) =>
+        this.storage.setItem(
+          "omamail.remoteImages",
+          enabled ? "true" : "false",
+        ),
       readAccounts: () => this.accountList,
       saveAccounts: (/** @type {any} */ next) => {
         this.accountList = saveAccounts(this.storage, next);
@@ -403,35 +431,37 @@ export default class Omamail extends View {
   }
 
   /** @param {import("gpui").Context} cx */
-  async retryHostConfiguration(cx) {
+  retryHostConfiguration(cx) {
     this.hostConfigurationError = "";
-    try {
-      const snapshot = loadAccounts(this.storage);
-      const plan = (this.hostContextPlan = hostContextsFor(
-        snapshot.accounts,
-        this.calendarSources,
-      ));
-      const invalid =
-        plan.accountErrors[String(this.state.activeAccountId || "")] || "";
-      this.hostConfigurationError = invalid;
-      this.hostConfigure = () =>
-        plan.contexts.length === 0
-          ? invalid
-            ? Promise.reject(new Error(invalid))
-            : Promise.resolve()
-          : (this.configureNativeHost?.(
-              snapshot.accounts,
-              this.calendarSources,
-            ) ?? Promise.reject(new Error("Mail host is unavailable")));
-      this.hostReady =
-        this.hostConfigure?.() ??
-        Promise.reject(new Error("Mail host is unavailable"));
-      await this.hostReady;
-      this.startController?.();
-    } catch (_) {
-      this.hostConfigurationError = "Mail host configuration is unavailable";
-    }
-    cx.notify();
+    return cx.spawn(async (asyncCx) => {
+      try {
+        const snapshot = loadAccounts(this.storage);
+        const plan = (this.hostContextPlan = hostContextsFor(
+          snapshot.accounts,
+          this.calendarSources,
+        ));
+        const invalid =
+          plan.accountErrors[String(this.state.activeAccountId || "")] || "";
+        this.hostConfigurationError = invalid;
+        this.hostConfigure = () =>
+          plan.contexts.length === 0
+            ? invalid
+              ? Promise.reject(new Error(invalid))
+              : Promise.resolve()
+            : (this.configureNativeHost?.(
+                snapshot.accounts,
+                this.calendarSources,
+              ) ?? Promise.reject(new Error("Mail host is unavailable")));
+        this.hostReady =
+          this.hostConfigure?.() ??
+          Promise.reject(new Error("Mail host is unavailable"));
+        await this.hostReady;
+        this.startController?.();
+      } catch (_) {
+        this.hostConfigurationError = "Mail host configuration is unavailable";
+      }
+      asyncCx.notify();
+    });
   }
 
   /** @param {string} providerId @param {import("gpui").Context} cx */
@@ -451,7 +481,7 @@ export default class Omamail extends View {
   }
 
   /** @param {import("gpui").Context} cx */
-  async submitSetup(cx) {
+  submitSetup(cx) {
     const provider = this.state.setupProviderId;
     const form =
       provider === "imap"
@@ -466,34 +496,42 @@ export default class Omamail extends View {
             insecure: this.setupInsecure,
           }
         : {};
-    const snapshot = await this.setup.submit(form, 30000);
-    if (snapshot.intent?.url)
-      this.setupAuthorizationUrl.set_value(snapshot.intent.url);
-    if (snapshot.phase === "ready")
-      await this.commitSetup(snapshot.commitIntent);
-    cx.notify();
+    return cx.spawn(async (asyncCx) => {
+      const snapshot = await this.setup.submit(form, 30000);
+      if (snapshot.intent?.url)
+        this.setupAuthorizationUrl.set_value(snapshot.intent.url);
+      if (snapshot.phase === "ready")
+        await this.commitSetup(snapshot.commitIntent);
+      asyncCx.notify();
+    });
   }
 
   /** @param {import("gpui").Context} cx */
-  async pollSetup(cx) {
-    const snapshot = await this.setup.poll(30000);
-    if (snapshot.phase === "ready")
-      await this.commitSetup(snapshot.commitIntent);
-    cx.notify();
+  pollSetup(cx) {
+    return cx.spawn(async (asyncCx) => {
+      const snapshot = await this.setup.poll(30000);
+      if (snapshot.phase === "ready")
+        await this.commitSetup(snapshot.commitIntent);
+      asyncCx.notify();
+    });
   }
 
   /** @param {import("gpui").Context} cx */
-  async logoutSetup(cx) {
-    await this.setup.logout(30000);
-    cx.notify();
+  logoutSetup(cx) {
+    return cx.spawn(async (asyncCx) => {
+      await this.setup.logout(30000);
+      asyncCx.notify();
+    });
   }
 
   /** @param {string} accountId @param {import("gpui").Context} cx */
-  async selectSetupAccount(accountId, cx) {
+  selectSetupAccount(accountId, cx) {
     const snapshot = this.setup.selectAccount(accountId);
-    if (snapshot.phase === "ready")
-      await this.commitSetup(snapshot.commitIntent);
-    cx.notify();
+    return cx.spawn(async (asyncCx) => {
+      if (snapshot.phase === "ready")
+        await this.commitSetup(snapshot.commitIntent);
+      asyncCx.notify();
+    });
   }
 
   /** @param {{account:any,context:any,compensation?:any}} intent */
@@ -554,9 +592,18 @@ export default class Omamail extends View {
   /** @param {import("gpui").Context} cx */
   openCursor(cx) {
     this.readerHidden = false;
-    this.controller?.openCursor((/** @type {any} */ detail) => {
-      if (detail?.draftId) this.openDraft(cx);
+    /** @type {(detail:any) => void} */
+    let completeOpen = () => {};
+    const opened = new Promise((resolve) => {
+      completeOpen = resolve;
     });
+    cx.spawn(async (asyncCx) => {
+      const detail = await opened;
+      if (detail?.draftId) this.openDraft(asyncCx);
+      else asyncCx.notify();
+    });
+    if (this.controller) this.controller.openCursor(completeOpen);
+    else completeOpen(undefined);
     cx.notify();
   }
 
@@ -592,7 +639,19 @@ export default class Omamail extends View {
   /** @param {import("gpui").Context} cx */
   openCompose(cx) {
     const accounts = this.controller?.snapshot().accounts ?? this.accountList;
-    /** @type {any} */ (this.compose).compose({ accountId: accounts.activeId });
+    const current = /** @type {any} */ (this.compose).snapshot().draft;
+    const hasDraft = [
+      current.to,
+      current.cc,
+      current.bcc,
+      current.subject,
+      current.body,
+      current.draftId,
+    ].some((value) => String(value || "").length > 0);
+    if (!hasDraft)
+      /** @type {any} */ (this.compose).compose({
+        accountId: accounts.activeId,
+      });
     this.syncComposeFields();
     this.state = { ...this.state, route: "compose" };
     cx.notify();
@@ -616,7 +675,17 @@ export default class Omamail extends View {
       return;
     }
     if (!snapshot?.detail) {
-      this.controller?.openCursor(() => this.openResponse(mode, cx));
+      /** @type {(value:any) => void} */
+      let completeOpen = () => {};
+      const opened = new Promise((resolve) => {
+        completeOpen = resolve;
+      });
+      cx.spawn(async (asyncCx) => {
+        await opened;
+        this.openResponse(mode, asyncCx);
+      });
+      if (this.controller) this.controller.openCursor(completeOpen);
+      else completeOpen(undefined);
       cx.notify();
       return;
     }
@@ -659,24 +728,31 @@ export default class Omamail extends View {
       (/** @type {any} */ entry) => entry.id === snapshot.accounts.activeId,
     );
     if (!detail || !account || account.provider === "hey") return;
-    const open = (/** @type {string} */ data) => {
+    const open = (
+      /** @type {string} */ data,
+      /** @type {import("gpui").Context} */ activeCx,
+    ) => {
       if (!data || data.length > 1_398_104) {
         this.controller?.refuse("Attachment data is invalid or too large");
-        cx.notify();
+        activeCx.notify();
         return;
       }
-      void this.openAttachmentHost(
-        JSON.stringify({
-          filename: String(attachment.filename || "attachment"),
-          data,
-        }),
-      ).catch(() => {
-        this.controller?.refuse("Attachment could not be opened");
-        cx.notify();
+      activeCx.spawn(async (asyncCx) => {
+        try {
+          await this.openAttachmentHost(
+            JSON.stringify({
+              filename: String(attachment.filename || "attachment"),
+              data,
+            }),
+          );
+        } catch (_) {
+          this.controller?.refuse("Attachment could not be opened");
+          asyncCx.notify();
+        }
       });
     };
     if (account.provider === "imap" && attachment.data) {
-      open(String(attachment.data));
+      open(String(attachment.data), cx);
       return;
     }
     if (account.provider !== "gmail") return;
@@ -684,29 +760,31 @@ export default class Omamail extends View {
       ...snapshot.mail.request,
       objectId: String(detail.id || ""),
     };
-    this.executeEffect(
-      {
-        kind: "gmail.attachment",
-        accountId: account.id,
-        identity,
-        messageId: identity.objectId,
-        partId: String(attachment.partId || attachment.attachmentId || ""),
-      },
-      (/** @type {any} */ result) => {
-        const current = this.controller?.snapshot();
-        if (
-          current?.detail !== detail ||
-          current?.accounts.activeId !== account.id
-        )
-          return;
-        if (!result?.ok || typeof result.value?.data !== "string") {
-          this.controller?.refuse("Attachment could not be downloaded");
-          cx.notify();
-          return;
-        }
-        open(result.value.data);
-      },
-    );
+    cx.spawn((asyncCx) => {
+      this.executeEffect(
+        {
+          kind: "gmail.attachment",
+          accountId: account.id,
+          identity,
+          messageId: identity.objectId,
+          partId: String(attachment.partId || attachment.attachmentId || ""),
+        },
+        (/** @type {any} */ result) => {
+          const current = this.controller?.snapshot();
+          if (
+            current?.detail !== detail ||
+            current?.accounts.activeId !== account.id
+          )
+            return;
+          if (!result?.ok || typeof result.value?.data !== "string") {
+            this.controller?.refuse("Attachment could not be downloaded");
+            asyncCx.notify();
+            return;
+          }
+          open(result.value.data, asyncCx);
+        },
+      );
+    });
   }
 
   /** @param {string} action @param {import("gpui").Context} cx */
@@ -720,6 +798,8 @@ export default class Omamail extends View {
   syncComposeFields() {
     const draft = /** @type {any} */ (this.compose).snapshot().draft;
     this.composeTo.set_value(draft.to);
+    this.composeCc.set_value(draft.cc);
+    this.composeBcc.set_value(draft.bcc);
     this.composeSubject.set_value(draft.subject);
     this.composeBody.set_value(draft.body);
   }
@@ -768,32 +848,34 @@ export default class Omamail extends View {
   }
 
   /** @param {import("gpui").Context} cx */
-  async confirmSettingsRemoval(cx) {
+  confirmSettingsRemoval(cx) {
     const pending = this.settings.snapshot().pendingRemoval;
     const removedId = pending?.accountId || "";
-    const result = await this.settings.confirmRemoval(pending);
-    if (result.ok || result.removed) {
-      if (result.uncertain)
-        this.hostConfigurationError =
-          "Credential state uncertain; sign in again";
-      this.accountList = loadAccounts(this.storage);
-      this.calendarSources = this.calendarSources.filter(
-        (/** @type {any} */ source) => source?.accountId !== removedId,
-      );
-      this.controller = null;
-      this.state = reduceApplicationState(this.state, {
-        type: "accounts-loaded",
-        accounts: accountSummaries(this.accountList),
-        activeAccountId: this.accountList.activeId,
-      });
-      if (!result.empty) {
-        this.startController?.();
+    return cx.spawn(async (asyncCx) => {
+      const result = await this.settings.confirmRemoval(pending);
+      if (result.ok || result.removed) {
+        if (result.uncertain)
+          this.hostConfigurationError =
+            "Credential state uncertain; sign in again";
+        this.accountList = loadAccounts(this.storage);
+        this.calendarSources = this.calendarSources.filter(
+          (/** @type {any} */ source) => source?.accountId !== removedId,
+        );
+        this.controller = null;
         this.state = reduceApplicationState(this.state, {
-          type: "open-settings",
+          type: "accounts-loaded",
+          accounts: accountSummaries(this.accountList),
+          activeAccountId: this.accountList.activeId,
         });
+        if (!result.empty) {
+          this.startController?.();
+          this.state = reduceApplicationState(this.state, {
+            type: "open-settings",
+          });
+        }
       }
-    }
-    cx.notify();
+      asyncCx.notify();
+    });
   }
 
   /** @param {import("gpui").Context} cx */
@@ -809,14 +891,22 @@ export default class Omamail extends View {
   /** @param {import("gpui").Context} cx */
   renderSettings(cx) {
     const snapshot = this.settings.snapshot();
-    return appFrame(cx)
-      .key_context("Page")
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::settings", (_event, eventCx) =>
-        this.openSettings(eventCx),
-      )
-      .child(
-        renderSettings(
+    return appShell(
+      {
+        top: topBar(
+          {
+            brand: brandLockup(cx),
+            center: muted("Settings", cx),
+            actions: button(
+              "settings-back",
+              "Back",
+              (_event, eventCx) => this.back(eventCx),
+              cx,
+            ),
+          },
+          cx,
+        ),
+        content: renderSettings(
           {
             ...snapshot,
             onBack: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
@@ -851,9 +941,30 @@ export default class Omamail extends View {
               /** @type {any} */ _event,
               /** @type {any} */ eventCx,
             ) => void this.confirmSettingsRemoval(eventCx),
+            onRemoteImages: (
+              /** @type {boolean} */ enabled,
+              /** @type {any} */ eventCx,
+            ) =>
+              void eventCx.spawn(
+                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                  await this.settings.toggleRemoteImages(enabled);
+                  asyncCx.notify();
+                },
+              ),
           },
           cx,
         ),
+        bottom: bottomBar(
+          { status: muted("Settings", cx), hints: muted("Esc Back", cx) },
+          cx,
+        ),
+      },
+      cx,
+    )
+      .key_context("Page")
+      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
+      .on_action("mail::settings", (_event, eventCx) =>
+        this.openSettings(eventCx),
       );
   }
 
@@ -862,21 +973,31 @@ export default class Omamail extends View {
     const compose = /** @type {any} */ (this.compose);
     const draft = compose.snapshot();
     const accounts = this.controller?.snapshot().accounts ?? this.accountList;
-    const canSaveDraft =
-      accounts.accounts.find(
-        (/** @type {any} */ account) => account.id === draft.draft.accountId,
-      )?.provider === "gmail";
-    return appFrame(cx)
-      .key_context("Compose")
-      .on_action("mail::send", (_event, eventCx) => {
-        compose.send();
-        eventCx.notify();
-      })
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .child(
-        renderCompose(
+    const account = accounts.accounts.find(
+      (/** @type {any} */ entry) => entry.id === draft.draft.accountId,
+    );
+    const canSaveDraft = account?.provider === "gmail";
+    return appShell(
+      {
+        top: topBar(
           {
+            brand: brandLockup(cx),
+            center: muted("Compose", cx),
+            actions: button(
+              "compose-back",
+              "Back",
+              (_event, eventCx) => this.back(eventCx),
+              cx,
+            ),
+          },
+          cx,
+        ),
+        content: renderCompose(
+          {
+            from: String(account?.email || account?.id || ""),
             to: this.composeTo,
+            cc: this.composeCc,
+            bcc: this.composeBcc,
             subject: this.composeSubject,
             body: this.composeBody,
             status: draft.status,
@@ -896,53 +1017,83 @@ export default class Omamail extends View {
             onDiscard: (_event, eventCx) => {
               const current = compose.snapshot().draft;
               const discardRevision = compose.snapshot().revision;
-              const finish = () => {
+              const finish = (
+                /** @type {import("gpui").Context} */ activeCx,
+              ) => {
                 compose.discard();
                 this.syncComposeFields();
                 this.state = { ...this.state, route: "mail" };
-                eventCx.notify();
+                activeCx.notify();
               };
               if (current.draftId)
-                this.executeEffect(
-                  {
-                    type: "compose.draft.delete",
-                    provider: "gmail",
-                    accountId: current.accountId,
-                    draftId: current.draftId,
-                  },
-                  (/** @type {any} */ result) => {
-                    const latest = compose.snapshot();
-                    if (
-                      latest.revision !== discardRevision ||
-                      latest.draft.accountId !== current.accountId ||
-                      latest.draft.draftId !== current.draftId ||
-                      this.controller?.snapshot().accounts.activeId !==
-                        current.accountId
-                    )
-                      return;
-                    if (result?.ok === false)
-                      compose.setStatus?.(
-                        String(result.error || "Draft could not be discarded"),
-                      );
-                    else {
-                      this.controller?.invalidateDrafts(current.accountId);
-                      finish();
-                    }
-                    eventCx.notify();
+                eventCx.spawn(
+                  (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                    this.executeEffect(
+                      {
+                        type: "compose.draft.delete",
+                        provider: "gmail",
+                        accountId: current.accountId,
+                        draftId: current.draftId,
+                      },
+                      (/** @type {any} */ result) => {
+                        const latest = compose.snapshot();
+                        if (
+                          latest.revision !== discardRevision ||
+                          latest.draft.accountId !== current.accountId ||
+                          latest.draft.draftId !== current.draftId ||
+                          this.controller?.snapshot().accounts.activeId !==
+                            current.accountId
+                        )
+                          return;
+                        if (result?.ok === false)
+                          compose.setStatus?.(
+                            String(
+                              result.error || "Draft could not be discarded",
+                            ),
+                          );
+                        else {
+                          this.controller?.invalidateDrafts(current.accountId);
+                          finish(asyncCx);
+                        }
+                        asyncCx.notify();
+                      },
+                    );
                   },
                 );
-              else finish();
+              else finish(eventCx);
             },
           },
           cx,
         ),
-      );
+        bottom: bottomBar(
+          { status: muted("Compose", cx), hints: muted("Esc Back", cx) },
+          cx,
+        ),
+      },
+      cx,
+    )
+      .key_context("Compose")
+      .on_action("mail::send", (_event, eventCx) => {
+        compose.send();
+        eventCx.notify();
+      })
+      .on_action("mail::back", (_event, eventCx) => this.back(eventCx));
   }
   /** @param {import("gpui").Context} cx */
   renderCalendar(cx) {
     const calendar = /** @type {any} */ (this.calendar);
     const view = calendar.snapshot();
-    return appFrame(cx)
+    const mailSnapshot = this.controller?.snapshot();
+    const mail = mailSnapshot?.mail;
+    const activeAccount = mailSnapshot?.accounts.accounts.find(
+      (/** @type {any} */ entry) => entry.id === mailSnapshot.accounts.activeId,
+    );
+    const activeProvider = Registry.get(activeAccount?.provider || "gmail");
+    return v_flex()
+      .id("calendar-action-host")
+      .size_full()
+      .min_w_0()
+      .min_h_0()
       .key_context(view.editing ? "Page" : "Calendar")
       .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx))
       .on_action("mail::calendar", (_event, eventCx) =>
@@ -1000,6 +1151,8 @@ export default class Omamail extends View {
             readStatus: view.readStatus,
             writeStatus: view.writeStatus,
             view: view.view,
+            anchorMs: view.anchorMs,
+            grid: view.grid,
             sourceLabel: view.source?.name || view.source?.id || "",
             hasSource: Boolean(view.source),
             sources: view.sources,
@@ -1016,49 +1169,105 @@ export default class Omamail extends View {
             selected: view.selected,
             selectedId: view.selected?.id || null,
             events: view.events,
-            onEvent: (event, eventCx) => {
+            navigation: mailSnapshot
+              ? {
+                  accounts: mailSnapshot.accounts.accounts.map(
+                    (/** @type {any} */ entry) => ({
+                      id: entry.id,
+                      label: entry.label ?? entry.email ?? entry.id,
+                      provider: entry.provider,
+                      selected: entry.id === mailSnapshot.accounts.activeId,
+                    }),
+                  ),
+                  mailboxes: Registry.mailboxes(activeProvider.id).map(
+                    (box) => ({
+                      id: box.key,
+                      label: box.label,
+                      count: mail?.counts?.[box.key] ?? 0,
+                      selected: false,
+                    }),
+                  ),
+                  onAccount: (
+                    /** @type {string} */ id,
+                    /** @type {any} */ _event,
+                    /** @type {any} */ eventCx,
+                  ) => {
+                    this.switchAccount(id, eventCx);
+                    this.openMail(eventCx);
+                  },
+                  onMailbox: (
+                    /** @type {string} */ key,
+                    /** @type {any} */ _event,
+                    /** @type {any} */ eventCx,
+                  ) => {
+                    this.controller?.selectMailbox(key);
+                    this.openMail(eventCx);
+                  },
+                  onCalendar: (
+                    /** @type {any} */ _event,
+                    /** @type {any} */ eventCx,
+                  ) => this.openCalendar(eventCx),
+                  calendarSelected: true,
+                }
+              : null,
+            onEvent: (/** @type {any} */ event, /** @type {any} */ eventCx) => {
               calendar.select(event);
               eventCx.notify();
             },
-            onNew: (_event, eventCx) => {
+            onNew: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.beginCreate();
               this.syncCalendarFields();
               eventCx.notify();
             },
-            onEdit: (_event, eventCx) => {
+            onEdit: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.beginEdit(view.selected);
               this.syncCalendarFields();
               eventCx.notify();
             },
-            onSave: (_event, eventCx) => {
+            onSave: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.save();
               eventCx.notify();
             },
-            onCancel: (_event, eventCx) => {
+            onCancel: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
               calendar.cancelEdit();
               eventCx.notify();
             },
-            onPrevious: (_event, eventCx) => {
+            onPrevious: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
               calendar.previous();
               eventCx.notify();
             },
-            onNext: (_event, eventCx) => {
+            onNext: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.next();
               eventCx.notify();
             },
-            onToday: (_event, eventCx) => {
+            onToday: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
               calendar.today();
               eventCx.notify();
             },
-            onMonth: (_event, eventCx) => {
+            onMonth: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
               calendar.showMonth(view.anchorMs);
               eventCx.notify();
             },
-            onWeek: (_event, eventCx) => {
+            onWeek: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.showWeek(view.anchorMs);
               eventCx.notify();
             },
-            onSource: (sourceId, eventCx) => {
+            onSource: (
+              /** @type {string} */ sourceId,
+              /** @type {any} */ eventCx,
+            ) => {
               calendar.selectSource(sourceId);
               eventCx.notify();
             },
@@ -1078,7 +1287,74 @@ export default class Omamail extends View {
       committing: "Saving account",
       ready: "Account connected",
     };
-    return appFrame(cx)
+    const providerId = this.state.setupProviderId;
+    const setupModel = {
+      provider: providerId,
+      providerName: providerId ? Registry.get(providerId).name : "",
+      providers: PROVIDERS,
+      ...setupSnapshot,
+      phase: this.setupFailure ? "error" : setupSnapshot.phase,
+      busy: ["authenticating", "verifying", "committing"].includes(
+        setupSnapshot.phase,
+      ),
+      insecure: this.setupInsecure,
+      fields: {
+        email: this.setupEmail,
+        username: this.setupUsername,
+        password: this.setupPassword,
+        imapHost: this.setupImapHost,
+        imapPort: this.setupImapPort,
+        smtpHost: this.setupSmtpHost,
+        smtpPort: this.setupSmtpPort,
+        authorizationUrl: this.setupAuthorizationUrl,
+      },
+      configurationError: this.hostConfigurationError,
+      status:
+        this.setupFailure ||
+        setupSnapshot.error ||
+        setupStatuses[String(setupSnapshot.phase)] ||
+        "",
+      submitLabel:
+        providerId === "imap"
+          ? "Test and save"
+          : providerId === "hey"
+            ? "Open HEY login…"
+            : "Connect…",
+      onSubmit: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        void this.submitSetup(eventCx),
+      onPoll: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        void this.pollSetup(eventCx),
+      onLogout: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        void this.logoutSetup(eventCx),
+      onAccount: (
+        /** @type {string} */ accountId,
+        /** @type {any} */ eventCx,
+      ) => void this.selectSetupAccount(accountId, eventCx),
+      onTls: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+        this.setupInsecure = !this.setupInsecure;
+        eventCx.notify();
+      },
+      onCancel: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+        this.back(eventCx),
+      onProvider: (
+        /** @type {string} */ nextProviderId,
+        /** @type {any} */ eventCx,
+      ) => this.chooseProvider(nextProviderId, eventCx),
+    };
+    return appShell(
+      {
+        top: topBar(
+          {
+            brand: brandLockup(cx),
+            center: muted("Add an email account", cx),
+          },
+          cx,
+        ),
+        content: renderSetupForm(setupModel, cx),
+        bottom: bottomBar({ status: renderSetupFooter(setupModel, cx) }, cx),
+      },
+      cx,
+    )
       .key_context("Page")
       .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
       .on_action("mail::compose", (_event, eventCx) =>
@@ -1090,92 +1366,7 @@ export default class Omamail extends View {
       .on_action("mail::calendarView", (_event, eventCx) =>
         this.openCalendar(eventCx),
       )
-      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx))
-      .p(cx.theme().spacing.xl)
-      .gap(cx.theme().spacing.lg)
-      .child(title("Add an email account", cx))
-      .child(muted("Choose the service that hosts this mailbox", cx))
-      .child(
-        this.hostConfigurationError
-          ? muted(this.hostConfigurationError, cx)
-          : "",
-      )
-      .when(Boolean(this.state.setupProviderId), (page) =>
-        page.child(
-          renderSetupForm(
-            {
-              provider: this.state.setupProviderId,
-              providerName: Registry.get(this.state.setupProviderId).name,
-              ...setupSnapshot,
-              phase: this.setupFailure ? "error" : setupSnapshot.phase,
-              insecure: this.setupInsecure,
-              fields: {
-                email: this.setupEmail,
-                username: this.setupUsername,
-                password: this.setupPassword,
-                imapHost: this.setupImapHost,
-                imapPort: this.setupImapPort,
-                smtpHost: this.setupSmtpHost,
-                smtpPort: this.setupSmtpPort,
-                authorizationUrl: this.setupAuthorizationUrl,
-              },
-              status:
-                this.setupFailure ||
-                setupSnapshot.error ||
-                setupStatuses[String(setupSnapshot.phase)] ||
-                "",
-              submitLabel:
-                this.state.setupProviderId === "imap"
-                  ? "Test and save"
-                  : this.state.setupProviderId === "hey"
-                    ? "Open HEY login…"
-                    : "Connect…",
-              onSubmit: (
-                /** @type {any} */ _event,
-                /** @type {any} */ eventCx,
-              ) => void this.submitSetup(eventCx),
-              onPoll: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
-                void this.pollSetup(eventCx),
-              onLogout: (
-                /** @type {any} */ _event,
-                /** @type {any} */ eventCx,
-              ) => void this.logoutSetup(eventCx),
-              onAccount: (
-                /** @type {string} */ accountId,
-                /** @type {any} */ eventCx,
-              ) => void this.selectSetupAccount(accountId, eventCx),
-              onTls: (
-                /** @type {any} */ _event,
-                /** @type {any} */ eventCx,
-              ) => {
-                this.setupInsecure = !this.setupInsecure;
-                eventCx.notify();
-              },
-              onCancel: (
-                /** @type {any} */ _event,
-                /** @type {any} */ eventCx,
-              ) => this.back(eventCx),
-            },
-            cx,
-          ),
-        ),
-      )
-      .child(
-        surface(cx)
-          .gap(cx.theme().spacing.sm)
-          .p(cx.theme().spacing.md)
-          .children(
-            PROVIDERS.map((provider) =>
-              button(
-                `provider-${provider.id}`,
-                provider.name,
-                (_event, eventCx) => this.chooseProvider(provider.id, eventCx),
-                cx,
-                { selected: this.state.setupProviderId === provider.id },
-              ),
-            ),
-          ),
-      );
+      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx));
   }
 
   /** @param {import("gpui").Context} cx */
@@ -1198,7 +1389,11 @@ export default class Omamail extends View {
       snapshot.lastOperation && !snapshot.lastOperation.ok
         ? snapshot.lastOperation.error
         : mail?.status || this.hostConfigurationError || "";
-    return appFrame(cx)
+    return v_flex()
+      .id("mail-action-host")
+      .size_full()
+      .min_w_0()
+      .min_h_0()
       .key_context(mailKeyContext(mail, this.readerHidden === true))
       .on_action("mail::cursorDown", (_event, eventCx) =>
         this.moveCursor(1, eventCx),
@@ -1424,6 +1619,11 @@ export default class Omamail extends View {
                   this.controller?.openMessage(id);
                   eventCx.notify();
                 },
+                onCalendar: (
+                  /** @type {any} */ _event,
+                  /** @type {any} */ eventCx,
+                ) => this.openCalendar(eventCx),
+                calendarSelected: false,
               },
               cx,
             ),

@@ -160,6 +160,28 @@ export function renderReader(model, cx) {
     ["spam", "Report spam", model.capabilities?.spam, model.onSpam],
     ["trash", "Trash", model.capabilities?.trash, model.onTrash],
   ];
+  const toolbar = h_flex()
+    .id("reader-toolbar")
+    .items_center()
+    .gap(cx.theme().spacing.xs)
+    .p(cx.theme().spacing.sm)
+    .border_t(1)
+    .border_color(cx.theme().colors.border)
+    .children(
+      actions
+        .filter(
+          ([, , supported, callback]) =>
+            supported && typeof callback === "function",
+        )
+        .map(([id, caption, , callback]) =>
+          button(
+            `reader-action-${id}`,
+            String(caption),
+            (event, eventCx) => callback(event, eventCx),
+            cx,
+          ),
+        ),
+    );
   return v_flex()
     .id(`reader-content-${model.message.id}`)
     .flex_1()
@@ -167,141 +189,141 @@ export function renderReader(model, cx) {
     .min_h_0()
     .bg(cx.theme().colors.background)
     .child(
-      h_flex()
-        .id("reader-toolbar")
-        .items_center()
-        .gap(cx.theme().spacing.xs)
-        .p(cx.theme().spacing.sm)
-        .border_b(1)
-        .border_color(cx.theme().colors.border)
-        .children(
-          actions
-            .filter(
-              ([, , supported, callback]) =>
-                supported && typeof callback === "function",
+      v_flex()
+        .id("reader-message-body")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p(cx.theme().spacing.lg)
+        .child(
+          v_flex()
+            .id("reader-message-column")
+            .w_full()
+            .max_w("48rem")
+            .gap(cx.theme().spacing.md)
+            .child(
+              v_flex()
+                .id("reader-message-header")
+                .gap(cx.theme().spacing.xs)
+                .child(
+                  title(
+                    typeof model.message.subject === "string" ||
+                      typeof model.message.subject === "number"
+                      ? String(model.message.subject)
+                      : "",
+                    cx,
+                  ),
+                )
+                .child(
+                  muted(
+                    typeof model.message.sender === "string" ||
+                      typeof model.message.sender === "number"
+                      ? String(model.message.sender)
+                      : model.message.sender &&
+                          typeof model.message.sender === "object"
+                        ? (() => {
+                            const name = String(
+                              model.message.sender.name ?? "",
+                            ).trim();
+                            const email = String(
+                              model.message.sender.email ?? "",
+                            ).trim();
+                            return name && email
+                              ? `${name} <${email}>`
+                              : name || email;
+                          })()
+                        : "",
+                    cx,
+                  ),
+                ),
             )
-            .map(([id, caption, , callback]) =>
-              button(
-                `reader-action-${id}`,
-                String(caption),
-                (event, eventCx) => callback(event, eventCx),
-                cx,
+            .child(
+              model.presentation
+                ? v_flex()
+                    .id("reader-reading-mode")
+                    .gap(cx.theme().spacing.md)
+                    .children(
+                      model.presentation.blocks.map(
+                        (
+                          /** @type {any} */ block,
+                          /** @type {number} */ index,
+                        ) => renderReadingBlock(block, index, cx),
+                      ),
+                    )
+                    .children([
+                      muted(
+                        `Reading view · ${Number(model.presentation.complexity?.tags ?? 0)} elements`,
+                        cx,
+                      ).id("reader-complexity"),
+                      ...(model.presentation.empty
+                        ? [muted("This message has no readable text.", cx)]
+                        : []),
+                      ...(model.presentation.tooHeavy
+                        ? [
+                            muted(
+                              "This message is too complex to show fully.",
+                              cx,
+                            ),
+                          ]
+                        : []),
+                      ...(model.presentation.remoteImagesBlocked
+                        ? [
+                            muted("Remote images are blocked.", cx).id(
+                              "reader-remote-images-blocked",
+                            ),
+                          ]
+                        : []),
+                    ])
+                    .child(
+                      muted("Formatted view is unavailable safely.", cx).id(
+                        "reader-formatted-unavailable",
+                      ),
+                    )
+                : label(model.message.body, cx),
+            )
+            .children(
+              (typeof model.onAttachment === "function" &&
+              Array.isArray(model.message.attachments)
+                ? model.message.attachments
+                : []
+              ).map((/** @type {any} */ attachment) =>
+                h_flex()
+                  .id(
+                    `reader-attachment-${String(attachment.partId || attachment.attachmentId)}`,
+                  )
+                  .items_center()
+                  .justify_between()
+                  .gap(cx.theme().spacing.md)
+                  .p(cx.theme().spacing.sm)
+                  .border(1)
+                  .border_color(cx.theme().colors.border)
+                  .rounded(cx.theme().radius.sm)
+                  .child(
+                    v_flex()
+                      .min_w_0()
+                      .child(
+                        label(String(attachment.filename || "attachment"), cx),
+                      )
+                      .child(
+                        muted(
+                          `${String(attachment.mimeType || "application/octet-stream")} · ${Math.max(0, Number(attachment.size) || 0)} bytes`,
+                          cx,
+                        ),
+                      ),
+                  )
+                  .child(
+                    button(
+                      `reader-attachment-open-${String(attachment.partId || attachment.attachmentId)}`,
+                      "Open…",
+                      (event, eventCx) =>
+                        model.onAttachment?.(attachment, event, eventCx),
+                      cx,
+                      { disabled: typeof model.onAttachment !== "function" },
+                    ),
+                  ),
               ),
             ),
         ),
     )
-    .child(
-      v_flex()
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .gap(cx.theme().spacing.md)
-        .p(cx.theme().spacing.lg)
-        .child(
-          title(
-            typeof model.message.subject === "string" ||
-              typeof model.message.subject === "number"
-              ? String(model.message.subject)
-              : "",
-            cx,
-          ),
-        )
-        .child(
-          muted(
-            typeof model.message.sender === "string" ||
-              typeof model.message.sender === "number"
-              ? String(model.message.sender)
-              : model.message.sender &&
-                  typeof model.message.sender === "object"
-                ? (() => {
-                    const name = String(model.message.sender.name ?? "").trim();
-                    const email = String(
-                      model.message.sender.email ?? "",
-                    ).trim();
-                    return name && email
-                      ? `${name} <${email}>`
-                      : name || email;
-                  })()
-                : "",
-            cx,
-          ),
-        )
-        .child(
-          model.presentation
-            ? v_flex()
-                .id("reader-reading-mode")
-                .gap(cx.theme().spacing.md)
-                .children(
-                  model.presentation.blocks.map(
-                    (/** @type {any} */ block, /** @type {number} */ index) =>
-                      renderReadingBlock(block, index, cx),
-                  ),
-                )
-                .children([
-                  muted(
-                    `Reading view · ${Number(model.presentation.complexity?.tags ?? 0)} elements`,
-                    cx,
-                  ).id("reader-complexity"),
-                  ...(model.presentation.empty
-                    ? [muted("This message has no readable text.", cx)]
-                    : []),
-                  ...(model.presentation.tooHeavy
-                    ? [muted("This message is too complex to show fully.", cx)]
-                    : []),
-                  ...(model.presentation.remoteImagesBlocked
-                    ? [
-                        muted("Remote images are blocked.", cx).id(
-                          "reader-remote-images-blocked",
-                        ),
-                      ]
-                    : []),
-                ])
-                .child(
-                  muted("Formatted view is unavailable safely.", cx).id(
-                    "reader-formatted-unavailable",
-                  ),
-                )
-            : label(model.message.body, cx),
-        )
-        .children(
-          (typeof model.onAttachment === "function" &&
-          Array.isArray(model.message.attachments)
-            ? model.message.attachments
-            : []
-          ).map((/** @type {any} */ attachment) =>
-            h_flex()
-              .id(
-                `reader-attachment-${String(attachment.partId || attachment.attachmentId)}`,
-              )
-              .items_center()
-              .justify_between()
-              .gap(cx.theme().spacing.md)
-              .p(cx.theme().spacing.sm)
-              .border(1)
-              .border_color(cx.theme().colors.border)
-              .rounded(cx.theme().radius.sm)
-              .child(
-                v_flex()
-                  .min_w_0()
-                  .child(label(String(attachment.filename || "attachment"), cx))
-                  .child(
-                    muted(
-                      `${String(attachment.mimeType || "application/octet-stream")} · ${Math.max(0, Number(attachment.size) || 0)} bytes`,
-                      cx,
-                    ),
-                  ),
-              )
-              .child(
-                button(
-                  `reader-attachment-open-${String(attachment.partId || attachment.attachmentId)}`,
-                  "Open…",
-                  (event, eventCx) =>
-                    model.onAttachment?.(attachment, event, eventCx),
-                  cx,
-                  { disabled: typeof model.onAttachment !== "function" },
-                ),
-              ),
-          ),
-        ),
-    );
+    .child(toolbar);
 }

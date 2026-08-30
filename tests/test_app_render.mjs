@@ -40,6 +40,11 @@ assert.deepEqual(
   ids(rendered).filter((id) => id.startsWith("provider-")),
   ["provider-gmail", "provider-hey", "provider-imap"],
 );
+assert.ok(ids(rendered).includes("application-top-bar"));
+assert.ok(ids(rendered).includes("application-bottom-bar"));
+assert.ok(ids(rendered).includes("setup-page"));
+assert.ok(ids(rendered).includes("setup-column"));
+assert.ok(ids(rendered).includes("setup-footer"));
 assert.equal(app.boundKeys > 10, true);
 
 globalThis.localStorage.value = JSON.stringify({
@@ -56,5 +61,21 @@ assert.ok(ids(mailbox).includes("account-reader@example.com"));
 assert.ok(ids(mailbox).includes("mailbox-list"));
 assert.ok(ids(mailbox).includes("message-list"));
 assert.ok(ids(mailbox).includes("message-reader"));
+
+hydrated.openCompose(cx);
+const compose = hydrated.render(cx);
+assert.ok(ids(compose).includes("application-top-bar"));
+assert.ok(ids(compose).includes("application-content"));
+assert.ok(ids(compose).includes("application-bottom-bar"));
+assert.ok(ids(compose).includes("compose-action-bar"));
+assert.ok(ids(compose).includes("compose-cc-field"));
+assert.ok(ids(compose).includes("compose-bcc-field"));
+
+hydrated.openSettings(cx);
+const settings = hydrated.render(cx);
+assert.ok(ids(settings).includes("application-top-bar"));
+assert.ok(ids(settings).includes("application-bottom-bar"));
+assert.ok(ids(settings).includes("settings-column"));
+assert.ok(ids(settings).includes("settings-accounts-group"));
 
 console.log("app render tests passed");

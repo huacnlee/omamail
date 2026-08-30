@@ -11,9 +11,11 @@ export const rowShell = (id, selected, cx) =>
     .min_w_0()
     .gap(cx.theme().spacing.sm)
     .px(cx.theme().spacing.md)
-    .py(cx.theme().spacing.sm)
+    .py(cx.theme().spacing.md)
     .bg(selected ? cx.theme().colors.accent : cx.theme().colors.surface)
     .text_color(
-      selected ? cx.theme().colors.accent_foreground : cx.theme().colors.foreground,
+      selected
+        ? cx.theme().colors.accent_foreground
+        : cx.theme().colors.foreground,
     )
     .hover((style) => style.bg(cx.theme().colors.muted));

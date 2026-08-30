@@ -403,16 +403,14 @@ function detailSummary(previous, summary) {
   if (!previous) return summary
   var merged = {}
   for (var key in summary) merged[key] = summary[key]
-  if (merged.subject === "(no subject)" && previous.subject) merged.subject = previous.subject
-  if (!merged.from || (!merged.from.name && !merged.from.email)) merged.from = previous.from
+  if ((!merged.subject || merged.subject === "(no subject)") && previous.subject) merged.subject = previous.subject
+  if (!merged.from || (!merged.from.display && !merged.from.name && !merged.from.email)) merged.from = previous.from
   if (!merged.snippet) merged.snippet = previous.snippet
   // The three readings of one date, kept together: a row showing yesterday's
   // relative time against today's date is worse than either alone.
-  if (!merged.date && previous.date) {
-    merged.date = previous.date
-    merged.time = previous.time
-    merged.fullTime = previous.fullTime
-  }
+  if (!merged.date && previous.date) merged.date = previous.date
+  if (!merged.time && previous.time) merged.time = previous.time
+  if (!merged.fullTime && previous.fullTime) merged.fullTime = previous.fullTime
   return merged
 }
 

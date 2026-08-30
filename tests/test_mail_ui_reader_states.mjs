@@ -21,11 +21,21 @@ function ids(element, result = []) {
   return result;
 }
 
+function find(element, target) {
+  if (!element || typeof element !== "object") return null;
+  if (element.elementId === target) return element;
+  for (const child of element.childNodes ?? []) {
+    const found = find(child, target);
+    if (found) return found;
+  }
+  return null;
+}
+
 assert.ok(ids(renderReader({ state: "blank" }, cx)).includes("reader-blank"));
 assert.ok(
   ids(renderReader({ state: "loading" }, cx)).includes("reader-loading"),
 );
-const callbacks = { reply: 0, archive: 0 };
+const callbacks = { reply: null, archive: 0 };
 const rendered = renderReader(
   {
     state: "content",
@@ -50,8 +60,8 @@ const rendered = renderReader(
       spam: false,
       trash: true,
     },
-    onReply() {
-      callbacks.reply += 1;
+    onReply(event, eventCx) {
+      callbacks.reply = { event, eventCx };
     },
     onArchive() {
       callbacks.archive += 1;
@@ -63,6 +73,8 @@ const rendered = renderReader(
 const actionIds = ids(rendered);
 assert.ok(actionIds.includes("reader-action-reply"));
 assert.ok(actionIds.includes("reader-action-archive"));
+assert.ok(actionIds.includes("reader-message-header"));
+assert.ok(actionIds.includes("reader-message-body"));
 assert.equal(
   actionIds.includes("reader-action-star"),
   false,
@@ -79,5 +91,11 @@ assert.equal(
   false,
   "missing callbacks hide actions",
 );
+
+const reply = find(rendered, "reader-action-reply");
+const event = { source: "reader-toolbar" };
+const eventCx = { callbackContext: true };
+reply.clickHandler(event, eventCx);
+assert.deepEqual(callbacks.reply, { event, eventCx });
 
 console.log("mail UI reader state tests passed");

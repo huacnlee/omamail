@@ -879,8 +879,13 @@ function referenceValue(value) {
 }
 
 function quoteBody(summary, body) {
-  var header = summary && summary.from
-    ? "On " + (summary.fullTime || "") + ", " + summary.from.display + " wrote:"
+  var sender = summary && summary.from ? summary.from : null
+  var senderName = sender
+    ? String(sender.display || sender.name || sender.email || "").trim()
+    : ""
+  var when = summary ? String(summary.fullTime || summary.time || summary.date || "").trim() : ""
+  var header = senderName
+    ? (when ? "On " + when + ", " : "") + senderName + " wrote:"
     : ""
   var lines = String(body || "").split("\n")
   var quoted = []

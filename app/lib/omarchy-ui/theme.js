@@ -48,16 +48,21 @@ export function omarchyTheme(source, fallback) {
   const foreground = first(palette, "foreground", "fg", "color7");
   if (!background || !foreground) return null;
 
-  const appearance = first(palette, "mode", "theme_type") === "light" ? "light" : "dark";
+  const appearance =
+    first(palette, "mode", "theme_type") === "light" ? "light" : "dark";
   const primary = first(palette, "accent", "blue", "color4") ?? foreground;
-  const muted = first(palette, "muted", "dark_foreground", "dark_fg") ?? foreground;
+  const muted =
+    first(palette, "muted", "dark_foreground", "dark_fg") ?? foreground;
   const mutedForeground = first(palette, "dark_foreground", "dark_fg") ?? muted;
-  const lightForeground = first(palette, "light_foreground", "light_fg") ?? foreground;
+  const lightForeground =
+    first(palette, "light_foreground", "light_fg") ?? foreground;
   const brightForeground =
     first(palette, "bright_foreground", "bright_fg") ?? lightForeground;
-  const secondary = first(palette, "lighter_background", "lighter_bg") ?? background;
+  const secondary =
+    first(palette, "lighter_background", "lighter_bg") ?? background;
   const accent = palette.selection ?? muted;
-  const destructive = first(palette, "red", "color1") ?? fallback.colors.destructive;
+  const destructive =
+    first(palette, "red", "color1") ?? fallback.colors.destructive;
 
   return {
     appearance,

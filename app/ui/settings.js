@@ -4,98 +4,107 @@ import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import {
   button,
+  centeredWorkspace,
   muted,
+  pageColumn,
+  panelHeader,
   rowShell,
+  sectionLabel,
   surface,
   title,
 } from "../lib/omarchy-ui/index.js";
 
 /** @param {any} model @param {import("gpui").Context} cx */
 export function renderSettings(model, cx) {
-  const page = v_flex()
-    .id("settings-page")
-    .role("region")
-    .accessibility_label("Settings")
-    .size_full()
-    .gap(cx.theme().spacing.lg)
-    .p(cx.theme().spacing.xl)
-    .bg(cx.theme().colors.background)
+  const confirmingRemoval = Boolean(model.pendingRemoval);
+  const accounts = surface(cx)
+    .id("settings-accounts-group")
     .child(
-      h_flex()
-        .items_center()
-        .justify_between()
-        .child(title("Settings", cx))
-        .child(button("settings-back", "Back", model.onBack, cx)),
+      panelHeader(
+        "settings-accounts-header",
+        sectionLabel("Accounts", cx),
+        confirmingRemoval
+          ? null
+          : button("settings-add-account", "Add account…", model.onAdd, cx, {
+              variant: "primary",
+            }),
+        cx,
+      ),
     )
-    .child(
-      surface(cx)
-        .child(
-          h_flex()
-            .items_center()
-            .justify_between()
-            .p(cx.theme().spacing.md)
-            .child(title("Accounts", cx))
-            .child(
-              button("settings-add-account", "Add account…", model.onAdd, cx, {
-                variant: "primary",
-              }),
-            ),
+    .children(
+      model.accounts.map((/** @type {any} */ account) =>
+        rowShell(
+          `settings-account-${account.id}`,
+          account.status === "Active",
+          cx,
         )
-        .children(
-          model.accounts.map((/** @type {any} */ account) =>
-            rowShell(
-              `settings-account-${account.id}`,
-              account.status === "Active",
+          .role("list_item")
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(div().child(account.label))
+              .child(muted(`${account.providerName} · ${account.status}`, cx)),
+          )
+          .child(
+            button(
+              `settings-switch-${account.id}`,
+              account.status === "Active" ? "Active" : "Switch",
+              (_event, eventCx) => model.onSwitch(account.id, eventCx),
               cx,
-            )
-              .role("list_item")
-              .child(
-                v_flex()
-                  .flex_1()
-                  .child(div().child(account.label))
-                  .child(
-                    muted(`${account.providerName} · ${account.status}`, cx),
-                  ),
-              )
-              .child(
-                button(
-                  `settings-switch-${account.id}`,
-                  account.status === "Active" ? "Active" : "Switch",
-                  (_event, eventCx) => model.onSwitch(account.id, eventCx),
-                  cx,
-                  { disabled: account.status === "Active" || model.busy },
-                ),
-              )
-              .child(
-                button(
-                  `settings-remove-${account.id}`,
-                  "Remove…",
-                  (_event, eventCx) => model.onRemove(account.id, eventCx),
-                  cx,
-                  { variant: "danger", disabled: model.busy },
-                ),
-              ),
-          ),
-        ),
-    )
+              {
+                disabled:
+                  account.status === "Active" ||
+                  model.busy ||
+                  confirmingRemoval,
+              },
+            ),
+          )
+          .child(
+            button(
+              `settings-remove-${account.id}`,
+              "Remove…",
+              (_event, eventCx) => model.onRemove(account.id, eventCx),
+              cx,
+              {
+                variant: "danger",
+                disabled: model.busy || confirmingRemoval,
+              },
+            ),
+          )
+          .when(confirmingRemoval, (row) => row.opacity(0.4)),
+      ),
+    );
+  const preferences = surface(cx)
+    .id("settings-preferences-group")
     .child(
-      surface(cx)
+      v_flex()
         .id("settings-remote-images")
+        .gap(cx.theme().spacing.sm)
         .p(cx.theme().spacing.md)
+        .child(sectionLabel("Privacy", cx))
         .child(title("Remote images", cx))
         .child(muted(model.remoteImages.detail, cx))
         .child(
           button(
-            "settings-remote-images-disabled",
-            "Unavailable",
-            () => {},
+            "settings-remote-images-toggle",
+            model.remoteImages.enabled ? "On" : "Off",
+            (_event, eventCx) =>
+              model.onRemoteImages(!model.remoteImages.enabled, eventCx),
             cx,
-            { disabled: true },
+            {
+              selected: model.remoteImages.enabled,
+              disabled: model.remoteImages.disabled || model.busy,
+            },
           ),
         ),
     );
+  const column = pageColumn("settings-column", cx, { maxWidth: "38rem" })
+    .child(title("Settings", cx))
+    .child(accounts)
+    .child(preferences);
   if (model.error)
-    page.child(
+    column.child(
       div()
         .id("settings-error")
         .role("alert")
@@ -103,7 +112,7 @@ export function renderSettings(model, cx) {
         .child(model.error),
     );
   if (model.pendingRemoval)
-    page.child(
+    column.child(
       surface(cx)
         .id("settings-remove-confirmation")
         .role("alert_dialog")
@@ -135,5 +144,13 @@ export function renderSettings(model, cx) {
             ),
         ),
     );
-  return page;
+  return v_flex()
+    .id("settings-page")
+    .role("region")
+    .accessibility_label("Settings")
+    .size_full()
+    .min_w_0()
+    .min_h_0()
+    .bg(cx.theme().colors.background)
+    .child(centeredWorkspace("settings-workspace", column, cx));
 }

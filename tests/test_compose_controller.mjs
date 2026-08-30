@@ -99,6 +99,19 @@ assert.equal(
   "me@example.test, team@example.test",
 );
 assert.equal(compose.snapshot().draft.originalCc, "copy@example.test");
+compose.reply({
+  id: "hey-posting:topic",
+  subject: "HEY topic",
+  from: { name: "Jane", email: "jane@example.com" },
+  fullTime: "Aug 20, 2026 10:00",
+  body: "HEY body",
+});
+assert.equal(compose.snapshot().draft.subject, "Re: HEY topic");
+assert.match(
+  compose.snapshot().draft.body,
+  /^On Aug 20, 2026 10:00, Jane wrote:\n> HEY body$/,
+);
+assert.equal(compose.snapshot().draft.body.includes("undefined"), false);
 compose.replyAll(
   {
     subject: "Topic",

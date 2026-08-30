@@ -22,12 +22,19 @@ const imap = {
   },
 };
 
-function harness({ failForget = false, uncertainForget = false } = {}) {
+function harness({
+  failForget = false,
+  uncertainForget = false,
+  failRemoteImages = false,
+  initialRemoteImages = false,
+} = {}) {
   let accounts = { version: 1, activeId: gmail.id, accounts: [gmail, imap] };
   const configured = [];
   const saved = [];
   const forgotten = [];
   const cleared = [];
+  const remoteImageWrites = [];
+  let remoteImages = initialRemoteImages;
   const controller = createSettingsController({
     readAccounts: () => accounts,
     saveAccounts(next) {
@@ -54,6 +61,12 @@ function harness({ failForget = false, uncertainForget = false } = {}) {
     clearCache(accountId) {
       cleared.push(accountId);
     },
+    readRemoteImages: () => remoteImages,
+    async saveRemoteImages(enabled) {
+      remoteImageWrites.push(enabled);
+      if (failRemoteImages) throw new Error("storage details must not escape");
+      remoteImages = enabled;
+    },
   });
   return {
     controller,
@@ -62,6 +75,7 @@ function harness({ failForget = false, uncertainForget = false } = {}) {
     saved,
     forgotten,
     cleared,
+    remoteImageWrites,
   };
 }
 
@@ -91,8 +105,41 @@ function harness({ failForget = false, uncertainForget = false } = {}) {
   assert.equal(snapshot.accounts.length, 2);
   assert.equal(snapshot.accounts[0].status, "Active");
   assert.equal(snapshot.remoteImages.enabled, false);
-  assert.equal(snapshot.remoteImages.disabled, true);
-  assert.match(snapshot.remoteImages.detail, /not available/i);
+  assert.equal(snapshot.remoteImages.disabled, false);
+  assert.match(snapshot.remoteImages.detail, /tell senders/i);
+}
+
+{
+  const { controller, remoteImageWrites } = harness({
+    initialRemoteImages: true,
+  });
+  assert.equal(controller.snapshot().remoteImages.enabled, true);
+  assert.deepEqual(await controller.toggleRemoteImages(false), {
+    ok: true,
+    enabled: false,
+  });
+  assert.deepEqual(remoteImageWrites, [false]);
+  assert.equal(controller.snapshot().remoteImages.enabled, false);
+  assert.equal(controller.snapshot().error, "");
+}
+
+{
+  const { controller, remoteImageWrites } = harness({
+    initialRemoteImages: true,
+    failRemoteImages: true,
+  });
+  const result = await controller.toggleRemoteImages(false);
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.enabled,
+    true,
+    "failed persistence keeps the prior value",
+  );
+  assert.match(result.error, /could not be saved/i);
+  assert.deepEqual(remoteImageWrites, [false]);
+  assert.equal(controller.snapshot().remoteImages.enabled, true);
+  assert.equal(controller.snapshot().busy, false);
+  assert.equal(controller.snapshot().error, result.error);
 }
 
 {

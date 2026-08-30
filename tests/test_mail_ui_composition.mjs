@@ -25,9 +25,19 @@ function collect(element, result = { ids: [], text: [] }) {
   return result;
 }
 
+function find(element, target) {
+  if (!element || typeof element !== "object") return null;
+  if (element.elementId === target) return element;
+  for (const child of element.childNodes ?? []) {
+    const found = find(child, target);
+    if (found) return found;
+  }
+  return null;
+}
+
 const noop = () => {};
 const model = {
-  width: 1024,
+  width: 1920,
   accounts: [
     { id: "gmail:me", label: "Personal", provider: "gmail", selected: true },
   ],
@@ -91,12 +101,27 @@ const model = {
 };
 
 const rendered = collect(renderMail(model, cx));
+assert.ok(rendered.ids.includes("mail-topbar"));
+assert.ok(rendered.ids.includes("mail-workspace"));
+assert.ok(rendered.ids.includes("mail-rail-accounts"));
+assert.ok(rendered.ids.includes("mail-list-pane-fixed"));
+assert.ok(rendered.ids.includes("mail-reader-pane"));
+assert.ok(rendered.ids.includes("mail-status-hints"));
 assert.ok(rendered.ids.includes("account-gmail:me"));
 assert.ok(rendered.ids.includes("mailbox-inbox"));
 assert.ok(rendered.ids.includes("message-m-1-selected"));
 assert.ok(rendered.ids.includes("message-m-2-cursor"));
+assert.ok(rendered.ids.includes("message-row-m-1"));
+assert.ok(rendered.ids.includes("message-row-m-1-sender"));
+assert.ok(rendered.ids.includes("message-row-m-1-subject"));
+assert.ok(rendered.ids.includes("message-row-m-1-snippet"));
 assert.ok(rendered.ids.includes("message-unread-m-1"));
 assert.ok(!rendered.ids.includes("message-unread-m-2"));
+assert.equal(
+  find(renderMail(model, cx), "message-m-1-selected").childNodes[0].elementId,
+  "message-unread-m-1",
+  "the unread marker stays in the leading column of a dense row",
+);
 assert.ok(rendered.ids.includes("reader-content-m-1"));
 assert.ok(rendered.ids.includes("reader-action-reply"));
 assert.ok(rendered.ids.includes("reader-action-trash"));

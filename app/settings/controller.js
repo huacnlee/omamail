@@ -4,6 +4,9 @@ import * as Accounts from "../account/Accounts.js";
 
 const FIXED_ERROR = "Account could not be removed";
 const UNCERTAIN_ERROR = "Credential state uncertain; sign in again";
+const REMOTE_IMAGES_ERROR = "Remote image preference could not be saved";
+const REMOTE_IMAGES_DETAIL =
+  "Loading remote images can tell senders when and where you opened a message.";
 
 /** @param {any} account @param {string} activeId */
 function summary(account, activeId) {
@@ -65,6 +68,12 @@ export function createSettingsController(dependencies) {
   let pendingRemoval = null;
   let busy = false;
   let error = "";
+  let remoteImagesEnabled = false;
+  try {
+    remoteImagesEnabled = Boolean(dependencies.readRemoteImages?.());
+  } catch (_) {
+    error = REMOTE_IMAGES_ERROR;
+  }
 
   function snapshot() {
     const list = Accounts.copyList(dependencies.readAccounts());
@@ -77,15 +86,34 @@ export function createSettingsController(dependencies) {
       busy,
       error,
       remoteImages: {
-        enabled: false,
-        disabled: true,
-        detail: "Remote image preference is not available yet",
+        enabled: remoteImagesEnabled,
+        disabled: false,
+        detail: REMOTE_IMAGES_DETAIL,
       },
     };
   }
 
   return {
     snapshot,
+    /** @param {boolean} enabled */
+    async toggleRemoteImages(enabled) {
+      const next = Boolean(enabled);
+      if (busy) return { ok: false, enabled: remoteImagesEnabled, error };
+      busy = true;
+      error = "";
+      try {
+        if (typeof dependencies.saveRemoteImages !== "function")
+          throw new Error("Remote image preference storage is unavailable");
+        await dependencies.saveRemoteImages(next);
+        remoteImagesEnabled = next;
+        busy = false;
+        return { ok: true, enabled: remoteImagesEnabled };
+      } catch (_) {
+        busy = false;
+        error = REMOTE_IMAGES_ERROR;
+        return { ok: false, enabled: remoteImagesEnabled, error };
+      }
+    },
     /** @param {string} accountId */
     switchAccount(accountId) {
       const previous = Accounts.copyList(dependencies.readAccounts());

@@ -79,13 +79,44 @@ const cx = {
     notifications += 1;
   },
 };
+const taskCx = {
+  ...cx,
+  spawn(task) {
+    return task(cx);
+  },
+};
+
+function expiringContext() {
+  let expired = false;
+  let taskNotifications = 0;
+  const taskCx = {
+    notify() {
+      taskNotifications += 1;
+    },
+  };
+  return {
+    context: {
+      notify() {
+        if (expired) throw new Error("stale GPUI event context");
+      },
+      spawn(task) {
+        return task(taskCx);
+      },
+    },
+    expire() {
+      expired = true;
+    },
+    taskNotifications() {
+      return taskNotifications;
+    },
+    taskCx,
+  };
+}
 const railEventCx = { notify() {} };
 let forwardedRailCx = null;
 const rail = renderRail(
   {
-    accounts: [
-      { id: "one", label: "One", provider: "hey", selected: false },
-    ],
+    accounts: [{ id: "one", label: "One", provider: "hey", selected: false }],
     mailboxes: [],
     onAccount: (_id, _event, eventCx) => {
       forwardedRailCx = eventCx;
@@ -269,7 +300,7 @@ connected.setupUsername.set_value("new");
 connected.setupPassword.set_value("password-must-not-persist");
 connected.setupImapHost.set_value("imap.example.test");
 connected.setupSmtpHost.set_value("smtp.example.test");
-await connected.submitSetup(cx);
+await connected.submitSetup(taskCx);
 const storedSetup = setupStorage.getItem("omamail.accounts");
 assert.equal(storedSetup.includes("password-must-not-persist"), false);
 assert.equal(storedSetup.includes("must-not-persist"), false);
@@ -277,6 +308,104 @@ assert.equal(configuredSetupAccounts[0].id, "imap:new@example.test");
 assert.equal(connected.state.route, "mail");
 assert.equal(mailKeyContext({ selectedId: "one" }, false), "MailReader");
 assert.equal(mailKeyContext({ selectedId: "one" }, true), "MailList");
+
+let completeLifetimeSetup;
+const lifetimeSetup = new Omamail();
+lifetimeSetup.init(
+  {
+    storage: memoryStorage(),
+    setupAdapters: {
+      gmail: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        cancel: async () => ({}),
+      },
+      imap: {
+        verifyAndStore: () =>
+          new Promise((resolve) => {
+            completeLifetimeSetup = resolve;
+          }),
+      },
+      hey: {
+        login: async () => ({}),
+        status: async () => ({}),
+        accounts: async () => ({}),
+        logout: async () => ({}),
+      },
+    },
+    configureHostContexts: async () => {},
+    execute(_effect, complete) {
+      complete({ ok: true, value: { messages: [] } });
+      return { cancel() {} };
+    },
+  },
+  cx,
+);
+lifetimeSetup.chooseProvider("imap", cx);
+lifetimeSetup.setupEmail.set_value("lifetime@example.test");
+lifetimeSetup.setupUsername.set_value("lifetime");
+lifetimeSetup.setupPassword.set_value("secret");
+lifetimeSetup.setupImapHost.set_value("imap.example.test");
+lifetimeSetup.setupSmtpHost.set_value("smtp.example.test");
+const setupLifetime = expiringContext();
+const pendingLifetimeSetup = lifetimeSetup.submitSetup(setupLifetime.context);
+setupLifetime.expire();
+completeLifetimeSetup({
+  account: {
+    id: "imap:lifetime@example.test",
+    provider: "imap",
+    email: "lifetime@example.test",
+    imap: {
+      username: "lifetime",
+      imapHost: "imap.example.test",
+      imapPort: 993,
+      smtpHost: "smtp.example.test",
+      smtpPort: 465,
+      insecure: false,
+    },
+  },
+  context: {
+    kind: "imap",
+    accountId: "imap:lifetime@example.test",
+  },
+});
+await assert.doesNotReject(() => pendingLifetimeSetup);
+assert.equal(setupLifetime.taskNotifications(), 1);
+
+let completeCursorOpen;
+let currentDraftDetail = null;
+const cursorLifetime = expiringContext();
+const cursorApp = new Omamail();
+cursorApp.init({ storage: memoryStorage() }, cx);
+cursorApp.controller = {
+  openCursor(complete) {
+    completeCursorOpen = complete;
+  },
+  snapshot() {
+    return {
+      detail: currentDraftDetail,
+      accounts: {
+        activeId: "reader@example.test",
+        accounts: [],
+      },
+    };
+  },
+};
+cursorApp.openCursor(cursorLifetime.context);
+cursorLifetime.expire();
+currentDraftDetail = {
+  id: "draft-message",
+  draftId: "draft-id",
+  to: "recipient@example.test",
+  cc: "",
+  bcc: "",
+  subject: "Draft",
+  body: "Body",
+};
+assert.doesNotThrow(() => completeCursorOpen(currentDraftDetail));
+await Promise.resolve();
+assert.equal(cursorApp.state.route, "compose");
+assert.equal(cursorLifetime.taskNotifications(), 1);
 
 const listEffect = {
   kind: "hey.cli",
@@ -689,7 +818,23 @@ assert.deepEqual(
 let rendered = ids(app.render(cx));
 assert.ok(rendered.includes("account-reader@example.com"));
 assert.ok(rendered.includes("message-cached-cursor"));
-assert.ok(rendered.includes("reader-blank"));
+assert.ok(rendered.includes("mail-list-pane-fixed"));
+assert.ok(
+  !rendered.includes("reader-blank"),
+  "a 1024-unit viewport keeps the reader out of the list route",
+);
+
+app.compose.update({ subject: "Keep this draft", body: "Unfinished" });
+app.openCompose(cx);
+app.back(cx);
+app.openCompose(cx);
+assert.equal(
+  app.compose.snapshot().draft.subject,
+  "Keep this draft",
+  "leaving and reopening Compose preserves the unsent draft",
+);
+app.compose.discard();
+app.back(cx);
 
 // An uncertain credential deletion deliberately removes the old account and
 // asks the user to add it again. A completed replacement is the one event that
@@ -737,7 +882,7 @@ app.openSettings(cx);
 rendered = ids(app.render(cx));
 assert.ok(rendered.includes("settings-page"));
 assert.ok(rendered.includes("settings-account-reader@example.com"));
-assert.ok(rendered.includes("settings-remote-images-disabled"));
+assert.ok(rendered.includes("settings-remote-images-toggle"));
 app.back(cx);
 assert.equal(app.state.route, "mail");
 
@@ -1250,8 +1395,15 @@ assert.equal(
 );
 let clickNotifications = 0;
 const clickCx = { notify: () => (clickNotifications += 1) };
-elementById(heyFlow.render(cx), "message-17:99-cursor").clickHandler({}, clickCx);
-assert.equal(clickNotifications, 1, "message click uses its live event context");
+elementById(heyFlow.render(cx), "message-17:99-cursor").clickHandler(
+  {},
+  clickCx,
+);
+assert.equal(
+  clickNotifications,
+  1,
+  "message click uses its live event context",
+);
 heyFlow.openCursor(cx);
 heyEffect = heyEffects.shift();
 assert.deepEqual(heyEffect.identity.objectId, "17:99");
@@ -1336,7 +1488,7 @@ retryStorage.setItem(
     ],
   }),
 );
-await retryApp.retryHostConfiguration(cx);
+await retryApp.retryHostConfiguration(taskCx);
 assert.equal(
   configureAttempts,
   1,
@@ -1358,7 +1510,7 @@ retryStorage.setItem(
     ],
   }),
 );
-await retryApp.retryHostConfiguration(cx);
+await retryApp.retryHostConfiguration(taskCx);
 assert.equal(configureAttempts, 2, "retry uses a fresh configuration attempt");
 assert.ok(retryApp.controller, "a successful retry starts the controller");
 
@@ -1472,7 +1624,7 @@ assert.ok(
   `mail frame handlers: ${[...mailFrame.actionHandlers.keys()].join(",")}`,
 );
 const replyKeyHandler = actionHandler(mailFrame, "mail::reply");
-replyKeyHandler({}, cx);
+replyKeyHandler({}, taskCx);
 assert.equal(
   identityEffects.at(-1).scope,
   "object",
@@ -1494,6 +1646,7 @@ identityCompletions.shift()({
     },
   },
 });
+await Promise.resolve();
 assert.equal(identityApp.state.route, "compose");
 assert.equal(
   identityApp.compose.snapshot().draft.to,

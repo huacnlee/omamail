@@ -52,6 +52,29 @@ export function createCalendarController(dependencies) {
         : monthDays(date.getFullYear(), date.getMonth(), 1);
     return { startMs: days[0].startMs, endMs: days[days.length - 1].endMs };
   }
+  function grid() {
+    const date = new Date(anchorMs);
+    const days =
+      view === "week"
+        ? weekDays(anchorMs, 1)
+        : monthDays(date.getFullYear(), date.getMonth(), 1);
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+    return days.map((day) => {
+      const value = new Date(day.startMs);
+      const key = `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
+      return {
+        ...day,
+        label: String(value.getDate()),
+        outside: view === "month" && value.getMonth() !== date.getMonth(),
+        today: key === todayKey,
+        events: events.filter((event) => {
+          const startMs = Number(event.startMs ?? event.start?.ms);
+          return startMs >= day.startMs && startMs < day.endMs;
+        }),
+      };
+    });
+  }
   function load() {
     const source = sourceSnapshot(activeSource());
     if (!source) {
@@ -273,6 +296,7 @@ export function createCalendarController(dependencies) {
         view,
         anchorMs,
         range: range(),
+        grid: grid(),
         events,
         selected,
         editing,
