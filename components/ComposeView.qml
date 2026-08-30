@@ -43,6 +43,11 @@ DropArea {
   // A failed provider save stays reachable after Back or Escape.
   property var recoveryDrafts: []
   property string accountId: ""
+  // The active account's sign-off, read when a draft is started rather than
+  // bound into the editor: the text is the user's to edit once it is in there,
+  // and a binding would overwrite what they had changed.
+  readonly property string accountSignature: root.service
+    ? String(root.service.activeSignature || "") : ""
   property int restoreRevision: 0
   property real restoreFlashOpacity: 0
   property string mode: "new"
@@ -323,6 +328,7 @@ DropArea {
     mode = String(nextMode || "new")
     accountId = root.service ? String(root.service.activeAccountId || "") : ""
     opened = true
+    var quoted = ""
 
     if (summary && mode !== "new") {
       var replyTo = summary.replyTo && summary.replyTo.email
@@ -349,8 +355,10 @@ DropArea {
           ccVisible = ccField.text !== ""
         }
       }
-      bodyEdit.text = "\n\n" + Mail.quoteBody(summary, String(bodyText || ""))
+      quoted = Mail.quoteBody(summary, String(bodyText || ""))
     }
+
+    bodyEdit.text = Mail.composeBody(root.accountSignature, quoted)
 
     selectPreferredFrom()
     if (root.service) root.service.refreshRecipientContacts()
@@ -374,7 +382,9 @@ DropArea {
     bccField.text = String(values.bcc || "")
     bccVisible = bccField.text !== ""
     subjectField.text = String(values.subject || "")
-    bodyEdit.text = String(values.body || "")
+    bodyEdit.text = mode === "draft"
+      ? String(values.body || "")
+      : String(values.body || "") + Mail.composeBody(root.accountSignature, "")
     var chosenFrom = String(values.from || "")
     if (chosenFrom !== "") {
       fromEmail = chosenFrom

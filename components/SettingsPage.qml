@@ -216,6 +216,109 @@ Column {
     }
   }
 
+  // A signature signs a mailbox, not a window, so there is one field per
+  // account. With a single account that is simply the field — the address
+  // above it appears only once there is a second one to tell it apart from.
+  Column {
+    width: parent.width
+    spacing: Style.space(2)
+
+    Text {
+      text: "Signature"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      bottomPadding: Style.space(4)
+    }
+
+    Repeater {
+      model: root.accounts
+
+      Column {
+        id: signatureRow
+        required property var modelData
+
+        width: parent.width
+        spacing: Style.space(2)
+        // A mailbox that has not signed in yet has no id to save against.
+        visible: String(modelData.id || "") !== ""
+
+        Text {
+          visible: root.accounts.length > 1
+          width: parent.width
+          textFormat: Text.PlainText
+          text: signatureRow.modelData.email
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+
+        Rectangle {
+          width: parent.width
+          implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
+            + Style.space(20)
+          radius: Style.cornerRadius
+          color: Style.normalFillFor(root.textColor, root.accentColor)
+
+          TextEdit {
+            id: signatureEdit
+            objectName: "settings-signature-editor"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(10)
+            activeFocusOnTab: true
+            selectByMouse: true
+            wrapMode: TextEdit.Wrap
+            textFormat: TextEdit.PlainText
+            color: root.textColor
+            selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+            selectedTextColor: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+
+            // Filled once from the row this Repeater built, never bound to it.
+            // Saving rewrites the account list, which rebuilds these rows: a
+            // binding would then reassign the text under the cursor.
+            Component.onCompleted: text = String(signatureRow.modelData.signature || "")
+
+            // Saved when the field is done with rather than on every keystroke,
+            // for the same reason. By the time the rows are rebuilt the stored
+            // text is what is already on screen, so nothing moves.
+            onActiveFocusChanged: if (!activeFocus) signatureRow.save()
+            Component.onDestruction: signatureRow.save()
+          }
+
+          Text {
+            anchors.left: signatureEdit.left
+            anchors.top: signatureEdit.top
+            visible: signatureEdit.text === ""
+            text: "No signature"
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        function save() {
+          if (root.service)
+            root.service.setAccountSignature(signatureRow.modelData.id, signatureEdit.text)
+        }
+      }
+    }
+
+    Text {
+      width: parent.width
+      text: "Sits under a new message, and above the quoted text in a reply. "
+        + "Sent as written — no separator line is added in front of it."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+  }
+
   // ------------------------------------------------------------- mailboxes
 
   Text {

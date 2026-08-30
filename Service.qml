@@ -116,6 +116,13 @@ Item {
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
+  // Read here rather than in the compose view, so the window never reaches into
+  // the account list itself. A pending account has no id and so no signature,
+  // which is the same answer as having set none.
+  readonly property string activeSignature: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? String(entry.signature || "") : ""
+  }
   readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
     ? String(current.accountId) : "__no_google_account__"
 
@@ -322,6 +329,17 @@ Item {
   // Dropping it is what made adding a mailbox undo itself: the new account was
   // never written, and the watcher then read the older file back over it.
   property bool accountsSaveQueued: false
+
+  // Identical text is not a write. The editor saves when it is done with
+  // rather than on every keystroke, but it is also rebuilt by the write it
+  // causes — so the value it hands back on the way out is routinely the one
+  // already on disk, and a file round trip for it would be pure cost.
+  function setAccountSignature(id, text) {
+    var next = Accounts.setSignature(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
 
   function saveAccounts() {
     if (!accountsLoaded) return
@@ -531,6 +549,7 @@ Item {
         email: accounts[i].email,
         provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
+        signature: String(accounts[i].signature || ""),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
         signedIn: host ? host.ready : false,

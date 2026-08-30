@@ -391,4 +391,54 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(accounts.active(legacy).clientId, "abc")
 }
 
+// ------------------------------------------------------------- signatures
+
+{
+  // Absent is empty, so an account written before the field existed loads with
+  // a signature rather than an undefined one every caller has to guard.
+  assert.strictEqual(accounts.makeAccount({ email: "j@gmail.com" }).signature, "")
+  assert.strictEqual(accounts.makeAccount({
+    email: "j@gmail.com", signature: "  Maarten\nmadra.nl  "
+  }).signature, "Maarten\nmadra.nl", "the ends are trimmed, the middle is not")
+
+  const list = accounts.add(accounts.emptyList(), account("jane@gmail.com"))
+  const before = frozen(list)
+
+  const signed = accounts.setSignature(list, "jane@gmail.com", "Jane\nRoe")
+  assert.strictEqual(accounts.find(signed, "jane@gmail.com").signature, "Jane\nRoe")
+  assert.strictEqual(frozen(list), before, "the list handed in is not edited")
+
+  // Setting one must not disturb the rest of the entry, which is the whole
+  // account: a signature edit that dropped an OAuth client would sign the user
+  // out to save a sign-off.
+  const entry = accounts.find(signed, "jane@gmail.com")
+  assert.strictEqual(entry.clientId, "cid")
+  assert.strictEqual(entry.clientSecret, "secret")
+  assert.strictEqual(entry.provider, "gmail")
+  assert.strictEqual(signed.activeId, "jane@gmail.com")
+
+  // Clearing is setting it to nothing, not a second operation.
+  assert.strictEqual(accounts.find(accounts.setSignature(signed, "jane@gmail.com", ""),
+    "jane@gmail.com").signature, "")
+
+  // An id the list does not hold is a caller acting on a list that has moved
+  // on — the same rule the other mutators follow, so it changes nothing.
+  assert.strictEqual(frozen(accounts.setSignature(list, "nobody@gmail.com", "x")), before)
+  assert.strictEqual(frozen(accounts.setSignature(list, "", "x")), before)
+
+  // A signature is the one field here that legitimately contains newlines, and
+  // the file crosses a line-oriented pipe on the way to disk. JSON escaping is
+  // what keeps a two-line sign-off from truncating the account list.
+  const stored = accounts.serialize(signed)
+  assert.ok(stored.indexOf("\n") < 0, "no raw newline reaches the writer")
+  const reloaded = accounts.load(stored)
+  assert.strictEqual(accounts.find(reloaded, "jane@gmail.com").signature, "Jane\nRoe",
+    "what was typed comes back")
+
+  // Two mailboxes are two identities. Signing one must leave the other unsigned.
+  const both = accounts.add(signed, account("john@gmail.com"))
+  assert.strictEqual(accounts.find(both, "john@gmail.com").signature, "")
+  assert.strictEqual(accounts.find(both, "jane@gmail.com").signature, "Jane\nRoe")
+}
+
 console.log("test_accounts.js ok")
