@@ -31,6 +31,7 @@ pub enum CaldavError {
 pub enum CaldavOperation {
     List { start_ms: i64, end_ms: i64 },
     Write { target: String, payload: String },
+    Delete { target: String },
 }
 pub struct CaldavReply {
     status: u16,
@@ -197,6 +198,14 @@ impl<'a> CaldavTransport<'a> {
                 }
                 ("PUT", "text/calendar; charset=utf-8", u, payload)
             }
+            CaldavOperation::Delete { target } => {
+                let u = base.join(&target).map_err(|_| CaldavError::OriginRefused)?;
+                if u.origin() != base.origin() || !u.username().is_empty() || u.password().is_some()
+                {
+                    return Err(CaldavError::OriginRefused);
+                }
+                ("DELETE", "text/calendar; charset=utf-8", u, String::new())
+            }
         };
         let host = base.host_str().ok_or(CaldavError::InvalidRequest)?;
         let port = base
@@ -254,14 +263,16 @@ struct CurlConfig<'a> {
 impl CurlConfig<'_> {
     fn render(&self) -> String {
         let mut c = format!(
-            "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nlocation = false\nmax-redirs = 0\nproto = \"=https\"\nproto-redir = \"=https\"\nrequest = \"{}\"\nuser = \"{}\"\nheader = \"Content-Type: {}\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\ndata = \"{}\"\n",
+            "url = \"{}\"\nnoproxy = \"*\"\nproxy = \"\"\nlocation = false\nmax-redirs = 0\nproto = \"=https\"\nproto-redir = \"=https\"\nrequest = \"{}\"\nuser = \"{}\"\nheader = \"Content-Type: {}\"\nmax-time = {}\nconnect-timeout = 20\nwrite-out = \"\\nOMAMAIL-STATUS:%{{http_code}}\\n\"\n",
             esc(self.url.as_str()),
             self.method,
             esc(self.credential),
             self.content_type,
-            self.deadline.as_secs_f64(),
-            esc(self.body)
+            self.deadline.as_secs_f64()
         );
+        if self.method != "DELETE" {
+            c.push_str(&format!("data = \"{}\"\n", esc(self.body)));
+        }
         if self.method == "REPORT" {
             c.push_str("header = \"Depth: 1\"\n");
         }

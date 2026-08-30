@@ -8,8 +8,33 @@ use std::{
 use omamail::effects::ProviderRuntime;
 use omamail::{
     effects::{EffectHost, EffectHostError, GroupwareRuntime, HeyCommandOutput, HeyRunner},
-    platform::commands::{CommandError, PreparedCommand},
+    platform::commands::{CommandError, PreparedCommand, ProcessOutput, ProcessRunner},
 };
+
+type SeenTransportCommand = (std::path::PathBuf, Vec<String>, bool, Duration);
+struct FakeTransportRunner {
+    commands: Mutex<Vec<SeenTransportCommand>>,
+    replies: Mutex<VecDeque<Result<ProcessOutput, CommandError>>>,
+}
+impl ProcessRunner for FakeTransportRunner {
+    fn run(&self, command: PreparedCommand) -> Result<ProcessOutput, CommandError> {
+        self.run_bounded(command, usize::MAX, usize::MAX)
+    }
+    fn run_bounded(
+        &self,
+        command: PreparedCommand,
+        _: usize,
+        _: usize,
+    ) -> Result<ProcessOutput, CommandError> {
+        self.commands.lock().unwrap().push((
+            command.program().to_owned(),
+            command.arguments().to_vec(),
+            command.has_stdin(),
+            command.deadline(),
+        ));
+        self.replies.lock().unwrap().pop_front().unwrap()
+    }
+}
 
 #[derive(Default)]
 struct FakeProviderRuntime {
@@ -228,6 +253,74 @@ fn groupware_route_reaches_the_registered_runtime() {
         host.execute_json(r#"{"type":"compose.send"}"#).unwrap(),
         r#"{"ok":true,"data":{"accepted":true}}"#
     );
+}
+
+#[test]
+fn closed_transport_effects_use_only_policy_scripts_and_structured_results() {
+    let transport = Arc::new(FakeTransportRunner {
+        commands: Mutex::new(vec![]),
+        replies: Mutex::new(VecDeque::from([
+            Ok(ProcessOutput::new(
+                Some(0),
+                b"data:image/png;base64,AA==\n".to_vec(),
+                vec![],
+            )),
+            Ok(ProcessOutput::new(Some(0), b"0 204\n".to_vec(), vec![])),
+        ])),
+    });
+    let host = EffectHost::with_transport_runner(
+        Path::new("/opt/omamail/app"),
+        Arc::new(FakeHeyRunner::replying("{}")),
+        Arc::new(FakeProviderRuntime::default()),
+        transport.clone(),
+    );
+    assert_eq!(
+        host.execute_json(
+            r#"{"operation":"image.fetch","deadlineMs":1000,"url":"https://8.8.8.8/pixel.png"}"#
+        )
+        .unwrap(),
+        r#"{"ok":true,"data":{"dataUri":"data:image/png;base64,AA=="}}"#,
+    );
+    assert_eq!(
+        host.execute_json(r#"{"operation":"unsubscribe","deadlineMs":1000,"url":"https://8.8.8.8/unsubscribe","contentType":"application/x-www-form-urlencoded","body":"List-Unsubscribe=One-Click"}"#).unwrap(),
+        r#"{"ok":true,"data":{"httpStatus":204,"unsubscribed":true}}"#,
+    );
+    let commands = transport.commands.lock().unwrap();
+    assert_eq!(
+        commands[0].0,
+        Path::new("/opt/omamail/scripts/image-fetch.sh")
+    );
+    assert_eq!(
+        commands[1].0,
+        Path::new("/opt/omamail/scripts/unsubscribe.sh")
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|(_, args, stdin, deadline)| args.is_empty()
+                && *stdin
+                && *deadline <= Duration::from_secs(1))
+    );
+}
+
+#[test]
+fn closed_transport_effects_reject_extra_fields_and_private_or_non_https_targets() {
+    let host = EffectHost::with_transport_runner(
+        Path::new("/opt/omamail/app"),
+        Arc::new(FakeHeyRunner::replying("{}")),
+        Arc::new(FakeProviderRuntime::default()),
+        Arc::new(FakeTransportRunner {
+            commands: Mutex::new(vec![]),
+            replies: Mutex::new(VecDeque::new()),
+        }),
+    );
+    for request in [
+        r#"{"operation":"image.fetch","deadlineMs":1000,"url":"http://127.0.0.1/x"}"#,
+        r#"{"operation":"unsubscribe","deadlineMs":1000,"url":"http://8.8.8.8/x","contentType":"text/plain","body":"x"}"#,
+    ] {
+        assert!(host.execute_json(request).is_err(), "accepted {request}");
+    }
+    assert!(EffectHost::parse(r#"{"operation":"image.fetch","deadlineMs":1000,"url":"https://8.8.8.8/x","program":"/bin/sh"}"#).is_err());
 }
 #[test]
 fn effect_host_uses_topic_for_threads_and_postings_for_actions() {

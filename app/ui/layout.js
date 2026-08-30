@@ -14,6 +14,7 @@ export function mailLayout(width, readerOpen = false) {
   if (width < SPLIT_MAIL_MIN_WIDTH) {
     return {
       mode: "single",
+      showRail: !readerOpen,
       showList: !readerOpen,
       showReader: readerOpen,
       railWidth: MAIL_RAIL_WIDTH,
@@ -23,6 +24,7 @@ export function mailLayout(width, readerOpen = false) {
   }
   return {
     mode: "split",
+    showRail: true,
     showList: true,
     showReader: true,
     railWidth: MAIL_RAIL_WIDTH,

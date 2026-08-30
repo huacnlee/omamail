@@ -235,6 +235,61 @@ export function createCalendarController(dependencies) {
       }
       return this.write(editing);
     },
+    deleteSelected() {
+      const event = selected;
+      const source = event?.source || sourceSnapshot(activeSource());
+      if (!event || !source) return this.snapshot();
+      const refusal = writeRefusal(source, event);
+      if (refusal) {
+        writeStatus = refusal;
+        return this.snapshot();
+      }
+      const eventId = String(event.googleId || event.id || "");
+      const url =
+        source.kind === "caldav" ? caldavEventUrl(source.url, event) : "";
+      if (
+        (source.kind === "google" && !eventId) ||
+        (source.kind === "caldav" && !url)
+      ) {
+        writeStatus = "This event cannot be deleted";
+        return this.snapshot();
+      }
+      const requested = ++writeRevision;
+      pending = true;
+      writeStatus = "Deleting…";
+      const frozenSource = sourceSnapshot(source);
+      const effect =
+        source.kind === "google"
+          ? {
+              type: "calendar.google.delete",
+              source: frozenSource,
+              sourceId: source.id,
+              eventId,
+            }
+          : {
+              type: "calendar.caldav.delete",
+              source: frozenSource,
+              sourceId: source.id,
+              url,
+            };
+      if (!values.execute) {
+        pending = false;
+        writeStatus = "Calendar host support is pending";
+        return this.snapshot();
+      }
+      values.execute(effect, (result) => {
+        if (requested !== writeRevision) return;
+        pending = false;
+        if (result?.ok) {
+          events = events.filter((item) => item.id !== event.id);
+          selected = null;
+          editing = null;
+          writeStatus = "Deleted";
+        } else
+          writeStatus = String(result?.error || "Couldn’t delete the event.");
+      });
+      return this.snapshot();
+    },
     /** @param {any} event */ write(event) {
       const source = event?.source || sourceSnapshot(activeSource());
       if (source?.kind === "caldav" && !caldavEventUrl(source.url, event))

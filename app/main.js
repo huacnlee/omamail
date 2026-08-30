@@ -29,7 +29,7 @@ import {
   title,
 } from "./lib/omarchy-ui/index.js";
 import { renderMail } from "./ui/mail.js";
-import { prepareReadingPresentation } from "./ui/reader.js";
+import { createReaderController } from "./ui/reader-controller.js";
 import * as HeyCli from "./providers/HeyCli.js";
 import * as Accounts from "./account/Accounts.js";
 import { createComposeController } from "./compose/controller.js";
@@ -71,6 +71,7 @@ const HANDLED_ACTIONS = new Set([
   "calendarView",
   "mailView",
   "send",
+  "undoSend",
   "createEvent",
   "calendarNext",
   "calendarPrevious",
@@ -134,6 +135,7 @@ export default class Omamail extends View {
   /** @type {import("gpui-base").TextareaState} */ setupAuthorizationUrl =
     /** @type {any} */ (null);
   setupInsecure = false;
+  setupAdvanced = false;
   setupFailure = "";
   /** @type {ReturnType<typeof createComposeController>} */
   compose = /** @type {ReturnType<typeof createComposeController>} */ (
@@ -155,6 +157,8 @@ export default class Omamail extends View {
   composeBcc = /** @type {import("gpui-base").InputState} */ (
     /** @type {unknown} */ (null)
   );
+  composeCcVisible = false;
+  composeBccVisible = false;
   /** @type {import("gpui-base").InputState} */
   composeSubject = /** @type {import("gpui-base").InputState} */ (
     /** @type {unknown} */ (null)
@@ -176,7 +180,7 @@ export default class Omamail extends View {
     /** @type {unknown} */ (null)
   );
   /** @type {any} */ readerPresentationDetail = null;
-  /** @type {any} */ readerPresentation = null;
+  /** @type {ReturnType<typeof createReaderController>|null} */ readerController = null;
 
   /** @param {unknown} props @param {import("gpui").AsyncContext} cx */
   init(props = {}, cx) {
@@ -232,6 +236,16 @@ export default class Omamail extends View {
         : (this.hostConfigure?.() ??
           Promise.reject(new Error("Mail host is unavailable")));
     this.hostReady = hostReady;
+    this.readerController = createReaderController({
+      dispatch:
+        options.readerDispatch ??
+        ((/** @type {string} */ request) =>
+          this.hostReady
+            .then(() => import("omamail-effects"))
+            .then((/** @type {{dispatch:(request:string)=>Promise<string>}} */ host) =>
+              host.dispatch(request),
+            )),
+    });
     const execute =
       options.execute ??
       hostExecutor(
@@ -382,6 +396,19 @@ export default class Omamail extends View {
           "omamail.remoteImages",
           enabled ? "true" : "false",
         ),
+      readHeavyMessages: () =>
+        this.storage.getItem("omamail.heavyMessages") === "true",
+      saveHeavyMessages: (/** @type {boolean} */ enabled) =>
+        this.storage.setItem(
+          "omamail.heavyMessages",
+          enabled ? "true" : "false",
+        ),
+      readUndoSendSeconds: () => {
+        const stored = Number(this.storage.getItem("omamail.undoSendSeconds"));
+        return Number.isFinite(stored) ? stored : 10;
+      },
+      saveUndoSendSeconds: (/** @type {number} */ seconds) =>
+        this.storage.setItem("omamail.undoSendSeconds", String(seconds)),
       readAccounts: () => this.accountList,
       saveAccounts: (/** @type {any} */ next) => {
         this.accountList = saveAccounts(this.storage, next);
@@ -466,6 +493,7 @@ export default class Omamail extends View {
 
   /** @param {string} providerId @param {import("gpui").Context} cx */
   chooseProvider(providerId, cx) {
+    this.setupAdvanced = false;
     // Reuse the account model's pending-row semantics.  It stays in memory
     // until a real host authentication yields an address, so no unusable
     // account is ever written to localStorage.
@@ -802,6 +830,8 @@ export default class Omamail extends View {
     this.composeBcc.set_value(draft.bcc);
     this.composeSubject.set_value(draft.subject);
     this.composeBody.set_value(draft.body);
+    this.composeCcVisible = String(draft.cc || "").length > 0;
+    this.composeBccVisible = String(draft.bcc || "").length > 0;
   }
 
   /** @param {import("gpui").Context} cx */
@@ -880,12 +910,34 @@ export default class Omamail extends View {
 
   /** @param {import("gpui").Context} cx */
   render(cx) {
-    if (this.state.route === "settings") return this.renderSettings(cx);
-    if (this.state.route === "compose") return this.renderCompose(cx);
-    if (this.state.route === "calendar") return this.renderCalendar(cx);
-    if (this.state.route === "mail" && this.controller)
-      return this.renderMail(cx);
-    return this.renderSetup(cx);
+    const view =
+      this.state.route === "settings"
+        ? this.renderSettings(cx)
+        : this.state.route === "compose"
+          ? this.renderCompose(cx)
+          : this.state.route === "calendar"
+            ? this.renderCalendar(cx)
+            : this.state.route === "mail" && this.controller
+              ? this.renderMail(cx)
+              : this.renderSetup(cx);
+    return view.on_action("mail::undoSend", (_event, eventCx) => {
+      this.compose.undo();
+      eventCx.notify();
+    });
+  }
+
+  /** @param {import("gpui").Context} cx */
+  sendCompose(cx) {
+    const delaySeconds = this.settings.snapshot().undoSend.seconds;
+    const snapshot = this.compose.send(Date.now(), delaySeconds);
+    const dueAt = snapshot.pending?.dueAt;
+    if (dueAt !== undefined)
+      cx.spawn(async (asyncCx) => {
+        await asyncCx.sleep(Math.max(0, dueAt - Date.now()));
+        this.compose.flush(Date.now(), dueAt);
+        asyncCx.notify();
+      });
+    cx.notify();
   }
 
   /** @param {import("gpui").Context} cx */
@@ -951,6 +1003,26 @@ export default class Omamail extends View {
                   asyncCx.notify();
                 },
               ),
+            onHeavyMessages: (
+              /** @type {boolean} */ enabled,
+              /** @type {any} */ eventCx,
+            ) =>
+              void eventCx.spawn(
+                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                  await this.settings.toggleHeavyMessages(enabled);
+                  asyncCx.notify();
+                },
+              ),
+            onUndoSend: (
+              /** @type {number} */ seconds,
+              /** @type {any} */ eventCx,
+            ) =>
+              void eventCx.spawn(
+                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
+                  await this.settings.setUndoSendSeconds(seconds);
+                  asyncCx.notify();
+                },
+              ),
           },
           cx,
         ),
@@ -977,18 +1049,24 @@ export default class Omamail extends View {
       (/** @type {any} */ entry) => entry.id === draft.draft.accountId,
     );
     const canSaveDraft = account?.provider === "gmail";
+    const composeTitle =
+      draft.draft.mode === "forward"
+        ? "Forward message"
+        : ["reply", "replyAll"].includes(draft.draft.mode)
+          ? "Reply"
+          : "New message";
     return appShell(
       {
         top: topBar(
           {
-            brand: brandLockup(cx),
-            center: muted("Compose", cx),
-            actions: button(
+            brand: button(
               "compose-back",
-              "Back",
+              "← Back",
               (_event, eventCx) => this.back(eventCx),
               cx,
             ),
+            center: muted(composeTitle, cx),
+            actions: div().id("compose-title-balance").w("5.5rem").flex_none(),
           },
           cx,
         ),
@@ -998,12 +1076,21 @@ export default class Omamail extends View {
             to: this.composeTo,
             cc: this.composeCc,
             bcc: this.composeBcc,
+            ccVisible: this.composeCcVisible,
+            bccVisible: this.composeBccVisible,
             subject: this.composeSubject,
             body: this.composeBody,
             status: draft.status,
             sending: draft.sending,
             onSend: (_event, eventCx) => {
-              compose.send();
+              this.sendCompose(eventCx);
+            },
+            onShowCc: (_event, eventCx) => {
+              this.composeCcVisible = !this.composeCcVisible;
+              eventCx.notify();
+            },
+            onShowBcc: (_event, eventCx) => {
+              this.composeBccVisible = !this.composeBccVisible;
               eventCx.notify();
             },
             ...(canSaveDraft
@@ -1074,8 +1161,7 @@ export default class Omamail extends View {
     )
       .key_context("Compose")
       .on_action("mail::send", (_event, eventCx) => {
-        compose.send();
-        eventCx.notify();
+        this.sendCompose(eventCx);
       })
       .on_action("mail::back", (_event, eventCx) => this.back(eventCx));
   }
@@ -1214,6 +1300,13 @@ export default class Omamail extends View {
               calendar.select(event);
               eventCx.notify();
             },
+            onCloseEvent: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
+              calendar.select(null);
+              eventCx.notify();
+            },
             onNew: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.beginCreate();
               this.syncCalendarFields();
@@ -1222,6 +1315,13 @@ export default class Omamail extends View {
             onEdit: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
               calendar.beginEdit(view.selected);
               this.syncCalendarFields();
+              eventCx.notify();
+            },
+            onDelete: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => {
+              calendar.deleteSelected();
               eventCx.notify();
             },
             onSave: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
@@ -1298,6 +1398,7 @@ export default class Omamail extends View {
         setupSnapshot.phase,
       ),
       insecure: this.setupInsecure,
+      advanced: this.setupAdvanced,
       fields: {
         email: this.setupEmail,
         username: this.setupUsername,
@@ -1332,6 +1433,10 @@ export default class Omamail extends View {
       ) => void this.selectSetupAccount(accountId, eventCx),
       onTls: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
         this.setupInsecure = !this.setupInsecure;
+        eventCx.notify();
+      },
+      onAdvanced: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+        this.setupAdvanced = !this.setupAdvanced;
         eventCx.notify();
       },
       onCancel: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
@@ -1381,10 +1486,9 @@ export default class Omamail extends View {
     const provider = Registry.get(account?.provider ?? "gmail");
     if (this.readerPresentationDetail !== snapshot.detail) {
       this.readerPresentationDetail = snapshot.detail;
-      this.readerPresentation = snapshot.detail?.html
-        ? prepareReadingPresentation(snapshot.detail.html)
-        : null;
+      if (snapshot.detail) this.readerController?.open(snapshot.detail);
     }
+    const readerSnapshot = this.readerController?.snapshot();
     const lastError =
       snapshot.lastOperation && !snapshot.lastOperation.ok
         ? snapshot.lastOperation.error
@@ -1506,7 +1610,22 @@ export default class Omamail extends View {
                               snapshot.detail.sender ?? snapshot.detail.from,
                             ),
                           },
-                          presentation: this.readerPresentation,
+                          presentation: readerSnapshot?.presentation
+                            ? {
+                                ...readerSnapshot.presentation,
+                                blockedImages: readerSnapshot.blockedImages,
+                                remoteImagesBlocked:
+                                  readerSnapshot.blockedImages > 0,
+                              }
+                            : null,
+                          onMode: (
+                            /** @type {"reader"|"original"|"plain"} */ mode,
+                            /** @type {any} */ _event,
+                            /** @type {import("gpui").Context} */ eventCx,
+                          ) => {
+                            this.readerController?.setMode(mode);
+                            eventCx.notify();
+                          },
                           capabilities: {
                             ...provider.capabilities,
                             reply:
@@ -1520,6 +1639,10 @@ export default class Omamail extends View {
                               provider.capabilities.send,
                             trash: true,
                           },
+                          onBack: (
+                            /** @type {any} */ _event,
+                            /** @type {import("gpui").Context} */ eventCx,
+                          ) => this.back(eventCx),
                           onReply: (
                             /** @type {any} */ _event,
                             /** @type {import("gpui").Context} */ eventCx,
@@ -2240,6 +2363,36 @@ export function hostRequestFor(effect) {
       sourceUrl: effect.source.url,
       url: String(effect.url ?? ""),
       payload: String(effect.payload ?? ""),
+    };
+  if (
+    effect.type === "calendar.google.delete" &&
+    effect.source?.kind === "google" &&
+    effect.source.id === effect.sourceId &&
+    safeField(effect.sourceId, 2048) &&
+    validEmail(effect.source.accountId) &&
+    safeField(effect.eventId, 2048)
+  )
+    return {
+      type: effect.type,
+      deadlineMs,
+      sourceId: String(effect.sourceId),
+      accountId: effect.source.accountId,
+      eventId: String(effect.eventId),
+    };
+  if (
+    effect.type === "calendar.caldav.delete" &&
+    effect.source?.kind === "caldav" &&
+    effect.source.id === effect.sourceId &&
+    safeField(effect.sourceId, 2048) &&
+    safeField(effect.source.url, 16384) &&
+    safeField(effect.url, 16384)
+  )
+    return {
+      type: effect.type,
+      deadlineMs,
+      sourceId: String(effect.sourceId),
+      sourceUrl: effect.source.url,
+      url: String(effect.url),
     };
   if (effect.kind !== "hey.cli") return null;
   const heyIdentity =

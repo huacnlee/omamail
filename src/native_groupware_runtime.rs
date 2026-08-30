@@ -136,8 +136,10 @@ impl<O: NativeGroupwareOps> Backend for NativeGroupwareRuntime<O> {
             }
             BackendCall::GoogleCalendarList { source_id, .. }
             | BackendCall::GoogleCalendarWrite { source_id, .. }
+            | BackendCall::GoogleCalendarDelete { source_id, .. }
             | BackendCall::CaldavList { source_id, .. }
-            | BackendCall::CaldavWrite { source_id, .. } => {
+            | BackendCall::CaldavWrite { source_id, .. }
+            | BackendCall::CaldavDelete { source_id, .. } => {
                 let source = self
                     .contexts
                     .resolve_source(source_id)
@@ -147,6 +149,11 @@ impl<O: NativeGroupwareOps> Backend for NativeGroupwareRuntime<O> {
             }
         };
         if let BackendCall::GoogleCalendarWrite { account_id, .. } = &call
+            && source.as_ref().map(CalendarContext::account_id) != Some(account_id.as_str())
+        {
+            return Err(BackendError::Unavailable);
+        }
+        if let BackendCall::GoogleCalendarDelete { account_id, .. } = &call
             && source.as_ref().map(CalendarContext::account_id) != Some(account_id.as_str())
         {
             return Err(BackendError::Unavailable);
@@ -366,6 +373,25 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                 };
                 self.gmail(account, operation, deadline)
             }
+            BackendCall::GoogleCalendarDelete {
+                source_id,
+                event_id,
+                ..
+            } => {
+                let source = google_source(source, &source_id)?;
+                let account = account.ok_or(BackendError::Unavailable)?;
+                self.gmail(
+                    account,
+                    GmailOperation::CalendarDelete {
+                        calendar_id: source
+                            .remote_calendar_id()
+                            .ok_or(BackendError::Unavailable)?
+                            .to_owned(),
+                        event_id,
+                    },
+                    deadline,
+                )
+            }
             BackendCall::CaldavList {
                 source_id, range, ..
             } => {
@@ -384,6 +410,11 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     target: url,
                     payload,
                 },
+                deadline,
+            ),
+            BackendCall::CaldavDelete { source_id, url } => self.caldav(
+                caldav_source(source, &source_id)?,
+                CaldavOperation::Delete { target: url },
                 deadline,
             ),
         }

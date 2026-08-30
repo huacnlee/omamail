@@ -48,21 +48,33 @@ function providerFields(model, cx) {
       .gap(cx.theme().spacing.md)
       .child(sectionLabel("Account details", cx))
       .child(input("email", "Email", model.fields.email, cx))
-      .child(input("username", "Username", model.fields.username, cx))
       .child(input("password", "Password", model.fields.password, cx))
-      .child(sectionLabel("Server details", cx))
-      .child(input("imap-host", "IMAP host", model.fields.imapHost, cx))
-      .child(input("imap-port", "IMAP port", model.fields.imapPort, cx))
-      .child(input("smtp-host", "SMTP host", model.fields.smtpHost, cx))
-      .child(input("smtp-port", "SMTP port", model.fields.smtpPort, cx))
       .child(
         button(
-          "setup-tls",
-          model.insecure ? "Plaintext · loopback only" : "TLS required",
-          model.onTls,
+          "setup-advanced-toggle",
+          model.advanced ? "Hide server settings" : "Server settings…",
+          model.onAdvanced,
           cx,
-          { selected: !model.insecure, disabled: model.busy },
+          { selected: Boolean(model.advanced), disabled: model.busy },
         ),
+      )
+      .when(Boolean(model.advanced), (form) =>
+        form
+          .child(sectionLabel("Server details", cx))
+          .child(input("username", "Username", model.fields.username, cx))
+          .child(input("imap-host", "IMAP host", model.fields.imapHost, cx))
+          .child(input("imap-port", "IMAP port", model.fields.imapPort, cx))
+          .child(input("smtp-host", "SMTP host", model.fields.smtpHost, cx))
+          .child(input("smtp-port", "SMTP port", model.fields.smtpPort, cx))
+          .child(
+            button(
+              "setup-tls",
+              model.insecure ? "Plaintext · loopback only" : "TLS required",
+              model.onTls,
+              cx,
+              { selected: !model.insecure, disabled: model.busy },
+            ),
+          ),
       );
   return v_flex()
     .id("setup-hey-guidance")
@@ -126,27 +138,63 @@ function authenticationForm(model, cx) {
 export function renderSetupForm(model, cx) {
   const providers = Array.isArray(model.providers) ? model.providers : [];
   const column = pageColumn("setup-column", cx)
-    .child(title("Add an email account", cx))
-    .child(muted("Choose the service that hosts this mailbox", cx))
     .child(
-      h_flex()
-        .id("setup-provider-selector")
-        .role("list")
-        .gap(cx.theme().spacing.xs)
-        .children(
-          providers.map((/** @type {{id:string,name:string}} */ provider) =>
-            button(
-              `provider-${provider.id}`,
-              provider.name,
-              (_event, eventCx) => model.onProvider(provider.id, eventCx),
-              cx,
-              {
-                selected: model.provider === provider.id,
-                disabled: model.busy,
-              },
+      title(
+        model.provider
+          ? `Add a ${model.providerName} mailbox`
+          : "Add a mailbox",
+        cx,
+      ),
+    )
+    .child(
+      muted(
+        model.provider
+          ? model.provider === "imap"
+            ? "Any mailbox that speaks IMAP. Your address and app password are usually all it takes."
+            : `Connect Omamail to ${model.providerName}.`
+          : "Which kind?",
+        cx,
+      ),
+    )
+    .when(!model.provider, (page) =>
+      page.child(
+        v_flex()
+          .id("setup-provider-selector")
+          .role("list")
+          .gap(cx.theme().spacing.sm)
+          .children(
+            providers.map(
+              (
+                /** @type {{id:string,name:string,summary?:string}} */ provider,
+              ) =>
+                surface(cx)
+                  .id(`setup-provider-${provider.id}`)
+                  .p(cx.theme().spacing.sm)
+                  .gap(cx.theme().spacing.xs)
+                  .child(
+                    button(
+                      `provider-${provider.id}`,
+                      provider.name,
+                      (_event, eventCx) =>
+                        model.onProvider(provider.id, eventCx),
+                      cx,
+                      {
+                        selected: model.provider === provider.id,
+                        disabled: model.busy,
+                      },
+                    )
+                      .w_full()
+                      .justify_start(),
+                  )
+                  .child(
+                    muted(
+                      provider.summary || `${provider.name} mailbox`,
+                      cx,
+                    ).id(`setup-provider-${provider.id}-summary`),
+                  ),
             ),
           ),
-        ),
+      ),
     )
     .when(Boolean(model.configurationError), (view) =>
       view.child(
@@ -157,7 +205,9 @@ export function renderSetupForm(model, cx) {
           .child(model.configurationError),
       ),
     )
-    .child(authenticationForm(model, cx));
+    .when(Boolean(model.provider), (page) =>
+      page.child(authenticationForm(model, cx)),
+    );
   return v_flex()
     .id("setup-page")
     .role("region")

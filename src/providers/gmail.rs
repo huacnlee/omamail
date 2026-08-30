@@ -103,6 +103,10 @@ pub enum GmailOperation {
         event_id: String,
         event: CalendarEvent,
     },
+    CalendarDelete {
+        calendar_id: String,
+        event_id: String,
+    },
     CalendarList,
     CalendarWrite {
         calendar_id: String,
@@ -157,7 +161,9 @@ impl std::fmt::Debug for GmailOperation {
             Self::CalendarEventsList { .. } => {
                 formatter.write_str("GmailOperation::CalendarEventsList")
             }
-            Self::CalendarCreate { .. } | Self::CalendarUpdate { .. } => {
+            Self::CalendarCreate { .. }
+            | Self::CalendarUpdate { .. }
+            | Self::CalendarDelete { .. } => {
                 formatter.write_str("GmailOperation::CalendarWrite([REDACTED])")
             }
             Self::CalendarList => formatter.write_str("GmailOperation::CalendarList"),
@@ -622,6 +628,24 @@ fn build_request(
             event_id,
             event,
         } => calendar_write("PUT", calendar_id, Some(event_id), event, deadline),
+        GmailOperation::CalendarDelete {
+            calendar_id,
+            event_id,
+        } => {
+            if !valid_id(&calendar_id) || !valid_id(&event_id) {
+                return Err(GmailError::InvalidRequest);
+            }
+            Ok(GmailHttpRequest::new(
+                "DELETE",
+                calendar_url(&format!(
+                    "/calendars/{}/events/{}",
+                    path_segment(&calendar_id)?,
+                    path_segment(&event_id)?
+                ))?,
+                None,
+                deadline,
+            ))
+        }
         GmailOperation::CalendarList => Ok(GmailHttpRequest::new(
             "GET",
             calendar_url("/users/me/calendarList")?,

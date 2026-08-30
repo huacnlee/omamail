@@ -203,6 +203,7 @@ assert.equal(
       "mail::calendarView",
       "mail::mailView",
       "mail::send",
+      "mail::undoSend",
       "mail::createEvent",
       "mail::calendarNext",
       "mail::calendarPrevious",
@@ -220,6 +221,14 @@ assert.equal(
 assert.equal(
   boundActions.some((binding) => binding.action === "mail::archive"),
   true,
+);
+assert.equal(
+  boundActions.some(
+    (binding) =>
+      binding.action === "mail::undoSend" && binding.keystroke === "alt-z",
+  ),
+  true,
+  "the standalone shell binds Alt+Z",
 );
 
 const setup = new Omamail();
@@ -778,6 +787,32 @@ assert.equal(
 );
 assert.equal(
   hostRequestFor({
+    type: "calendar.google.delete",
+    source: {
+      kind: "google",
+      id: "primary",
+      accountId: "a@example.test",
+    },
+    sourceId: "primary",
+    eventId: "event-1",
+  }).eventId,
+  "event-1",
+);
+assert.equal(
+  hostRequestFor({
+    type: "calendar.caldav.delete",
+    source: {
+      kind: "caldav",
+      id: "work",
+      url: "https://calendar.example.test/me/",
+    },
+    sourceId: "work",
+    url: "event-1.ics",
+  }).url,
+  "event-1.ics",
+);
+assert.equal(
+  hostRequestFor({
     type: "compose.send",
     provider: "gmail",
     accountId: "a@example.test",
@@ -990,6 +1025,28 @@ assert.deepEqual(app.compose.snapshot().draft, {
   subject: "A retained draft",
   body: "Editable body",
 });
+await app.settings.setUndoSendSeconds(7);
+let requestedSleep = null;
+const delayedCx = {
+  ...cx,
+  spawn(task) {
+    return task({
+      ...cx,
+      sleep(milliseconds) {
+        requestedSleep = milliseconds;
+        return new Promise(() => {});
+      },
+    });
+  },
+};
+const completionsBeforeDelayedSend = completions.length;
+actionHandler(app.renderCompose(delayedCx), "mail::send")({}, delayedCx);
+assert.equal(completions.length, completionsBeforeDelayedSend);
+assert.ok(requestedSleep > 6900 && requestedSleep <= 7000);
+assert.ok(app.compose.snapshot().pending, "the preference delays delivery");
+actionHandler(app.render(delayedCx), "mail::undoSend")({}, delayedCx);
+assert.equal(app.compose.snapshot().pending, null);
+assert.equal(app.compose.snapshot().sending, false);
 app.compose.send(0, 0);
 assert.equal(
   completions.length > 0,

@@ -18,6 +18,8 @@ const compose = renderCompose(
     status: "Sending…",
     sending: true,
     onSend() {},
+    onShowCc() {},
+    onShowBcc() {},
     onDiscard() {},
   },
   cx,
@@ -54,15 +56,17 @@ assert.equal(
   "recipient controls share the compact address header",
 );
 assert.equal(
-  contains(compose, "compose-cc-field"),
+  contains(compose, "compose-cc-toggle"),
   true,
-  "Cc is available without leaving compose",
+  "Cc can be disclosed from the primary recipient row",
 );
 assert.equal(
-  contains(compose, "compose-bcc-field"),
+  contains(compose, "compose-bcc-toggle"),
   true,
-  "Bcc is available without leaving compose",
+  "Bcc can be disclosed from the primary recipient row",
 );
+assert.equal(contains(compose, "compose-cc-field"), false);
+assert.equal(contains(compose, "compose-bcc-field"), false);
 assert.equal(
   contains(compose, "compose-subject-row"),
   true,
@@ -103,6 +107,26 @@ const withAttachments = renderCompose(
   cx,
 );
 assert.equal(contains(withAttachments, "compose-attach"), true);
+
+const withCopies = renderCompose(
+  {
+    from: "me@example.com",
+    to: {},
+    cc: {},
+    bcc: {},
+    ccVisible: true,
+    bccVisible: true,
+    subject: {},
+    body: {},
+    onSend() {},
+    onShowCc() {},
+    onShowBcc() {},
+    onDiscard() {},
+  },
+  cx,
+);
+assert.equal(contains(withCopies, "compose-cc-field"), true);
+assert.equal(contains(withCopies, "compose-bcc-field"), true);
 assert.equal(find(compose, "compose-send")?.isDisabled === true, true);
 assert.equal(
   contains(compose, "compose-save"),

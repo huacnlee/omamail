@@ -68,8 +68,10 @@ assert.ok(ids(compose).includes("application-top-bar"));
 assert.ok(ids(compose).includes("application-content"));
 assert.ok(ids(compose).includes("application-bottom-bar"));
 assert.ok(ids(compose).includes("compose-action-bar"));
-assert.ok(ids(compose).includes("compose-cc-field"));
-assert.ok(ids(compose).includes("compose-bcc-field"));
+assert.ok(ids(compose).includes("compose-cc-toggle"));
+assert.ok(ids(compose).includes("compose-bcc-toggle"));
+assert.equal(ids(compose).includes("compose-cc-field"), false);
+assert.equal(ids(compose).includes("compose-bcc-field"), false);
 
 hydrated.openSettings(cx);
 const settings = hydrated.render(cx);

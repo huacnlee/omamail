@@ -11,7 +11,7 @@ import {
   muted,
 } from "../lib/omarchy-ui/index.js";
 
-/** @param {{from?:string,to:import("gpui-base").InputState,cc?:import("gpui-base").InputState,bcc?:import("gpui-base").InputState,subject:import("gpui-base").InputState,body:import("gpui-base").TextareaState,status?:string,sending?:boolean,onSend:(event:any,cx:any)=>void,onSave?:(event:any,cx:any)=>void,onAttach?:(event:any,cx:any)=>void,onDiscard:(event:any,cx:any)=>void}} model @param {import("gpui").Context} cx */
+/** @param {{from?:string,to:import("gpui-base").InputState,cc?:import("gpui-base").InputState,bcc?:import("gpui-base").InputState,ccVisible?:boolean,bccVisible?:boolean,subject:import("gpui-base").InputState,body:import("gpui-base").TextareaState,status?:string,sending?:boolean,onSend:(event:any,cx:any)=>void,onSave?:(event:any,cx:any)=>void,onAttach?:(event:any,cx:any)=>void,onShowCc?:(event:any,cx:any)=>void,onShowBcc?:(event:any,cx:any)=>void,onDiscard:(event:any,cx:any)=>void}} model @param {import("gpui").Context} cx */
 export function renderCompose(model, cx) {
   const unavailableAddressField = () =>
     div()
@@ -103,24 +103,59 @@ export function renderCompose(model, cx) {
           fieldRow(
             "compose-to-row",
             "To",
-            addressField(model.to, "compose-to-field", "To"),
+            h_flex()
+              .flex_1()
+              .min_w_0()
+              .items_center()
+              .gap(cx.theme().spacing.xs)
+              .child(addressField(model.to, "compose-to-field", "To"))
+              .when(typeof model.onShowCc === "function", (row) =>
+                row.child(
+                  button(
+                    "compose-cc-toggle",
+                    "Cc",
+                    model.onShowCc ?? (() => {}),
+                    cx,
+                    {
+                      selected: Boolean(model.ccVisible),
+                    },
+                  ),
+                ),
+              )
+              .when(typeof model.onShowBcc === "function", (row) =>
+                row.child(
+                  button(
+                    "compose-bcc-toggle",
+                    "Bcc",
+                    model.onShowBcc ?? (() => {}),
+                    cx,
+                    {
+                      selected: Boolean(model.bccVisible),
+                    },
+                  ),
+                ),
+              ),
             cx,
           ),
         )
-        .child(
-          fieldRow(
-            "compose-cc-row",
-            "Cc",
-            addressField(model.cc, "compose-cc-field", "Cc"),
-            cx,
+        .when(Boolean(model.ccVisible), (header) =>
+          header.child(
+            fieldRow(
+              "compose-cc-row",
+              "Cc",
+              addressField(model.cc, "compose-cc-field", "Cc"),
+              cx,
+            ),
           ),
         )
-        .child(
-          fieldRow(
-            "compose-bcc-row",
-            "Bcc",
-            addressField(model.bcc, "compose-bcc-field", "Bcc"),
-            cx,
+        .when(Boolean(model.bccVisible), (header) =>
+          header.child(
+            fieldRow(
+              "compose-bcc-row",
+              "Bcc",
+              addressField(model.bcc, "compose-bcc-field", "Bcc"),
+              cx,
+            ),
           ),
         )
         .child(

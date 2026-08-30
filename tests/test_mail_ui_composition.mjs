@@ -133,4 +133,15 @@ assert.ok(rendered.text.includes("Load more"));
 assert.ok(rendered.text.includes("Quarterly <results>"));
 assert.ok(rendered.text.includes("j/k"));
 
+const narrowReader = renderMail({
+  ...model,
+  width: 500,
+  reader: { ...model.reader, onBack: noop },
+}, cx);
+const narrow = collect(narrowReader);
+assert.ok(!narrow.ids.includes("mail-rail"));
+assert.ok(!narrow.ids.includes("mail-list-pane-fixed"));
+assert.ok(narrow.ids.includes("mail-reader-pane"));
+assert.ok(narrow.ids.includes("reader-back"));
+
 console.log("mail UI composition tests passed");

@@ -26,6 +26,12 @@ const view = renderSettings(
       disabled: false,
       detail: "Loading images can tell the sender when a message was opened.",
     },
+    heavyMessages: {
+      enabled: false,
+      disabled: false,
+      detail: "Render immediately.",
+    },
+    undoSend: { seconds: 10, disabled: false, detail: "Delay delivery." },
     onAdd() {},
     onBack() {},
     onSwitch() {},
@@ -33,6 +39,8 @@ const view = renderSettings(
     onCancelRemove() {},
     onConfirmRemove() {},
     onRemoteImages() {},
+    onHeavyMessages() {},
+    onUndoSend() {},
   },
   cx,
 );
@@ -58,6 +66,10 @@ assert.equal(contains(view, "settings-preferences-group"), true);
 assert.equal(contains(view, "settings-account-one@example.com"), true);
 assert.equal(contains(view, "settings-remote-images"), true);
 assert.equal(contains(view, "settings-remote-images-toggle"), true);
+assert.equal(contains(view, "settings-heavy-messages-toggle"), true);
+assert.equal(contains(view, "settings-undo-send-decrease"), true);
+assert.equal(contains(view, "settings-undo-send-increase"), true);
+assert.equal(contains(view, "settings-add-account"), true);
 
 const confirmation = renderSettings(
   {
@@ -81,10 +93,18 @@ const confirmation = renderSettings(
       disabled: false,
       detail: "Privacy warning",
     },
+    heavyMessages: {
+      enabled: false,
+      disabled: false,
+      detail: "Render immediately.",
+    },
+    undoSend: { seconds: 10, disabled: false, detail: "Delay delivery." },
     onAdd() {},
     onSwitch() {},
     onRemove() {},
     onRemoteImages() {},
+    onHeavyMessages() {},
+    onUndoSend() {},
     onCancelRemove() {},
     onConfirmRemove() {},
   },

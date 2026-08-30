@@ -14,6 +14,26 @@ import {
   title,
 } from "../lib/omarchy-ui/index.js";
 
+/** @param {string} id @param {string} heading @param {string} detail @param {any} control @param {import("gpui").Context} cx */
+function preferenceRow(id, heading, detail, control, cx) {
+  return h_flex()
+    .id(id)
+    .items_center()
+    .justify_between()
+    .gap(cx.theme().spacing.lg)
+    .p(cx.theme().spacing.md)
+    .bg(cx.theme().colors.surface)
+    .child(
+      v_flex()
+        .flex_1()
+        .min_w_0()
+        .gap(cx.theme().spacing.xs)
+        .child(div().child(heading))
+        .child(muted(detail, cx)),
+    )
+    .child(control);
+}
+
 /** @param {any} model @param {import("gpui").Context} cx */
 export function renderSettings(model, cx) {
   const confirmingRemoval = Boolean(model.pendingRemoval);
@@ -75,34 +95,104 @@ export function renderSettings(model, cx) {
           .when(confirmingRemoval, (row) => row.opacity(0.4)),
       ),
     );
-  const preferences = surface(cx)
+  const reading = v_flex()
     .id("settings-preferences-group")
+    .gap(cx.theme().spacing.xs)
+    .child(sectionLabel("Reading", cx))
     .child(
-      v_flex()
-        .id("settings-remote-images")
-        .gap(cx.theme().spacing.sm)
-        .p(cx.theme().spacing.md)
-        .child(sectionLabel("Privacy", cx))
-        .child(title("Remote images", cx))
-        .child(muted(model.remoteImages.detail, cx))
-        .child(
-          button(
-            "settings-remote-images-toggle",
-            model.remoteImages.enabled ? "On" : "Off",
-            (_event, eventCx) =>
-              model.onRemoteImages(!model.remoteImages.enabled, eventCx),
-            cx,
-            {
-              selected: model.remoteImages.enabled,
-              disabled: model.remoteImages.disabled || model.busy,
-            },
-          ),
+      preferenceRow(
+        "settings-remote-images",
+        "Always show remote images",
+        model.remoteImages.detail,
+        button(
+          "settings-remote-images-toggle",
+          model.remoteImages.enabled ? "On" : "Off",
+          (_event, eventCx) =>
+            model.onRemoteImages(!model.remoteImages.enabled, eventCx),
+          cx,
+          {
+            selected: model.remoteImages.enabled,
+            disabled: model.remoteImages.disabled || model.busy,
+          },
         ),
+        cx,
+      ),
+    )
+    .child(
+      preferenceRow(
+        "settings-heavy-messages",
+        "Always render heavy messages",
+        model.heavyMessages.detail,
+        button(
+          "settings-heavy-messages-toggle",
+          model.heavyMessages.enabled ? "On" : "Off",
+          (_event, eventCx) =>
+            model.onHeavyMessages(!model.heavyMessages.enabled, eventCx),
+          cx,
+          {
+            selected: model.heavyMessages.enabled,
+            disabled: model.heavyMessages.disabled || model.busy,
+          },
+        ),
+        cx,
+      ),
+    );
+  const writing = v_flex()
+    .id("settings-writing-group")
+    .gap(cx.theme().spacing.xs)
+    .child(sectionLabel("Writing", cx))
+    .child(
+      preferenceRow(
+        "settings-undo-send",
+        "Undo send window",
+        model.undoSend.detail,
+        h_flex()
+          .items_center()
+          .gap(cx.theme().spacing.xs)
+          .child(
+            button(
+              "settings-undo-send-decrease",
+              "−",
+              (_event, eventCx) =>
+                model.onUndoSend(model.undoSend.seconds - 1, eventCx),
+              cx,
+              {
+                disabled:
+                  model.undoSend.disabled ||
+                  model.busy ||
+                  model.undoSend.seconds <= 0,
+              },
+            ).accessibility_label("Decrease undo send window"),
+          )
+          .child(
+            div()
+              .w("5rem")
+              .text_center()
+              .child(`${model.undoSend.seconds} seconds`),
+          )
+          .child(
+            button(
+              "settings-undo-send-increase",
+              "+",
+              (_event, eventCx) =>
+                model.onUndoSend(model.undoSend.seconds + 1, eventCx),
+              cx,
+              {
+                disabled:
+                  model.undoSend.disabled ||
+                  model.busy ||
+                  model.undoSend.seconds >= 60,
+              },
+            ).accessibility_label("Increase undo send window"),
+          ),
+        cx,
+      ),
     );
   const column = pageColumn("settings-column", cx, { maxWidth: "38rem" })
     .child(title("Settings", cx))
-    .child(accounts)
-    .child(preferences);
+    .child(reading)
+    .child(writing)
+    .child(accounts);
   if (model.error)
     column.child(
       div()

@@ -151,6 +151,27 @@ fn caldav_rejects_cross_origin_before_secret_access() {
 }
 
 #[test]
+fn dispatches_google_and_caldav_delete_effects() {
+    let backend = FakeBackend::default();
+    run(
+        &backend,
+        json!({"type":"calendar.google.delete", "sourceId":"primary",
+            "accountId":"me@example.test", "deadlineMs":3000, "eventId":"event-7"}),
+    )
+    .unwrap();
+    run(
+        &backend,
+        json!({"type":"calendar.caldav.delete", "sourceId":"work",
+            "sourceUrl":"https://calendar.example.test/users/me/", "deadlineMs":3000,
+            "url":"events/1.ics"}),
+    )
+    .unwrap();
+    let calls = backend.calls.lock().unwrap();
+    assert!(matches!(calls[0], BackendCall::GoogleCalendarDelete { .. }));
+    assert!(matches!(calls[1], BackendCall::CaldavDelete { .. }));
+}
+
+#[test]
 fn caldav_resolves_same_origin_relative_urls_then_reads_secret() {
     let backend = FakeBackend::default();
     run(

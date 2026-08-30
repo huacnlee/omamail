@@ -47,6 +47,15 @@ assert.equal(calendar.snapshot().editing.fields.title, "Changed");
 calendar.cancelEdit();
 assert.equal(calendar.snapshot().editing, null);
 
+calendar.select({ id: "delete-me", googleId: "delete-me", title: "Delete me" });
+calendar.deleteSelected();
+assert.equal(calendar.snapshot().pending, true);
+assert.equal(effects.at(-1).type, "calendar.google.delete");
+assert.equal(effects.at(-1).eventId, "delete-me");
+completions.shift()({ ok: true, value: null });
+assert.equal(calendar.snapshot().selected, null);
+assert.equal(calendar.snapshot().writeStatus, "Deleted");
+
 calendar.beginCreate();
 calendar.updateDraft({ title: "", startMs: 10, endMs: 20 });
 calendar.save();

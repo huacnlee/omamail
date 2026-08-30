@@ -301,8 +301,15 @@ export function createComposeController(dependencies) {
       } else deliver(payload, revision);
       return this.snapshot();
     },
-    /** @param {number} [now] */ flush(now = Date.now()) {
-      if (pending && pending.dueAt <= now) {
+    /** @param {number} [now] @param {number} [expectedDueAt] */ flush(
+      now = Date.now(),
+      expectedDueAt,
+    ) {
+      if (
+        pending &&
+        (expectedDueAt === undefined || pending.dueAt === expectedDueAt) &&
+        pending.dueAt <= now
+      ) {
         const queued = pending;
         pending = null;
         sending = false;

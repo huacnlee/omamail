@@ -64,6 +64,11 @@ pub enum BackendCall {
         event_id: String,
         payload: GoogleEventPayload,
     },
+    GoogleCalendarDelete {
+        source_id: String,
+        account_id: String,
+        event_id: String,
+    },
     CaldavList {
         source_id: String,
         url: String,
@@ -74,6 +79,10 @@ pub enum BackendCall {
         source_id: String,
         url: String,
         payload: String,
+    },
+    CaldavDelete {
+        source_id: String,
+        url: String,
     },
 }
 
@@ -92,8 +101,10 @@ impl fmt::Debug for BackendCall {
                 .debug_struct("GoogleCalendarWrite")
                 .field("create", create)
                 .finish_non_exhaustive(),
+            Self::GoogleCalendarDelete { .. } => formatter.write_str("GoogleCalendarDelete { .. }"),
             Self::CaldavList { .. } => formatter.write_str("CaldavList { .. }"),
             Self::CaldavWrite { .. } => formatter.write_str("CaldavWrite { .. }"),
+            Self::CaldavDelete { .. } => formatter.write_str("CaldavDelete { .. }"),
         }
     }
 }
@@ -221,6 +232,10 @@ enum Request {
     GoogleWrite(GoogleWriteRequest),
     #[serde(rename = "calendar.caldav.write")]
     CaldavWrite(CaldavWriteRequest),
+    #[serde(rename = "calendar.google.delete")]
+    GoogleDelete(GoogleDeleteRequest),
+    #[serde(rename = "calendar.caldav.delete")]
+    CaldavDelete(CaldavDeleteRequest),
 }
 
 impl Request {
@@ -231,6 +246,8 @@ impl Request {
             Self::CalendarList(value) => value.deadline_ms,
             Self::GoogleWrite(value) => value.deadline_ms,
             Self::CaldavWrite(value) => value.deadline_ms,
+            Self::GoogleDelete(value) => value.deadline_ms,
+            Self::CaldavDelete(value) => value.deadline_ms,
         }
     }
 
@@ -242,6 +259,8 @@ impl Request {
             Self::CalendarList(value) => value.into_call(),
             Self::GoogleWrite(value) => value.into_call(),
             Self::CaldavWrite(value) => value.into_call(),
+            Self::GoogleDelete(value) => value.into_call(),
+            Self::CaldavDelete(value) => value.into_call(),
         }
     }
 }
@@ -563,6 +582,35 @@ impl GoogleWriteRequest {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GoogleDeleteRequest {
+    source_id: String,
+    account_id: String,
+    deadline_ms: u64,
+    event_id: String,
+}
+
+impl GoogleDeleteRequest {
+    fn into_call(self) -> Result<(BackendCall, String), HostError> {
+        if !valid_identity(&self.source_id)
+            || !valid_identity(&self.account_id)
+            || !valid_identity(&self.event_id)
+        {
+            return Err(HostError::InvalidRequest);
+        }
+        let identity = format!("google-calendar:{}", self.source_id);
+        Ok((
+            BackendCall::GoogleCalendarDelete {
+                source_id: self.source_id,
+                account_id: self.account_id,
+                event_id: self.event_id,
+            },
+            identity,
+        ))
+    }
+}
+
 #[derive(Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GoogleEventPayload {
@@ -803,6 +851,31 @@ impl CaldavWriteRequest {
                 source_id: self.source_id.clone(),
                 url,
                 payload: self.payload,
+            },
+            format!("caldav:{}", self.source_id),
+        ))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CaldavDeleteRequest {
+    source_id: String,
+    source_url: String,
+    deadline_ms: u64,
+    url: String,
+}
+
+impl CaldavDeleteRequest {
+    fn into_call(self) -> Result<(BackendCall, String), HostError> {
+        if !valid_identity(&self.source_id) {
+            return Err(HostError::InvalidRequest);
+        }
+        let url = exact_origin_url(&self.source_url, &self.url)?;
+        Ok((
+            BackendCall::CaldavDelete {
+                source_id: self.source_id.clone(),
+                url,
             },
             format!("caldav:{}", self.source_id),
         ))

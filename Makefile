@@ -114,6 +114,7 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_composition.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_states.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_security.mjs
+	node tests/test_reader_controller.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_compose_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_setup_ui_render.mjs

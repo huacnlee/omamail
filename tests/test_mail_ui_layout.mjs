@@ -23,6 +23,7 @@ assert.equal(
 
 assert.deepEqual(mailLayout(SPLIT_MAIL_MIN_WIDTH - 1), {
   mode: "single",
+  showRail: true,
   showList: true,
   showReader: false,
   railWidth: 64,
@@ -31,6 +32,7 @@ assert.deepEqual(mailLayout(SPLIT_MAIL_MIN_WIDTH - 1), {
 });
 assert.deepEqual(mailLayout(SPLIT_MAIL_MIN_WIDTH), {
   mode: "split",
+  showRail: true,
   showList: true,
   showReader: true,
   railWidth: 64,
@@ -39,6 +41,7 @@ assert.deepEqual(mailLayout(SPLIT_MAIL_MIN_WIDTH), {
 });
 assert.deepEqual(mailLayout(1024), {
   mode: "single",
+  showRail: true,
   showList: true,
   showReader: false,
   railWidth: 64,
@@ -47,6 +50,7 @@ assert.deepEqual(mailLayout(1024), {
 });
 assert.deepEqual(mailLayout(500, true), {
   mode: "single",
+  showRail: false,
   showList: false,
   showReader: true,
   railWidth: 64,

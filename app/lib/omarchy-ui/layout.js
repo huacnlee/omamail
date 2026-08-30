@@ -153,7 +153,7 @@ export const appShell = (options, cx) =>
   appFrame(cx)
     .child(options.top)
     .child(
-      div()
+      v_flex()
         .id("application-content")
         .flex_1()
         .min_w_0()

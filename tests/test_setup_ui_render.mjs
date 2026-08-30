@@ -30,12 +30,14 @@ const view = renderSetupForm(
     phase: "verifying",
     fields,
     insecure: false,
+    advanced: false,
     status: "Checking account",
     submitLabel: "Test and save",
     onSubmit() {},
     onPoll() {},
     onLogout() {},
     onTls() {},
+    onAdvanced() {},
     onCancel() {},
     onProvider() {},
   },
@@ -53,11 +55,54 @@ assert.equal(view.accessibilityRole, "region");
 assert.equal(contains(view, "setup-workspace"), true);
 assert.equal(contains(view, "setup-scroll"), true);
 assert.equal(contains(view, "setup-column"), true);
-assert.equal(contains(view, "setup-provider-selector"), true);
+assert.equal(contains(view, "setup-provider-selector"), false);
 assert.equal(contains(view, "setup-form"), true);
 assert.equal(contains(view, "setup-imap-fields"), true);
 assert.equal(contains(view, "setup-field-email"), true);
-assert.equal(contains(view, "setup-field-smtp-port"), true);
+assert.equal(contains(view, "setup-field-password"), true);
+assert.equal(contains(view, "setup-field-smtp-port"), false);
+assert.equal(contains(view, "setup-advanced-toggle"), true);
+
+const chooser = renderSetupForm(
+  {
+    provider: null,
+    providers: [
+      { id: "gmail", name: "Gmail", summary: "Google OAuth" },
+      { id: "hey", name: "HEY", summary: "HEY CLI" },
+      { id: "imap", name: "IMAP", summary: "Any IMAP server" },
+    ],
+    fields,
+    onProvider() {},
+  },
+  cx,
+);
+assert.equal(contains(chooser, "setup-provider-selector"), true);
+assert.equal(contains(chooser, "setup-form"), false);
+assert.equal(contains(chooser, "setup-provider-gmail-summary"), true);
+assert.equal(contains(chooser, "setup-provider-hey-summary"), true);
+assert.equal(contains(chooser, "setup-provider-imap-summary"), true);
+
+const advancedView = renderSetupForm(
+  {
+    provider: "imap",
+    providerName: "IMAP",
+    providers: [
+      { id: "gmail", name: "Gmail", summary: "Google OAuth" },
+      { id: "hey", name: "HEY", summary: "HEY CLI" },
+      { id: "imap", name: "IMAP", summary: "Any IMAP server" },
+    ],
+    phase: "editing",
+    fields,
+    advanced: true,
+    insecure: false,
+    onTls() {},
+    onAdvanced() {},
+    onCancel() {},
+    onProvider() {},
+  },
+  cx,
+);
+assert.equal(contains(advancedView, "setup-field-smtp-port"), true);
 const footer = renderSetupFooter(
   {
     provider: "imap",

@@ -114,7 +114,7 @@ export function renderMail(model, cx) {
             .min_w_0()
             .min_h_0()
             .children([
-              renderRail(model, cx),
+              ...(layout.showRail ? [renderRail(model, cx)] : []),
               ...(layout.showList ? [list] : []),
               ...(layout.showReader
                 ? [

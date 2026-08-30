@@ -7,6 +7,10 @@ const UNCERTAIN_ERROR = "Credential state uncertain; sign in again";
 const REMOTE_IMAGES_ERROR = "Remote image preference could not be saved";
 const REMOTE_IMAGES_DETAIL =
   "Loading remote images can tell senders when and where you opened a message.";
+const HEAVY_MESSAGES_DETAIL =
+  "Render complex messages immediately; layout may briefly pause while they open.";
+const UNDO_SEND_DETAIL =
+  "Omamail waits before delivery. Set 0 seconds to send immediately.";
 
 /** @param {any} account @param {string} activeId */
 function summary(account, activeId) {
@@ -69,8 +73,14 @@ export function createSettingsController(dependencies) {
   let busy = false;
   let error = "";
   let remoteImagesEnabled = false;
+  let heavyMessagesEnabled = false;
+  let undoSendSeconds = 10;
   try {
     remoteImagesEnabled = Boolean(dependencies.readRemoteImages?.());
+    heavyMessagesEnabled = Boolean(dependencies.readHeavyMessages?.());
+    const storedSeconds = Number(dependencies.readUndoSendSeconds?.());
+    if (Number.isFinite(storedSeconds))
+      undoSendSeconds = Math.max(0, Math.min(60, Math.round(storedSeconds)));
   } catch (_) {
     error = REMOTE_IMAGES_ERROR;
   }
@@ -89,6 +99,16 @@ export function createSettingsController(dependencies) {
         enabled: remoteImagesEnabled,
         disabled: false,
         detail: REMOTE_IMAGES_DETAIL,
+      },
+      heavyMessages: {
+        enabled: heavyMessagesEnabled,
+        disabled: false,
+        detail: HEAVY_MESSAGES_DETAIL,
+      },
+      undoSend: {
+        seconds: undoSendSeconds,
+        disabled: false,
+        detail: UNDO_SEND_DETAIL,
       },
     };
   }
@@ -112,6 +132,44 @@ export function createSettingsController(dependencies) {
         busy = false;
         error = REMOTE_IMAGES_ERROR;
         return { ok: false, enabled: remoteImagesEnabled, error };
+      }
+    },
+    /** @param {boolean} enabled */
+    async toggleHeavyMessages(enabled) {
+      const next = Boolean(enabled);
+      if (busy) return { ok: false, enabled: heavyMessagesEnabled, error };
+      busy = true;
+      error = "";
+      try {
+        if (typeof dependencies.saveHeavyMessages !== "function")
+          throw new Error("Heavy message preference storage is unavailable");
+        await dependencies.saveHeavyMessages(next);
+        heavyMessagesEnabled = next;
+        busy = false;
+        return { ok: true, enabled: heavyMessagesEnabled };
+      } catch (_) {
+        busy = false;
+        error = "Reading preference could not be saved";
+        return { ok: false, enabled: heavyMessagesEnabled, error };
+      }
+    },
+    /** @param {number} seconds */
+    async setUndoSendSeconds(seconds) {
+      const next = Math.max(0, Math.min(60, Math.round(Number(seconds) || 0)));
+      if (busy) return { ok: false, seconds: undoSendSeconds, error };
+      busy = true;
+      error = "";
+      try {
+        if (typeof dependencies.saveUndoSendSeconds !== "function")
+          throw new Error("Undo-send preference storage is unavailable");
+        await dependencies.saveUndoSendSeconds(next);
+        undoSendSeconds = next;
+        busy = false;
+        return { ok: true, seconds: undoSendSeconds };
+      } catch (_) {
+        busy = false;
+        error = "Writing preference could not be saved";
+        return { ok: false, seconds: undoSendSeconds, error };
       }
     },
     /** @param {string} accountId */

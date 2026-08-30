@@ -67,6 +67,8 @@ const rendered = renderReader(
       callbacks.archive += 1;
     },
     onAttachment() {},
+    onBack() {},
+    onMode() {},
   },
   cx,
 );
@@ -75,6 +77,10 @@ assert.ok(actionIds.includes("reader-action-reply"));
 assert.ok(actionIds.includes("reader-action-archive"));
 assert.ok(actionIds.includes("reader-message-header"));
 assert.ok(actionIds.includes("reader-message-body"));
+assert.ok(actionIds.includes("reader-back"));
+assert.ok(actionIds.includes("reader-mode-reader"));
+assert.ok(actionIds.includes("reader-mode-original"));
+assert.ok(actionIds.includes("reader-mode-plain"));
 assert.equal(
   actionIds.includes("reader-action-star"),
   false,

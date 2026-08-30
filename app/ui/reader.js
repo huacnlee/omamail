@@ -146,6 +146,7 @@ export function renderReader(model, cx) {
   }
 
   const actions = [
+    ["back", "← Back", typeof model.onBack === "function", model.onBack],
     [
       "edit-draft",
       "Edit draft",
@@ -175,12 +176,30 @@ export function renderReader(model, cx) {
         )
         .map(([id, caption, , callback]) =>
           button(
-            `reader-action-${id}`,
+            id === "back" ? "reader-back" : `reader-action-${id}`,
             String(caption),
             (event, eventCx) => callback(event, eventCx),
             cx,
           ),
         ),
+    );
+  const modes = h_flex()
+    .id("reader-modes")
+    .items_center()
+    .gap(cx.theme().spacing.xs)
+    .children(
+      ["reader", "original", "plain"].map((mode) =>
+        button(
+          `reader-mode-${mode}`,
+          mode === "reader" ? "Reader" : mode === "original" ? "Original" : "Plain",
+          (event, eventCx) => model.onMode?.(mode, event, eventCx),
+          cx,
+          {
+            disabled: typeof model.onMode !== "function",
+            selected: model.presentation?.mode === mode,
+          },
+        ),
+      ),
     );
   return v_flex()
     .id(`reader-content-${model.message.id}`)
@@ -188,6 +207,7 @@ export function renderReader(model, cx) {
     .min_w_0()
     .min_h_0()
     .bg(cx.theme().colors.background)
+    .child(modes)
     .child(
       v_flex()
         .id("reader-message-body")

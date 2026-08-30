@@ -24,6 +24,11 @@ assert.equal(
 assert.equal(compose.snapshot().draft.subject.includes("\n"), false);
 compose.send(1_000, 10);
 assert.equal(sent.length, 0, "undo delay holds the send");
+const firstDueAt = compose.snapshot().pending.dueAt;
+compose.undo();
+compose.send(2_000, 10);
+compose.flush(12_000, firstDueAt);
+assert.equal(sent.length, 0, "a retired timer cannot flush a later send");
 compose.undo();
 compose.send(1_000, 0);
 assert.equal(sent.length, 1);

@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::platform::commands::{
     CommandError, CommandPolicy, HeyOperation, PreparedCommand, ProcessRunner, SystemProcessRunner,
+    TransportOperation,
 };
 use crate::{
     host_context::HostContextRegistry,
@@ -25,6 +26,8 @@ const MAX_DEADLINE_MS: u64 = 60_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024;
 const MAX_HEY_STDOUT_BYTES: usize = 512 * 1024;
 const MAX_HEY_ARGUMENT_BYTES: usize = 4 * 1024;
+const MAX_IMAGE_STDOUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_TRANSPORT_STDERR_BYTES: usize = 16 * 1024;
 const UNSEEN_SCAN_LIMIT: &str = "100";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +109,21 @@ pub enum EffectRequest {
     GmailRequest {
         #[serde(rename = "deadlineMs")]
         deadline_ms: u64,
+    },
+    #[serde(rename = "image.fetch")]
+    ImageFetch {
+        #[serde(rename = "deadlineMs")]
+        deadline_ms: u64,
+        url: String,
+    },
+    #[serde(rename = "unsubscribe")]
+    Unsubscribe {
+        #[serde(rename = "deadlineMs")]
+        deadline_ms: u64,
+        url: String,
+        #[serde(rename = "contentType")]
+        content_type: String,
+        body: String,
     },
 }
 
@@ -212,6 +230,7 @@ pub struct EffectHost {
     dropped_thread_flags: Arc<Mutex<HashSet<ThreadFlag>>>,
     provider: Arc<dyn ProviderRuntime>,
     groupware: Arc<dyn GroupwareRuntime>,
+    transport_runner: Arc<dyn ProcessRunner>,
 }
 pub trait GroupwareRuntime: Send + Sync {
     fn dispatch(&self, json: &str) -> String;
@@ -354,6 +373,35 @@ impl EffectHost {
         provider: Arc<dyn ProviderRuntime>,
         groupware: Arc<dyn GroupwareRuntime>,
     ) -> Self {
+        Self::with_all_runners(
+            app_root,
+            hey_runner,
+            provider,
+            groupware,
+            Arc::new(SystemProcessRunner),
+        )
+    }
+    pub fn with_transport_runner(
+        app_root: &Path,
+        hey_runner: Arc<dyn HeyRunner>,
+        provider: Arc<dyn ProviderRuntime>,
+        transport_runner: Arc<dyn ProcessRunner>,
+    ) -> Self {
+        Self::with_all_runners(
+            app_root,
+            hey_runner,
+            provider,
+            Arc::new(UnsupportedGroupware),
+            transport_runner,
+        )
+    }
+    fn with_all_runners(
+        app_root: &Path,
+        hey_runner: Arc<dyn HeyRunner>,
+        provider: Arc<dyn ProviderRuntime>,
+        groupware: Arc<dyn GroupwareRuntime>,
+        transport_runner: Arc<dyn ProcessRunner>,
+    ) -> Self {
         let checkout_root = app_root.parent().unwrap_or(app_root);
         Self {
             policy: CommandPolicy::new(
@@ -366,6 +414,7 @@ impl EffectHost {
             dropped_thread_flags: Arc::new(Mutex::new(HashSet::new())),
             provider,
             groupware,
+            transport_runner,
         }
     }
     pub fn configure(&self, json: &str) -> Result<(), EffectHostError> {
@@ -403,6 +452,8 @@ impl EffectHost {
                 | "hey.compose"
                 | "imap.request"
                 | "gmail.request"
+                | "image.fetch"
+                | "unsubscribe"
         ) {
             return Err(EffectHostError::Unsupported);
         }
@@ -492,6 +543,39 @@ impl EffectHost {
                     body,
                     remaining_ms(started, deadline_ms)?,
                 )?)
+            }
+            EffectRequest::ImageFetch { deadline_ms, url } => {
+                let command = self
+                    .policy
+                    .prepare_transport(
+                        TransportOperation::image_fetch(url),
+                        Duration::from_millis(deadline_ms),
+                    )
+                    .map_err(|_| EffectHostError::InvalidRequest)?;
+                let output = self
+                    .transport_runner
+                    .run_bounded(command, MAX_IMAGE_STDOUT_BYTES, MAX_TRANSPORT_STDERR_BYTES)
+                    .map_err(|_| EffectHostError::Failed)?;
+                encode_image_response(output)
+            }
+            EffectRequest::Unsubscribe {
+                deadline_ms,
+                url,
+                content_type,
+                body,
+            } => {
+                let command = self
+                    .policy
+                    .prepare_transport(
+                        TransportOperation::unsubscribe(url, content_type, body),
+                        Duration::from_millis(deadline_ms),
+                    )
+                    .map_err(|_| EffectHostError::InvalidRequest)?;
+                let output = self
+                    .transport_runner
+                    .run_bounded(command, 64, MAX_TRANSPORT_STDERR_BYTES)
+                    .map_err(|_| EffectHostError::Failed)?;
+                encode_unsubscribe_response(output)
             }
             other => Self::dispatch(other).and(Ok("{}".into())),
         }
@@ -677,6 +761,19 @@ fn validate_request(request: &EffectRequest) -> Result<(), EffectHostError> {
                 return Err(EffectHostError::InvalidRequest);
             }
         }
+        EffectRequest::ImageFetch { url, .. } => {
+            if url.len() > MAX_REQUEST_BYTES || url.contains(['\r', '\n', '\0']) {
+                return Err(EffectHostError::InvalidRequest);
+            }
+        }
+        EffectRequest::Unsubscribe {
+            url,
+            content_type,
+            body,
+            ..
+        } if url.len() > MAX_REQUEST_BYTES || content_type.len() > 256 || body.len() > 4096 => {
+            return Err(EffectHostError::InvalidRequest);
+        }
         _ => {}
     }
     Ok(())
@@ -729,7 +826,60 @@ fn deadline(request: &EffectRequest) -> Duration {
         | EffectRequest::HeyCompose { deadline_ms, .. }
         | EffectRequest::ImapRequest { deadline_ms }
         | EffectRequest::GmailRequest { deadline_ms } => *deadline_ms,
+        EffectRequest::ImageFetch { deadline_ms, .. }
+        | EffectRequest::Unsubscribe { deadline_ms, .. } => *deadline_ms,
     })
+}
+
+fn encode_image_response(
+    output: crate::platform::commands::ProcessOutput,
+) -> Result<String, EffectHostError> {
+    if output.status() != Some(0) {
+        return Err(EffectHostError::Failed);
+    }
+    let data_uri = std::str::from_utf8(output.stdout())
+        .map_err(|_| EffectHostError::Failed)?
+        .trim_end();
+    let permitted = [
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/jpg;base64,",
+        "data:image/gif;base64,",
+        "data:image/webp;base64,",
+        "data:image/bmp;base64,",
+    ];
+    if data_uri.contains(['\r', '\n'])
+        || !permitted.iter().any(|prefix| data_uri.starts_with(prefix))
+    {
+        return Err(EffectHostError::Failed);
+    }
+    serde_json::to_string(&json!({"ok":true,"data":{"dataUri":data_uri}}))
+        .map_err(|_| EffectHostError::Failed)
+}
+
+fn encode_unsubscribe_response(
+    output: crate::platform::commands::ProcessOutput,
+) -> Result<String, EffectHostError> {
+    if output.status() != Some(0) {
+        return Err(EffectHostError::Failed);
+    }
+    let answer = std::str::from_utf8(output.stdout())
+        .map_err(|_| EffectHostError::Failed)?
+        .trim();
+    let fields = answer.split_whitespace().collect::<Vec<_>>();
+    if fields.len() != 2 {
+        return Err(EffectHostError::Failed);
+    }
+    let curl_status = fields[0]
+        .parse::<u16>()
+        .map_err(|_| EffectHostError::Failed)?;
+    let http_status = fields[1]
+        .parse::<u16>()
+        .map_err(|_| EffectHostError::Failed)?;
+    if curl_status > 255 || http_status > 999 {
+        return Err(EffectHostError::Failed);
+    }
+    serde_json::to_string(&json!({"ok":true,"data":{"httpStatus":http_status,"unsubscribed":curl_status == 0 && (200..300).contains(&http_status)}})).map_err(|_| EffectHostError::Failed)
 }
 fn prepared_hey_stdin(
     arguments: Vec<String>,

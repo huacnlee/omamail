@@ -21,6 +21,7 @@ const handlers = {
   onEvent() {},
   onNew() {},
   onEdit() {},
+  onCloseEvent() {},
   onSave() {},
   onCancel() {},
   onPrevious() {},
@@ -85,6 +86,7 @@ assert.match(source, /`Previous \$\{period\}`/);
 assert.match(source, /`Next \$\{period\}`/);
 let selectedSource = "";
 let edited = false;
+let removed = false;
 const interactive = renderCalendar(
   {
     ...handlers,
@@ -93,6 +95,9 @@ const interactive = renderCalendar(
     },
     onEdit() {
       edited = true;
+    },
+    onDelete() {
+      removed = true;
     },
     view: "month",
     anchorMs: Date.now(),
@@ -105,10 +110,18 @@ const interactive = renderCalendar(
   },
   cx,
 );
+for (const id of [
+  "calendar-selected-detail",
+  "calendar-selected-edit",
+  "calendar-selected-delete",
+])
+  assert.ok(find(interactive, id), id);
 find(interactive, "calendar-source-work").clickHandler({}, cx);
 find(interactive, "calendar-edit").clickHandler({}, cx);
+find(interactive, "calendar-selected-delete").clickHandler({}, cx);
 assert.equal(selectedSource, "work");
 assert.equal(edited, true);
+assert.equal(removed, true);
 const contentStart = source.indexOf("const content = v_flex()");
 const contentEnd = source.indexOf("if (!model.hasSource)", contentStart);
 assert.doesNotMatch(source.slice(contentStart, contentEnd), /\.size_full\(\)/);

@@ -27,6 +27,8 @@ function harness({
   uncertainForget = false,
   failRemoteImages = false,
   initialRemoteImages = false,
+  initialHeavyMessages = false,
+  initialUndoSendSeconds = 10,
 } = {}) {
   let accounts = { version: 1, activeId: gmail.id, accounts: [gmail, imap] };
   const configured = [];
@@ -35,6 +37,10 @@ function harness({
   const cleared = [];
   const remoteImageWrites = [];
   let remoteImages = initialRemoteImages;
+  let heavyMessages = initialHeavyMessages;
+  let undoSendSeconds = initialUndoSendSeconds;
+  const heavyMessageWrites = [];
+  const undoSendWrites = [];
   const controller = createSettingsController({
     readAccounts: () => accounts,
     saveAccounts(next) {
@@ -67,6 +73,16 @@ function harness({
       if (failRemoteImages) throw new Error("storage details must not escape");
       remoteImages = enabled;
     },
+    readHeavyMessages: () => heavyMessages,
+    async saveHeavyMessages(enabled) {
+      heavyMessageWrites.push(enabled);
+      heavyMessages = enabled;
+    },
+    readUndoSendSeconds: () => undoSendSeconds,
+    async saveUndoSendSeconds(seconds) {
+      undoSendWrites.push(seconds);
+      undoSendSeconds = seconds;
+    },
   });
   return {
     controller,
@@ -76,6 +92,8 @@ function harness({
     forgotten,
     cleared,
     remoteImageWrites,
+    heavyMessageWrites,
+    undoSendWrites,
   };
 }
 
@@ -107,6 +125,26 @@ function harness({
   assert.equal(snapshot.remoteImages.enabled, false);
   assert.equal(snapshot.remoteImages.disabled, false);
   assert.match(snapshot.remoteImages.detail, /tell senders/i);
+  assert.equal(snapshot.heavyMessages.enabled, false);
+  assert.equal(snapshot.undoSend.seconds, 10);
+}
+
+{
+  const { controller, heavyMessageWrites, undoSendWrites } = harness();
+  assert.deepEqual(await controller.toggleHeavyMessages(true), {
+    ok: true,
+    enabled: true,
+  });
+  assert.deepEqual(await controller.setUndoSendSeconds(61), {
+    ok: true,
+    seconds: 60,
+  });
+  assert.deepEqual(await controller.setUndoSendSeconds(-1), {
+    ok: true,
+    seconds: 0,
+  });
+  assert.deepEqual(heavyMessageWrites, [true]);
+  assert.deepEqual(undoSendWrites, [60, 0]);
 }
 
 {

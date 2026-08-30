@@ -8,6 +8,7 @@ import {
   button,
   field,
   kbd,
+  label,
   muted,
   sectionLabel,
   statusLine,
@@ -86,6 +87,77 @@ function calendarGrid(cells, model, cx) {
     .children(rows);
 }
 
+/** @param {any} event */
+function eventTime(event) {
+  const start = Number(event?.startMs ?? event?.start?.ms);
+  const end = Number(event?.endMs ?? event?.end?.ms);
+  if (!Number.isFinite(start)) return "Time unavailable";
+  const startDate = new Date(start);
+  const day = startDate.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (event?.start?.allDay) return `${day} · All day`;
+  const time = startDate.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (!Number.isFinite(end)) return `${day} · ${time}`;
+  return `${day} · ${time}–${new Date(end).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+}
+
+/** @param {any} model @param {import("gpui").Context} cx */
+function selectedDetail(model, cx) {
+  const event = model.selected;
+  return v_flex()
+    .id("calendar-selected-detail")
+    .absolute()
+    .inset_0()
+    .overflow_y_scroll()
+    .bg(cx.theme().colors.background)
+    .p(cx.theme().spacing.xl)
+    .gap(cx.theme().spacing.lg)
+    .child(
+      h_flex()
+        .items_center()
+        .justify_between()
+        .child(button("calendar-selected-back", "Back", model.onCloseEvent, cx))
+        .child(
+          h_flex()
+            .gap(cx.theme().spacing.sm)
+            .child(
+              button("calendar-selected-edit", "Edit…", model.onEdit, cx, {
+                disabled: model.pending,
+              }),
+            )
+            .when(typeof model.onDelete === "function", (actions) =>
+              actions.child(
+                button(
+                  "calendar-selected-delete",
+                  "Delete…",
+                  model.onDelete,
+                  cx,
+                  { variant: "danger", disabled: model.pending },
+                ),
+              ),
+            ),
+        ),
+    )
+    .child(title(event.title || event.summary || "Untitled event", cx))
+    .child(label(eventTime(event), cx))
+    .when(Boolean(event.location), (detail) =>
+      detail.child(label(String(event.location), cx)),
+    )
+    .when(Boolean(event.description), (detail) =>
+      detail.child(muted(String(event.description), cx)),
+    );
+}
+
 /** @param {any} model @param {import("gpui").Context} cx */
 export function renderCalendar(model, cx) {
   const anchor = new Date(Number(model.anchorMs || Date.now()));
@@ -140,6 +212,7 @@ export function renderCalendar(model, cx) {
     );
   const content = v_flex()
     .id("calendar")
+    .relative()
     .flex_1()
     .min_w_0()
     .min_h_0()
@@ -219,6 +292,7 @@ export function renderCalendar(model, cx) {
             ),
         ),
     );
+  else if (model.selected) content.child(selectedDetail(model, cx));
   return appShell(
     {
       top: topBar(

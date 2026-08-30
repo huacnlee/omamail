@@ -402,6 +402,13 @@ pub struct ProcessOutput {
     stderr: Vec<u8>,
 }
 impl ProcessOutput {
+    pub fn new(status: Option<i32>, stdout: Vec<u8>, stderr: Vec<u8>) -> Self {
+        Self {
+            status,
+            stdout,
+            stderr,
+        }
+    }
     pub fn status(&self) -> Option<i32> {
         self.status
     }
