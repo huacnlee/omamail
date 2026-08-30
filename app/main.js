@@ -564,14 +564,29 @@ export default class Omamail extends View {
     this.setupAdapters = options.setupAdapters ?? nativeSetupAdapters;
     this.setup = createSetupController(this.setupAdapters);
     this.setupInsecure = false;
-    this.setupEmail = InputState.new({ placeholder: "you@example.com" });
-    this.setupUsername = InputState.new({ placeholder: "Mailbox username" });
-    this.setupPassword = InputState.new({ placeholder: "App password" });
+    // Whether the client step is showing its form rather than its summary.
+    this.setupClientStepOpen = false;
+    // `ImapSetupPage.qml`'s own placeholders, which are the whole label: the
+    // page draws no captions above these fields, so a shortened placeholder
+    // takes the guidance away rather than tidying it. The SMTP one carries the
+    // rule as well as the name — an empty SMTP server is a mailbox you can read
+    // but not send from, and it is the only place that says so.
+    this.setupEmail = InputState.new({
+      placeholder: "Email address — you@example.com",
+    });
+    this.setupUsername = InputState.new({
+      placeholder: "Username — only if it is not the address",
+    });
+    this.setupPassword = InputState.new({
+      placeholder: "Password, or app password",
+    });
     this.setupPassword.set_masked?.(true);
-    this.setupImapHost = InputState.new({ placeholder: "imap.example.com" });
-    this.setupImapPort = InputState.new({ placeholder: "993", value: "993" });
-    this.setupSmtpHost = InputState.new({ placeholder: "smtp.example.com" });
-    this.setupSmtpPort = InputState.new({ placeholder: "465", value: "465" });
+    this.setupImapHost = InputState.new({ placeholder: "IMAP server" });
+    this.setupImapPort = InputState.new({ placeholder: "IMAP port", value: "993" });
+    this.setupSmtpHost = InputState.new({
+      placeholder: "SMTP server — leave empty to read only",
+    });
+    this.setupSmtpPort = InputState.new({ placeholder: "SMTP port", value: "465" });
     this.setupAuthorizationUrl = TextareaState.new({ rows: 2 });
     // The address fills the four server fields in until somebody edits one.
     bindImapAutofill(this, cx);
@@ -784,6 +799,10 @@ export default class Omamail extends View {
     this.setupClientId?.set_value(String(client?.clientId ?? ""));
     if (typeof client?.clientSecret === "string")
       this.setupClientSecret?.set_value(client.clientSecret);
+    // A client that landed closes the step it was typed into, which is what
+    // `onCredentialsSaved` does in the QML. Leaving it open would leave the
+    // page showing a form for work that is finished.
+    this.setupClientStepOpen = false;
   }
 
   /** @param {import("gpui").Context} cx */
@@ -2224,12 +2243,15 @@ export default class Omamail extends View {
         setupSnapshot.error ||
         setupStatuses[String(setupSnapshot.phase)] ||
         "",
-      submitLabel:
-        providerId === "imap"
-          ? "Test and save"
-          : providerId === "hey"
-            ? "Open HEY login…"
-            : "Connect…",
+      // `SetupPage.qml` marks the client step `reopenable`: once a client is
+      // saved the step collapses to its summary, and this is the way back in
+      // to correct a secret that was typed wrong. Without it a saved client
+      // could never be edited again from this page.
+      clientStepOpen: this.setupClientStepOpen,
+      onReopenClient: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+        this.setupClientStepOpen = true;
+        eventCx.notify();
+      },
       onSubmit: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
         void this.submitSetup(eventCx),
       onPoll: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>

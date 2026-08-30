@@ -240,6 +240,15 @@ fn claim_single_instance(
     if let Some(socket) = socket.as_deref()
         && command_router::deliver(socket, &command)
     {
+        // Said out loud. Handing the command over and exiting in silence is
+        // indistinguishable from failing to start — which is exactly how it
+        // read from a terminal, because `cx.activate` is a no-op on Linux
+        // (gpui says so itself) and so the window that took the command does
+        // not come forward either.
+        eprintln!(
+            "Omamail is already running; the request went to that window. \
+             Close it first to start another."
+        );
         return None;
     }
     let queue = CommandQueue::new();
