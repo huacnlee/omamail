@@ -1196,4 +1196,39 @@ if grep -rn --include='*.qml' -E "(^|[^a-zA-Z/])app/|omamail-(outbox|calendars|c
   fail "the QML plugin must not depend on the standalone client's tree or host modules"
 fi
 
+# The sender's HTML is parsed when the message arrives, never during a render.
+#
+# `gpui-shell` gives a render 50 ms and an event 500 ms
+# (`crates/shell/src/engine/quickjs/sandbox.rs`), and exceeding the render one
+# unwinds the frame — the window then shows "This view could not be re-rendered;
+# showing the last version that worked". Sanitising and walking ordinary
+# newsletter markup measures about 16 ms at 46 KB in V8, and QuickJS is several
+# times slower, so a large message parsed inside `render` is over the budget.
+#
+# The parse lives in `syncReaderPresentation`, called from the notify that
+# delivers the detail. A grep rather than a test because the cost is not
+# observable from the render tree: the wrong version returns the same elements,
+# just too late to be shown.
+python3 - <<'PARSE'
+import re
+from pathlib import Path
+
+source = Path("app/main.js").read_text()
+start = source.index("\n  renderMail(cx) {")
+# The method ends at the next one at the same indentation.
+end = source.index("\n  }\n", start)
+body = source[start:end]
+if "readerController?.open(" in body or "readerController.open(" in body:
+    raise SystemExit(
+        "test_source.sh: renderMail reaches readerController.open(). Parsing the "
+        "sender's HTML inside a render exceeds gpui-shell's 50 ms render budget "
+        "on a large message; call syncReaderPresentation from the notify instead."
+    )
+if "syncReaderPresentation" not in body:
+    raise SystemExit(
+        "test_source.sh: renderMail no longer syncs the reader presentation; the "
+        "backstop for a detail that changed without notifying is gone."
+    )
+PARSE
+
 printf 'test_source.sh ok\n'

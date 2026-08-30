@@ -2157,4 +2157,49 @@ assert.equal(imapCalls.at(-1).effect.hostOperation.maxResults, 50);
   );
 }
 
+
+// The sender's HTML is parsed when the message arrives, never during a render.
+//
+// `gpui-shell` gives a render 50 ms and an event 500 ms
+// (`crates/shell/src/engine/quickjs/sandbox.rs`), and exceeding the render one
+// unwinds the frame: the window then shows "This view could not be re-rendered;
+// showing the last version that worked". Sanitising and walking ordinary
+// newsletter markup measures ~16 ms at 46 KB in V8, and QuickJS is several
+// times slower — so a large message read inside `render` is over the budget.
+{
+  const parses = [];
+  const watched = new Omamail();
+  watched.init(
+    {
+      storage,
+      cache,
+      execute: () => ({ cancel() {} }),
+      width: 1024,
+    },
+    cx,
+  );
+  const controller = /** @type {any} */ (watched.readerController);
+  const openedFor = controller.open.bind(controller);
+  controller.open = (detail) => {
+    parses.push(detail);
+    return openedFor(detail);
+  };
+
+  // A render must not reach the parse, however many times it runs.
+  watched.syncReaderPresentation({ id: "m1", html: "<p>one</p>" });
+  assert.equal(parses.length, 1, "arriving parses once");
+  for (let i = 0; i < 5; i += 1) watched.render(cx);
+  assert.equal(parses.length, 1, "and a render never parses again");
+
+  // A different message parses once more, and only once.
+  watched.syncReaderPresentation({ id: "m2", html: "<p>two</p>" });
+  watched.render(cx);
+  assert.equal(parses.length, 2);
+
+  // No message is not a parse.
+  watched.syncReaderPresentation(null);
+  watched.render(cx);
+  assert.equal(parses.length, 2);
+}
+
 console.log("app integration tests passed");

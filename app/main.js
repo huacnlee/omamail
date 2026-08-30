@@ -642,6 +642,9 @@ export default class Omamail extends View {
         ) =>
           execute(effect, (/** @type {any} */ reply) => {
             complete(reply);
+            // Before the repaint, not during it: the message this reply may
+            // have delivered is parsed here, where the budget is an event's.
+            this.syncReaderPresentation(this.controller?.snapshot().detail);
             cx.notify();
           }),
         // A thunk, not the values: Settings writes them while the window is
@@ -2351,6 +2354,33 @@ export default class Omamail extends View {
     );
   }
 
+  /**
+   * Parse the message being read, once, when it arrives.
+   *
+   * This used to sit in `renderMail`, and `open()` is not a cheap call: it
+   * sanitises the sender's HTML, walks it into reading blocks and does the same
+   * again for the other two modes. Measured against ordinary newsletter markup
+   * that is ~16 ms in V8 at 46 KB, and QuickJS is several times slower — past
+   * the 50 ms `render` budget in `gpui-shell`'s interrupt handler, which
+   * unwinds the frame and leaves the window showing "This view could not be
+   * re-rendered". An event handler has 500 ms, and this is an event: a message
+   * was opened.
+   *
+   * It is also what the coding guides ask for on its own — a render reads state
+   * and composes elements; parsing is a named method.
+   *
+   * @param {any} detail the message the controller is now holding
+   */
+  syncReaderPresentation(detail) {
+    if (this.readerPresentationDetail === detail) return;
+    this.readerPresentationDetail = detail;
+    if (detail) this.readerController?.open(detail);
+    // A different message, or none: the selecting surface holds the previous
+    // one's words and there is nothing here that could re-seed it mid-drag, so
+    // it goes away with the message it came from.
+    endReaderSelection(this);
+  }
+
   /** @param {import("gpui").Context} cx */
   renderMail(cx) {
     const controller = this.controller;
@@ -2361,14 +2391,11 @@ export default class Omamail extends View {
       (/** @type {any} */ entry) => entry.id === snapshot.accounts.activeId,
     );
     const provider = providerFor(account);
-    if (this.readerPresentationDetail !== snapshot.detail) {
-      this.readerPresentationDetail = snapshot.detail;
-      if (snapshot.detail) this.readerController?.open(snapshot.detail);
-      // A different message, or none: the selecting surface holds the
-      // previous one's words and there is nothing here that could re-seed
-      // it mid-drag, so it goes away with the message it came from.
-      endReaderSelection(this);
-    }
+    // Normally already done, by the notify that delivered this detail. Kept as
+    // the backstop for a path that changes `detail` without notifying: the
+    // comparison costs nothing, and the parse behind it must not be reached
+    // from here — see `syncReaderPresentation`.
+    this.syncReaderPresentation(snapshot.detail);
     const readerSnapshot = this.readerController?.snapshot();
     const lastError =
       snapshot.lastOperation && !snapshot.lastOperation.ok
