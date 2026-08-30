@@ -17,9 +17,15 @@
 # draft, not close the mailbox. The standalone router says the same thing in
 # its own vocabulary — `compose-mailto` never closes anything.
 #
-# Resolved at run time rather than written into the desktop file, so building
-# the standalone client is enough to start using it for links; there is no
-# second install step and nothing to undo when it is removed again.
+# The shell plugin is asked first. It is the primary client — the one that is
+# native to Omarchy — and merely having built the standalone binary must not
+# silently take the machine's mail links away from it. The standalone client
+# answers where the shell cannot: on a machine with no Omarchy shell at all
+# (macOS, or a plain Linux desktop), or when `OMAMAIL_BIN` names it explicitly.
+#
+# Resolved at run time rather than written into the desktop file, so neither
+# client needs a second install step and nothing has to be undone when one of
+# them is removed again.
 set -eu
 
 plugin_id=omamail
@@ -37,7 +43,23 @@ json_string() {
 url=${1:-}
 
 standalone=${OMAMAIL_BIN:-}
+explicit=$standalone
 [ -n "$standalone" ] || standalone=$(command -v omamail 2>/dev/null || true)
+
+# `OMAMAIL_BIN` is a deliberate instruction and outranks the shell; a binary
+# merely found on PATH does not.
+if [ -z "$explicit" ] && command -v omarchy-shell >/dev/null 2>&1; then
+  if [ -z "$url" ]; then
+    payload='{}'
+  else
+    payload="{\"mailto\":$(json_string "$url")}"
+  fi
+  if [ -n "${OMAMAIL_MAILTO_PRINT:-}" ]; then
+    printf '%s\n' "omarchy-shell shell summon $plugin_id $payload"
+    exit 0
+  fi
+  exec omarchy-shell shell summon "$plugin_id" "$payload"
+fi
 
 if [ -n "$standalone" ] && [ -x "$standalone" ]; then
   # The scheme is checked here as well as in the router. A desktop handler is

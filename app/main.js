@@ -17,7 +17,11 @@ import {
   shortcutSheetModel,
 } from "./keys/overlay.js";
 import { createFocusHomes, focusOverlay, parkKeyboard } from "./keys/focus.js";
-import { mailActionHost, mailKeyContext } from "./keys/mail-host.js";
+import {
+  globalActions,
+  mailActionHost,
+  mailKeyContext,
+} from "./keys/mail-host.js";
 
 // Re-exported: the integration test reaches for it here, because it is a fact
 // about this window even though it lives beside the handlers that need it.
@@ -1820,7 +1824,9 @@ export default class Omamail extends View {
   /** @param {import("gpui").Context} cx */
   renderSettings(cx) {
     const snapshot = this.settings.snapshot();
-    return appShell(
+    // F5 and Ctrl+, are `ANY` in the table; every route answers them.
+    return globalActions(
+      this, appShell(
       {
         top: topBar(
           {
@@ -1997,7 +2003,8 @@ export default class Omamail extends View {
       .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
       .on_action("mail::settings", (_event, eventCx) =>
         this.openSettings(eventCx),
-      );
+      ),
+    );
   }
 
   /** @param {import("gpui").Context} cx */
@@ -2008,7 +2015,9 @@ export default class Omamail extends View {
     const account = accounts.accounts.find(
       (/** @type {any} */ entry) => entry.id === draft.draft.accountId,
     );
-    return appShell(
+    // F5 and Ctrl+, are `ANY` in the table; every route answers them.
+    return globalActions(
+      this, appShell(
       {
         // No window header while composing: the QML hides it and the form
         // carries its own title band, because a reply is this window doing
@@ -2037,7 +2046,8 @@ export default class Omamail extends View {
       .on_action("mail::send", (_event, eventCx) => {
         this.sendCompose(eventCx);
       })
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx));
+      .on_action("mail::back", (_event, eventCx) => this.back(eventCx)),
+    );
   }
   /** @param {import("gpui").Context} cx */
   renderCalendar(cx) {
@@ -2049,7 +2059,9 @@ export default class Omamail extends View {
       (/** @type {any} */ entry) => entry.id === mailSnapshot.accounts.activeId,
     );
     const activeProvider = Registry.get(activeAccount?.provider || "gmail");
-    return v_flex()
+    // F5 and Ctrl+, are `ANY` in the table; every route answers them.
+    return globalActions(
+      this, v_flex()
       .id("calendar-action-host")
       .size_full()
       .min_w_0()
@@ -2120,7 +2132,8 @@ export default class Omamail extends View {
           ),
           cx,
         ),
-      );
+      ),
+    );
   }
 
   /** @param {import("gpui").Context} cx */
@@ -2251,7 +2264,9 @@ export default class Omamail extends View {
         /** @type {any} */ eventCx,
       ) => this.chooseProvider(nextProviderId, eventCx),
     };
-    return appShell(
+    // F5 and Ctrl+, are `ANY` in the table; every route answers them.
+    return globalActions(
+      this, appShell(
       {
         top: topBar(
           {
@@ -2306,7 +2321,8 @@ export default class Omamail extends View {
       .on_action("mail::calendarView", (_event, eventCx) =>
         this.openCalendar(eventCx),
       )
-      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx));
+      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx)),
+    );
   }
 
   /** @param {import("gpui").Context} cx */

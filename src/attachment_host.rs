@@ -47,10 +47,36 @@ impl<T: AttachmentLauncher + ?Sized> AttachmentLauncher for Arc<T> {
     }
 }
 
-pub struct XdgOpenLauncher;
-impl AttachmentLauncher for XdgOpenLauncher {
+/// The desktop's own opener, named absolutely: a `PATH` this process inherited
+/// is not a decision this process should be making.
+pub const XDG_OPEN: &str = "/usr/bin/xdg-open";
+/// macOS ships this and has no `xdg-open`. Same job, same argument.
+pub const MACOS_OPEN: &str = "/usr/bin/open";
+
+/// The program this desktop hands a saved attachment to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemOpener {
+    program: &'static Path,
+}
+
+impl SystemOpener {
+    pub fn current() -> Self {
+        Self {
+            program: Path::new(if cfg!(target_os = "macos") {
+                MACOS_OPEN
+            } else {
+                XDG_OPEN
+            }),
+        }
+    }
+    pub fn program(&self) -> &Path {
+        self.program
+    }
+}
+
+impl AttachmentLauncher for SystemOpener {
     fn launch(&self, path: &Path) -> Result<(), AttachmentError> {
-        launch_and_wait(Path::new("/usr/bin/xdg-open"), path)
+        launch_and_wait(self.program, path)
     }
 }
 
@@ -74,6 +100,16 @@ fn launch_and_wait(program: &Path, path: &Path) -> Result<(), AttachmentError> {
 pub struct AttachmentHost<L> {
     #[cfg(unix)]
     root: File,
+    /// The same directory as a path, and only where it is needed.
+    ///
+    /// Linux hands the opener the file back through the descriptor above, so
+    /// the thing that gets opened is the file this host wrote whatever happened
+    /// to the names on the way. `/proc` is how a descriptor becomes a path, and
+    /// no other Unix has it — so everywhere else the opener is given the
+    /// ordinary path, inside a directory this process created 0700 under a
+    /// random name a moment earlier.
+    #[cfg(all(unix, not(target_os = "linux")))]
+    root_path: PathBuf,
     launcher: L,
     directories: Mutex<Vec<(String, String)>>,
 }
@@ -82,6 +118,8 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
+            #[cfg(all(unix, not(target_os = "linux")))]
+            let root_path = root.clone();
             let root = fs::OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -92,6 +130,8 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
             }
             Ok(Self {
                 root,
+                #[cfg(all(unix, not(target_os = "linux")))]
+                root_path,
                 launcher,
                 directories: Mutex::new(Vec::new()),
             })
@@ -145,11 +185,14 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
             let mut file = unsafe { File::from_raw_fd(fd) };
             file.write_all(&bytes).map_err(|_| AttachmentError)?;
             file.sync_all().map_err(|_| AttachmentError)?;
+            #[cfg(target_os = "linux")]
             let target = PathBuf::from(format!(
                 "/proc/{}/fd/{}/{directory}/{filename}",
                 std::process::id(),
                 self.root.as_raw_fd()
             ));
+            #[cfg(not(target_os = "linux"))]
+            let target = self.root_path.join(&directory).join(filename);
             self.launcher.launch(&target).map_err(|_| AttachmentError)
         })();
         #[cfg(unix)]

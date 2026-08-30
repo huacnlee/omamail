@@ -38,6 +38,30 @@ export function mailKeyContext(mail, hidden, searching = false) {
 }
 
 /**
+ * The two keys the table declares for every context, installed on any route.
+ *
+ * `keys/Keymap.js` gives `refresh` and `settings` the context `ANY`, and
+ * `App.qml` answers both from `runShortcut` whatever is on screen. Here each
+ * route builds its own root with its own handlers, so "every context" has to be
+ * something a route can ask for — otherwise F5 works on the mailbox and nowhere
+ * else, which is what it did.
+ *
+ * @param {any} app the window
+ * @param {any} element the route's own root
+ * @returns {import("gpui").Element} the same element, so the chain stays typed
+ */
+export function globalActions(app, element) {
+  return element
+    .on_action("mail::refresh", (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+      app.controller?.refresh();
+      eventCx.notify();
+    })
+    .on_action("mail::settings", (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+      app.openSettings(eventCx),
+    );
+}
+
+/**
  * The mail screen's action host: the context, the keyboard's home, and one
  * handler per row of the keymap — `runShortcut`, taken apart.
  * @param {any} app the window @param {any} mail its mail state
@@ -99,6 +123,20 @@ export function mailActionHost(app, mail) {
       app.controller?.refresh();
       eventCx.notify();
     })
+    // Four keys the table binds on this screen that nothing here answered.
+    //
+    // `actionBindings` installs a binding for every row of `HANDLED_ACTIONS`,
+    // and the shortcut sheet advertises the same list — so a row with no
+    // `on_action` on the route it is bound to is a key the window promises and
+    // then ignores. `c` is the most-used write key in the application and it
+    // did nothing at all on the mailbox; the three view keys left the calendar
+    // with no keyboard route in or out.
+    .on_action("mail::compose", (_event, eventCx) => app.openCompose(eventCx))
+    .on_action("mail::calendar", (_event, eventCx) => app.openCalendar(eventCx))
+    .on_action("mail::calendarView", (_event, eventCx) =>
+      app.openCalendar(eventCx),
+    )
+    .on_action("mail::mailView", (_event, eventCx) => app.openMail(eventCx))
     .on_action("mail::toggleSidebar", (_event, eventCx) =>
       app.toggleSidebar(eventCx),
     )

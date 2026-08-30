@@ -1,5 +1,48 @@
 # Repository working agreements
 
+## Two clients
+
+This repository ships two mail clients, and they are not equals.
+
+- **The QML plugin** at the root — `App.qml`, `Service.qml`, `BarWidget.qml`,
+  `account/`, `cache/`, `calendar/`, `compose/`, `components/`, `keys/`,
+  `message/`, `providers/`, `bar/` — is the **primary** client. It is native to
+  Omarchy and it is what most people run.
+- **The standalone GPUI client** — `app/` (JavaScript) and `src/` (Rust) — is
+  **experimental**, and exists so the same mailbox can be opened where the
+  Omarchy shell is not: macOS, or a plain Linux desktop.
+
+The code boundary already holds by itself and must stay that way: no `.qml`
+file references `app/` or `src/`, and the GPUI tree names a `.qml` file only in
+comments citing it as the reference implementation. `tests/test_source.sh`
+fails if the plugin grows a dependency on the standalone client.
+
+Three things *are* shared, and each has a rule.
+
+- **The domain libraries.** Every `.js` under `account/`, `cache/`, `calendar/`,
+  `compose/`, `message/`, `providers/`, `keys/` and `bar/` is the single source
+  of truth for its logic. `scripts/qml-js-to-esm.mjs` generates the ESM copy
+  under `app/`, and `tests/test_generated_app_modules.mjs` fails if the two
+  drift. **Never edit the copy under `app/`.** Change the source, regenerate
+  with `node scripts/qml-js-to-esm.mjs <source> <target>`, and remember that
+  the change lands in both clients: it has to be right for the plugin too, not
+  only for the port.
+- **`scripts/`.** Eight of these serve both clients. Ownership is declared in
+  `tests/test_source.sh` and checked against what actually references each
+  file, so a script quietly acquiring a second client — or losing one — fails
+  a test rather than surprising a user. It has surprised one already:
+  `mailto.sh` was changed to prefer the standalone binary, which took the
+  machine's mail links away from the plugin whenever the binary had been built.
+- **`Makefile`, `manifest.json`, `assets/`.** The manifest version is what
+  Omarchy installs; the release workflow refuses a tag that disagrees with it.
+
+The gates the plugin needs — `make qml-check`, `make test-qml`, and
+`omarchy plugin validate .` — **cannot run in CI**: `qmllint` needs the Omarchy
+shell on the import path, and the QML tests need the Qt the plugin actually
+runs on rather than the one a runner ships. `.github/workflows/release.yml`
+says so where it skips them. So anything touching shared source has to be
+proved locally with `make test`, not by a green pull request.
+
 ## Colors
 
 - Use colors from the active Omarchy system theme. Do not hard-code UI colors.

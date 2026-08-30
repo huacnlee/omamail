@@ -1087,4 +1087,101 @@ if host.group(1) != window.group(1):
     )
 GRANTS
 
+# Two clients, one repository, and one place that says which scripts they share.
+#
+# The QML plugin at the root is the primary client and the GPUI client under
+# `app/`/`src/` is the experimental one. Nothing in the QML tree references
+# `app/` or `src/`, and the GPUI tree names a `.qml` file only in comments that
+# cite it — so the *code* boundary holds on its own.
+#
+# `scripts/` is where it does not. A script serves one client or both, nothing
+# in the file says which, and a change made for one silently changes the other.
+# That has already happened once: `mailto.sh` was made to prefer the standalone
+# binary, which took the machine's mail links away from the plugin.
+#
+# So ownership is declared here and checked against reality. Adding a reference
+# from the other client's tree — or removing the last one — now fails this test
+# instead of being noticed by a user.
+python3 - <<'CLIENTS'
+from pathlib import Path
+
+# script -> the clients allowed to reference it.
+OWNERS = {
+    "attachment.sh": {"qml", "standalone"},
+    "body-cache.sh": {"qml", "standalone"},
+    "config-store.sh": {"qml", "standalone"},
+    "image-fetch.sh": {"qml", "standalone"},
+    "mail-transport.sh": {"qml", "standalone"},
+    "mailto.sh": {"qml", "standalone"},
+    "omamail-companion.sh": {"qml", "standalone"},
+    "unsubscribe.sh": {"qml", "standalone"},
+    "contact-suggestions.py": {"qml", "standalone"},
+    "calendar-delete.sh": {"qml"},
+    "calendar-transport.sh": {"qml"},
+    "calendar-write.sh": {"qml"},
+    "google-cloud-setup.sh": {"qml"},
+    "install-mailto.sh": {"qml"},
+    "keyring-store.sh": {"qml"},
+    "pkce.sh": {"qml"},
+    "open-attachment.py": {"qml"},
+    "migrate-storage.sh": {"standalone"},
+    "build-icons.mjs": {"standalone"},
+    # Repository tooling. Neither client runs these; they build or release it.
+    "bump.sh": set(),
+    "release-notes.sh": set(),
+    "qml-js-to-esm.mjs": set(),
+}
+
+def referencing(name, roots, suffixes):
+    for root in roots:
+        base = Path(root)
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file() or path.suffix not in suffixes:
+                continue
+            if ".git" in path.parts:
+                continue
+            try:
+                if name in path.read_text(errors="ignore"):
+                    return True
+            except OSError:
+                continue
+    return False
+
+present = {p.name for p in Path("scripts").iterdir() if p.is_file()}
+declared = set(OWNERS)
+if present != declared:
+    raise SystemExit(
+        "test_source.sh: scripts/ and the ownership table disagree; "
+        "undeclared %s, stale %s"
+        % (sorted(present - declared), sorted(declared - present))
+    )
+
+for name, owners in sorted(OWNERS.items()):
+    qml = referencing(name, ["."], {".qml"})
+    standalone = referencing(name, ["app", "src"], {".js", ".rs", ".ts"})
+    actual = {c for c, hit in (("qml", qml), ("standalone", standalone)) if hit}
+    if actual - owners:
+        raise SystemExit(
+            "test_source.sh: scripts/%s is declared for %s but is now referenced by %s. "
+            "If that is intended, widen the table — and check the other client still "
+            "behaves the same way."
+            % (name, sorted(owners) or ["neither client"], sorted(actual - owners))
+        )
+    if owners - actual:
+        raise SystemExit(
+            "test_source.sh: scripts/%s is declared for %s but nothing in %s references it "
+            "any more; narrow the table."
+            % (name, sorted(owners), sorted(owners - actual))
+        )
+CLIENTS
+
+# The QML plugin must not reach into the standalone client. It is the primary
+# client and it predates the port; a dependency in this direction would make it
+# unusable without a Rust build.
+if grep -rn --include='*.qml' -E "(^|[^a-zA-Z/])app/|omamail-(outbox|calendars|command|contacts|notify)" . ; then
+  fail "the QML plugin must not depend on the standalone client's tree or host modules"
+fi
+
 printf 'test_source.sh ok\n'

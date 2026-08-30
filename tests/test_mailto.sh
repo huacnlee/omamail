@@ -74,4 +74,28 @@ upper=$(OMAMAIL_BIN="$binary" OMAMAIL_MAILTO_PRINT=1 sh "$script" \
 [ "$upper" = "$binary MAILTO:jane@example.com" ] \
   || fail "MAILTO: is the same scheme, got: $upper"
 
+
+# The shell plugin outranks a standalone binary merely found on PATH.
+#
+# The QML plugin is the primary client — the one native to Omarchy — and having
+# built the standalone binary must not silently take the machine's mail links
+# away from it. Only `OMAMAIL_BIN`, which is a deliberate instruction, moves
+# them; a machine with no Omarchy shell at all falls through to the binary.
+onpath=$(mktemp -d)
+printf '#!/bin/sh\nexit 0\n' > "$onpath/omamail"
+chmod +x "$onpath/omamail"
+found=$(PATH="$onpath:$PATH" OMAMAIL_MAILTO_PRINT=1 sh "$script" \
+  'mailto:jane@example.com')
+case "$found" in
+  "omarchy-shell shell summon omamail"*) ;;
+  *) fail "a binary on PATH must not outrank the shell plugin, got: $found" ;;
+esac
+
+# Named explicitly, it does outrank it.
+named=$(PATH="$onpath:$PATH" OMAMAIL_BIN="$onpath/omamail" OMAMAIL_MAILTO_PRINT=1 \
+  sh "$script" 'mailto:jane@example.com')
+[ "$named" = "$onpath/omamail mailto:jane@example.com" ] \
+  || fail "OMAMAIL_BIN must be honoured, got: $named"
+rm -rf "$onpath"
+
 printf 'test_mailto.sh ok\n'

@@ -1170,7 +1170,7 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
     let attachment_host = Arc::new(
         crate::attachment_host::AttachmentHost::new(
             attachment_root,
-            crate::attachment_host::XdgOpenLauncher,
+            crate::attachment_host::SystemOpener::current(),
         )
         .map_err(|error| gpui_shell::HostError::from(error.to_string()))?,
     );
@@ -1274,24 +1274,27 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
                 Ok(async move { Ok(HostValue::from(calendar_store.dispatch(&request))) })
             }),
     )?;
-    let notify_host = Arc::new(crate::notify_host::NotifyHost::new(
-        app_root,
-        crate::notify_host::NotifySendLauncher,
-    ));
-    gpui_shell::export_module(
-        HostModule::new("omamail-notify")
-            .declarations("export function send(request: string): Promise<string>;")
-            .async_function("send", move |arguments| {
-                let request = arguments.string(0)?.to_owned();
-                let notify_host = Arc::clone(&notify_host);
-                Ok(async move {
-                    notify_host
-                        .send_json(&request)
-                        .map(|_| HostValue::from("{}"))
-                        .map_err(|error| gpui_shell::HostError::from(error.to_string()))
-                })
-            }),
-    )?;
+    // Only where the desktop has a program to raise one with. A window that
+    // carries the module and fails every request would be a promise this side
+    // cannot keep; `main.js` treats the absent module as "no notification" and
+    // goes on showing the mail.
+    if let Some(notifier) = crate::notify_host::system_notifier() {
+        let notify_host = Arc::new(crate::notify_host::NotifyHost::new(app_root, notifier));
+        gpui_shell::export_module(
+            HostModule::new("omamail-notify")
+                .declarations("export function send(request: string): Promise<string>;")
+                .async_function("send", move |arguments| {
+                    let request = arguments.string(0)?.to_owned();
+                    let notify_host = Arc::clone(&notify_host);
+                    Ok(async move {
+                        notify_host
+                            .send_json(&request)
+                            .map(|_| HostValue::from("{}"))
+                            .map_err(|error| gpui_shell::HostError::from(error.to_string()))
+                    })
+                }),
+        )?;
+    }
     gpui_shell::export_module(
         HostModule::new("omamail-effects")
             .declarations("export function dispatch(request: string): Promise<string>;")

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { readFileSync } from "node:fs";
 
 import { HANDLED_ACTIONS, actionBindings } from "../app/keys/actions.js";
@@ -102,6 +103,45 @@ assert.deepEqual(CONTEXTS, ["list", "reader", "search", "compose", "page", "cale
       `${row.id} is documented beneath that table instead`,
     );
   }
+}
+
+
+// Every key the table binds on a route has a handler on that route.
+//
+// `actionBindings` installs a binding for every row of `HANDLED_ACTIONS` in
+// every context the table names, and the shortcut sheet advertises the same
+// list. A row bound on a route that answers nothing is a key the window
+// promises and then ignores — `c` did nothing at all on the mailbox, and the
+// three view keys left the calendar with no keyboard route in or out.
+{
+  const answered = (source) =>
+    new Set(
+      [...source.matchAll(/on_action\(\s*[`"]([^`"]+)[`"]/g)].map((m) => m[1]),
+    );
+  const host = answered(
+    fs.readFileSync(new URL("../app/keys/mail-host.js", import.meta.url), "utf8"),
+  );
+  for (const action of [
+    "mail::compose",
+    "mail::calendar",
+    "mail::calendarView",
+    "mail::mailView",
+  ])
+    assert.ok(host.has(action), `the mail screen must answer ${action}`);
+
+  // `refresh` and `settings` are `ANY` in the table, so every route installs
+  // them through one shared helper rather than four copies.
+  assert.ok(host.has("mail::refresh"));
+  assert.ok(host.has("mail::settings"));
+  const window = fs.readFileSync(
+    new URL("../app/main.js", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    (window.match(/globalActions\(/g) ?? []).length,
+    4,
+    "settings, compose, calendar and setup each install the ANY keys",
+  );
 }
 
 console.log("app keymap tests passed");
