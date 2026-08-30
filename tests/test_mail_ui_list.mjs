@@ -678,6 +678,32 @@ assert.equal(styleArg(inboxTab, "text_size"), tokens.font.bodySmall);
 assert.deepEqual(text(inboxTab), ["Inbox"]);
 assert.deepEqual(text(find(track, "mailbox-tab-unread")), ["Unread 3"]);
 
+// The status line's left edge follows what leads it.
+//
+// `App.qml` anchors the rail toggle 8 from the left and the status text at
+// either `railToggle.right + 8` or, with no toggle, 14 from the edge. A 24
+// square starting at 8 puts its glyph on the same 14 the text would have had.
+// Padding the bar uniformly at 14 pushed the toggle six pixels right of every
+// other left edge in the window.
+{
+  const withToggle = renderMail(mailModel({ onToggleSidebar() {} }), cx);
+  const bar = find(withToggle, "application-bottom-bar");
+  assert.ok(bar);
+  assert.equal(styleArg(bar, "pl"), tokens.space(8));
+  assert.equal(styleArg(bar, "pr"), tokens.space(12));
+  assert.ok(ids(withToggle).includes("sidebar-toggle"));
+
+  // Compact has no rail to toggle, so the text leads and takes the text inset.
+  const narrow = renderMail(
+    mailModel({ width: 600, onToggleSidebar() {} }),
+    cx,
+  );
+  const narrowBar = find(narrow, "application-bottom-bar");
+  assert.equal(ids(narrow).includes("sidebar-toggle"), false);
+  assert.equal(styleArg(narrowBar, "pl"), tokens.space(14));
+  assert.equal(styleArg(narrowBar, "pr"), tokens.space(12));
+}
+
 console.log("mail UI list tests passed");
 
 // A mailbox with no SMTP server is not offered three rows that refuse.

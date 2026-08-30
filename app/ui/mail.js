@@ -216,6 +216,10 @@ function statusBar(model, compact, cx) {
   const notice = String(model.status.notice ?? "");
   return bottomBar(
     {
+      // The rail toggle leads the line, so the bar starts at 8 rather than 14:
+      // the glyph inside its 24-square then lands on the same left edge the
+      // status text would have had. `App.qml` anchors it exactly that way.
+      leadsWithIcon: !compact && typeof model.onToggleSidebar === "function",
       status: h_flex()
         .id("mail-status")
         .flex_1()

@@ -149,7 +149,7 @@ export const topBar = (options, cx) =>
     .children([options.brand, options.center, options.actions].filter(Boolean));
 
 /**
- * @param {{status?:any,hints?:any}} options
+ * @param {{status?:any,hints?:any,leadsWithIcon?:boolean}} options
  * @param {import("gpui").Context} cx
  */
 export const bottomBar = (options, cx) =>
@@ -160,7 +160,14 @@ export const bottomBar = (options, cx) =>
     .items_center()
     .justify_between()
     .gap(style().spacing.controlGap)
-    .px(style().space(14))
+    // Not a uniform inset. `App.qml` anchors the rail toggle 8 from the left
+    // and the status text at either `railToggle.right + 8` or, with no toggle,
+    // 14 from the edge — so a 24-square icon button starts at 8 and its glyph
+    // lands on the same 14 the text would have. Padding the bar itself at 14
+    // put the toggle six pixels right of where every other left edge in the
+    // window sits, which is exactly where the eye catches it.
+    .pl(style().space(options.leadsWithIcon === true ? 8 : 14))
+    .pr(style().space(12))
     .border_t(style().spacing.hairline)
     .border_color(role("separator", cx.theme().colors.border))
     .bg(cx.theme().colors.background)
