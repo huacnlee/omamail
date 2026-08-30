@@ -7,6 +7,7 @@ import {
   cursorAfterOffset,
   cursorAfterReload,
   cursorAfterRemoval,
+  pluralize,
   removeById,
   replaceById,
   survivesAction,
@@ -33,6 +34,8 @@ import {
  *   canRetry: boolean,
  *   signedOut: boolean,
  *   status: string,
+ *   notice: string,
+ *   noticeAt: number,
  *   syncedAtMs: number
  * }} MailState
  */
@@ -44,6 +47,46 @@ import {
  * so the list offers the way back in instead of a Retry that cannot work.
  */
 export const SIGNED_OUT = "provider requires sign-in";
+
+/**
+ * How long a confirmation stays on the status line — `MailAccount`'s
+ * `noticeTimer`, at the same four seconds.
+ *
+ * Counted from the moment it went up rather than started on a timer of its
+ * own, so one beat of the clock the window already runs takes it down again.
+ * `compose/controller.js` retires its toast exactly this way, and a second
+ * mechanism for the same thing is two clocks to keep in step.
+ */
+export const NOTICE_MS = 4000;
+
+/**
+ * What the status line says once an action has landed —
+ * `MailAccount.actionLabel`, in its words.
+ *
+ * Said after the server agreed rather than beside the optimistic edit: the row
+ * moves the instant the key is pressed, and a sentence claiming the archive
+ * happened would be a claim about a request that had not left yet. The plural
+ * is for the one action that takes a whole page at once, which is
+ * `markAllRead` — "3 messages marked read" rather than "Marked read", because
+ * the row that moved is not the only thing that changed.
+ *
+ * @param {string} action @param {number} [count]
+ */
+export function actionLabel(action, count = 1) {
+  const many = Math.max(1, Math.floor(Number(count) || 1));
+  if (action === "markRead" && many > 1)
+    return `${pluralize(many, "message")} marked read`;
+  if (action === "archive") return "Archived";
+  if (action === "unarchive") return "Moved to inbox";
+  if (action === "trash") return "Moved to trash";
+  if (action === "untrash") return "Restored";
+  if (action === "star") return "Starred";
+  if (action === "unstar") return "Unstarred";
+  if (action === "markRead") return "Marked read";
+  if (action === "markUnread") return "Marked unread";
+  if (action === "spam") return "Reported as spam";
+  return "Done";
+}
 
 /** @param {unknown} error */
 export function isSignedOut(error) {
@@ -77,6 +120,13 @@ export function createMailState(accountId, providerId) {
     // any other failure: nothing this window can retry will fix it.
     signedOut: false,
     status: "",
+    // A confirmation, kept apart from `status` the way `MailAccount` keeps
+    // `actionStatus` apart from `lastError`. They are read in that order and
+    // drawn in different colours: "Archived" printed in the urgent colour, or
+    // under a failure from before it, reads as the archive having failed.
+    notice: "",
+    // When it went up, so a beat of the window's clock can take it down.
+    noticeAt: 0,
     // When the server last answered. The status line says how current the list
     // is rather than how long it is: a count of what is loaded is a number the
     // user can already see, and "Synced 5m ago" is the thing they cannot.
@@ -255,9 +305,14 @@ export function reduceMailState(state, event) {
   if (event.type === "act") {
     const capability = actionCapability(event.action);
     if (capability && event.capabilities?.[capability] !== true) {
+      // A refusal is something said, not something that went wrong — the same
+      // `note()` the confirmations go through in `MailAccount.act`, and it
+      // retires on the same four seconds. Drawn as a failure it would blame
+      // the mailbox for a request that was never made.
       return {
         ...state,
-        status: actionUnavailable(event.action, event.providerName),
+        notice: actionUnavailable(event.action, event.providerName),
+        noticeAt: Number(event.at) || state.noticeAt,
       };
     }
     const previous = state.messages;
@@ -269,9 +324,18 @@ export function reduceMailState(state, event) {
     // keyboard is not standing on, and pulling the cursor off a message that
     // is still listed is a step nobody asked for.
     const nextCursor = cursorAfterRemoval(previous, event.messageId) || null;
-    const messages = survivesAction(state.mailboxKey, event.action)
-      ? replaceById(previous, applyLabelChange(message, event.action))
-      : removeById(previous, event.messageId);
+    // An action the user did not ask for must never move them —
+    // `MailAccount.act`'s `keepOpen`. Opening an unread message marks it read,
+    // and being read is the very thing that disqualifies it from the Unread
+    // mailbox, so evicting it there would close the reader the click had just
+    // opened. The row stays until the list is next loaded, which is what
+    // Gmail's own clients do.
+    const keepOpen =
+      event.quiet === true && state.selectedId === event.messageId;
+    const messages =
+      survivesAction(state.mailboxKey, event.action) || keepOpen
+        ? replaceById(previous, applyLabelChange(message, event.action))
+        : removeById(previous, event.messageId);
     const removed = messages.length !== previous.length;
     return {
       ...state,
@@ -288,9 +352,96 @@ export function reduceMailState(state, event) {
     };
   }
 
+  // What the server agreed to, in the status line's words. Nothing is said for
+  // an action nobody asked for: marking read on open is a consequence of the
+  // click rather than a second thing that happened, and `MailAccount` passes
+  // `quiet` for exactly that reason.
+  if (event.type === "acted") {
+    return {
+      ...state,
+      notice: String(event.notice || ""),
+      noticeAt: Number(event.at) || 0,
+      status: "",
+    };
+  }
+
+  // The row put back where it was, because the server refused.
+  //
+  // `MailAccount.act`'s `restore`: the row is reinserted at the index it left
+  // from rather than the whole list being fetched again. A reload leaves the
+  // list wrong until a round trip completes and wrong for good if that read
+  // fails too, which is the one situation in which the list is already known
+  // to be talking to a server that is not answering.
+  if (event.type === "act-restore") {
+    let messages = state.messages;
+    (Array.isArray(event.rows) ? event.rows : []).forEach(
+      (/** @type {any} */ row) => {
+        if (!row || !row.message) return;
+        const id = row.message.id;
+        messages = messages.some((/** @type {any} */ entry) => entry.id === id)
+          ? replaceById(messages, row.message)
+          : messages
+              .slice(0, Math.min(Number(row.index) || 0, messages.length))
+              .concat(
+                [row.message],
+                messages.slice(
+                  Math.min(Number(row.index) || 0, messages.length),
+                ),
+              );
+      },
+    );
+    return {
+      ...state,
+      messages,
+      // A page offset taken before the row moved is the offset that belongs
+      // with the list being put back.
+      nextPageToken: String(event.nextPageToken ?? state.nextPageToken),
+      notice: "",
+      noticeAt: 0,
+      status: String(event.error || "The action could not be completed"),
+    };
+  }
+
+  // A confirmation that has had its four seconds. One beat of the window's
+  // clock, the way `compose/controller.js` retires its own toast.
+  if (event.type === "retire-notice") {
+    if (state.notice === "") return state;
+    if (Number(event.at) - state.noticeAt < NOTICE_MS) return state;
+    return { ...state, notice: "", noticeAt: 0 };
+  }
+
+  // A list read given up on because an action is about to edit the rows it
+  // would rebuild.
+  //
+  // `MailAccount.act` aborts the request and bumps `listSerial`; here the
+  // revision is the serial, and every completion is already guarded by it. A
+  // trashed search hit visibly came back when the slowest metadata request
+  // answered, because the read that owned those snapshots was allowed to
+  // finish and persist them over the edit.
+  if (event.type === "interrupt-list") {
+    if (!state.loading && !state.loadingMore) return state;
+    return {
+      ...state,
+      loading: false,
+      loadingMore: false,
+      // A provisional streamed offset can cross ids the interrupted read never
+      // settled. No Load more is safer than one that skips them.
+      nextPageToken: "",
+      request: {
+        ...state.request,
+        revision: state.request.revision + 1,
+      },
+    };
+  }
+
   if (event.type === "account-changed") {
     const next = createMailState(event.accountId, event.providerId);
     next.request.revision = state.request.revision + 1;
+    // The mailbox the switch is landing in, which is the one being left
+    // wherever the account being switched to has it — `Model.mailboxAfterAccountSwitch`
+    // decides, and the caller has already asked. Defaulted rather than
+    // required so a fresh state is still an inbox.
+    if (event.mailboxKey) next.mailboxKey = String(event.mailboxKey);
     return next;
   }
 

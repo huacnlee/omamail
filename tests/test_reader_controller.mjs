@@ -196,4 +196,168 @@ hostile.open({ html: "<p>x</p>", unsubscribe: { oneClick: false, postUrl: "file:
 await assert.rejects(hostile.unsubscribe());
 await assert.rejects(hostile.loadImage(0));
 
+// ---------------------------------------------- the other two ways off a list
+
+// `Unsubscribe.plan` picks between three, in the order of how little the user
+// has to do. Two of them are not this controller's own work — a page needs
+// something that can open one and a message needs an account that can send —
+// so both arrive as the caller's functions. Neither was reachable at all
+// before: `plan` was asked with `canSend` hard-coded false and anything but a
+// POST threw, so a list offering only a page had a live button that did
+// nothing.
+const opened = [];
+const paged = createReaderController({ dispatch: async () => "{}" });
+paged.open({
+  html: "<p>Newsletter</p>",
+  unsubscribe: {
+    available: true,
+    oneClick: false,
+    url: "https://list.example.com/off/9",
+    postUrl: "",
+    mail: null,
+  },
+});
+assert.equal(paged.snapshot().unsubscribe.plan, "browser");
+assert.equal(paged.snapshot().unsubscribe.state, "ready");
+// A page is the only one of the three that leaves the window, and the label
+// says so before it is pressed.
+assert.equal(paged.snapshot().unsubscribe.label, "Unsubscribe...");
+assert.equal(
+  paged.snapshot().unsubscribe.detail,
+  "Unsubscribing opens this sender's page in a browser",
+);
+await paged.unsubscribe({ openUrl: (url) => opened.push(url) });
+assert.deepEqual(opened, ["https://list.example.com/off/9"]);
+// What happened is that a page opened. Whether the list acted on it is between
+// the user and that page.
+assert.equal(
+  paged.snapshot().unsubscribe.detail,
+  "The unsubscribe page is open in your browser",
+);
+assert.equal(paged.snapshot().unsubscribe.label, "");
+await paged.unsubscribe({ openUrl: (url) => opened.push(url) });
+assert.deepEqual(opened, ["https://list.example.com/off/9"], "answered once");
+
+// The same message on an account that can send: a mailto finishes without
+// leaving the window either, so it is preferred to the page.
+const outgoing = [];
+const posted = createReaderController({ dispatch: async () => "{}" });
+const both = {
+  available: true,
+  oneClick: false,
+  url: "https://list.example.com/off/9",
+  postUrl: "",
+  mail: { to: "leave@list.example.com", subject: "off", body: "Unsubscribe" },
+};
+posted.open({ html: "<p>Newsletter</p>", unsubscribe: both });
+assert.equal(posted.snapshot({ canSend: true }).unsubscribe.plan, "mail");
+assert.equal(
+  posted.snapshot({ canSend: true }).unsubscribe.detail,
+  "Unsubscribing sends a message to this list",
+);
+// And the same message on an account that cannot: the page, not a button that
+// could not do what it said.
+assert.equal(posted.snapshot().unsubscribe.plan, "browser");
+await posted.unsubscribe({
+  canSend: true,
+  sendMail: async (message) => outgoing.push(message),
+});
+assert.deepEqual(outgoing, [
+  { to: "leave@list.example.com", subject: "off", body: "Unsubscribe" },
+]);
+assert.equal(
+  posted.snapshot({ canSend: true }).unsubscribe.detail,
+  "Unsubscribe request sent to leave@list.example.com",
+);
+
+// A send that failed says so and stays pressable, rather than claiming the
+// address is off the list.
+const refused = createReaderController({ dispatch: async () => "{}" });
+refused.open({ html: "<p>x</p>", unsubscribe: both });
+await assert.rejects(
+  refused.unsubscribe({
+    canSend: true,
+    sendMail: async () => {
+      throw new Error("no");
+    },
+  }),
+);
+assert.equal(refused.snapshot({ canSend: true }).unsubscribe.state, "error");
+
+// Both addresses are the sender's, and `plan` reads a shape rather than
+// judging one — so each is put back through the gate that produced it before
+// it is acted on. A page on the machine this runs on is not a page.
+const local = createReaderController({ dispatch: async () => "{}" });
+local.open({
+  html: "<p>x</p>",
+  unsubscribe: {
+    available: true,
+    oneClick: false,
+    url: "http://127.0.0.1/off",
+    postUrl: "",
+    mail: null,
+  },
+});
+let localOpened = 0;
+await assert.rejects(local.unsubscribe({ openUrl: () => (localOpened += 1) }));
+assert.equal(localOpened, 0);
+
+const forged = createReaderController({ dispatch: async () => "{}" });
+forged.open({
+  html: "<p>x</p>",
+  unsubscribe: {
+    available: true,
+    oneClick: false,
+    url: "",
+    postUrl: "",
+    mail: { to: "not an address", subject: "off", body: "Unsubscribe" },
+  },
+});
+let forgedSent = 0;
+await assert.rejects(
+  forged.unsubscribe({
+    canSend: true,
+    sendMail: async () => (forgedSent += 1),
+  }),
+);
+assert.equal(forgedSent, 0);
+
+// A record that has been on disk since it was written, and a `to` that would
+// come apart into a second recipient or a header of the list's own. It only
+// goes out if the parse that produced it gives back exactly what is stored.
+for (const to of [
+  "leave@list.example.com?bcc=everyone@list.example.com",
+  "leave@list.example.com,else@list.example.com",
+  "leave@list.example.com\r\nBcc: everyone@list.example.com",
+]) {
+  const tampered = createReaderController({ dispatch: async () => "{}" });
+  tampered.open({
+    html: "<p>x</p>",
+    unsubscribe: {
+      available: true,
+      oneClick: false,
+      url: "",
+      postUrl: "",
+      mail: { to, subject: "off", body: "Unsubscribe" },
+    },
+  });
+  let tamperedSent = 0;
+  await assert.rejects(
+    tampered.unsubscribe({
+      canSend: true,
+      sendMail: async () => (tamperedSent += 1),
+    }),
+    undefined,
+    to,
+  );
+  assert.equal(tamperedSent, 0, to);
+}
+
+// Nothing on offer is not a button at all.
+const none = createReaderController({ dispatch: async () => "{}" });
+none.open({ html: "<p>x</p>" });
+assert.equal(none.snapshot().unsubscribe.state, "unavailable");
+assert.equal(none.snapshot().unsubscribe.detail, "");
+await assert.rejects(none.unsubscribe());
+
 console.log("reader controller tests passed");

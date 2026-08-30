@@ -100,15 +100,20 @@ fn launch_and_wait(program: &Path, path: &Path) -> Result<(), AttachmentError> {
 pub struct AttachmentHost<L> {
     #[cfg(unix)]
     root: File,
-    /// The same directory as a path, and only where it is needed.
+    /// The same directory as a path.
     ///
-    /// Linux hands the opener the file back through the descriptor above, so
+    /// Linux hands the *opener* the file back through the descriptor above, so
     /// the thing that gets opened is the file this host wrote whatever happened
     /// to the names on the way. `/proc` is how a descriptor becomes a path, and
     /// no other Unix has it — so everywhere else the opener is given the
     /// ordinary path, inside a directory this process created 0700 under a
     /// random name a moment earlier.
-    #[cfg(all(unix, not(target_os = "linux")))]
+    ///
+    /// `store` needs the ordinary path on every Unix, because what it answers
+    /// with crosses to the window and comes back on a draft: a `/proc` path is
+    /// this process's own view of a descriptor and is not a name anything else
+    /// could be handed.
+    #[cfg(unix)]
     root_path: PathBuf,
     launcher: L,
     directories: Mutex<Vec<(String, String)>>,
@@ -118,7 +123,6 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            #[cfg(all(unix, not(target_os = "linux")))]
             let root_path = root.clone();
             let root = fs::OpenOptions::new()
                 .read(true)
@@ -130,7 +134,6 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
             }
             Ok(Self {
                 root,
-                #[cfg(all(unix, not(target_os = "linux")))]
                 root_path,
                 launcher,
                 directories: Mutex::new(Vec::new()),
@@ -206,6 +209,104 @@ impl<L: AttachmentLauncher> AttachmentHost<L> {
             .map_err(|_| AttachmentError)?
             .push((directory, filename.to_owned()));
         Ok(())
+    }
+
+    /// Keep bytes this window received, and answer with the path they are at.
+    ///
+    /// A forwarded file and a saved draft's file arrive from the mail server as
+    /// base64 and nothing else; the send path takes a *path* and opens the file
+    /// itself, because bytes large enough to be worth attaching do not fit in
+    /// the request that describes them. So the two are joined here: the same
+    /// private 0700 directory `open` writes into, under the same random name,
+    /// removed with every other one when this process ends.
+    ///
+    /// The answer is a value rather than an error for the same reason `pick`'s
+    /// is — the composer has a sentence to show beside a Retry, and a rejected
+    /// promise would give it nothing to say.
+    pub fn store_json(&self, input: &str) -> String {
+        match self.store(input) {
+            Ok(answer) => answer,
+            Err(_) => refused("That file could not be kept"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn store(&self, _input: &str) -> Result<String, AttachmentError> {
+        Err(AttachmentError)
+    }
+
+    #[cfg(unix)]
+    fn store(&self, input: &str) -> Result<String, AttachmentError> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        if input.len() > MAX_ENCODED + 1024 {
+            return Err(AttachmentError);
+        }
+        let request: StoreRequest = serde_json::from_str(input).map_err(|_| AttachmentError)?;
+        // Held to what the send path holds a filename to, here rather than
+        // only there: a name that would be refused at Send is one this should
+        // refuse while the draft is still being written. The name came off a
+        // stranger's message, so the caller is the one that cleans it.
+        let filename = checked_filename(&request.filename)?;
+        if filename.contains(['"', '\\', ';']) {
+            return Err(AttachmentError);
+        }
+        if !request.mime_type.is_empty() && !valid_media_type(&request.mime_type) {
+            return Err(AttachmentError);
+        }
+        if request.data.len() > MAX_ENCODED {
+            return Err(AttachmentError);
+        }
+        let bytes = URL_SAFE_NO_PAD
+            .decode(&request.data)
+            .or_else(|_| STANDARD.decode(&request.data))
+            .map_err(|_| AttachmentError)?;
+        if bytes.len() > MAX_DECODED {
+            return Err(AttachmentError);
+        }
+        let directory = create_private_directory(&self.root)?;
+        let written = (|| {
+            let relative = std::ffi::CString::new(format!("{directory}/{filename}"))
+                .map_err(|_| AttachmentError)?;
+            let fd = unsafe {
+                libc::openat(
+                    self.root.as_raw_fd(),
+                    relative.as_ptr(),
+                    libc::O_WRONLY
+                        | libc::O_CREAT
+                        | libc::O_EXCL
+                        | libc::O_NOFOLLOW
+                        | libc::O_CLOEXEC,
+                    0o600,
+                )
+            };
+            if fd < 0 {
+                return Err(AttachmentError);
+            }
+            let mut file = unsafe { File::from_raw_fd(fd) };
+            file.write_all(&bytes).map_err(|_| AttachmentError)?;
+            file.sync_all().map_err(|_| AttachmentError)
+        })();
+        if written.is_err() {
+            cleanup(&self.root, &directory, filename);
+            return Err(AttachmentError);
+        }
+        let path = self.root_path.join(&directory).join(filename);
+        let Some(path) = path.to_str().map(str::to_owned) else {
+            cleanup(&self.root, &directory, filename);
+            return Err(AttachmentError);
+        };
+        self.directories
+            .lock()
+            .map_err(|_| AttachmentError)?
+            .push((directory, filename.to_owned()));
+        serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "path": path,
+            "filename": filename,
+            "mimeType": request.mime_type,
+            "size": bytes.len(),
+        }))
+        .map_err(|_| AttachmentError)
     }
 }
 
@@ -396,6 +497,15 @@ impl<L> Drop for AttachmentHost<L> {
 #[serde(deny_unknown_fields)]
 struct Request {
     filename: String,
+    data: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StoreRequest {
+    filename: String,
+    #[serde(default)]
+    mime_type: String,
     data: String,
 }
 

@@ -238,6 +238,40 @@ answer=$(sh "$script" choose)
 check "a cancelled choose is cancelled, not an error" "$(json_field error "$answer")" "cancelled"
 unset OMAMAIL_PICK_OUT OMAMAIL_PICK_EXIT
 
+# macOS has neither of those pickers and needs no helper: the chooser is the
+# one every application there opens, asked for through osascript. Reached only
+# once the portal and zenity are both absent, so a Linux desktop never sees it.
+# A PATH with neither portal on it: this machine may well have
+# omarchy-file-select installed, and the branch under test is the one reached
+# when it is not there. Only what the script itself runs is linked in.
+mkdir -p "$work/mac-bin"
+for tool in sh wc tr sed; do
+  ln -sf "$(command -v "$tool")" "$work/mac-bin/$tool"
+done
+cat > "$work/mac-bin/osascript" <<'STUB'
+#!/bin/sh
+# Answers the way `choose file ... with multiple selections allowed` does:
+# POSIX paths, one per line. A cancelled dialog exits non-zero saying nothing.
+[ -n "$OMAMAIL_OSASCRIPT_OUT" ] || exit 1
+printf '%s\n' "$OMAMAIL_OSASCRIPT_OUT"
+STUB
+chmod +x "$work/mac-bin/osascript"
+printf '%%PDF-1.4\n' > "$work/mac-chosen.pdf"
+answer=$(PATH="$work/mac-bin" OMAMAIL_OSASCRIPT_OUT="$work/mac-chosen.pdf" \
+  sh "$script" choose)
+check "choose falls back to the macOS chooser" "$(json_field ok "$answer")" "True"
+chosen=$(printf '%s' "$answer" | python3 -c 'import json,sys
+files = json.load(sys.stdin)["files"]
+print(len(files), files[0]["filename"], files[0]["mimeType"], "data" in files[0])')
+check "the macOS chooser describes the file without its bytes" \
+  "$chosen" "1 mac-chosen.pdf application/pdf False"
+answer=$(PATH="$work/mac-bin" OMAMAIL_OSASCRIPT_OUT= sh "$script" choose)
+check "a cancelled macOS chooser is cancelled, not an error" \
+  "$(json_field error "$answer")" "cancelled"
+rm "$work/mac-bin/osascript"
+answer=$(PATH="$work/mac-bin" sh "$script" choose)
+check "no chooser at all says so" "$(json_field error "$answer")" "No file picker is available"
+
 # forget only deletes files this script wrote into the compose dir.
 printf 'keep\n' > "$work/outside.txt"
 sh "$script" forget "$work/compose" "$work/outside.txt" >/dev/null 2>&1 || true

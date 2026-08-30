@@ -1,7 +1,9 @@
 // @ts-check
 
 import * as Api from "../providers/GmailApi.js";
+import * as Calendar from "../message/Calendar.js";
 import * as Message from "../message/Message.js";
+import * as Unsubscribe from "../message/Unsubscribe.js";
 import { redactError } from "./effect-port.js";
 
 /** @param {any} operation */
@@ -71,8 +73,55 @@ function normalizeMessageResult(result, detail) {
         ...attachment,
         partId: attachment.attachmentId,
       })),
+      // Read out of the same fetch as the body, the way `MailAccount`'s detail
+      // read does, and never out of a list row: both are answers about a whole
+      // message, and both are what the reader draws its invitation card and
+      // its unsubscribe notice from.
+      invite: Calendar.fromPayload(message.payload),
+      unsubscribe: Unsubscribe.fromMessage(message),
     },
   };
+}
+
+// The invitation Google described rather than sent.
+//
+// Gmail withholds the octets of every part the sender named, and Google
+// Calendar names both of the two it sends — so on Gmail a Google invitation
+// always arrives as an id and one more request. `MailAccount.loadInvite` makes
+// that request after the body is on screen; here it is made before the detail
+// is handed on, because an adapter answers a detail read once and a second
+// answer would re-open the reader over a message somebody is already reading.
+//
+// A part id the host would refuse, a fetch that fails, or a file that is not a
+// calendar all leave the message exactly as it was: the invitation is the one
+// thing on this card that can be absent without anything else being wrong.
+const ATTACHMENT_ID = /^[A-Za-z0-9:._-]{1,2048}$/;
+
+/**
+ * @param {any} normalized the detail the message read became
+ * @param {any} payload the MIME tree it came from
+ * @returns {any} the part to ask for, or null
+ */
+function pendingInvitePart(normalized, payload) {
+  if (!normalized?.ok || normalized.value?.invite || !payload) return null;
+  const part = /** @type {any} */ (Calendar.pendingPart(payload));
+  const id = String(part?.body?.attachmentId || "");
+  return part && ATTACHMENT_ID.test(id) ? part : null;
+}
+
+/**
+ * The fetched file, read back through the part that named it so the charset
+ * the sender declared still decides how it is read. Refused before it is
+ * decoded when it is larger than a calendar file may be — this runs on the
+ * thread that draws the window, and a part that would be refused for its size
+ * should not become half a megabyte of string first.
+ * @param {any} normalized @param {any} part @param {any} attachment
+ */
+function withFetchedInvite(normalized, part, attachment) {
+  const data = attachment?.ok === true ? String(attachment.value?.data || "") : "";
+  if (data === "" || data.length > Calendar.MAX_ICS_BYTES * 2) return normalized;
+  const invite = Calendar.fromAttachment(part, data);
+  return invite ? { ...normalized, value: { ...normalized.value, invite } } : normalized;
 }
 
 /** @param {any} port @param {Array<any>} effects @param {any} callback */
@@ -146,7 +195,9 @@ export function createGmailAdapter(port) {
     /** @param {any} operation @param {(result: any) => void} [callback] */
     detail(operation = {}, callback) {
       const identity = identityOf(operation);
-      return port.dispatch(
+      /** @type {any} */
+      let invitation = null;
+      const handle = port.dispatch(
         {
           kind: "gmail.http",
           scope: "object",
@@ -163,10 +214,32 @@ export function createGmailAdapter(port) {
             operation.full === true ? Api.fullQuery() : Api.metadataQuery(),
           body: null,
         },
-        (/** @type {any} */ result) =>
-          callback?.(normalizeMessageResult(result, true)),
+        (/** @type {any} */ result) => {
+          const normalized = normalizeMessageResult(result, true);
+          const part = pendingInvitePart(normalized, result?.value?.payload);
+          if (!part) return callback?.(normalized);
+          invitation = port.dispatch(
+            {
+              kind: "gmail.attachment",
+              scope: "object",
+              accountId: identity.accountId,
+              identity,
+              messageId: identity.objectId,
+              partId: String(part.body.attachmentId),
+            },
+            (/** @type {any} */ attachment) =>
+              callback?.(withFetchedInvite(normalized, part, attachment)),
+            errorFor,
+          );
+        },
         errorFor,
       );
+      return {
+        cancel() {
+          handle?.cancel?.();
+          invitation?.cancel?.();
+        },
+      };
     },
 
     /** @param {any} operation @param {(result: any) => void} [callback] */

@@ -23,6 +23,48 @@ import { AUTHOR_URL, PROJECT_URL } from "./links.js";
 import { openShortcuts } from "../keys/overlay.js";
 import { accountIn, providerFor } from "./account-capabilities.js";
 
+/**
+ * Open what the cursor is standing on, and go where the message says.
+ *
+ * A row in Drafts is not a message to read: it is what somebody was typing,
+ * and opening it means picking the typing back up. So the open answers with
+ * the row it produced and the caller branches on `draftId` — which is what the
+ * keyboard already did, while the mouse called through a path that took no
+ * answer and always showed the reader. One implementation for both, because
+ * "clicking a row does what pressing Enter on it does" is not a rule two
+ * copies of this can be relied on to keep.
+ *
+ * @param {any} app @param {import("gpui").Context} cx
+ */
+export function openCursorDetail(app, cx) {
+  /** @type {(detail:any) => void} */
+  let completeOpen = () => {};
+  // Whether the answer came back inside the call. A body already on disk does;
+  // a fetch does not, and by the time it answers the event context that
+  // started it may be gone — which is why the task takes a live one.
+  let settled = true;
+  if (typeof cx.spawn === "function") {
+    const opened = new Promise((resolve) => {
+      completeOpen = resolve;
+    });
+    cx.spawn(async (/** @type {any} */ asyncCx) => {
+      const detail = await opened;
+      if (detail?.draftId) app.openDraft(asyncCx);
+      else asyncCx.notify();
+    });
+  } else {
+    // A context with no way to spawn cannot hold anything open until a fetch
+    // lands, so only the answer that arrives inside the call is acted on.
+    completeOpen = (/** @type {any} */ detail) => {
+      if (settled && detail?.draftId) app.openDraft(cx);
+    };
+  }
+  if (app.controller) app.controller.openCursor(completeOpen);
+  else completeOpen(undefined);
+  settled = false;
+  cx.notify();
+}
+
 /** @param {any} app */
 function activeAccount(app) {
   return accountIn(app.controller?.snapshot());

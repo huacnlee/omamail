@@ -2,7 +2,9 @@
 
 import * as Protocol from "../providers/ImapProtocol.js";
 import * as Registry from "../providers/Registry.js";
+import * as Calendar from "../message/Calendar.js";
 import * as Message from "../message/Message.js";
+import * as Unsubscribe from "../message/Unsubscribe.js";
 import { redactError } from "./effect-port.js";
 
 /** @param {any} operation */
@@ -107,6 +109,12 @@ function normalizeTransportResult(
       body: body.text,
       html: Message.extractHtml(messages[0].payload),
       attachments,
+      // A detail read here is `BODY.PEEK[]` — the whole message — so both of
+      // these are answered by the fetch that brought the body, with no second
+      // request of the kind Gmail needs. Read off the same MIME tree the body
+      // and the attachments came from, once.
+      invite: Calendar.fromPayload(messages[0].payload),
+      unsubscribe: Unsubscribe.fromMessage(messages[0]),
     },
   };
 }

@@ -232,4 +232,172 @@ hydratedComplete({
 assert.equal(detail.value.html, "<b>Hello</b>");
 assert.equal(detail.value.attachments[0].filename, "report.pdf");
 
-console.log("app Gmail adapter tests passed");
+
+// ------------------------------------------------- the list's own door out
+
+// `List-Unsubscribe` is read out of the same fetch as the body, the way
+// `MailAccount`'s detail read does it. Without this the reader's notice had
+// nothing to draw from and never appeared, however the message was written.
+let listed = null;
+hydratedIdentity = messageIdentity;
+hydratedAdapter.detail({ identity: messageIdentity, full: true }, (result) => {
+  listed = result;
+});
+hydratedComplete({
+  ok: true,
+  value: {
+    id: "18f3a",
+    payload: {
+      mimeType: "multipart/alternative",
+      headers: [
+        {
+          name: "List-Unsubscribe",
+          value:
+            "<mailto:leave@list.example.com?subject=off>, <https://list.example.com/off/9>",
+        },
+        { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+      ],
+      parts: [
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("Goodbye").toString("base64") },
+        },
+      ],
+    },
+  },
+});
+assert.equal(listed.value.unsubscribe.oneClick, true);
+assert.equal(listed.value.unsubscribe.postUrl, "https://list.example.com/off/9");
+assert.equal(listed.value.unsubscribe.mail.to, "leave@list.example.com");
+assert.equal(listed.value.invite, null);
+
+// --------------------------------------------------- the meeting inside it
+
+const ics = [
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "METHOD:REQUEST",
+  "BEGIN:VEVENT",
+  "UID:evt-1",
+  "SUMMARY:Architecture sync",
+  "DTSTART:20260901T090000Z",
+  "DTEND:20260901T093000Z",
+  "ORGANIZER;CN=Ada:mailto:ada@example.test",
+  "ATTENDEE;CN=Me;PARTSTAT=NEEDS-ACTION:mailto:me@example.com",
+  "END:VEVENT",
+  "END:VCALENDAR",
+].join("\r\n");
+
+let carried = null;
+hydratedAdapter.detail({ identity: messageIdentity, full: true }, (result) => {
+  carried = result;
+});
+hydratedComplete({
+  ok: true,
+  value: {
+    id: "18f3a",
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("Please come").toString("base64") },
+        },
+        {
+          mimeType: "text/calendar; method=REQUEST",
+          filename: "invite.ics",
+          body: { data: Buffer.from(ics).toString("base64"), size: ics.length },
+        },
+      ],
+    },
+  },
+});
+assert.equal(carried.value.invite.summary, "Architecture sync");
+assert.equal(carried.value.invite.method, "REQUEST");
+assert.equal(carried.value.invite.organizer.email, "ada@example.test");
+assert.equal(carried.value.unsubscribe.available, false);
+
+// Gmail withholds the octets of every part the sender named, and Google
+// Calendar names both of the two it sends — so on Gmail a Google invitation
+// always arrives as an id and one more request. The detail is answered once,
+// with the meeting already on it.
+const promised = [];
+const promisedAdapter = createGmailAdapter(
+  createEffectPort(
+    (effect, complete) => {
+      promised.push({ effect, complete });
+      return { cancel() {} };
+    },
+    () => messageIdentity,
+  ),
+);
+let answered = null;
+promisedAdapter.detail({ identity: messageIdentity, full: true }, (result) => {
+  answered = result;
+});
+promised[0].complete({
+  ok: true,
+  value: {
+    id: "18f3a",
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("Please come").toString("base64") },
+        },
+        {
+          mimeType: "text/calendar",
+          filename: "invite.ics",
+          body: { attachmentId: "part:cal", size: ics.length },
+        },
+      ],
+    },
+  },
+});
+assert.equal(answered, null, "the detail waits for the invitation it named");
+assert.deepEqual(
+  { kind: promised[1].effect.kind, partId: promised[1].effect.partId },
+  { kind: "gmail.attachment", partId: "part:cal" },
+);
+promised[1].complete({
+  ok: true,
+  value: { data: Buffer.from(ics).toString("base64") },
+});
+assert.equal(answered.value.invite.summary, "Architecture sync");
+assert.equal(answered.value.body, "Please come");
+
+// A fetch that failed leaves the message exactly as it was: the invitation is
+// the one thing on this card that can be absent without anything else being
+// wrong.
+answered = null;
+promised.length = 0;
+promisedAdapter.detail({ identity: messageIdentity, full: true }, (result) => {
+  answered = result;
+});
+promised[0].complete({
+  ok: true,
+  value: {
+    id: "18f3a",
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("Please come").toString("base64") },
+        },
+        {
+          mimeType: "text/calendar",
+          filename: "invite.ics",
+          body: { attachmentId: "part:cal", size: ics.length },
+        },
+      ],
+    },
+  },
+});
+promised[1].complete({ ok: false, error: "gone" });
+assert.equal(answered.ok, true);
+assert.equal(answered.value.invite, null);
+assert.equal(answered.value.body, "Please come");
+
+console.log("app Gmail adapter invitation and unsubscribe tests passed");

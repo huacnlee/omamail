@@ -9,8 +9,14 @@ node_modules/
 docs/design/
 docs/superpowers/
 target/
-Cargo.lock
 app/**/gpui.d.ts
+
+# Cargo.lock is deliberately *not* ignored. gpui and gpui-component are git
+# dependencies with no version to pin, so without the lock a release build
+# resolves whatever is on their default branches that morning — a binary that
+# differs from the one the change was tested against, with nothing in the tree
+# to say how. It is committed, and the release workflow builds `--locked`, so
+# two builds of one tag are the same build.
 
 # The Google OAuth client lives in ~/.config/omamail; an old build wrote it
 # here, and a client id and secret must never be committed.

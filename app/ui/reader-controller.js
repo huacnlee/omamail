@@ -92,7 +92,13 @@ export function createReaderController(effects) {
   let imageStates = [];
   /** @type {any} */
   let unsubscribeInfo = null;
-  let unsubscribeState = "unavailable";
+  // What has happened to the request, and nothing about what is on offer:
+  // which of the three ways off a list this message carries depends on whether
+  // the account can send, and that is the window's answer rather than the
+  // message's — so it arrives with the question instead of being frozen here
+  // when the message was opened.
+  /** @type {"idle"|"loading"|"done"|"error"} */
+  let unsubscribeState = "idle";
   let unsubscribeDone = "";
   // Set by the reader when a document is past the bounds, cleared by the user
   // asking for it anyway. Per message rather than per window: "show anyway" is
@@ -121,7 +127,12 @@ export function createReaderController(effects) {
     forced: alwaysRenderHeavyMessages || forceRichAnyway,
   });
 
-  const snapshot = () => {
+  /**
+   * @param {{canSend?:boolean}} [options] whether this account can send a
+   *   message, which is what decides between a mailto entry and a page.
+   */
+  const snapshot = (options = {}) => {
+    const canSend = options.canSend === true;
     const offer = offerNow();
     const wanted = /** @type {ReaderMode} */ (
       Html.resolveBodyMode(mode, offer)
@@ -160,20 +171,28 @@ export function createReaderController(effects) {
       blockedImages: prepared.blockedImages,
       images: imageStates.map((entry) => ({ ...entry })),
       unsubscribe: {
-        state: unsubscribeState,
-        // Which of the three ways off this list the sender offers. Only the
-        // one-click POST is something this controller can carry out; the other
-        // two are a browser and an outgoing message, and both belong to the
-        // host that owns those.
-        plan: Unsubscribe.plan(unsubscribeInfo, false),
-        label: unsubscribeDone !== "" ? "" : Unsubscribe.label(unsubscribeInfo, false),
+        state:
+          unsubscribeState === "idle"
+            ? Unsubscribe.plan(unsubscribeInfo, canSend) === ""
+              ? "unavailable"
+              : "ready"
+            : unsubscribeState,
+        // Which of the three ways off this list the sender offers. The
+        // one-click POST is the only one this controller carries out itself;
+        // the other two are a browser and an outgoing message, and both are
+        // done by whoever holds those — `unsubscribe` below is handed them.
+        plan: Unsubscribe.plan(unsubscribeInfo, canSend),
+        label:
+          unsubscribeDone !== ""
+            ? ""
+            : Unsubscribe.label(unsubscribeInfo, canSend),
         // Stays up after the deed is done, saying what was done: a control that
         // vanishes under the pointer reads as a misclick, and "did that work?"
         // is a question the user may come back to this message to ask.
         detail:
           unsubscribeDone !== ""
             ? unsubscribeDone
-            : Unsubscribe.explanation(unsubscribeInfo, false),
+            : Unsubscribe.explanation(unsubscribeInfo, canSend),
         busy: unsubscribeState === "loading",
       },
     };
@@ -194,10 +213,7 @@ export function createReaderController(effects) {
       reparse();
       imageStates = prepared.imageSources.map(() => ({ state: "blocked" }));
       unsubscribeInfo = message?.unsubscribe ?? null;
-      unsubscribeState =
-        Unsubscribe.plan(unsubscribeInfo, false) === "post"
-          ? "ready"
-          : "unavailable";
+      unsubscribeState = "idle";
       unsubscribeDone = "";
       forceRichAnyway = false;
     },
@@ -265,8 +281,70 @@ export function createReaderController(effects) {
         throw error;
       }
     },
-    async unsubscribe() {
-      if (Unsubscribe.plan(unsubscribeInfo, false) !== "post") throw new TypeError("one-click unsubscribe is unavailable");
+    /**
+     * Off this list, whichever of the three ways this one offers.
+     *
+     * `MailAccount.unsubscribe` in one function, and the order is
+     * `Unsubscribe.plan`'s: how little the user has to do, not how much this
+     * controller would enjoy doing it. Only the POST is this controller's own
+     * work. A page is opened by whoever holds a live context and an outgoing
+     * message is sent by whoever holds the account, so both arrive as the
+     * caller's own functions rather than being reached for from here.
+     *
+     * Both addresses are the sender's, and `plan` reads a shape rather than
+     * judging one — so the URL is put back through the same gate that decided
+     * a message may load a picture, and the mailto through the same parse that
+     * produced it, before either is acted on.
+     *
+     * @param {{canSend?:boolean, openUrl?:(url:string)=>void,
+     *   sendMail?:(message:{to:string,subject:string,body:string})=>Promise<unknown>}} [actions]
+     */
+    async unsubscribe(actions = {}) {
+      const canSend = actions.canSend === true;
+      const how = Unsubscribe.plan(unsubscribeInfo, canSend);
+      if (how === "") throw new TypeError("this message offers no way off the list");
+      // Pressed twice, or pressed after it was answered. The notice stays up
+      // saying what was done, so the button under it must not do it again.
+      if (unsubscribeState === "loading" || unsubscribeDone !== "") return;
+      if (how === "browser") {
+        const url = String(unsubscribeInfo?.url || "");
+        if (!Unsubscribe.isPublicWebUrl(url) || typeof actions.openUrl !== "function")
+          throw new TypeError("that unsubscribe address is not one this can open");
+        actions.openUrl(url);
+        // What happened is that a page opened. Whether the list acted on it is
+        // between the user and that page, and claiming otherwise here would be
+        // this window taking credit for work it cannot see.
+        unsubscribeState = "done";
+        unsubscribeDone = "The unsubscribe page is open in your browser";
+        return;
+      }
+      if (how === "mail") {
+        const mail = unsubscribeInfo?.mail;
+        // Put back through the parse that produced it, and only sent if it
+        // comes out unchanged: a `?`, a comma or a line break in there is a
+        // second recipient or a header of the list's own choosing, and this
+        // object may have come off disk rather than out of the header a moment
+        // ago. The subject loses its line breaks for the same reason.
+        const parsed = mail ? Unsubscribe.parseMailto(`mailto:${mail.to}`) : null;
+        if (!parsed || parsed.to !== String(mail.to) || typeof actions.sendMail !== "function")
+          throw new TypeError("that unsubscribe address is not one this can write to");
+        unsubscribeState = "loading";
+        try {
+          await actions.sendMail({
+            to: parsed.to,
+            subject: Unsubscribe.headerSafe(mail.subject) || "Unsubscribe",
+            body: String(mail.body || "Unsubscribe"),
+          });
+          unsubscribeState = "done";
+          unsubscribeDone = `Unsubscribe request sent to ${parsed.to}`;
+        } catch (error) {
+          unsubscribeState = "error";
+          throw error;
+        }
+        return;
+      }
+      if (!Unsubscribe.isPostableUrl(unsubscribeInfo?.postUrl))
+        throw new TypeError("that unsubscribe address is not one this can post to");
       unsubscribeState = "loading";
       try {
         const response = JSON.parse(await effects.dispatch(JSON.stringify({

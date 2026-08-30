@@ -60,3 +60,68 @@ jobs:
           previous_tag="$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^")"
           scripts/release-notes.sh "$previous_tag" "$GITHUB_REF_NAME" >release-notes.md
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+
+  # The standalone client, for the desktops that cannot run the plugin.
+  #
+  # An addition to the release above and never a replacement for it: what the
+  # tag publishes is the Omarchy plugin, which is installed by cloning this
+  # repository and needs nothing built. So this runs after the release exists
+  # and attaches to it — a build that fails leaves a complete plugin release
+  # standing and can be re-run on its own, which is the right way round for a
+  # repository whose primary client is the QML one.
+  #
+  # `needs: release` is also what puts the binaries behind the tag/manifest
+  # check and the tests: nothing is built for a tag that disagrees with the
+  # version Omarchy installs.
+  binaries:
+    needs: release
+    strategy:
+      # Two platforms, judged separately. A macOS build that fails is not a
+      # reason to withhold the Linux binary from the release.
+      fail-fast: false
+      matrix:
+        include:
+          # macos-14 is arm64 and ubuntu-latest is x86_64, so each artifact is
+          # built on a machine of its own architecture and nothing is
+          # cross-compiled.
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+          - platform: macos-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # What the Linux binary links: xcb and xkbcommon. Wayland and Vulkan are
+      # opened at run time rather than linked, so they are the user's to have
+      # and not this build's. The macOS runner needs nothing — its own SDK is
+      # what gpui builds against.
+      - name: Install the Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-x11-dev libxcb-xkb-dev libwayland-dev libfontconfig-1-dev
+
+      # The runners ship a Rust toolchain; this is only to make sure it is
+      # current enough for the edition this crate is written in.
+      - name: Use the current stable toolchain
+        run: rustup update --no-self-update stable && rustup default stable
+
+      # `--locked`, because `Cargo.lock` is what pins the four unversioned git
+      # dependencies and a release that quietly re-resolved them is a binary
+      # nobody tested. Failing on a stale lock is the point: it says the tag
+      # was cut without the lockfile the change was verified against.
+      - name: Build
+        run: cargo build --release --locked
+
+      # The binary alone does not run: the artifact carries the window and the
+      # helpers the host shells out to, in a layout `application_dir` already
+      # resolves. `tests/test_package_release.sh` is what holds that together.
+      - name: Package
+        run: bash scripts/package-release.sh "${{ matrix.platform }}" target/release/omamail dist
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz --clobber

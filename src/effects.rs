@@ -1174,6 +1174,7 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
         )
         .map_err(|error| gpui_shell::HostError::from(error.to_string()))?,
     );
+    let attachment_store = Arc::clone(&attachment_host);
     gpui_shell::export_module(
         HostModule::new("omamail-host-context")
             .declarations("export function configure(contextJson: string): Promise<string>;")
@@ -1218,26 +1219,34 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
     let chooser = Arc::new(crate::attachment_host::ScriptChooser::new(
         checkout_root.join("scripts/attachment.sh"),
     ));
-    let contacts = Arc::new(crate::contacts_host::ScriptContacts::new(
-        checkout_root.join("scripts/contact-suggestions.py"),
-    ));
-    gpui_shell::export_module(
-        HostModule::new("omamail-contacts")
-            .declarations("export function read(): Promise<string>;")
-            .async_function("read", move |_arguments| {
-                let contacts = Arc::clone(&contacts);
-                Ok(async move {
-                    Ok(HostValue::from(crate::contacts_host::read_contacts(
-                        contacts.as_ref(),
-                    )))
-                })
-            }),
-    )?;
+    // Only where this machine has a desktop address book to read. Nothing is
+    // gained by running the reader on a machine with no Thunderbird — the
+    // completion falls back to the mailbox's own senders either way — and on
+    // macOS running it costs a developer-tools dialog nobody asked for.
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if crate::contacts_host::has_address_book(home.as_deref()) {
+        let contacts = Arc::new(crate::contacts_host::ScriptContacts::new(
+            checkout_root.join("scripts/contact-suggestions.py"),
+        ));
+        gpui_shell::export_module(
+            HostModule::new("omamail-contacts")
+                .declarations("export function read(): Promise<string>;")
+                .async_function("read", move |_arguments| {
+                    let contacts = Arc::clone(&contacts);
+                    Ok(async move {
+                        Ok(HostValue::from(crate::contacts_host::read_contacts(
+                            contacts.as_ref(),
+                        )))
+                    })
+                }),
+        )?;
+    }
     gpui_shell::export_module(
         HostModule::new("omamail-attachment")
             .declarations(
                 "export function open(request: string): Promise<string>;\n\
-                 export function pick(): Promise<string>;",
+                 export function pick(): Promise<string>;\n\
+                 export function store(request: string): Promise<string>;",
             )
             .async_function("open", move |arguments| {
                 let request = arguments.string(0)?.to_owned();
@@ -1259,6 +1268,14 @@ pub fn install_effect_host(app_root: &Path) -> Result<(), gpui_shell::HostError>
                         chooser.as_ref(),
                     )))
                 })
+            })
+            // A file the mail server handed over as bytes, kept where the send
+            // path can open it. Answered rather than rejected, for the reason
+            // `pick` is: the composer shows what went wrong beside a Retry.
+            .async_function("store", move |arguments| {
+                let request = arguments.string(0)?.to_owned();
+                let attachment_store = Arc::clone(&attachment_store);
+                Ok(async move { Ok(HostValue::from(attachment_store.store_json(&request))) })
             }),
     )?;
     // The calendars the user configured. Read at start-up and written back

@@ -11,6 +11,7 @@
 // list — so the toast is drawn at the window root, not from here.
 
 import { attachFiles } from "./compose-attach.js";
+import { retryAttachments } from "./compose-attachments.js";
 
 /**
  * There is no `onSave`. `ComposeView.qml` offers no Save draft button, because
@@ -102,6 +103,15 @@ export function composeModel(app, draft, account) {
             attachFiles(app, eventCx);
           },
         }),
+    // The files the original carries did not arrive, and the composer says so
+    // beside a Retry rather than leaving Send held with no way out —
+    // `ComposeView`'s Retry, in the same place, doing the same read again.
+    onRetryForward: (
+      /** @type {any} */ _event,
+      /** @type {any} */ eventCx,
+    ) => {
+      retryAttachments(app, eventCx);
+    },
     onRemoveAttachment: (
       /** @type {number} */ index,
       /** @type {any} */ _event,

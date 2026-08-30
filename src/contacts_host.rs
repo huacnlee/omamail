@@ -1,4 +1,8 @@
-use std::{fmt, path::PathBuf, time::Duration};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use crate::platform::commands::{PreparedCommand, ProcessRunner, SystemProcessRunner};
 
@@ -39,6 +43,37 @@ impl std::error::Error for ContactsError {}
 /// because they answer different questions and either can be empty on its own.
 pub trait ContactSource: Send + Sync {
     fn read(&self) -> Result<Vec<u8>, ContactsError>;
+}
+
+/// Where a desktop address book lives on this platform.
+///
+/// The same directories `scripts/contact-suggestions.py` reads — it keeps the
+/// whole list because one script serves both clients, and this keeps the pair
+/// this platform can have, because the host has one question to answer before
+/// it runs anything: whether there is an address book here at all.
+///
+/// That question earns its keep on macOS. `/usr/bin/python3` there is a stub
+/// that puts a "install the command line developer tools" dialog on screen when
+/// the tools are absent, and a completion list nobody asked for is not worth
+/// putting that in front of somebody who has no Thunderbird to read.
+/// `tests/contacts_host.rs` holds these against the script's own list.
+pub fn address_book_roots(home: Option<&Path>) -> Vec<PathBuf> {
+    let Some(home) = home else {
+        return Vec::new();
+    };
+    if cfg!(target_os = "macos") {
+        vec![
+            home.join("Library/Thunderbird"),
+            home.join("Library/Betterbird"),
+        ]
+    } else {
+        vec![home.join(".thunderbird"), home.join(".betterbird")]
+    }
+}
+
+/// Whether this machine has one, which is whether the module is exported.
+pub fn has_address_book(home: Option<&Path>) -> bool {
+    address_book_roots(home).iter().any(|root| root.is_dir())
 }
 
 pub struct ScriptContacts {

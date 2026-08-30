@@ -1895,8 +1895,38 @@ assert.equal(
 );
 identityCompletions.shift()({ ok: true });
 identityApp.switchAccount("second@example.test", cx);
+// The field is debounced, so the read is issued once the typing settles rather
+// than once per keystroke. A context that can sleep is what runs the settle.
+let searchSleep = 0;
+const searchCx = {
+  ...cx,
+  spawn(task) {
+    return task({
+      ...cx,
+      sleep(milliseconds) {
+        searchSleep = milliseconds;
+        return Promise.resolve();
+      },
+    });
+  },
+};
+const effectsBeforeTyping = identityEffects.length;
+identityApp.search.set_value("from:fr");
+identityApp.search.emit("change", searchCx);
 identityApp.search.set_value("from:friend@example.test");
-identityApp.search.emit("change", cx);
+identityApp.search.emit("change", searchCx);
+assert.equal(
+  identityEffects.length,
+  effectsBeforeTyping,
+  "a keystroke does not issue a list read of its own",
+);
+assert.equal(searchSleep, 250);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  identityEffects.length,
+  effectsBeforeTyping + 1,
+  "two keystrokes settle into one read",
+);
 assert.equal(
   identityEffects.at(-1).query.q,
   "from:friend@example.test",

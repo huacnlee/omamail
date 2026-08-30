@@ -73,6 +73,7 @@ import {
   endReaderSelection,
 } from "./application/reader-selection.js";
 import { saveDraftOnLeave } from "./application/compose-exit.js";
+import { loadDraftAttachments } from "./application/compose-attachments.js";
 import { openResponse } from "./application/compose-response.js";
 import {
   composeContacts,
@@ -94,10 +95,15 @@ import {
   moveAppMenu,
   moveMessageMenu,
   openAccountSwitcher,
+  openCursorDetail,
   runAccountSwitcherCursor,
   runAppMenuCursor,
   runMessageMenuCursor,
 } from "./application/mail-actions.js";
+import {
+  searchAfterTyping,
+  submitSearch,
+} from "./application/search.js";
 import * as HeyCli from "./providers/HeyCli.js";
 import * as Mail from "./message/Message.js";
 import * as Accounts from "./account/Accounts.js";
@@ -153,7 +159,15 @@ const SIGN_IN_POLL_INTERVAL_MS = 500;
 // window painted in the theme's colors at gpui's density and roundness still
 // does not belong on the desktop.
 async function currentOmarchyTheme() {
-  const none = { colors: "", shell: "", cornerRadius: 0, fontFamily: "" };
+  // `monospace` is a fontconfig alias, and fontconfig is what macOS has not
+  // got: asked for there it names no family at all. Menlo is on every macOS
+  // and is what its own terminal draws.
+  const none = {
+    colors: "",
+    shell: "",
+    cornerRadius: 0,
+    fontFamily: platform === "darwin" ? "Menlo" : "",
+  };
   if (platform !== "linux") return none;
   try {
     const {
@@ -314,10 +328,13 @@ export default class Omamail extends View {
     this.search = InputState.new({
       placeholder: "Search mail — from:jane has:attachment",
     });
-    this.search.on("change", (_event, eventCx) => {
-      this.controller?.search(this.search.value());
-      eventCx.notify();
-    });
+    // Debounced, and Enter asks at once. A read per keystroke made a
+    // nine-character query nine list reads, eight of them about a question
+    // nobody had finished asking. `application/search.js` holds both.
+    this.search.on("change", (_event, eventCx) =>
+      searchAfterTyping(this, eventCx),
+    );
+    this.search.on("submit", (_event, eventCx) => submitSearch(this, eventCx));
     // A query being typed beats the list underneath it. The context is the only
     // guard there is — a text-entry context binds no bare key but Escape — so
     // without these two the field sat inside `MailList` and typing a query
@@ -424,6 +441,12 @@ export default class Omamail extends View {
       options.openAttachment ??
       ((/** @type {string} */ request) =>
         import("omamail-attachment").then((host) => host.open(request)));
+    // Where a file the mail server handed over as bytes is kept so the send
+    // path can open it: see `application/compose-attachments.js`.
+    this.storeAttachmentHost =
+      options.storeAttachment ??
+      ((/** @type {string} */ request) =>
+        import("omamail-attachment").then((host) => host.store(request)));
     /** @returns {any} */
     const activeAccount = () => {
       const current = this.controller?.snapshot().accounts ?? this.accountList;
@@ -627,6 +650,10 @@ export default class Omamail extends View {
         preference: (/** @type {string} */ key) =>
           /** @type {any} */ (this.settings)?.preference(key),
         notify: (/** @type {any} */ request) => this.postNotification(request),
+        // A confirmation needs the clock that retires it running, and that
+        // clock stops the moment nothing is moving. `compose/controller.js`
+        // raises its toast the same way, and the one loop takes both down.
+        onNotice: () => this.startOutboxClock(cx),
         // The bar's number. Published from the same count `recordUnread` keeps,
         // so the envelope in the panel and the list in this window are never
         // two different answers.
@@ -1034,19 +1061,7 @@ export default class Omamail extends View {
       return;
     }
     this.readerHidden = false;
-    /** @type {(detail:any) => void} */
-    let completeOpen = () => {};
-    const opened = new Promise((resolve) => {
-      completeOpen = resolve;
-    });
-    cx.spawn(async (asyncCx) => {
-      const detail = await opened;
-      if (detail?.draftId) this.openDraft(asyncCx);
-      else asyncCx.notify();
-    });
-    if (this.controller) this.controller.openCursor(completeOpen);
-    else completeOpen(undefined);
-    cx.notify();
+    openCursorDetail(this, cx);
   }
 
   /** @param {import("gpui").Context} cx */
@@ -1231,6 +1246,10 @@ export default class Omamail extends View {
       ...snapshot.detail,
       accountId: snapshot.accounts.activeId,
     });
+    // The files it was saved with, which the draft is not the draft without.
+    // `ComposeView.loadDraftAttachments`, and after `draft()` rather than
+    // before: beginning a draft rebuilds the form around it.
+    loadDraftAttachments(this, snapshot.detail, cx);
     this.syncComposeFields();
     this.state = { ...this.state, route: "compose" };
     cx.notify();
@@ -1689,13 +1708,20 @@ export default class Omamail extends View {
     this.outboxClockRunning = true;
     void cx.spawn(async (/** @type {any} */ asyncCx) => {
       try {
-        while (/** @type {any} */ (this.compose).snapshot().needsTick) {
+        while (
+          /** @type {any} */ (this.compose).snapshot().needsTick ||
+          this.controller?.needsTick()
+        ) {
           await asyncCx.sleep(OUTBOX_TICK_INTERVAL_MS);
           const queued = Boolean(this.compose.snapshot().pending);
           // Closing spends the rest of the undo window rather than the message.
           if (await this.outboxGate(queued))
             /** @type {any} */ (this.compose).drain();
           else /** @type {any} */ (this.compose).tick(Date.now());
+          // The mailbox's own confirmation, on the same beat: "Archived" has
+          // four seconds the same way the undo toast does, and one loop is
+          // what stops the two from having to be kept in step.
+          this.controller?.tick(Date.now());
           asyncCx.notify();
         }
       } finally {

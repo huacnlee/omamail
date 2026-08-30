@@ -354,4 +354,62 @@ complete({
 assert.equal(failure.error.includes("hunter2"), false);
 assert.equal(failure.error.includes("[redacted]"), true);
 
+
+// ----------------------------------- the meeting and the list's door out
+
+// A detail read here is `BODY.PEEK[]` — the whole message — so both of these
+// come out of the fetch that brought the body, with no second request of the
+// kind Gmail needs. Neither was read at all before, so an IMAP invitation drew
+// as a wall of the organiser's HTML and a newsletter offered no way off.
+const invitation = [
+  "From: Ada <ada@example.test>",
+  "Subject: Architecture sync",
+  "List-Unsubscribe: <https://list.example.com/off/9>",
+  "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+  "MIME-Version: 1.0",
+  'Content-Type: multipart/mixed; boundary="b1"',
+  "",
+  "--b1",
+  "Content-Type: text/plain",
+  "",
+  "Please come",
+  "--b1",
+  'Content-Type: text/calendar; method=REQUEST; charset=UTF-8',
+  'Content-Disposition: attachment; filename="invite.ics"',
+  "",
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "METHOD:REQUEST",
+  "BEGIN:VEVENT",
+  "UID:evt-1",
+  "SUMMARY:Architecture sync",
+  "DTSTART:20260901T090000Z",
+  "DTEND:20260901T093000Z",
+  "ORGANIZER;CN=Ada:mailto:ada@example.test",
+  "ATTENDEE;CN=Me;PARTSTAT=ACCEPTED:mailto:me@example.com",
+  "END:VEVENT",
+  "END:VCALENDAR",
+  "--b1--",
+  "",
+].join("\r\n");
+
+let invited = null;
+normalizedAdapter.detail({ identity, full: true }, (result) => {
+  invited = result;
+});
+listComplete({
+  ok: true,
+  value: {
+    responseBase64: Buffer.from(
+      `* 1 FETCH (UID 42 FLAGS () RFC822.SIZE ${invitation.length} BODY[] {${invitation.length}}\r\n${invitation})\r\nA1 OK\r\n`,
+    ).toString("base64"),
+  },
+});
+assert.equal(invited.ok, true);
+assert.equal(invited.value.invite.summary, "Architecture sync");
+assert.equal(invited.value.invite.organizer.email, "ada@example.test");
+assert.equal(invited.value.invite.attendees[0].partstat, "ACCEPTED");
+assert.equal(invited.value.unsubscribe.oneClick, true);
+assert.equal(invited.value.unsubscribe.postUrl, "https://list.example.com/off/9");
+
 console.log("app IMAP adapter tests passed");

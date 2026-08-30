@@ -124,3 +124,47 @@ fn every_host_quit_path_stops_the_companion_before_quitting() {
         );
     }
 }
+
+#[test]
+fn the_two_release_layouts_are_ones_the_resolver_already_accepts() {
+    // What `scripts/package-release.sh` builds, from the resolver's side. The
+    // artifact is the binary *and* the window, and where the window sits is
+    // decided here rather than by the packaging: neither shape asks
+    // `application_dir` for a candidate it did not already have.
+    let staging = tempfile::tempdir().expect("release fixture");
+
+    let prefix = staging.path().join("omamail-0.0.0-linux-x86_64");
+    let unix = prefix.join("share/app");
+    fs::create_dir_all(&unix).expect("prefix application directory");
+    fs::write(unix.join("gpui-shell.json"), "{}").expect("fixture manifest");
+    assert_eq!(
+        application_dir(&ApplicationPaths {
+            explicit: None,
+            executable: prefix.join("bin/omamail"),
+            manifest_dir: PathBuf::from("/nowhere"),
+        })
+        .unwrap(),
+        unix
+    );
+
+    let bundle = staging.path().join("Omamail.app/Contents");
+    let resources = bundle.join("Resources/app");
+    fs::create_dir_all(&resources).expect("bundle application directory");
+    fs::write(resources.join("gpui-shell.json"), "{}").expect("fixture manifest");
+    assert_eq!(
+        application_dir(&ApplicationPaths {
+            explicit: None,
+            executable: bundle.join("MacOS/omamail"),
+            manifest_dir: PathBuf::from("/nowhere"),
+        })
+        .unwrap(),
+        resources
+    );
+
+    // And the helpers the host runs live beside that directory, which is what
+    // makes `share/` and `Resources/` the roots the packaging copies into.
+    let source =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/effects.rs"))
+            .expect("read the effect host");
+    assert!(source.contains("let checkout_root = app_root.parent()"));
+}

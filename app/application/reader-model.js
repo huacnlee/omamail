@@ -1,6 +1,7 @@
 // @ts-check
 
 import * as Registry from "../providers/Registry.js";
+import * as Calendar from "../message/Calendar.js";
 import * as Mail from "../message/Message.js";
 import * as Model from "../account/Model.js";
 import { hintsFor } from "../keys/keymap.js";
@@ -38,6 +39,51 @@ function readerDate(detail, summary) {
     if (!Number.isNaN(date.getTime())) return date;
   }
   return null;
+}
+
+/**
+ * The message a `mailto:` List-Unsubscribe asks for, sent as itself.
+ *
+ * `MailAccount.unsubscribe` sends it through the account's own client; here it
+ * is the same `compose.send` the composer uses, addressed and worded by
+ * `Unsubscribe.parseMailto` out of the header the list wrote. It never opens
+ * the composer: nothing about this is a draft the user is writing, and putting
+ * a half-filled form on screen would be asking them to finish a request they
+ * have already made.
+ *
+ * @param {any} app @param {any} account @param {any} provider
+ * @param {string} from @param {{to:string,subject:string,body:string}} outgoing
+ */
+function sendUnsubscribeMail(app, account, provider, from, outgoing) {
+  return new Promise((resolve, reject) => {
+    if (!account?.id || typeof app.executeEffect !== "function") {
+      reject(new Error("This mailbox cannot send"));
+      return;
+    }
+    app.executeEffect(
+      {
+        type: "compose.send",
+        provider: provider.id,
+        accountId: account.id,
+        draft: {
+          mode: "new",
+          to: [outgoing.to],
+          cc: [],
+          bcc: [],
+          subject: outgoing.subject,
+          body: outgoing.body,
+          // The list only ever knew the address it delivered to, so the
+          // request has to come from it rather than from wherever the host
+          // would otherwise put the account.
+          from,
+        },
+      },
+      (/** @type {any} */ result) =>
+        result?.ok === true
+          ? resolve(result)
+          : reject(new Error(String(result?.error || "The unsubscribe message could not be sent"))),
+    );
+  });
 }
 
 /**
@@ -82,7 +128,23 @@ export function readerModel(app, snapshot, mail, provider) {
   // alone is what stands in: a whole-pane skeleton hid the very thing that
   // had just become available.
   const message = detail ?? summary;
-  const reader = detail ? app.readerController?.snapshot() : null;
+  const account = (snapshot.accounts?.accounts ?? []).find(
+    (/** @type {any} */ entry) => entry.id === snapshot.accounts?.activeId,
+  );
+  // The address this account answers as. `MailAccount` picks the alias the
+  // message was addressed to, out of the Gmail send-as list; nothing here has
+  // that list yet, so it is the account's own address — which is what the
+  // alias falls back to there as well.
+  const answeringAs = String(account?.email ?? "");
+  // Whether unsubscribing by mail is on offer at all. Not simply "the provider
+  // can send": the standalone host's `compose.send` carries a new message for
+  // Gmail and IMAP, while HEY's own command takes a reply or a forward and
+  // nothing else — so on HEY the list's page is the honest offer and a mailto
+  // would be a button that could not do what it said.
+  const canSend =
+    provider.capabilities.send === true &&
+    ["gmail", "imap"].includes(provider.id);
+  const reader = detail ? app.readerController?.snapshot({ canSend }) : null;
   return {
     state: detail ? "content" : "loading",
     message: {
@@ -104,6 +166,19 @@ export function readerModel(app, snapshot, mail, provider) {
       starred:
         summary?.starred === true ||
         message.labelIds?.includes("STARRED") === true,
+      // Read back out of the invitation rather than remembered beside it, the
+      // way `MailAccount.selectedResponse` is: an answer that was sent rewrote
+      // this account's ATTENDEE line in the copy on disk, so the card and the
+      // file cannot disagree.
+      response: message.invite
+        ? Calendar.responseOf(message.invite, answeringAs)
+        : "",
+      // Answering is sending an RFC 5546 REPLY, and the standalone host's
+      // message builder has no `text/calendar` part to put one in — so the
+      // card shows the meeting and what was answered, and offers no buttons
+      // that would send a reply no calendar server would act on.
+      canRespond: false,
+      rsvpSending: false,
     },
     presentation: reader?.presentation
       ? {
@@ -176,12 +251,35 @@ export function readerModel(app, snapshot, mail, provider) {
       /** @type {any} */ _event,
       /** @type {import("gpui").Context} */ eventCx,
     ) => allowRemoteImages(app, eventCx),
+    // Three ways off a list and one button, because `Unsubscribe.plan` has
+    // already chosen between them. Only the POST is the controller's own work:
+    // a page needs a live context to open it and a message needs the account
+    // to send it, so both are handed down from here rather than reached for
+    // from inside the reader.
     onUnsubscribe: (
       /** @type {any} */ _event,
       /** @type {import("gpui").Context} */ eventCx,
     ) => {
       eventCx.spawn(async (asyncCx) => {
-        await /** @type {any} */ (app.readerController)?.unsubscribe();
+        try {
+          await /** @type {any} */ (app.readerController)?.unsubscribe({
+            canSend,
+            openUrl: (/** @type {string} */ url) => asyncCx.open_url(url),
+            sendMail: (/** @type {any} */ outgoing) =>
+              sendUnsubscribeMail(app, account, provider, answeringAs, outgoing),
+          });
+        } catch (error) {
+          // `MailAccount.unsubscribe`'s `fail`, which is the status line. An
+          // unhandled rejection out of a spawned task takes the window with
+          // it, and a request that failed silently is one the user has no
+          // reason to think failed at all.
+          app.controller?.refuse(
+            String(
+              /** @type {any} */ (error)?.message ||
+                "The unsubscribe request could not be sent",
+            ),
+          );
+        }
         asyncCx.notify();
       });
     },

@@ -151,6 +151,37 @@ function answerList(completions, messages) {
   completions.shift().complete({ ok: true, value: { messages } });
 }
 
+// ---------------------------------------------------- clicking a draft row
+
+// A row in Drafts is not a message to read: it is what somebody was typing,
+// and opening it means picking the typing back up.
+//
+// The keyboard already branched on `draftId`; the mouse called a path that
+// took no answer at all and always showed the reader. Both go through the one
+// open now, so the rule is kept by there being one implementation of it.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One")]);
+  app.controller.selectMailbox("drafts");
+  const draftRow = {
+    ...resource("d1", "Half written", ["DRAFT"]),
+    draftId: "draft-1",
+  };
+  answerList(completions, [draftRow]);
+  const row = find(app.render(cx), "message-d1-cursor");
+  assert.ok(row, "the drafts row is drawn");
+  row.clickHandler({}, cx);
+  completions.shift().complete({ ok: true, value: draftRow });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    app.state.route,
+    "compose",
+    "clicking a row in Drafts resumes the draft rather than showing the reader",
+  );
+  assert.equal(app.compose.snapshot().draft.draftId, "draft-1");
+}
+
 // ------------------------------------------------- acting on the cursor row
 
 {
@@ -453,6 +484,49 @@ function answerList(completions, messages) {
       .map((entry) => entry.id),
     [],
     "and the body rows appear once there is a parsed body to take",
+  );
+}
+
+// ------------------------------------------------- searching, and the notice
+
+// A search replaces the list, so the message the reader is showing is almost
+// certainly not among the results — `App.qml` runs the search and then
+// `backToList()`. Enter asks at once; the keystrokes in between are debounced.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  app.controller.openMessage("m1");
+  completions.shift().complete({ ok: true, value: resource("m1", "One") });
+  app.readerHidden = false;
+  const before = completions.length;
+  app.search.set_value("from:friend@example.test");
+  app.search.emit("submit", cx);
+  assert.equal(completions.length, before + 1);
+  assert.equal(
+    completions.at(-1).effect.query.q,
+    "from:friend@example.test",
+    "Enter asks the question straight away",
+  );
+  assert.equal(app.readerHidden, true, "the search closes the open message");
+  assert.equal(app.controller.snapshot().mail.selectedId, null);
+  // The same question, still in the air, is not asked again.
+  app.search.emit("submit", cx);
+  assert.equal(completions.length, before + 1);
+}
+
+// The status line confirms an action, in the words `MailAccount.actionLabel`
+// uses, and it is drawn as a notice rather than as a failure.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  app.actOn("archive", "m1", cx);
+  completions.shift().complete({ ok: true, value: null });
+  const drawn = app.render(cx);
+  assert.deepEqual(labels(find(drawn, "mail-status-notice")), ["Archived"]);
+  assert.notEqual(
+    styleArg(find(drawn, "mail-status-label"), "text_color"),
+    "semantic:destructive",
+    "a confirmation is not drawn in the failure colour",
   );
 }
 

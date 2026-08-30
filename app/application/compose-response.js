@@ -23,6 +23,7 @@
 // says what is being waited for.
 
 import { accountIn, providerFor, sendRefusal } from "./account-capabilities.js";
+import { loadForwardAttachments } from "./compose-attachments.js";
 
 /**
  * Which of the three verbs a mailbox may be asked for.
@@ -104,8 +105,9 @@ function subjectOf(snapshot, targetId) {
  * is written.
  * @param {any} app @param {string} mode @param {any} opened the draft as it opened
  * @param {any} loaded @param {string} error @param {string} own @param {string} accountId
+ * @param {import("gpui").Context} cx
  */
-function fillAnswer(app, mode, opened, loaded, error, own, accountId) {
+function fillAnswer(app, mode, opened, loaded, error, own, accountId, cx) {
   const compose = /** @type {any} */ (app.compose);
   if (!loaded) {
     compose.loadedQuote(error || "The message you are answering could not be read");
@@ -131,6 +133,10 @@ function fillAnswer(app, mode, opened, loaded, error, own, accountId) {
   if (kept.cc && !compose.snapshot().ccVisible) compose.showCc();
   if (kept.bcc && !compose.snapshot().bccVisible) compose.showBcc();
   compose.loadedQuote();
+  // Only now: the read is what named the files at all — a list row says a
+  // message has attachments and never says which — and beginning the draft a
+  // line above rebuilt the form around it, clearing anything set before.
+  if (mode === "forward") loadForwardAttachments(app, loaded, cx);
   app.syncComposeFields();
 }
 
@@ -170,6 +176,11 @@ export function openResponse(app, mode, cx, targetId = "") {
   // is nothing to wait for and nothing to fill in later.
   if (wanted.detail) {
     beginAnswer(app, mode, { ...wanted.detail, accountId }, own);
+    // The files the original carries, which a forward is not a forward
+    // without. Send is held until they are here — `compose.send` refuses
+    // while `forward.loading` — because a forward that went out without them
+    // and said nothing is the defect this call answers.
+    if (mode === "forward") loadForwardAttachments(app, wanted.detail, cx);
     show();
     cx.notify();
     return;
@@ -185,6 +196,9 @@ export function openResponse(app, mode, cx, targetId = "") {
   }
   beginAnswer(app, mode, fromRow(row, accountId), own);
   const compose = /** @type {any} */ (app.compose);
+  // A row names no files, so nothing is loaded yet and any load left over from
+  // an earlier draft is dropped rather than left holding this one's Send.
+  if (mode === "forward") loadForwardAttachments(app, null, cx);
   // Half a quote is worse than none: an "On ... wrote:" line with nothing
   // under it would end up rewritten beneath whatever was typed above it. The
   // body stays empty until the read lands, which is also the room to start
@@ -207,7 +221,16 @@ export function openResponse(app, mode, cx, targetId = "") {
     const answer = await read;
     if (app.answering === token && compose.snapshot().draft.mode === mode) {
       app.answering = null;
-      fillAnswer(app, mode, opened, answer.detail, answer.error, own, accountId);
+      fillAnswer(
+        app,
+        mode,
+        opened,
+        answer.detail,
+        answer.error,
+        own,
+        accountId,
+        asyncCx,
+      );
     }
     asyncCx.notify();
   });

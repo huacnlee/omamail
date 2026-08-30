@@ -61,3 +61,52 @@ fn an_entry_that_could_write_a_header_never_reaches_the_completion() {
     assert_eq!(contacts.len(), 1);
     assert_eq!(contacts[0]["email"], "fine@example.test");
 }
+
+#[test]
+fn the_host_names_this_platform_s_address_book_and_the_script_names_them_all() {
+    let home = std::path::PathBuf::from("/home/person");
+    let roots = omamail::contacts_host::address_book_roots(Some(&home));
+    let expected: Vec<_> = if cfg!(target_os = "macos") {
+        ["Library/Thunderbird", "Library/Betterbird"]
+    } else {
+        [".thunderbird", ".betterbird"]
+    }
+    .iter()
+    .map(|suffix| home.join(suffix))
+    .collect();
+    assert_eq!(roots, expected);
+    assert!(omamail::contacts_host::address_book_roots(None).is_empty());
+
+    // The script reads both platforms' directories, because one script serves
+    // both clients. A root the host would look in and the script would not is
+    // a completion list that stays empty for no reason anybody could see.
+    let script = include_str!("../scripts/contact-suggestions.py");
+    for root in &roots {
+        let suffix = root.strip_prefix(&home).unwrap().to_str().unwrap();
+        assert!(
+            script.contains(&format!("home / \"{suffix}\"")),
+            "{suffix} is not one of the roots the script reads"
+        );
+    }
+}
+
+#[test]
+fn a_machine_with_no_address_book_exports_no_module() {
+    let home = tempfile::tempdir().unwrap();
+    assert!(!omamail::contacts_host::has_address_book(Some(home.path())));
+    std::fs::create_dir_all(
+        omamail::contacts_host::address_book_roots(Some(home.path()))[0].clone(),
+    )
+    .unwrap();
+    assert!(omamail::contacts_host::has_address_book(Some(home.path())));
+
+    // And the export is what that decides.
+    let source = include_str!("../src/effects.rs");
+    let guard = source
+        .find("has_address_book(home.as_deref())")
+        .expect("the contacts module is gated on there being an address book");
+    let module = source
+        .find("HostModule::new(\"omamail-contacts\")")
+        .expect("the contacts module");
+    assert!(guard < module);
+}

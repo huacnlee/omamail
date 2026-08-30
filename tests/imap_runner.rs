@@ -1,8 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use omamail::{
     imap_host::{
-        ImapAccount, MailOperation, MailProcessOutput, MailProcessRunner, MailTransportExecutor,
-        RunnerError, execute, execute_with_runner, plan,
+        Action, ImapAccount, MailOperation, MailProcessOutput, MailProcessRunner,
+        MailTransportExecutor, RunnerError, execute, execute_with_runner, plan,
     },
     platform::{
         commands::{CommandError, PreparedCommand},
@@ -123,6 +123,108 @@ fn parser_rejects_bad_framing_caps_and_transport_errors_without_echoing_stderr()
         .unwrap_err();
         assert!(!format!("{error:?} {error}").contains("runner-secret"));
     }
+}
+
+fn ran(operation: MailOperation<'_>, response: &[u8]) -> Result<Vec<u8>, RunnerError> {
+    let runner = FakeRunner {
+        seen: Mutex::new(Vec::new()),
+        result: Mutex::new(Some(Ok(MailProcessOutput::new(
+            Some(0),
+            framed(0, response, b""),
+            Vec::new(),
+        )))),
+    };
+    execute_with_runner(
+        plan(&account(), operation).unwrap(),
+        &MailTransportExecutor::new(PathBuf::from("/opt/omamail")),
+        Duration::from_secs(1),
+        &runner,
+    )
+    .map(|reply| reply.stdout().to_vec())
+}
+
+#[test]
+fn an_action_the_server_refused_is_not_reported_as_done() {
+    // curl exits 0 here: it delivered the command and read the answer, and
+    // whether the server agreed is not curl's question. Reading only the exit
+    // code reported a `UID MOVE` the server refused as an archive that
+    // happened, with the row already gone from the list.
+    for refusal in [
+        &b"A1 NO [TRYCREATE] Mailbox does not exist\r\n"[..],
+        &b"A2 BAD Invalid arguments\r\n"[..],
+        &b"* OK still going\r\nA3 no over quota\r\n"[..],
+        // Tab-separated, and a run of spaces: the tag and the word are fields,
+        // not a fixed offset.
+        &b"A4\tNO refused\r\n"[..],
+        &b"A5  BAD refused\r\n"[..],
+    ] {
+        assert_eq!(
+            ran(
+                MailOperation::Action {
+                    message_id: "7:INBOX",
+                    action: Action::Move {
+                        destination: "Archive",
+                    },
+                },
+                refusal,
+            ),
+            Err(RunnerError::ServerRefused),
+            "{}",
+            String::from_utf8_lossy(refusal)
+        );
+    }
+}
+
+#[test]
+fn a_message_that_merely_contains_the_word_is_still_delivered() {
+    // The one thing this cannot be wrong about is where a literal ends. A
+    // header a stranger wrote is not the server refusing a command, and a
+    // message that could forge one by saying so is the reason this walks the
+    // response rather than searching it.
+    let header = b"X-Spam-Flag: NO\r\nA1 BAD not a completion\r\n";
+    let mut response =
+        format!("* 1 FETCH (UID 7 BODY[HEADER] {{{}}}\r\n", header.len()).into_bytes();
+    response.extend_from_slice(header);
+    response.extend_from_slice(b")\r\n");
+    assert_eq!(
+        ran(MailOperation::List { folder: "INBOX" }, &response),
+        Ok(response.clone())
+    );
+
+    // Untagged and continuation lines are not completions either, and an
+    // ordinary answer carries no tagged completion at all: curl strips it.
+    for benign in [
+        &b"* NO [ALERT] mailbox maintenance\r\n"[..],
+        &b"+ NO is continuation text\r\n"[..],
+        &b"* 1 FETCH (UID 7)\r\nA1 OK completed\r\n"[..],
+        &b""[..],
+    ] {
+        assert_eq!(
+            ran(MailOperation::List { folder: "INBOX" }, benign),
+            Ok(benign.to_vec()),
+            "{}",
+            String::from_utf8_lossy(benign)
+        );
+    }
+}
+
+#[test]
+fn an_smtp_reply_is_left_to_curl_to_judge() {
+    // SMTP refuses with a reply code, which curl already turns into a non-zero
+    // exit — and its transcript is not IMAP, so nothing here may read a line
+    // of it as a tagged completion.
+    assert_eq!(
+        ran(
+            MailOperation::Send {
+                from: "me@example.com",
+                recipients: vec!["you@example.com"],
+                subject: "Hi",
+                body: "Body",
+            },
+            b"250 NO problem\r\n",
+        ),
+        Ok(b"250 NO problem\r\n".to_vec())
+    );
 }
 
 #[cfg(unix)]

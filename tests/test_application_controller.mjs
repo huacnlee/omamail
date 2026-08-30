@@ -315,7 +315,7 @@ assert.equal(
   effectsBeforeRefusal,
   "capability refusal happens before an effect",
 );
-assert.match(controller.snapshot().mail.status, /no junk/i);
+assert.match(controller.snapshot().mail.notice, /no junk/i);
 
 controller.act("markRead", ["1:INBOX", "2:Sent"]);
 assert.equal(
@@ -524,15 +524,26 @@ assert.equal(
     0,
     "the shared action path applies its optimistic state",
   );
+  const callsBeforeRefusal = calls.length;
   pending.shift()({
     ok: false,
     discarded: true,
     error: "Action outcome is uncertain",
   });
+  // The row goes back where it left from, rather than the list going round the
+  // network again — `MailAccount.act`'s `restore`. A reload leaves the list
+  // wrong until a round trip completes, and wrong for good if that read fails
+  // too, which is the one situation in which the server is already known not
+  // to be answering.
   assert.equal(
-    calls.at(-1).scope,
-    "list",
-    "an uncertain action starts an authoritative reload",
+    calls.length,
+    callsBeforeRefusal,
+    "a refused action repairs the list without asking for it again",
+  );
+  assert.deepEqual(
+    recovering.snapshot().mail.messages.map((message) => message.id),
+    ["live"],
+    "the archived row is put back",
   );
   assert.equal(
     cacheReads,
@@ -543,11 +554,6 @@ assert.equal(
     recovering.snapshot().mail.status,
     "Action outcome is uncertain",
   );
-  pending.shift()({
-    status: 200,
-    value: { messages: [gmailResource("live", ["INBOX"])] },
-  });
-  assert.equal(recovering.snapshot().mail.messages[0].id, "live");
 }
 
 {
@@ -896,6 +902,336 @@ assert.equal(
   tuned.search("");
   settle([gmailResource("silent", ["UNREAD", "INBOX"])]);
   assert.equal(notifications.length, 2);
+}
+
+// Opening an unread message marks it read.
+//
+// `MailAccount.qml`'s detail completion does `if (summary.unread)
+// act(id, "markRead", true)`, and without it every row in the window stays
+// bold for good — which makes the badge, the dot and the weight all wrong
+// about the same message.
+{
+  const calls = [];
+  const pending = [];
+  const bodies = new Map();
+  const opening = createApplicationController({
+    storage: storageFor(saved),
+    cache: {
+      readList() {
+        return null;
+      },
+      writeList() {},
+    },
+    bodies: {
+      read(accountId, id) {
+        return bodies.get(`${accountId}/${id}`) ?? null;
+      },
+      put(accountId, id, record) {
+        bodies.set(`${accountId}/${id}`, record);
+      },
+      touch() {},
+    },
+    execute(effect, complete) {
+      calls.push(effect);
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  opening.start();
+  pending.shift()({
+    status: 200,
+    value: {
+      messages: [
+        gmailResource("bold", ["UNREAD", "INBOX"]),
+        gmailResource("plain", ["INBOX"]),
+      ],
+    },
+  });
+  opening.openMessage("bold");
+  pending.shift()({ status: 200, value: gmailResource("bold", ["UNREAD"]) });
+  assert.equal(calls.at(-1).hostOperation.action, "markRead");
+  assert.deepEqual(calls.at(-1).hostOperation.messageIds, ["bold"]);
+  assert.equal(
+    opening.snapshot().mail.messages[0].unread,
+    false,
+    "the row the reader is showing stops being bold",
+  );
+  pending.shift()({ status: 200, value: null });
+  assert.equal(
+    opening.snapshot().mail.notice,
+    "",
+    "an action nobody asked for says nothing",
+  );
+
+  // A message already read is not marked again.
+  const callsBeforeSecondOpen = calls.length;
+  opening.openMessage("plain");
+  pending.shift()({ status: 200, value: gmailResource("plain", []) });
+  assert.equal(
+    calls.length,
+    callsBeforeSecondOpen + 1,
+    "a message already read is not marked read a second time",
+  );
+
+  // And the mark does not live on the fetch path: a body already on disk
+  // answers the open with no request at all, and the row still stops being
+  // bold. This is the half a mark written into the detail completion misses.
+  opening.selectMailbox("inbox");
+  pending.shift()({
+    status: 200,
+    value: { messages: [gmailResource("bold", ["UNREAD", "INBOX"])] },
+  });
+  const callsBeforeCachedOpen = calls.length;
+  opening.openMessage("bold");
+  assert.equal(
+    opening.snapshot().detail.id,
+    "bold",
+    "the body on disk answers the open",
+  );
+  assert.equal(
+    calls.length,
+    callsBeforeCachedOpen + 1,
+    "the cached open asks for the mark and nothing else",
+  );
+  assert.equal(calls.at(-1).hostOperation.action, "markRead");
+  assert.equal(opening.snapshot().mail.messages[0].unread, false);
+}
+
+// Marking read on open must not close the reader it was opened from.
+//
+// In the Unread mailbox, being read is the very thing that disqualifies a row
+// — so an action the user did not ask for would evict the message the click
+// had just opened. `MailAccount.act`'s `keepOpen`.
+{
+  const pending = [];
+  const staying = createApplicationController({
+    storage: storageFor(saved),
+    cache: { readList: () => null, writeList() {} },
+    execute(_effect, complete) {
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  staying.start();
+  pending.shift()({ status: 200, value: { messages: [] } });
+  staying.selectMailbox("unread");
+  pending.shift()({
+    status: 200,
+    value: { messages: [gmailResource("bold", ["UNREAD", "INBOX"])] },
+  });
+  staying.openMessage("bold");
+  pending.shift()({ status: 200, value: gmailResource("bold", ["UNREAD"]) });
+  assert.equal(staying.snapshot().mail.selectedId, "bold");
+  assert.deepEqual(
+    staying.snapshot().mail.messages.map((message) => message.id),
+    ["bold"],
+    "the row stays in Unread until the list is next loaded",
+  );
+}
+
+// The optimistic edit is written back to the list cache, and the read that
+// would rebuild the pre-action rows over it is stopped first.
+//
+// `MailAccount.qml:1310-1325` and `:1452-1467`: without `rememberList` the
+// next cache-first paint of the same query repaints the rows as they were, and
+// without the interrupt a `list-loaded` for the same identity settles
+// afterwards and rebuilds them.
+{
+  const calls = [];
+  const pending = [];
+  const written = [];
+  const remembered = createApplicationController({
+    storage: storageFor(saved),
+    cache: {
+      readList: () => null,
+      writeList(accountId, query, messages) {
+        written.push({ accountId, query, ids: messages.map((row) => row.id) });
+      },
+    },
+    execute(effect, complete) {
+      calls.push(effect);
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  remembered.start();
+  pending.shift()({
+    status: 200,
+    value: {
+      messages: [
+        gmailResource("one", ["INBOX"]),
+        gmailResource("two", ["INBOX"]),
+      ],
+    },
+  });
+  remembered.act("archive", ["one"]);
+  assert.deepEqual(
+    written.at(-1).ids,
+    ["two"],
+    "the archived row leaves the copy on disk at the moment it leaves the list",
+  );
+  assert.equal(written.at(-1).query, "in:inbox");
+  pending.shift()({ status: 200, value: null });
+  assert.equal(
+    remembered.snapshot().mail.notice,
+    "Archived",
+    "the status line confirms the action once the server agrees",
+  );
+
+  // A list read already in the air when the action starts is given up on, so
+  // its answer cannot rebuild the row that has just left.
+  remembered.refresh();
+  const stale = pending.shift();
+  remembered.act("archive", ["two"]);
+  stale({
+    status: 200,
+    value: {
+      messages: [
+        gmailResource("one", ["INBOX"]),
+        gmailResource("two", ["INBOX"]),
+      ],
+    },
+  });
+  assert.deepEqual(
+    remembered.snapshot().mail.messages.map((message) => message.id),
+    [],
+    "the interrupted read cannot rebuild the archived rows",
+  );
+  // And the same query is revalidated once the mutation lands, rather than the
+  // list being left on a read that was thrown away.
+  pending.shift()({ status: 200, value: null });
+  assert.equal(calls.at(-1).scope, "list");
+  assert.equal(
+    written.at(-1).ids.length,
+    0,
+    "the optimistic success is what the cache keeps",
+  );
+}
+
+// A refused action puts the row back where it was, and says so.
+{
+  const calls = [];
+  const pending = [];
+  const failing = createApplicationController({
+    storage: storageFor(saved),
+    cache: { readList: () => null, writeList() {} },
+    execute(effect, complete) {
+      calls.push(effect);
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  failing.start();
+  pending.shift()({
+    status: 200,
+    value: {
+      messages: [
+        gmailResource("one", ["INBOX"]),
+        gmailResource("two", ["INBOX"]),
+        gmailResource("three", ["INBOX"]),
+      ],
+    },
+  });
+  failing.act("archive", ["two"]);
+  assert.deepEqual(
+    failing.snapshot().mail.messages.map((message) => message.id),
+    ["one", "three"],
+  );
+  const callsBeforeFailure = calls.length;
+  pending.shift()({ ok: false, error: "Gmail refused the archive" });
+  assert.deepEqual(
+    failing.snapshot().mail.messages.map((message) => message.id),
+    ["one", "two", "three"],
+    "the row is reinserted at the index it left from",
+  );
+  assert.equal(
+    calls.length,
+    callsBeforeFailure,
+    "nothing is asked of the server that has just refused",
+  );
+  assert.equal(failing.snapshot().mail.status, "Gmail refused the archive");
+  assert.equal(failing.snapshot().mail.notice, "");
+}
+
+// The status line confirms an action, and the confirmation retires on a beat
+// of the window's clock rather than standing for the life of the window.
+{
+  let now = 1_000;
+  const pending = [];
+  let notices = 0;
+  const confirming = createApplicationController({
+    storage: storageFor(saved),
+    now: () => now,
+    onNotice: () => (notices += 1),
+    cache: { readList: () => null, writeList() {} },
+    execute(_effect, complete) {
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  confirming.start();
+  pending.shift()({
+    status: 200,
+    value: { messages: [gmailResource("one", ["INBOX"])] },
+  });
+  confirming.act("star", ["one"]);
+  pending.shift()({ status: 200, value: null });
+  assert.equal(confirming.snapshot().mail.notice, "Starred");
+  assert.equal(notices, 1, "the window is told to start the clock");
+  assert.equal(confirming.needsTick(), true);
+  now = 3_000;
+  confirming.tick(now);
+  assert.equal(
+    confirming.snapshot().mail.notice,
+    "Starred",
+    "the confirmation is not taken down early",
+  );
+  now = 5_001;
+  confirming.tick(now);
+  assert.equal(confirming.snapshot().mail.notice, "");
+  assert.equal(confirming.needsTick(), false);
+
+  // A batch says how many, the way `markAllRead` does.
+  confirming.act("markRead", ["one"]);
+  pending.shift()({ status: 200, value: null });
+  assert.equal(confirming.snapshot().mail.notice, "Marked read");
+}
+
+// Switching accounts keeps the mailbox you were reading.
+//
+// `Model.mailboxAfterAccountSwitch` decides, and the empty answer is an
+// account that has no such mailbox — which lands in the inbox rather than in
+// nothing.
+{
+  const calls = [];
+  const pending = [];
+  const switching = createApplicationController({
+    storage: storageFor(saved),
+    cache: { readList: () => null, writeList() {} },
+    execute(effect, complete) {
+      calls.push(effect);
+      pending.push(complete);
+      return { cancel() {} };
+    },
+  });
+  switching.start();
+  pending.shift()({ status: 200, value: { messages: [] } });
+  switching.selectMailbox("starred");
+  pending.shift()({ status: 200, value: { messages: [] } });
+  switching.switchAccount("imap:two@example.com");
+  assert.equal(
+    switching.snapshot().mail.mailboxKey,
+    "starred",
+    "the mailbox comes with you where the account has one",
+  );
+  assert.equal(switching.snapshot().mail.query, "folder:INBOX FLAGGED");
+  switching.selectMailbox("archive");
+  switching.switchAccount("one@example.com");
+  assert.equal(
+    switching.snapshot().mail.mailboxKey,
+    "inbox",
+    "an account with no such mailbox lands in the inbox",
+  );
 }
 
 console.log("application controller tests passed");

@@ -198,6 +198,18 @@ export function createComposeController(dependencies) {
   let forwardedAttachments = [];
   let forwardLoading = false;
   let forwardError = "";
+  /**
+   * Whose files these are: a forward's originals, or a stored draft's own.
+   *
+   * The wait is the same either way and so is what it holds — Send, until the
+   * bytes are here — but the sentence about it is not: "will be forwarded"
+   * over a draft nobody is forwarding names the wrong thing. `ComposeView`
+   * answers that by drawing its row for `mode === "forward"` alone, which
+   * leaves a reopened draft with Send held and nothing said about why; the
+   * page here draws the row either way and says which files it means.
+   * @type {"forward"|"draft"}
+   */
+  let forwardKind = "forward";
   // Whether the message this draft answers is still on its way, and what went
   // wrong if it never came. A reply raised from the list opens the form at
   // once — nobody is made to watch a fetch before they may start typing — so
@@ -284,12 +296,20 @@ export function createComposeController(dependencies) {
     return suggest(contacts, draft[focusedField], SUGGESTION_LIMIT);
   }
 
-  /** Forwarded files ride along with the draft's own; a reply forwards none. */
+  /**
+   * Forwarded files ride along with the draft's own; a reply forwards none.
+   *
+   * A reopened draft's saved files come through the same list: they were read
+   * off the server the same way and they are just as much part of the message
+   * as the original's are. Its `mode` is `new` rather than `forward`, so the
+   * kind is what says so.
+   */
   function outgoingAttachments() {
-    return [
-      ...(draft.mode === "forward" ? forwardedAttachments : []),
-      ...attachments,
-    ];
+    const carried =
+      draft.mode === "forward" || forwardKind === "draft"
+        ? forwardedAttachments
+        : [];
+    return [...carried, ...attachments];
   }
 
   /** The per-draft state a new draft starts from. */
@@ -308,6 +328,7 @@ export function createComposeController(dependencies) {
     forwardedAttachments = [];
     forwardLoading = false;
     forwardError = "";
+    forwardKind = "forward";
     quoteLoading = false;
     quoteError = "";
     attaching = false;
@@ -364,6 +385,7 @@ export function createComposeController(dependencies) {
       attachments,
       originalAttachments,
       forwardedAttachments,
+      forwardKind,
     };
     draft = clean({ accountId: draft.accountId });
     revision += 1;
@@ -387,6 +409,7 @@ export function createComposeController(dependencies) {
     attachments = held.attachments;
     originalAttachments = held.originalAttachments;
     forwardedAttachments = held.forwardedAttachments;
+    forwardKind = held.forwardKind ?? "forward";
   }
 
   /**
@@ -706,11 +729,15 @@ export function createComposeController(dependencies) {
       );
       return { ...this.snapshot(), removed };
     },
-    /** @param {Array<any>} listed what the original message carries */
-    loadingForwardAttachments(listed) {
+    /**
+     * @param {Array<any>} listed what the message this draft came from carries
+     * @param {"forward"|"draft"} [kind]
+     */
+    loadingForwardAttachments(listed, kind = "forward") {
       originalAttachments = Array.isArray(listed) ? listed.slice() : [];
       forwardedAttachments = [];
       forwardError = "";
+      forwardKind = kind === "draft" ? "draft" : "forward";
       forwardLoading = originalAttachments.length > 0;
       return this.snapshot();
     },
@@ -966,6 +993,7 @@ export function createComposeController(dependencies) {
           files: forwardedAttachments,
           loading: forwardLoading,
           error: forwardError,
+          kind: forwardKind,
         },
       };
     },

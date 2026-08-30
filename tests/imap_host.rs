@@ -44,6 +44,39 @@ fn list_uses_peek_and_keeps_credentials_only_in_protected_stdin() {
     assert!(!format!("{account:?} {planned:?}").contains("top-secret"));
 }
 
+// A list row is not only a subject and a sender. `ImapProtocol.LIST_HEADERS`
+// is the plugin's answer to what one needs, and this side asked for six of the
+// eight — so To and Cc were empty on every IMAP row the reader drew, answering
+// went to the From address whatever Reply-To said, and a mailing list's own
+// door out was not in the fetch at all.
+#[test]
+fn list_asks_for_the_headers_a_row_and_its_reader_need() {
+    let planned = plan(&account(), MailOperation::List { folder: "INBOX" }).unwrap();
+    let command = String::from_utf8(fields(planned.stdin())[2].clone()).unwrap();
+    let start = command.find("HEADER.FIELDS (").unwrap() + "HEADER.FIELDS (".len();
+    let asked = command[start..]
+        .split_once(')')
+        .unwrap()
+        .0
+        .split_whitespace()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for header in [
+        "FROM",
+        "TO",
+        "CC",
+        "SUBJECT",
+        "DATE",
+        "MESSAGE-ID",
+        "REPLY-TO",
+        "LIST-UNSUBSCRIBE",
+        "REFERENCES",
+        "IN-REPLY-TO",
+    ] {
+        assert!(asked.contains(header), "{header} is not asked for");
+    }
+}
+
 #[test]
 fn detail_requires_uid_and_folder_and_never_uses_body_without_peek() {
     let planned = plan(

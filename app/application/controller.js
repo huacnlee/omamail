@@ -3,13 +3,18 @@
 import {
   actionCapability,
   detailSummary,
+  mailboxAfterAccountSwitch,
   messageById,
   newArrivals,
 } from "../account/Model.js";
 import { createProviderAdapter } from "../adapters/index.js";
 import * as Registry from "../providers/Registry.js";
 import { loadAccounts, saveAccounts } from "./account-store.js";
-import { createMailState, reduceMailState } from "./mail-state.js";
+import {
+  actionLabel,
+  createMailState,
+  reduceMailState,
+} from "./mail-state.js";
 import { notificationRequest } from "./notifications.js";
 import {
   defaultQuery as normalizedDefaultQuery,
@@ -27,15 +32,27 @@ function accountFor(list, id) {
   );
 }
 
-/** @param {any} messages */
-function unreadCount(messages) {
-  return (Array.isArray(messages) ? messages : []).filter(
-    (message) =>
-      message &&
+/**
+ * Whether the list is drawing this row bold.
+ *
+ * Two spellings because two things write a summary: `Message.summarize` sets
+ * the flag, and a row that came straight off a provider carries Gmail's label.
+ * Asked in one place so the badge, the mark-on-open and the count agree.
+ *
+ * @param {any} message
+ */
+function isUnread(message) {
+  return Boolean(
+    message &&
       (message.unread === true ||
         (Array.isArray(message.labelIds) &&
           message.labelIds.includes("UNREAD"))),
-  ).length;
+  );
+}
+
+/** @param {any} messages */
+function unreadCount(messages) {
+  return (Array.isArray(messages) ? messages : []).filter(isUnread).length;
 }
 
 /**
@@ -59,7 +76,7 @@ function isDraft(message) {
   );
 }
 
-/** @param {{ storage: any, execute: any, cache?: any, bodies?: any, companion?: any, now?:()=>number, preference?:(key:string)=>any, notify?:(request:{summary:string,body:string})=>void }} dependencies */
+/** @param {{ storage: any, execute: any, cache?: any, bodies?: any, companion?: any, now?:()=>number, preference?:(key:string)=>any, notify?:(request:{summary:string,body:string})=>void, onNotice?:()=>void }} dependencies */
 export function createApplicationController(dependencies) {
   const values = dependencies || {};
   if (!values.storage || typeof values.execute !== "function")
@@ -246,6 +263,44 @@ export function createApplicationController(dependencies) {
     );
   }
 
+  /**
+   * What is on screen, written back to the query cache —
+   * `MailAccount.rememberList`.
+   *
+   * An action changed `messages` and changed nothing else, so the copy on disk
+   * still said what the mailbox looked like before it. Anything that paints
+   * from that copy — the next cache-first read, a mailbox switched away from
+   * and back, the window reopened — put the old state back on screen: a
+   * message read a moment ago, bold again. The live load corrected it a moment
+   * later, which is what made it look intermittent rather than broken.
+   *
+   * @param {string} accountId @param {string} query @param {Array<any>} [rows]
+   */
+  function rememberList(accountId, query, rows) {
+    const messages = rows ?? (mail ? mail.messages : []);
+    if (values.cache && typeof values.cache.writeList === "function")
+      values.cache.writeList(accountId, query, messages);
+    else if (values.cache && typeof values.cache.put === "function")
+      values.cache.put(accountId, query, messages);
+  }
+
+  /**
+   * Whatever the window is told when a confirmation goes up.
+   *
+   * The clock that retires it may have stopped — it runs while something is
+   * still moving and stops the moment nothing is — so the notice starts it,
+   * exactly the way `compose/controller.js`'s `note` does. One clock retires
+   * both.
+   */
+  function raiseNotice() {
+    if (mail && mail.notice !== "" && typeof values.onNotice === "function")
+      values.onNotice();
+  }
+
+  // The read in the air, so an action can stop it before editing the rows it
+  // would rebuild. `MailAccount.listHandle`, and `abortRequest` is `cancel`.
+  let listHandle = /** @type {any} */ (null);
+
   /** @param {string} query */
   function loadList(
     query,
@@ -262,7 +317,12 @@ export function createApplicationController(dependencies) {
       mail = reduceMailState(mail, { type: "load", query, searchText, reset });
     else mail = reduceMailState(mail, { type: "load-more" });
     const identity = mail.request;
-    detail = null;
+    // Only a read that replaces the list puts the open message down. A refresh
+    // and a revalidation ask the same question again about the same mailbox,
+    // and blanking the reader on the poll's answer closed a message somebody
+    // was still reading. What the reload no longer lists is closed below,
+    // where the list itself says so.
+    if (reset) detail = null;
     const cached =
       !authoritative &&
       values.cache &&
@@ -278,8 +338,8 @@ export function createApplicationController(dependencies) {
       recordUnread();
       recordArrivals(account.id, cached, false);
     }
-    withRuntime(account, identity, (/** @type {any} */ adapter) =>
-      adapter.list(
+    withRuntime(account, identity, (/** @type {any} */ adapter) => {
+      const handle = adapter.list(
         {
           identity,
           query,
@@ -287,6 +347,7 @@ export function createApplicationController(dependencies) {
           pageToken,
         },
         (/** @type {any} */ result) => {
+          if (listHandle === handle) listHandle = null;
           if (!isCurrentRequest(identity)) return;
           lastOperation = result;
           if (!result.ok) {
@@ -318,31 +379,50 @@ export function createApplicationController(dependencies) {
             messages,
             !pageToken && !mail.searchText,
           );
-          if (values.cache && typeof values.cache.writeList === "function") {
-            values.cache.writeList(account.id, query, mail.messages);
-          } else if (values.cache && typeof values.cache.put === "function") {
-            values.cache.put(account.id, query, mail.messages);
-          }
+          rememberList(account.id, query);
           recordUnread();
+          // A message the reload no longer lists is not open any more. The
+          // reducer has already put the selection down; the body it was
+          // showing goes with it.
+          if (!mail.selectedId) detail = null;
         },
-      ),
-    );
+      );
+      if (isCurrentRequest(identity)) listHandle = handle;
+      return handle;
+    });
   }
 
-  /** @param {any} account */
-  function activate(account) {
+  /**
+   * Make one mailbox the one on screen.
+   *
+   * The mailbox being read comes with it wherever the account switched to has
+   * one — `App.switchAccount`, through `Model.mailboxAfterAccountSwitch`.
+   * Switching from Starred to an account that has no Starred lands in the
+   * inbox, which is what the empty answer means; switching to one that does
+   * keeps you where you were reading, because the account changed and the
+   * question did not.
+   *
+   * @param {any} account @param {string} [keepMailboxKey]
+   */
+  function activate(account, keepMailboxKey) {
     if (!account) return false;
     accounts = { ...accounts, activeId: account.id };
     accounts = saveAccounts(values.storage, accounts);
+    const mailboxKey =
+      mailboxAfterAccountSwitch(
+        String(keepMailboxKey || ""),
+        Registry.mailboxes(account.provider),
+      ) || "inbox";
     mail = mail
       ? reduceMailState(mail, {
           type: "account-changed",
           accountId: account.id,
           providerId: account.provider,
+          mailboxKey,
         })
       : createMailState(account.id, account.provider);
     detail = null;
-    loadList(mailboxQuery(account.provider, "inbox", ""));
+    loadList(mailboxQuery(account.provider, mailboxKey, ""));
     return true;
   }
 
@@ -454,6 +534,159 @@ export function createApplicationController(dependencies) {
     );
   }
 
+  /**
+   * Every action moves the list immediately and reconciles afterwards.
+   *
+   * Waiting for the server before the row moves makes the window feel broken
+   * on a slow connection, so `MailAccount.act`'s three consequences all live
+   * here: the optimistic edit is written back to the copy on disk, the list
+   * read that would rebuild the pre-action rows over it is stopped first, and
+   * a refusal puts the row back where it was rather than sending the whole
+   * list round the network again.
+   *
+   * `quiet` is for an action nobody asked for — marking read on open. It says
+   * nothing on the status line, and it keeps the row where it is even in the
+   * mailbox the action disqualifies it from, because closing the reader the
+   * click had just opened is not something a click should do.
+   *
+   * @param {string} action @param {Array<string>} ids
+   * @param {{quiet?: boolean}} [options]
+   */
+  function performAct(action, ids, options) {
+    const account = activeAccount();
+    const messageIds = Array.isArray(ids) ? ids : [];
+    if (!mail || !account || messageIds.length === 0) return;
+    const quiet = options?.quiet === true;
+    const capability = actionCapability(action);
+    const provider = Registry.get(account.provider);
+    if (capability && !Registry.can(account.provider, capability)) {
+      mail = reduceMailState(mail, {
+        type: "act",
+        action,
+        messageId: messageIds[0],
+        capabilities: provider.capabilities,
+        providerName: provider.name,
+        at: clockNow(),
+      });
+      raiseNotice();
+      return;
+    }
+    // A live list owns snapshots taken from before this action. Letting it
+    // finish would rebuild and persist those stale rows over the optimistic
+    // edit — a trashed search hit visibly came back when the slowest metadata
+    // request answered. Stop that read, then revalidate this same query once
+    // the mutation has landed.
+    const interrupted = mail.loading || mail.loadingMore;
+    if (interrupted) {
+      listHandle?.cancel?.();
+      listHandle = null;
+      mail = reduceMailState(mail, { type: "interrupt-list" });
+    }
+    const identity = { ...mail.request, objectId: messageIds[0] };
+    const query = mail.query;
+    // Where each row was and what it said, so a refusal can put it back.
+    const rows = messageIds
+      .map((messageId) => ({
+        index: mail.messages.findIndex(
+          (/** @type {any} */ entry) => entry.id === messageId,
+        ),
+        message: messageById(mail.messages, [], messageId),
+      }))
+      .filter((row) => row.index >= 0 && row.message);
+    const beforeMessages = mail.messages;
+    const beforeToken = mail.nextPageToken;
+    let optimisticMessages = /** @type {Array<any>|null} */ (null);
+    withRuntime(account, identity, (/** @type {any} */ adapter) =>
+      adapter.action(
+        {
+          identity,
+          action,
+          ids: messageIds,
+          onOptimistic: () => {
+            messageIds.forEach((messageId) => {
+              mail = reduceMailState(mail, {
+                type: "act",
+                action,
+                messageId,
+                quiet,
+                capabilities: provider.capabilities,
+                providerName: provider.name,
+              });
+            });
+            optimisticMessages = mail.messages;
+            recordUnread();
+            // The edit written back to the query cache, so the next
+            // cache-first paint of this same question draws what the user did
+            // rather than what was there before it. Not while a read was
+            // interrupted: what is on screen then is a half-built list, and it
+            // is written on success instead.
+            if (!interrupted) rememberList(account.id, query);
+          },
+        },
+        (/** @type {any} */ result) => {
+          if (!isCurrentRequest(identity)) {
+            // Navigation replaced the visible list while the request was in
+            // flight. Repair the query it belonged to on disk without putting
+            // its row into the mailbox that is now on screen.
+            const settled = result.ok ? optimisticMessages : beforeMessages;
+            if (settled) rememberList(account.id, query, settled);
+            return;
+          }
+          lastOperation = result;
+          if (!mail) return;
+          if (!result.ok) {
+            mail = reduceMailState(mail, {
+              type: "act-restore",
+              rows,
+              nextPageToken: beforeToken,
+              error: result.error,
+            });
+            recordUnread();
+            if (interrupted) loadList(query, "", true);
+            else rememberList(account.id, query);
+            return;
+          }
+          if (!quiet) {
+            mail = reduceMailState(mail, {
+              type: "acted",
+              notice: actionLabel(action, messageIds.length),
+              at: clockNow(),
+            });
+            raiseNotice();
+          }
+          if (interrupted) {
+            // Save the optimistic success for the next visit, then keep this
+            // list on screen while a live read revalidates it.
+            rememberList(account.id, query);
+            loadList(query, "", true);
+          }
+        },
+      ),
+    );
+  }
+
+  /**
+   * Opening an unread message marks it read.
+   *
+   * The one place Gmail's own clients act without being asked, and a reader
+   * that leaves the message bold is confusing — every other unread signal in
+   * the window is then wrong about it. Quiet, because it is a consequence of
+   * the click rather than a second thing that happened, and because the row
+   * has to stay where it is: this is exactly the action that disqualifies it
+   * from the Unread mailbox.
+   *
+   * Asked of the row rather than of the fetch, because a body already on disk
+   * short-circuits the fetch entirely and a mark that lived on that path would
+   * fire only for messages nobody had opened before.
+   *
+   * @param {string} messageId
+   */
+  function markOpenedRead(messageId) {
+    const row = mail ? messageById(mail.messages, [], messageId) : null;
+    if (!isUnread(row)) return;
+    performAct("markRead", [messageId], { quiet: true });
+  }
+
   return {
     start() {
       accounts = loadAccounts(values.storage);
@@ -469,7 +702,7 @@ export function createApplicationController(dependencies) {
 
     /** @param {string} accountId */
     switchAccount(accountId) {
-      return activate(accountFor(accounts, accountId));
+      return activate(accountFor(accounts, accountId), mail?.mailboxKey);
     },
 
     /** @param {string} mailboxKey */
@@ -571,6 +804,7 @@ export function createApplicationController(dependencies) {
       const cached = cachedDetail(account.id, identity.objectId);
       if (cached) {
         detail = cached;
+        markOpenedRead(identity.objectId);
         if (typeof done === "function") done(detail);
         return this.snapshot();
       }
@@ -585,6 +819,7 @@ export function createApplicationController(dependencies) {
         // The fetch's own answer rather than the merge, because the fields the
         // merge adds are the list's and the list keeps them.
         rememberBody(account.id, identity.objectId, result.value);
+        markOpenedRead(identity.objectId);
         if (typeof done === "function") done(detail);
       });
       return this.snapshot();
@@ -688,58 +923,36 @@ export function createApplicationController(dependencies) {
       return this.snapshot();
     },
 
-    /** @param {string} action @param {Array<string>} ids */
-    act(action, ids) {
-      const account = activeAccount();
-      const messageIds = Array.isArray(ids) ? ids : [];
-      if (!mail || !account || messageIds.length === 0) return this.snapshot();
-      const capability = actionCapability(action);
-      const provider = Registry.get(account.provider);
-      if (capability && !Registry.can(account.provider, capability)) {
-        mail = reduceMailState(mail, {
-          type: "act",
-          action,
-          messageId: messageIds[0],
-          capabilities: provider.capabilities,
-          providerName: provider.name,
-        });
-        return this.snapshot();
-      }
-      const identity = { ...mail.request, objectId: messageIds[0] };
-      withRuntime(account, identity, (/** @type {any} */ adapter) =>
-        adapter.action(
-          {
-            identity,
-            action,
-            ids: messageIds,
-            onOptimistic: () => {
-              messageIds.forEach((messageId) => {
-                mail = reduceMailState(mail, {
-                  type: "act",
-                  action,
-                  messageId,
-                  capabilities: provider.capabilities,
-                  providerName: provider.name,
-                });
-              });
-              recordUnread();
-            },
-          },
-          (/** @type {any} */ result) => {
-            if (!isCurrentRequest(identity)) return;
-            lastOperation = result;
-            if (!result.ok && isCurrentRequest(identity) && mail) {
-              const error = String(
-                result.error ||
-                  "The action may not have completed. Refreshing…",
-              );
-              loadList(identity.query, "", true);
-              if (mail) mail = { ...mail, status: error };
-            }
-          },
-        ),
-      );
+    /**
+     * @param {string} action @param {Array<string>} ids
+     * @param {{quiet?: boolean}} [options]
+     */
+    act(action, ids, options) {
+      performAct(action, ids, options);
       return this.snapshot();
+    },
+
+    /**
+     * One beat of the clock the confirmation is drawn against.
+     *
+     * The four seconds are worked out from the time, so something has to make
+     * the time move. This is the same beat `compose/controller.js` takes, from
+     * the same loop in the window — a second timer for the same job is two
+     * clocks to keep in step.
+     * @param {number} [at]
+     */
+    tick(at) {
+      if (mail)
+        mail = reduceMailState(mail, {
+          type: "retire-notice",
+          at: at === undefined ? clockNow() : at,
+        });
+      return this.snapshot();
+    },
+
+    /** Whether anything here still needs the clock to beat. */
+    needsTick() {
+      return Boolean(mail && mail.notice !== "");
     },
 
     snapshot() {

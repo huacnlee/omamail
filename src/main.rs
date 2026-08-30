@@ -293,10 +293,22 @@ fn install_command_host(queue: CommandQueue) -> Result<(), gpui_shell::HostError
     )
 }
 
+/// The unread count the Omarchy bar reads, and the heartbeat that says the
+/// window is still up.
+///
+/// Both are an Omarchy concept: `BarWidget.qml` is the only reader of
+/// `status.json`, and there is no bar to read it anywhere else. So off Linux
+/// `companion_status_path` answers `None`, and this exports nothing and starts
+/// no heartbeat thread rather than exporting a module whose every call writes
+/// to nowhere. `application/companion.js` treats the missing module as a
+/// mailbox with no bar, which is exactly what that is.
 fn install_companion_status(
     path: Option<PathBuf>,
 ) -> Result<Arc<Mutex<CompanionStatusState>>, gpui_shell::HostError> {
     let state = Arc::new(Mutex::new(CompanionStatusState::running()));
+    if path.is_none() {
+        return Ok(state);
+    }
     publish_companion_status(path.as_deref(), &state);
     let heartbeat_path = path.clone();
     let heartbeat_state = Arc::clone(&state);

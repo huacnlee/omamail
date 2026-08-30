@@ -236,6 +236,7 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     files.iter().map(LoadedAttachment::part).collect();
                 let (
                     mode,
+                    from,
                     to,
                     cc,
                     bcc,
@@ -251,8 +252,15 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                 if reply && in_reply_to.is_empty() {
                     return Err(BackendError::Unsupported);
                 }
+                // The address the composer picked, which the request layer has
+                // already refused unless it is one this mailbox may send as.
+                // Only a draft that named none falls back to the account's.
                 let operation = MailOperation::SendThreaded {
-                    from: context.email(),
+                    from: if from.is_empty() {
+                        context.email()
+                    } else {
+                        from.as_str()
+                    },
                     to: to.iter().map(String::as_str).collect(),
                     cc: cc.iter().map(String::as_str).collect(),
                     bcc: bcc.iter().map(String::as_str).collect(),
@@ -294,6 +302,7 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                 let files = load_attachments(draft.attachments())?;
                 let (
                     mode,
+                    from,
                     to,
                     cc,
                     bcc,
@@ -315,7 +324,14 @@ impl NativeGroupwareOps for ProductionGroupwareOps {
                     return Err(BackendError::Unsupported);
                 }
                 let raw = message(
-                    account.account_id(),
+                    // As above: the picked address, checked against this
+                    // mailbox before the grant was read, and the account's own
+                    // only where the draft named none.
+                    if from.is_empty() {
+                        account.account_id()
+                    } else {
+                        from.as_str()
+                    },
                     &to,
                     &cc,
                     &bcc,
@@ -701,6 +717,7 @@ fn event(payload: crate::providers::groupware::GoogleEventPayload) -> CalendarEv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::groupware::ComposeDraft;
     use std::io::Write as _;
 
     fn file(dir: &std::path::Path, name: &str, bytes: &[u8]) -> String {
@@ -756,6 +773,37 @@ mod tests {
         .unwrap();
         let decoded = String::from_utf8(URL_SAFE_NO_PAD.decode(plain).unwrap()).unwrap();
         assert!(decoded.contains("Subject: Quarterly report\r\n"));
+    }
+
+    #[test]
+    fn the_from_the_composer_picked_is_what_the_message_says() {
+        // The seam the address used to fall through: `into_parts` is what the
+        // send path takes a draft apart with, and a `from` it did not return
+        // was a From nobody could write.
+        let draft: ComposeDraft = serde_json::from_value(json!({
+            "mode": "new",
+            "from": "Me@Example.test",
+            "to": "you@example.test",
+            "subject": "Hi",
+            "body": "Body",
+        }))
+        .unwrap();
+        let (_mode, from, to, cc, bcc, subject, body, ..) = draft.into_parts();
+        assert_eq!(from, "Me@Example.test");
+        let raw = message(&from, &to, &cc, &bcc, &subject, &body, None, &[]).unwrap();
+        let decoded = String::from_utf8(URL_SAFE_NO_PAD.decode(raw).unwrap()).unwrap();
+        assert!(decoded.starts_with("From: Me@Example.test\r\n"));
+
+        // A draft that named none still goes out as the account, which is what
+        // every message sent before an identity list existed did.
+        let bare: ComposeDraft = serde_json::from_value(json!({
+            "mode": "new",
+            "to": "you@example.test",
+            "subject": "Hi",
+            "body": "Body",
+        }))
+        .unwrap();
+        assert_eq!(bare.sender(), "");
     }
 
     #[test]

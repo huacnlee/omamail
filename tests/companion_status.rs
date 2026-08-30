@@ -101,3 +101,28 @@ fn status_write_atomically_replaces_the_previous_snapshot() {
     );
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
 }
+
+#[test]
+fn a_desktop_with_no_bar_gets_no_companion_module_and_no_heartbeat() {
+    // The bar is Omarchy's, and `companion_status_path` already answers `None`
+    // anywhere else. What that has to reach is the host: a module exported
+    // there would answer every `set_unread` by writing to nowhere, and a thread
+    // would wake every minute to do it. `application/companion.js` reads a
+    // missing module as a mailbox with no bar, which is what this is.
+    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))
+        .expect("read host source");
+    let start = source
+        .find("fn install_companion_status")
+        .expect("the companion installer");
+    let body = &source[start..];
+    let guard = body
+        .find("if path.is_none() {")
+        .expect("the absent-path guard");
+    for later in ["omarchy-companion", "heartbeat", "publish_companion_status"] {
+        let offset = body.find(later).unwrap_or_else(|| panic!("{later}"));
+        assert!(
+            guard < offset,
+            "{later} must come after the guard that returns without a status path"
+        );
+    }
+}

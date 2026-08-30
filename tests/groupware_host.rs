@@ -208,6 +208,60 @@ fn refuses_every_attachment_shape_that_could_reach_a_file_or_a_header_unchecked(
     );
 }
 
+/// A draft that names a From, with everything else the same.
+fn compose_from(provider: &str, account_id: &str, from: &str) -> Value {
+    json!({
+        "type": "compose.send",
+        "provider": provider,
+        "accountId": account_id,
+        "deadlineMs": 2000,
+        "draft": {"mode": "new", "to": "you@example.test", "cc": "", "bcc": "",
+                  "subject": "Subject", "body": "Body", "from": from}
+    })
+}
+
+#[test]
+fn a_from_the_mailbox_may_not_send_as_never_reaches_a_credential() {
+    let backend = FakeBackend::default();
+    // The window chose this address, so it is a request and not a fact. There
+    // is one address this mailbox may send as until a send-as route exists
+    // host-side, and a draft naming any other is refused rather than quietly
+    // going out under the account's own.
+    for (provider, account_id, from) in [
+        ("gmail", "me@example.test", "someone@example.test"),
+        ("imap", "imap:me@example.test", "someone@example.test"),
+        // Not an address at all, and a display-name form is not one either:
+        // the picker offers bare mailboxes and the header is written from this.
+        ("gmail", "me@example.test", "Me <me@example.test>"),
+        (
+            "gmail",
+            "me@example.test",
+            "me@example.test, other@example.test",
+        ),
+    ] {
+        assert!(
+            run(&backend, compose_from(provider, account_id, from)).is_err(),
+            "{provider} must not send as {from}"
+        );
+    }
+    assert!(backend.calls.lock().unwrap().is_empty());
+    assert!(
+        backend.secret_reads.lock().unwrap().is_empty(),
+        "and no credential is read to find out"
+    );
+
+    // The mailbox's own address is the one choice there is, whatever case the
+    // window offered it back in.
+    for (provider, account_id, from) in [
+        ("gmail", "me@example.test", "me@example.test"),
+        ("gmail", "me@example.test", "Me@Example.test"),
+        ("imap", "imap:me@example.test", "me@example.test"),
+    ] {
+        run(&backend, compose_from(provider, account_id, from)).unwrap();
+    }
+    assert_eq!(backend.calls.lock().unwrap().len(), 3);
+}
+
 #[test]
 fn dispatches_closed_gmail_draft_delete() {
     let backend = FakeBackend::default();

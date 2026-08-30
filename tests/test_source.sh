@@ -865,18 +865,29 @@ awk '
 #    a release asset, or GitHub's own attachment host, which is where the
 #    README's screenshots already live.
 #
-#    preview.png is the one exception, and it is named rather than waved
-#    through by raising the ceiling. The marketplace catalog rebuilds from
-#    branch HEAD and takes a plugin's card image from a root file, so this one
-#    has to be in the tree or the card falls back to a placeholder. It gets a
-#    ceiling of its own instead of none: a card image that grew to a megabyte
-#    would still be a megabyte every user clones.
+#    Two files are named exceptions rather than being waved through by raising
+#    the ceiling for everything.
+#
+#    preview.png: the marketplace catalog rebuilds from branch HEAD and takes a
+#    plugin's card image from a root file, so this one has to be in the tree or
+#    the card falls back to a placeholder. It gets a ceiling of its own instead
+#    of none: a card image that grew to a megabyte would still be a megabyte
+#    every user clones.
+#
+#    Cargo.lock: not an asset at all, but a build input, and the rule above does
+#    not apply to it — nothing can move it out of the clone without breaking the
+#    thing it is for. `gpui`, `gpui_platform`, `gpui-shell` and `gpui-base` are
+#    git dependencies with no version, so without the lock a release resolves
+#    whatever is on their default branches that morning and ships a binary
+#    nobody tested. Its size is cargo's, and it grows with the dependency graph.
 limit=$((128 * 1024))
 preview_limit=$((384 * 1024))
+lock_limit=$((2 * 1024 * 1024))
 oversized=$(git ls-files -z \
   | xargs -0 -I{} sh -c '
       case "{}" in
         preview.png) ceiling='"$preview_limit"' ;;
+        Cargo.lock) ceiling='"$lock_limit"' ;;
         *) ceiling='"$limit"' ;;
       esac
       size=$(wc -c < "{}" 2>/dev/null || echo 0)
@@ -1128,6 +1139,7 @@ OWNERS = {
     "build-icons.mjs": {"standalone"},
     # Repository tooling. Neither client runs these; they build or release it.
     "bump.sh": set(),
+    "package-release.sh": set(),
     "release-notes.sh": set(),
     "qml-js-to-esm.mjs": set(),
 }

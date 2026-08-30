@@ -71,7 +71,16 @@ def records(database: Path) -> list[dict[str, str]]:
 
 def main() -> None:
     home = Path(os.environ.get("HOME", "")).expanduser()
-    roots = [home / ".thunderbird", home / ".betterbird"]
+    # Both desktops' locations, unconditionally: one script serves the shell
+    # plugin and the standalone client, and a directory the other platform uses
+    # simply is not there. `contacts_host.rs` keeps the pair for the platform it
+    # was built for, and a test holds the two lists together.
+    roots = [
+        home / ".thunderbird",
+        home / ".betterbird",
+        home / "Library/Thunderbird",
+        home / "Library/Betterbird",
+    ]
     contacts: dict[str, dict[str, str]] = {}
     for root in roots:
         for profile in profiles(root):

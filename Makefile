@@ -104,6 +104,7 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_integration.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_attachments.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_flows.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_forward_attachments.mjs
 	node tests/test_application_controller.mjs
 	node tests/test_body_cache.mjs
 	node tests/test_app_adapters_effect_port.mjs
@@ -131,6 +132,7 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_states.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_mail_ui_reader_security.mjs
 	node tests/test_reader_controller.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_reader_wire.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_reader_selection.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_compose_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_ui_render.mjs
@@ -159,6 +161,7 @@ test-shell:
 	bash tests/test_calendar_write.sh
 	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh
+	bash tests/test_package_release.sh
 
 # Focus ownership and key routing cannot be tested without a focus scope, and a
 # focus scope needs the QML engine. Offscreen, so it needs no compositor: the

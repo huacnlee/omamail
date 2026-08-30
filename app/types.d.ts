@@ -221,6 +221,17 @@ declare module "omamail-attachment" {
    * host opens the file when the message goes.
    */
   export function pick(): Promise<string>;
+  /**
+   * Keep a file the mail server handed over as bytes, so a draft can carry it
+   * the way every other attachment is carried — by path, opened by the host at
+   * send time. A forward's originals and a saved draft's files arrive this way
+   * and no other.
+   *
+   * `{"filename":…,"mimeType":…,"data":<base64>}` in;
+   * `{"ok":true,path,filename,mimeType,size}` or `{"ok":false,"error":…}` out.
+   * The file lives in a private directory this process removes when it ends.
+   */
+  export function store(request: string): Promise<string>;
 }
 
 declare module "omamail-contacts" {

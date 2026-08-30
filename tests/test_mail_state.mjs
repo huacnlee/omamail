@@ -135,7 +135,12 @@ assert.equal(
   opened.messages,
   "refusal happens before optimistic mutation",
 );
-assert.equal(refused.status, "HEY has no archive");
+// A refusal is something said, not something that went wrong: `MailAccount.act`
+// puts it through `note()`, beside the confirmations and away from `lastError`,
+// so it is drawn dim and retires on the same four seconds. Drawn as a failure
+// it blames the mailbox for a request that never left the window.
+assert.equal(refused.notice, "HEY has no archive");
+assert.equal(refused.status, "");
 
 const archived = reduceMailState(opened, {
   type: "act",

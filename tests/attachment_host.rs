@@ -1,11 +1,14 @@
 use std::{
-    fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
 };
 
-#[cfg(unix)]
+// The bare `fs` and the launched child belong to the `/proc` tests, which are
+// Linux's; everything else here spells the module out where it uses it.
+#[cfg(target_os = "linux")]
+use std::{fs, process::Command};
+
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -20,11 +23,13 @@ impl AttachmentLauncher for Launcher {
     }
 }
 
+#[cfg(target_os = "linux")]
 struct ExecLauncher {
     script: PathBuf,
     copied: PathBuf,
 }
 
+#[cfg(target_os = "linux")]
 impl AttachmentLauncher for ExecLauncher {
     fn launch(&self, path: &Path) -> Result<(), AttachmentError> {
         Command::new(&self.script)
@@ -93,7 +98,11 @@ fn rejects_paths_bad_base64_unknown_fields_and_oversize_without_launching() {
     assert!(launcher.0.lock().unwrap().is_empty());
 }
 
-#[cfg(unix)]
+// Pinning the *opened* file to the descriptor is a `/proc` mechanism, so these
+// two are Linux's. Elsewhere the write is still made through the descriptor and
+// only the path handed to the opener is an ordinary one, which is what
+// `the_opener_is_given_a_path_inside_the_private_directory` holds instead.
+#[cfg(target_os = "linux")]
 #[test]
 fn pins_the_open_root_directory_when_its_path_is_replaced() {
     let parent = tempfile::tempdir().unwrap();
@@ -113,7 +122,31 @@ fn pins_the_open_root_directory_when_its_path_is_replaced() {
     assert!(std::fs::read_dir(&pinned).unwrap().next().is_some());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
+#[test]
+fn the_opener_is_given_a_path_inside_the_private_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let launcher = Arc::new(Launcher::default());
+    let host = AttachmentHost::new(root.path().to_owned(), launcher.clone()).unwrap();
+
+    host.open_json(r#"{"filename":"safe.txt","data":"QQ"}"#)
+        .unwrap();
+
+    let opened = launcher.0.lock().unwrap()[0].clone();
+    assert!(opened.starts_with(root.path()), "{}", opened.display());
+    assert!(
+        opened
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("omamail-attachment-")),
+        "{}",
+        opened.display()
+    );
+    assert_eq!(std::fs::read(&opened).unwrap(), b"A");
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn launched_process_can_read_the_pinned_attachment_after_exec() {
     let parent = tempfile::tempdir().unwrap();
@@ -141,6 +174,20 @@ fn launched_process_can_read_the_pinned_attachment_after_exec() {
     assert_eq!(fs::read(copied).unwrap(), b"cross-exec");
     assert!(fs::read_dir(root).unwrap().next().is_none());
     assert!(fs::read_dir(pinned).unwrap().next().is_some());
+}
+
+#[test]
+fn the_opener_is_the_one_this_desktop_has() {
+    let opener = omamail::attachment_host::SystemOpener::current();
+    let expected = if cfg!(target_os = "macos") {
+        omamail::attachment_host::MACOS_OPEN
+    } else {
+        omamail::attachment_host::XDG_OPEN
+    };
+    assert_eq!(opener.program(), Path::new(expected));
+    // Absolute, both of them: what opens a stranger's file is not a decision
+    // an inherited PATH gets to make.
+    assert!(opener.program().is_absolute());
 }
 
 #[test]
@@ -228,4 +275,97 @@ fn the_picker_is_registered_beside_the_opener() {
     let source = include_str!("../src/effects.rs");
     assert!(source.contains(".async_function(\"pick\""));
     assert!(source.contains("scripts/attachment.sh"));
+}
+
+// ------------------------------------------------------------------ the store
+
+// A forwarded file and a saved draft's file arrive from the mail server as
+// bytes, and the send path opens a path. `store` is where the two meet.
+
+#[cfg(unix)]
+fn store(host: &AttachmentHost<Arc<Launcher>>, value: serde_json::Value) -> serde_json::Value {
+    serde_json::from_str(&host.store_json(&value.to_string())).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_kept_file_is_answered_as_a_path_the_send_path_can_open() {
+    let root = tempfile::tempdir().unwrap();
+    let launcher = Arc::new(Launcher::default());
+    let host = AttachmentHost::new(root.path().to_owned(), launcher.clone()).unwrap();
+    let bytes = b"\0forwarded attachment bytes";
+    let answer = store(
+        &host,
+        serde_json::json!({
+            "filename": "report.pdf",
+            "mimeType": "application/pdf",
+            "data": URL_SAFE_NO_PAD.encode(bytes),
+        }),
+    );
+    assert_eq!(answer["ok"], serde_json::json!(true));
+    assert_eq!(answer["filename"], serde_json::json!("report.pdf"));
+    assert_eq!(answer["mimeType"], serde_json::json!("application/pdf"));
+    assert_eq!(answer["size"], serde_json::json!(bytes.len()));
+    let path = PathBuf::from(answer["path"].as_str().unwrap());
+    // An ordinary path, not this process's own view of a descriptor: it
+    // crosses to the window and comes back on a draft, and the host opens it.
+    assert!(path.is_absolute());
+    assert!(path.starts_with(root.path()));
+    assert!(
+        !path
+            .components()
+            .any(|part| part.as_os_str() == "." || part.as_os_str() == ".."),
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let directory = std::fs::metadata(path.parent().unwrap()).unwrap();
+        assert_eq!(directory.permissions().mode() & 0o777, 0o700);
+    }
+    // Nothing was opened: keeping a file is not showing it to anybody.
+    assert!(launcher.0.lock().unwrap().is_empty());
+    drop(host);
+    assert!(!path.exists(), "the file goes when the window does");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_name_or_a_type_the_send_path_would_refuse_is_refused_here() {
+    let root = tempfile::tempdir().unwrap();
+    let host = AttachmentHost::new(root.path().to_owned(), Arc::new(Launcher::default())).unwrap();
+    let data = URL_SAFE_NO_PAD.encode(b"bytes");
+    for (name, request) in [
+        (
+            "a name that could forge a header parameter",
+            serde_json::json!({"filename":"a\";b.pdf","data":data}),
+        ),
+        (
+            "a name that is a path",
+            serde_json::json!({"filename":"../escape.pdf","data":data}),
+        ),
+        (
+            "a media type that is not two tokens",
+            serde_json::json!({"filename":"a.pdf","mimeType":"application/pdf; x=1","data":data}),
+        ),
+        (
+            "bytes that are not base64",
+            serde_json::json!({"filename":"a.pdf","data":"not base64!"}),
+        ),
+        (
+            "a field nothing here reads",
+            serde_json::json!({"filename":"a.pdf","data":data,"path":"/etc/passwd"}),
+        ),
+    ] {
+        let answer = store(&host, request);
+        assert_eq!(answer["ok"], serde_json::json!(false), "{name}");
+        assert!(answer["path"].is_null(), "{name}");
+    }
+}
+
+#[test]
+fn the_store_is_registered_beside_the_opener() {
+    let source = include_str!("../src/effects.rs");
+    assert!(source.contains(".async_function(\"store\""));
 }

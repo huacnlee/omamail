@@ -332,12 +332,27 @@ impl ComposeRequest {
         if !matches!(self.provider.as_str(), "gmail" | "imap") {
             return Err(HostError::Unsupported);
         }
-        if !valid_email(
-            self.account_id
-                .strip_prefix("imap:")
-                .unwrap_or(&self.account_id),
-        ) || !self.draft.valid(save)
-        {
+        // An IMAP id is `imap:<address>` and a Gmail id is the address, and
+        // `HostContext` refuses an IMAP account whose id and address disagree,
+        // so this is the mailbox's own address in both cases.
+        let account_email = self
+            .account_id
+            .strip_prefix("imap:")
+            .unwrap_or(&self.account_id);
+        if !valid_email(account_email) || !self.draft.valid(save) {
+            return Err(HostError::InvalidRequest);
+        }
+        // Which addresses this account may send as. There is exactly one until
+        // a send-as route exists host-side, and the window is not the thing
+        // that gets to decide: a draft naming any other address is refused
+        // here rather than quietly going out under the account's own, which is
+        // what a From the host dropped on the floor amounts to.
+        //
+        // Case is not part of the answer. The picker offers the account's own
+        // address back, so a mailbox that differs only in case is the same
+        // mailbox and refusing it would be refusing the only choice there is.
+        let from = self.draft.sender();
+        if !from.is_empty() && !from.eq_ignore_ascii_case(account_email) {
             return Err(HostError::InvalidRequest);
         }
         if self.provider == "imap" {
@@ -477,6 +492,7 @@ fn valid_mime_type(value: &str) -> bool {
 }
 pub(crate) type ComposeParts = (
     String,
+    String,
     Vec<String>,
     Vec<String>,
     Vec<String>,
@@ -501,10 +517,18 @@ impl ComposeDraft {
     pub fn attachments(&self) -> &[ComposeAttachment] {
         &self.attachments
     }
+    /// The address this draft says it is sent as, or "" where it named none.
+    ///
+    /// Checked against the mailbox before any credential is read: the window
+    /// chose it, so it is a request rather than a fact.
+    pub(crate) fn sender(&self) -> &str {
+        &self.from
+    }
     #[allow(dead_code)]
     pub(crate) fn into_parts(self) -> ComposeParts {
         (
             self.mode,
+            self.from,
             self.to,
             self.cc,
             self.bcc,

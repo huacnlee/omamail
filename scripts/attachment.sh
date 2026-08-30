@@ -259,6 +259,21 @@ forget_file() {
 # The chosen list lands in $chosen rather than on stdout, because both callers
 # below answer a cancelled picker with their own JSON and a command
 # substitution would swallow it.
+# macOS has neither of those and needs no helper: the chooser is the one every
+# application there opens, asked for through AppleScript. Cancelling it exits
+# non-zero, which is the same empty answer a cancelled portal gives. The script
+# is fixed text with nothing interpolated into it, and what comes back is
+# POSIX paths, one per line, the way the portal answers.
+osascript_picker() {
+  osascript \
+    -e 'set chosen to choose file with prompt "Attach files" with multiple selections allowed' \
+    -e 'set answer to ""' \
+    -e 'repeat with item_ref in chosen' \
+    -e 'set answer to answer & POSIX path of item_ref & linefeed' \
+    -e 'end repeat' \
+    -e 'return answer' 2>/dev/null || true
+}
+
 run_picker() {
   chosen=
   if command -v omarchy-file-select >/dev/null 2>&1; then
@@ -266,6 +281,8 @@ run_picker() {
   elif command -v zenity >/dev/null 2>&1; then
     chosen=$(zenity --file-selection --multiple --separator='
 ' --title='Attach files' 2>/dev/null || true)
+  elif command -v osascript >/dev/null 2>&1; then
+    chosen=$(osascript_picker)
   else
     return 1
   fi

@@ -431,6 +431,9 @@ pub fn standard_hey_candidates() -> Vec<PathBuf> {
         candidates.push(bin_home.join("hey"));
     }
     candidates.extend([
+        // Homebrew's prefix on Apple silicon, which is where a `brew install`
+        // of the HEY CLI lands on the machines this ships a macOS build for.
+        PathBuf::from("/opt/homebrew/bin/hey"),
         PathBuf::from("/usr/local/bin/hey"),
         PathBuf::from("/usr/bin/hey"),
     ]);

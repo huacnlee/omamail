@@ -61,4 +61,32 @@ with tempfile.TemporaryDirectory() as temporary:
         {"name": "", "email": "morgan@example.com"},
     ]
 
+# macOS keeps the same profiles under ~/Library. The script reads both
+# platforms' directories because one script serves both clients, and a
+# directory the other platform uses simply is not there.
+with tempfile.TemporaryDirectory() as temporary:
+    home = Path(temporary)
+    profile = home / "Library" / "Thunderbird" / "Profiles" / "test.default"
+    profile.mkdir(parents=True)
+    make_book(
+        profile / "abook.sqlite",
+        [
+            ("one", "DisplayName", "Grace Hopper"),
+            ("one", "PrimaryEmail", "grace@example.com"),
+        ],
+    )
+
+    environment = dict(os.environ)
+    environment["HOME"] = str(home)
+    result = subprocess.run(
+        [str(SCRIPT)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert json.loads(result.stdout) == [
+        {"name": "Grace Hopper", "email": "grace@example.com"}
+    ]
+
 print("contact discovery tests passed")

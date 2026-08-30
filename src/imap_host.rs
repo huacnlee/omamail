@@ -277,6 +277,15 @@ pub enum RunnerError {
     OutputTooLarge,
     InvalidResponse,
     TransportFailed,
+    /// The server answered, and its answer was a tagged `NO` or `BAD`.
+    ///
+    /// curl exits 0 for this: it delivered the command and read the reply, and
+    /// whether the server agreed to it is not curl's question. So an exit code
+    /// is not an answer about whether a `UID MOVE` happened, and reading only
+    /// that reported every refusal — a folder that is gone, a mailbox over
+    /// quota, a message another client expunged — as an action that was
+    /// carried out, with the row already moved in the list.
+    ServerRefused,
     ProcessFailed,
 }
 
@@ -289,6 +298,11 @@ impl fmt::Display for RunnerError {
             Self::OutputTooLarge => "mail transport output is too large",
             Self::InvalidResponse => "mail transport returned an invalid response",
             Self::TransportFailed => "mail server transport failed",
+            // What the server said is not repeated: a refusal can quote the
+            // command it refused, and a failed LOGIN is a command with a
+            // password in it. `Imap.responseError` is where a sentence about
+            // the reason belongs, and it has the response to read.
+            Self::ServerRefused => "the mail server refused this request",
             Self::ProcessFailed => "mail transport process failed",
         })
     }
@@ -349,10 +363,11 @@ pub fn execute_with_runner(
         deadline,
     )
     .map_err(map_command_error)?;
+    let mode = planned.mode;
     let output = runner
         .run_bounded(command, MAX_PROCESS_OUTPUT_BYTES, MAX_PROCESS_OUTPUT_BYTES)
         .map_err(map_command_error)?;
-    parse_transport_output(output)
+    parse_transport_output(mode, output)
 }
 
 fn map_command_error(error: CommandError) -> RunnerError {
@@ -365,7 +380,10 @@ fn map_command_error(error: CommandError) -> RunnerError {
     }
 }
 
-fn parse_transport_output(output: MailProcessOutput) -> Result<MailTransportReply, RunnerError> {
+fn parse_transport_output(
+    mode: &str,
+    output: MailProcessOutput,
+) -> Result<MailTransportReply, RunnerError> {
     if output.stdout.len() > MAX_PROCESS_OUTPUT_BYTES
         || output.stderr.len() > MAX_PROCESS_OUTPUT_BYTES
     {
@@ -391,7 +409,87 @@ fn parse_transport_output(output: MailProcessOutput) -> Result<MailTransportRepl
     if transport_status != 0 {
         return Err(RunnerError::TransportFailed);
     }
+    // curl exited 0, which says the conversation happened and nothing about
+    // what the server said in it. SMTP is left alone: its refusals are reply
+    // codes curl already turns into a non-zero exit.
+    if mode == "imap" && tagged_failure(&stdout) {
+        return Err(RunnerError::ServerRefused);
+    }
     Ok(MailTransportReply { stdout })
+}
+
+/// Whether a tagged completion in this response said `NO` or `BAD`.
+///
+/// A port of `Imap.failureCompletion`, and it has to walk the response the way
+/// that one does rather than search the bytes: a FETCH carries the message
+/// itself in a literal, and an ordinary header such as `X-Spam-Flag: NO` is
+/// not the server refusing a command. Only the first protocol line of each
+/// response can be a completion, so the literal's own octets are stepped over
+/// by their declared count and never read as protocol.
+///
+/// curl removes the tagged completion around a custom IMAP request, so most
+/// successful responses carry none of these at all and this answers false
+/// without looking at anything but the untagged lines.
+fn tagged_failure(bytes: &[u8]) -> bool {
+    let mut index = 0;
+    // Whether the next line begins a response rather than continuing one. A
+    // literal folds the lines after it into the response that opened it.
+    let mut at_start = true;
+    while index < bytes.len() {
+        let newline = find_crlf(&bytes[index..]).map(|at| index + at);
+        let end = newline.unwrap_or(bytes.len());
+        let line = &bytes[index..end];
+        index = newline.map_or(bytes.len(), |at| at + 2);
+        if at_start && refusal_line(line) {
+            return true;
+        }
+        match literal_count(line) {
+            Some(size) => {
+                index = index.saturating_add(size).min(bytes.len());
+                // curl can begin another untagged response at the exact byte
+                // after a literal; the count is the boundary either way.
+                at_start = bytes[index..].starts_with(b"* ");
+            }
+            None => at_start = true,
+        }
+    }
+    false
+}
+
+fn find_crlf(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(2).position(|pair| pair == b"\r\n")
+}
+
+/// The octet count a line ending in `{123}` or `{123+}` continues into.
+fn literal_count(line: &[u8]) -> Option<usize> {
+    let inner = line.strip_suffix(b"}")?;
+    let inner = inner.strip_suffix(b"+").unwrap_or(inner);
+    let open = inner.iter().rposition(|byte| *byte == b'{')?;
+    let digits = &inner[open + 1..];
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(digits).ok()?.parse::<usize>().ok()
+}
+
+/// `<tag> NO ...` or `<tag> BAD ...`, where the tag is neither the untagged
+/// `*` nor the continuation `+`.
+fn refusal_line(line: &[u8]) -> bool {
+    let space = |byte: u8| byte == b' ' || byte == b'\t';
+    // The tag starts the line: a response indented by anything is not one.
+    if line
+        .first()
+        .is_none_or(|byte| space(*byte) || matches!(byte, b'*' | b'+'))
+    {
+        return false;
+    }
+    let mut words = line
+        .split(|byte| space(*byte))
+        .filter(|word| !word.is_empty())
+        .skip(1);
+    words
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case(b"NO") || word.eq_ignore_ascii_case(b"BAD"))
 }
 
 fn decode_capped(value: &str) -> Result<Vec<u8>, RunnerError> {
@@ -418,10 +516,18 @@ pub fn plan(
             "INBOX",
             vec!["CAPABILITY".to_owned(), "LIST \"\" \"*\" RETURN (SPECIAL-USE)".to_owned()],
         ),
+        // The same header set `ImapProtocol.LIST_HEADERS` asks for, plus the
+        // two threading headers this side has always taken. A row is not only
+        // a subject and a sender: To and Cc are what the reader shows a
+        // message was addressed to, Reply-To is where answering it goes, and
+        // List-Unsubscribe is the mailing list's own door out. Asking for
+        // fewer left every one of those empty on an IMAP row, so the reader
+        // drew a message with no recipients and no unsubscribe notice while
+        // the same message on Gmail had both.
         MailOperation::List { folder } => imap_plan(
             account,
             folder,
-            vec!["UID FETCH 1:* (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE FROM SUBJECT MESSAGE-ID REFERENCES IN-REPLY-TO)])".to_owned()],
+            vec!["UID FETCH 1:* (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REPLY-TO LIST-UNSUBSCRIBE REFERENCES IN-REPLY-TO)])".to_owned()],
         ),
         MailOperation::Detail { message_id } => {
             let (uid, folder) = message_parts(message_id)?;
@@ -857,8 +963,12 @@ fn valid_address(value: &str) -> bool {
         })
 }
 
+// The message may only claim to come from this mailbox. Case is not part of
+// the answer: the composer offers the account's own address back and a copy
+// that differs only in case is the same mailbox, so comparing bytes would
+// refuse the one address there is to pick.
 fn valid_from(value: &str, account_email: &str) -> bool {
-    if value == account_email {
+    if value.eq_ignore_ascii_case(account_email) {
         return true;
     }
     if value.trim() != value || !value.ends_with('>') {
@@ -871,7 +981,7 @@ fn valid_from(value: &str, account_email: &str) -> bool {
     let display = display.trim_end();
     !display.is_empty()
         && !display.contains(['<', '>'])
-        && address == account_email
+        && address.eq_ignore_ascii_case(account_email)
         && valid_address(address)
 }
 

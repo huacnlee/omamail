@@ -26,7 +26,7 @@ use omamail::platform::{
     },
     secrets::{
         MemorySecretStore, SUPERSEDED_GMAIL_GRANTS, Secret, SecretKey, SecretStore,
-        SecretStoreError, SystemSecretStore, keyring_error_class,
+        SecretStoreError, keyring_error_class,
     },
 };
 
@@ -253,6 +253,11 @@ fn binary_keyring_identity_is_unambiguous_across_field_boundaries() {
     assert_eq!(left.keyring_service(), right.keyring_service());
     assert_ne!(left.keyring_account(), right.keyring_account());
 }
+
+// The `secret-tool` half of the store, and so are its tests: everywhere else
+// `SystemSecretStore` is the Keychain and there is no child process to fixture.
+#[cfg(target_os = "linux")]
+use omamail::platform::secrets::SystemSecretStore;
 
 #[cfg(target_os = "linux")]
 fn executable_fixture(contents: &str) -> (tempfile::TempDir, PathBuf) {

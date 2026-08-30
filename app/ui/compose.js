@@ -63,7 +63,7 @@ import { icon } from "./icons.js";
  * @property {boolean} [ccVisible]
  * @property {boolean} [bccVisible]
  * @property {{field:string,contacts:Array<ComposeContact>,highlighted:number}} [suggestions]
- * @property {{originals:Array<ComposeAttachment>,files:Array<ComposeAttachment>,loading:boolean,error:string}} [forward]
+ * @property {{originals:Array<ComposeAttachment>,files:Array<ComposeAttachment>,loading:boolean,error:string,kind?:"forward"|"draft"}} [forward] what the message this draft came from carries, and whose files those are
  * @property {{loading:boolean,error:string}} [quoting] the message being answered, while it is still being read
  * @property {Array<ComposeAttachment>} [attachments]
  * @property {boolean} [attaching]
@@ -498,10 +498,18 @@ function forwardRow(model, cx) {
     loading: false,
     error: "",
   };
+  // A forward's files belong to the message being forwarded; a reopened
+  // draft's belong to the draft. The wait and the Retry are the same, and
+  // saying "will be forwarded" over a draft nobody is forwarding is not.
+  const saved = forward.kind === "draft";
   const summary = forward.loading
-    ? "Loading original attachments..."
+    ? saved
+      ? "Loading the files saved with this draft..."
+      : "Loading original attachments..."
     : forward.error ||
-      `${formatCount(forward.files.length, "original attachment")} will be forwarded`;
+      (saved
+        ? `${formatCount(forward.files.length, "saved file")} will be sent`
+        : `${formatCount(forward.files.length, "original attachment")} will be forwarded`);
   return formRow(
     "compose-forward-row",
     "Files",
@@ -832,8 +840,9 @@ export function renderCompose(model, cx) {
               cx,
             ),
           )
-          // A forward names what it carries; every other draft has nothing to
-          // say here and gives the row back to the body.
+          // A forward names what it carries, and so does a draft reopened
+          // with files saved on it; every other draft has nothing to say here
+          // and gives the row back to the body.
           .when((model.forward?.originals.length ?? 0) > 0, (fields) =>
             fields.child(forwardRow(model, cx)),
           ),

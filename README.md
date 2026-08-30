@@ -99,6 +99,21 @@ Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
 `curl` — all of which Omarchy already ships. A HEY mailbox additionally needs
 `hey`; see below.
 
+## Somewhere that is not Omarchy
+
+The same mailbox, the same keys and the same reader, drawn by a standalone application rather than by the Omarchy shell. Every release carries one for `linux-x86_64` and one for `macos-arm64`; download the archive, unpack it, and run what is inside. The plugin above is the one to install on Omarchy — this is for the machines that cannot load it.
+
+```bash
+tar xzf omamail-*-linux-x86_64.tar.gz
+omamail-*-linux-x86_64/bin/omamail
+```
+
+The `bin/` and `share/` inside it are an ordinary Unix prefix, so `cp -R omamail-*-linux-x86_64/* ~/.local/` installs it and `~/.local/bin/omamail` runs it. Keep the two together whichever way you move them: the binary finds the window it draws in `share/app`, and the mail transport it shells out to in `share/scripts`.
+
+macOS ships `Omamail.app`. Drag it to Applications. The build is not signed, so the first launch is right-click → Open rather than a double-click — or `xattr -dr com.apple.quarantine /Applications/Omamail.app` once, which says the same thing in one line. Mailboxes are kept in the login Keychain there, the way they are kept in the keyring on Linux.
+
+Three things are Omarchy's own and are simply absent elsewhere, rather than present and failing: the unread badge in the bar, the theme the window paints itself in, and `mailto:` links, which reach the running window through a socket that only the Linux build opens. Signing in to HEY needs a terminal that macOS has no standard way to open, so run `hey auth login` in Terminal yourself — the setup page picks the answer up on its next look.
+
 ## Mailboxes it can open
 
 Adding a mailbox asks which kind first, because the three setups have nothing in

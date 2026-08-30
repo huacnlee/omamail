@@ -18,6 +18,7 @@ import {
   closeMessageMenu,
   menuCapabilitiesFor,
   openAccountSwitcher,
+  openCursorDetail,
   openMessageMenu,
   runMessageMenu,
 } from "./mail-actions.js";
@@ -77,6 +78,13 @@ export function signedOutCard(mail, provider) {
 export function mailModel(app, snapshot, mail, provider, account, lastError, now) {
   const card = signedOutCard(mail, provider);
   const signedOut = card.signedOut;
+  // What just happened, kept apart from what went wrong. `App.qml` reads
+  // `actionStatus` ahead of `lastError` and colours the line urgent only when
+  // there is a failure and no confirmation: "Archived" printed in the urgent
+  // colour, or sitting under an older failure, reads as the archive having
+  // failed.
+  const acted = String(mail?.notice || "");
+  const failed = !acted && Boolean(lastError || signedOut);
   return {
         width: app.width,
         accounts: snapshot.accounts.accounts.map(
@@ -307,18 +315,14 @@ export function mailModel(app, snapshot, mail, provider, account, lastError, now
               ? Mail.relativeTime(new Date(mail.syncedAtMs), now)
               : "",
           ),
-          state: lastError || signedOut
-            ? "error"
-            : mail?.loading
-              ? "loading"
-              : "ready",
+          state: failed ? "error" : mail?.loading ? "loading" : "ready",
           // What the window most needs to say. It takes the right of
           // the status line from the hints while it has something.
           //
           // The signed-out sentence wins over the raw failure: the host's
           // reply travels as far as here, and "provider requires sign-in" is
           // a protocol word, not something to read off a mailbox.
-          notice: card.notice || lastError,
+          notice: card.notice || acted || lastError,
           // Rendered from the keymap and nothing else. Three
           // hand-written copies of this list used to exist and had
           // already drifted apart.
@@ -385,8 +389,12 @@ export function mailModel(app, snapshot, mail, provider, account, lastError, now
           /** @type {any} */ eventCx,
         ) => {
           app.readerHidden = false;
-          app.controller?.openMessage(id);
-          eventCx.notify();
+          // The cursor first, then the one open the keyboard uses. Clicking a
+          // row in Drafts resumes the draft rather than showing the reader,
+          // and it does so because this is the same call Enter makes — not
+          // because a second copy of the branch was written for the mouse.
+          app.controller?.placeCursor(id);
+          openCursorDetail(app, eventCx);
         },
         onCalendar: (
           /** @type {any} */ _event,

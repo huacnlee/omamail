@@ -6,7 +6,12 @@ use std::{
     time::Duration,
 };
 
-use zeroize::{Zeroize as _, Zeroizing};
+use zeroize::Zeroizing;
+
+// The in-place wipe is the `secret-tool` path's: every value the Keychain
+// answers with arrives owned, and `Zeroizing` is what clears those.
+#[cfg(target_os = "linux")]
+use zeroize::Zeroize as _;
 
 #[cfg(target_os = "linux")]
 use std::{
@@ -428,8 +433,17 @@ impl SecretStore for MemorySecretStore {
     }
 }
 
+/// The machine's own keyring.
+///
+/// Two implementations under one name, chosen at compile time: `secret-tool`
+/// against the Secret Service on Linux, and the `keyring` crate — which is the
+/// Keychain — everywhere else. The two fields the child process needs are
+/// therefore Linux's alone, and `with_secret_tool` still sets them on every
+/// platform so a caller does not have to know which one it built.
 pub struct SystemSecretStore {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     secret_tool: PathBuf,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     deadline: Duration,
     clear_legacy: bool,
 }
