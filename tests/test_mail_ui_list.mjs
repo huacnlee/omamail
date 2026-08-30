@@ -7,6 +7,7 @@ import { renderMessageRow } from "../app/ui/message-row.js";
 import { renderRail } from "../app/ui/rail.js";
 import { signedOutCard } from "../app/application/mail-model.js";
 import { messageMenuEntries } from "../app/ui/message-menu.js";
+import { menuItem } from "../app/lib/omarchy-ui/index.js";
 import { applyOmarchyStyle, style } from "../app/lib/omarchy-ui/style.js";
 
 // The list column, the rail and the chrome beside them, held to the
@@ -702,6 +703,31 @@ assert.deepEqual(text(find(track, "mailbox-tab-unread")), ["Unread 3"]);
   assert.equal(ids(narrow).includes("sidebar-toggle"), false);
   assert.equal(styleArg(narrowBar, "pl"), tokens.space(14));
   assert.equal(styleArg(narrowBar, "pr"), tokens.space(12));
+}
+
+// A menu row's keyboard cursor is a fill and nothing else.
+//
+// `MenuActionRow.qml` colours the row `Qt.rgba(textColor, 0.08)` when it is
+// hovered or under the cursor, and draws no border at all — the border belongs
+// to `AccountSwitcher.qml`, whose rows carry an avatar and two lines and need
+// the extra edge to read as one row. Giving a menu row a border made the first
+// row of a freshly opened menu look like a button pressed inside it.
+{
+  const cursored = menuItem("m", "Reply", () => {}, cx, { cursor: true });
+  const resting = menuItem("m", "Reply", () => {}, cx, {});
+  const widths = (control) =>
+    (control.styleCalls ?? [])
+      .filter((call) => call.name === "border")
+      .map((call) => call.args[0]);
+  assert.deepEqual(widths(cursored), [], "no border on the cursor row");
+  assert.deepEqual(widths(resting), []);
+  // The fill is the whole of it, and it is hover's weight rather than the
+  // heavier selected one.
+  assert.notEqual(styleArg(cursored, "bg"), styleArg(resting, "bg"));
+  assert.equal(
+    styleArg(cursored, "bg"),
+    styleArg(menuItem("m", "Reply", () => {}, cx, { selected: false, cursor: true }), "bg"),
+  );
 }
 
 console.log("mail UI list tests passed");

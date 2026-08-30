@@ -64,6 +64,7 @@ import { icon } from "./icons.js";
  * @property {boolean} [bccVisible]
  * @property {{field:string,contacts:Array<ComposeContact>,highlighted:number}} [suggestions]
  * @property {{originals:Array<ComposeAttachment>,files:Array<ComposeAttachment>,loading:boolean,error:string}} [forward]
+ * @property {{loading:boolean,error:string}} [quoting] the message being answered, while it is still being read
  * @property {Array<ComposeAttachment>} [attachments]
  * @property {boolean} [attaching]
  * @property {boolean} [sending]
@@ -699,8 +700,14 @@ export function renderCompose(model, cx) {
   const tokens = style();
   const forward = model.forward;
   // A forward whose files are still arriving would go out without them, and
-  // one whose read failed would go out claiming to carry them.
-  const blocked = Boolean(forward?.loading) || Boolean(forward?.error);
+  // one whose read failed would go out claiming to carry them. A reply whose
+  // original has not arrived is the same objection a step earlier: it would go
+  // out quoting nothing and threaded against no message. The status line says
+  // which of the two is being waited for.
+  const blocked =
+    Boolean(forward?.loading) ||
+    Boolean(forward?.error) ||
+    Boolean(model.quoting?.loading);
   const sendDisabled =
     Boolean(model.sending) || Boolean(model.sendPending) || blocked;
   const attachHandler = model.onAttach;

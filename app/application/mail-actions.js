@@ -140,19 +140,25 @@ export function runMessageMenuCursor(app, cx) {
 /**
  * What one of the menu's rows does.
  *
- * Answering opens the message first, because a reply needs the message it is
- * answering and a list row is only a summary. Everything else goes through the
- * cursor, so one path decides what the list does after a row leaves it rather
- * than two that would have to agree.
+ * Answering names its message rather than opening it. It used to open it —
+ * `openMessage` is a read *and* a selection, and a selection is what puts the
+ * reader on screen — so Reply from a row's menu showed the message before the
+ * composer, which is a place nobody asked to go on the way to writing. The id
+ * goes to `openResponse` instead, because the menu can be raised on a row that
+ * is neither open nor under the cursor.
+ *
+ * Everything else goes through the cursor, so one path decides what the list
+ * does after a row leaves it rather than two that would have to agree.
  * @param {any} app @param {string} action @param {string} id
  * @param {import("gpui").Context} cx
  */
 export function runMessageMenu(app, action, id, cx) {
   app.messageMenu = null;
   if (action === "reply" || action === "replyAll" || action === "forward") {
-    app.readerHidden = false;
-    app.controller?.openMessage(id);
-    app.openResponse(action, cx);
+    // The keyboard's cursor still follows the row that was acted on, the way
+    // it does for every other row of this menu.
+    app.controller?.placeCursor(id);
+    app.openResponse(action, cx, id);
     return;
   }
   // Neither of these touches the mailbox, so neither goes through the cursor:

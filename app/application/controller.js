@@ -38,7 +38,28 @@ function unreadCount(messages) {
   ).length;
 }
 
-/** @param {{ storage: any, execute: any, cache?: any, companion?: any, now?:()=>number, preference?:(key:string)=>any, notify?:(request:{summary:string,body:string})=>void }} dependencies */
+/**
+ * Whether the list already knows this message is a draft.
+ *
+ * A body never changes once it has been fetched — which is what makes a cache
+ * hit always correct, and what lets a hit skip the read entirely. A draft is
+ * the one message that is not a fetched body at all: it is what somebody was
+ * typing, and it changes every time they type. `BodyCache.qml` caches drafts
+ * along with everything else and gets away with it because the QML *always*
+ * fetches and lets the live copy win the race; a cache that answers instead of
+ * fetching would hand the composer yesterday's text to save over.
+ *
+ * @param {any} message
+ */
+function isDraft(message) {
+  return Boolean(
+    message &&
+      (message.draftId ||
+        (Array.isArray(message.labelIds) && message.labelIds.includes("DRAFT"))),
+  );
+}
+
+/** @param {{ storage: any, execute: any, cache?: any, bodies?: any, companion?: any, now?:()=>number, preference?:(key:string)=>any, notify?:(request:{summary:string,body:string})=>void }} dependencies */
 export function createApplicationController(dependencies) {
   const values = dependencies || {};
   if (!values.storage || typeof values.execute !== "function")
@@ -348,6 +369,91 @@ export function createApplicationController(dependencies) {
     );
   }
 
+  /**
+   * A message that has been opened before, put back together out of the row
+   * the list is already showing and the body kept on disk beside it.
+   *
+   * The two halves are split the way `MailAccount` splits them: the row is the
+   * live one — its flags and its labels change, and a starred message must not
+   * come back unstarred — and the record is the half that never changes. So
+   * only the body's own fields come out of the cache, and the summary is
+   * whatever the list holds now. Merged through `detailSummary` for the same
+   * reason the live read is, so both paths produce one shape.
+   *
+   * @param {string} accountId @param {string} id
+   */
+  function cachedDetail(accountId, id) {
+    const bodies = values.bodies;
+    if (!bodies || typeof bodies.read !== "function") return null;
+    const row = mail ? messageById(mail.messages, [], id) : null;
+    // Without the row there is a body and nothing to say who sent it, which is
+    // less than the reader needs; the fetch answers both.
+    if (!row || isDraft(row)) return null;
+    const record = bodies.read(accountId, id);
+    if (!record) return null;
+    bodies.touch?.(accountId, id);
+    return detailSummary(row, {
+      ...row,
+      id,
+      // `body` rather than `text`: that is what every adapter's detail calls
+      // the plain reading, and the reader falls back to it.
+      body: record.text,
+      html: record.html,
+      attachments: record.attachments,
+      invite: record.invite,
+      unsubscribe: record.unsubscribe,
+    });
+  }
+
+  /** @param {string} accountId @param {string} id @param {any} value */
+  function rememberBody(accountId, id, value) {
+    const bodies = values.bodies;
+    if (!bodies || typeof bodies.put !== "function") return;
+    if (isDraft(value)) return;
+    bodies.put(accountId, id, {
+      text: value.body,
+      // Which of the two readings the text is. The reader works it out from
+      // the markup either way; the field is in the record because
+      // `Cache.serializeBody` defines the record and both clients share it.
+      source: value.html ? "html" : "plain",
+      html: value.html,
+      attachments: value.attachments,
+      invite: value.invite,
+      unsubscribe: value.unsubscribe,
+    });
+  }
+
+  /**
+   * Ask the server for one message and hand back the row it becomes.
+   *
+   * The two callers below want the same request and the same staleness guard —
+   * an answer about a list that has since been replaced is an answer about
+   * nothing — and differ only in what they do with it. Written once here so
+   * that "what a detail read is" is said once; who may see the result stays
+   * with whoever asked, because the reader's guard is not the composer's.
+   *
+   * `deliver` is given the merged row, or null where the read failed or
+   * answered about another message, and the raw result beside it.
+   *
+   * @param {any} account @param {any} identity
+   * @param {(detail:any, result:any)=>void} deliver
+   */
+  function readDetail(account, identity, deliver) {
+    withRuntime(account, identity, (/** @type {any} */ adapter) =>
+      adapter.detail({ identity, full: true }, (/** @type {any} */ result) => {
+        if (!mail || mail.request.revision !== identity.revision) return;
+        const loaded =
+          result.ok && String(result.value?.id || "") === identity.objectId
+            ? detailSummary(
+                messageById(mail.messages, [], identity.objectId),
+                result.value,
+              )
+            : null;
+        deliver(loaded, result);
+      }),
+    );
+  }
+
   return {
     start() {
       accounts = loadAccounts(values.storage);
@@ -458,30 +564,69 @@ export function createApplicationController(dependencies) {
       if (!mail.selectedId) return this.snapshot();
       detail = null;
       const identity = { ...mail.request, objectId: mail.selectedId };
-      withRuntime(account, identity, (/** @type {any} */ adapter) =>
-        adapter.detail(
-          { identity, full: true },
-          (/** @type {any} */ result) => {
-            if (
-              mail &&
-              mail.request.revision === identity.revision &&
-              mail.selectedId === identity.objectId
-            ) {
-              lastOperation = result;
-              if (
-                result.ok &&
-                String(result.value?.id || "") === identity.objectId
-              )
-                detail = detailSummary(
-                  messageById(mail.messages, [], identity.objectId),
-                  result.value,
-                );
-              if (result.ok && detail && typeof done === "function")
-                done(detail);
-            }
-          },
-        ),
-      );
+      // A message opened before opens off the disk and stops there. The QML
+      // asks anyway and lets whichever answer arrives first paint, because its
+      // read is asynchronous and cannot be waited on; this one is answered
+      // before the decision is made, so a hit is the whole of the open.
+      const cached = cachedDetail(account.id, identity.objectId);
+      if (cached) {
+        detail = cached;
+        if (typeof done === "function") done(detail);
+        return this.snapshot();
+      }
+      readDetail(account, identity, (loaded, result) => {
+        // Still the message the reader has open. A second open that overtook
+        // this one owns the reader now, and an answer about the message before
+        // it would paint over what the user is looking at.
+        if (mail.selectedId !== identity.objectId) return;
+        lastOperation = result;
+        if (!loaded) return;
+        detail = loaded;
+        // The fetch's own answer rather than the merge, because the fields the
+        // merge adds are the list's and the list keeps them.
+        rememberBody(account.id, identity.objectId, result.value);
+        if (typeof done === "function") done(detail);
+      });
+      return this.snapshot();
+    },
+
+    /**
+     * One message's body, with the reader left where it is.
+     *
+     * `openCursor` reads a message *and* shows it, which is one act for
+     * somebody opening mail and two for somebody answering it: a reply needs
+     * the body to quote and the Message-ID to thread against, and needs the
+     * reader not at all. Those two were the same call, which is why Reply on a
+     * row's menu put the message on screen on the way to the composer.
+     *
+     * The answer goes to `done` rather than into the snapshot, because
+     * `detail` belongs to the message the reader has open and this one is not
+     * open. A hit in the body cache answers immediately, in the same breath as
+     * the call, so a message that has been read before answers with no fetch
+     * at all.
+     *
+     * @param {string} id
+     * @param {(detail:any, error:string)=>void} [done]
+     */
+    loadDetail(id, done) {
+      const account = activeAccount();
+      const objectId = String(id || "");
+      if (!mail || !account || !objectId) return this.snapshot();
+      const identity = { ...mail.request, objectId };
+      const cached = cachedDetail(account.id, objectId);
+      if (cached) {
+        if (typeof done === "function") done(cached, "");
+        return this.snapshot();
+      }
+      readDetail(account, identity, (loaded, result) => {
+        lastOperation = result;
+        if (loaded) rememberBody(account.id, objectId, result.value);
+        if (typeof done === "function")
+          done(
+            loaded,
+            loaded ? "" : String(result.error || "The message could not be read"),
+          );
+      });
       return this.snapshot();
     },
 

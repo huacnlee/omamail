@@ -54,6 +54,12 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
 
+# Where bun unpacks its toolchain. It follows `TMPDIR` rather than pinning
+# `/tmp`, because `/tmp` is a tmpfs with a fixed inode budget and a machine that
+# has spent it fails `bunx` with `ENOSPC` while still reporting gigabytes free —
+# a failure that looks like a broken test rather than a full filesystem.
+BUN_ROOT ?= $(if $(TMPDIR),$(TMPDIR:/=),/tmp)/omamail-bun
+
 .PHONY: test test-js test-app test-shell test-qml qml-check validate bench
 
 test: test-js test-app test-shell test-qml
@@ -99,6 +105,7 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_attachments.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_app_compose_flows.mjs
 	node tests/test_application_controller.mjs
+	node tests/test_body_cache.mjs
 	node tests/test_app_adapters_effect_port.mjs
 	node tests/test_app_adapters_factory.mjs
 	node tests/test_app_adapters_gmail.mjs
@@ -132,7 +139,7 @@ test-app:
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_settings_ui_render.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_calendar_sources_wiring.mjs
 	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_icons.mjs
-	BUN_TMPDIR=/tmp/omamail-bun BUN_INSTALL=/tmp/omamail-bun/install bunx tsc -p app/jsconfig.json
+	BUN_TMPDIR=$(BUN_ROOT) BUN_INSTALL=$(BUN_ROOT)/install bunx tsc -p app/jsconfig.json
 	cargo test
 
 test-shell:

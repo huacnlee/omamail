@@ -12,6 +12,11 @@ import {
 // shortlist and starts being a directory the user has to read.
 const SUGGESTION_LIMIT = 5;
 
+// What the status line says while the message being answered is still being
+// read. One sentence, said from the snapshot rather than written into `status`,
+// because a keystroke clears `status` and the wait outlives it.
+const QUOTE_LOADING = "Loading the message you are answering...";
+
 // How long a toast stays up, which is `MailAccount`'s `noticeTimer` and
 // `App.qml`'s `draftSavedTimer` — the same four seconds in both places.
 const NOTICE_MS = 4000;
@@ -193,6 +198,13 @@ export function createComposeController(dependencies) {
   let forwardedAttachments = [];
   let forwardLoading = false;
   let forwardError = "";
+  // Whether the message this draft answers is still on its way, and what went
+  // wrong if it never came. A reply raised from the list opens the form at
+  // once — nobody is made to watch a fetch before they may start typing — so
+  // the quote, the Message-ID and the addresses only the full read knows land
+  // in a form that is already up. See `loadingQuote`.
+  let quoteLoading = false;
+  let quoteError = "";
   let attaching = false;
   let notice = "";
   // When the notice went up, so a beat of the clock can take it down again
@@ -296,6 +308,8 @@ export function createComposeController(dependencies) {
     forwardedAttachments = [];
     forwardLoading = false;
     forwardError = "";
+    quoteLoading = false;
+    quoteError = "";
     attaching = false;
     refreshIdentities();
   }
@@ -711,6 +725,32 @@ export function createComposeController(dependencies) {
           : [];
       return this.snapshot();
     },
+    /**
+     * The message being answered is still being read.
+     *
+     * Said after the draft has begun, because beginning one clears the form.
+     * While it is true the form is live and Send is not: a reply whose quote
+     * has not arrived would go out unthreaded and quoting nothing, which is
+     * the same objection `forwardLoading` makes to a forward whose files are
+     * still coming.
+     */
+    loadingQuote() {
+      quoteLoading = true;
+      quoteError = "";
+      return this.snapshot();
+    },
+    /**
+     * It arrived, or it did not. A failed read does not lock the form: the
+     * draft is addressed and the user can see there is no quote in it, and a
+     * Send that can never be pressed is a worse answer than a sentence saying
+     * what is missing.
+     * @param {string} [error]
+     */
+    loadedQuote(error = "") {
+      quoteLoading = false;
+      quoteError = String(error || "");
+      return this.snapshot();
+    },
     /** @param {string} message the draft-saved toast, "" to take it down */
     setNotice(message) {
       note(message);
@@ -738,6 +778,11 @@ export function createComposeController(dependencies) {
       // A forward whose files are still arriving would go out without them,
       // and one whose read failed would go out claiming to carry them.
       if (forwardLoading || forwardError) return this.snapshot();
+      // Same objection, about the message being answered rather than the files
+      // it carries. Nothing is set here: the status line is already saying
+      // that the original is still coming, which is the whole explanation, and
+      // a sentence written into `status` would outlive the wait it describes.
+      if (quoteLoading) return this.snapshot();
       const payload = { ...clean(draft), attachments: outgoingAttachments() };
       if (
         values.currentAccountId &&
@@ -890,7 +935,14 @@ export function createComposeController(dependencies) {
         // outlives its reason is a window that never goes idle.
         needsTick: Boolean(held) || notice !== "",
         sending,
-        status,
+        // What is being waited for outranks what was last said, and both
+        // outrank a failure the user has since acted past: `set` clears
+        // `status` on every keystroke, so a quote that never arrived goes on
+        // saying so until something else has something to say.
+        status: quoteLoading ? QUOTE_LOADING : status || quoteError,
+        // Whether the original this draft answers is still coming. The view
+        // holds Send while it is.
+        quoting: { loading: quoteLoading, error: quoteError },
         notice,
         title:
           TITLES[/** @type {keyof typeof TITLES} */ (formKind())] ||

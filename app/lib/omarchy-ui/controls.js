@@ -350,10 +350,11 @@ export function menuItem(id, caption, onClick, cx, options = {}) {
     disabled = false,
     iconName = "",
     selected = false,
-    // Where the keyboard is standing, which is not the same as what is chosen:
-    // the row you are already on owns the selected fill, and the keyboard has to
-    // be visible standing on that row too. A border rather than a third fill,
-    // the way `AccountSwitcher.qml` draws it.
+    // Where the keyboard is standing, which is not the same as what is chosen.
+    // `MenuActionRow.qml` draws it as hover's own fill and nothing else — the
+    // border belongs to `AccountSwitcher.qml`, whose rows carry an avatar and
+    // two lines and need the extra edge to read as one row. Giving a menu row
+    // a border made an open menu look like it had a button pressed in it.
     cursor = false,
     dim = false,
   } = options;
@@ -377,8 +378,7 @@ export function menuItem(id, caption, onClick, cx, options = {}) {
     .gap(tokens.spacing.controlGap)
     .px(tokens.space(9))
     .rounded(tokens.cornerRadius)
-    .border(cursor ? states.borderWidth : 0)
-    .when(cursor, (element) => element.border_color(states.hoverBorder))
+
     .bg(
       selected
         ? states.selectedFill

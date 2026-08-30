@@ -37,6 +37,7 @@ import { companionPublisher } from "./application/companion.js";
 import { createApplicationController } from "./application/controller.js";
 import { startMailClock } from "./application/mail-clock.js";
 import { createListCache } from "./application/list-cache.js";
+import { createBodyCache } from "./application/body-cache.js";
 import {
   accountIn,
   senderRows,
@@ -68,6 +69,7 @@ import {
   endReaderSelection,
 } from "./application/reader-selection.js";
 import { saveDraftOnLeave } from "./application/compose-exit.js";
+import { openResponse } from "./application/compose-response.js";
 import {
   composeContacts,
   loadAddressBook,
@@ -180,6 +182,8 @@ export default class Omamail extends View {
   setupAdapters = null;
   /** @type {any} */
   listCache = null;
+  /** @type {any} */
+  bodyCache = null;
   /** @type {ReturnType<typeof Accounts.emptyList>} */
   accountList = Accounts.emptyList();
   /** @type {import("gpui-base").InputState} */ setupEmail =
@@ -263,6 +267,9 @@ export default class Omamail extends View {
   /** @type {number} */ shortcutScroll = 0;
   /** @type {string} */ hoveredMessageId = "";
   /** @type {any} */ messageMenu = null;
+  // Which answer this window is waiting for the body of, where a reply was
+  // raised on a message that had not been read yet. See `openResponse`.
+  /** @type {any} */ answering = null;
   /** @type {boolean} */ shortcutHelpOpen = false;
   /** @type {number} */ bodyZoom = 1;
   /** @type {string} */ omarchyColors = "";
@@ -595,11 +602,13 @@ export default class Omamail extends View {
     // silent global bindings in this first host surface.
     this.boundKeys = cx.bind_keys(actionBindings(HANDLED_ACTIONS));
     this.listCache = options.cache ?? createListCache(this.storage);
+    this.bodyCache = options.bodies ?? createBodyCache(this.storage);
     this.startController = () => {
       if (this.controller || !this.accountList.accounts.length) return;
       this.controller = createApplicationController({
         storage: this.storage,
         cache: this.listCache,
+        bodies: this.bodyCache,
         execute: (
           /** @type {any} */ effect,
           /** @type {(reply:any)=>void} */ complete,
@@ -674,8 +683,12 @@ export default class Omamail extends View {
       forgetImap: async (/** @type {any} */ descriptor) => {
         return this.setupAdapters.imap.forgetCredential(descriptor);
       },
-      clearCache: (/** @type {string} */ accountId) =>
-        this.listCache.clearAccount?.(accountId),
+      clearCache: (/** @type {string} */ accountId) => {
+        this.listCache.clearAccount?.(accountId);
+        // Bodies are mail, and an account that has been removed must not
+        // leave its messages behind in the store.
+        this.bodyCache.clearAccount(accountId);
+      },
       readCalendarSources: () => availableCalendarSources(this),
     });
     // The reader is told the two standing reading answers before it opens
@@ -1195,54 +1208,15 @@ export default class Omamail extends View {
     cx.notify();
   }
 
-  /** @param {"reply"|"replyAll"|"forward"} mode @param {import("gpui").Context} cx */
-  openResponse(mode, cx) {
-    this.primeCompose(cx);
-    const snapshot = this.controller?.snapshot();
-    const provider = providerFor(accountIn(snapshot));
-    const supported =
-      mode === "replyAll"
-        ? ["gmail", "imap"].includes(provider.id)
-        : ["gmail", "hey", "imap"].includes(provider.id);
-    if (!supported || !provider.capabilities.send) {
-      this.controller?.refuse(
-        sendRefusal(accountIn(snapshot)) ||
-          `${provider.name} cannot reply from Omamail`,
-      );
-      cx.notify();
-      return;
-    }
-    if (!snapshot?.detail) {
-      /** @type {(value:any) => void} */
-      let completeOpen = () => {};
-      const opened = new Promise((resolve) => {
-        completeOpen = resolve;
-      });
-      cx.spawn(async (asyncCx) => {
-        await opened;
-        this.openResponse(mode, asyncCx);
-      });
-      if (this.controller) this.controller.openCursor(completeOpen);
-      else completeOpen(undefined);
-      cx.notify();
-      return;
-    }
-    const account = snapshot.accounts.accounts.find(
-      (/** @type {any} */ entry) => entry.id === snapshot.accounts.activeId,
-    );
-    if (mode === "replyAll")
-      this.compose.replyAll(
-        { ...snapshot.detail, accountId: snapshot.accounts.activeId },
-        account?.email || account?.id || "",
-      );
-    else
-      this.compose[mode]({
-        ...snapshot.detail,
-        accountId: snapshot.accounts.activeId,
-      });
-    this.syncComposeFields();
-    this.state = { ...this.state, route: "compose" };
-    cx.notify();
+  /**
+   * Reply, reply all and forward. `targetId` names the message where the
+   * caller has one; see `application/compose-response.js`, which is where the
+   * question of what to do while its body is still arriving is answered.
+   * @param {"reply"|"replyAll"|"forward"} mode
+   * @param {import("gpui").Context} cx @param {string} [targetId]
+   */
+  openResponse(mode, cx, targetId = "") {
+    openResponse(this, mode, cx, targetId);
   }
 
   /** @param {import("gpui").Context} cx */

@@ -15,6 +15,7 @@ import {
   openAppMenu,
   runAccountSwitcherCursor,
   runAppMenuCursor,
+  runMessageMenu,
 } from "../app/application/mail-actions.js";
 
 // What the mailbox's own verbs act on, and what the list and the reader do
@@ -781,3 +782,177 @@ console.log("mail action tests passed");
   openAccountSwitcher(app, true, cx);
   assert.ok(ids(app.render(cx)).includes("account-switcher-centered"));
 }
+
+// --------------------------------------- answering goes to the composer only
+//
+// Reply, reply all and forward from a row's menu used to open the message and
+// then the draft, because the only way to get a body was `openCursor`, which
+// reads and selects in one act — and a selection is what puts the reader on
+// screen. The reader is not on the way to writing a reply. Everything below is
+// a gate against it coming back: the route is `compose`, and nothing is
+// selected while it gets there.
+
+/** Whether the window is on the mailbox with a message open in the reader. */
+function readerOpen(app) {
+  return (
+    app.state.route === "mail" &&
+    Boolean(app.controller.snapshot().mail.selectedId) &&
+    app.readerHidden !== true
+  );
+}
+
+// The reported path, through the pointer: right-click a row nobody has opened,
+// choose Reply, and land in the composer without the reader having been drawn
+// at all.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  // The second row, which is neither open nor the one the keyboard is on.
+  const row = find(app.render(cx), "message-m2-idle");
+  mouseDown(row, "right")({ local_position: { x: 0, y: 0 } }, cx);
+  find(app.render(cx), "message-menu-reply").clickHandler({}, cx);
+  assert.equal(app.messageMenu, null);
+  assert.equal(app.state.route, "compose");
+  assert.equal(readerOpen(app), false);
+  assert.equal(
+    ids(app.render(cx)).includes("message-reader"),
+    false,
+    "the reader is not drawn on the way to the composer",
+  );
+}
+
+// The body is already here, because the message is the one being read. There
+// is nothing to fetch and nothing to wait for.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  app.controller.openMessage("m1");
+  completions.shift().complete({ ok: true, value: resource("m1", "One") });
+  assert.equal(completions.length, 0);
+
+  runMessageMenu(app, "reply", "m1", cx);
+  assert.equal(app.state.route, "compose");
+  assert.equal(app.compose.snapshot().draft.mode, "reply");
+  assert.equal(
+    app.compose.snapshot().draft.body.includes("> Body"),
+    true,
+    "a message already read is quoted in the same breath",
+  );
+  assert.equal(app.compose.snapshot().quoting.loading, false);
+  assert.equal(completions.length, 0, "and nothing is asked for twice");
+}
+
+// The body is not here, which is the case that went through the reader.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  assert.equal(app.controller.snapshot().mail.selectedId, null);
+
+  runMessageMenu(app, "reply", "m2", cx);
+  assert.equal(app.state.route, "compose", "Reply opens the composer, at once");
+  assert.equal(readerOpen(app), false);
+  assert.equal(
+    app.controller.snapshot().mail.selectedId,
+    null,
+    "and nothing was opened on the way there",
+  );
+  assert.equal(
+    app.controller.snapshot().mail.cursorId,
+    "m2",
+    "the keyboard still follows the row that was acted on",
+  );
+  // What the row alone can say is said now; the rest is on its way, and the
+  // status line is where the wait is explained.
+  const waiting = app.compose.snapshot();
+  assert.equal(waiting.draft.mode, "reply");
+  assert.equal(waiting.draft.to, "Sender <sender@example.test>");
+  assert.equal(waiting.draft.subject, "Re: Two");
+  assert.equal(waiting.draft.body, "");
+  assert.equal(waiting.quoting.loading, true);
+  assert.equal(waiting.status, "Loading the message you are answering...");
+  // A draft that quotes nothing and threads against nothing may not go.
+  assert.equal(waiting.draft.inReplyTo, undefined);
+  const asked = completions.length;
+  app.compose.send(0, 0);
+  assert.equal(
+    completions.length,
+    asked,
+    "Send is held until the message being answered has arrived",
+  );
+
+  completions.shift().complete({ ok: true, value: resource("m2", "Two") });
+  await Promise.resolve();
+  await Promise.resolve();
+  const answered = app.compose.snapshot();
+  assert.equal(app.state.route, "compose");
+  assert.equal(readerOpen(app), false);
+  assert.equal(answered.quoting.loading, false);
+  assert.equal(answered.draft.body.includes("> Body"), true, "the quote lands");
+  assert.equal(answered.draft.inReplyTo, "m2", "and so does the threading");
+  assert.equal(app.composeBody.value(), answered.draft.body);
+}
+
+// Typing during the wait is typing into this draft. The quote arrives under
+// it, the way a reply is written, and nothing typed is thrown away.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  runMessageMenu(app, "replyAll", "m1", cx);
+  assert.equal(app.state.route, "compose");
+  app.compose.update({ body: "Yes, tomorrow works." });
+  app.compose.update({ subject: "Re: One, then" });
+  completions.shift().complete({ ok: true, value: resource("m1", "One") });
+  await Promise.resolve();
+  await Promise.resolve();
+  const draft = app.compose.snapshot().draft;
+  assert.equal(draft.body.startsWith("Yes, tomorrow works.\n\n"), true);
+  assert.equal(draft.body.includes("> Body"), true);
+  assert.equal(
+    draft.subject,
+    "Re: One, then",
+    "an edited field keeps its edit; an untouched one takes the answer's",
+  );
+  assert.equal(draft.mode, "replyAll");
+}
+
+// The keys are the same path. `f` on a row nobody has opened is a forward, not
+// a reader.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One"), resource("m2", "Two")]);
+  app.moveCursor(1, cx);
+  assert.equal(app.controller.snapshot().mail.cursorId, "m2");
+  app.openResponse("forward", cx);
+  assert.equal(app.state.route, "compose");
+  assert.equal(readerOpen(app), false);
+  assert.equal(app.controller.snapshot().mail.selectedId, null);
+  assert.equal(app.compose.snapshot().draft.subject, "Fwd: Two");
+  completions.shift().complete({ ok: true, value: resource("m2", "Two") });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(app.compose.snapshot().draft.body.includes("> Body"), true);
+  assert.equal(app.compose.snapshot().quoting.loading, false);
+}
+
+// A read that fails leaves the draft standing and says so, rather than a
+// composer that waits for something that is never coming.
+{
+  const { app, completions } = windowFor();
+  answerList(completions, [resource("m1", "One")]);
+  app.openResponse("reply", cx);
+  completions.shift().complete({ ok: false, error: "Network is unreachable" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(app.state.route, "compose");
+  assert.equal(app.compose.snapshot().quoting.loading, false);
+  assert.equal(app.compose.snapshot().status, "Network is unreachable");
+  app.compose.update({ body: "Sending anyway" });
+  app.compose.send(0, 0);
+  assert.equal(
+    completions.at(-1).effect.type,
+    "compose.send",
+    "a failed read does not lock the form for good",
+  );
+}
+
+console.log("answering tests passed");
