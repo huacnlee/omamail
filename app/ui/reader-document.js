@@ -1,35 +1,28 @@
 // @ts-check
 
-// The message, reduced to what a flex layout can draw.
-//
-// Qt drew the reader's document itself — `TextEdit` with `RichText` is a real
-// HTML engine, so the QML reader handed it a string and was finished. gpui has
-// no such engine, so the document is walked once here and comes out as blocks:
-// a heading, a paragraph, a list item, a quote, a rule, a grid, preformatted
-// text, and nothing else. That is also the whole security argument for this
-// seam. A block is a kind and a string, so no attribute, no `src` and no `href`
-// of the sender's can reach a view that only ever draws text.
-//
-// **The one thing that is deliberately lost is the link.** `Html.readerHref`
-// clears an address for the reading document and Qt drew it as a link, but
-// carrying it across this seam would put a sender-written URL in the render
-// model — which `tests/test_mail_ui_reader_security.mjs` asserts never happens.
-// gpui also has no inline text run reachable from JavaScript: a paragraph is
-// one string in one style, so a link, a `<strong>` or a `<code>` inside a
-// sentence could only be drawn by breaking the sentence into separate elements,
-// which puts every emphasised phrase on a line of its own. The words are the
-// message and they all come through; the address and the weight do not.
+// The sanitized message document is serialized for the native TextView host
+// component. The legacy text-block walk remains below solely for selection and
+// clipboard compatibility.
 
 import * as Html from "../message/Html.js";
 
 /** @typedef {{kind:string,text:string,level?:number,marker?:string,last?:boolean,rows?:ReadingRow[]}} ReadingBlock */
 /** @typedef {{header:boolean,cells:string[]}} ReadingRow */
 
-// Past this many blocks the reading is not a reading. Laying them out costs a
-// frame of the thread that draws every other view in this window, for a
-// document nobody is going to scroll to the end of, so the reader says it
-// refused rather than spending it.
+// Kept for the selection-model compatibility helpers below. Rich rendering is
+// now bounded by serialized HTML length instead of element count because
+// TextView virtualizes its own blocks.
 export const MAX_READING_BLOCKS = 512;
+export const MAX_READING_HTML_LENGTH = 512 * 1024;
+
+/** Serialize one already-sanitized tree, refusing an unreasonable payload. */
+export function readingHtmlOf(document) {
+  const html = document ? Html.serialize(document) : "";
+  return {
+    html: html.length <= MAX_READING_HTML_LENGTH ? html : "",
+    overflow: html.length > MAX_READING_HTML_LENGTH,
+  };
+}
 
 /**
  * Every character under a node, entity references and all. The tree here is

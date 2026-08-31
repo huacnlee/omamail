@@ -6,10 +6,13 @@ use std::{
 };
 
 use gpui::{
-    App, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, Window, WindowBounds, WindowOptions,
-    actions, point, px, size,
+    App, Bounds, IntoElement as _, KeyBinding, Menu, MenuItem, SharedString, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, actions, point, px, rems, size,
 };
-use gpui_shell::{AppAssets, HostModule, HostValue, ShellRuntime, plugin::PluginManifest};
+use gpui_base::{TextView, TextViewDefaults, TextViewStyle, Theme};
+use gpui_shell::{
+    AppAssets, HostComponent, HostModule, HostValue, ShellRuntime, plugin::PluginManifest,
+};
 use omamail::{
     APP_ID, ApplicationPaths, COMPANION_HEARTBEAT_INTERVAL_MS, CompanionStatus,
     CompanionStatusState, application_dir,
@@ -77,6 +80,7 @@ fn main() {
         .with_assets(assets)
         .run(move |cx| {
             gpui_shell::init(cx);
+            TextViewDefaults::default().install(cx);
             gpui_shell::set_bundle_id(APP_ID).expect("configure Omamail application identity");
             let data_dir = application_data_dir().expect("locate Omamail application storage");
             gpui_shell::set_storage_path(data_dir.join("store.json"));
@@ -84,6 +88,7 @@ fn main() {
                 PluginManifest::read(&app_root).expect("read Omamail application manifest");
             gpui_shell::set_capabilities(manifest.capabilities(&app_root, &data_dir));
             install_omarchy_theme_reader().expect("install Omarchy theme reader");
+            install_mail_body_component().expect("install mail body component");
             install_effect_host(&app_root).expect("install Omamail effect host");
             install_command_host(commands.clone()).expect("install Omamail command router");
             let companion_state =
@@ -415,6 +420,42 @@ fn install_omarchy_theme_reader() -> Result<(), gpui_shell::HostError> {
             .function("current_font_family", |_| {
                 Ok(HostValue::from(resolved_monospace_family()))
             }),
+    )
+}
+
+fn mail_body_style(zoom: f32, cx: &App) -> TextViewStyle {
+    let zoom = zoom.clamp(0.5, 3.0);
+    TextViewStyle::from_theme(&Theme::global(cx))
+        .with_heading_base_font_size(px(14. * zoom))
+        .with_paragraph_gap(rems(0.85 * zoom))
+}
+
+fn install_mail_body_component() -> Result<(), gpui_shell::HostError> {
+    gpui_shell::export_component(
+        HostComponent::new("mail-body", |args, _window, cx| {
+            let html = args
+                .props
+                .get("html")
+                .and_then(HostValue::as_str)
+                .unwrap_or_default();
+            let zoom = args
+                .props
+                .get("zoom")
+                .and_then(HostValue::as_number)
+                .unwrap_or(1.) as f32;
+            let events = args.events.clone();
+            TextView::html(
+                SharedString::from(format!("mail-body-{}", args.id)),
+                SharedString::from(html),
+            )
+            .style(mail_body_style(zoom, cx))
+            .selectable(true)
+            .on_link_click(move |url, _event, window, cx| {
+                events.emit("link", HostValue::from(url.to_string()), window, cx);
+            })
+            .into_any_element()
+        })
+        .declarations("export type MailBodyProps = { html: string; zoom: number };"),
     )
 }
 

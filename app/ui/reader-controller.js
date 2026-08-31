@@ -12,7 +12,7 @@
 
 import * as Html from "../message/Html.js";
 import * as Unsubscribe from "../message/Unsubscribe.js";
-import { readingBlocksOf } from "./reader-document.js";
+import { readingHtmlOf } from "./reader-document.js";
 
 /** @typedef {"reader"|"original"|"plain"} ReaderMode */
 /** @type {ReaderMode[]} */
@@ -21,8 +21,13 @@ const DEADLINE_MS = 20_000;
 
 /** @param {any} document @param {ReaderMode} mode */
 function presentationOf(document, mode) {
-  const { blocks, overflow } = readingBlocksOf(document);
-  return { mode, blocks, empty: blocks.length === 0, refused: overflow };
+  const { html, overflow } = readingHtmlOf(document);
+  return { mode, html, empty: html === "", refused: overflow };
+}
+
+function plainPresentation(text) {
+  const body = Html.escapeMarkup(text).replace(/\n/g, "<br>");
+  return { mode: "plain", html: body ? `<p>${body}</p>` : "", empty: !body, refused: false };
 }
 
 /**
@@ -49,12 +54,7 @@ export function preparePresentationSet(html, plainText = "", images = {}) {
     presentations: {
       reader: presentationOf(ready.reader?.document, "reader"),
       original: presentationOf(ready.document, "original"),
-      plain: {
-        mode: "plain",
-        blocks: plain ? [{ kind: "paragraph", text: plain }] : [],
-        empty: !plain,
-        refused: false,
-      },
+      plain: plainPresentation(plain),
     },
     // What this message can be drawn as, which is the question
     // `Html.resolveBodyMode` answers the chosen mode against.
@@ -170,6 +170,7 @@ export function createReaderController(effects) {
       remoteImagesAllowed,
       blockedImages: prepared.blockedImages,
       images: imageStates.map((entry) => ({ ...entry })),
+      imageSources: [...prepared.imageSources],
       unsubscribe: {
         state:
           unsubscribeState === "idle"

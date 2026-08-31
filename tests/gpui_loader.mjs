@@ -18,7 +18,7 @@ const library = new URL(
 );
 
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === "gpui" || specifier === "gpui-base") {
+  if (specifier === "gpui" || specifier === "gpui-base" || specifier === "gpui-shell") {
     return { url: stub, shortCircuit: true };
   }
   if (specifier === "omarchy-theme") {

@@ -124,6 +124,11 @@ class Element {
     return this;
   }
 
+  on(name, handler) {
+    this.actionHandlers.set(name, handler);
+    return this;
+  }
+
   children(values) {
     this.childNodes.push(...values);
     return this;
@@ -155,6 +160,12 @@ export const div = () => new Element();
 export const svg = () => new Element();
 export const h_flex = () => new Element();
 export const v_flex = () => new Element();
+export const host_component = (name, props = {}) => {
+  const element = new Element(`host-component:${name}`);
+  element.hostComponent = name;
+  element.props = props;
+  return element;
+};
 export const set_theme = () => {};
 
 const component = {
@@ -165,6 +176,9 @@ const component = {
 
 export const Button = component;
 export const Input = component;
+export const NumberInput = component;
+export const Tab = component;
+export const Tabs = component;
 // The trigger is a constructor argument, so it is a child here: it is what is
 // on screen whether or not the surface above it is open.
 export const Popup = {
@@ -185,6 +199,18 @@ export function image(path) {
 
 export const Popover = component;
 export const Textarea = component;
+export const TextView = {
+  html(id, text) {
+    const element = new Element(id);
+    element.html = text;
+    return element;
+  },
+  markdown(id, text) {
+    const element = new Element(id);
+    element.markdown = text;
+    return element;
+  },
+};
 export const Link = component;
 
 // The rest of `gpui-base`'s catalog, present because `omarchy-ui` is imported

@@ -2,13 +2,10 @@
 
 // The right column, ported from `components/MessageReader.qml`.
 //
-// The QML reader handed the message to Qt's own rich text engine after
-// `Html.sanitize` had removed what Qt would render badly and the remote images
-// that would otherwise fire every tracking pixel in the message the instant it
-// opened. gpui has no HTML engine at all, so the same sanitised document comes
-// through `reader-document.js` as blocks of text and is laid out here — which
-// removes the fetch entirely rather than blocking it, and costs the sender's
-// own formatting.
+// The QML reader handed the message to Qt's rich text engine after
+// `Html.sanitize` removed unsafe markup and remote tracking images. The GPUI
+// reader preserves that sanitized HTML through the native `mail-body` host
+// component, which owns its TextView and link routing.
 //
 // Everything else the QML drew is here: the header block, the notices that say
 // why a message does not look the way it was written, the invitation card, the
@@ -16,13 +13,14 @@
 // how you look at it.
 
 import { div } from "gpui";
+import { host_component } from "gpui-shell";
 import { Textarea, h_flex, v_flex } from "gpui-base";
 import * as Html from "../message/Html.js";
 import * as Mail from "../message/Message.js";
 import { Button, role, style } from "omarchy-ui";
 import { actionIcon, iconTextButton } from "./controls.js";
 import { icon } from "./icons.js";
-import { readingBlocksOf } from "./reader-document.js";
+import { readingHtmlOf } from "./reader-document.js";
 import {
   dimColor,
   dimmerColor,
@@ -31,8 +29,6 @@ import {
   readerSkeleton,
 } from "./reader-chrome.js";
 import { inviteCard } from "./reader-invite.js";
-
-/** @typedef {import("./reader-document.js").ReadingBlock} ReadingBlock */
 
 /**
  * Build a GPUI-safe reading model. No sender markup or URL survives this seam.
@@ -47,7 +43,7 @@ export function prepareReadingPresentation(source) {
   if (ready.reader?.tooHeavy)
     return {
       mode: "reading",
-      blocks: /** @type {ReadingBlock[]} */ ([]),
+      html: "",
       blockedImages: Number(ready.reader.blockedImages ?? 0),
       remoteImagesBlocked:
         Number(ready.remoteImages ?? 0) > 0 ||
@@ -58,13 +54,14 @@ export function prepareReadingPresentation(source) {
       empty: false,
       formattedAvailable: false,
     };
-  const { blocks, overflow } = readingBlocksOf(ready.reader?.document);
+  const { html, overflow } = readingHtmlOf(ready.reader?.document);
   const fallback = Html.readableText(ready.plainText?.text ?? "");
-  if (!overflow && blocks.length === 0 && fallback)
-    blocks.push({ kind: "paragraph", text: fallback });
+  const shown = !overflow && html === "" && fallback
+    ? `<p>${Html.escapeMarkup(fallback).replace(/\n/g, "<br>")}</p>`
+    : html;
   return {
     mode: "reading",
-    blocks,
+    html: shown,
     blockedImages: Number(
       ready.reader?.blockedImages ?? ready.blockedImages ?? 0,
     ),
@@ -74,7 +71,7 @@ export function prepareReadingPresentation(source) {
     complexity: ready.reader?.complexity ?? ready.complexity,
     tooHeavy: Boolean(ready.reader?.tooHeavy),
     refused: overflow,
-    empty: blocks.length === 0,
+    empty: shown === "",
     formattedAvailable: false,
   };
 }
@@ -374,145 +371,12 @@ function readingMeasure(fontSize) {
   return Math.ceil(fontSize * 0.6 * 70);
 }
 
-/** @param {ReadingBlock} block @param {number} index @param {number} base @param {import("gpui").Context} cx */
-function renderBlock(block, index, base, cx) {
-  const tokens = style();
-  // One rhythm for the whole document, derived from the size it is read at, so
-  // the spacing follows the zoom rather than standing still while the type
-  // grows past it. The same two numbers `Html.readerDocumentFor` writes into
-  // its stylesheet, and every margin below is one of the declarations that
-  // stylesheet carries.
-  const gap = Math.max(4, Math.round(base * 0.85));
-  const rule = Math.max(2, Math.round(base * 0.5));
-  const id = `reader-block-${index}-${block.kind}`;
-  if (block.kind === "heading") {
-    const level = Number(block.level ?? 1);
-    const scale =
-      level === 1 ? 1.6 : level === 2 ? 1.35 : level === 3 ? 1.18 : 1;
-    // `h1,h2{margin-top:gap*2}`, `h3{margin-top:gap*1.6}`,
-    // `h4,h5,h6{margin-top:gap*1.4}`: the air above a heading shrinks with the
-    // heading, and the three thresholds are the sheet's own.
-    const lead =
-      level <= 2 ? gap * 2 : Math.round(gap * (level === 3 ? 1.6 : 1.4));
-    return (
-      div()
-        .id(id)
-        .w_full()
-        .mt(index === 0 ? 0 : lead)
-        .mb(rule)
-        .text_size(Math.round(base * scale))
-        // Qt draws `h1`-`h6` bold and the sheet does not say otherwise, which is
-        // the same weight `font.bold` gives the subject above.
-        .font_bold()
-        .text_color(cx.theme().colors.foreground)
-        .child(block.text)
-    );
-  }
-  // The sender dividing their own message. `Html`'s reader rebuild keeps `<hr>`
-  // as itself, and a rule between two paragraphs is a panel rule rather than a
-  // control border: `Ui/PanelSeparator.qml`'s 0.12, not the border's 0.4.
-  if (block.kind === "rule")
-    return div()
-      .id(id)
-      .flex_none()
-      .w_full()
-      .h(tokens.spacing.hairline)
-      .mb(gap)
-      .bg(role("separator", cx.theme().colors.border));
-  // `td,th{padding-top:rule;padding-bottom:rule;padding-right:gap}` and
-  // `th{font-weight:bold;text-align:left}`. Only a grid ever reaches here —
-  // `reader-document.js` asks the same question the QML reader does — so these
-  // cells really do line up with each other.
-  if (block.kind === "table")
-    return v_flex()
-      .id(id)
-      .w_full()
-      .mb(gap)
-      .children(
-        (block.rows ?? []).map((row, line) =>
-          h_flex()
-            .id(`${id}-row-${line}`)
-            .w_full()
-            .items_start()
-            .children(
-              row.cells.map((cell, column) =>
-                div()
-                  .id(`${id}-cell-${line}-${column}`)
-                  .flex_1()
-                  .min_w_0()
-                  .pt(rule)
-                  .pb(rule)
-                  .pr(gap)
-                  .text_size(base)
-                  .text_color(cx.theme().colors.foreground)
-                  .when(row.header, (head) => head.font_bold())
-                  .child(cell),
-              ),
-            ),
-        ),
-      );
-  // `blockquote{margin-left:rule;padding-left:gap;margin-bottom:gap}` in the
-  // quote tone, which is the dim role the QML passes in as `quote`.
-  if (block.kind === "quote")
-    return div()
-      .id(id)
-      .w_full()
-      .ml(rule)
-      .pl(gap)
-      .mb(gap)
-      .text_size(base)
-      .text_color(dimColor(cx))
-      .child(block.text);
-  if (block.kind === "list-item")
-    return (
-      h_flex()
-        .id(id)
-        .w_full()
-        .items_start()
-        // The list indent `Html.readerDocumentFor` gives Qt, as one fixed column
-        // rather than a marker indent plus a list indent.
-        .ml(tokens.space(26))
-        // `li{margin-bottom:rule}` between the items and `ul,ol{margin-bottom:
-        // gap}` under the last of them. The list is flat here, so the closing
-        // gap belongs to the item that closes it.
-        .mb(block.last === true ? gap : rule)
-        .gap(Math.round(base * 0.5))
-        .text_size(base)
-        .text_color(cx.theme().colors.foreground)
-        // Qt numbered an `<ol>` and bulleted a `<ul>`, so which mark this is was
-        // decided where the list was walked.
-        .child(
-          div()
-            .flex_none()
-            .child(String(block.marker ?? "•")),
-        )
-        .child(div().flex_1().min_w_0().child(block.text))
-    );
-  // A paragraph and a `<pre>` share `margin-top:0;margin-bottom:gap`. The
-  // preformatted one keeps the spaces it was written with, which is why the
-  // walk does not collapse them.
-  return div()
-    .id(id)
-    .w_full()
-    .mb(gap)
-    .text_size(base)
-    .text_color(cx.theme().colors.foreground)
-    .child(block.text);
-}
-
 /** @param {any} model @param {import("gpui").Context} cx */
 function readerBody(model, cx) {
   const tokens = style();
   const base = bodyFontSize(model.zoom);
   const presentation = model.presentation;
-  /** @type {ReadingBlock[]} */
-  const blocks = presentation
-    ? (presentation.blocks ?? [])
-    : String(model.message.body ?? "")
-        .split(/\n{2,}/)
-        .map((/** @type {string} */ text) => text.trim())
-        .filter(Boolean)
-        .map((/** @type {string} */ text) => ({ kind: "paragraph", text }));
+  const html = presentation?.html ?? `<p>${Html.escapeMarkup(String(model.message.body ?? ""))}</p>`;
   // Reading mode centres its column in whatever the panel has spare. The other
   // two start at the page inset, because the sender's own layout and a
   // plain-text body both begin at the left edge — and a body handed over as
@@ -530,8 +394,18 @@ function readerBody(model, cx) {
     .id("reader-message-column")
     .w_full()
     .when(reading, (body) => body.max_w(readingMeasure(base)))
-    .children(
-      blocks.map((block, index) => renderBlock(block, index, base, cx)),
+    .child(
+      host_component("mail-body", { html, zoom: Number(model.zoom ?? 1) })
+        .id("reader-mail-body")
+        .on("link", (url, eventCx) => {
+          const image = Html.imageLinkIndex(url);
+          if (image > 0) {
+            model.onOpenImage?.(image - 1, eventCx);
+            return;
+          }
+          eventCx.open_url(String(url));
+        })
+        .w_full(),
     );
 
   return (

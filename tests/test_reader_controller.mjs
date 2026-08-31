@@ -23,7 +23,13 @@ controller.open({
 });
 assert.equal(controller.snapshot().mode, "reader");
 assert.deepEqual(controller.snapshot().availableModes, ["reader", "original", "plain"]);
-assert.equal(JSON.stringify(controller.snapshot()).includes("images.example.com"), false);
+assert.equal(
+  JSON.stringify(controller.snapshot().presentation).includes("images.example.com"),
+  false,
+);
+assert.deepEqual(controller.snapshot().imageSources, [
+  "https://images.example.com/a.png",
+]);
 assert.equal(JSON.stringify(controller.snapshot()).includes("<script"), false);
 
 controller.setMode("original");
@@ -83,7 +89,7 @@ heavy.showAnyway();
 assert.equal(heavy.snapshot().shownMode, "reader");
 assert.equal(heavy.snapshot().tooHeavy, false);
 assert.equal(
-  heavy.snapshot().presentation.blocks.length,
+  heavy.snapshot().presentation.html.match(/<p>/g)?.length,
   10,
   "insisting shows the reading it was refused, not an empty pane",
 );
@@ -112,13 +118,11 @@ assert.equal(
 capped.showAnyway();
 assert.equal(
   capped.snapshot().shownMode,
-  "plain",
-  "there is no reading to insist on when the walk refused to build one",
+  "reader",
+  "insisting hands the sanitized HTML to TextView",
 );
-assert.equal(capped.snapshot().refused, true);
-assert.deepEqual(capped.snapshot().presentation.blocks, [
-  { kind: "paragraph", text: "the plain reading" },
-]);
+assert.equal(capped.snapshot().refused, false);
+assert.ok(capped.snapshot().presentation.html.includes("hostile block"));
 
 // Reading was asked for and there was nothing to rebuild, so the sender's own
 // formatting is what is on screen while the picker still says Reader.
@@ -176,9 +180,7 @@ const textOnly = createReaderController({ dispatch: async () => "{}" });
 textOnly.open({ body: "Only a plain part" });
 assert.equal(textOnly.snapshot().hasHtml, false);
 assert.equal(textOnly.snapshot().shownMode, "plain");
-assert.deepEqual(textOnly.snapshot().presentation.blocks, [
-  { kind: "paragraph", text: "Only a plain part" },
-]);
+assert.equal(textOnly.snapshot().presentation.html, "<p>Only a plain part</p>");
 assert.equal(textOnly.snapshot().presentation.empty, false);
 
 // No markup at all: the text is the message rather than one reading of it.
@@ -187,9 +189,7 @@ bare.open({ text: "Just words" });
 assert.equal(bare.snapshot().hasHtml, false);
 assert.equal(bare.snapshot().shownMode, "plain");
 assert.equal(bare.snapshot().tooHeavy, false, "no markup is not a refusal");
-assert.deepEqual(bare.snapshot().presentation.blocks, [
-  { kind: "paragraph", text: "Just words" },
-]);
+assert.equal(bare.snapshot().presentation.html, "<p>Just words</p>");
 
 const hostile = createReaderController({ dispatch: async () => "{}" });
 hostile.open({ html: "<p>x</p>", unsubscribe: { oneClick: false, postUrl: "file:///x" } });

@@ -199,6 +199,7 @@ export function readerModel(app, snapshot, mail, provider) {
     readingEmpty: reader?.readingEmpty === true,
     remoteImages: reader?.remoteImages ?? 0,
     remoteImagesAllowed: reader?.remoteImagesAllowed === true,
+    imageSources: reader?.imageSources ?? [],
     unsubscribe: reader?.unsubscribe ?? null,
     // Whether the body is drawn as the reading blocks or as the plain surface a
     // selection can happen in. Not one of the three readings: it is a way of
@@ -302,6 +303,13 @@ export function readerModel(app, snapshot, mail, provider) {
       /** @type {any} */ _event,
       /** @type {import("gpui").Context} */ eventCx,
     ) => eventCx.open_url(url),
+    onOpenImage: (
+      /** @type {number} */ index,
+      /** @type {import("gpui").Context} */ eventCx,
+    ) => {
+      const source = reader?.imageSources?.[index];
+      if (source && /^https?:\/\//i.test(source)) eventCx.open_url(source);
+    },
     onBack: (
       /** @type {any} */ _event,
       /** @type {import("gpui").Context} */ eventCx,

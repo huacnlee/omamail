@@ -28,6 +28,8 @@
 //     whole body for real, and the copy key takes exactly the highlighted run.
 
 import { TextareaState } from "gpui-base";
+import * as Html from "../message/Html.js";
+import { readingBlocksOf } from "../ui/reader-document.js";
 
 /**
  * The message as text, in the order the reader lays it out.
@@ -43,7 +45,8 @@ import { TextareaState } from "gpui-base";
  * @returns {string}
  */
 export function readerBodyText(presentation) {
-  const blocks = Array.isArray(presentation?.blocks) ? presentation.blocks : [];
+  const html = String(presentation?.html ?? "");
+  const { blocks } = readingBlocksOf(Html.parse(html));
   let text = "";
   let previous = "";
   for (const block of blocks) {

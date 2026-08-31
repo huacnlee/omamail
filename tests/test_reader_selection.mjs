@@ -41,18 +41,9 @@ function contextFor() {
 // ------------------------------------------------------- what a body reads as
 
 assert.equal(readerBodyText(null), "");
-assert.equal(readerBodyText({ blocks: [] }), "");
+assert.equal(readerBodyText({ html: "" }), "");
 assert.equal(
-  readerBodyText({
-    blocks: [
-      { kind: "heading", text: "Release notes", level: 1 },
-      { kind: "paragraph", text: "Two things changed." },
-      { kind: "list-item", text: "The first" },
-      { kind: "list-item", text: "The second" },
-      { kind: "paragraph", text: "That is all." },
-      { kind: "paragraph", text: "   " },
-    ],
-  }),
+  readerBodyText({ html: "<h1>Release notes</h1><p>Two things changed.</p><ul><li>The first</li><li>The second</li></ul><p>That is all.</p><p>   </p>" }),
   [
     "Release notes",
     "",
@@ -182,24 +173,13 @@ assert.equal(
 // knows which it is. Copying every item as a bullet loses the one thing the
 // ordering was for.
 {
-  const ordered = readerBodyText({
-    blocks: [
-      { kind: "paragraph", text: "Steps:" },
-      { kind: "list-item", text: "Open the lid", marker: "1." },
-      { kind: "list-item", text: "Turn the key", marker: "2." },
-    ],
-  });
+  const ordered = readerBodyText({ html: "<p>Steps:</p><ol><li>Open the lid</li><li>Turn the key</li></ol>" });
   assert.equal(ordered, "Steps:\n\n1. Open the lid\n2. Turn the key");
 
   // A bulleted list is unchanged, and a block with no marker at all still gets
   // one rather than losing its indent.
   assert.equal(
-    readerBodyText({
-      blocks: [
-        { kind: "list-item", text: "Milk", marker: "\u2022" },
-        { kind: "list-item", text: "Eggs" },
-      ],
-    }),
+    readerBodyText({ html: "<ul><li>Milk</li><li>Eggs</li></ul>" }),
     "\u2022 Milk\n\u2022 Eggs",
   );
 }

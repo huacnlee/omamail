@@ -186,7 +186,7 @@ const modes = renderReader(
     state: "content",
     message: { id: "m1", subject: "S" },
     bodyMode: "reader",
-    presentation: { mode: "plain", blocks: [], empty: true },
+    presentation: { mode: "plain", html: "", empty: true },
     tooHeavy: true,
     onMode() {},
     onShowAnyway() {},
@@ -216,7 +216,7 @@ assert.equal(
         state: "content",
         message: { id: "m1", subject: "S" },
         hasHtml: false,
-        presentation: { mode: "plain", blocks: [], empty: true },
+        presentation: { mode: "plain", html: "", empty: true },
         onMode() {},
       },
       cx,
@@ -233,7 +233,7 @@ const noticed = renderReader(
     message: { id: "m1", subject: "S" },
     presentation: {
       mode: "reader",
-      blocks: [{ kind: "paragraph", text: "Hello" }],
+      html: "<p>Hello</p>",
       empty: false,
     },
     readingEmpty: true,
@@ -272,7 +272,7 @@ assert.ok(
       {
         state: "content",
         message: { id: "m1", subject: "S" },
-        presentation: { mode: "reader", blocks: [], empty: false },
+        presentation: { mode: "reader", html: "<p>Body</p>", empty: false },
         remoteImages: 1,
         onShowImages() {},
       },
@@ -290,7 +290,7 @@ assert.equal(
       {
         state: "content",
         message: { id: "m1", subject: "S" },
-        presentation: { mode: "reader", blocks: [], empty: false },
+        presentation: { mode: "reader", html: "<p>Body</p>", empty: false },
         remoteImages: 4,
         remoteImagesAllowed: true,
         onShowImages() {},
@@ -306,7 +306,7 @@ const bare = renderReader(
   {
     state: "content",
     message: { id: "m1", subject: "S", attachments: [] },
-    presentation: { mode: "reader", blocks: [], empty: true },
+    presentation: { mode: "reader", html: "", empty: true },
     onOpenWeb() {},
   },
   cx,
@@ -338,7 +338,7 @@ const invited = renderReader(
       response: "tentative",
       canRespond: true,
     },
-    presentation: { mode: "reader", blocks: [], empty: false },
+    presentation: { mode: "reader", html: "<p>Body</p>", empty: false },
     onRsvp(answer) {
       answers.push(answer);
     },
@@ -377,7 +377,7 @@ assert.ok(
           response: "accepted",
           canRespond: false,
         },
-        presentation: { mode: "reader", blocks: [], empty: false },
+        presentation: { mode: "reader", html: "<p>Body</p>", empty: false },
       },
       cx,
     ),
@@ -391,14 +391,10 @@ assert.ok(
 // taken as, and the two are a toggle apart.
 
 {
-  const blocks = [
-    { kind: "heading", text: "Invoice", level: 2 },
-    { kind: "paragraph", text: "Due Friday." },
-  ];
   const model = {
     state: "content",
     message: { id: "m1", subject: "S" },
-    presentation: { mode: "reader", blocks, empty: false },
+    presentation: { mode: "reader", html: "<h2>Invoice</h2><p>Due Friday.</p>", empty: false },
     hasHtml: true,
     onMode() {},
     onToggleSelect() {},
@@ -414,7 +410,7 @@ assert.ok(
     false,
     "and the body is the rich reading until it is asked for",
   );
-  assert.ok(texts(reading).includes("Invoice"));
+  assert.ok(find(reading, "reader-mail-body").props.html.includes("Invoice"));
 
   let toggled = 0;
   const clickable = renderReader(
@@ -435,7 +431,7 @@ assert.ok(
   const selectingIds = ids(selecting);
   assert.ok(selectingIds.includes("reader-message-selection"));
   assert.equal(
-    texts(selecting).includes("Invoice"),
+    ids(selecting).includes("reader-mail-body"),
     false,
     "the blocks are gone rather than drawn behind it",
   );
@@ -510,26 +506,7 @@ const measured = renderReader(
     },
     presentation: {
       mode: "reader",
-      blocks: [
-        { kind: "paragraph", text: "Hi Jamie," },
-        { kind: "heading", level: 1, text: "One" },
-        { kind: "heading", level: 3, text: "Three" },
-        { kind: "heading", level: 4, text: "Four" },
-        { kind: "quote", text: "Quoted words" },
-        { kind: "list-item", text: "First", marker: "•" },
-        { kind: "list-item", text: "Second", marker: "•", last: true },
-        { kind: "list-item", text: "One", marker: "1." },
-        { kind: "rule", text: "" },
-        { kind: "pre", text: "  indented" },
-        {
-          kind: "table",
-          text: "Item  Cost",
-          rows: [
-            { header: true, cells: ["Item", "Cost"] },
-            { header: false, cells: ["Runbook", "12.00"] },
-          ],
-        },
-      ],
+      html: "<p>Hi Jamie,</p><h1>One</h1><h3>Three</h3><h4>Four</h4><blockquote>Quoted words</blockquote><ul><li>First</li><li>Second</li></ul><ol><li>One</li></ol><hr><pre>  indented</pre><table><tr><th>Item</th><th>Cost</th></tr><tr><td>Runbook</td><td>12.00</td></tr></table>",
       empty: false,
       refused: false,
     },
@@ -588,73 +565,11 @@ assert.equal(styleArg(body, "pt"), tokens.space(24));
 assert.equal(styleArg(body, "pb"), tokens.space(28));
 assert.equal(styleArg(body, "gap"), tokens.space(14));
 
-// `p{margin-top:0px;margin-bottom:gap}`
-assert.equal(styleArg(find(measured, "reader-block-0-paragraph"), "mb"), gap);
-
-// `h1{font-size:base*1.6;margin-top:gap*2;margin-bottom:rule}`. The first block
-// of a document takes no lead, the way Qt collapses it against the body.
-const h1 = find(measured, "reader-block-1-heading");
-assert.equal(styleArg(h1, "text_size"), Math.round(base * 1.6));
-assert.equal(styleArg(h1, "mt"), gap * 2);
-assert.equal(styleArg(h1, "mb"), rule);
-// `h3{font-size:base*1.18;margin-top:gap*1.6}` and
-// `h4,h5,h6{font-size:base;margin-top:gap*1.4}` — the air above a heading
-// shrinks with the heading, which is three thresholds and not two.
-const h3 = find(measured, "reader-block-2-heading");
-assert.equal(styleArg(h3, "text_size"), Math.round(base * 1.18));
-assert.equal(styleArg(h3, "mt"), Math.round(gap * 1.6));
-const h4 = find(measured, "reader-block-3-heading");
-assert.equal(styleArg(h4, "text_size"), base);
-assert.equal(styleArg(h4, "mt"), Math.round(gap * 1.4));
-
-// `blockquote{margin-left:rule;padding-left:gap;margin-bottom:gap}`
-const quote = find(measured, "reader-block-4-quote");
-assert.equal(styleArg(quote, "ml"), rule);
-assert.equal(styleArg(quote, "pl"), gap);
-assert.equal(styleArg(quote, "mb"), gap);
-
-// `ul,ol{margin-bottom:gap;margin-left:26px}` with `li{margin-bottom:rule}`
-// between the items: the closing gap belongs to the item that closes the list,
-// because this model has no element for the list itself.
-const first = find(measured, "reader-block-5-list-item");
-assert.equal(styleArg(first, "ml"), tokens.space(26));
-assert.equal(styleArg(first, "mb"), rule);
-assert.equal(styleArg(find(measured, "reader-block-6-list-item"), "mb"), gap);
-// Qt numbered an `<ol>` and bulleted a `<ul>`, so the mark is the list's
-// answer and not one glyph for both.
-assert.ok(texts(first).includes("•"));
-assert.ok(texts(find(measured, "reader-block-7-list-item")).includes("1."));
-
-// A rule the sender wrote is a panel rule — `Ui/PanelSeparator.qml`'s 0.12 on
-// the foreground — and never the control border's 0.4.
-const hr = find(measured, "reader-block-8-rule");
-assert.equal(styleArg(hr, "h"), tokens.spacing.hairline);
-assert.equal(styleArg(hr, "mb"), gap);
-assert.equal(styleArg(hr, "bg"), SEPARATOR);
-assert.notEqual(styleArg(hr, "bg"), cx.theme().colors.border);
-
-// `pre{margin-top:0px;margin-bottom:gap}`, and the spaces it was written with
-// are the content rather than the sender's typesetting.
-const pre = find(measured, "reader-block-9-pre");
-assert.equal(styleArg(pre, "mb"), gap);
-assert.ok(texts(pre).includes("  indented"));
-
-// `td,th{padding-top:rule;padding-bottom:rule;padding-right:gap}` and
-// `th{font-weight:bold}` — a grid is drawn as a grid, not as one welded line.
-const headCell = find(measured, "reader-block-10-table-cell-0-0");
-assert.equal(styleArg(headCell, "pt"), rule);
-assert.equal(styleArg(headCell, "pb"), rule);
-assert.equal(styleArg(headCell, "pr"), gap);
-assert.ok(
-  (headCell.styleCalls ?? []).some((call) => call.name === "font_bold"),
-);
-assert.equal(
-  (find(measured, "reader-block-10-table-cell-1-0").styleCalls ?? []).some(
-    (call) => call.name === "font_bold",
-  ),
-  false,
-  "only a row of `th` is a header row",
-);
+const richBody = find(measured, "reader-mail-body");
+assert.ok(richBody, "the body is one host TextView component");
+assert.ok(richBody.props.html.includes("<strong") === false);
+assert.ok(richBody.props.html.includes("<table>"));
+assert.equal(richBody.props.zoom, 1);
 
 // ------------------------------------------------------------------ footer
 
@@ -737,7 +652,7 @@ const noticed2 = renderReader(
   {
     state: "content",
     message: { id: "m-n", subject: "S", sender: "Sender" },
-    presentation: { mode: "reader", blocks: [], empty: false, refused: false },
+    presentation: { mode: "reader", html: "<p>Body</p>", empty: false, refused: false },
     remoteImages: 3,
     onShowImages: () => {},
     capabilities: {},
@@ -787,7 +702,7 @@ const card = find(
         },
         canRespond: true,
       },
-      presentation: { mode: "reader", blocks: [], empty: false, refused: false },
+      presentation: { mode: "reader", html: "<p>Body</p>", empty: false, refused: false },
       capabilities: {},
       onRsvp: () => {},
     },

@@ -22,9 +22,10 @@ assert.equal(reading.remoteImagesBlocked, true);
 assert.equal(reading.formattedAvailable, false);
 assert.equal(reading.empty, false);
 assert.equal(typeof reading.complexity.length, "number");
-assert.ok(reading.blocks.some((block) => block.kind === "heading"));
-assert.ok(reading.blocks.some((block) => block.kind === "quote"));
-assert.ok(reading.blocks.some((block) => block.kind === "list-item"));
+assert.ok(reading.html.includes("<h1>Safe heading</h1>"));
+assert.ok(reading.html.includes("<blockquote>"));
+assert.ok(reading.html.includes("<strong>reader</strong>"));
+assert.ok(reading.html.includes('href="https://public.example/path"'));
 
 const serialized = JSON.stringify(reading);
 for (const forbidden of [
@@ -34,7 +35,6 @@ for (const forbidden of [
   "open.png",
   "file:///",
   "127.0.0.1",
-  "https://public.example/path",
 ]) {
   assert.equal(serialized.includes(forbidden), false, forbidden);
 }
@@ -51,13 +51,14 @@ const cx = {
   }),
 };
 
-function collect(element, result = { ids: [], text: [] }) {
+function collect(element, result = { ids: [], text: [], html: [] }) {
   if (typeof element === "string" || typeof element === "number") {
     result.text.push(String(element));
     return result;
   }
   if (!element || typeof element !== "object") return result;
   if (element.elementId) result.ids.push(element.elementId);
+  if (typeof element.props?.html === "string") result.html.push(element.props.html);
   for (const child of element.childNodes ?? []) collect(child, result);
   return result;
 }
@@ -78,8 +79,8 @@ assert.ok(rendered.ids.includes("reader-message-column"));
 // The reader says the pictures were refused and offers the standing answer,
 // which is the only place a remote source is ever mentioned to the user.
 assert.ok(rendered.ids.includes("reader-remote-images-blocked"));
-assert.ok(rendered.text.includes("Safe heading"));
-assert.ok(rendered.text.includes("Quoted words"));
+assert.ok(rendered.html.some((html) => html.includes("Safe heading")));
+assert.ok(rendered.html.some((html) => html.includes("Quoted words")));
 assert.equal(
   rendered.text.some((value) => value.includes("tracker.example")),
   false,
@@ -113,17 +114,13 @@ const heavy = prepareReadingPresentation(
 );
 assert.equal(heavy.tooHeavy, true);
 assert.equal(heavy.refused, true);
-assert.deepEqual(heavy.blocks, []);
+assert.equal(heavy.html, "");
 
 const tooManyBlocks = prepareReadingPresentation(
   new Array(513).fill("<p>x</p>").join(""),
 );
-assert.equal(tooManyBlocks.refused, true);
-assert.equal(tooManyBlocks.empty, true);
-assert.deepEqual(
-  tooManyBlocks.blocks,
-  [],
-  "an overflow must not return the full body as one fallback label",
-);
+assert.equal(tooManyBlocks.refused, false);
+assert.equal(tooManyBlocks.empty, false);
+assert.ok(tooManyBlocks.html.includes("<p>x</p>"));
 
 console.log("mail UI reader security tests passed");
