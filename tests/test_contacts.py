@@ -45,8 +45,37 @@ with tempfile.TemporaryDirectory() as temporary:
         ],
     )
 
+    # Also create omamail cache and contacts.json
+    cache_dir = home / ".cache" / "omamail"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "account-test.json").write_text(
+        json.dumps({
+            "queries": {
+                "folder:INBOX|25": {
+                    "summaries": [
+                        {
+                            "from": {"name": "Cached Sender", "email": "sender@cached.org"},
+                            "to": [{"name": "Cached Recipient", "email": "to@cached.org"}],
+                            "cc": []
+                        }
+                    ]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    config_dir = home / ".config" / "omamail"
+    config_dir.mkdir(parents=True)
+    (config_dir / "contacts.json").write_text(
+        json.dumps([{"name": "Local Friend", "email": "friend@local.net"}]),
+        encoding="utf-8"
+    )
+
     environment = dict(os.environ)
     environment["HOME"] = str(home)
+    environment.pop("XDG_CACHE_HOME", None)
+    environment.pop("XDG_CONFIG_HOME", None)
     result = subprocess.run(
         [str(SCRIPT)],
         check=True,
@@ -57,7 +86,10 @@ with tempfile.TemporaryDirectory() as temporary:
     contacts = json.loads(result.stdout)
     assert contacts == [
         {"name": "Ada Lovelace", "email": "ada@example.com"},
+        {"name": "Cached Recipient", "email": "to@cached.org"},
+        {"name": "Cached Sender", "email": "sender@cached.org"},
         {"name": "Jane Doe", "email": "jane@example.com"},
+        {"name": "Local Friend", "email": "friend@local.net"},
         {"name": "", "email": "morgan@example.com"},
     ]
 

@@ -33,6 +33,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ReaderSkeleton.qml \
 	components/ComposeView.qml \
 	components/RecipientSuggestions.qml \
+	components/ContactsPicker.qml \
 	components/UndoSendToast.qml \
 	components/DraftSavedToast.qml \
 	components/SearchBar.qml \

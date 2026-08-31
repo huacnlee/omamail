@@ -891,6 +891,19 @@ DropArea {
         spacing: Style.space(4)
 
         Button {
+          id: contactsButton
+          objectName: "compose-contacts-button"
+          text: "Contacts"
+          foreground: contactsPicker.opened ? root.textColor : root.dimColor
+          bordered: false
+          fontSize: Style.font.caption
+          onClicked: {
+            var global = contactsButton.mapToGlobal(0, contactsButton.height)
+            contactsPicker.opened ? contactsPicker.close() : contactsPicker.openAt(global.x, global.y)
+          }
+        }
+
+        Button {
           id: ccToggle
           objectName: "compose-cc-toggle"
           text: "Cc"
@@ -1334,6 +1347,32 @@ DropArea {
 
         HoverHandler { id: fromHover }
         TapHandler { onTapped: root.chooseFrom(fromRow.modelData) }
+      }
+    }
+  }
+
+  ContactsPicker {
+    id: contactsPicker
+    objectName: "compose-contacts-picker"
+    contacts: root.contactBook
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onContactChosen: function(contact, target) {
+      if (target === "cc") {
+        root.ccVisible = true
+        ccField.text = Recipients.append(ccField.text, contact)
+        ccField.forceActiveFocus()
+      } else if (target === "bcc") {
+        root.bccVisible = true
+        bccField.text = Recipients.append(bccField.text, contact)
+        bccField.forceActiveFocus()
+      } else {
+        toField.text = Recipients.append(toField.text, contact)
+        toField.forceActiveFocus()
       }
     }
   }
