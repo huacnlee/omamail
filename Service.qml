@@ -51,13 +51,16 @@ Item {
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
-    undoSendSeconds: 10
+    undoSendSeconds: 10,
+    unifiedCalendarView: false
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool unifiedCalendarView: !!settings
+    && settings.unifiedCalendarView === true
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -105,6 +108,10 @@ Item {
 
   function setAlwaysRenderHeavyMessages(value) {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
+  }
+
+  function setUnifiedCalendarView(value) {
+    persistSetting("unifiedCalendarView", value === true)
   }
 
   // ---------------------------------------------------------- the accounts

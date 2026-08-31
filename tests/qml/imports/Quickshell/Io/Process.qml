@@ -7,5 +7,8 @@ Item {
   property string jobMode: ""
   property var stdout: StdioCollector {}
   property var stderr: StdioCollector {}
+  signal started()
   signal exited(int exitCode)
+
+  function write(_value) {}
 }

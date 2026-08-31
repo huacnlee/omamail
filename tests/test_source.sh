@@ -295,7 +295,7 @@ if "accountId: root.calendarAccountId" not in service:
     raise SystemExit("test_source.sh: the visible Calendar must follow the displayed account")
 composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
-    raise SystemExit("test_source.sh: event creation must offer only writable calendars of the current account")
+    raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"

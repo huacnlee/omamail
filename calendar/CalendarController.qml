@@ -58,7 +58,10 @@ Item {
   property bool eventWriting: false
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
-  readonly property var contextSources: Sources.forAccount(availableSources, accountId)
+  readonly property bool unifiedCalendarView: !!service
+    && service.unifiedCalendarView === true
+  readonly property var contextSources: unifiedCalendarView
+    ? availableSources : Sources.forAccount(availableSources, accountId)
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
   // The composer offers only calendars a write can run against.
@@ -74,6 +77,12 @@ Item {
 
   onAccountIdChanged: {
     if (!rangeStart || !rangeEnd || !eventCache.loaded) return
+    events = cachedEventsFor(accountId, rangeStart, rangeEnd)
+    refresh(rangeStart, rangeEnd)
+  }
+
+  onUnifiedCalendarViewChanged: {
+    if (!rangeStart || !rangeEnd) return
     events = cachedEventsFor(accountId, rangeStart, rangeEnd)
     refresh(rangeStart, rangeEnd)
   }
@@ -116,8 +125,9 @@ Item {
   }
 
   function sourcesForAccount(wantedAccountId) {
-    return Sources.forAccount(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), wantedAccountId)
+    var available = Sources.withGoogleAccounts(
+      sourceList, service ? service.accountSummaries : [])
+    return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
   function cachedEventsFor(wantedAccountId, startMs, endMs) {

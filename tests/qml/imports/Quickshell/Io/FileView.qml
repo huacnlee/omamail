@@ -4,6 +4,7 @@ QtObject {
   property string path: ""
   property bool watchChanges: false
   property bool printErrors: false
+  property bool atomicWrites: false
   signal loaded()
   signal fileChanged()
   signal loadFailed()
