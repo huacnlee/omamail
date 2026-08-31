@@ -576,7 +576,14 @@ export function createApplicationController(dependencies) {
     // edit — a trashed search hit visibly came back when the slowest metadata
     // request answered. Stop that read, then revalidate this same query once
     // the mutation has landed.
-    const interrupted = mail.loading || mail.loadingMore;
+    //
+    // The read in the air is `listHandle`, and the loading flags are not it: a
+    // list painted from the cache clears `loading` while its network read is
+    // still running, which is precisely the moment somebody opens the first
+    // unread message. Marking it read hid the dot, and the answer that landed a
+    // second later put the row's bold back. The flags stay in the question for
+    // a read that has been asked for and not yet been handed a handle.
+    const interrupted = listHandle !== null || mail.loading || mail.loadingMore;
     if (interrupted) {
       listHandle?.cancel?.();
       listHandle = null;

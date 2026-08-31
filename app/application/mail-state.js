@@ -419,7 +419,12 @@ export function reduceMailState(state, event) {
   // answered, because the read that owned those snapshots was allowed to
   // finish and persist them over the edit.
   if (event.type === "interrupt-list") {
-    if (!state.loading && !state.loadingMore) return state;
+    // No guard on the loading flags here either. They are not what says a read
+    // is in the air — a cache-first paint clears `loading` while the network
+    // read is still running — and refusing on them left that read's revision
+    // current, so the rows it had taken before the edit were still allowed to
+    // land on top of it. The caller owns the question, and only sends this
+    // when it is holding a read to stop.
     return {
       ...state,
       loading: false,

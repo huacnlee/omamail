@@ -1234,4 +1234,53 @@ assert.equal(
   );
 }
 
+{
+  // A list painted from the cache clears `loading` while its network read is
+  // still running, and opening the first unread message marks it read right
+  // there. The read that had taken its rows before the mark used to be allowed
+  // to finish over the edit: the dot went, and a moment later came back.
+  const pending = [];
+  let cancelled = 0;
+  const reading = createApplicationController({
+    storage: storageFor(saved),
+    cache: {
+      readList: (accountId) =>
+        accountId === "one@example.com"
+          ? [{ id: "unread-row", labelIds: ["UNREAD"] }]
+          : null,
+      writeList() {},
+    },
+    execute(_effect, complete) {
+      pending.push(complete);
+      return {
+        cancel() {
+          cancelled += 1;
+        },
+      };
+    },
+  });
+  reading.start();
+  assert.equal(
+    reading.snapshot().mail.loading,
+    false,
+    "the cache paint has already put the loading flag down",
+  );
+  reading.act("markRead", ["unread-row"], { quiet: true });
+  assert.equal(
+    reading.snapshot().mail.messages[0].unread,
+    false,
+    "the mark clears the row optimistically",
+  );
+  assert.equal(cancelled, 1, "the list read in the air is stopped");
+  pending.shift()({
+    status: 200,
+    value: { messages: [{ id: "unread-row", labelIds: ["UNREAD"] }] },
+  });
+  assert.equal(
+    reading.snapshot().mail.messages[0].unread,
+    false,
+    "a list read that started before the mark cannot put the row back",
+  );
+}
+
 console.log("application controller tests passed");
