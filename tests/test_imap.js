@@ -98,6 +98,14 @@ deepEqual(imap.parseAliases("alias1@icloud.com, alias2@example.org"), [
   { email: "alias1@icloud.com", displayName: "", isPrimary: false, isDefault: false },
   { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
 ])
+deepEqual(imap.parseAliases("alias1@icloud.com (default), alias2@example.org"), [
+  { email: "alias1@icloud.com", displayName: "", isPrimary: false, isDefault: true },
+  { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
+])
+deepEqual(imap.parseAliases("Work <alias1@icloud.com> (default), alias2@example.org"), [
+  { email: "alias1@icloud.com", displayName: "Work", isPrimary: false, isDefault: true },
+  { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
+])
 deepEqual(imap.parseAliases(["alias@me.com", "not an email", "duplicate@me.com", "duplicate@me.com"]), [
   { email: "alias@me.com", displayName: "", isPrimary: false, isDefault: false },
   { email: "duplicate@me.com", displayName: "", isPrimary: false, isDefault: false }
@@ -106,15 +114,21 @@ assert.strictEqual(imap.formatAliases([
   { email: "a@icloud.com" },
   { email: "b@icloud.com" }
 ]), "a@icloud.com, b@icloud.com")
+assert.strictEqual(imap.formatAliases([
+  { email: "a@icloud.com", isDefault: true },
+  { email: "b@icloud.com", displayName: "Work" }
+]), "a@icloud.com (default), Work <b@icloud.com>")
 
 const withAliases = imap.setupSettings({
   address: "primary@icloud.com",
   username: "primary",
   imapHost: "imap.mail.me.com",
-  aliases: "alias1@icloud.com, alias2@icloud.com"
+  aliases: "alias1@icloud.com (default), alias2@icloud.com"
 })
 assert.strictEqual(withAliases.aliases.length, 2)
 assert.strictEqual(withAliases.aliases[0].email, "alias1@icloud.com")
+assert.strictEqual(withAliases.aliases[0].isDefault, true)
+assert.strictEqual(withAliases.aliases[1].isDefault, false)
 
 // ------------------------------------------------------------------- URLs
 

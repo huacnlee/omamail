@@ -188,11 +188,30 @@ function parseAliases(value) {
     var item = rawList[i]
     var email = ""
     var displayName = ""
+    var isDef = false
     if (typeof item === "string") {
-      email = trimmed(item).toLowerCase()
+      var str = trimmed(item)
+      if (/\(default\)|\[default\]/i.test(str)) {
+        isDef = true
+        str = str.replace(/\(default\)|\[default\]/gi, "").trim()
+      } else if (str.endsWith("*")) {
+        isDef = true
+        str = str.replace(/\*+$/, "").trim()
+      } else if (str.startsWith("*")) {
+        isDef = true
+        str = str.replace(/^\*+/, "").trim()
+      }
+      var matchAngle = str.match(/^(.*?)\s*<([^\s@]+@[^>]+)>\s*$/)
+      if (matchAngle) {
+        displayName = trimmed(matchAngle[1])
+        email = trimmed(matchAngle[2]).toLowerCase()
+      } else {
+        email = trimmed(str).toLowerCase()
+      }
     } else if (item && typeof item === "object") {
       email = trimmed(item.email || item.sendAsEmail).toLowerCase()
       displayName = trimmed(item.displayName || item.name)
+      isDef = item.isDefault === true || item.default === true || item.defaultFrom === true
     }
     if (!email || !EMAIL_PATTERN.test(email)) continue
     if (seen[email]) continue
@@ -201,19 +220,39 @@ function parseAliases(value) {
       email: email,
       displayName: displayName,
       isPrimary: false,
-      isDefault: false
+      isDefault: isDef
     })
+  }
+  var foundDefault = false
+  for (var j = 0; j < out.length; j++) {
+    if (out[j].isDefault) {
+      if (foundDefault) {
+        out[j].isDefault = false
+      } else {
+        foundDefault = true
+      }
+    }
   }
   return out
 }
 
 function formatAliases(aliases) {
   var list = parseAliases(aliases)
-  var emails = []
+  var entries = []
   for (var i = 0; i < list.length; i++) {
-    emails.push(list[i].email)
+    var item = list[i]
+    var str = ""
+    if (item.displayName) {
+      str = item.displayName + " <" + item.email + ">"
+    } else {
+      str = item.email
+    }
+    if (item.isDefault) {
+      str += " (default)"
+    }
+    entries.push(str)
   }
-  return emails.join(", ")
+  return entries.join(", ")
 }
 
 function normalizedPort(value, fallback) {

@@ -116,11 +116,30 @@ function normalizeAliases(value) {
     var item = rawList[i]
     var email = ""
     var displayName = ""
+    var isDef = false
     if (typeof item === "string") {
-      email = trimmed(item).toLowerCase()
+      var str = trimmed(item)
+      if (/\(default\)|\[default\]/i.test(str)) {
+        isDef = true
+        str = str.replace(/\(default\)|\[default\]/gi, "").trim()
+      } else if (str.endsWith("*")) {
+        isDef = true
+        str = str.replace(/\*+$/, "").trim()
+      } else if (str.startsWith("*")) {
+        isDef = true
+        str = str.replace(/^\*+/, "").trim()
+      }
+      var matchAngle = str.match(/^(.*?)\s*<([^\s@]+@[^>]+)>\s*$/)
+      if (matchAngle) {
+        displayName = trimmed(matchAngle[1])
+        email = trimmed(matchAngle[2]).toLowerCase()
+      } else {
+        email = trimmed(str).toLowerCase()
+      }
     } else if (item && typeof item === "object") {
       email = trimmed(item.email || item.sendAsEmail).toLowerCase()
       displayName = trimmed(item.displayName || item.name)
+      isDef = item.isDefault === true || item.default === true || item.defaultFrom === true
     }
     if (!email || !isValidEmail(email)) continue
     if (seen[email]) continue
@@ -129,8 +148,18 @@ function normalizeAliases(value) {
       email: email,
       displayName: displayName,
       isPrimary: false,
-      isDefault: false
+      isDefault: isDef
     })
+  }
+  var foundDefault = false
+  for (var j = 0; j < out.length; j++) {
+    if (out[j].isDefault) {
+      if (foundDefault) {
+        out[j].isDefault = false
+      } else {
+        foundDefault = true
+      }
+    }
   }
   return out
 }

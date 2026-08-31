@@ -573,25 +573,33 @@ Item {
       if (!root) return
       var list = []
       var seen = ({})
+      var hasDefaultAlias = false
+      for (var k = 0; k < customAliases.length; k++) {
+        if (customAliases[k] && customAliases[k].isDefault === true) {
+          hasDefaultAlias = true
+          break
+        }
+      }
       if (address !== "") {
         list.push({
           email: address,
           displayName: "",
           isPrimary: true,
-          isDefault: true
+          isDefault: !hasDefaultAlias
         })
         seen[address.toLowerCase()] = true
       }
       for (var i = 0; i < customAliases.length; i++) {
         var item = customAliases[i]
         var email = (typeof item === "string" ? item : (item ? item.email : "")).trim()
+        var isDef = item && typeof item === "object" ? (item.isDefault === true) : false
         if (email !== "" && !seen[email.toLowerCase()]) {
           seen[email.toLowerCase()] = true
           list.push({
             email: email,
             displayName: (item && item.displayName) ? String(item.displayName).trim() : "",
             isPrimary: false,
-            isDefault: false
+            isDefault: isDef
           })
         }
       }

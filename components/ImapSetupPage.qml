@@ -359,7 +359,7 @@ Column {
         foreground: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        placeholderText: "Send-as aliases — comma-separated (e.g. alias@icloud.com)"
+        placeholderText: "Send-as aliases — comma-separated (e.g. alias@icloud.com (default))"
       }
     }
 
