@@ -21,7 +21,7 @@
 // that named its own colour would not.
 
 import { div, svg } from "gpui";
-import { style } from "../lib/omarchy-ui/index.js";
+import { style } from "omarchy-ui";
 
 const ICON_DIRECTORY = "assets/icons";
 

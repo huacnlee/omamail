@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { renderSettings } from "../app/ui/settings.js";
 import { renderShortcutSheet, columnCount } from "../app/ui/shortcuts.js";
 import { helpGroups } from "../app/keys/keymap.js";
-import { style } from "../app/lib/omarchy-ui/index.js";
+import { style } from "omarchy-ui";
 
 const cx = {
   theme: () => ({

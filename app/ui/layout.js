@@ -1,6 +1,6 @@
 // @ts-check
 
-import { style } from "../lib/omarchy-ui/style.js";
+import { style } from "omarchy-ui";
 
 // The window's shape, ported from `App.qml`.
 //
@@ -62,7 +62,10 @@ export function viewportSize(fallbackWidth = 1024, fallbackHeight = 768) {
     typeof window !== "undefined" ? window : undefined
   );
   if (typeof host?.viewport_size !== "function")
-    return { width: Number(fallbackWidth) || 0, height: Number(fallbackHeight) || 0 };
+    return {
+      width: Number(fallbackWidth) || 0,
+      height: Number(fallbackHeight) || 0,
+    };
   const size = host.viewport_size();
   return {
     width: Number(size.width) || Number(fallbackWidth) || 0,

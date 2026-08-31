@@ -3,24 +3,20 @@
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import {
-  actionButton,
+  AppShell,
+  KeyHints,
+  MutedText,
+  StatusBar,
+  StatusItem,
+  TextField,
+  TitleBar,
   alpha,
-  appShell,
-  bottomBar,
-  brandLockup,
-  field,
-  keyHints,
-  muted,
-  statusLine,
-  style,
-  topBar,
   role,
-} from "../lib/omarchy-ui/index.js";
-import {
-  MAIL_SPLITTER_WIDTH,
-  mailLayout,
-  viewportSize,
-} from "./layout.js";
+  style,
+} from "omarchy-ui";
+import { actionIcon } from "./controls.js";
+import { brandLockup } from "./brand.js";
+import { MAIL_SPLITTER_WIDTH, mailLayout, viewportSize } from "./layout.js";
 import { renderMessageList } from "./message-list.js";
 import { renderMailboxTabs, renderRail } from "./rail.js";
 import { renderAppMenu, renderAccountSwitcherCard } from "./menu.js";
@@ -62,69 +58,75 @@ function searchField(search, cx) {
   // field gets.
   const clearable =
     String(search?.text ?? "") !== "" && typeof search?.onClear === "function";
-  return h_flex()
-    .id("mail-search")
-    // The field fills the slot and the × sits inside its right edge, so the
-    // button has to be positioned against this row rather than laid out beside
-    // the input — which would put it outside the border it belongs in.
-    .relative()
-    .flex_1()
-    .min_w_0()
-    .items_center()
-    .child(
-      field(search.state, cx)
-        .accessibility_label("Search mail")
-        // A query is list text, not a form value: it is read beside the rows
-        // it filters and takes their size.
-        .text_size(tokens.font.bodySmall)
-        .border_color(rest)
-        // The rest border survives the pointer: only focus commits to the
-        // control border, which is the state the outline is actually about.
-        // The fill is re-declared alongside it rather than left to the kit's
-        // own hover, because a second refinement that named only the border
-        // would depend on the two being merged rather than replaced.
-        .hover((appearance) =>
-          appearance
-            .bg(
-              /** @type {import("gpui").Color} */ (
-                alpha(foreground, tokens.state.hoverFillAlpha)
-              ),
-            )
-            .border_color(rest),
-        )
-        // Room for the × rather than text running under it.
-        .when(clearable, (input) =>
-          input.pr(tokens.spacing.controlPaddingX + tokens.space(SEARCH_CLEAR_SIZE)),
-        ),
-    )
-    .when(clearable, (row) =>
-      row.child(
-        actionButton(
-          "mail-search-clear",
-          "close",
-          "Clear search · Esc",
-          (/** @type {any} */ event, /** @type {any} */ eventCx) =>
-            search.onClear(event, eventCx),
-          cx,
-          {
-            // Centred by arithmetic rather than by the row: an absolutely
-            // placed child is out of the flex flow, so `items_center` above has
-            // nothing to say about it.
-            size: tokens.space(SEARCH_CLEAR_SIZE),
-            iconSize: tokens.font.iconSmall,
-            color: /** @type {import("gpui").Color} */ (alpha(foreground, 0.55)),
-            hoverColor: foreground,
-          },
-        )
-          .absolute()
-          .right(tokens.space(4))
-          .top(
-            Math.round(
-              (tokens.spacing.controlHeight - tokens.space(SEARCH_CLEAR_SIZE)) / 2,
+  return (
+    h_flex()
+      .id("mail-search")
+      // The field fills the slot and the × sits inside its right edge, so the
+      // button has to be positioned against this row rather than laid out beside
+      // the input — which would put it outside the border it belongs in.
+      .relative()
+      .flex_1()
+      .min_w_0()
+      .items_center()
+      .child(
+        new TextField()
+          .state(search.state)
+          .build(cx)
+          .accessibility_label("Search mail")
+          // A query is list text, not a form value: it is read beside the rows
+          // it filters and takes their size.
+          .text_size(tokens.font.bodySmall)
+          .border_color(rest)
+          // The rest border survives the pointer: only focus commits to the
+          // control border, which is the state the outline is actually about.
+          // The fill is re-declared alongside it rather than left to the kit's
+          // own hover, because a second refinement that named only the border
+          // would depend on the two being merged rather than replaced.
+          .hover((appearance) =>
+            appearance
+              .bg(
+                /** @type {import("gpui").Color} */ (
+                  alpha(foreground, tokens.state.hoverFillAlpha)
+                ),
+              )
+              .border_color(rest),
+          )
+          // Room for the × rather than text running under it.
+          .when(clearable, (input) =>
+            input.pr(
+              tokens.spacing.controlPaddingX + tokens.space(SEARCH_CLEAR_SIZE),
             ),
           ),
-      ),
-    );
+      )
+      .when(clearable, (row) =>
+        row.child(
+          actionIcon("mail-search-clear", "close", "Clear search · Esc")
+            // Waiting in the muted foreground and coming forward when pointed
+            // at: a × that is as loud as the query beside it reads as part of
+            // the query.
+            .quiet()
+            .size("small")
+            .onClick((/** @type {any} */ event, /** @type {any} */ eventCx) =>
+              search.onClear(event, eventCx),
+            )
+            .build(cx)
+            // Narrower than the small step, because it sits *inside* the field
+            // rather than beside it — and centred by arithmetic rather than by
+            // the row: an absolutely placed child is out of the flex flow, so
+            // `items_center` above has nothing to say about it.
+            .size(tokens.space(SEARCH_CLEAR_SIZE))
+            .absolute()
+            .right(tokens.space(4))
+            .top(
+              Math.round(
+                (tokens.spacing.controlHeight -
+                  tokens.space(SEARCH_CLEAR_SIZE)) /
+                  2,
+              ),
+            ),
+        ),
+      )
+  );
 }
 
 /**
@@ -138,16 +140,18 @@ function header(model, compact, cx) {
   const tokens = style();
   const dim = cx.theme().colors.muted_foreground;
   const searchVisible = !compact;
-  return topBar(
-    {
-      brand: h_flex()
+  return new TitleBar()
+    .brand(
+      h_flex()
         .id("mail-header-left")
         .flex_none()
         .items_center()
         .gap(tokens.space(8))
         .child(brandLockup(cx, { compact }))
         .child(renderAppMenu(model.menu ?? {}, cx)),
-      center: h_flex()
+    )
+    .center(
+      h_flex()
         .id("mail-topbar")
         .flex_1()
         .min_w_0()
@@ -162,7 +166,9 @@ function header(model, compact, cx) {
               .child(searchField(model.search, cx)),
           ),
         ),
-      actions: h_flex()
+    )
+    .actions(
+      h_flex()
         .id("mail-header-right")
         .flex_none()
         .items_center()
@@ -170,16 +176,17 @@ function header(model, compact, cx) {
         // same kind of thing, not three separate ideas.
         .gap(tokens.space(4))
         .child(
-          actionButton(
+          actionIcon(
             "mail-refresh",
             "refresh",
             model.status.state === "loading"
               ? "Checking for mail"
               : "Check mail · F5",
-            model.header.onRefresh ?? (() => {}),
-            cx,
-            { disabled: model.status.state === "loading", color: dim },
-          ),
+          )
+            .disabled(model.status.state === "loading")
+            .quiet()
+            .onClick(model.header.onRefresh ?? (() => {}))
+            .build(cx),
         )
         // No Compose where the mailbox has nowhere to hand a message to. An
         // IMAP account with no SMTP server is a supported setup — the form
@@ -187,19 +194,14 @@ function header(model, compact, cx) {
         // fails after the user has written the message.
         .when(model.capabilities?.send !== false, (header) =>
           header.child(
-            actionButton(
-              "compose",
-              "send",
-              "Compose · c",
-              model.header.onCompose,
-              cx,
-              { color: dim },
-            ),
+            actionIcon("compose", "send", "Compose · c")
+              .quiet()
+              .onClick(model.header.onCompose)
+              .build(cx),
           ),
         ),
-    },
-    cx,
-  );
+    )
+    .build(cx);
 }
 
 /**
@@ -214,13 +216,15 @@ function statusBar(model, compact, cx) {
   const tokens = style();
   const dim = cx.theme().colors.muted_foreground;
   const notice = String(model.status.notice ?? "");
-  return bottomBar(
-    {
-      // The rail toggle leads the line, so the bar starts at 8 rather than 14:
-      // the glyph inside its 24-square then lands on the same left edge the
-      // status text would have had. `App.qml` anchors it exactly that way.
-      leadsWithIcon: !compact && typeof model.onToggleSidebar === "function",
-      status: h_flex()
+  // How current the list is. The sentence about what went wrong is `notice`,
+  // on the other side of the bar, so this side is often empty — and a state
+  // colours the words it is given, which means there is nothing here for it to
+  // land on when there are none.
+  const report = String(model.status.label ?? "");
+  return new StatusBar()
+    .leadsWithIcon(!compact && typeof model.onToggleSidebar === "function")
+    .status(
+      h_flex()
         .id("mail-status")
         .flex_1()
         .min_w_0()
@@ -228,45 +232,51 @@ function statusBar(model, compact, cx) {
         .gap(tokens.space(8))
         .when(!compact && typeof model.onToggleSidebar === "function", (line) =>
           line.child(
-            actionButton(
+            // No fill for the open state. The sidebar standing there is the
+            // state, said better than a lit square on the status line could,
+            // and this control has no business drawing attention to itself.
+            //
+            // The small step is `space(24)` at the small icon size, which is
+            // what a 28-tall status line has room for: the kit's own size
+            // would leave the glyph taller than the line it sits on.
+            actionIcon(
               "sidebar-toggle",
               "sidebar",
               model.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar",
-              model.onToggleSidebar,
-              cx,
-              // No fill for the open state. The sidebar standing there is the
-              // state, said better than a lit square on the status line could,
-              // and this control has no business drawing attention to itself.
-              //
-              // `iconSize: Style.font.iconSmall; size: Style.space(24)`: a
-              // 28-tall status line has no room for the kit's icon size, which
-              // would leave the glyph taller than the line it sits on.
-              {
-                color: dim,
-                size: tokens.space(24),
-                iconSize: tokens.font.iconSmall,
-              },
-            ),
+            )
+              .quiet()
+              .size("small")
+              .onClick(model.onToggleSidebar)
+              .build(cx),
           ),
         )
         .child(
-          statusLine(model.status.label, model.status.state, cx)
+          (report
+            ? new StatusItem()
+                .label(report)
+                .loadingLabel(report)
+                .state(model.status.state)
+            : new StatusItem()
+          )
+            .build(cx)
             .id("mail-status-label")
             .min_w_0()
             .truncate()
             .text_size(tokens.font.caption),
         ),
-      hints: notice
-        ? muted(notice, cx)
+    )
+    .hints(
+      notice
+        ? new MutedText(notice)
+            .build(cx)
             .id("mail-status-notice")
             .flex_none()
             .max_w("50%")
             .truncate()
             .text_size(tokens.font.caption)
-        : keyHints(model.status.hints ?? [], cx),
-    },
-    cx,
-  );
+        : new KeyHints("key-hints").hints(model.status.hints ?? []).build(cx),
+    )
+    .build(cx);
 }
 
 /** @param {any} model @param {import("gpui").Context} cx */
@@ -342,10 +352,10 @@ export function renderMail(model, cx) {
       model.onSplitterPress?.(event, eventCx),
     );
 
-  const shell = appShell(
-    {
-      top: header(model, layout.compact, cx),
-      content: h_flex()
+  const shell = new AppShell()
+    .top(header(model, layout.compact, cx))
+    .content(
+      h_flex()
         .id(`mail-layout-${layout.mode}`)
         // A five-pixel strip loses the pointer the moment a drag moves faster
         // than the frame, so the row the panes sit in is what reports the
@@ -419,10 +429,9 @@ export function renderMail(model, cx) {
               ]
             : []),
         ]),
-      bottom: statusBar(model, layout.compact, cx),
-    },
-    cx,
-  );
+    )
+    .bottom(statusBar(model, layout.compact, cx))
+    .build(cx);
 
   // The switcher lives on the rail, and a narrow window has no rail — which is
   // exactly the case the app menu's "Switch account..." row exists for, and it
@@ -447,7 +456,9 @@ export function renderMail(model, cx) {
         .justify_center()
         // A press anywhere off the card puts it away, which is what the popup's
         // own CloseOnPressOutside does on the rail.
-        .on_click((_event, eventCx) => model.onSwitcherOpenChange?.(false, eventCx))
+        .on_click((_event, eventCx) =>
+          model.onSwitcherOpenChange?.(false, eventCx),
+        )
         .child(
           renderAccountSwitcherCard(
             {

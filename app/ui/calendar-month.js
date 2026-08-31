@@ -3,8 +3,13 @@
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import { eventsOnDay, two } from "../calendar/Calendar.js";
-import { style } from "../lib/omarchy-ui/index.js";
-import { CHIP_FILL, CHIP_SELECTED_FILL, calendarRoles, chipSurface } from "./calendar-palette.js";
+import { roles, style } from "omarchy-ui";
+import {
+  CHIP_FILL,
+  CHIP_SELECTED_FILL,
+  calendarRoles,
+  chipSurface,
+} from "./calendar-palette.js";
 
 export const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -76,7 +81,9 @@ function monthChip(id, event, model, cx) {
       eventCx.stop_propagation?.();
       model.onEvent?.(event, eventCx);
     })
-    .child(div().flex_none().w(tokens.space(3)).self_stretch().bg(surface.color))
+    .child(
+      div().flex_none().w(tokens.space(3)).self_stretch().bg(surface.color),
+    )
     .child(
       div()
         .flex_1()
@@ -85,7 +92,9 @@ function monthChip(id, event, model, cx) {
         .text_size(tokens.font.caption)
         .text_color(roles.text)
         .truncate()
-        .child(`${time}${String(event?.summary || event?.title || "Untitled event")}`),
+        .child(
+          `${time}${String(event?.summary || event?.title || "Untitled event")}`,
+        ),
     );
 }
 

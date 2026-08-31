@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
+import { InputState } from "gpui-base";
 
 import { renderMail } from "../app/ui/mail.js";
 import {
   appMenuGroups,
   renderAccountSwitcherCard,
 } from "../app/ui/menu.js";
-import { button } from "../app/lib/omarchy-ui/index.js";
-import { applyOmarchyStyle, style } from "../app/lib/omarchy-ui/style.js";
+import { applyOmarchyStyle, style } from "omarchy-ui";
 
 // The window's own chrome, held to `App.qml`'s measurements.
 //
@@ -89,7 +89,7 @@ function model(overrides = {}) {
     messages: [],
     cursorId: null,
     selectedId: null,
-    search: { state: null, onChange() {} },
+    search: { state: InputState.new({ placeholder: "Search mail" }), onChange() {} },
     header: {
       title: "Inbox",
       onCompose() {},
@@ -206,22 +206,10 @@ assert.equal(narrowIds.includes("mail-rail"), false);
 assert.equal(narrowIds.includes("sidebar-toggle"), false);
 assert.ok(narrowIds.includes("application-brand"), "the mark always stays");
 
-// ------------------------------------------------------------ button border
-
-// A button reserves its border in every state and only recolours it. Adding
-// one on hover gains a pixel a side and shoves the row along — the trap
-// `qs.Ui/Button.qml` documents and reserves against.
-const ghost = button("ghost", "Discard", () => {}, cx);
-const outlined = button("outlined", "Send", () => {}, cx, { bordered: true });
-for (const control of [ghost, outlined]) {
-  const widths = (control.styleCalls ?? [])
-    .filter((call) => call.name === "border")
-    .map((call) => call.args[0]);
-  assert.deepEqual(widths, [tokens.state.normalBorderWidth]);
-}
-// The ghost's is transparent rather than absent.
-assert.equal(styleArg(ghost, "border_color"), "#00000000");
-assert.notEqual(styleArg(outlined, "border_color"), "#00000000");
+// A button reserving its border in every state — so a hover does not gain a
+// pixel a side and shove the row along — is `omarchy-ui`'s invariant now, and
+// its own tests hold it. What is left here is what this window does with the
+// controls, which is the half no library can check.
 
 // ---------------------------------------------------------------- app menu
 

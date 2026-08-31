@@ -3,18 +3,17 @@
 import { div, image } from "gpui";
 import { Popup, Textarea, h_flex, v_flex } from "gpui-base";
 import {
-  actionBar,
-  actionButton,
+  ActionBar,
+  Button,
+  Label,
+  MutedText,
+  TextField,
   alpha,
-  button,
-  field,
-  iconTextButton,
-  label,
   mix,
-  muted,
   resolveSurfaceColor,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { actionIcon, iconTextButton } from "./controls.js";
 import { formatCount, formatSize } from "../message/Message.js";
 import { icon } from "./icons.js";
 
@@ -289,18 +288,14 @@ function fromRow(model, cx) {
   const tokens = style();
   const identities = model.identities ?? [];
   const chosen = model.from.toLowerCase();
-  const trigger = button(
-    "compose-from-button",
-    model.from || "No sending account",
-    model.onToggleFromMenu ?? (() => {}),
-    cx,
-    {
-      bordered: true,
-      disabled: !model.canChooseFrom,
-      selected: Boolean(model.fromMenuOpen),
-      fontSize: tokens.font.bodySmall,
-    },
-  )
+  const trigger = new Button("compose-from-button")
+    .label(model.from || "No sending account")
+    .bordered()
+    .disabled(!model.canChooseFrom)
+    .selected(Boolean(model.fromMenuOpen))
+    .size("small")
+    .onClick(model.onToggleFromMenu ?? (() => {}))
+    .build(cx)
     // Grows to the address and no further, and gives way rather than pushing
     // the row wider when the address is a long one. That is the QML's
     // `min(implicitWidth + trailing, parent.width - label - space(46))`: a
@@ -408,11 +403,13 @@ function addressRow(name, caption, model, cx) {
   const state = model[name];
   const offered = model.suggestions;
   const control = state
-    ? field(state, cx)
+    ? new TextField()
+        .state(state)
+        .build(cx)
         .id(`compose-${name}-field`)
         .accessibility_label(caption)
         .text_size(tokens.font.bodySmall)
-    : muted("Not set", cx).id(`compose-${name}-field`).flex_1();
+    : new MutedText("Not set").build(cx).id(`compose-${name}-field`).flex_1();
   const withPopup =
     offered && offered.field === name
       ? suggestionPopup(
@@ -444,12 +441,15 @@ function addressRow(name, caption, model, cx) {
     /** @type {boolean} */ on,
     /** @type {(event:any,cx:any)=>void} */ press,
   ) =>
-    button(id, label, press, cx, {
-      fontSize: tokens.font.caption,
-      color: on
-        ? cx.theme().colors.foreground
-        : cx.theme().colors.muted_foreground,
-    }).flex_none();
+    new Button(id)
+      .label(label)
+      .tone(
+        on ? cx.theme().colors.foreground : cx.theme().colors.muted_foreground,
+      )
+      .size("xsmall")
+      .onClick(press)
+      .build(cx)
+      .flex_none();
   return formRow(
     "compose-to-row",
     caption,
@@ -552,13 +552,12 @@ function forwardRow(model, cx) {
         Boolean(forward.error) && typeof model.onRetryForward === "function",
         (row) =>
           row.child(
-            button(
-              "compose-forward-retry",
-              "Retry",
-              model.onRetryForward ?? (() => {}),
-              cx,
-              { fontSize: tokens.font.caption },
-            ).flex_none(),
+            new Button("compose-forward-retry")
+              .label("Retry")
+              .size("xsmall")
+              .onClick(model.onRetryForward ?? (() => {}))
+              .build(cx)
+              .flex_none(),
           ),
       ),
     cx,
@@ -646,21 +645,22 @@ function attachmentStrip(model, cx) {
               )
               .when(typeof remove === "function", (row) =>
                 row.child(
-                  actionButton(
+                  // The small step rather than the kit's default, which beside
+                  // a caption-sized filename reads as the loudest thing on the
+                  // row — and quiet, so the × waits until the row is pointed
+                  // at.
+                  actionIcon(
                     `compose-attachment-remove-${index}`,
                     "close",
                     "Remove",
-                    (/** @type {any} */ event, /** @type {any} */ eventCx) =>
-                      remove?.(index, event, eventCx),
-                    cx,
-                    {
-                      color: cx.theme().colors.muted_foreground,
-                      // The strip's own mark size. The kit's default is the
-                      // full icon size, which beside a caption-sized filename
-                      // reads as the loudest thing on the row.
-                      iconSize: tokens.font.iconSmall,
-                    },
-                  ),
+                  )
+                    .quiet()
+                    .size("small")
+                    .onClick(
+                      (/** @type {any} */ event, /** @type {any} */ eventCx) =>
+                        remove?.(index, event, eventCx),
+                    )
+                    .build(cx),
                 ),
               ),
           ),
@@ -723,14 +723,11 @@ export function renderCompose(model, cx) {
     .items_center()
     .gap(tokens.space(10))
     .child(
-      iconTextButton(
-        "compose-send",
-        "send",
-        model.sending ? "Sending" : "Send",
-        model.onSend,
-        cx,
-        { disabled: sendDisabled, tooltip: "Send · Ctrl+Enter" },
-      ),
+      iconTextButton("compose-send", "send", model.sending ? "Sending" : "Send")
+        .disabled(sendDisabled)
+        .tooltip("Send · Ctrl+Enter")
+        .onClick(model.onSend)
+        .build(cx),
     )
     .when(typeof attachHandler === "function", (bar) =>
       bar.child(
@@ -738,11 +735,13 @@ export function renderCompose(model, cx) {
           "compose-attach",
           "attachment",
           model.attaching ? "Attaching" : "Attach...",
-          (/** @type {any} */ event, /** @type {any} */ eventCx) =>
+        )
+          .disabled(Boolean(model.attaching))
+          .tooltip("Attach files...")
+          .onClick((/** @type {any} */ event, /** @type {any} */ eventCx) =>
             attachHandler?.(event, eventCx),
-          cx,
-          { disabled: Boolean(model.attaching), tooltip: "Attach files..." },
-        ),
+          )
+          .build(cx),
       ),
     )
     // Discard is borderless and in the dim colour. It is the destructive
@@ -754,11 +753,13 @@ export function renderCompose(model, cx) {
     // out, and a button for what already happens is a button that teaches the
     // wrong thing about when a draft is safe.
     .child(
-      button("compose-discard", "Discard", model.onDiscard, cx, {
-        disabled: Boolean(model.sending),
-        fontSize: tokens.font.bodySmall,
-        color: cx.theme().colors.muted_foreground,
-      }),
+      new Button("compose-discard")
+        .label("Discard")
+        .disabled(Boolean(model.sending))
+        .tone(cx.theme().colors.muted_foreground)
+        .size("small")
+        .onClick(model.onDiscard)
+        .build(cx),
     );
 
   return (
@@ -784,20 +785,16 @@ export function renderCompose(model, cx) {
             .border_b(tokens.spacing.hairline)
             .border_color(cx.theme().colors.border)
             .child(
-              iconTextButton(
-                "compose-back",
-                "back",
-                "Back",
-                model.onBack ?? (() => {}),
-                cx,
-                {
-                  tooltip: "Back · Esc",
-                  // `BackBar.qml` gives the whole control the dim tone, glyph
-                  // included. A `text_color` on the element cannot reach the
-                  // glyph, which paints itself in the button's own foreground.
-                  color: cx.theme().colors.muted_foreground,
-                },
-              ).flex_none(),
+              iconTextButton("compose-back", "back", "Back")
+                .tooltip("Back · Esc")
+                // `BackBar.qml` gives the whole control the dim tone, glyph
+                // included. A `text_color` on the element cannot reach the
+                // glyph, which paints itself in the button's own foreground —
+                // which is what a tone is for.
+                .tone(cx.theme().colors.muted_foreground)
+                .onClick(model.onBack ?? (() => {}))
+                .build(cx)
+                .flex_none(),
             )
             // Centred on the band, not between the two controls beside it.
             // `ComposeView.qml` anchors the title to the band's own horizontal
@@ -833,7 +830,9 @@ export function renderCompose(model, cx) {
             formRow(
               "compose-subject-row",
               "Subject",
-              field(model.subject, cx)
+              new TextField()
+                .state(model.subject)
+                .build(cx)
                 .id("compose-subject-field")
                 .accessibility_label("Subject")
                 .text_size(tokens.font.bodySmall),
@@ -880,9 +879,10 @@ export function renderCompose(model, cx) {
       // is the window's status line and the saved-draft toast, and a third copy
       // of it here would be the same sentence in three places.
       .child(
-        actionBar("compose-action-bar", { actions: commands }, cx).h(
-          tokens.space(52),
-        ),
+        new ActionBar("compose-action-bar")
+          .actions(commands)
+          .build(cx)
+          .h(tokens.space(52)),
       )
   );
 }
@@ -902,7 +902,8 @@ export function renderCompose(model, cx) {
  */
 export function composeToasts(model, cx) {
   const tokens = style();
-  const undoing = Boolean(model.sendPending) && typeof model.onUndo === "function";
+  const undoing =
+    Boolean(model.sendPending) && typeof model.onUndo === "function";
   if (!undoing && !model.notice) return null;
   // The undo card wins the spot while it is up. Both land in the same place, so
   // showing them together would show one of them through the other.
@@ -923,13 +924,13 @@ export function composeToasts(model, cx) {
             .child(`Sending in ${model.undoSeconds ?? 0}s`),
         )
         .child(
-          button(
-            "compose-undo-button",
-            "Undo  Alt+Z",
-            model.onUndo ?? (() => {}),
-            cx,
-            { bordered: true, fontSize: tokens.font.bodySmall },
-          ).text_color(cx.theme().colors.primary),
+          new Button("compose-undo-button")
+            .label("Undo  Alt+Z")
+            .bordered()
+            .size("small")
+            .onClick(model.onUndo ?? (() => {}))
+            .build(cx)
+            .text_color(cx.theme().colors.primary),
         ),
       cx,
     );
@@ -945,7 +946,11 @@ export function composeToasts(model, cx) {
           .rounded_full()
           .bg(cx.theme().colors.primary),
       )
-      .child(label(model.notice ?? "", cx).text_size(tokens.font.bodySmall)),
+      .child(
+        new Label(model.notice ?? "")
+          .build(cx)
+          .text_size(tokens.font.bodySmall),
+      ),
     cx,
   );
 }

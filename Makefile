@@ -60,7 +60,13 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 # a failure that looks like a broken test rather than a full filesystem.
 BUN_ROOT ?= $(if $(TMPDIR),$(TMPDIR:/=),/tmp)/omamail-bun
 
-.PHONY: test test-js test-app test-shell test-qml qml-check validate bench
+.PHONY: test test-js test-app test-shell test-qml qml-check validate bench deps
+
+# The Git packages `app/gpui-shell.json` declares. gpui-shell materializes them
+# itself at load; this puts them where it would, so the node tests and an
+# editor resolve `omarchy-ui` the same way the running window does.
+deps:
+	node scripts/fetch-app-dependencies.mjs
 
 test: test-js test-app test-shell test-qml
 
@@ -93,9 +99,9 @@ test-js:
 	node tests/test_imap.js
 	node tests/test_hey.js
 
-test-app:
-	node tests/test_omarchy_ui.mjs
-	node tests/test_omarchy_ui_style.mjs
+test-app: deps
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_omarchy_ui.mjs
+	node --no-warnings --experimental-loader ./tests/gpui_loader.mjs tests/test_omarchy_ui_style.mjs
 	node tests/test_account_store.mjs
 	node tests/test_app_keymap.mjs
 	node tests/test_app_actions.mjs

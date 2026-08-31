@@ -1138,6 +1138,10 @@ OWNERS = {
     "migrate-storage.sh": {"standalone"},
     "build-icons.mjs": {"standalone"},
     # Repository tooling. Neither client runs these; they build or release it.
+    # `fetch-app-dependencies.mjs` is the standalone client's Git packages, but
+    # the running window never calls it: gpui-shell materializes them itself,
+    # and this puts them in the same place for the tests and an editor.
+    "fetch-app-dependencies.mjs": set(),
     "bump.sh": set(),
     "package-release.sh": set(),
     "release-notes.sh": set(),

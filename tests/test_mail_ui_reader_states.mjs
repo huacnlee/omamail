@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 
 import { renderReader } from "../app/ui/reader.js";
-import { style } from "../app/lib/omarchy-ui/style.js";
-import { applyOmarchyRoles } from "../app/lib/omarchy-ui/theme.js";
+import { style } from "omarchy-ui";
+import { applyOmarchyRoles } from "omarchy-ui";
 
 const colors = new Proxy(
   {},

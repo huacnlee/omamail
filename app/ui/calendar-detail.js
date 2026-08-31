@@ -4,12 +4,13 @@ import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import { two } from "../calendar/Calendar.js";
 import {
-  centeredWorkspace,
-  iconTextButton,
-  pageColumn,
-  separator,
+  CenteredWorkspace,
+  PageColumn,
+  Separator,
+  roles,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { iconTextButton } from "./controls.js";
 import { icon } from "./icons.js";
 import { LONG_WEEKDAY_NAMES, MONTH_NAMES } from "./calendar-month.js";
 import { calendarRoles, slotColor } from "./calendar-palette.js";
@@ -54,9 +55,7 @@ export function dateSummary(event) {
     ? new Date(Number(event.end.ms || event.start.ms || 0))
     : start;
   if (event.start.allDay) {
-    const inclusiveEnd = new Date(
-      Math.max(start.getTime(), end.getTime() - 1),
-    );
+    const inclusiveEnd = new Date(Math.max(start.getTime(), end.getTime() - 1));
     if (start.toDateString() === inclusiveEnd.toDateString())
       return `${longDay(start)} · All day`;
     return `${shortDay(start)} – ${shortDay(inclusiveEnd)} · All day`;
@@ -101,171 +100,175 @@ export function renderCalendarDetail(model, cx) {
     .inset_0()
     .bg(roles.background)
     .child(
-      centeredWorkspace(
-        "calendar-detail-page",
-        pageColumn("calendar-detail-column", cx, {
-          // The QML's `space(720)` is the column's own width, with the
-          // flickable's `space(18)` margin outside it. `pageColumn` carries
-          // that margin as padding and gpui counts padding inside a maximum
-          // width, so the margin is added back to arrive at the same column.
-          maxWidth: tokens.space(720) + tokens.spacing.panelPadding * 2,
-        })
-          .child(
-            h_flex().child(
-              // `BackBar.qml`: outlined, and quieter than the page it leaves.
-              iconTextButton(
-                "calendar-detail-back",
-                "back",
-                "Calendar",
-                (_click, eventCx) => model.onCloseEvent?.(_click, eventCx),
-                cx,
-                { tooltip: "Calendar · Esc", color: roles.dim },
+      new CenteredWorkspace("calendar-detail-page")
+        .content(
+          new PageColumn("calendar-detail-column")
+            .maxWidth(tokens.space(720) + tokens.spacing.panelPadding * 2)
+            .build(cx)
+            .child(
+              h_flex().child(
+                // `BackBar.qml`: outlined, and quieter than the page it leaves.
+                iconTextButton("calendar-detail-back", "back", "Calendar")
+                  .tooltip("Calendar · Esc")
+                  .tone(roles.dim)
+                  .onClick((_click, eventCx) =>
+                    model.onCloseEvent?.(_click, eventCx),
+                  )
+                  .build(cx),
               ),
-            ),
-          )
-          .child(div().flex_none().h(tokens.space(4)).rounded_full().bg(own))
-          .child(
-            div()
-              .text_size(tokens.font.title)
-              .text_color(roles.text)
-              .font_bold()
-              .child(String(event.summary || event.title || "Untitled event")),
-          )
-          .child(
-            div()
-              .text_size(tokens.font.body)
-              .text_color(roles.text)
-              .child(dateSummary(event)),
-          )
-          .child(
-            h_flex()
-              .items_center()
-              .gap(tokens.space(8))
-              .child(
-                div()
-                  .flex_none()
-                  .size(tokens.space(10))
-                  .rounded_full()
-                  .bg(own),
-              )
-              .child(
-                div()
-                  .text_size(tokens.font.bodySmall)
-                  .text_color(roles.dim)
-                  .child(
-                    source
-                      ? String(source.name || source.id || "Calendar")
-                      : "Calendar",
-                  ),
-              ),
-          )
-          .when(location !== "", (page) =>
-            page.child(
+            )
+            .child(div().flex_none().h(tokens.space(4)).rounded_full().bg(own))
+            .child(
+              div()
+                .text_size(tokens.font.title)
+                .text_color(roles.text)
+                .font_bold()
+                .child(
+                  String(event.summary || event.title || "Untitled event"),
+                ),
+            )
+            .child(
+              div()
+                .text_size(tokens.font.body)
+                .text_color(roles.text)
+                .child(dateSummary(event)),
+            )
+            .child(
               h_flex()
-                .items_start()
+                .items_center()
                 .gap(tokens.space(8))
                 .child(
-                  icon("pin", cx, { color: roles.dim }),
+                  div()
+                    .flex_none()
+                    .size(tokens.space(10))
+                    .rounded_full()
+                    .bg(own),
                 )
                 .child(
                   div()
-                    .flex_1()
-                    .min_w_0()
                     .text_size(tokens.font.bodySmall)
-                    .text_color(roles.text)
-                    .child(location),
+                    .text_color(roles.dim)
+                    .child(
+                      source
+                        ? String(source.name || source.id || "Calendar")
+                        : "Calendar",
+                    ),
                 ),
-            ),
-          )
-          .when(
-            canWrite ||
-              meetingLink !== "" ||
-              locationLink !== "" ||
-              providerLink !== "",
-            (page) =>
+            )
+            .when(location !== "", (page) =>
               page.child(
                 h_flex()
-                  .id("calendar-detail-actions")
-                  .flex_wrap()
-                  .gap(tokens.space(7))
-                  .when(canWrite, (actions) =>
-                    actions.child(
-                      iconTextButton(
-                        "calendar-detail-edit",
-                        "compose",
-                        "Edit...",
-                        (_click, eventCx) => model.onEdit?.(_click, eventCx),
-                        cx,
-                      ),
-                    ),
-                  )
-                  .when(canWrite, (actions) =>
-                    actions.child(
-                      iconTextButton(
-                        "calendar-detail-delete",
-                        "trash",
-                        "Delete...",
-                        (_click, eventCx) => model.onDelete?.(_click, eventCx),
-                        cx,
-                        { variant: "danger" },
-                      ),
-                    ),
-                  )
-                  .when(meetingLink !== "", (actions) =>
-                    actions.child(
-                      iconTextButton(
-                        "calendar-detail-call",
-                        "video",
-                        "Join call",
-                        (_click, eventCx) =>
-                          model.onOpenUrl?.(meetingLink, eventCx),
-                        cx,
-                      ),
-                    ),
-                  )
-                  .when(
-                    locationLink !== "" && locationLink !== meetingLink,
-                    (actions) =>
-                      actions.child(
-                        iconTextButton(
-                          "calendar-detail-location",
-                          "pin",
-                          "Open location",
-                          (_click, eventCx) =>
-                            model.onOpenUrl?.(locationLink, eventCx),
-                          cx,
-                        ),
-                      ),
-                  )
-                  .when(
-                    providerLink !== "" &&
-                      providerLink !== meetingLink &&
-                      providerLink !== locationLink,
-                    (actions) =>
-                      actions.child(
-                        iconTextButton(
-                          "calendar-detail-provider",
-                          "browser",
-                          "Open in provider",
-                          (_click, eventCx) =>
-                            model.onOpenUrl?.(providerLink, eventCx),
-                          cx,
-                        ),
-                      ),
+                  .items_start()
+                  .gap(tokens.space(8))
+                  .child(icon("pin", cx, { color: roles.dim }))
+                  .child(
+                    div()
+                      .flex_1()
+                      .min_w_0()
+                      .text_size(tokens.font.bodySmall)
+                      .text_color(roles.text)
+                      .child(location),
                   ),
               ),
-          )
-          .when(description !== "", (page) => page.child(separator(cx)))
-          .when(description !== "", (page) =>
-            page.child(
-              div()
-                .text_size(tokens.font.body)
-                .line_height(1.35)
-                .text_color(roles.text)
-                .child(description),
+            )
+            .when(
+              canWrite ||
+                meetingLink !== "" ||
+                locationLink !== "" ||
+                providerLink !== "",
+              (page) =>
+                page.child(
+                  h_flex()
+                    .id("calendar-detail-actions")
+                    .flex_wrap()
+                    .gap(tokens.space(7))
+                    .when(canWrite, (actions) =>
+                      actions.child(
+                        iconTextButton(
+                          "calendar-detail-edit",
+                          "compose",
+                          "Edit...",
+                        )
+                          .onClick((_click, eventCx) =>
+                            model.onEdit?.(_click, eventCx),
+                          )
+                          .build(cx),
+                      ),
+                    )
+                    .when(canWrite, (actions) =>
+                      actions.child(
+                        iconTextButton(
+                          "calendar-detail-delete",
+                          "trash",
+                          "Delete...",
+                        )
+                          .danger()
+                          .onClick((_click, eventCx) =>
+                            model.onDelete?.(_click, eventCx),
+                          )
+                          .build(cx),
+                      ),
+                    )
+                    .when(meetingLink !== "", (actions) =>
+                      actions.child(
+                        iconTextButton(
+                          "calendar-detail-call",
+                          "video",
+                          "Join call",
+                        )
+                          .onClick((_click, eventCx) =>
+                            model.onOpenUrl?.(meetingLink, eventCx),
+                          )
+                          .build(cx),
+                      ),
+                    )
+                    .when(
+                      locationLink !== "" && locationLink !== meetingLink,
+                      (actions) =>
+                        actions.child(
+                          iconTextButton(
+                            "calendar-detail-location",
+                            "pin",
+                            "Open location",
+                          )
+                            .onClick((_click, eventCx) =>
+                              model.onOpenUrl?.(locationLink, eventCx),
+                            )
+                            .build(cx),
+                        ),
+                    )
+                    .when(
+                      providerLink !== "" &&
+                        providerLink !== meetingLink &&
+                        providerLink !== locationLink,
+                      (actions) =>
+                        actions.child(
+                          iconTextButton(
+                            "calendar-detail-provider",
+                            "browser",
+                            "Open in provider",
+                          )
+                            .onClick((_click, eventCx) =>
+                              model.onOpenUrl?.(providerLink, eventCx),
+                            )
+                            .build(cx),
+                        ),
+                    ),
+                ),
+            )
+            .when(description !== "", (page) =>
+              page.child(new Separator().build(cx)),
+            )
+            .when(description !== "", (page) =>
+              page.child(
+                div()
+                  .text_size(tokens.font.body)
+                  .line_height(1.35)
+                  .text_color(roles.text)
+                  .child(description),
+              ),
             ),
-          ),
-        cx,
-      ),
+        )
+        .build(cx),
     );
 }

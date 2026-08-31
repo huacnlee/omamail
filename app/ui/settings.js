@@ -10,22 +10,22 @@
 // rows folded into the sections they belong to.
 
 import { div } from "gpui";
-import { Button, h_flex, v_flex } from "gpui-base";
+import { Button as BaseButton, h_flex, v_flex } from "gpui-base";
 import {
+  Button,
+  CenteredWorkspace,
+  Label,
+  MutedText,
+  PageColumn,
+  Separator,
+  Surface,
+  TextField,
+  Title,
   alpha,
-  button,
-  centeredWorkspace,
-  field,
-  iconTextButton,
-  label,
-  muted,
-  pageColumn,
   role,
-  separator,
   style,
-  surface,
-  title,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { iconTextButton } from "./controls.js";
 import { slotColor } from "./calendar-palette.js";
 import {
   choiceField,
@@ -204,13 +204,15 @@ function accountRows(model, cx) {
           .child(
             // The address itself, never rendered as anything but text: it is a
             // value the user typed and a stranger may have chosen.
-            label(account.email || account.label || "New mailbox", cx)
+            new Label(account.email || account.label || "New mailbox")
+              .build(cx)
               .text_size(tokens.font.bodySmall)
               .truncate()
               .when(active, (line) => line.font_bold()),
           )
           .child(
-            muted(`${account.providerName} · ${account.detail || ""}`, cx)
+            new MutedText(`${account.providerName} · ${account.detail || ""}`)
+              .build(cx)
               .text_size(tokens.font.caption)
               .truncate()
               .when(Boolean(account.failed), (line) =>
@@ -227,44 +229,32 @@ function accountRows(model, cx) {
           // at the theme's control height whatever it says.
           .when(!active, (actions) =>
             actions.child(
-              iconTextButton(
-                `settings-switch-${account.id}`,
-                "",
-                "Switch",
-                (_event, eventCx) => model.onSwitch?.(account.id, eventCx),
-                cx,
-                { disabled: model.busy === true || confirming },
-              ),
+              iconTextButton(`settings-switch-${account.id}`, "", "Switch")
+                .disabled(model.busy === true || confirming)
+                .onClick((_event, eventCx) =>
+                  model.onSwitch?.(account.id, eventCx),
+                )
+                .build(cx),
             ),
           )
           .when(typeof model.onEdit === "function", (actions) =>
             actions.child(
-              iconTextButton(
-                `settings-edit-${account.id}`,
-                "",
-                "Edit…",
-                (_event, eventCx) => model.onEdit(account.id, eventCx),
-                cx,
-                {
-                  tooltip: "Edit this mailbox",
-                  disabled: model.busy === true || confirming,
-                },
-              ),
+              iconTextButton(`settings-edit-${account.id}`, "", "Edit…")
+                .tooltip("Edit this mailbox")
+                .disabled(model.busy === true || confirming)
+                .onClick((_event, eventCx) => model.onEdit(account.id, eventCx))
+                .build(cx),
             ),
           )
           .child(
-            iconTextButton(
-              `settings-remove-${account.id}`,
-              "",
-              "Remove…",
-              (_event, eventCx) => model.onRemove?.(account.id, eventCx),
-              cx,
-              {
-                variant: "danger",
-                bordered: false,
-                disabled: model.busy === true || confirming,
-              },
-            ),
+            iconTextButton(`settings-remove-${account.id}`, "", "Remove…")
+              .danger()
+              .bordered(false)
+              .disabled(model.busy === true || confirming)
+              .onClick((_event, eventCx) =>
+                model.onRemove?.(account.id, eventCx),
+              )
+              .build(cx),
           ),
       );
   });
@@ -282,7 +272,10 @@ function accountRows(model, cx) {
  */
 function calendarColorChoice(model, source, cx) {
   const tokens = style();
-  const size = Math.max(tokens.space(12), Math.round(tokens.spacing.controlHeight * 0.4));
+  const size = Math.max(
+    tokens.space(12),
+    Math.round(tokens.spacing.controlHeight * 0.4),
+  );
   return h_flex()
     .id(`settings-calendar-color-${source.id}`)
     .role("radio_group")
@@ -293,7 +286,7 @@ function calendarColorChoice(model, source, cx) {
     .children(
       (source.colorKeys ?? []).map((/** @type {string} */ key) => {
         const chosen = key === source.colorKey;
-        return Button.new(`settings-calendar-color-${source.id}-${key}`)
+        return BaseButton.new(`settings-calendar-color-${source.id}-${key}`)
           .role("radio_button")
           .selected(chosen)
           .accessibility_label(key)
@@ -338,31 +331,33 @@ function calendarPasswordRow(model, source, cx) {
     .min_w_0()
     .gap(tokens.space(6))
     .child(
-      field(form.fields.existingPassword, cx)
+      new TextField()
+        .state(form.fields.existingPassword)
+        .build(cx)
         .id(`settings-calendar-password-field-${source.id}`)
         .accessibility_label(`Password for ${source.name}`)
         .flex_1()
         .min_w_0(),
     )
     .child(
-      iconTextButton(
-        `settings-calendar-password-save-${source.id}`,
-        "",
-        "Save",
-        (_event, eventCx) => model.onCalendarPasswordSave(source.id, eventCx),
-        cx,
-        { disabled: form.busy === true },
-      ),
+      iconTextButton(`settings-calendar-password-save-${source.id}`, "", "Save")
+        .disabled(form.busy === true)
+        .onClick((_event, eventCx) =>
+          model.onCalendarPasswordSave(source.id, eventCx),
+        )
+        .build(cx),
     )
     .child(
       // Borderless and dim: leaving the field is not the thing this row is for.
-      button(
-        `settings-calendar-password-cancel-${source.id}`,
-        "Cancel",
-        (_event, eventCx) => model.onCalendarPassword(source.id, eventCx),
-        cx,
-        { fontSize: tokens.font.bodySmall, color: dim(cx) },
-      ).h(tokens.spacing.controlHeight),
+      new Button(`settings-calendar-password-cancel-${source.id}`)
+        .label("Cancel")
+        .tone(dim(cx))
+        .size("small")
+        .onClick((_event, eventCx) =>
+          model.onCalendarPassword(source.id, eventCx),
+        )
+        .build(cx)
+        .h(tokens.spacing.controlHeight),
     );
 }
 
@@ -372,7 +367,11 @@ function calendarRows(model, cx) {
   const sources = model.calendars?.sources ?? [];
   const form = model.calendarForm;
   if (sources.length === 0)
-    return [muted("No calendars yet.", cx).text_size(tokens.font.caption)];
+    return [
+      new MutedText("No calendars yet.")
+        .build(cx)
+        .text_size(tokens.font.caption),
+    ];
   return sources.map((/** @type {any} */ source) =>
     v_flex()
       .id(`settings-calendar-${source.id}`)
@@ -393,15 +392,18 @@ function calendarRows(model, cx) {
               .min_w_0()
               .gap(tokens.spacing.xxs)
               .child(
-                label(source.name, cx).text_size(tokens.font.bodySmall).truncate(),
+                new Label(source.name)
+                  .build(cx)
+                  .text_size(tokens.font.bodySmall)
+                  .truncate(),
               )
               .child(
-                muted(
+                new MutedText(
                   source.kind === "google"
                     ? "Google Calendar"
                     : source.url || "CalDAV",
-                  cx,
                 )
+                  .build(cx)
                   .text_size(tokens.font.caption)
                   .truncate(),
               ),
@@ -414,14 +416,14 @@ function calendarRows(model, cx) {
               // Every control here needs a host to answer it, and one that has
               // not been wired up yet is not drawn at all: a button that fails
               // after it is pressed is worse than one that never offered.
-              .when(
-                typeof model.onCalendarColor === "function",
-                (actions) => actions.child(calendarColorChoice(model, source, cx)),
+              .when(typeof model.onCalendarColor === "function", (actions) =>
+                actions.child(calendarColorChoice(model, source, cx)),
               )
               // A Google calendar comes and goes with the mailbox that serves
               // it, so it has no remove and no password of its own.
               .when(
-                source.removable && typeof model.onCalendarPassword === "function",
+                source.removable &&
+                  typeof model.onCalendarPassword === "function",
                 (actions) =>
                   actions.child(
                     // Borderless, the way `CalendarSettings.qml` draws both of
@@ -432,26 +434,30 @@ function calendarRows(model, cx) {
                       `settings-calendar-password-${source.id}`,
                       "",
                       "Set password",
-                      (_event, eventCx) =>
+                    )
+                      .bordered(false)
+                      .onClick((_event, eventCx) =>
                         model.onCalendarPassword(source.id, eventCx),
-                      cx,
-                      { bordered: false },
-                    ),
+                      )
+                      .build(cx),
                   ),
               )
               .when(
-                source.removable && typeof model.onCalendarRemove === "function",
+                source.removable &&
+                  typeof model.onCalendarRemove === "function",
                 (actions) =>
                   actions.child(
                     iconTextButton(
                       `settings-calendar-remove-${source.id}`,
                       "",
                       "Remove",
-                      (_event, eventCx) =>
+                    )
+                      .danger()
+                      .bordered(false)
+                      .onClick((_event, eventCx) =>
                         model.onCalendarRemove(source.id, eventCx),
-                      cx,
-                      { variant: "danger", bordered: false },
-                    ),
+                      )
+                      .build(cx),
                   ),
               )
               // Switching a calendar off leaves it configured and stops it
@@ -493,10 +499,13 @@ function calendarRows(model, cx) {
 function calendarAddForm(model, cx) {
   const tokens = style();
   const form = model.calendarForm;
-  if (!form?.adding || typeof model.onCalendarAddSave !== "function") return null;
+  if (!form?.adding || typeof model.onCalendarAddSave !== "function")
+    return null;
   /** @param {string} name @param {string} caption */
   const row = (name, caption) =>
-    field(form.fields[name], cx)
+    new TextField()
+      .state(form.fields[name])
+      .build(cx)
       .id(`settings-calendar-new-${name}`)
       .accessibility_label(caption)
       .w_full();
@@ -521,19 +530,19 @@ function calendarAddForm(model, cx) {
             "settings-calendar-save",
             "",
             form.busy ? "Adding" : "Add calendar",
-            (_event, eventCx) => model.onCalendarAddSave(eventCx),
-            cx,
-            { disabled: form.busy },
-          ),
+          )
+            .disabled(form.busy)
+            .onClick((_event, eventCx) => model.onCalendarAddSave(eventCx))
+            .build(cx),
         )
         .child(
-          button(
-            "settings-calendar-cancel",
-            "Cancel",
-            (_event, eventCx) => model.onCalendarAddCancel(eventCx),
-            cx,
-            { fontSize: tokens.font.bodySmall, color: dim(cx) },
-          ).h(tokens.spacing.controlHeight),
+          new Button("settings-calendar-cancel")
+            .label("Cancel")
+            .tone(dim(cx))
+            .size("small")
+            .onClick((_event, eventCx) => model.onCalendarAddCancel(eventCx))
+            .build(cx)
+            .h(tokens.spacing.controlHeight),
         ),
     );
 }
@@ -576,19 +585,19 @@ function oauthClientRow(model, cx) {
         .min_w_0()
         .gap(tokens.spacing.xxs)
         .child(
-          label(
+          new Label(
             client.present
               ? client.description || "Google OAuth client"
               : "No client yet",
-            cx,
           )
+            .build(cx)
             .text_size(tokens.font.bodySmall)
             .truncate(),
         )
         .child(
-          muted(client.detail || "Shared by every mailbox above", cx).text_size(
-            tokens.font.caption,
-          ),
+          new MutedText(client.detail || "Shared by every mailbox above")
+            .build(cx)
+            .text_size(tokens.font.caption),
         ),
     )
     .when(typeof model.onClientSetup === "function", (row) =>
@@ -599,10 +608,10 @@ function oauthClientRow(model, cx) {
           "settings-oauth-client-setup",
           "",
           client.present ? "Change…" : "Set up…",
-          (_event, eventCx) => model.onClientSetup(eventCx),
-          cx,
-          { color: dim(cx) },
-        ),
+        )
+          .tone(dim(cx))
+          .onClick((_event, eventCx) => model.onClientSetup(eventCx))
+          .build(cx),
       ),
     );
 }
@@ -627,7 +636,8 @@ function removalDialog(model, cx) {
     .p(tokens.spacing.panelPadding)
     .bg(alpha(cx.theme().colors.background, 0.85))
     .child(
-      surface(cx)
+      new Surface()
+        .build(cx)
         .id("settings-remove-confirmation")
         .role("alert_dialog")
         .accessibility_label(pending.title)
@@ -636,32 +646,38 @@ function removalDialog(model, cx) {
         .gap(tokens.spacing.xxxl)
         .p(tokens.spacing.huge)
         .child(
-          title(pending.title, cx)
+          new Title(pending.title)
+            .build(cx)
             .text_size(tokens.font.heading)
             .font_bold(),
         )
-        .child(muted(pending.detail, cx).text_size(tokens.font.bodySmall))
+        .child(
+          new MutedText(pending.detail)
+            .build(cx)
+            .text_size(tokens.font.bodySmall),
+        )
         .child(
           h_flex()
             .justify_end()
             .gap(tokens.spacing.controlGap)
             .child(
-              button(
-                "settings-remove-cancel",
-                "Cancel",
-                (_event, eventCx) => model.onCancelRemove?.(_event, eventCx),
-                cx,
-                { disabled: model.busy === true },
-              ),
+              new Button("settings-remove-cancel")
+                .label("Cancel")
+                .disabled(model.busy === true)
+                .onClick((_event, eventCx) =>
+                  model.onCancelRemove?.(_event, eventCx),
+                )
+                .build(cx),
             )
             .child(
-              button(
-                "settings-remove-confirm",
-                model.busy ? "Removing…" : "Remove",
-                (_event, eventCx) => model.onConfirmRemove?.(_event, eventCx),
-                cx,
-                { variant: "danger", disabled: model.busy === true },
-              ),
+              new Button("settings-remove-confirm")
+                .label(model.busy ? "Removing…" : "Remove")
+                .danger()
+                .disabled(model.busy === true)
+                .onClick((_event, eventCx) =>
+                  model.onConfirmRemove?.(_event, eventCx),
+                )
+                .build(cx),
             ),
         ),
     );
@@ -679,18 +695,17 @@ export function renderSettings(model, cx) {
     preferences
       .map((/** @type {any} */ entry) => entry.section)
       .filter(
-        (/** @type {string} */ section, /** @type {number} */ index, /** @type {string[]} */ all) =>
-          !PAGE.includes(section) && all.indexOf(section) === index,
+        (
+          /** @type {string} */ section,
+          /** @type {number} */ index,
+          /** @type {string[]} */ all,
+        ) => !PAGE.includes(section) && all.indexOf(section) === index,
       ),
   );
 
-  const column = pageColumn("settings-column", cx, {
-    // `App.qml` gives the settings flickable a `space(18)` margin and the page
-    // inside it a width of `space(560)`. `pageColumn` carries that margin as
-    // padding, and gpui counts padding inside a maximum width, so the margin is
-    // added back to arrive at the column the QML draws.
-    maxWidth: tokens.space(560) + tokens.spacing.panelPadding * 2,
-  })
+  const column = new PageColumn("settings-column")
+    .maxWidth(tokens.space(560) + tokens.spacing.panelPadding * 2)
+    .build(cx)
     // Everything on this page is `space(16)` from its neighbour, captions
     // included: the QML page is one column and that is its spacing.
     .gap(tokens.space(16))
@@ -701,18 +716,20 @@ export function renderSettings(model, cx) {
         h_flex().child(
           // `BackBar.qml`: the drawn arrow rather than a typed one, outlined,
           // and quieter than the page it leaves.
-          iconTextButton(
-            "settings-back",
-            "back",
-            "Back",
-            (event, eventCx) => model.onBack(event, eventCx),
-            cx,
-            { tooltip: "Back · Esc", color: dim(cx) },
-          ),
+          iconTextButton("settings-back", "back", "Back")
+            .tooltip("Back · Esc")
+            .tone(dim(cx))
+            .onClick((event, eventCx) => model.onBack(event, eventCx))
+            .build(cx),
         ),
       ),
     )
-    .child(title("Settings", cx).text_size(tokens.font.heading).font_bold());
+    .child(
+      new Title("Settings")
+        .build(cx)
+        .text_size(tokens.font.heading)
+        .font_bold(),
+    );
 
   for (const section of sections) {
     const rows = preferenceRows(model, section, cx);
@@ -740,21 +757,15 @@ export function renderSettings(model, cx) {
             // this button is as wide as its label — the QML lays it out by its
             // implicit width.
             h_flex().child(
-              iconTextButton(
-                "settings-add-account",
-                "plus",
-                "Add a mailbox…",
-                (_event, eventCx) => model.onAdd?.(_event, eventCx),
-                cx,
-                {
-                  tooltip: "Add another mail account",
-                  disabled: model.busy === true || confirming,
-                },
-              ),
+              iconTextButton("settings-add-account", "plus", "Add a mailbox…")
+                .tooltip("Add another mail account")
+                .disabled(model.busy === true || confirming)
+                .onClick((_event, eventCx) => model.onAdd?.(_event, eventCx))
+                .build(cx),
             ),
           ),
         )
-        .child(separator(cx));
+        .child(new Separator().build(cx));
     else if (section === "Calendars")
       column
         .child(
@@ -762,9 +773,9 @@ export function renderSettings(model, cx) {
             "settings-calendars-group",
             "Calendars",
             [
-              muted(model.calendars?.detail || "", cx).text_size(
-                tokens.font.caption,
-              ),
+              new MutedText(model.calendars?.detail || "")
+                .build(cx)
+                .text_size(tokens.font.caption),
               ...calendarRows(model, cx),
               calendarAddForm(model, cx),
               typeof model.onCalendarAdd === "function" &&
@@ -774,9 +785,11 @@ export function renderSettings(model, cx) {
                       "settings-add-calendar",
                       "plus",
                       "Add a calendar",
-                      (_event, eventCx) => model.onCalendarAdd(eventCx),
-                      cx,
-                    ),
+                    )
+                      .onClick((_event, eventCx) =>
+                        model.onCalendarAdd(eventCx),
+                      )
+                      .build(cx),
                   )
                 : null,
               calendarResult(model, cx),
@@ -787,7 +800,7 @@ export function renderSettings(model, cx) {
             { gap: tokens.space(8) },
           ),
         )
-        .child(separator(cx));
+        .child(new Separator().build(cx));
     else if (section === "Google OAuth client")
       column.child(
         settingsSection(
@@ -827,6 +840,8 @@ export function renderSettings(model, cx) {
     .min_w_0()
     .min_h_0()
     .bg(cx.theme().colors.background)
-    .child(centeredWorkspace("settings-workspace", column, cx))
+    .child(
+      new CenteredWorkspace("settings-workspace").content(column).build(cx),
+    )
     .when(confirming, (page) => page.child(removalDialog(model, cx)));
 }

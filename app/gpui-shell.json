@@ -4,5 +4,8 @@
   "version": "0.6.0",
   "shell-version": "0.1.0",
   "entry": "main.js",
+  "dependencies": {
+    "omarchy-ui": "huacnlee/omarchy-ui"
+  },
   "capabilities": {}
 }

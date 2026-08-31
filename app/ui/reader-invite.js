@@ -15,9 +15,10 @@
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import * as Calendar from "../message/Calendar.js";
-import { button, style } from "../lib/omarchy-ui/index.js";
+import { style } from "omarchy-ui";
 import { icon } from "./icons.js";
 import { dimColor, dimmerColor, normalFill } from "./reader-chrome.js";
+import { iconTextButton } from "./controls.js";
 
 // Six of them, and then a count. A meeting with forty guests would otherwise be
 // a card longer than the message it came in.
@@ -32,7 +33,7 @@ const ANSWERS = [
 /**
  * The card's own button: `IconTextButton` at the caption size the QML passes
  * it. The kit's `iconTextButton` pins `bodySmall` and takes no size, so this is
- * the same control assembled from `button()` — bordered, one control high, with
+ * the same control assembled from `Button` — bordered, one control high, with
  * the glyph beside the label.
  * @param {string} id @param {string} iconName @param {string} caption
  * @param {(event:import("gpui").ClickEvent,cx:import("gpui").Context)=>void} onClick
@@ -41,12 +42,12 @@ const ANSWERS = [
  */
 function cardButton(id, iconName, caption, onClick, cx, options = {}) {
   const tokens = style();
-  return button(id, caption, onClick, cx, {
-    ...options,
-    iconName,
-    bordered: true,
-    fontSize: tokens.font.caption,
-  })
+  return iconTextButton(id, iconName, caption)
+    .size("xsmall")
+    .selected(options.selected ?? false)
+    .disabled(options.disabled ?? false)
+    .onClick(onClick)
+    .build(cx)
     .flex_none()
     .h(tokens.spacing.controlHeight);
 }
@@ -175,19 +176,20 @@ export function inviteCard(model, cx) {
           .w_full()
           .gap(tokens.space(2))
           .children(
-            attendees.slice(0, SHOWN_GUESTS).map(
-              (/** @type {any} */ guest, /** @type {number} */ index) =>
-              div()
-                .id(`reader-invite-guest-${index}`)
-                .w_full()
-                .truncate()
-                .pl(tokens.font.iconSmall + tokens.space(6))
-                .text_size(tokens.font.caption)
-                .text_color(dimmerColor(cx))
-                .child(
-                  `${String(guest.name || guest.email)} — ${Calendar.partstatLabel(guest.partstat)}${guest.optional ? " (optional)" : ""}`,
-                ),
-            ),
+            attendees
+              .slice(0, SHOWN_GUESTS)
+              .map((/** @type {any} */ guest, /** @type {number} */ index) =>
+                div()
+                  .id(`reader-invite-guest-${index}`)
+                  .w_full()
+                  .truncate()
+                  .pl(tokens.font.iconSmall + tokens.space(6))
+                  .text_size(tokens.font.caption)
+                  .text_color(dimmerColor(cx))
+                  .child(
+                    `${String(guest.name || guest.email)} — ${Calendar.partstatLabel(guest.partstat)}${guest.optional ? " (optional)" : ""}`,
+                  ),
+              ),
           ),
       ),
     )
@@ -201,9 +203,8 @@ export function inviteCard(model, cx) {
           .child(`and ${attendees.length - SHOWN_GUESTS} more`),
       ),
     )
-    .when(
-      (Boolean(meetLink) && !cancelled) || canRespond,
-      (card) => card.child(div().flex_none().h(tokens.space(4))),
+    .when((Boolean(meetLink) && !cancelled) || canRespond, (card) =>
+      card.child(div().flex_none().h(tokens.space(4))),
     )
     .when(Boolean(meetLink) && !cancelled, (card) =>
       card.child(

@@ -11,7 +11,7 @@
 import { div, image } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import { splitBrand } from "../account/Model.js";
-import { alpha, label, muted, style } from "../lib/omarchy-ui/index.js";
+import { Label, MutedText, alpha, style } from "omarchy-ui";
 import { icon } from "./icons.js";
 
 // A provider's own artwork, as this application draws it.
@@ -165,7 +165,9 @@ export function pageHeading(id, heading, detail, cx) {
         .child(heading),
     )
     .when(Boolean(detail), (column) =>
-      column.child(muted(detail, cx).text_size(tokens.font.bodySmall)),
+      column.child(
+        new MutedText(detail).build(cx).text_size(tokens.font.bodySmall),
+      ),
     );
 }
 
@@ -249,7 +251,11 @@ export function providerHero(model, cx) {
         .min_w_0()
         .gap(tokens.spacing.labelGap)
         .child(heading)
-        .child(muted(model.detail, cx).text_size(tokens.font.bodySmall)),
+        .child(
+          new MutedText(model.detail)
+            .build(cx)
+            .text_size(tokens.font.bodySmall),
+        ),
     );
 }
 
@@ -278,61 +284,67 @@ export function providerPicker(model, cx) {
       providers.map((/** @type {any} */ provider) => {
         const reason = String(provider.unavailable || "");
         const connectable = !reason;
-        return h_flex()
-          .id(`setup-provider-${provider.id}`)
-          .role("list_item")
-          .accessibility_label(provider.name)
-          .items_center()
-          .w_full()
-          .min_w_0()
-          .gap(tokens.spacing.rowPaddingX)
-          .px(tokens.spacing.rowPaddingX)
-          // `implicitHeight: max(text, mark) + Style.space(24)` — twelve above
-          // and twelve below, the same air the card keeps at its sides.
-          .py(tokens.space(12))
-          .rounded(tokens.cornerRadius)
-          .border(tokens.state.normalBorderWidth)
-          .border_color(alpha(foreground, tokens.state.hoverBorderAlpha))
-          .bg(alpha(foreground, tokens.state.normalFillAlpha))
-          // Not greyed out with a literal colour — the theme owns those.
-          // Reduced opacity says "not available" without inventing a grey some
-          // themes render as ordinary body text.
-          .when(!connectable, (card) => card.opacity(0.55))
-          .when(connectable, (card) =>
-            card
-              .on_click((_event, eventCx) =>
-                model.onProvider?.(provider.id, eventCx),
-              )
-              .hover((appearance) =>
-                appearance.bg(alpha(foreground, tokens.state.hoverFillAlpha)),
+        return (
+          h_flex()
+            .id(`setup-provider-${provider.id}`)
+            .role("list_item")
+            .accessibility_label(provider.name)
+            .items_center()
+            .w_full()
+            .min_w_0()
+            .gap(tokens.spacing.rowPaddingX)
+            .px(tokens.spacing.rowPaddingX)
+            // `implicitHeight: max(text, mark) + Style.space(24)` — twelve above
+            // and twelve below, the same air the card keeps at its sides.
+            .py(tokens.space(12))
+            .rounded(tokens.cornerRadius)
+            .border(tokens.state.normalBorderWidth)
+            .border_color(alpha(foreground, tokens.state.hoverBorderAlpha))
+            .bg(alpha(foreground, tokens.state.normalFillAlpha))
+            // Not greyed out with a literal colour — the theme owns those.
+            // Reduced opacity says "not available" without inventing a grey some
+            // themes render as ordinary body text.
+            .when(!connectable, (card) => card.opacity(0.55))
+            .when(connectable, (card) =>
+              card
+                .on_click((_event, eventCx) =>
+                  model.onProvider?.(provider.id, eventCx),
+                )
+                .hover((appearance) =>
+                  appearance.bg(alpha(foreground, tokens.state.hoverFillAlpha)),
+                ),
+            )
+            .child(
+              providerArtwork(
+                `setup-provider-${provider.id}-mark`,
+                String(provider.id || ""),
+                tokens.space(26),
+                cx,
+                // The square icon a row wants, never the page's wider lockup.
+                { variant: "mark" },
               ),
-          )
-          .child(
-            providerArtwork(
-              `setup-provider-${provider.id}-mark`,
-              String(provider.id || ""),
-              tokens.space(26),
-              cx,
-              // The square icon a row wants, never the page's wider lockup.
-              { variant: "mark" },
-            ),
-          )
-          .child(
-            v_flex()
-              .flex_1()
-              .min_w_0()
-              .gap(tokens.spacing.xs)
-              .child(
-                label(provider.name, cx)
-                  .text_size(tokens.font.bodySmall)
-                  .font_bold(),
-              )
-              .child(
-                muted(connectable ? String(provider.summary || "") : reason, cx)
-                  .id(`setup-provider-${provider.id}-summary`)
-                  .text_size(tokens.font.caption),
-              ),
-          );
+            )
+            .child(
+              v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(tokens.spacing.xs)
+                .child(
+                  new Label(provider.name)
+                    .build(cx)
+                    .text_size(tokens.font.bodySmall)
+                    .font_bold(),
+                )
+                .child(
+                  new MutedText(
+                    connectable ? String(provider.summary || "") : reason,
+                  )
+                    .build(cx)
+                    .id(`setup-provider-${provider.id}-summary`)
+                    .text_size(tokens.font.caption),
+                ),
+            )
+        );
       }),
     );
 }

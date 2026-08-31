@@ -1,7 +1,7 @@
 // @ts-check
 
 import { defaultKey, normalizeKey } from "../calendar/Palette.js";
-import { alpha, role, style } from "../lib/omarchy-ui/index.js";
+import { alpha, role, roles, style } from "omarchy-ui";
 
 /**
  * `alpha`, `mix` and the palette file all answer in `#rrggbbaa`, which is a

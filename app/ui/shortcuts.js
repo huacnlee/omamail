@@ -20,7 +20,7 @@
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import { helpColumns } from "../keys/keymap.js";
-import { alpha, muted, style } from "../lib/omarchy-ui/index.js";
+import { MutedText, alpha, style } from "omarchy-ui";
 
 // How wide one column of keys and their labels wants to be, and how many of
 // them a window can hold. Three is the ceiling, as it is in `ShortcutHelp.qml`:
@@ -122,7 +122,8 @@ export function renderShortcutSheet(model, cx) {
     .accessibility_label("Keyboard shortcuts")
     .w_full()
     .max_w(
-      count * tokens.space(COLUMN_WIDTH) + (count - 1) * tokens.space(COLUMN_GAP),
+      count * tokens.space(COLUMN_WIDTH) +
+        (count - 1) * tokens.space(COLUMN_GAP),
     )
     .gap(tokens.spacing.md)
     .child(
@@ -145,105 +146,110 @@ export function renderShortcutSheet(model, cx) {
         .items_start()
         .gap(tokens.space(COLUMN_GAP))
         .children(
-          columns.map((/** @type {any[]} */ groups, /** @type {number} */ index) =>
-            v_flex()
-              .id(`shortcut-column-${index}`)
-              .flex_1()
-              .min_w_0()
-              .gap(tokens.spacing.md)
-              .children(
-                groups.map((/** @type {any} */ group) =>
-                  v_flex()
-                    .id(`shortcut-group-${group.name.toLowerCase()}`)
-                    .role("group")
-                    .accessibility_label(group.name)
-                    .w_full()
-                    .min_w_0()
-                    .gap(tokens.spacing.md)
-                    // A heading costs a line as surely as a row does, and the
-                    // gap above it is what makes the groups read as groups.
-                    // A spacer rather than padding, because that is what the
-                    // QML has: the column's own `space(6)` falls on both sides
-                    // of it, and padding would swallow one of them.
-                    .child(div().flex_none().h(tokens.spacing.lg))
-                    .child(
-                      muted(group.name, cx)
-                        .text_size(tokens.font.caption)
-                        .font_bold(),
-                    )
-                    .children(
-                      group.rows.map((/** @type {any} */ row) =>
-                        h_flex()
-                          .w_full()
-                          .min_w_0()
-                          .items_center()
-                          .h(tokens.space(ROW_HEIGHT))
-                          // The QML starts the action at `keys * 0.54 +
-                          // space(5)`, so the two never touch when a key
-                          // string runs the width of its share.
-                          .gap(tokens.space(KEY_GAP))
-                          .child(
-                            // Plain text rather than key caps: forty filled
-                            // caps is a wall, and this sheet is read down the
-                            // left edge rather than glanced at the way the
-                            // status line's hints are.
-                            div()
-                              .flex_none()
-                              .w(`${KEY_SHARE * 100}%`)
-                              .truncate()
-                              .text_size(tokens.font.caption)
-                              .text_color(cx.theme().colors.foreground)
-                              .child(row.keys),
-                          )
-                          .child(
-                            muted(row.action, cx)
-                              .flex_1()
-                              .min_w_0()
-                              .truncate()
-                              .text_size(tokens.font.caption),
-                          ),
+          columns.map(
+            (/** @type {any[]} */ groups, /** @type {number} */ index) =>
+              v_flex()
+                .id(`shortcut-column-${index}`)
+                .flex_1()
+                .min_w_0()
+                .gap(tokens.spacing.md)
+                .children(
+                  groups.map((/** @type {any} */ group) =>
+                    v_flex()
+                      .id(`shortcut-group-${group.name.toLowerCase()}`)
+                      .role("group")
+                      .accessibility_label(group.name)
+                      .w_full()
+                      .min_w_0()
+                      .gap(tokens.spacing.md)
+                      // A heading costs a line as surely as a row does, and the
+                      // gap above it is what makes the groups read as groups.
+                      // A spacer rather than padding, because that is what the
+                      // QML has: the column's own `space(6)` falls on both sides
+                      // of it, and padding would swallow one of them.
+                      .child(div().flex_none().h(tokens.spacing.lg))
+                      .child(
+                        new MutedText(group.name)
+                          .build(cx)
+                          .text_size(tokens.font.caption)
+                          .font_bold(),
+                      )
+                      .children(
+                        group.rows.map((/** @type {any} */ row) =>
+                          h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .h(tokens.space(ROW_HEIGHT))
+                            // The QML starts the action at `keys * 0.54 +
+                            // space(5)`, so the two never touch when a key
+                            // string runs the width of its share.
+                            .gap(tokens.space(KEY_GAP))
+                            .child(
+                              // Plain text rather than key caps: forty filled
+                              // caps is a wall, and this sheet is read down the
+                              // left edge rather than glanced at the way the
+                              // status line's hints are.
+                              div()
+                                .flex_none()
+                                .w(`${KEY_SHARE * 100}%`)
+                                .truncate()
+                                .text_size(tokens.font.caption)
+                                .text_color(cx.theme().colors.foreground)
+                                .child(row.keys),
+                            )
+                            .child(
+                              new MutedText(row.action)
+                                .build(cx)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(tokens.font.caption),
+                            ),
+                        ),
                       ),
-                    ),
+                  ),
                 ),
-              ),
           ),
         ),
     );
 
   const offset = Math.max(0, Number(model.scrollOffset) || 0);
   const scroll = model.onScroll;
-  return v_flex()
-    .id("shortcut-help")
-    .absolute()
-    .inset_0()
-    .items_center()
-    // Centred while it fits and pinned to the top when it does not, because
-    // half of a centred sheet taller than the window is above the top edge and
-    // can never be scrolled back down to.
-    .when(offset === 0 && shortcutScrollLimit(model) === 0, (overlay) =>
-      overlay.justify_center(),
-    )
-    .p(tokens.space(SHEET_PADDING))
-    // The sheet moves rather than the container scrolling. `j` and `k` are
-    // handed to the sheet while it is up, and this host gives a script no way
-    // to drive a scroll container — so wheel and keyboard drive the one offset
-    // instead of one of them working and the other looking as though it does.
-    .overflow_hidden()
-    // Nearly opaque rather than opaque: the window stays faintly visible, so
-    // the sheet reads as something laid over where you were rather than as
-    // another screen you have been sent to.
-    .bg(alpha(cx.theme().colors.background, 0.96))
-    // The sheet is what holds the keyboard while it is up, and that is the whole
-    // of `survivesOverlay` here: the screen behind it is off the focus path, so
-    // `e`, `d` and `r` cannot fire behind the sheet that documents them.
-    .when(Boolean(model.focus), (overlay) => overlay.track_focus(model.focus))
-    .when(typeof scroll === "function", (overlay) =>
-      overlay.on_scroll_wheel((event, eventCx) =>
-        scroll?.(-Math.sign(Number(event.delta?.y) || 0), eventCx),
-      ),
-    )
-    .when(typeof dismiss === "function", (overlay) =>
-      overlay.on_click((event, eventCx) => dismiss?.(event, eventCx)),
-    )
-    .child(sheet.mt(-offset));
+  return (
+    v_flex()
+      .id("shortcut-help")
+      .absolute()
+      .inset_0()
+      .items_center()
+      // Centred while it fits and pinned to the top when it does not, because
+      // half of a centred sheet taller than the window is above the top edge and
+      // can never be scrolled back down to.
+      .when(offset === 0 && shortcutScrollLimit(model) === 0, (overlay) =>
+        overlay.justify_center(),
+      )
+      .p(tokens.space(SHEET_PADDING))
+      // The sheet moves rather than the container scrolling. `j` and `k` are
+      // handed to the sheet while it is up, and this host gives a script no way
+      // to drive a scroll container — so wheel and keyboard drive the one offset
+      // instead of one of them working and the other looking as though it does.
+      .overflow_hidden()
+      // Nearly opaque rather than opaque: the window stays faintly visible, so
+      // the sheet reads as something laid over where you were rather than as
+      // another screen you have been sent to.
+      .bg(alpha(cx.theme().colors.background, 0.96))
+      // The sheet is what holds the keyboard while it is up, and that is the whole
+      // of `survivesOverlay` here: the screen behind it is off the focus path, so
+      // `e`, `d` and `r` cannot fire behind the sheet that documents them.
+      .when(Boolean(model.focus), (overlay) => overlay.track_focus(model.focus))
+      .when(typeof scroll === "function", (overlay) =>
+        overlay.on_scroll_wheel((event, eventCx) =>
+          scroll?.(-Math.sign(Number(event.delta?.y) || 0), eventCx),
+        ),
+      )
+      .when(typeof dismiss === "function", (overlay) =>
+        overlay.on_click((event, eventCx) => dismiss?.(event, eventCx)),
+      )
+      .child(sheet.mt(-offset))
+  );
 }

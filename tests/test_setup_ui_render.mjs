@@ -7,7 +7,7 @@ import {
   setupActions,
 } from "../app/ui/setup.js";
 import { ALL as PROVIDERS } from "../app/providers/Registry.js";
-import { applyOmarchyStyle, alpha, style } from "../app/lib/omarchy-ui/style.js";
+import { applyOmarchyStyle, alpha, role, style } from "omarchy-ui";
 
 // The setup pages, held to `components/SetupPage.qml`,
 // `components/ImapSetupPage.qml`, `components/HeySetupPage.qml` and the
@@ -444,7 +444,10 @@ const rule = find(gmail, "setup-gmail-form").childNodes.find(
   (child) => styleArg(child, "h") === tokens.spacing.hairline,
 );
 assert.notEqual(rule, undefined);
-assert.equal(styleArg(rule, "bg"), alpha(colors.foreground, 0.12));
+// A panel rule is the theme's own `separator` role rather than a fraction of
+// the foreground this window picked: a desktop that publishes one gets its
+// rule, and one that does not falls back to the border token.
+assert.equal(styleArg(rule, "bg"), role("separator", colors.border));
 const detailToggle = find(gmail, "setup-gmail-detail-toggle");
 assert.equal(styleArg(detailToggle, "px"), 0);
 assert.equal(styleArg(detailToggle, "text_size"), tokens.font.caption);

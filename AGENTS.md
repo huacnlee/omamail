@@ -63,28 +63,46 @@ The standalone client in `app/` draws the same window the QML plugin does, on a
 different engine. It is held to the QML by porting the shell's own tokens rather
 than by eyeballing the result, so the two stay in step when a theme changes.
 
-- `app/lib/omarchy-ui/style.js` is a port of the shell's `Style.qml` singleton.
-  It reads `theme/shell.toml` plus Hyprland's `decoration:rounding` through the
-  `omarchy-theme` host module, and exposes `style()` — `space(px)`, the spacing
+**The kit is `omarchy-ui`, a Git dependency.** `app/gpui-shell.json` declares it,
+gpui-shell materializes it at load, and `make deps` puts it where the shell
+would so the node tests and an editor resolve `import { Button } from
+"omarchy-ui"` the same way the running window does. It was extracted from this
+repository and its shapes are still Omarchy's — but it is somebody else's tree
+now, so a shape this window needs and the kit lacks is a pull request there,
+not a copy here. The two things that stay in `app/ui/` are the ones the kit
+deliberately refuses: `controls.js`, because resolving a short icon name to a
+file is the application's job, and `brand.js`, because what this window is
+*called* is not a shape.
+
+- `style()` — from `omarchy-ui` — is a port of the shell's `Style.qml`
+  singleton. It reads `theme/shell.toml` plus Hyprland's `decoration:rounding`
+  through the `omarchy-theme` host module, and answers `space(px)`, the spacing
   scale, the type scale, the state alphas, the corner radius, the resolved font
   family. **Views ask `style()` for a token; they never invent a `rem` value.**
   gpui's own semantic theme carries seventeen colour tokens, seven spacing steps
-  and six radii and nothing else, which is why the rest lives here.
+  and six radii and nothing else, which is why the rest lives there.
 - Write a measurement as the pixel value the QML uses — `style().space(14)`, not
   `14` and not `"0.875rem"`. That is what makes a port diffable against the
   component it came from, and what lets `[spacing] scale` move the whole window
   at once.
 - Colours that gpui's token set has no room for — `dim`, `dimmer`, `link`,
-  `urgent`, the popup surface — live beside the theme in `theme.js` as
-  `role(name, fallback)`. Writing them into the theme writes them nowhere: gpui
-  drops tokens it does not know, silently.
+  `urgent`, `separator`, the popup surface — are `role(name, fallback)`.
+  Writing them into the theme writes them nowhere: gpui drops tokens it does
+  not know, silently.
+- A colour a control carries because of what it *means* — a starred message, a
+  row that leaves the application — is `.tone(color)`, not a `.text_color()` on
+  the element the builder answers: a control resolves one foreground and hands
+  it to its label and its icon separately, so styling the element from outside
+  colours the box and leaves the words in the theme's own. `.quiet()` is the
+  other half of the pair — it decides when a control reaches full strength, not
+  what full strength is.
 - A fill or a border is the control's own colour at one of the theme's alphas,
   via `alpha()`. Never a literal gray, and never a second palette.
 - **There is no accent-filled "primary" button.** The Omarchy kit has none: a
   solid accent block is louder than anything else on the desktop, and the accent
   is reserved for the small marks that carry state — the unread dot, the focus
-  ring, a selected row. `button()` is transparent when idle unless it is
-  `bordered`.
+  ring, a selected row. A `Button` is transparent when idle unless it is
+  `.bordered()`.
 - Icons are `app/assets/icons/*.svg`, generated from `components/ActionIcon.qml`
   by `scripts/build-icons.mjs`. Regenerate rather than hand-editing an SVG.
   **gpui paints an SVG as a single mask in the element's text colour**, so

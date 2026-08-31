@@ -1,7 +1,13 @@
 // @ts-check
 
 import { View, div } from "gpui";
-import { InputState, TextareaState, h_flex, set_theme, v_flex } from "gpui-base";
+import {
+  InputState,
+  TextareaState,
+  h_flex,
+  set_theme,
+  v_flex,
+} from "gpui-base";
 import { platform } from "process";
 import { ALL as PROVIDERS } from "./providers/Registry.js";
 import * as Registry from "./providers/Registry.js";
@@ -49,21 +55,17 @@ import {
   sendRefusal,
 } from "./application/account-capabilities.js";
 import {
-  appShell,
-  bottomBar,
-  keyHints,
-  statusLine,
-  brandLockup,
-  button,
-  muted,
-  omarchyTheme,
+  AppShell,
+  KeyHints,
+  StatusBar,
+  StatusItem,
+  TitleBar,
   applyOmarchyRoles,
   applyOmarchyStyle,
+  omarchyTheme,
   style,
-  surface,
-  topBar,
-  title,
-} from "./lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { brandLockup } from "./ui/brand.js";
 import { renderMail } from "./ui/mail.js";
 import { mailModel } from "./application/mail-model.js";
 import { composeModel } from "./application/compose-model.js";
@@ -100,10 +102,7 @@ import {
   runAppMenuCursor,
   runMessageMenuCursor,
 } from "./application/mail-actions.js";
-import {
-  searchAfterTyping,
-  submitSearch,
-} from "./application/search.js";
+import { searchAfterTyping, submitSearch } from "./application/search.js";
 import * as HeyCli from "./providers/HeyCli.js";
 import * as Mail from "./message/Message.js";
 import * as Accounts from "./account/Accounts.js";
@@ -152,7 +151,6 @@ const OUTBOX_TICK_INTERVAL_MS = 250;
 // rather than exactly on them, so neither refuses the request that asks for it.
 const SIGN_IN_WINDOW_MS = 240_000;
 const SIGN_IN_POLL_INTERVAL_MS = 500;
-
 
 // The palette, the structural tokens, and the two values that come from
 // Hyprland rather than from a file. All three are read together because a
@@ -298,7 +296,8 @@ export default class Omamail extends View {
   /** @type {boolean} */ setupPasswordVisible = false;
   /** @type {boolean} */ setupClientSecretVisible = false;
   /** @type {any} */ readerPresentationDetail = null;
-  /** @type {ReturnType<typeof createReaderController>|null} */ readerController = null;
+  /** @type {ReturnType<typeof createReaderController>|null} */ readerController =
+    null;
   // The body held as plain text so it can be selected, and whether it is on
   // screen. `application/reader-selection.js` owns both.
   /** @type {any} */ readerSelection = null;
@@ -425,8 +424,10 @@ export default class Omamail extends View {
         ((/** @type {string} */ request) =>
           this.hostReady
             .then(() => import("omamail-effects"))
-            .then((/** @type {{dispatch:(request:string)=>Promise<string>}} */ host) =>
-              host.dispatch(request),
+            .then(
+              (
+                /** @type {{dispatch:(request:string)=>Promise<string>}} */ host,
+              ) => host.dispatch(request),
             )),
     });
     const execute =
@@ -509,9 +510,11 @@ export default class Omamail extends View {
     this.setupClientSecret.set_masked(true);
     this.settingsDefaultQuery = InputState.new({ placeholder: "in:inbox" });
     this.settingsDefaultQuery.on("change", (_event, eventCx) => {
-      void /** @type {any} */ (this.settings)?.setPreference(
-        "defaultQuery",
-        this.settingsDefaultQuery?.value() ?? "",
+      void (
+        /** @type {any} */ (this.settings)?.setPreference(
+          "defaultQuery",
+          this.settingsDefaultQuery?.value() ?? "",
+        )
       );
       eventCx.notify();
     });
@@ -573,12 +576,15 @@ export default class Omamail extends View {
       ["interval", this.calendarInterval],
       ["count", this.calendarCount],
     ]))
-      state.on("change", (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-        /** @type {any} */ (this.calendar).updateDraft({
-          [field]: state.value(),
-        });
-        eventCx.notify();
-      });
+      state.on(
+        "change",
+        (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+          /** @type {any} */ (this.calendar).updateDraft({
+            [field]: state.value(),
+          });
+          eventCx.notify();
+        },
+      );
     this.calendarTitle.on("change", (_event, eventCx) => {
       this.calendar.updateDraft({ title: this.calendarTitle.value() });
       eventCx.notify();
@@ -616,11 +622,17 @@ export default class Omamail extends View {
     });
     this.setupPassword.set_masked?.(true);
     this.setupImapHost = InputState.new({ placeholder: "IMAP server" });
-    this.setupImapPort = InputState.new({ placeholder: "IMAP port", value: "993" });
+    this.setupImapPort = InputState.new({
+      placeholder: "IMAP port",
+      value: "993",
+    });
     this.setupSmtpHost = InputState.new({
       placeholder: "SMTP server — leave empty to read only",
     });
-    this.setupSmtpPort = InputState.new({ placeholder: "SMTP port", value: "465" });
+    this.setupSmtpPort = InputState.new({
+      placeholder: "SMTP port",
+      value: "465",
+    });
     this.setupAuthorizationUrl = TextareaState.new({ rows: 2 });
     // The address fills the four server fields in until somebody edits one.
     bindImapAutofill(this, cx);
@@ -734,7 +746,9 @@ export default class Omamail extends View {
     // now that the value actually decides what the inbox asks for, the field is
     // where somebody goes to find out what it is.
     this.settingsDefaultQuery.set_value(
-      String(/** @type {any} */ (this.settings).preference("defaultQuery") ?? ""),
+      String(
+        /** @type {any} */ (this.settings).preference("defaultQuery") ?? "",
+      ),
     );
     if (options.execute || this.hostContextPlan.contexts.length === 0)
       this.startController();
@@ -1594,16 +1608,24 @@ export default class Omamail extends View {
           {
             ...shortcutSheetModel(this),
             focus: this.overlayFocus,
-            onDismiss: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
-              closeShortcuts(this, eventCx),
-            onScroll: (/** @type {number} */ steps, /** @type {any} */ eventCx) =>
-              scrollShortcuts(this, steps, eventCx),
+            onDismiss: (
+              /** @type {any} */ _event,
+              /** @type {any} */ eventCx,
+            ) => closeShortcuts(this, eventCx),
+            onScroll: (
+              /** @type {number} */ steps,
+              /** @type {any} */ eventCx,
+            ) => scrollShortcuts(this, steps, eventCx),
           },
           cx,
         ),
       )
-      .on_action("mail::help", (_event, eventCx) => closeShortcuts(this, eventCx))
-      .on_action("mail::back", (_event, eventCx) => closeShortcuts(this, eventCx))
+      .on_action("mail::help", (_event, eventCx) =>
+        closeShortcuts(this, eventCx),
+      )
+      .on_action("mail::back", (_event, eventCx) =>
+        closeShortcuts(this, eventCx),
+      )
       .on_action("mail::cursorDown", (_event, eventCx) =>
         scrollShortcuts(this, 1, eventCx),
       )
@@ -1612,7 +1634,6 @@ export default class Omamail extends View {
       )
       .on_action("mail::undoSend", (_event, eventCx) => this.undoSend(eventCx));
   }
-
 
   /**
    * A reading size somebody reached for is theirs until they change it, so it
@@ -1676,7 +1697,8 @@ export default class Omamail extends View {
     // narrow either column may be, and clamping twice would let the two
     // disagree about it.
     this.listWidth =
-      this.listDrag.width + ((Number(event?.position?.x) || 0) - this.listDrag.x);
+      this.listDrag.width +
+      ((Number(event?.position?.x) || 0) - this.listDrag.x);
     cx.notify();
   }
 
@@ -1684,7 +1706,10 @@ export default class Omamail extends View {
   endListDrag(cx) {
     if (!this.listDrag) return;
     this.listDrag = null;
-    this.storage.setItem("omamail.listWidth", String(Math.round(this.listWidth)));
+    this.storage.setItem(
+      "omamail.listWidth",
+      String(Math.round(this.listWidth)),
+    );
     cx.notify();
   }
 
@@ -1855,184 +1880,202 @@ export default class Omamail extends View {
     const snapshot = this.settings.snapshot();
     // F5 and Ctrl+, are `ANY` in the table; every route answers them.
     return globalActions(
-      this, appShell(
-      {
-        top: topBar(
-          {
-            brand: h_flex()
-              .id("settings-header-left")
-              .flex_none()
-              .items_center()
-              .gap(style().space(8))
-              .child(brandLockup(cx))
-              .child(renderAppMenu(this.pageMenuModel(cx), cx)),
-          },
-          cx,
-        ),
-        content: renderSettings(
-          {
-            ...snapshot,
-            onBack: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
-              this.back(eventCx),
-            onAdd: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
-              this.state = {
-                ...this.state,
-                route: "setup",
-                setupProviderId: null,
-              };
-              eventCx.notify();
-            },
-            onSwitch: (
-              /** @type {string} */ accountId,
-              /** @type {any} */ eventCx,
-            ) => this.switchSettingsAccount(accountId, eventCx),
-            onRemove: (
-              /** @type {string} */ accountId,
-              /** @type {any} */ eventCx,
-            ) => {
-              this.settings.requestRemoval(accountId);
-              eventCx.notify();
-            },
-            onCancelRemove: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => {
-              this.settings.cancelRemoval();
-              eventCx.notify();
-            },
-            onConfirmRemove: (
-              /** @type {any} */ _event,
-              /** @type {any} */ eventCx,
-            ) => void this.confirmSettingsRemoval(eventCx),
-            onRemoteImages: (
-              /** @type {boolean} */ enabled,
-              /** @type {any} */ eventCx,
-            ) =>
-              void eventCx.spawn(
-                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                  await this.settings.toggleRemoteImages(enabled);
-                  // The message on screen is one the answer was given about,
-                  // so it answers now rather than at the next message.
-                  applyReadingPreferences(this);
-                  asyncCx.notify();
-                },
-              ),
-            onHeavyMessages: (
-              /** @type {boolean} */ enabled,
-              /** @type {any} */ eventCx,
-            ) =>
-              void eventCx.spawn(
-                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                  await this.settings.toggleHeavyMessages(enabled);
-                  applyReadingPreferences(this);
-                  asyncCx.notify();
-                },
-              ),
-            onUndoSend: (
-              /** @type {number} */ seconds,
-              /** @type {any} */ eventCx,
-            ) =>
-              void eventCx.spawn(
-                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                  await this.settings.setUndoSendSeconds(seconds);
-                  asyncCx.notify();
-                },
-              ),
-            fields: { defaultQuery: this.settingsDefaultQuery },
-            // One client for every Gmail mailbox, so it is described here and
-            // set up on the Gmail page that needs it.
-            oauthClient: {
-              present: this.setup.snapshot().client?.present === true,
-              description: this.setup.snapshot().client?.description ?? "",
-              detail: "Shared by every mailbox above",
-            },
-            onClientSetup: (/** @type {any} */ eventCx) =>
-              this.chooseProvider("gmail", eventCx),
-            onPreference: (
-              /** @type {string} */ key,
-              /** @type {any} */ value,
-              /** @type {any} */ eventCx,
-            ) =>
-              void eventCx.spawn(
-                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                  await /** @type {any} */ (this.settings).setPreference(
-                    key,
-                    value,
-                  );
-                  asyncCx.notify();
-                },
-              ),
-            onStepPreference: (
-              /** @type {string} */ key,
-              /** @type {number} */ direction,
-              /** @type {any} */ eventCx,
-            ) =>
-              void eventCx.spawn(
-                async (/** @type {import("gpui").AsyncContext} */ asyncCx) => {
-                  await /** @type {any} */ (this.settings).stepPreference(
-                    key,
-                    direction,
-                  );
-                  asyncCx.notify();
-                },
-              ),
-            onEdit: (
-              /** @type {string} */ accountId,
-              /** @type {any} */ eventCx,
-            ) => {
-              const account = /** @type {any} */ (
-                this.accountList.accounts.find(
-                  (/** @type {any} */ entry) => entry.id === accountId,
-                )
-              );
-              this.state = {
-                ...this.state,
-                route: "setup",
-                setupProviderId: account?.provider ?? null,
-              };
-              eventCx.notify();
-            },
-            onOpenUrl: (
-              /** @type {string} */ url,
-              /** @type {any} */ eventCx,
-            ) => eventCx.open_url(url),
-            ...calendarSourceModel(this),
-          },
-          cx,
-        ),
-        bottom: bottomBar(
-          {
-            status: statusLine(
-              snapshot.error ||
-                Model.syncedLabel(
-                  false,
-                  this.controller?.snapshot().mail?.syncedAtMs
-                    ? Mail.relativeTime(
-                        new Date(this.controller.snapshot().mail.syncedAtMs),
-                        Date.now(),
-                      )
-                    : "",
+      this,
+      new AppShell()
+        .top(
+          new TitleBar()
+            .brand(
+              h_flex()
+                .id("settings-header-left")
+                .flex_none()
+                .items_center()
+                .gap(style().space(8))
+                .child(brandLockup(cx))
+                .child(renderAppMenu(this.pageMenuModel(cx), cx)),
+            )
+            .build(cx),
+        )
+        .content(
+          renderSettings(
+            {
+              ...snapshot,
+              onBack: (/** @type {any} */ _event, /** @type {any} */ eventCx) =>
+                this.back(eventCx),
+              onAdd: (
+                /** @type {any} */ _event,
+                /** @type {any} */ eventCx,
+              ) => {
+                this.state = {
+                  ...this.state,
+                  route: "setup",
+                  setupProviderId: null,
+                };
+                eventCx.notify();
+              },
+              onSwitch: (
+                /** @type {string} */ accountId,
+                /** @type {any} */ eventCx,
+              ) => this.switchSettingsAccount(accountId, eventCx),
+              onRemove: (
+                /** @type {string} */ accountId,
+                /** @type {any} */ eventCx,
+              ) => {
+                this.settings.requestRemoval(accountId);
+                eventCx.notify();
+              },
+              onCancelRemove: (
+                /** @type {any} */ _event,
+                /** @type {any} */ eventCx,
+              ) => {
+                this.settings.cancelRemoval();
+                eventCx.notify();
+              },
+              onConfirmRemove: (
+                /** @type {any} */ _event,
+                /** @type {any} */ eventCx,
+              ) => void this.confirmSettingsRemoval(eventCx),
+              onRemoteImages: (
+                /** @type {boolean} */ enabled,
+                /** @type {any} */ eventCx,
+              ) =>
+                void eventCx.spawn(
+                  async (
+                    /** @type {import("gpui").AsyncContext} */ asyncCx,
+                  ) => {
+                    await this.settings.toggleRemoteImages(enabled);
+                    // The message on screen is one the answer was given about,
+                    // so it answers now rather than at the next message.
+                    applyReadingPreferences(this);
+                    asyncCx.notify();
+                  },
                 ),
-              snapshot.error ? "error" : "ready",
-              cx,
-            ),
-            hints: keyHints(hintsFor("page"), cx),
-          },
-          cx,
+              onHeavyMessages: (
+                /** @type {boolean} */ enabled,
+                /** @type {any} */ eventCx,
+              ) =>
+                void eventCx.spawn(
+                  async (
+                    /** @type {import("gpui").AsyncContext} */ asyncCx,
+                  ) => {
+                    await this.settings.toggleHeavyMessages(enabled);
+                    applyReadingPreferences(this);
+                    asyncCx.notify();
+                  },
+                ),
+              onUndoSend: (
+                /** @type {number} */ seconds,
+                /** @type {any} */ eventCx,
+              ) =>
+                void eventCx.spawn(
+                  async (
+                    /** @type {import("gpui").AsyncContext} */ asyncCx,
+                  ) => {
+                    await this.settings.setUndoSendSeconds(seconds);
+                    asyncCx.notify();
+                  },
+                ),
+              fields: { defaultQuery: this.settingsDefaultQuery },
+              // One client for every Gmail mailbox, so it is described here and
+              // set up on the Gmail page that needs it.
+              oauthClient: {
+                present: this.setup.snapshot().client?.present === true,
+                description: this.setup.snapshot().client?.description ?? "",
+                detail: "Shared by every mailbox above",
+              },
+              onClientSetup: (/** @type {any} */ eventCx) =>
+                this.chooseProvider("gmail", eventCx),
+              onPreference: (
+                /** @type {string} */ key,
+                /** @type {any} */ value,
+                /** @type {any} */ eventCx,
+              ) =>
+                void eventCx.spawn(
+                  async (
+                    /** @type {import("gpui").AsyncContext} */ asyncCx,
+                  ) => {
+                    await /** @type {any} */ (this.settings).setPreference(
+                      key,
+                      value,
+                    );
+                    asyncCx.notify();
+                  },
+                ),
+              onStepPreference: (
+                /** @type {string} */ key,
+                /** @type {number} */ direction,
+                /** @type {any} */ eventCx,
+              ) =>
+                void eventCx.spawn(
+                  async (
+                    /** @type {import("gpui").AsyncContext} */ asyncCx,
+                  ) => {
+                    await /** @type {any} */ (this.settings).stepPreference(
+                      key,
+                      direction,
+                    );
+                    asyncCx.notify();
+                  },
+                ),
+              onEdit: (
+                /** @type {string} */ accountId,
+                /** @type {any} */ eventCx,
+              ) => {
+                const account = /** @type {any} */ (
+                  this.accountList.accounts.find(
+                    (/** @type {any} */ entry) => entry.id === accountId,
+                  )
+                );
+                this.state = {
+                  ...this.state,
+                  route: "setup",
+                  setupProviderId: account?.provider ?? null,
+                };
+                eventCx.notify();
+              },
+              onOpenUrl: (
+                /** @type {string} */ url,
+                /** @type {any} */ eventCx,
+              ) => eventCx.open_url(url),
+              ...calendarSourceModel(this),
+            },
+            cx,
+          ),
+        )
+        .bottom(
+          new StatusBar()
+            .status(
+              new StatusItem()
+                .label(
+                  snapshot.error ||
+                    Model.syncedLabel(
+                      false,
+                      this.controller?.snapshot().mail?.syncedAtMs
+                        ? Mail.relativeTime(
+                            new Date(
+                              this.controller.snapshot().mail.syncedAtMs,
+                            ),
+                            Date.now(),
+                          )
+                        : "",
+                    ),
+                )
+                .state(snapshot.error ? "error" : "ready")
+                .build(cx),
+            )
+            .hints(new KeyHints("key-hints").hints(hintsFor("page")).build(cx))
+            .build(cx),
+        )
+        .build(cx)
+        // The keyboard's home on this screen. Without it nothing in the window
+        // is focusable, every key dispatches from the tree root where none of
+        // these contexts are, and a press on anything that is not a control
+        // blurs the window — see `keys/focus.js`.
+        .track_focus(this.keyboardHome)
+        .key_context("Page")
+        .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
+        .on_action("mail::settings", (_event, eventCx) =>
+          this.openSettings(eventCx),
         ),
-      },
-      cx,
-    )
-      // The keyboard's home on this screen. Without it nothing in the window
-      // is focusable, every key dispatches from the tree root where none of
-      // these contexts are, and a press on anything that is not a control
-      // blurs the window — see `keys/focus.js`.
-      .track_focus(this.keyboardHome)
-      .key_context("Page")
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::settings", (_event, eventCx) =>
-        this.openSettings(eventCx),
-      ),
     );
   }
 
@@ -2046,36 +2089,37 @@ export default class Omamail extends View {
     );
     // F5 and Ctrl+, are `ANY` in the table; every route answers them.
     return globalActions(
-      this, appShell(
-      {
-        // No window header while composing: the QML hides it and the form
-        // carries its own title band, because a reply is this window doing
-        // something rather than a second place to be.
-        top: null,
-        content: renderCompose(
-          composeModel(this, draft, account),
-          cx,
-        ),
-        bottom: bottomBar(
-          {
-            status: statusLine(draft.status || "", "ready", cx),
-            hints: keyHints(hintsFor("compose"), cx),
-          },
-          cx,
-        ),
-      },
-      cx,
-    )
-      // The keyboard's home on this screen. Without it nothing in the window
-      // is focusable, every key dispatches from the tree root where none of
-      // these contexts are, and a press on anything that is not a control
-      // blurs the window — see `keys/focus.js`.
-      .track_focus(this.keyboardHome)
-      .key_context("Compose")
-      .on_action("mail::send", (_event, eventCx) => {
-        this.sendCompose(eventCx);
-      })
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx)),
+      // No window header while composing: the QML hides it and the form
+      // carries its own title band, because a reply is this window doing
+      // something rather than a second place to be. An omitted slot is how the
+      // kit says "nothing here".
+      this,
+      new AppShell()
+        .content(renderCompose(composeModel(this, draft, account), cx))
+        .bottom(
+          new StatusBar()
+            .status(
+              new StatusItem()
+                .label(draft.status || "")
+                .state("ready")
+                .build(cx),
+            )
+            .hints(
+              new KeyHints("key-hints").hints(hintsFor("compose")).build(cx),
+            )
+            .build(cx),
+        )
+        .build(cx)
+        // The keyboard's home on this screen. Without it nothing in the window
+        // is focusable, every key dispatches from the tree root where none of
+        // these contexts are, and a press on anything that is not a control
+        // blurs the window — see `keys/focus.js`.
+        .track_focus(this.keyboardHome)
+        .key_context("Compose")
+        .on_action("mail::send", (_event, eventCx) => {
+          this.sendCompose(eventCx);
+        })
+        .on_action("mail::back", (_event, eventCx) => this.back(eventCx)),
     );
   }
   /** @param {import("gpui").Context} cx */
@@ -2090,78 +2134,75 @@ export default class Omamail extends View {
     const activeProvider = Registry.get(activeAccount?.provider || "gmail");
     // F5 and Ctrl+, are `ANY` in the table; every route answers them.
     return globalActions(
-      this, v_flex()
-      .id("calendar-action-host")
-      .size_full()
-      .min_w_0()
-      .min_h_0()
-      // The keyboard's home on this screen. Without it nothing in the window
-      // is focusable, every key dispatches from the tree root where none of
-      // these contexts are, and a press on anything that is not a control
-      // blurs the window — see `keys/focus.js`.
-      .track_focus(this.keyboardHome)
-      .key_context(view.editing ? "Page" : "Calendar")
-      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx))
-      .on_action("mail::calendar", (_event, eventCx) =>
-        this.openCalendar(eventCx),
-      )
-      .on_action("mail::calendarView", (_event, eventCx) =>
-        this.openCalendar(eventCx),
-      )
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::createEvent", (_event, eventCx) => {
-        calendar.beginCreate();
-        this.syncCalendarFields();
-        eventCx.notify();
-      })
-      .on_action("mail::calendarNext", (_event, eventCx) => {
-        calendar.moveSelection(1);
-        eventCx.notify();
-      })
-      .on_action("mail::calendarPrevious", (_event, eventCx) => {
-        calendar.moveSelection(-1);
-        eventCx.notify();
-      })
-      // Enter opens the event, which means showing it — the editor is behind
-      // its own Edit control, because opening an event to look at it is what
-      // somebody does far more often than opening one to change it.
-      .on_action("mail::openCalendarEvent", (_event, eventCx) => {
-        calendar.activateSelection();
-        eventCx.notify();
-      })
-      .on_action("mail::calendarPreviousPeriod", (_event, eventCx) => {
-        calendar.previous();
-        eventCx.notify();
-      })
-      .on_action("mail::calendarNextPeriod", (_event, eventCx) => {
-        calendar.next();
-        eventCx.notify();
-      })
-      .on_action("mail::calendarToday", (_event, eventCx) => {
-        calendar.today();
-        eventCx.notify();
-      })
-      .on_action("mail::calendarWeek", (_event, eventCx) => {
-        calendar.showWeek(view.anchorMs);
-        this.startCalendarClock(eventCx);
-        eventCx.notify();
-      })
-      .on_action("mail::calendarMonth", (_event, eventCx) => {
-        calendar.showMonth(view.anchorMs);
-        eventCx.notify();
-      })
-      .child(
-        renderCalendar(
-          calendarModel(
-            this,
-            view,
-            mailSnapshot,
-            mail,
-            activeProvider,
+      this,
+      v_flex()
+        .id("calendar-action-host")
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        // The keyboard's home on this screen. Without it nothing in the window
+        // is focusable, every key dispatches from the tree root where none of
+        // these contexts are, and a press on anything that is not a control
+        // blurs the window — see `keys/focus.js`.
+        .track_focus(this.keyboardHome)
+        .key_context(view.editing ? "Page" : "Calendar")
+        .on_action("mail::mailView", (_event, eventCx) =>
+          this.openMail(eventCx),
+        )
+        .on_action("mail::calendar", (_event, eventCx) =>
+          this.openCalendar(eventCx),
+        )
+        .on_action("mail::calendarView", (_event, eventCx) =>
+          this.openCalendar(eventCx),
+        )
+        .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
+        .on_action("mail::createEvent", (_event, eventCx) => {
+          calendar.beginCreate();
+          this.syncCalendarFields();
+          eventCx.notify();
+        })
+        .on_action("mail::calendarNext", (_event, eventCx) => {
+          calendar.moveSelection(1);
+          eventCx.notify();
+        })
+        .on_action("mail::calendarPrevious", (_event, eventCx) => {
+          calendar.moveSelection(-1);
+          eventCx.notify();
+        })
+        // Enter opens the event, which means showing it — the editor is behind
+        // its own Edit control, because opening an event to look at it is what
+        // somebody does far more often than opening one to change it.
+        .on_action("mail::openCalendarEvent", (_event, eventCx) => {
+          calendar.activateSelection();
+          eventCx.notify();
+        })
+        .on_action("mail::calendarPreviousPeriod", (_event, eventCx) => {
+          calendar.previous();
+          eventCx.notify();
+        })
+        .on_action("mail::calendarNextPeriod", (_event, eventCx) => {
+          calendar.next();
+          eventCx.notify();
+        })
+        .on_action("mail::calendarToday", (_event, eventCx) => {
+          calendar.today();
+          eventCx.notify();
+        })
+        .on_action("mail::calendarWeek", (_event, eventCx) => {
+          calendar.showWeek(view.anchorMs);
+          this.startCalendarClock(eventCx);
+          eventCx.notify();
+        })
+        .on_action("mail::calendarMonth", (_event, eventCx) => {
+          calendar.showMonth(view.anchorMs);
+          eventCx.notify();
+        })
+        .child(
+          renderCalendar(
+            calendarModel(this, view, mailSnapshot, mail, activeProvider),
+            cx,
           ),
-          cx,
         ),
-      ),
     );
   }
 
@@ -2264,7 +2305,10 @@ export default class Omamail extends View {
       // to correct a secret that was typed wrong. Without it a saved client
       // could never be edited again from this page.
       clientStepOpen: this.setupClientStepOpen,
-      onReopenClient: (/** @type {any} */ _event, /** @type {any} */ eventCx) => {
+      onReopenClient: (
+        /** @type {any} */ _event,
+        /** @type {any} */ eventCx,
+      ) => {
         this.setupClientStepOpen = true;
         eventCx.notify();
       },
@@ -2295,62 +2339,67 @@ export default class Omamail extends View {
     };
     // F5 and Ctrl+, are `ANY` in the table; every route answers them.
     return globalActions(
-      this, appShell(
-      {
-        top: topBar(
-          {
-            brand: h_flex()
-              .id("setup-header-left")
-              .flex_none()
-              .items_center()
-              .gap(style().space(8))
-              .child(brandLockup(cx))
-              .child(renderAppMenu(this.pageMenuModel(cx), cx)),
-          },
-          cx,
+      this,
+      new AppShell()
+        .top(
+          new TitleBar()
+            .brand(
+              h_flex()
+                .id("setup-header-left")
+                .flex_none()
+                .items_center()
+                .gap(style().space(8))
+                .child(brandLockup(cx))
+                .child(renderAppMenu(this.pageMenuModel(cx), cx)),
+            )
+            .build(cx),
+        )
+        .content(renderSetupForm(setupModel, cx))
+        .bottom(
+          new StatusBar()
+            .status(
+              setupModel.status
+                ? renderSetupFooter(setupModel, cx)
+                : new StatusItem()
+                    .label(
+                      Model.syncedLabel(
+                        false,
+                        this.controller?.snapshot().mail?.syncedAtMs
+                          ? Mail.relativeTime(
+                              new Date(
+                                this.controller.snapshot().mail.syncedAtMs,
+                              ),
+                              Date.now(),
+                            )
+                          : "",
+                      ),
+                    )
+                    .state("ready")
+                    .build(cx),
+            )
+            .hints(new KeyHints("key-hints").hints(hintsFor("page")).build(cx))
+            .build(cx),
+        )
+        .build(cx)
+        // The keyboard's home on this screen. Without it nothing in the window
+        // is focusable, every key dispatches from the tree root where none of
+        // these contexts are, and a press on anything that is not a control
+        // blurs the window — see `keys/focus.js`.
+        .track_focus(this.keyboardHome)
+        .key_context("Page")
+        .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
+        .on_action("mail::compose", (_event, eventCx) =>
+          this.openCompose(eventCx),
+        )
+        .on_action("mail::calendar", (_event, eventCx) =>
+          this.openCalendar(eventCx),
+        )
+        .on_action("mail::calendarView", (_event, eventCx) =>
+          this.openCalendar(eventCx),
+        )
+        .on_action("mail::mailView", (_event, eventCx) =>
+          this.openMail(eventCx),
         ),
-        content: renderSetupForm(setupModel, cx),
-        bottom: bottomBar(
-          {
-            status: setupModel.status
-              ? renderSetupFooter(setupModel, cx)
-              : statusLine(
-                  Model.syncedLabel(
-                    false,
-                    this.controller?.snapshot().mail?.syncedAtMs
-                      ? Mail.relativeTime(
-                          new Date(this.controller.snapshot().mail.syncedAtMs),
-                          Date.now(),
-                        )
-                      : "",
-                  ),
-                  "ready",
-                  cx,
-                ),
-            hints: keyHints(hintsFor("page"), cx),
-          },
-          cx,
-        ),
-      },
-      cx,
-    )
-      // The keyboard's home on this screen. Without it nothing in the window
-      // is focusable, every key dispatches from the tree root where none of
-      // these contexts are, and a press on anything that is not a control
-      // blurs the window — see `keys/focus.js`.
-      .track_focus(this.keyboardHome)
-      .key_context("Page")
-      .on_action("mail::back", (_event, eventCx) => this.back(eventCx))
-      .on_action("mail::compose", (_event, eventCx) =>
-        this.openCompose(eventCx),
-      )
-      .on_action("mail::calendar", (_event, eventCx) =>
-        this.openCalendar(eventCx),
-      )
-      .on_action("mail::calendarView", (_event, eventCx) =>
-        this.openCalendar(eventCx),
-      )
-      .on_action("mail::mailView", (_event, eventCx) => this.openMail(eventCx)),
     );
   }
 
@@ -2403,26 +2452,18 @@ export default class Omamail extends View {
         : mail?.status || this.hostConfigurationError || "";
     const now = Date.now();
     return mailActionHost(this, mail).child(
-        div()
-          .id("message-reader")
-          .size_full()
-          .min_w_0()
-          .min_h_0()
-          .child(
-            renderMail(
-              mailModel(
-                this,
-                snapshot,
-                mail,
-                provider,
-                account,
-                lastError,
-                now,
-              ),
-              cx,
-            ),
+      div()
+        .id("message-reader")
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .child(
+          renderMail(
+            mailModel(this, snapshot, mail, provider, account, lastError, now),
+            cx,
           ),
-      );
+        ),
+    );
   }
 }
 
@@ -2612,8 +2653,7 @@ export function hostContextsFor(accounts, sources) {
         !contextPort(imap?.imapPort) ||
         (sends && !contextPort(imap?.smtpPort)) ||
         (insecure &&
-          (!contextLoopback(imapHost) ||
-            (sends && !contextLoopback(smtpHost))))
+          (!contextLoopback(imapHost) || (sends && !contextLoopback(smtpHost))))
       ) {
         if (account?.id)
           accountErrors[String(account.id)] = "IMAP settings are invalid";

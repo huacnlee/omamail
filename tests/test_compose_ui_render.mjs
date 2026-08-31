@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { composeToasts, renderCompose } from "../app/ui/compose.js";
-import { applyOmarchyStyle, style } from "../app/lib/omarchy-ui/style.js";
+import { applyOmarchyStyle, style } from "omarchy-ui";
 
 // The ids below say a control exists. The measurements at the foot of the file
 // say it is the size and the shape `components/ComposeView.qml` draws it at,

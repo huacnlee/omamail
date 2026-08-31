@@ -3,13 +3,7 @@
 import { div } from "gpui";
 import { Button, h_flex, v_flex } from "gpui-base";
 import { badgeText, slotNumberOf } from "../account/Model.js";
-import {
-  alpha,
-  sectionLabel,
-  separator,
-  style,
-  role,
-} from "../lib/omarchy-ui/index.js";
+import { SectionLabel, Separator, alpha, role, style } from "omarchy-ui";
 import { icon, iconNames } from "./icons.js";
 import { renderAccountSwitcher } from "./menu.js";
 import { MAIL_RAIL_COLLAPSED_WIDTH, MAIL_RAIL_WIDTH } from "./layout.js";
@@ -85,98 +79,100 @@ function railRow(id, entry, onClick, cx) {
   const numberText = entry.slotNumber === 10 ? "0" : String(entry.slotNumber);
   const count = Math.max(0, Math.floor(entry.count || 0));
 
-  return Button.new(id)
-    .selected(entry.selected)
-    .accessibility_label(count > 0 ? `${entry.label}, ${count}` : entry.label)
-    // The tooltip is how the rail stays usable while collapsed, and it carries
-    // the count too, which the dot can only hint at.
-    .tooltip(count > 0 ? `${entry.label} · ${count}` : entry.label)
-    .flex()
-    .relative()
-    .items_center()
-    .w_full()
-    .flex_none()
-    .h(tokens.space(28))
-    // The gaps are the QML's own anchor margins rather than one flex gap: the
-    // glyph starts 8 from the row's edge, the name 9 after the glyph, and the
-    // count 6 before its own 8 — a uniform gap would move the count away from
-    // the edge the rail's rows are read down.
-    .when(entry.collapsed, (row) => row.justify_center())
-    .rounded(tokens.cornerRadius)
-    .bg(entry.selected ? fills.selected : fills.clear)
-    .hover((appearance) => appearance.bg(fills.hover))
-    .active((appearance) => appearance.bg(fills.pressed))
-    .on_click(onClick)
-    .when(!(showsNumber && entry.collapsed), (row) =>
-      row.child(
-        icon(entry.icon, cx, {
-          color: entry.selected ? foreground : dim,
-        }).when(!entry.collapsed, (glyph) => glyph.ml(tokens.space(8))),
-      ),
-    )
-    .when(!entry.collapsed, (row) =>
-      row.child(
-        div()
-          .id(`${id}-label`)
-          .flex_1()
-          .min_w_0()
-          .truncate()
-          .ml(tokens.space(9))
-          // Six before whatever stands to its right, which is the count, the
-          // Alt chip, or the row's own edge — the QML anchors all three the
-          // same way.
-          .mr(tokens.space(6))
-          .text_size(tokens.font.bodySmall)
-          .text_color(entry.selected ? foreground : dim)
-          .when(entry.selected, (text) => text.font_bold())
-          .child(entry.label),
-      ),
-    )
-    // Held Alt names every row. Collapsed there is no room beside the glyph, so
-    // it stands where the glyph was; open it takes the count's place, because a
-    // 148px rail cannot hold both and the count is the one you can get back by
-    // letting go.
-    .when(showsNumber, (row) =>
-      row.child(
-        div()
-          .flex()
-          .flex_none()
-          .items_center()
-          .justify_center()
-          .size(tokens.space(16))
-          .rounded(tokens.cornerRadius)
-          .bg(fills.selected)
-          .text_size(tokens.font.caption)
-          .text_color(foreground)
-          .font_bold()
-          .when(!entry.collapsed, (chip) => chip.mr(tokens.space(6)))
-          .child(numberText),
-      ),
-    )
-    .when(count > 0 && !entry.collapsed && !showsNumber, (row) =>
-      row.child(
-        div()
-          .flex_none()
-          .mr(tokens.space(8))
-          .text_size(tokens.font.caption)
-          .text_color(accent)
-          .font_bold()
-          .child(badgeText(count, 999)),
-      ),
-    )
-    // Collapsed the number itself will not fit, so the row says only that
-    // something is there. The tooltip still has the count.
-    .when(count > 0 && entry.collapsed && !showsNumber, (row) =>
-      row.child(
-        div()
-          .absolute()
-          .top(tokens.space(4))
-          .right(tokens.space(3))
-          .size(tokens.space(5))
-          .rounded_full()
-          .bg(accent),
-      ),
-    );
+  return (
+    Button.new(id)
+      .selected(entry.selected)
+      .accessibility_label(count > 0 ? `${entry.label}, ${count}` : entry.label)
+      // The tooltip is how the rail stays usable while collapsed, and it carries
+      // the count too, which the dot can only hint at.
+      .tooltip(count > 0 ? `${entry.label} · ${count}` : entry.label)
+      .flex()
+      .relative()
+      .items_center()
+      .w_full()
+      .flex_none()
+      .h(tokens.space(28))
+      // The gaps are the QML's own anchor margins rather than one flex gap: the
+      // glyph starts 8 from the row's edge, the name 9 after the glyph, and the
+      // count 6 before its own 8 — a uniform gap would move the count away from
+      // the edge the rail's rows are read down.
+      .when(entry.collapsed, (row) => row.justify_center())
+      .rounded(tokens.cornerRadius)
+      .bg(entry.selected ? fills.selected : fills.clear)
+      .hover((appearance) => appearance.bg(fills.hover))
+      .active((appearance) => appearance.bg(fills.pressed))
+      .on_click(onClick)
+      .when(!(showsNumber && entry.collapsed), (row) =>
+        row.child(
+          icon(entry.icon, cx, {
+            color: entry.selected ? foreground : dim,
+          }).when(!entry.collapsed, (glyph) => glyph.ml(tokens.space(8))),
+        ),
+      )
+      .when(!entry.collapsed, (row) =>
+        row.child(
+          div()
+            .id(`${id}-label`)
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .ml(tokens.space(9))
+            // Six before whatever stands to its right, which is the count, the
+            // Alt chip, or the row's own edge — the QML anchors all three the
+            // same way.
+            .mr(tokens.space(6))
+            .text_size(tokens.font.bodySmall)
+            .text_color(entry.selected ? foreground : dim)
+            .when(entry.selected, (text) => text.font_bold())
+            .child(entry.label),
+        ),
+      )
+      // Held Alt names every row. Collapsed there is no room beside the glyph, so
+      // it stands where the glyph was; open it takes the count's place, because a
+      // 148px rail cannot hold both and the count is the one you can get back by
+      // letting go.
+      .when(showsNumber, (row) =>
+        row.child(
+          div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(tokens.space(16))
+            .rounded(tokens.cornerRadius)
+            .bg(fills.selected)
+            .text_size(tokens.font.caption)
+            .text_color(foreground)
+            .font_bold()
+            .when(!entry.collapsed, (chip) => chip.mr(tokens.space(6)))
+            .child(numberText),
+        ),
+      )
+      .when(count > 0 && !entry.collapsed && !showsNumber, (row) =>
+        row.child(
+          div()
+            .flex_none()
+            .mr(tokens.space(8))
+            .text_size(tokens.font.caption)
+            .text_color(accent)
+            .font_bold()
+            .child(badgeText(count, 999)),
+        ),
+      )
+      // Collapsed the number itself will not fit, so the row says only that
+      // something is there. The tooltip still has the count.
+      .when(count > 0 && entry.collapsed && !showsNumber, (row) =>
+        row.child(
+          div()
+            .absolute()
+            .top(tokens.space(4))
+            .right(tokens.space(3))
+            .size(tokens.space(5))
+            .rounded_full()
+            .bg(accent),
+        ),
+      )
+  );
 }
 
 /**
@@ -378,11 +374,13 @@ export function renderRail(model, cx) {
                   .flex_none()
                   .h(tokens.space(12))
                   .justify_center()
-                  .child(separator(cx)),
+                  .child(new Separator().build(cx)),
               )
               .when(!collapsed, (section) =>
                 section.child(
-                  sectionLabel("Labels", cx)
+                  new SectionLabel("LABELS")
+                    .strong(false)
+                    .build(cx)
                     .pl(tokens.space(8))
                     .pb(tokens.space(3)),
                 ),
@@ -445,7 +443,7 @@ export function renderRail(model, cx) {
               )
               .child(div().flex_none().h(tokens.space(6))),
           )
-          .child(separator(cx))
+          .child(new Separator().build(cx))
           .child(
             v_flex()
               .id("mail-rail-accounts")
@@ -543,62 +541,64 @@ export function renderMailboxTabs(model, cx) {
   // selected one's fill floating at a different left edge from the logo above
   // and the message text below; a single track has one edge, and that edge is
   // the one everything else lines up on.
-  return h_flex()
-    .id("mailbox-tabs")
-    .role("tab_list")
-    .flex_none()
-    .items_center()
-    .justify_center()
-    .w_full()
-    .min_w_0()
-    .px(tokens.space(14))
-    .pt(tokens.space(14))
-    // The QML hangs the list column off this strip's bottom with a margin of
-    // its own; stacked in a column there are no anchors to hang from, so the
-    // gap belongs to the thing above it.
-    .pb(tokens.space(8))
-    .child(
-      h_flex()
-        .id("mailbox-tabs-track")
-        .flex_none()
-        .min_w_0()
-        // Centred whenever the row has slack, and left-aligned the moment it
-        // fills the width — at the sizes where it does span, its edge is the
-        // one the logo above and the message text below line up on.
-        .max_w_full()
-        .overflow_x_scroll()
-        .rounded(tokens.cornerRadius)
-        .border(tokens.state.normalBorderWidth)
-        .border_color(border)
-        .children(
-          shown.map((mailbox, index) =>
-            Button.new(`mailbox-tab-${mailbox.id}`)
-              .role("tab")
-              .selected(mailbox.selected)
-              .accessibility_label(mailbox.label)
-              .flex()
-              .items_center()
-              .justify_center()
-              .flex_none()
-              .h(tokens.spacing.controlHeight)
-              .px(tokens.spacing.controlPaddingX)
-              .text_size(tokens.font.bodySmall)
-              .text_color(cx.theme().colors.foreground)
-              .bg(mailbox.selected ? fills.selected : fills.clear)
-              // Segments share an edge instead of standing apart, so the row
-              // reads as one control with a current position.
-              .when(index > 0, (chip) =>
-                chip
-                  .border_l(tokens.state.normalBorderWidth)
-                  .border_color(border),
-              )
-              .hover((appearance) => appearance.bg(fills.hover))
-              .active((appearance) => appearance.bg(fills.pressed))
-              .on_click((event, eventCx) =>
-                model.onMailbox(mailbox.id, event, eventCx),
-              )
-              .child(captionOf(mailbox)),
+  return (
+    h_flex()
+      .id("mailbox-tabs")
+      .role("tab_list")
+      .flex_none()
+      .items_center()
+      .justify_center()
+      .w_full()
+      .min_w_0()
+      .px(tokens.space(14))
+      .pt(tokens.space(14))
+      // The QML hangs the list column off this strip's bottom with a margin of
+      // its own; stacked in a column there are no anchors to hang from, so the
+      // gap belongs to the thing above it.
+      .pb(tokens.space(8))
+      .child(
+        h_flex()
+          .id("mailbox-tabs-track")
+          .flex_none()
+          .min_w_0()
+          // Centred whenever the row has slack, and left-aligned the moment it
+          // fills the width — at the sizes where it does span, its edge is the
+          // one the logo above and the message text below line up on.
+          .max_w_full()
+          .overflow_x_scroll()
+          .rounded(tokens.cornerRadius)
+          .border(tokens.state.normalBorderWidth)
+          .border_color(border)
+          .children(
+            shown.map((mailbox, index) =>
+              Button.new(`mailbox-tab-${mailbox.id}`)
+                .role("tab")
+                .selected(mailbox.selected)
+                .accessibility_label(mailbox.label)
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_none()
+                .h(tokens.spacing.controlHeight)
+                .px(tokens.spacing.controlPaddingX)
+                .text_size(tokens.font.bodySmall)
+                .text_color(cx.theme().colors.foreground)
+                .bg(mailbox.selected ? fills.selected : fills.clear)
+                // Segments share an edge instead of standing apart, so the row
+                // reads as one control with a current position.
+                .when(index > 0, (chip) =>
+                  chip
+                    .border_l(tokens.state.normalBorderWidth)
+                    .border_color(border),
+                )
+                .hover((appearance) => appearance.bg(fills.hover))
+                .active((appearance) => appearance.bg(fills.pressed))
+                .on_click((event, eventCx) =>
+                  model.onMailbox(mailbox.id, event, eventCx),
+                )
+                .child(captionOf(mailbox)),
+            ),
           ),
-        ),
-    );
+      )
+  );
 }

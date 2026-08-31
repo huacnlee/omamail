@@ -11,19 +11,19 @@ import {
 } from "../calendar/Calendar.js";
 import { hintsFor } from "../keys/keymap.js";
 import {
-  actionButton,
+  AppShell,
+  Button,
+  Keycap,
+  MutedText,
+  StatusBar,
+  StatusItem,
+  TitleBar,
   alpha,
-  appShell,
-  bottomBar,
-  brandLockup,
-  button,
-  iconTextButton,
-  kbd,
-  muted,
-  statusLine,
+  roles,
   style,
-  topBar,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { actionIcon, iconTextButton } from "./controls.js";
+import { brandLockup } from "./brand.js";
 import {
   renderCalendarComposer,
   renderDeleteConfirmation,
@@ -90,30 +90,24 @@ function errorBanner(model, cx) {
     )
     .when(apiDisabled, (banner) =>
       banner.child(
-        iconTextButton(
-          "calendar-error-copy",
-          "",
-          "Copy",
-          (_click, eventCx) =>
+        iconTextButton("calendar-error-copy", "", "Copy")
+          .tooltip("Copy this error")
+          .onClick((_click, eventCx) =>
             model.onCopy?.(String(model.lastError || ""), eventCx),
-          cx,
-          { tooltip: "Copy this error" },
-        ),
+          )
+          .build(cx),
       ),
     )
     .when(apiDisabled, (banner) =>
       banner.child(
-        iconTextButton(
-          // No glyph on either: the banner is already the loudest thing on the
-          // page, and the QML draws both of these as bare labels.
-          "calendar-error-enable-api",
-          "",
-          "Enable API...",
-          (_click, eventCx) =>
+        // No glyph on either: the banner is already the loudest thing on the
+        // page, and the QML draws both of these as bare labels.
+        iconTextButton("calendar-error-enable-api", "", "Enable API...")
+          .tooltip("Open Google Cloud Calendar API setup...")
+          .onClick((_click, eventCx) =>
             model.onOpenUrl?.(googleCalendarApiUrl(), eventCx),
-          cx,
-          { tooltip: "Open Google Cloud Calendar API setup..." },
-        ),
+          )
+          .build(cx),
       ),
     );
 }
@@ -137,11 +131,16 @@ function calendarHeader(model, caption, cx) {
    * @param {(event: any, cx: import("gpui").Context) => void} onClick
    * @param {any} options
    */
-  const headerButton = (id, text, onClick, options) =>
-    button(id, text, onClick, cx, {
-      ...options,
-      fontSize: tokens.font.caption,
-    }).h(tokens.spacing.controlHeight);
+  const headerButton = (id, text, onClick, options = {}) =>
+    new Button(id)
+      .label(text)
+      .size("xsmall")
+      .bordered(options.bordered ?? false)
+      .selected(options.selected ?? false)
+      .tone(options.color)
+      .onClick(onClick)
+      .build(cx)
+      .h(tokens.spacing.controlHeight);
   return h_flex()
     .id("calendar-header")
     .flex_none()
@@ -229,24 +228,24 @@ function calendarHeader(model, caption, cx) {
           ),
         )
         .child(
-          actionButton(
+          actionIcon(
             "calendar-previous",
             "chevronLeft",
             week ? "Previous week" : "Previous month",
-            (_click, eventCx) => model.onPrevious?.(_click, eventCx),
-            cx,
-            { color: roles.dim, hoverColor: roles.text },
-          ),
+          )
+            .quiet()
+            .onClick((_click, eventCx) => model.onPrevious?.(_click, eventCx))
+            .build(cx),
         )
         .child(
-          actionButton(
+          actionIcon(
             "calendar-next",
             "chevronRight",
             week ? "Next week" : "Next month",
-            (_click, eventCx) => model.onNext?.(_click, eventCx),
-            cx,
-            { color: roles.dim, hoverColor: roles.text },
-          ),
+          )
+            .quiet()
+            .onClick((_click, eventCx) => model.onNext?.(_click, eventCx))
+            .build(cx),
         ),
     );
 }
@@ -326,7 +325,10 @@ export function renderCalendar(model, cx) {
     .when(Boolean(model.lastError), (page) => page.child(errorBanner(view, cx)))
     .when(!canCreate, (page) =>
       page.child(
-        muted("Add a calendar source in Settings before creating events.", cx)
+        new MutedText(
+          "Add a calendar source in Settings before creating events.",
+        )
+          .build(cx)
           .id("calendar-no-source")
           .flex_none()
           .text_size(tokens.font.caption),
@@ -348,41 +350,41 @@ export function renderCalendar(model, cx) {
   if (confirmation) overlays.push(confirmation);
   content.children(overlays);
 
-  return appShell(
-    {
-      top: topBar(
-        {
-          brand: brandLockup(cx),
-          actions: h_flex()
+  return new AppShell()
+    .top(
+      new TitleBar()
+        .brand(brandLockup(cx))
+        .actions(
+          h_flex()
             .flex_none()
             .items_center()
             .gap(tokens.space(4))
             .child(
-              actionButton(
+              actionIcon(
                 "calendar-refresh",
                 "refresh",
                 model.loading === true
                   ? "Loading calendars"
                   : "Refresh calendars · F5",
-                (_click, eventCx) => model.onRefresh?.(_click, eventCx),
-                cx,
-                { color: roles.dim, disabled: model.loading === true },
-              ),
+              )
+                .quiet()
+                .disabled(model.loading === true)
+                .onClick((_click, eventCx) =>
+                  model.onRefresh?.(_click, eventCx),
+                )
+                .build(cx),
             )
             .child(
-              iconTextButton(
-                "calendar-new",
-                "plus",
-                "Create event...",
-                (_click, eventCx) => model.onNew?.(_click, eventCx),
-                cx,
-                { disabled: !canCreate || model.pending === true },
-              ),
+              iconTextButton("calendar-new", "plus", "Create event...")
+                .disabled(!canCreate || model.pending === true)
+                .onClick((_click, eventCx) => model.onNew?.(_click, eventCx))
+                .build(cx),
             ),
-        },
-        cx,
-      ),
-      content: h_flex()
+        )
+        .build(cx),
+    )
+    .content(
+      h_flex()
         .id("calendar-workspace")
         // The rail and the grid are columns filling the window, not items in a
         // row — `h_flex` would otherwise centre each on the cross axis.
@@ -394,12 +396,25 @@ export function renderCalendar(model, cx) {
           workspace.child(renderRail(model.navigation, cx)),
         )
         .child(content),
-      bottom: bottomBar(
-        {
-          status: statusLine(status, statusState, cx)
+    )
+    .bottom(
+      new StatusBar()
+        .status(
+          (status
+            ? new StatusItem()
+                .label(status)
+                .loadingLabel(status)
+                .state(statusState)
+            : // A calendar with nothing to report keeps its bar, and a state
+              // colours the words it is given — there are none to colour here.
+              new StatusItem()
+          )
+            .build(cx)
             .id("calendar-status")
             .role(statusState === "error" ? "alert" : "status"),
-          hints: h_flex()
+        )
+        .hints(
+          h_flex()
             .id("calendar-status-hints")
             .flex_none()
             .gap(tokens.spacing.controlGap)
@@ -408,16 +423,16 @@ export function renderCalendar(model, cx) {
                 h_flex()
                   .items_center()
                   .gap(tokens.spacing.labelGap)
-                  .child(kbd(hint.key, cx))
+                  .child(new Keycap(hint.key).build(cx))
                   .child(
-                    muted(hint.label, cx).text_size(tokens.font.caption),
+                    new MutedText(hint.label)
+                      .build(cx)
+                      .text_size(tokens.font.caption),
                   ),
               ),
             ),
-        },
-        cx,
-      ),
-    },
-    cx,
-  );
+        )
+        .build(cx),
+    )
+    .build(cx);
 }

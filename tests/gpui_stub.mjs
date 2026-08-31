@@ -1,4 +1,3 @@
-
 // gpui's colour vocabulary is theme tokens plus hex literals. A CSS keyword it
 // does not know — "transparent", most temptingly — is not a type slip the
 // runtime forgives: it refuses to render the whole view. Modelling that here is
@@ -9,15 +8,34 @@
 // its colours whatever it likes ("semantic:border"), and the mistake this is
 // for is always a CSS word somebody reached for out of habit.
 const REFUSED_COLORS = new Set([
-  "transparent", "inherit", "initial", "unset", "currentcolor", "none",
-  "white", "black", "red", "green", "blue", "gray", "grey",
+  "transparent",
+  "inherit",
+  "initial",
+  "unset",
+  "currentcolor",
+  "none",
+  "white",
+  "black",
+  "red",
+  "green",
+  "blue",
+  "gray",
+  "grey",
   // A theme token gpui does not carry. Writing one is writing nothing, and it
   // reads as a colour right up until the view refuses to draw.
-  "popover", "popover_foreground", "link", "selection",
+  "popover",
+  "popover_foreground",
+  "link",
+  "selection",
 ]);
 
 const COLOR_METHODS = new Set([
-  "bg", "text_color", "border_color", "fill", "stroke", "shadow_color",
+  "bg",
+  "text_color",
+  "border_color",
+  "fill",
+  "stroke",
+  "shadow_color",
 ]);
 
 function assertColor(method, value) {
@@ -168,6 +186,23 @@ export function image(path) {
 export const Popover = component;
 export const Textarea = component;
 export const Link = component;
+
+// The rest of `gpui-base`'s catalog, present because `omarchy-ui` is imported
+// through its own barrel: ESM instantiates every module the entry re-exports,
+// so a name this application never draws still has to exist for the ones it
+// does. They are the plain recording element the other components are — the
+// library's own tests cover what each of them is given.
+export const Avatar = component;
+export const AvatarFallback = component;
+export const TableHeader = component;
+export const TableHead = component;
+export const TableRow = component;
+export const TableCell = component;
+export const Accordion = component;
+export const AccordionItem = component;
+export const AccordionHeader = component;
+export const AccordionTrigger = component;
+export const AccordionPanel = component;
 function textState(options = {}) {
   let value = String(options.value ?? "");
   let masked = options.masked === true;

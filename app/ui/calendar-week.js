@@ -15,7 +15,7 @@ import {
   weekHourRange,
   weekNowOffset,
 } from "../calendar/Calendar.js";
-import { style } from "../lib/omarchy-ui/index.js";
+import { roles, style } from "omarchy-ui";
 import {
   ALL_DAY_FILL,
   BLOCK_FILL,
@@ -89,7 +89,9 @@ function eventBlock(id, event, day, firstHour, span, model, cx) {
       eventCx.stop_propagation?.();
       model.onEvent?.(event, eventCx);
     })
-    .child(div().flex_none().w(tokens.space(3)).self_stretch().bg(surface.color))
+    .child(
+      div().flex_none().w(tokens.space(3)).self_stretch().bg(surface.color),
+    )
     .child(
       v_flex()
         .flex_1()
@@ -215,7 +217,9 @@ function dayColumn(day, index, firstHour, lastHour, hourCount, model, cx) {
         ),
       ),
     )
-    .when(offset >= 0, (column) => column.children(nowMarker(offset, span, cx)));
+    .when(offset >= 0, (column) =>
+      column.children(nowMarker(offset, span, cx)),
+    );
 }
 
 /**
@@ -278,7 +282,9 @@ function allDayLane(days, count, railWidth, model, cx) {
                   .border_color(surface.color)
                   .text_size(tokens.font.caption)
                   .text_color(roles.text)
-                  .on_click((_click, eventCx) => model.onEvent?.(event, eventCx))
+                  .on_click((_click, eventCx) =>
+                    model.onEvent?.(event, eventCx),
+                  )
                   .child(
                     div()
                       .truncate()

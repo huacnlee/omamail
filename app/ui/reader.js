@@ -19,13 +19,8 @@ import { div } from "gpui";
 import { Textarea, h_flex, v_flex } from "gpui-base";
 import * as Html from "../message/Html.js";
 import * as Mail from "../message/Message.js";
-import {
-  actionButton,
-  button,
-  iconTextButton,
-  style,
-  role,
-} from "../lib/omarchy-ui/index.js";
+import { Button, role, style } from "omarchy-ui";
+import { actionIcon, iconTextButton } from "./controls.js";
 import { icon } from "./icons.js";
 import { readingBlocksOf } from "./reader-document.js";
 import {
@@ -138,14 +133,12 @@ function readerHeader(model, cx) {
           // Outlined rather than flat: an outline makes the box itself the
           // aligned edge, so both the glyph and the hover fill sit on the same
           // line as everything under them.
-          iconTextButton(
-            "reader-back",
-            "back",
-            "Back",
-            (event, eventCx) => model.onBack(event, eventCx),
-            cx,
-            { tooltip: "Back · Esc", color: dimColor(cx) },
-          ).flex_none(),
+          iconTextButton("reader-back", "back", "Back")
+            .tooltip("Back · Esc")
+            .tone(dimColor(cx))
+            .onClick((event, eventCx) => model.onBack(event, eventCx))
+            .build(cx)
+            .flex_none(),
         ),
       ),
     )
@@ -199,23 +192,21 @@ function readerHeader(model, cx) {
             typeof model.onStar === "function",
           (row) =>
             row.child(
-              actionButton(
+              // `hoverColor: root.accentColor`, not the foreground the other
+              // icons lift to: this one is about to become accent. So the
+              // accent is its tone, and quiet is what holds the tone back
+              // until the star is set.
+              actionIcon(
                 "reader-action-star",
                 // gpui paints an SVG as one mask in the element's text colour,
                 // so "filled" is a different file rather than a different paint.
                 starred ? "star-filled" : "star",
                 `${starred ? "Unstar" : "Star"} · s`,
-                (event, eventCx) => model.onStar(event, eventCx),
-                cx,
-                {
-                  color: starred
-                    ? cx.theme().colors.ring
-                    : dimColor(cx),
-                  // `hoverColor: root.accentColor`, not the foreground the
-                  // other icons lift to: this one is about to become accent.
-                  hoverColor: cx.theme().colors.ring,
-                },
-              ),
+              )
+                .tone(cx.theme().colors.ring)
+                .quiet(!starred)
+                .onClick((event, eventCx) => model.onStar(event, eventCx))
+                .build(cx),
             ),
         ),
     );
@@ -396,23 +387,26 @@ function renderBlock(block, index, base, cx) {
   const id = `reader-block-${index}-${block.kind}`;
   if (block.kind === "heading") {
     const level = Number(block.level ?? 1);
-    const scale = level === 1 ? 1.6 : level === 2 ? 1.35 : level === 3 ? 1.18 : 1;
+    const scale =
+      level === 1 ? 1.6 : level === 2 ? 1.35 : level === 3 ? 1.18 : 1;
     // `h1,h2{margin-top:gap*2}`, `h3{margin-top:gap*1.6}`,
     // `h4,h5,h6{margin-top:gap*1.4}`: the air above a heading shrinks with the
     // heading, and the three thresholds are the sheet's own.
     const lead =
       level <= 2 ? gap * 2 : Math.round(gap * (level === 3 ? 1.6 : 1.4));
-    return div()
-      .id(id)
-      .w_full()
-      .mt(index === 0 ? 0 : lead)
-      .mb(rule)
-      .text_size(Math.round(base * scale))
-      // Qt draws `h1`-`h6` bold and the sheet does not say otherwise, which is
-      // the same weight `font.bold` gives the subject above.
-      .font_bold()
-      .text_color(cx.theme().colors.foreground)
-      .child(block.text);
+    return (
+      div()
+        .id(id)
+        .w_full()
+        .mt(index === 0 ? 0 : lead)
+        .mb(rule)
+        .text_size(Math.round(base * scale))
+        // Qt draws `h1`-`h6` bold and the sheet does not say otherwise, which is
+        // the same weight `font.bold` gives the subject above.
+        .font_bold()
+        .text_color(cx.theme().colors.foreground)
+        .child(block.text)
+    );
   }
   // The sender dividing their own message. `Html`'s reader rebuild keeps `<hr>`
   // as itself, and a rule between two paragraphs is a panel rule rather than a
@@ -470,24 +464,30 @@ function renderBlock(block, index, base, cx) {
       .text_color(dimColor(cx))
       .child(block.text);
   if (block.kind === "list-item")
-    return h_flex()
-      .id(id)
-      .w_full()
-      .items_start()
-      // The list indent `Html.readerDocumentFor` gives Qt, as one fixed column
-      // rather than a marker indent plus a list indent.
-      .ml(tokens.space(26))
-      // `li{margin-bottom:rule}` between the items and `ul,ol{margin-bottom:
-      // gap}` under the last of them. The list is flat here, so the closing
-      // gap belongs to the item that closes it.
-      .mb(block.last === true ? gap : rule)
-      .gap(Math.round(base * 0.5))
-      .text_size(base)
-      .text_color(cx.theme().colors.foreground)
-      // Qt numbered an `<ol>` and bulleted a `<ul>`, so which mark this is was
-      // decided where the list was walked.
-      .child(div().flex_none().child(String(block.marker ?? "•")))
-      .child(div().flex_1().min_w_0().child(block.text));
+    return (
+      h_flex()
+        .id(id)
+        .w_full()
+        .items_start()
+        // The list indent `Html.readerDocumentFor` gives Qt, as one fixed column
+        // rather than a marker indent plus a list indent.
+        .ml(tokens.space(26))
+        // `li{margin-bottom:rule}` between the items and `ul,ol{margin-bottom:
+        // gap}` under the last of them. The list is flat here, so the closing
+        // gap belongs to the item that closes it.
+        .mb(block.last === true ? gap : rule)
+        .gap(Math.round(base * 0.5))
+        .text_size(base)
+        .text_color(cx.theme().colors.foreground)
+        // Qt numbered an `<ol>` and bulleted a `<ul>`, so which mark this is was
+        // decided where the list was walked.
+        .child(
+          div()
+            .flex_none()
+            .child(String(block.marker ?? "•")),
+        )
+        .child(div().flex_1().min_w_0().child(block.text))
+    );
   // A paragraph and a `<pre>` share `margin-top:0;margin-bottom:gap`. The
   // preformatted one keeps the spaces it was written with, which is why the
   // walk does not collapse them.
@@ -534,73 +534,75 @@ function readerBody(model, cx) {
       blocks.map((block, index) => renderBlock(block, index, base, cx)),
     );
 
-  return v_flex()
-    .id("reader-message-body")
-    .flex_1()
-    .min_w_0()
-    .min_h_0()
-    // The panel scrolls the blocks, and the surface scrolls itself: a textarea
-    // is its own scroller, and one inside another gives every wheel event two
-    // plausible targets — the reason the message list is a `Column` and not a
-    // `ListView` in the QML, said again one panel over.
-    .when(!selecting, (body) => body.overflow_y_scroll())
-    // One inset for the whole page. Giving the body a narrower one bought a few
-    // pixels and cost the alignment: the message text started to the left of
-    // the subject above it and the toolbar below, which reads as a mistake long
-    // before it reads as extra room.
-    .px(tokens.space(14))
-    .pt(tokens.space(24))
-    .pb(tokens.space(28))
-    .gap(tokens.space(14))
-    .when(typeof model.onZoom === "function", (body) =>
-      // The same gesture every document reader has. Without the modifier this
-      // is the scroller's own wheel event and must stay so.
-      body.on_scroll_wheel((event, eventCx) => {
-        if (!event.modifiers?.control) return;
-        model.onZoom(event.delta.y > 0 ? 0.1 : -0.1, eventCx);
-      }),
-    )
-    .when(Boolean(model.message.invite), (body) =>
-      // Inside the scroller rather than pinned above it: a recurring invitation
-      // with a dozen guests is taller than the panel, and a card that cannot
-      // scroll would leave the message itself with nowhere to be. It keeps the
-      // panel's full width in every mode — it is this app's own UI, not the
-      // sender's document.
-      body.child(
-        inviteCard(
-          {
-            invite: model.message.invite,
-            response: model.message.response,
-            canRespond: model.message.canRespond,
-            sending: model.message.rsvpSending,
-            onRespond: model.onRsvp,
-            onOpen: model.onOpenLink,
-          },
-          cx,
+  return (
+    v_flex()
+      .id("reader-message-body")
+      .flex_1()
+      .min_w_0()
+      .min_h_0()
+      // The panel scrolls the blocks, and the surface scrolls itself: a textarea
+      // is its own scroller, and one inside another gives every wheel event two
+      // plausible targets — the reason the message list is a `Column` and not a
+      // `ListView` in the QML, said again one panel over.
+      .when(!selecting, (body) => body.overflow_y_scroll())
+      // One inset for the whole page. Giving the body a narrower one bought a few
+      // pixels and cost the alignment: the message text started to the left of
+      // the subject above it and the toolbar below, which reads as a mistake long
+      // before it reads as extra room.
+      .px(tokens.space(14))
+      .pt(tokens.space(24))
+      .pb(tokens.space(28))
+      .gap(tokens.space(14))
+      .when(typeof model.onZoom === "function", (body) =>
+        // The same gesture every document reader has. Without the modifier this
+        // is the scroller's own wheel event and must stay so.
+        body.on_scroll_wheel((event, eventCx) => {
+          if (!event.modifiers?.control) return;
+          model.onZoom(event.delta.y > 0 ? 0.1 : -0.1, eventCx);
+        }),
+      )
+      .when(Boolean(model.message.invite), (body) =>
+        // Inside the scroller rather than pinned above it: a recurring invitation
+        // with a dozen guests is taller than the panel, and a card that cannot
+        // scroll would leave the message itself with nowhere to be. It keeps the
+        // panel's full width in every mode — it is this app's own UI, not the
+        // sender's document.
+        body.child(
+          inviteCard(
+            {
+              invite: model.message.invite,
+              response: model.message.response,
+              canRespond: model.message.canRespond,
+              sending: model.message.rsvpSending,
+              onRespond: model.onRsvp,
+              onOpen: model.onOpenLink,
+            },
+            cx,
+          ),
         ),
-      ),
-    )
-    .child(
-      selecting
-        ? // No border and no fill: it stands where the message stood, and a
-          // framed box would read as a form to fill in rather than as the
-          // message being held still. The reading width is not applied either —
-          // the surface wraps its own lines, and a measure it does not know
-          // about would only leave the text short of the panel edge.
-          Textarea.new(model.selection)
-            .id("reader-message-selection")
-            .accessibility_label("Message text")
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .border(0)
-            .bg(cx.theme().colors.background)
-            .text_size(base)
-            .text_color(cx.theme().colors.foreground)
-        : reading
-          ? h_flex().w_full().justify_center().child(column)
-          : column,
-    );
+      )
+      .child(
+        selecting
+          ? // No border and no fill: it stands where the message stood, and a
+            // framed box would read as a form to fill in rather than as the
+            // message being held still. The reading width is not applied either —
+            // the surface wraps its own lines, and a measure it does not know
+            // about would only leave the text short of the panel edge.
+            Textarea.new(model.selection)
+              .id("reader-message-selection")
+              .accessibility_label("Message text")
+              .flex_1()
+              .min_h_0()
+              .w_full()
+              .border(0)
+              .bg(cx.theme().colors.background)
+              .text_size(base)
+              .text_color(cx.theme().colors.foreground)
+          : reading
+            ? h_flex().w_full().justify_center().child(column)
+            : column,
+      )
+  );
 }
 
 // ------------------------------------------------------------------- footer
@@ -622,13 +624,14 @@ function attachmentRow(attachment, model, cx) {
       }),
     )
     .child(
-      button(
-        `reader-attachment-open-${key}`,
-        filename,
-        (event, eventCx) => model.onAttachment(attachment, event, eventCx),
-        cx,
-        { tooltip: "Open attachment", fontSize: tokens.font.caption },
-      )
+      new Button(`reader-attachment-open-${key}`)
+        .label(filename)
+        .tooltip("Open attachment")
+        .size("xsmall")
+        .onClick((event, eventCx) =>
+          model.onAttachment(attachment, event, eventCx),
+        )
+        .build(cx)
         .flex_1()
         .min_w_0()
         .justify_start()
@@ -678,19 +681,14 @@ function messageActions(model, cx) {
   ];
   /** @param {[string,string,string,any]} entry */
   const offered = ([id, , , callback]) =>
-    can[
-      id === "reply-all" ? "replyAll" : id
-    ] !== false && typeof callback === "function";
+    can[id === "reply-all" ? "replyAll" : id] !== false &&
+    typeof callback === "function";
   /** @param {[string,string,string,any]} entry */
   const draw = ([id, icon, description, callback]) =>
-    actionButton(
-      `reader-action-${id}`,
-      icon,
-      description,
-      (event, eventCx) => callback(event, eventCx),
-      cx,
-      { color: dimColor(cx) },
-    );
+    actionIcon(`reader-action-${id}`, icon, description)
+      .quiet()
+      .onClick((event, eventCx) => callback(event, eventCx))
+      .build(cx);
 
   const left = answering.filter(offered);
   const right = disposing.filter(offered);
@@ -700,18 +698,13 @@ function messageActions(model, cx) {
     .items_center()
     .gap(tokens.space(2))
     .when(
-      Boolean(model.message.draftId) &&
-        typeof model.onEditDraft === "function",
+      Boolean(model.message.draftId) && typeof model.onEditDraft === "function",
       (row) =>
         row.child(
-          actionButton(
-            "reader-action-edit-draft",
-            "compose",
-            "Edit draft",
-            (event, eventCx) => model.onEditDraft(event, eventCx),
-            cx,
-            { color: dimColor(cx) },
-          ),
+          actionIcon("reader-action-edit-draft", "compose", "Edit draft")
+            .quiet()
+            .onClick((event, eventCx) => model.onEditDraft(event, eventCx))
+            .build(cx),
         ),
     )
     .children(left.map(draw))
@@ -760,111 +753,104 @@ function viewTools(model, cx) {
   // that quietly moved to the mode it fell back to would leave nothing saying
   // the choice still stands for the next message.
   const chosen = String(model.bodyMode ?? model.presentation?.mode ?? "reader");
-  return h_flex()
-    .id("reader-view-tools")
-    // `anchors.right: parent.right` in the QML, which holds whether the picker
-    // sits beside the actions or on its own line under them: a single item on a
-    // wrapped line takes the line's start, so the slot claims the rest of the
-    // width and pushes its contents to the far edge instead.
-    .flex_1()
-    .min_w_0()
-    .justify_end()
-    .items_center()
-    .gap(tokens.space(6))
-    .when(model.hasHtml !== false, (tools) =>
-      // Nothing to choose between where there is no markup: the text is then
-      // the message rather than one reading of it.
-      tools.child(
-        h_flex()
-          .id("reader-mode-track")
-          .flex_none()
-          .items_center()
-          .rounded(tokens.cornerRadius)
-          .border(tokens.state.normalBorderWidth)
-          .border_color(cx.theme().colors.border)
-          .overflow_hidden()
-          .children(
-            MODES.flatMap(([mode, caption, tooltip], index) => [
-              ...(index === 0
-                ? []
-                : [
-                    // As tall as the segments it stands between, taken from
-                    // them rather than from a constant: a fixed height drifts
-                    // the moment the type scale moves.
-                    div()
-                      .flex_none()
-                      .self_stretch()
-                      .w(tokens.spacing.hairline)
-                      .bg(cx.theme().colors.border),
-                  ]),
-              button(
-                `reader-mode-${mode}`,
-                caption,
-                (event, eventCx) => model.onMode?.(mode, event, eventCx),
-                cx,
-                {
-                  disabled: typeof model.onMode !== "function",
-                  selected: chosen === mode,
-                  tooltip,
-                  fontSize: tokens.font.caption,
-                },
-              )
-                .flex_none()
-                .px(tokens.space(7))
-                .py(tokens.space(3)),
-            ]),
-          ),
-      ),
-    )
-    // Beside the reading picker rather than in it, because it is not a fourth
-    // reading: it is what happens to whichever of the three is chosen. Named
-    // rather than iconed for the same reason the three are — and the kit has no
-    // glyph for "you may now drag across this" that would not be a guess.
-    //
-    // Bordered, so it reads as a control while it is off: `button()` is
-    // transparent when idle, and a toggle nobody can see is a toggle nobody
-    // finds. Selected while it is on, which is the whole of how the panel says
-    // the body is being held plain on purpose.
-    .when(typeof model.onToggleSelect === "function", (tools) =>
-      tools.child(
-        button(
-          "reader-select-text",
-          "Select",
-          (event, eventCx) => model.onToggleSelect(event, eventCx),
-          cx,
-          {
-            bordered: true,
-            selected: model.selecting === true,
+  return (
+    h_flex()
+      .id("reader-view-tools")
+      // `anchors.right: parent.right` in the QML, which holds whether the picker
+      // sits beside the actions or on its own line under them: a single item on a
+      // wrapped line takes the line's start, so the slot claims the rest of the
+      // width and pushes its contents to the far edge instead.
+      .flex_1()
+      .min_w_0()
+      .justify_end()
+      .items_center()
+      .gap(tokens.space(6))
+      .when(model.hasHtml !== false, (tools) =>
+        // Nothing to choose between where there is no markup: the text is then
+        // the message rather than one reading of it.
+        tools.child(
+          h_flex()
+            .id("reader-mode-track")
+            .flex_none()
+            .items_center()
+            .rounded(tokens.cornerRadius)
+            .border(tokens.state.normalBorderWidth)
+            .border_color(cx.theme().colors.border)
+            .overflow_hidden()
+            .children(
+              MODES.flatMap(([mode, caption, tooltip], index) => [
+                ...(index === 0
+                  ? []
+                  : [
+                      // As tall as the segments it stands between, taken from
+                      // them rather than from a constant: a fixed height drifts
+                      // the moment the type scale moves.
+                      div()
+                        .flex_none()
+                        .self_stretch()
+                        .w(tokens.spacing.hairline)
+                        .bg(cx.theme().colors.border),
+                    ]),
+                new Button(`reader-mode-${mode}`)
+                  .label(caption)
+                  .disabled(typeof model.onMode !== "function")
+                  .selected(chosen === mode)
+                  .tooltip(tooltip)
+                  .size("xsmall")
+                  .onClick((event, eventCx) =>
+                    model.onMode?.(mode, event, eventCx),
+                  )
+                  .build(cx)
+                  .flex_none()
+                  .px(tokens.space(7))
+                  .py(tokens.space(3)),
+              ]),
+            ),
+        ),
+      )
+      // Beside the reading picker rather than in it, because it is not a fourth
+      // reading: it is what happens to whichever of the three is chosen. Named
+      // rather than iconed for the same reason the three are — and the kit has no
+      // glyph for "you may now drag across this" that would not be a guess.
+      //
+      // Bordered, so it reads as a control while it is off: a `Button` is
+      // transparent when idle, and a toggle nobody can see is a toggle nobody
+      // finds. Selected while it is on, which is the whole of how the panel says
+      // the body is being held plain on purpose.
+      .when(typeof model.onToggleSelect === "function", (tools) =>
+        tools.child(
+          new Button("reader-select-text")
+            .label("Select")
+            .bordered()
+            .selected(model.selecting === true)
             // Not "formatted": a message with no markup of its own has a
             // reading and no formatting, and the toggle means the same thing
             // for it.
-            tooltip:
+            .tooltip(
               model.selecting === true
                 ? "Show the message as it is read"
                 : "Show the text so it can be selected · Ctrl+A",
-            fontSize: tokens.font.caption,
-          },
-        )
-          .flex_none()
-          .px(tokens.space(7))
-          .py(tokens.space(3)),
-      ),
-    )
-    .when(
-      model.capabilities?.openOnWeb !== false &&
-        typeof model.onOpenWeb === "function",
-      (tools) =>
-        tools.child(
-          actionButton(
-            "reader-open-web",
-            "browser",
-            "Open in browser",
-            (event, eventCx) => model.onOpenWeb(event, eventCx),
-            cx,
-            { color: dimColor(cx) },
-          ),
+            )
+            .size("xsmall")
+            .onClick((event, eventCx) => model.onToggleSelect(event, eventCx))
+            .build(cx)
+            .flex_none()
+            .px(tokens.space(7))
+            .py(tokens.space(3)),
         ),
-    );
+      )
+      .when(
+        model.capabilities?.openOnWeb !== false &&
+          typeof model.onOpenWeb === "function",
+        (tools) =>
+          tools.child(
+            actionIcon("reader-open-web", "browser", "Open in browser")
+              .quiet()
+              .onClick((event, eventCx) => model.onOpenWeb(event, eventCx))
+              .build(cx),
+          ),
+      )
+  );
 }
 
 /** @param {any} model @param {import("gpui").Context} cx */
@@ -875,42 +861,44 @@ function readerFooter(model, cx) {
     Array.isArray(model.message.attachments)
       ? model.message.attachments
       : [];
-  return v_flex()
-    .id("reader-footer")
-    .flex_none()
-    .w_full()
-    // The toolbar sits on its own ground rather than on whatever happens to be
-    // scrolled behind it, and the rule above it runs the full width: it
-    // separates the toolbar from the message, and that division is the panel's.
-    .bg(cx.theme().colors.background)
-    .border_t(tokens.spacing.hairline)
-    .border_color(role("separator", cx.theme().colors.border))
-    // Control frames share the status bar's eight-pixel chrome inset. The page
-    // content keeps its wider reading inset; applying that to buttons as well
-    // made their glyphs sit visibly farther inward than the chrome below.
-    .px(tokens.space(8))
-    .pt(tokens.space(6))
-    .pb(tokens.space(4))
-    .gap(tokens.space(4))
-    .children(
-      attachments.map((/** @type {any} */ attachment) =>
-        attachmentRow(attachment, model, cx),
-      ),
-    )
-    .child(
-      // The mode picker takes its own line when the two of them will not fit
-      // across the panel: a row of controls that overlaps another row of
-      // controls is worse than a taller toolbar.
-      h_flex()
-        .id("reader-toolbar")
-        .w_full()
-        .items_center()
-        .justify_between()
-        .flex_wrap()
-        .gap(tokens.space(4))
-        .child(messageActions(model, cx))
-        .child(viewTools(model, cx)),
-    );
+  return (
+    v_flex()
+      .id("reader-footer")
+      .flex_none()
+      .w_full()
+      // The toolbar sits on its own ground rather than on whatever happens to be
+      // scrolled behind it, and the rule above it runs the full width: it
+      // separates the toolbar from the message, and that division is the panel's.
+      .bg(cx.theme().colors.background)
+      .border_t(tokens.spacing.hairline)
+      .border_color(role("separator", cx.theme().colors.border))
+      // Control frames share the status bar's eight-pixel chrome inset. The page
+      // content keeps its wider reading inset; applying that to buttons as well
+      // made their glyphs sit visibly farther inward than the chrome below.
+      .px(tokens.space(8))
+      .pt(tokens.space(6))
+      .pb(tokens.space(4))
+      .gap(tokens.space(4))
+      .children(
+        attachments.map((/** @type {any} */ attachment) =>
+          attachmentRow(attachment, model, cx),
+        ),
+      )
+      .child(
+        // The mode picker takes its own line when the two of them will not fit
+        // across the panel: a row of controls that overlaps another row of
+        // controls is worse than a taller toolbar.
+        h_flex()
+          .id("reader-toolbar")
+          .w_full()
+          .items_center()
+          .justify_between()
+          .flex_wrap()
+          .gap(tokens.space(4))
+          .child(messageActions(model, cx))
+          .child(viewTools(model, cx)),
+      )
+  );
 }
 
 /** @param {any} model @param {import("gpui").Context} cx */
@@ -931,7 +919,9 @@ export function renderReader(model, cx) {
     .min_h_0()
     .bg(cx.theme().colors.background)
     .child(readerHeader(model, cx))
-    .when(notices !== null, (reader) => reader.child(/** @type {any} */ (notices)))
+    .when(notices !== null, (reader) =>
+      reader.child(/** @type {any} */ (notices)),
+    )
     .child(
       // The headers are known and the body is not, which is every message being
       // opened for the first time. Over the body alone, so the sender and the

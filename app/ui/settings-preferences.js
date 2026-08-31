@@ -8,24 +8,25 @@
 // when the kit grows them this file can hand them over unchanged.
 
 import { div } from "gpui";
-import { Button, h_flex, v_flex } from "gpui-base";
+import { Button as BaseButton, h_flex, v_flex } from "gpui-base";
 import {
+  Button,
+  Label,
+  MutedText,
+  SectionLabel,
+  TextField,
   alpha,
-  button,
-  field,
-  glyphButton,
-  label,
-  muted,
-  sectionLabel,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
 
 /**
  * `remoteImages` → `remote-images`, so an id reads like the rest of them.
  * @param {string} value
  */
 export function kebab(value) {
-  return String(value).replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase();
 }
 
 /**
@@ -43,7 +44,14 @@ export function kebab(value) {
  * @param {import("gpui").Context} cx
  * @param {{disabled?: boolean}} [options]
  */
-export function toggleSwitch(id, checked, description, onToggle, cx, options = {}) {
+export function toggleSwitch(
+  id,
+  checked,
+  description,
+  onToggle,
+  cx,
+  options = {},
+) {
   const tokens = style();
   const state = tokens.state;
   const disabled = options.disabled === true;
@@ -60,7 +68,7 @@ export function toggleSwitch(id, checked, description, onToggle, cx, options = {
   // Pill on a rounded desktop, square on a sharp one — the switch follows
   // Hyprland's rounding the way every other corner in the window does.
   const round = tokens.cornerRadius > 0;
-  return Button.new(id)
+  return BaseButton.new(id)
     .role("switch")
     .disabled(disabled)
     .selected(checked)
@@ -140,7 +148,7 @@ export function numberField(id, model, onStep, cx) {
   /** @param {string} suffix @param {string} glyph @param {number} direction @param {boolean} stop */
   const stepper = (suffix, glyph, direction, stop) => {
     const stopped = disabled || stop;
-    return Button.new(`${id}-${suffix}`)
+    return BaseButton.new(`${id}-${suffix}`)
       .disabled(stopped)
       .accessibility_label(
         `${direction > 0 ? "Increase" : "Decrease"} ${model.label}`,
@@ -166,51 +174,57 @@ export function numberField(id, model, onStep, cx) {
       .when(stopped, (element) => element.opacity(0.4))
       .child(glyph);
   };
-  return v_flex()
-    .id(id)
-    .flex_none()
-    // `NumberField.qml` sets its own column spacing to `spacing.md`, which is
-    // wider than the gap a field and its caption take elsewhere in the kit.
-    .gap(tokens.spacing.md)
-    .when(disabled, (column) => column.opacity(0.4))
-    .when(Boolean(model.unit), (column) =>
-      column.child(muted(model.unit ?? "", cx).text_size(tokens.font.bodySmall)),
-    )
-    .child(
-      h_flex()
-        .id(`${id}-field`)
-        .role("spin_button")
-        .accessibility_label(model.label)
-        .items_center()
-        .w(tokens.spacing.numberFieldWidth)
-        .h(tokens.spacing.controlHeight)
-        // Padding on the reading side only: the stepper column is flush to the
-        // border, which is where a spin box puts it.
-        .pl(tokens.spacing.controlPaddingX)
-        .rounded(tokens.cornerRadius)
-        .border(state.normalBorderWidth)
-        .border_color(alpha(foreground, state.normalBorderAlpha))
-        .bg(alpha(foreground, state.normalFillAlpha))
-        .child(
-          // Centred, the way `NumberField.qml` aligns its TextInput. Right
-          // against the steppers it read as though the arrows belonged to the
-          // digits rather than to the box.
-          div()
-            .flex_1()
-            .min_w_0()
-            .text_center()
-            .text_size(tokens.font.body)
-            .text_color(foreground)
-            .child(String(model.value)),
-        )
-        .child(
-          v_flex()
-            .flex_none()
-            .items_center()
-            .child(stepper("increase", "▴", 1, model.value >= model.max))
-            .child(stepper("decrease", "▾", -1, model.value <= model.min)),
+  return (
+    v_flex()
+      .id(id)
+      .flex_none()
+      // `NumberField.qml` sets its own column spacing to `spacing.md`, which is
+      // wider than the gap a field and its caption take elsewhere in the kit.
+      .gap(tokens.spacing.md)
+      .when(disabled, (column) => column.opacity(0.4))
+      .when(Boolean(model.unit), (column) =>
+        column.child(
+          new MutedText(model.unit ?? "")
+            .build(cx)
+            .text_size(tokens.font.bodySmall),
         ),
-    );
+      )
+      .child(
+        h_flex()
+          .id(`${id}-field`)
+          .role("spin_button")
+          .accessibility_label(model.label)
+          .items_center()
+          .w(tokens.spacing.numberFieldWidth)
+          .h(tokens.spacing.controlHeight)
+          // Padding on the reading side only: the stepper column is flush to the
+          // border, which is where a spin box puts it.
+          .pl(tokens.spacing.controlPaddingX)
+          .rounded(tokens.cornerRadius)
+          .border(state.normalBorderWidth)
+          .border_color(alpha(foreground, state.normalBorderAlpha))
+          .bg(alpha(foreground, state.normalFillAlpha))
+          .child(
+            // Centred, the way `NumberField.qml` aligns its TextInput. Right
+            // against the steppers it read as though the arrows belonged to the
+            // digits rather than to the box.
+            div()
+              .flex_1()
+              .min_w_0()
+              .text_center()
+              .text_size(tokens.font.body)
+              .text_color(foreground)
+              .child(String(model.value)),
+          )
+          .child(
+            v_flex()
+              .flex_none()
+              .items_center()
+              .child(stepper("increase", "▴", 1, model.value >= model.max))
+              .child(stepper("decrease", "▾", -1, model.value <= model.min)),
+          ),
+      )
+  );
 }
 
 /**
@@ -235,18 +249,14 @@ export function choiceField(id, model, onSelect, cx) {
     .gap(tokens.spacing.xxs)
     .children(
       model.options.map((option) =>
-        button(
-          `${id}-${kebab(option.replace(/\s+/g, "-"))}`,
-          option,
-          (_event, eventCx) => onSelect(option, eventCx),
-          cx,
-          {
-            selected: option === model.value,
-            bordered: true,
-            disabled: model.disabled === true,
-            fontSize: tokens.font.bodySmall,
-          },
-        ),
+        new Button(`${id}-${kebab(option.replace(/\s+/g, "-"))}`)
+          .label(option)
+          .selected(option === model.value)
+          .bordered()
+          .disabled(model.disabled === true)
+          .size("small")
+          .onClick((_event, eventCx) => onSelect(option, eventCx))
+          .build(cx),
       ),
     );
 }
@@ -272,7 +282,9 @@ export function textField(id, model, cx) {
       .text_size(tokens.font.bodySmall)
       .text_color(cx.theme().colors.muted_foreground)
       .child(model.value || "—");
-  return field(model.state, cx)
+  return new TextField()
+    .state(model.state)
+    .build(cx)
     .id(id)
     .accessibility_label(model.label)
     .flex_none()
@@ -307,8 +319,12 @@ export function preferenceRow(id, entry, control, cx) {
         .flex_1()
         .min_w_0()
         .gap(tokens.spacing.xxs)
-        .child(label(entry.label, cx).text_size(tokens.font.bodySmall))
-        .child(muted(entry.detail, cx).text_size(tokens.font.caption)),
+        .child(
+          new Label(entry.label).build(cx).text_size(tokens.font.bodySmall),
+        )
+        .child(
+          new MutedText(entry.detail).build(cx).text_size(tokens.font.caption),
+        ),
     )
     .child(control);
 }
@@ -333,6 +349,6 @@ export function settingsSection(id, caption, rows, cx, options = {}) {
     .w_full()
     .min_w_0()
     .gap(options.gap ?? tokens.space(16))
-    .child(sectionLabel(caption, cx))
+    .child(new SectionLabel(caption.toUpperCase()).strong(false).build(cx))
     .children(rows.filter(Boolean));
 }

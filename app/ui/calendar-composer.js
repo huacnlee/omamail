@@ -4,15 +4,16 @@ import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import { recurrenceIntervalUnit } from "../calendar/Calendar.js";
 import {
-  button,
-  centeredWorkspace,
-  field,
-  iconTextButton,
-  pageColumn,
-  popupSurface,
-  sectionLabel,
+  Button,
+  CenteredWorkspace,
+  PageColumn,
+  PopupSurface,
+  SectionLabel,
+  TextField,
+  roles,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { iconTextButton } from "./controls.js";
 import { calendarRoles, slotColor } from "./calendar-palette.js";
 
 const FREQUENCIES = [
@@ -95,23 +96,17 @@ export function renderCalendarComposer(model, cx) {
       : "Create event";
   const interval = textOf(fields.interval) || "1";
 
-  const form = pageColumn("calendar-composer-column", cx, {
-    // `space(620)` is the form's own width in the QML, with the flickable's
-    // `space(18)` margin outside it; gpui counts padding inside a maximum
-    // width, so the margin is added back to land on the same column.
-    maxWidth: tokens.space(620) + tokens.spacing.panelPadding * 2,
-  })
+  const form = new PageColumn("calendar-composer-column")
+    .maxWidth(tokens.space(620) + tokens.spacing.panelPadding * 2)
+    .build(cx)
     .gap(tokens.space(10))
     .child(
       h_flex().child(
-        iconTextButton(
-          "calendar-composer-back",
-          "back",
-          "Calendar",
-          (_click, eventCx) => model.onCancel?.(_click, eventCx),
-          cx,
-          { tooltip: "Calendar · Esc", color: roles.dim },
-        ),
+        iconTextButton("calendar-composer-back", "back", "Calendar")
+          .tooltip("Calendar · Esc")
+          .tone(roles.dim)
+          .onClick((_click, eventCx) => model.onCancel?.(_click, eventCx))
+          .build(cx),
       ),
     )
     .child(
@@ -126,7 +121,7 @@ export function renderCalendarComposer(model, cx) {
   // the answer is grouped by the account that serves it: one address can hold
   // several calendars and several accounts can hold one name.
   if (!composer.editing && composer.sourceGroups.length > 0) {
-    form.child(sectionLabel("Calendar", cx));
+    form.child(new SectionLabel("CALENDAR").strong(false).build(cx));
     for (const [index, group] of composer.sourceGroups.entries()) {
       form.child(
         v_flex()
@@ -154,14 +149,17 @@ export function renderCalendarComposer(model, cx) {
                       `calendar-composer-source-${calendar.id}`,
                       "",
                       String(calendar.name || calendar.id || "Calendar"),
-                      (_click, eventCx) =>
+                    )
+                      .selected(
+                        composer.selectedSourceId === String(calendar.id),
+                      )
+                      .onClick((_click, eventCx) =>
                         model.onSource?.(String(calendar.id), eventCx),
-                      cx,
-                      {
-                        selected:
-                          composer.selectedSourceId === String(calendar.id),
-                      },
-                    ).border_color(slotColor(model.palette, calendar.colorKey, cx)),
+                      )
+                      .build(cx)
+                      .border_color(
+                        slotColor(model.palette, calendar.colorKey, cx),
+                      ),
                 ),
               ),
           ),
@@ -170,14 +168,21 @@ export function renderCalendarComposer(model, cx) {
   }
 
   if (fields.title)
-    form.child(field(fields.title, cx).accessibility_label("Event title"));
+    form.child(
+      new TextField()
+        .state(fields.title)
+        .build(cx)
+        .accessibility_label("Event title"),
+    );
 
   // An all-day event is edited as the days it spans; the time fields stand
   // down, because writing them back would turn it into a timed one.
   const dates = h_flex().id("calendar-composer-when").gap(tokens.space(8));
   if (fields.date)
     dates.child(
-      field(fields.date, cx)
+      new TextField()
+        .state(fields.date)
+        .build(cx)
         .flex_grow(2)
         .flex_basis(0)
         .min_w_0()
@@ -185,7 +190,9 @@ export function renderCalendarComposer(model, cx) {
     );
   if (composer.allDay && fields.endDate)
     dates.child(
-      field(fields.endDate, cx)
+      new TextField()
+        .state(fields.endDate)
+        .build(cx)
         .flex_grow(2)
         .flex_basis(0)
         .min_w_0()
@@ -193,7 +200,9 @@ export function renderCalendarComposer(model, cx) {
     );
   if (!composer.allDay && fields.start)
     dates.child(
-      field(fields.start, cx)
+      new TextField()
+        .state(fields.start)
+        .build(cx)
         .flex_grow(1)
         .flex_basis(0)
         .min_w_0()
@@ -201,7 +210,9 @@ export function renderCalendarComposer(model, cx) {
     );
   if (!composer.allDay && fields.end)
     dates.child(
-      field(fields.end, cx)
+      new TextField()
+        .state(fields.end)
+        .build(cx)
         .flex_grow(1)
         .flex_basis(0)
         .min_w_0()
@@ -211,9 +222,18 @@ export function renderCalendarComposer(model, cx) {
 
   if (fields.location)
     form.child(
-      field(fields.location, cx).accessibility_label("Location or meeting link"),
+      new TextField()
+        .state(fields.location)
+        .build(cx)
+        .accessibility_label("Location or meeting link"),
     );
-  if (fields.notes) form.child(field(fields.notes, cx).accessibility_label("Notes"));
+  if (fields.notes)
+    form.child(
+      new TextField()
+        .state(fields.notes)
+        .build(cx)
+        .accessibility_label("Notes"),
+    );
 
   if (!composer.editing) {
     form.child(
@@ -221,17 +241,20 @@ export function renderCalendarComposer(model, cx) {
         "calendar-composer-recurring",
         composer.recurring ? "check" : "",
         "Make recurring",
-        (_click, eventCx) => model.onToggleRecurring?.(_click, eventCx),
-        cx,
-        { selected: composer.recurring },
-      ).text_color(composer.recurring ? roles.text : roles.dim),
+      )
+        .selected(composer.recurring)
+        .onClick((_click, eventCx) =>
+          model.onToggleRecurring?.(_click, eventCx),
+        )
+        .build(cx)
+        .text_color(composer.recurring ? roles.text : roles.dim),
     );
     if (composer.recurring)
       form.child(
         v_flex()
           .id("calendar-composer-recurrence")
           .gap(tokens.space(8))
-          .child(sectionLabel("Repeats", cx))
+          .child(new SectionLabel("REPEATS").strong(false).build(cx))
           .child(
             h_flex()
               .flex_wrap()
@@ -242,13 +265,17 @@ export function renderCalendarComposer(model, cx) {
                     `calendar-composer-frequency-${entry.value}`,
                     "",
                     entry.label,
-                    (_click, eventCx) =>
+                  )
+                    .selected(composer.frequency === entry.value)
+                    .onClick((_click, eventCx) =>
                       model.onFrequency?.(entry.value, eventCx),
-                    cx,
-                    { selected: composer.frequency === entry.value },
-                  ).text_color(
-                    composer.frequency === entry.value ? roles.text : roles.dim,
-                  ),
+                    )
+                    .build(cx)
+                    .text_color(
+                      composer.frequency === entry.value
+                        ? roles.text
+                        : roles.dim,
+                    ),
                 ),
               ),
           )
@@ -272,7 +299,9 @@ export function renderCalendarComposer(model, cx) {
                       .gap(tokens.space(8))
                       .when(Boolean(fields.interval), (row) =>
                         row.child(
-                          field(fields.interval, cx)
+                          new TextField()
+                            .state(fields.interval)
+                            .build(cx)
                             .max_w(tokens.space(96))
                             .accessibility_label("Repeat interval"),
                         ),
@@ -283,7 +312,10 @@ export function renderCalendarComposer(model, cx) {
                           .text_size(tokens.font.body)
                           .text_color(roles.text)
                           .child(
-                            recurrenceIntervalUnit(composer.frequency, interval),
+                            recurrenceIntervalUnit(
+                              composer.frequency,
+                              interval,
+                            ),
                           ),
                       ),
                   ),
@@ -301,9 +333,10 @@ export function renderCalendarComposer(model, cx) {
                   )
                   .when(Boolean(fields.count), (column) =>
                     column.child(
-                      field(fields.count, cx).accessibility_label(
-                        "Occurrences",
-                      ),
+                      new TextField()
+                        .state(fields.count)
+                        .build(cx)
+                        .accessibility_label("Occurrences"),
                     ),
                   ),
               ),
@@ -326,22 +359,22 @@ export function renderCalendarComposer(model, cx) {
             : composer.busy
               ? "Creating"
               : "Create event",
-          (_click, eventCx) => model.onSave?.(_click, eventCx),
-          cx,
-          { disabled: composer.busy },
-        ),
+        )
+          .disabled(composer.busy)
+          .onClick((_click, eventCx) => model.onSave?.(_click, eventCx))
+          .build(cx),
       )
       .child(
         // Borderless and dim beside the write it stands next to, and the same
         // height as it: both are `IconTextButton`s in the QML, so a row of them
         // shares one baseline.
-        button(
-          "calendar-cancel",
-          "Cancel",
-          (_click, eventCx) => model.onCancel?.(_click, eventCx),
-          cx,
-          { fontSize: tokens.font.bodySmall, color: roles.dim },
-        ).h(tokens.spacing.controlHeight),
+        new Button("calendar-cancel")
+          .label("Cancel")
+          .tone(roles.dim)
+          .size("small")
+          .onClick((_click, eventCx) => model.onCancel?.(_click, eventCx))
+          .build(cx)
+          .h(tokens.spacing.controlHeight),
       ),
   );
 
@@ -359,7 +392,9 @@ export function renderCalendarComposer(model, cx) {
     .absolute()
     .inset_0()
     .bg(roles.background)
-    .child(centeredWorkspace("calendar-composer-page", form, cx));
+    .child(
+      new CenteredWorkspace("calendar-composer-page").content(form).build(cx),
+    );
 }
 
 /**
@@ -373,58 +408,61 @@ export function renderDeleteConfirmation(model, cx) {
   const roles = calendarRoles(cx);
   const request = model.confirm;
   if (!request) return null;
-  return h_flex()
-    .id("calendar-confirm")
-    .absolute()
-    .inset_0()
-    .items_center()
-    .justify_center()
-    // `min(space(360), parent.width - space(32))`, said as the room left
-    // around the card rather than as a width subtracted from the window.
-    .p(tokens.space(16))
-    // The dim behind a modal is the window's own ground turned up, so the
-    // dialog sits on the desktop's colours rather than on a grey nobody chose.
-    .bg(cx.theme().colors.background)
-    .child(
-      popupSurface("calendar-confirm-card", cx)
-        .w_full()
-        .max_w(tokens.space(360))
-        .gap(tokens.space(14))
-        .p(tokens.space(18))
-        .child(
-          div()
-            .text_size(tokens.font.heading)
-            .text_color(roles.text)
-            .font_bold()
-            .child(`Delete "${String(request.name || "")}"?`),
-        )
-        .child(
-          div()
-            .text_size(tokens.font.bodySmall)
-            .text_color(roles.dim)
-            .child(String(request.message || "")),
-        )
-        .child(
-          h_flex()
-            .justify_end()
-            .gap(tokens.space(8))
-            .child(
-              button(
-                "calendar-confirm-cancel",
-                "Cancel",
-                (_click, eventCx) => model.onCancelDelete?.(_click, eventCx),
-                cx,
+  return (
+    h_flex()
+      .id("calendar-confirm")
+      .absolute()
+      .inset_0()
+      .items_center()
+      .justify_center()
+      // `min(space(360), parent.width - space(32))`, said as the room left
+      // around the card rather than as a width subtracted from the window.
+      .p(tokens.space(16))
+      // The dim behind a modal is the window's own ground turned up, so the
+      // dialog sits on the desktop's colours rather than on a grey nobody chose.
+      .bg(cx.theme().colors.background)
+      .child(
+        new PopupSurface("calendar-confirm-card")
+          .build(cx)
+          .w_full()
+          .max_w(tokens.space(360))
+          .gap(tokens.space(14))
+          .p(tokens.space(18))
+          .child(
+            div()
+              .text_size(tokens.font.heading)
+              .text_color(roles.text)
+              .font_bold()
+              .child(`Delete "${String(request.name || "")}"?`),
+          )
+          .child(
+            div()
+              .text_size(tokens.font.bodySmall)
+              .text_color(roles.dim)
+              .child(String(request.message || "")),
+          )
+          .child(
+            h_flex()
+              .justify_end()
+              .gap(tokens.space(8))
+              .child(
+                new Button("calendar-confirm-cancel")
+                  .label("Cancel")
+                  .onClick((_click, eventCx) =>
+                    model.onCancelDelete?.(_click, eventCx),
+                  )
+                  .build(cx),
+              )
+              .child(
+                new Button("calendar-confirm-delete")
+                  .label("Delete")
+                  .danger()
+                  .onClick((_click, eventCx) =>
+                    model.onConfirmDelete?.(_click, eventCx),
+                  )
+                  .build(cx),
               ),
-            )
-            .child(
-              button(
-                "calendar-confirm-delete",
-                "Delete",
-                (_click, eventCx) => model.onConfirmDelete?.(_click, eventCx),
-                cx,
-                { variant: "danger" },
-              ),
-            ),
-        ),
-    );
+          ),
+      )
+  );
 }

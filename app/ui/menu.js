@@ -3,14 +3,14 @@
 import { div } from "gpui";
 import { Button, Popover, v_flex } from "gpui-base";
 import {
-  actionButton,
+  MenuItem,
+  MenuSeparator,
+  PopupSurface,
   alpha,
-  menuItem,
-  menuSeparator,
-  popupSurface,
   role,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { actionIcon } from "./controls.js";
 
 /**
  * Nothing painted. gpui's colour vocabulary is a theme token or a hex literal
@@ -99,18 +99,19 @@ export function renderAppMenu(model, cx) {
   const open = model.open === true;
   return Popover.new("app-menu")
     .open(open)
-    .on_open_change(
-      (/** @type {boolean} */ next, /** @type {any} */ eventCx) =>
-        model.onOpenChange?.(next, eventCx),
+    .on_open_change((/** @type {boolean} */ next, /** @type {any} */ eventCx) =>
+      model.onOpenChange?.(next, eventCx),
     )
     .trigger(
-      actionButton("app-menu-trigger", "menu", "Menu", () => {}, cx, {
-        selected: open,
-        color: cx.theme().colors.muted_foreground,
-      }),
+      actionIcon("app-menu-trigger", "menu", "Menu")
+        .selected(open)
+        .quiet()
+        .onClick(() => {})
+        .build(cx),
     )
     .content(
-      popupSurface("app-menu-surface", cx)
+      new PopupSurface("app-menu-surface")
+        .build(cx)
         .w(tokens.space(MENU_WIDTH))
         .children(
           // The rows, and where the keyboard is standing among them. `at` counts
@@ -119,23 +120,34 @@ export function renderAppMenu(model, cx) {
           (() => {
             let at = -1;
             return appMenuGroups(model).flatMap((group, index) => [
-              ...(index > 0 ? [menuSeparator(cx)] : []),
+              ...(index > 0 ? [new MenuSeparator().build(cx)] : []),
               ...group.map((row) => {
                 at += 1;
-                return menuItem(
-                  `app-menu-${row.id}`,
-                  row.caption,
-                  (/** @type {any} */ event, /** @type {any} */ eventCx) => {
-                    model.onOpenChange?.(false, eventCx);
-                    row.onActivate?.(event, eventCx);
-                  },
-                  cx,
-                  {
-                    disabled: row.disabled === true,
-                    dim: row.dim === true,
-                    cursor: open && at === Number(model.cursorIndex),
-                  },
-                ).w_full();
+                return (
+                  new MenuItem(`app-menu-${row.id}`)
+                    .label(row.caption)
+                    .disabled(row.disabled === true)
+                    // A row that leaves the application still belongs on the
+                    // menu, but it is not one of the verbs the menu is mostly
+                    // for. No token names that, so it is the caller's tone.
+                    .tone(
+                      row.dim === true
+                        ? cx.theme().colors.muted_foreground
+                        : undefined,
+                    )
+                    .selected(open && at === Number(model.cursorIndex))
+                    .onClick(
+                      (
+                        /** @type {any} */ event,
+                        /** @type {any} */ eventCx,
+                      ) => {
+                        model.onOpenChange?.(false, eventCx);
+                        row.onActivate?.(event, eventCx);
+                      },
+                    )
+                    .build(cx)
+                    .w_full()
+                );
               }),
             ]);
           })(),
@@ -157,17 +169,19 @@ export function renderAppMenu(model, cx) {
  * @param {import("gpui").Context} cx
  */
 export function renderAccountSwitcher(model, trigger, cx) {
-  return Popover.new("account-switcher")
-    .open(model.open === true)
-    // Pinned by its own bottom edge: the user bar sits at the foot of the
-    // window, so the card has to grow upward or it grows off the screen.
-    .anchor("bottom_left")
-    .on_open_change(
-      (/** @type {boolean} */ next, /** @type {any} */ eventCx) =>
-        model.onOpenChange?.(next, eventCx),
-    )
-    .trigger(trigger)
-    .content(renderAccountSwitcherCard(model, cx));
+  return (
+    Popover.new("account-switcher")
+      .open(model.open === true)
+      // Pinned by its own bottom edge: the user bar sits at the foot of the
+      // window, so the card has to grow upward or it grows off the screen.
+      .anchor("bottom_left")
+      .on_open_change(
+        (/** @type {boolean} */ next, /** @type {any} */ eventCx) =>
+          model.onOpenChange?.(next, eventCx),
+      )
+      .trigger(trigger)
+      .content(renderAccountSwitcherCard(model, cx))
+  );
 }
 
 /**
@@ -208,74 +222,76 @@ function switcherRow(account, hasCursor, onClick, cx) {
           : name !== "" && address.indexOf(name) !== 0
             ? name
             : "";
-  return Button.new(`account-switcher-${account.id}`)
-    .role("menu_item")
-    .selected(active)
-    .accessibility_label(detail === "" ? address : `${address}, ${detail}`)
-    .flex()
-    .items_center()
-    .w_full()
-    .flex_none()
-    .h(tokens.space(40))
-    .pl(tokens.space(8))
-    .pr(tokens.space(10))
-    .gap(tokens.space(9))
-    .rounded(tokens.cornerRadius)
-    .bg(active ? selectedFill : hasCursor ? hoverFill : NO_FILL)
-    // The border is reserved in both states and only recoloured, so landing on
-    // a row does not gain it a pixel a side and shove the card's rows along.
-    .border(tokens.state.normalBorderWidth)
-    .border_color(
-      hasCursor ? alpha(foreground, tokens.state.hoverBorderAlpha) : NO_FILL,
-    )
-    .hover((appearance) => appearance.bg(active ? selectedFill : hoverFill))
-    .on_click(onClick)
-    .child(
-      // An initial rather than a picture: Gmail's own avatar is behind an API
-      // this app does not ask permission for, and an address is always Latin
-      // script, so one letter is safe here in a way a label name is not.
-      div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(tokens.space(22))
-        .rounded_full()
-        .bg(selectedFill)
-        .text_size(tokens.font.caption)
-        .text_color(foreground)
-        .font_bold()
-        .child(address === "" ? "+" : address.charAt(0).toUpperCase()),
-    )
-    .child(
-      v_flex()
-        .flex_1()
-        .min_w_0()
-        .gap(tokens.space(1))
-        .child(
-          div()
-            .w_full()
-            .text_ellipsis_middle()
-            .text_size(tokens.font.bodySmall)
-            .text_color(foreground)
-            .when(active, (line) => line.font_bold())
-            .child(address === "" ? "New account" : address),
-        )
-        .when(detail !== "", (lines) =>
-          lines.child(
+  return (
+    Button.new(`account-switcher-${account.id}`)
+      .role("menu_item")
+      .selected(active)
+      .accessibility_label(detail === "" ? address : `${address}, ${detail}`)
+      .flex()
+      .items_center()
+      .w_full()
+      .flex_none()
+      .h(tokens.space(40))
+      .pl(tokens.space(8))
+      .pr(tokens.space(10))
+      .gap(tokens.space(9))
+      .rounded(tokens.cornerRadius)
+      .bg(active ? selectedFill : hasCursor ? hoverFill : NO_FILL)
+      // The border is reserved in both states and only recoloured, so landing on
+      // a row does not gain it a pixel a side and shove the card's rows along.
+      .border(tokens.state.normalBorderWidth)
+      .border_color(
+        hasCursor ? alpha(foreground, tokens.state.hoverBorderAlpha) : NO_FILL,
+      )
+      .hover((appearance) => appearance.bg(active ? selectedFill : hoverFill))
+      .on_click(onClick)
+      .child(
+        // An initial rather than a picture: Gmail's own avatar is behind an API
+        // this app does not ask permission for, and an address is always Latin
+        // script, so one letter is safe here in a way a label name is not.
+        div()
+          .flex()
+          .flex_none()
+          .items_center()
+          .justify_center()
+          .size(tokens.space(22))
+          .rounded_full()
+          .bg(selectedFill)
+          .text_size(tokens.font.caption)
+          .text_color(foreground)
+          .font_bold()
+          .child(address === "" ? "+" : address.charAt(0).toUpperCase()),
+      )
+      .child(
+        v_flex()
+          .flex_1()
+          .min_w_0()
+          .gap(tokens.space(1))
+          .child(
             div()
               .w_full()
-              .truncate()
-              .text_size(tokens.font.caption)
-              .text_color(
-                error !== ""
-                  ? role("urgent", cx.theme().colors.destructive)
-                  : cx.theme().colors.muted_foreground,
-              )
-              .child(detail),
+              .text_ellipsis_middle()
+              .text_size(tokens.font.bodySmall)
+              .text_color(foreground)
+              .when(active, (line) => line.font_bold())
+              .child(address === "" ? "New account" : address),
+          )
+          .when(detail !== "", (lines) =>
+            lines.child(
+              div()
+                .w_full()
+                .truncate()
+                .text_size(tokens.font.caption)
+                .text_color(
+                  error !== ""
+                    ? role("urgent", cx.theme().colors.destructive)
+                    : cx.theme().colors.muted_foreground,
+                )
+                .child(detail),
+            ),
           ),
-        ),
-    );
+      )
+  );
 }
 
 /**
@@ -307,7 +323,8 @@ export function renderAccountSwitcherCard(model, cx) {
         ]
       : []),
   ];
-  return popupSurface("account-switcher-surface", cx)
+  return new PopupSurface("account-switcher-surface")
+    .build(cx)
     .w(tokens.space(250))
     .children(
       accounts.map((/** @type {any} */ account, /** @type {number} */ index) =>
@@ -326,19 +343,18 @@ export function renderAccountSwitcherCard(model, cx) {
       ),
     )
     .when(tail.length > 0 && accounts.length > 0, (surface) =>
-      surface.child(menuSeparator(cx)),
+      surface.child(new MenuSeparator().build(cx)),
     )
     .children(
       tail.map((row) =>
-        menuItem(
-          `account-switcher-${row.id}`,
-          row.caption,
-          (/** @type {any} */ event, /** @type {any} */ eventCx) => {
+        new MenuItem(`account-switcher-${row.id}`)
+          .label(row.caption)
+          .onClick((/** @type {any} */ event, /** @type {any} */ eventCx) => {
             model.onOpenChange?.(false, eventCx);
             row.onActivate?.(event, eventCx);
-          },
-          cx,
-        ).w_full(),
+          })
+          .build(cx)
+          .w_full(),
       ),
     );
 }

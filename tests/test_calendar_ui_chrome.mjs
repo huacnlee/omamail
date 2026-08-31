@@ -4,7 +4,7 @@ import { monthDays, weekDays } from "../app/calendar/Calendar.js";
 import { renderCalendar } from "../app/ui/calendar.js";
 import { dateSummary } from "../app/ui/calendar-detail.js";
 import { renderSettings } from "../app/ui/settings.js";
-import { applyOmarchyStyle, style } from "../app/lib/omarchy-ui/style.js";
+import { applyOmarchyStyle, style } from "omarchy-ui";
 
 // The calendar's grids and the settings page, held to the measurements the QML
 // draws them at.

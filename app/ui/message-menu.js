@@ -2,12 +2,7 @@
 
 import { div } from "gpui";
 import { Popup } from "gpui-base";
-import {
-  menuItem,
-  menuSeparator,
-  popupSurface,
-  style,
-} from "../lib/omarchy-ui/index.js";
+import { MenuItem, MenuSeparator, PopupSurface, style } from "omarchy-ui";
 
 // The list's right-click menu, ported from `components/MessageMenu.qml`.
 //
@@ -218,26 +213,28 @@ export function renderMessageMenu(menu, cx) {
     if (entry.kind === "separator") {
       // `MenuSeparatorLine.qml`: a rule with `Style.space(7)` of its own around
       // it, so a group boundary costs the same whichever rows it falls between.
-      children.push(menuSeparator(cx));
+      children.push(new MenuSeparator().build(cx));
       continue;
     }
     const action = String(entry.action);
     children.push(
-      menuItem(
-        `message-menu-${entry.id}`,
-        String(entry.caption),
-        (event, eventCx) =>
+      new MenuItem(`message-menu-${entry.id}`)
+        .label(String(entry.caption))
+        .danger(entry.danger === true)
+        // A row that leaves the application still belongs on the menu, but it
+        // is not one of the verbs the menu is mostly for. No token names that,
+        // so it is the caller's tone.
+        .tone(
+          entry.dim === true ? cx.theme().colors.muted_foreground : undefined,
+        )
+        // Where the keyboard is standing. A menu row has one such state:
+        // nothing here is chosen, so the kit draws it at the pointer's own
+        // fill, the way `MenuActionRow.qml` does.
+        .selected(row === cursorIndex)
+        .onClick((event, eventCx) =>
           menu.onAction?.(action, menu.messageId, event, eventCx),
-        cx,
-        {
-          danger: entry.danger === true,
-          dim: entry.dim === true,
-          // Where the keyboard is standing, which `MenuActionRow.qml` draws at
-          // the hover fill rather than the heavier selected one: nothing in
-          // this menu is chosen, so there is no second state to outrank.
-          cursor: row === cursorIndex,
-        },
-      ),
+        )
+        .build(cx),
     );
   }
 
@@ -245,7 +242,8 @@ export function renderMessageMenu(menu, cx) {
   // `[popups]` in `shell.toml` typically points the border at the compositor's
   // own active-window colour, so a menu's edge matches the frame Hyprland draws
   // around the window it belongs to.
-  const card = popupSurface("message-menu-card", cx)
+  const card = new PopupSurface("message-menu-card")
+    .build(cx)
     .role("menu")
     .w(width)
     .on_mouse_down_out((event, eventCx) => menu.onDismiss?.(event, eventCx))

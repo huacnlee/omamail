@@ -2,14 +2,9 @@
 
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
-import {
-  actionButton,
-  alpha,
-  label,
-  muted,
-  style,
-} from "../lib/omarchy-ui/index.js";
+import { Label, MutedText, alpha, style } from "omarchy-ui";
 import { renderMessageMenu } from "./message-menu.js";
+import { actionIcon } from "./controls.js";
 
 // One message in the list, ported from `components/MessageRow.qml`. Unread is
 // carried by weight and by the dot on the left, never by colour alone — the
@@ -124,7 +119,8 @@ export function renderMessageRow(message, state, cx) {
         .items_baseline()
         .gap(tokens.space(8))
         .child(
-          label(message.subject, cx)
+          new Label(message.subject)
+            .build(cx)
             .id(`message-row-${message.id}-subject`)
             .flex_1()
             .min_w_0()
@@ -132,11 +128,15 @@ export function renderMessageRow(message, state, cx) {
             .when(message.unread, (text) => text.font_bold()),
         )
         .child(
-          muted(message.time, cx).flex_none().text_size(tokens.font.caption),
+          new MutedText(message.time)
+            .build(cx)
+            .flex_none()
+            .text_size(tokens.font.caption),
         ),
     )
     .child(
-      muted(message.sender, cx)
+      new MutedText(message.sender)
+        .build(cx)
         .id(`message-row-${message.id}-sender`)
         .min_w_0()
         .truncate()
@@ -144,7 +144,8 @@ export function renderMessageRow(message, state, cx) {
     )
     .when(message.snippet !== "", (column) =>
       column.child(
-        label(message.snippet, cx)
+        new Label(message.snippet)
+          .build(cx)
           .id(`message-row-${message.id}-snippet`)
           .min_w_0()
           .truncate()
@@ -166,11 +167,9 @@ export function renderMessageRow(message, state, cx) {
   // `IconButton { iconSize: Style.font.iconSmall; size: Style.space(24) }` in
   // the QML, which is a smaller glyph than the kit's default: these sit inside
   // a text row rather than in a toolbar, and at the icon size they would stand
-  // taller than the subject beside them.
-  const actionSize = {
-    iconSize: tokens.font.iconSmall,
-    size: tokens.space(24),
-  };
+  // taller than the subject beside them. That is the kit's small step exactly
+  // — `space(24)` at the small icon size — so the row asks for the step rather
+  // than for the two measurements.
   const actions = h_flex()
     .flex_none()
     .items_center()
@@ -178,112 +177,107 @@ export function renderMessageRow(message, state, cx) {
     .ml(tokens.space(8))
     .gap(tokens.space(1))
     .child(
-      actionButton(
+      // The star is the one row action whose lit state is a colour, so the
+      // accent is its tone rather than its hover: set, it stays lit; unset, it
+      // is quiet and arrives at that same accent under the pointer. The QML
+      // gives it `hoverColor: accentColor` where its neighbours take the
+      // foreground.
+      actionIcon(
         `message-star-${message.id}`,
         starred ? "star-filled" : "star",
         `${starred ? "Unstar" : "Star"} · s`,
-        rowAction(state.onStar, message.id),
-        cx,
-        {
-          ...actionSize,
-          color: starred ? colors.primary : colors.muted_foreground,
-          // The star is the one row action whose lit state is a colour, so
-          // coming forward under the pointer has to be that same colour: the
-          // QML gives it `hoverColor: accentColor` where its neighbours take
-          // the foreground.
-          hoverColor: colors.primary,
-        },
-      ),
+      )
+        .tone(colors.primary)
+        .quiet(!starred)
+        .size("small")
+        .onClick(rowAction(state.onStar, message.id))
+        .build(cx),
     )
     // No archive button where the account has nowhere to archive to. On IMAP
     // that is a move to a folder, and a server without one would have this
     // quietly do nothing.
     .when(hot && canArchive, (row) =>
       row.child(
-        actionButton(
-          `message-archive-${message.id}`,
-          "archive",
-          "Archive · e",
-          rowAction(state.onArchive, message.id),
-          cx,
-          { ...actionSize, color: colors.muted_foreground },
-        ),
+        actionIcon(`message-archive-${message.id}`, "archive", "Archive · e")
+          .quiet()
+          .size("small")
+          .onClick(rowAction(state.onArchive, message.id))
+          .build(cx),
       ),
     )
     .when(hot, (row) =>
       row.child(
-        actionButton(
-          `message-trash-${message.id}`,
-          "trash",
-          "Move to trash · d",
-          rowAction(state.onTrash, message.id),
-          cx,
-          { ...actionSize, color: colors.muted_foreground },
-        ),
+        actionIcon(`message-trash-${message.id}`, "trash", "Move to trash · d")
+          .quiet()
+          .size("small")
+          .onClick(rowAction(state.onTrash, message.id))
+          .build(cx),
       ),
     );
 
-  return h_flex()
-    .id(messageRowId(message, state))
-    .role("button")
-    .accessibility_label(
-      [
-        message.unread ? "Unread" : "",
-        starred ? "Starred" : "",
-        message.subject,
-        message.sender,
-        message.time,
-      ]
-        .filter(Boolean)
-        .join(", "),
-    )
-    .w_full()
-    .min_w_0()
-    .items_start()
-    // The row is the positioning parent its own context menu anchors into.
-    .relative()
-    // The QML row is its body plus 14, split evenly above and below. The 4 on
-    // the left is where the dot's column starts. On the right the QML anchors
-    // the text to the action row when there is one and to the row's own edge
-    // when there is not, at two different margins — 6 for the actions, 8 for
-    // the text — so the inset moves with what is actually standing there.
-    .py(tokens.space(7))
-    .pl(tokens.space(4))
-    .pr(tokens.space(showsActions ? 6 : 8))
-    .rounded(tokens.cornerRadius)
-    // `accent` and `muted` are the semantic theme's names for the shell's
-    // `selectedFillFor` and `hoverFillFor`: the same alphas over the same
-    // roles. An idle row is painted by nothing at all, so the list reads as one
-    // surface rather than as a stack of tiles.
-    .when(state.selected, (row) => row.bg(colors.accent))
-    .when(!state.selected && hot, (row) => row.bg(colors.muted))
-    .when(!state.selected, (row) =>
-      row.hover((appearance) => appearance.bg(colors.muted)),
-    )
-    .child(gutter)
-    .child(body)
-    .when(showsActions, (row) => row.child(actions))
-    .children(menu ? [menu] : [])
-    .on_click((event, eventCx) => state.onOpen?.(message.id, event, eventCx))
-    // Middle-click archives: the one triage action worth having without moving
-    // the pointer to a button.
-    .when(canArchive && Boolean(state.onArchive), (row) =>
-      row.on_mouse_down("middle", (event, eventCx) =>
-        state.onArchive?.(message.id, event, eventCx),
-      ),
-    )
-    .when(Boolean(state.onMenu), (row) =>
-      row.on_mouse_down("right", (event, eventCx) =>
-        state.onMenu?.(message.id, event, eventCx),
-      ),
-    )
-    // Hovering a row must not move the keyboard's cursor: letting hover write
-    // `cursorId` put the mouse and the keyboard in a fight the mouse won, since
-    // j scrolls the list and a row moving under a still pointer re-reports
-    // hover. This reports hover and nothing else.
-    .when(Boolean(state.onHover), (row) =>
-      row.on_hover((hovered, eventCx) =>
-        state.onHover?.(message.id, hovered, eventCx),
-      ),
-    );
+  return (
+    h_flex()
+      .id(messageRowId(message, state))
+      .role("button")
+      .accessibility_label(
+        [
+          message.unread ? "Unread" : "",
+          starred ? "Starred" : "",
+          message.subject,
+          message.sender,
+          message.time,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      )
+      .w_full()
+      .min_w_0()
+      .items_start()
+      // The row is the positioning parent its own context menu anchors into.
+      .relative()
+      // The QML row is its body plus 14, split evenly above and below. The 4 on
+      // the left is where the dot's column starts. On the right the QML anchors
+      // the text to the action row when there is one and to the row's own edge
+      // when there is not, at two different margins — 6 for the actions, 8 for
+      // the text — so the inset moves with what is actually standing there.
+      .py(tokens.space(7))
+      .pl(tokens.space(4))
+      .pr(tokens.space(showsActions ? 6 : 8))
+      .rounded(tokens.cornerRadius)
+      // `accent` and `muted` are the semantic theme's names for the shell's
+      // `selectedFillFor` and `hoverFillFor`: the same alphas over the same
+      // roles. An idle row is painted by nothing at all, so the list reads as one
+      // surface rather than as a stack of tiles.
+      .when(state.selected, (row) => row.bg(colors.accent))
+      .when(!state.selected && hot, (row) => row.bg(colors.muted))
+      .when(!state.selected, (row) =>
+        row.hover((appearance) => appearance.bg(colors.muted)),
+      )
+      .child(gutter)
+      .child(body)
+      .when(showsActions, (row) => row.child(actions))
+      .children(menu ? [menu] : [])
+      .on_click((event, eventCx) => state.onOpen?.(message.id, event, eventCx))
+      // Middle-click archives: the one triage action worth having without moving
+      // the pointer to a button.
+      .when(canArchive && Boolean(state.onArchive), (row) =>
+        row.on_mouse_down("middle", (event, eventCx) =>
+          state.onArchive?.(message.id, event, eventCx),
+        ),
+      )
+      .when(Boolean(state.onMenu), (row) =>
+        row.on_mouse_down("right", (event, eventCx) =>
+          state.onMenu?.(message.id, event, eventCx),
+        ),
+      )
+      // Hovering a row must not move the keyboard's cursor: letting hover write
+      // `cursorId` put the mouse and the keyboard in a fight the mouse won, since
+      // j scrolls the list and a row moving under a still pointer re-reports
+      // hover. This reports hover and nothing else.
+      .when(Boolean(state.onHover), (row) =>
+        row.on_hover((hovered, eventCx) =>
+          state.onHover?.(message.id, hovered, eventCx),
+        ),
+      )
+  );
 }

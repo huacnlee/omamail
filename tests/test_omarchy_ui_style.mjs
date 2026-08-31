@@ -11,7 +11,7 @@ import {
   parseShellToml,
   resolveSurfaceColor,
   style,
-} from "../app/lib/omarchy-ui/style.js";
+} from "omarchy-ui";
 
 // A trimmed shell.toml in the shape Omarchy actually ships: sections, quoted
 // strings, bare numbers, commented-out overrides, and a trailing comment on a

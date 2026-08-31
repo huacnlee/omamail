@@ -7,8 +7,8 @@ import {
   omarchyStatusColors,
   omarchyTheme,
   role,
-} from "../app/lib/omarchy-ui/theme.js";
-import { mix, omarchyStyle } from "../app/lib/omarchy-ui/style.js";
+} from "omarchy-ui";
+import { mix, omarchyStyle } from "omarchy-ui";
 
 const source = `
 mode = "light"

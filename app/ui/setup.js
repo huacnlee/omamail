@@ -19,19 +19,18 @@
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
 import {
-  actionButton,
+  Button,
+  CenteredWorkspace,
+  Label,
+  MutedText,
+  PageColumn,
+  Separator,
+  TextField,
   alpha,
-  button,
-  centeredWorkspace,
-  field,
-  label,
-  muted,
-  pageColumn,
-  separator,
   style,
-} from "../lib/omarchy-ui/index.js";
+} from "omarchy-ui";
+import { icon, iconAsset } from "./icons.js";
 import { imapSuggestion } from "../setup/controller.js";
-import { icon } from "./icons.js";
 import {
   linkLabel,
   pageHeading,
@@ -39,6 +38,7 @@ import {
   providerPicker,
   providerRecord,
 } from "./setup-provider.js";
+import { actionIcon } from "./controls.js";
 
 const BUSY_PHASES = ["authenticating", "verifying", "committing"];
 // The one line somebody has to run to get the HEY CLI. Written out rather than
@@ -143,7 +143,8 @@ function step(model, body, cx) {
         .min_w_0()
         .gap(tokens.spacing.controlGap)
         .child(
-          label(done && model.summary ? model.summary : model.title, cx)
+          new Label(done && model.summary ? model.summary : model.title)
+            .build(cx)
             .text_size(tokens.font.bodySmall)
             .truncate()
             .when(!done, (line) => line.font_bold())
@@ -166,13 +167,15 @@ function step(model, body, cx) {
  */
 function disclosure(id, caption, open, onToggle, cx) {
   const tokens = style();
-  return button(id, caption, onToggle ?? (() => {}), cx, {
-    iconName: open ? "chevronDown" : "chevronRight",
-    fontSize: tokens.font.caption,
-    color: cx.theme().colors.muted_foreground,
-    bordered: true,
-    disabled: typeof onToggle !== "function",
-  })
+  return new Button(id)
+    .label(caption)
+    .icon(iconAsset(open ? "chevronDown" : "chevronRight"))
+    .tone(cx.theme().colors.muted_foreground)
+    .bordered()
+    .disabled(typeof onToggle !== "function")
+    .size("xsmall")
+    .onClick(onToggle ?? (() => {}))
+    .build(cx)
     .role("disclosure_triangle")
     .flex_none()
     .self_start()
@@ -190,11 +193,13 @@ function disclosure(id, caption, open, onToggle, cx) {
  */
 function proseDisclosure(id, caption, onToggle, cx) {
   const tokens = style();
-  return button(id, caption, onToggle ?? (() => {}), cx, {
-    fontSize: tokens.font.caption,
-    color: cx.theme().colors.muted_foreground,
-    disabled: typeof onToggle !== "function",
-  })
+  return new Button(id)
+    .label(caption)
+    .tone(cx.theme().colors.muted_foreground)
+    .disabled(typeof onToggle !== "function")
+    .size("xsmall")
+    .onClick(onToggle ?? (() => {}))
+    .build(cx)
     .role("disclosure_triangle")
     .flex_none()
     .self_start()
@@ -206,13 +211,15 @@ function proseDisclosure(id, caption, onToggle, cx) {
 function textInput(state, id, description, cx) {
   const tokens = style();
   return state
-    ? field(state, cx)
+    ? new TextField()
+        .state(state)
+        .build(cx)
         .id(id)
         .accessibility_label(description)
         // `TextField` on every setup page is `Style.font.bodySmall`; the kit's
         // own default is body, which is a size the QML never draws a form at.
         .text_size(tokens.font.bodySmall)
-    : muted(`${description} is unavailable`, cx).id(id);
+    : new MutedText(`${description} is unavailable`).build(cx).id(id);
 }
 
 /**
@@ -233,39 +240,41 @@ function maskedField(id, state, description, reveal, cx) {
   const extent = tokens.space(22);
   const inset = tokens.space(4);
   const room = tokens.spacing.controlPaddingX + tokens.space(26);
-  const offered =
-    typeof reveal.onReveal === "function" && textOf(state) !== "";
-  return div()
-    .id(id)
-    .relative()
-    .w_full()
-    .min_w_0()
-    // The role goes on the wrapper, not on the `Input`: base's Input owns its
-    // own focus and accessibility, and refuses one with a warning.
-    .role("password_input")
-    .child(textInput(state, `${id}-field`, description, cx).pr(room))
-    .when(offered, (row) =>
-      row.child(
-        actionButton(
-          `${id}-reveal`,
-          reveal.visible ? "eyeOff" : "eye",
-          reveal.visible ? reveal.hide : reveal.show,
-          (_event, eventCx) => reveal.onReveal?.(!reveal.visible, eventCx),
-          cx,
-          {
-            selected: reveal.visible,
-            color: cx.theme().colors.muted_foreground,
-            size: extent,
-            iconSize: tokens.font.iconSmall,
-          },
-        )
-          .absolute()
-          .right(inset)
-          // `anchors.verticalCenter` against a field of the kit's control
-          // height: the difference, halved.
-          .top(Math.round((tokens.spacing.controlHeight - extent) / 2)),
-      ),
-    );
+  const offered = typeof reveal.onReveal === "function" && textOf(state) !== "";
+  return (
+    div()
+      .id(id)
+      .relative()
+      .w_full()
+      .min_w_0()
+      // The role goes on the wrapper, not on the `Input`: base's Input owns its
+      // own focus and accessibility, and refuses one with a warning.
+      .role("password_input")
+      .child(textInput(state, `${id}-field`, description, cx).pr(room))
+      .when(offered, (row) =>
+        row.child(
+          actionIcon(
+            `${id}-reveal`,
+            reveal.visible ? "eyeOff" : "eye",
+            reveal.visible ? reveal.hide : reveal.show,
+          )
+            .quiet()
+            .selected(reveal.visible)
+            .size("small")
+            .onClick((_event, eventCx) =>
+              reveal.onReveal?.(!reveal.visible, eventCx),
+            )
+            .build(cx)
+            // Narrower than the small step, because it sits inside the field.
+            .size(extent)
+            .absolute()
+            .right(inset)
+            // `anchors.verticalCenter` against a field of the kit's control
+            // height: the difference, halved.
+            .top(Math.round((tokens.spacing.controlHeight - extent) / 2)),
+        ),
+      )
+  );
 }
 
 /**
@@ -311,17 +320,13 @@ function clientForm(model, cx) {
     )
     .when(typeof save === "function", (column) =>
       column.child(
-        button(
-          "setup-gmail-client-save",
-          client.busy === true ? "Saving..." : "Save client",
-          save,
-          cx,
-          {
-            bordered: true,
-            fontSize: tokens.font.bodySmall,
-            disabled: client.busy === true,
-          },
-        )
+        new Button("setup-gmail-client-save")
+          .label(client.busy === true ? "Saving..." : "Save client")
+          .bordered()
+          .disabled(client.busy === true)
+          .size("small")
+          .onClick(save)
+          .build(cx)
           .flex_none()
           .self_start(),
       ),
@@ -354,14 +359,17 @@ function gmailForm(model, cx) {
    */
   const openButton = (id, caption, target, options = {}) =>
     typeof open === "function"
-      ? button(id, caption, (_event, eventCx) => open(target, eventCx), cx, {
-          bordered: options.bordered ?? true,
-          fontSize: tokens.font.bodySmall,
-          color:
+      ? new Button(id)
+          .label(caption)
+          .bordered(options.bordered ?? true)
+          .tone(
             options.bordered === false
               ? cx.theme().colors.muted_foreground
               : undefined,
-        })
+          )
+          .size("small")
+          .onClick((_event, eventCx) => open(target, eventCx))
+          .build(cx)
       : null;
 
   const clientBody = v_flex()
@@ -370,10 +378,11 @@ function gmailForm(model, cx) {
     .min_w_0()
     .gap(tokens.spacing.xl)
     .child(
-      muted(
+      new MutedText(
         "Create an OAuth client with application type Desktop app, and enable the Gmail API on the same project.",
-        cx,
-      ).text_size(tokens.font.caption),
+      )
+        .build(cx)
+        .text_size(tokens.font.caption),
     )
     .child(
       h_flex()
@@ -406,10 +415,11 @@ function gmailForm(model, cx) {
       // The one piece of the walkthrough that cannot be hidden: a project left
       // in Testing is issued seven-day refresh tokens, so Google would sign the
       // user out every week. It belongs beside the button it affects.
-      muted(
+      new MutedText(
         'Press "Publish app" on your project first, or Google expires the session every seven days. An "unverified app" warning is expected — you are the developer.',
-        cx,
-      ).text_size(tokens.font.caption),
+      )
+        .build(cx)
+        .text_size(tokens.font.caption),
     )
     .child(
       h_flex()
@@ -417,17 +427,13 @@ function gmailForm(model, cx) {
         .gap(tokens.spacing.controlGap)
         .children(
           /** @type {any[]} */ ([
-            button(
-              "setup-submit",
-              busy ? "Signing in" : "Sign in with Google...",
-              model.onSubmit ?? (() => {}),
-              cx,
-              {
-                bordered: true,
-                fontSize: tokens.font.bodySmall,
-                disabled: busy || typeof model.onSubmit !== "function",
-              },
-            ),
+            new Button("setup-submit")
+              .label(busy ? "Signing in" : "Sign in with Google...")
+              .bordered()
+              .disabled(busy || typeof model.onSubmit !== "function")
+              .size("small")
+              .onClick(model.onSubmit ?? (() => {}))
+              .build(cx),
             openButton(
               "setup-gmail-consent",
               "Consent screen...",
@@ -435,10 +441,12 @@ function gmailForm(model, cx) {
               { bordered: false },
             ),
             phase === "authenticating" && typeof model.onPoll === "function"
-              ? button("setup-poll", "Check status", model.onPoll, cx, {
-                  fontSize: tokens.font.bodySmall,
-                  color: cx.theme().colors.muted_foreground,
-                })
+              ? new Button("setup-poll")
+                  .label("Check status")
+                  .tone(cx.theme().colors.muted_foreground)
+                  .size("small")
+                  .onClick(model.onPoll)
+                  .build(cx)
               : null,
           ]).filter(Boolean),
         ),
@@ -450,10 +458,9 @@ function gmailForm(model, cx) {
           v_flex()
             .gap(tokens.spacing.xs)
             .child(
-              muted(
-                "If the browser did not open, this is the address:",
-                cx,
-              ).text_size(tokens.font.caption),
+              new MutedText("If the browser did not open, this is the address:")
+                .build(cx)
+                .text_size(tokens.font.caption),
             )
             .child(
               // Clickable, not just readable. There is no selectable text in
@@ -480,91 +487,90 @@ function gmailForm(model, cx) {
       ),
     );
 
-  return v_flex()
-    .id("setup-gmail-form")
-    .role("form")
-    .w_full()
-    .min_w_0()
-    .gap(tokens.space(16))
-    .child(
-      step(
-        {
-          id: "setup-gmail-step-client",
-          number: "1",
-          title: "Create a client in Google Cloud",
-          done: configured,
-          summary: `Client connected · ${client.description || "Google OAuth client"}`,
-          // `reopenable`: the one step somebody comes back to, so it keeps a
-          // way back in rather than being sealed by its own success.
-          aside:
-            typeof model.onReopenClient === "function"
-              ? button(
-                  "setup-gmail-client-change",
-                  "Change...",
-                  model.onReopenClient,
-                  cx,
-                  {
-                    fontSize: tokens.font.caption,
-                    color: cx.theme().colors.muted_foreground,
-                  },
-                ).flex_none()
-              : null,
-        },
-        clientBody,
-        cx,
-      ),
-    )
-    .child(
-      step(
-        {
-          id: "setup-gmail-step-signin",
-          number: "2",
-          title: "Sign in",
-          done: phase === "ready",
-          waiting: !configured,
-          summary: model.commitIntent?.account?.email
-            ? `Signed in as ${model.commitIntent.account.email}`
-            : "Signed in",
-        },
-        signInBody,
-        cx,
-      ),
-    )
-    // Whatever went wrong. Without this a rejected client ID looks exactly like
-    // a button that does nothing — the status line carries it too, but that
-    // line is one truncated caption at the foot of the window, and a sign-in
-    // that stopped is read where the user was looking.
-    .when(Boolean(failure), (column) =>
-      column.child(
-        div()
-          .id("setup-gmail-error")
-          .role("alert")
-          .w_full()
-          .min_w_0()
-          .text_size(tokens.font.caption)
-          .text_color(cx.theme().colors.destructive)
-          .child(failure),
-      ),
-    )
-    .child(separator(cx))
-    .child(
-      proseDisclosure(
-        "setup-gmail-detail-toggle",
-        model.detailVisible ? "Hide the details" : "Need more detail?",
-        model.onDetail,
-        cx,
-      ),
-    )
-    .when(model.detailVisible === true, (column) =>
-      column.child(
-        muted(
-          "In Google Cloud, pick or create a project. Under APIs and Services, enable the Gmail API. On the consent screen add the Gmail address you want to read as a test user, then press Publish app. Under Credentials, create an OAuth client with application type Desktop app, and paste its client ID above.\n\nThe client is saved to a file readable only by you, never to application state and never to this window. You can also copy the JSON the console downloads to that path instead of pasting.\n\nThe refresh token goes to GNOME Keyring; the access token never leaves memory.",
+  return (
+    v_flex()
+      .id("setup-gmail-form")
+      .role("form")
+      .w_full()
+      .min_w_0()
+      .gap(tokens.space(16))
+      .child(
+        step(
+          {
+            id: "setup-gmail-step-client",
+            number: "1",
+            title: "Create a client in Google Cloud",
+            done: configured,
+            summary: `Client connected · ${client.description || "Google OAuth client"}`,
+            // `reopenable`: the one step somebody comes back to, so it keeps a
+            // way back in rather than being sealed by its own success.
+            aside:
+              typeof model.onReopenClient === "function"
+                ? new Button("setup-gmail-client-change")
+                    .label("Change...")
+                    .tone(cx.theme().colors.muted_foreground)
+                    .size("xsmall")
+                    .onClick(model.onReopenClient)
+                    .build(cx)
+                    .flex_none()
+                : null,
+          },
+          clientBody,
           cx,
-        )
-          .id("setup-gmail-detail")
-          .text_size(tokens.font.caption),
-      ),
-    );
+        ),
+      )
+      .child(
+        step(
+          {
+            id: "setup-gmail-step-signin",
+            number: "2",
+            title: "Sign in",
+            done: phase === "ready",
+            waiting: !configured,
+            summary: model.commitIntent?.account?.email
+              ? `Signed in as ${model.commitIntent.account.email}`
+              : "Signed in",
+          },
+          signInBody,
+          cx,
+        ),
+      )
+      // Whatever went wrong. Without this a rejected client ID looks exactly like
+      // a button that does nothing — the status line carries it too, but that
+      // line is one truncated caption at the foot of the window, and a sign-in
+      // that stopped is read where the user was looking.
+      .when(Boolean(failure), (column) =>
+        column.child(
+          div()
+            .id("setup-gmail-error")
+            .role("alert")
+            .w_full()
+            .min_w_0()
+            .text_size(tokens.font.caption)
+            .text_color(cx.theme().colors.destructive)
+            .child(failure),
+        ),
+      )
+      .child(new Separator().build(cx))
+      .child(
+        proseDisclosure(
+          "setup-gmail-detail-toggle",
+          model.detailVisible ? "Hide the details" : "Need more detail?",
+          model.onDetail,
+          cx,
+        ),
+      )
+      .when(model.detailVisible === true, (column) =>
+        column.child(
+          new MutedText(
+            "In Google Cloud, pick or create a project. Under APIs and Services, enable the Gmail API. On the consent screen add the Gmail address you want to read as a test user, then press Publish app. Under Credentials, create an OAuth client with application type Desktop app, and paste its client ID above.\n\nThe client is saved to a file readable only by you, never to application state and never to this window. You can also copy the JSON the console downloads to that path instead of pasting.\n\nThe refresh token goes to GNOME Keyring; the access token never leaves memory.",
+          )
+            .build(cx)
+            .id("setup-gmail-detail")
+            .text_size(tokens.font.caption),
+        ),
+      )
+  );
 }
 
 /** @param {any} model @param {any} actions @param {import("gpui").Context} cx */
@@ -599,11 +605,19 @@ function imapForm(model, actions, cx) {
         .min_w_0()
         .gap(tokens.spacing.xl)
         .child(
-          textInput(model.fields?.email, "setup-field-email", "Email address", cx),
+          textInput(
+            model.fields?.email,
+            "setup-field-email",
+            "Email address",
+            cx,
+          ),
         )
         .when(Boolean(note), (form) =>
           form.child(
-            muted(note, cx).id("setup-imap-note").text_size(tokens.font.caption),
+            new MutedText(note)
+              .build(cx)
+              .id("setup-imap-note")
+              .text_size(tokens.font.caption),
           ),
         )
         .child(
@@ -715,27 +729,28 @@ function imapForm(model, actions, cx) {
             // one control the page adds sits above the sentence that explains
             // it rather than in place of it.
             .child(
-              button(
-                "setup-tls",
-                model.insecure ? "Plain text · loopback only" : "TLS required",
-                model.onTls ?? (() => {}),
-                cx,
-                {
-                  bordered: true,
-                  selected: model.insecure !== true,
-                  fontSize: tokens.font.bodySmall,
-                  disabled:
-                    typeof model.onTls !== "function" || model.busy === true,
-                },
-              )
+              new Button("setup-tls")
+                .label(
+                  model.insecure
+                    ? "Plain text · loopback only"
+                    : "TLS required",
+                )
+                .bordered()
+                .selected(model.insecure !== true)
+                .disabled(
+                  typeof model.onTls !== "function" || model.busy === true,
+                )
+                .size("small")
+                .onClick(model.onTls ?? (() => {}))
+                .build(cx)
                 .flex_none()
                 .self_start(),
             )
             .child(
-              muted(
+              new MutedText(
                 "Connections are TLS on the port given. Plain text is refused unless the server is on this machine.",
-                cx,
               )
+                .build(cx)
                 .id("setup-imap-tls-note")
                 .text_size(tokens.font.caption),
             ),
@@ -797,7 +812,9 @@ function heyForm(model, actions, cx) {
               ),
           )
           .child(
-            muted("Run this in a terminal:", cx).text_size(tokens.font.caption),
+            new MutedText("Run this in a terminal:")
+              .build(cx)
+              .text_size(tokens.font.caption),
           )
           .child(
             notice(
@@ -807,10 +824,11 @@ function heyForm(model, actions, cx) {
             ),
           )
           .child(
-            muted(
+            new MutedText(
               "Recent versions of Omarchy install it for you — omarchy-mise-install github:basecamp/hey-cli hey does the same thing. Either way it lands in ~/.local/bin.",
-              cx,
-            ).text_size(tokens.font.caption),
+            )
+              .build(cx)
+              .text_size(tokens.font.caption),
           ),
       ),
     )
@@ -822,15 +840,17 @@ function heyForm(model, actions, cx) {
           .min_w_0()
           .gap(tokens.spacing.xl)
           .child(
-            label("Sign in to HEY", cx)
+            new Label("Sign in to HEY")
+              .build(cx)
               .text_size(tokens.font.bodySmall)
               .font_bold(),
           )
           .child(
-            muted(
+            new MutedText(
               "This opens HEY in your browser. The token comes back to the HEY CLI, which keeps it in your keyring and refreshes it — Omamail never holds it and never asks for your HEY password.",
-              cx,
-            ).text_size(tokens.font.caption),
+            )
+              .build(cx)
+              .text_size(tokens.font.caption),
           )
           .child(
             h_flex()
@@ -838,23 +858,23 @@ function heyForm(model, actions, cx) {
               .gap(tokens.spacing.controlGap)
               .children(
                 /** @type {any[]} */ ([
-                  button(
-                    "setup-submit",
-                    busy ? "Waiting for the browser" : "Sign in to HEY...",
-                    model.onSubmit ?? (() => {}),
-                    cx,
-                    {
-                      bordered: true,
-                      fontSize: tokens.font.bodySmall,
-                      disabled: busy || typeof model.onSubmit !== "function",
-                    },
-                  ),
+                  new Button("setup-submit")
+                    .label(
+                      busy ? "Waiting for the browser" : "Sign in to HEY...",
+                    )
+                    .bordered()
+                    .disabled(busy || typeof model.onSubmit !== "function")
+                    .size("small")
+                    .onClick(model.onSubmit ?? (() => {}))
+                    .build(cx),
                   phase === "authenticating" &&
                   typeof model.onPoll === "function"
-                    ? button("setup-poll", "Check status", model.onPoll, cx, {
-                        fontSize: tokens.font.bodySmall,
-                        color: cx.theme().colors.muted_foreground,
-                      })
+                    ? new Button("setup-poll")
+                        .label("Check status")
+                        .tone(cx.theme().colors.muted_foreground)
+                        .size("small")
+                        .onClick(model.onPoll)
+                        .build(cx)
                     : null,
                 ]).filter(Boolean),
               ),
@@ -869,17 +889,19 @@ function heyForm(model, actions, cx) {
           .min_w_0()
           .gap(tokens.spacing.labelGap)
           .child(
-            label("Connected", cx)
+            new Label("Connected")
+              .build(cx)
               .text_size(tokens.font.bodySmall)
               .font_bold(),
           )
           .child(
-            muted(
+            new MutedText(
               model.commitIntent?.account?.email
                 ? `${model.commitIntent.account.email} — signed in through the HEY CLI.`
                 : "Signed in through the HEY CLI.",
-              cx,
-            ).text_size(tokens.font.caption),
+            )
+              .build(cx)
+              .text_size(tokens.font.caption),
           ),
       ),
     )
@@ -893,25 +915,27 @@ function heyForm(model, actions, cx) {
         .min_w_0()
         .gap(tokens.spacing.labelGap)
         .child(
-          label("What is different about HEY", cx)
+          new Label("What is different about HEY")
+            .build(cx)
             .text_size(tokens.font.caption)
             .font_bold(),
         )
         .child(
-          muted(
+          new MutedText(
             "No star and no archive — HEY has neither. A thread is moved to Set Aside, Reply Later or Paper Trail instead, and those are mailboxes in the rail. No Sent either: the HEY CLI does not serve one yet. Reading, marking read, replying, searching, labels and reporting spam all work. A row here is one conversation rather than one message, and attachments and the Screener stay in HEY's own app.",
-            cx,
-          ).text_size(tokens.font.caption),
+          )
+            .build(cx)
+            .text_size(tokens.font.caption),
         ),
     )
     .children(/** @type {any[]} */ ([actions]).filter(Boolean))
     .child(
       // The sign-out above is `hey`'s own, because the token is `hey`'s. Said
       // next to the button rather than after it has been pressed.
-      muted(
+      new MutedText(
         "Signing out signs the HEY CLI out, so anything else on this machine that uses it — the HEY terminal app, the bar plugin — is signed out too.",
-        cx,
       )
+        .build(cx)
         .id("setup-hey-logout-note")
         .text_size(tokens.font.caption),
     );
@@ -927,20 +951,18 @@ function accountChooser(model, cx) {
     .min_w_0()
     .gap(tokens.spacing.lg)
     .child(
-      muted(
-        "This sign-in serves more than one mailbox. Which one?",
-        cx,
-      ).text_size(tokens.font.caption),
+      new MutedText("This sign-in serves more than one mailbox. Which one?")
+        .build(cx)
+        .text_size(tokens.font.caption),
     )
     .children(
       (model.accounts || []).map((/** @type {any} */ account) =>
-        button(
-          `setup-account-${account.id}`,
-          account.label || account.email,
-          (_event, eventCx) => model.onAccount?.(account.id, eventCx),
-          cx,
-          { bordered: true, fontSize: tokens.font.bodySmall },
-        )
+        new Button(`setup-account-${account.id}`)
+          .label(account.label || account.email)
+          .bordered()
+          .size("small")
+          .onClick((_event, eventCx) => model.onAccount?.(account.id, eventCx))
+          .build(cx)
           .w_full()
           .justify_start(),
       ),
@@ -958,7 +980,8 @@ function providerForm(model, actions, cx) {
 export function renderSetupForm(model, cx) {
   const tokens = style();
   const provider = providerRecord(model);
-  const column = pageColumn("setup-column", cx)
+  const column = new PageColumn("setup-column")
+    .build(cx)
     // `spacing: Style.space(16)` on all three pages. The kit's panel gap is
     // fourteen, which is the density a settings panel wants and not the one a
     // walkthrough does.
@@ -971,19 +994,16 @@ export function renderSetupForm(model, cx) {
       (page) =>
         page.child(
           h_flex().child(
-            button(
-              "setup-back",
-              "Back",
-              (event, eventCx) => model.onCancel(event, eventCx),
-              cx,
-              {
-                iconName: "back",
-                bordered: true,
-                fontSize: tokens.font.bodySmall,
-                color: cx.theme().colors.muted_foreground,
-                tooltip: "Back · Esc",
-              },
-            ).h(tokens.spacing.controlHeight),
+            new Button("setup-back")
+              .label("Back")
+              .icon(iconAsset("back"))
+              .bordered()
+              .tone(cx.theme().colors.muted_foreground)
+              .tooltip("Back · Esc")
+              .size("small")
+              .onClick((event, eventCx) => model.onCancel(event, eventCx))
+              .build(cx)
+              .h(tokens.spacing.controlHeight),
           ),
         ),
     );
@@ -991,7 +1011,12 @@ export function renderSetupForm(model, cx) {
   if (!model.provider)
     column
       .child(
-        pageHeading("setup-chooser-heading", "Add a mailbox", "Which kind?", cx),
+        pageHeading(
+          "setup-chooser-heading",
+          "Add a mailbox",
+          "Which kind?",
+          cx,
+        ),
       )
       .child(providerPicker(model, cx));
   // IMAP is a protocol rather than a service, so its page opens with a plain
@@ -1057,16 +1082,16 @@ export function renderSetupForm(model, cx) {
     .min_h_0()
     .bg(cx.theme().colors.background)
     .child(
-      centeredWorkspace(
-        "setup-scroll",
-        h_flex()
-          .id("setup-workspace")
-          .w_full()
-          .min_w_0()
-          .justify_center()
-          .child(column),
-        cx,
-      ),
+      new CenteredWorkspace("setup-scroll")
+        .content(
+          h_flex()
+            .id("setup-workspace")
+            .w_full()
+            .min_w_0()
+            .justify_center()
+            .child(column),
+        )
+        .build(cx),
     );
 }
 
@@ -1121,26 +1146,24 @@ export function setupActions(model, cx) {
       textOf(model.fields?.email).trim() !== "" &&
       textOf(model.fields?.password) !== "";
     row.child(
-      button(
-        "setup-submit",
-        busy ? "Checking" : "Connect the mailbox",
-        model.onSubmit ?? (() => {}),
-        cx,
-        {
-          bordered: true,
-          fontSize: tokens.font.bodySmall,
-          disabled: busy || !ready || typeof model.onSubmit !== "function",
-        },
-      ),
+      new Button("setup-submit")
+        .label(busy ? "Checking" : "Connect the mailbox")
+        .bordered()
+        .disabled(busy || !ready || typeof model.onSubmit !== "function")
+        .size("small")
+        .onClick(model.onSubmit ?? (() => {}))
+        .build(cx),
     );
   }
   if (model.provider === "hey" && typeof model.onLogout === "function")
     row.child(
-      button("setup-logout", "Sign out of HEY", model.onLogout, cx, {
-        bordered: true,
-        fontSize: tokens.font.bodySmall,
-        disabled: busy,
-      }),
+      new Button("setup-logout")
+        .label("Sign out of HEY")
+        .bordered()
+        .disabled(busy)
+        .size("small")
+        .onClick(model.onLogout)
+        .build(cx),
     );
   return row;
 }

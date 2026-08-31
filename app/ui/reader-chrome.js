@@ -7,7 +7,7 @@
 
 import { div } from "gpui";
 import { h_flex, v_flex } from "gpui-base";
-import { alpha, button, mix, role, style } from "../lib/omarchy-ui/index.js";
+import { Button, alpha, mix, role, style } from "omarchy-ui";
 import { icon } from "./icons.js";
 
 /**
@@ -81,13 +81,12 @@ export function readerNotice(id, notice, cx) {
       row.child(
         // Narrower than the kit's default control padding on purpose: this
         // button lives inside a thirty-pixel line, not on a toolbar.
-        button(
-          `${id}-action`,
-          actionLabel,
-          (event, eventCx) => onActivate?.(event, eventCx),
-          cx,
-          { disabled: busy, fontSize: tokens.font.caption },
-        )
+        new Button(`${id}-action`)
+          .label(actionLabel)
+          .disabled(busy)
+          .size("xsmall")
+          .onClick((event, eventCx) => onActivate?.(event, eventCx))
+          .build(cx)
           .flex_none()
           .px(tokens.space(8))
           .py(tokens.space(2)),
@@ -249,7 +248,9 @@ export function readerBlankSlate(mailbox, cx) {
 // Subject over sender over meta, then paragraphs of a few lines each with a
 // short last line: the shape of the thing that is coming, so the pane does not
 // jump when the real message lands. A zero is the gap between paragraphs.
-const SKELETON_BODY = [0.96, 0.99, 0.72, 0, 0.94, 0.88, 0.97, 0.54, 0, 0.92, 0.63];
+const SKELETON_BODY = [
+  0.96, 0.99, 0.72, 0, 0.94, 0.88, 0.97, 0.54, 0, 0.92, 0.63,
+];
 
 /**
  * What the reader shows while a message is on its way. A word like "Opening…"

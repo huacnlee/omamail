@@ -1,30 +1,38 @@
 // @ts-check
 
+// One window drawn only from `omarchy-ui`, for `gpui-shell check` to load.
+//
+// It carries no application state and no Omamail copy on purpose: what it
+// proves is that the declared Git dependency resolves, that the classes the
+// window is built from are the ones the package publishes, and that every
+// required slot is filled the way the library asks. `make test-app` runs it
+// through `tests/test_omarchy_ui_fixture.sh` with `entry` pointed here.
+
 import { View } from "gpui";
 import { InputState } from "gpui-base";
 import {
-  appFrame,
-  appShell,
-  actionBar,
-  bottomBar,
-  button,
-  centeredWorkspace,
-  emptyState,
-  field,
-  fieldRow,
-  formField,
-  glyphButton,
-  iconButton,
-  kbd,
-  menuItem,
-  rowShell,
-  pageColumn,
-  panelHeader,
-  statusLine,
-  surface,
-  topBar,
-  title,
-} from "./lib/omarchy-ui/index.js";
+  ActionBar,
+  AppShell,
+  Button,
+  CenteredWorkspace,
+  EmptyState,
+  FieldRow,
+  FormField,
+  GlyphButton,
+  IconButton,
+  Keycap,
+  KeyHints,
+  ListRow,
+  MenuItem,
+  PageColumn,
+  PanelHeader,
+  StatusBar,
+  StatusItem,
+  Surface,
+  TextField,
+  Title,
+  TitleBar,
+} from "omarchy-ui";
 
 export default class OmarchyUiFixture extends View {
   /** @type {import("gpui-base").InputState} */
@@ -38,81 +46,99 @@ export default class OmarchyUiFixture extends View {
 
   /** @param {import("gpui").Context} cx */
   render(cx) {
-    const content = centeredWorkspace(
-      "fixture-workspace",
-      pageColumn("fixture-column", cx)
-        .child(
-          surface(cx)
-            .child(
-              panelHeader(
-                "fixture-panel-header",
-                title("Omarchy UI", cx),
-                glyphButton("fixture-glyph", "×", "Close", () => {}, cx),
-                cx,
-              ),
-            )
-            .child(statusLine("Connected", "ready", cx))
-            .child(
-              fieldRow(
-                "fixture-field-row",
-                "Filter",
-                field(this.input, cx),
-                cx,
-              ),
-            )
-            .child(
-              formField(
-                "fixture-form-field",
-                "Query",
-                field(this.input, cx),
-                cx,
-              ),
-            )
-            .child(rowShell("fixture-row", true, cx).child("Selected row"))
-            .child(
-              // Bordered, not accent-filled: the Omarchy kit has no primary
-              // variant, and a solid accent block is louder than anything else
-              // on the desktop.
-              button("fixture-action", "Continue", () => {}, cx, {
-                bordered: true,
-              }),
-            )
-            .child(
-              iconButton(
-                "fixture-icon",
-                "assets/gmail.svg",
-                "Open menu",
-                () => {},
-                cx,
-              ),
-            )
-            .child(
-              menuItem("fixture-menu", "Settings…", () => {}, cx, {
-                detail: "Cmd + ,",
-              }),
-            )
-            .child(kbd("Cmd + K", cx)),
-        )
-        .child(emptyState("Nothing here", "Add an item to continue", cx))
-        .child(
-          actionBar(
-            "fixture-action-bar",
-            {
-              actions: button("fixture-save", "Save", () => {}, cx),
-              status: statusLine("Saving…", "loading", cx),
-            },
-            cx,
-          ),
-        ),
-      cx,
-    );
-    return appShell(
-      {
-        top: topBar({ brand: title("Omarchy UI", cx) }, cx),
-        content,
-        bottom: bottomBar({ status: statusLine("Connected", "ready", cx) }, cx),
-      },
-      cx,
-    );
+    const panel = new Surface()
+      .children([
+        new PanelHeader("fixture-panel-header")
+          .heading(new Title("Omarchy UI").build(cx))
+          .actions(
+            new GlyphButton("fixture-glyph")
+              .glyph("×")
+              .description("Close")
+              .quiet()
+              .onClick(() => {})
+              .build(cx),
+          )
+          .build(cx),
+        new StatusItem().label("Connected").state("ready").build(cx),
+        new FieldRow("fixture-field-row")
+          .label("Filter")
+          .control(new TextField().state(this.input).build(cx))
+          .build(cx),
+        new FormField("fixture-form-field")
+          .label("Query")
+          .control(new TextField().state(this.input).build(cx))
+          .build(cx),
+        new ListRow("fixture-row").selected().build(cx).child("Selected row"),
+        // Bordered, not accent-filled: the Omarchy kit has no primary variant,
+        // and a solid accent block is louder than anything else on the desktop.
+        new Button("fixture-action")
+          .label("Continue")
+          .bordered()
+          .tooltip("Continue · Enter")
+          .onClick(() => {})
+          .build(cx),
+        new IconButton("fixture-icon")
+          .icon("assets/gmail.svg")
+          .description("Open menu")
+          .quiet()
+          .onClick(() => {})
+          .build(cx),
+        // The active row: where the arrow keys have got to.
+        new MenuItem("fixture-menu")
+          .label("Settings…")
+          .detail("Cmd + ,")
+          .selected()
+          .onClick(() => {})
+          .build(cx),
+        new Keycap("Cmd + K").build(cx),
+      ])
+      .build(cx);
+
+    const content = new CenteredWorkspace("fixture-workspace")
+      .content(
+        new PageColumn("fixture-column")
+          .children([
+            panel,
+            new EmptyState()
+              .heading("Nothing here")
+              .hint("Add an item to continue")
+              .build(cx),
+            new ActionBar("fixture-action-bar")
+              .actions(
+                new Button("fixture-save")
+                  .label("Save")
+                  .onClick(() => {})
+                  .build(cx),
+              )
+              .status(
+                new StatusItem()
+                  .label("Saved")
+                  .loadingLabel("Saving…")
+                  .state("loading")
+                  .build(cx),
+              )
+              .build(cx),
+          ])
+          .build(cx),
+      )
+      .build(cx);
+
+    return new AppShell()
+      .top(new TitleBar().brand(new Title("Omarchy UI").build(cx)).build(cx))
+      .content(content)
+      .bottom(
+        new StatusBar()
+          .status(new StatusItem().label("Connected").state("ready").build(cx))
+          .hints(
+            new KeyHints("fixture-hints")
+              .hints([
+                { key: "j", label: "Next" },
+                { key: "k", label: "Previous" },
+              ])
+              .build(cx),
+          )
+          .build(cx),
+      )
+      .build(cx);
   }
 }
