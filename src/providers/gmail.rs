@@ -417,8 +417,19 @@ impl<'a> GmailExecutor<'a> {
         if !(200..300).contains(&response.status) {
             return Err(GmailError::RemoteFailure);
         }
-        let payload =
-            serde_json::from_slice(&response.body).map_err(|_| GmailError::InvalidResponse)?;
+        // A 2xx with nothing in it is an answer, not a broken one. Every label
+        // change there is — read, unread, star, unstar, archive, unarchive,
+        // spam — goes through `batchModify`, and Gmail replies to that with 204
+        // and no body at all. Parsed as JSON, which nothing is, the whole class
+        // came back as `InvalidResponse`; the window read that as a refusal and
+        // put the row back, so opening an unread message showed its dot go and
+        // then return. Trash and untrash were never affected, because those two
+        // answer with a message.
+        let payload = if response.body.iter().all(u8::is_ascii_whitespace) {
+            Value::Null
+        } else {
+            serde_json::from_slice(&response.body).map_err(|_| GmailError::InvalidResponse)?
+        };
         Ok(GmailReply { identity, payload })
     }
 

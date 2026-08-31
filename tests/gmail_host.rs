@@ -729,3 +729,53 @@ fn a_calendar_update_patches_and_leaves_the_series_rule_with_the_server() {
             .contains("\"recurrence\":[\"RRULE:FREQ=WEEKLY;INTERVAL=1\"]")
     );
 }
+
+// Gmail answers `batchModify` with 204 and nothing at all, and every label
+// action there is goes through it — mark read, mark unread, star, unstar,
+// archive, unarchive, spam. Parsing that empty body as JSON reported the whole
+// class as `InvalidResponse`, which the window received as a refusal and
+// answered by putting the row back. Opening an unread message showed exactly
+// that: the dot went, and a moment later came back.
+//
+// The tests that covered these actions all handed back `200 {}`, which is a
+// reply Gmail does not send. This one is the reply it does.
+#[test]
+fn a_label_action_succeeds_on_the_empty_204_gmail_actually_answers() {
+    let store = MemorySecretStore::default();
+    let transport = RecordingTransport::default();
+    let key = SecretKey::gmail(
+        "client.apps.googleusercontent.com",
+        "me@example.test",
+        "gmail.modify gmail.send calendar.events",
+    )
+    .unwrap();
+    store.set(&key, Secret::new("refresh-token")).unwrap();
+    transport
+        .replies
+        .lock()
+        .unwrap()
+        .push(Ok(GmailHttpResponse::json(204, Vec::new())));
+    let host = executor(&store, &transport);
+
+    let reply = host
+        .execute(
+            identity(),
+            GmailOperation::Action {
+                action: GmailAction::MarkRead,
+                message_ids: vec!["message-1".into()],
+            },
+            Duration::from_secs(5),
+        )
+        .expect("a 204 with no body is an answer, not a broken one");
+    assert_eq!(reply.identity.revision, 8);
+    assert!(
+        reply.payload.is_null(),
+        "no body is no payload, and the caller has nothing to read from it"
+    );
+    let requests = transport.requests.lock().unwrap();
+    assert!(
+        requests[0].url().ends_with("/messages/batchModify"),
+        "one message or many, a label change is the batch endpoint: {}",
+        requests[0].url()
+    );
+}
