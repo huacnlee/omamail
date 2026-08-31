@@ -152,19 +152,35 @@ const OUTBOX_TICK_INTERVAL_MS = 250;
 const SIGN_IN_WINDOW_MS = 240_000;
 const SIGN_IN_POLL_INTERVAL_MS = 500;
 
+/**
+ * The family to ask for where no fontconfig answered.
+ *
+ * `monospace` is a fontconfig alias, and fontconfig is what macOS has not got:
+ * asked for there it names no family at all. Menlo is on every macOS and is
+ * what its own terminal draws.
+ *
+ * Both spellings of macOS are matched. `process.platform` here is the *host's*
+ * name for the platform — Rust's `std::env::consts::OS`, so `macos` — and not
+ * Node's `darwin`, which is what the node tests see. Getting that wrong is
+ * silent: the window asks for an alias macOS cannot resolve and draws in
+ * whatever gpui falls back to.
+ *
+ * @param {string} platform
+ */
+export function hostFontFamily(platform) {
+  return platform === "macos" || platform === "darwin" ? "Menlo" : "";
+}
+
 // The palette, the structural tokens, and the two values that come from
 // Hyprland rather than from a file. All three are read together because a
 // window painted in the theme's colors at gpui's density and roundness still
 // does not belong on the desktop.
 async function currentOmarchyTheme() {
-  // `monospace` is a fontconfig alias, and fontconfig is what macOS has not
-  // got: asked for there it names no family at all. Menlo is on every macOS
-  // and is what its own terminal draws.
   const none = {
     colors: "",
     shell: "",
     cornerRadius: 0,
-    fontFamily: platform === "darwin" ? "Menlo" : "",
+    fontFamily: hostFontFamily(platform),
   };
   if (platform !== "linux") return none;
   try {
@@ -771,7 +787,15 @@ export default class Omamail extends View {
       const { colors, shell, cornerRadius, fontFamily } =
         await currentOmarchyTheme();
       this.omarchyColors = colors;
-      const tokens = applyOmarchyStyle(shell, { cornerRadius, fontFamily });
+      // `platform` is the third thing only the host knows, beside the radius
+      // Hyprland resolved and the family fontconfig did: it is what tells the
+      // kit whether this window has the system's own buttons drawn over its
+      // leading edge.
+      const tokens = applyOmarchyStyle(shell, {
+        cornerRadius,
+        fontFamily,
+        platform,
+      });
       // The roles gpui's own token set has no room for — the link tone, the
       // two dim tones, the popup surface — kept beside the theme rather than
       // written into it, because gpui drops what it does not know.

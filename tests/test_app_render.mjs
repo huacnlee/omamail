@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import Omamail from "../app/main.js";
+import Omamail, { hostFontFamily } from "../app/main.js";
 import { focusHandle } from "./gpui_stub.mjs";
 
 const colors = new Proxy(
@@ -97,5 +97,21 @@ assert.ok(ids(settings).includes("settings-accounts-group"));
 // QML says so about the same two fields.
 assert.equal(app.setupPassword.is_masked(), true);
 assert.equal(app.setupClientSecret.is_masked(), true);
+
+// The window asks for a family by name where no fontconfig answered, and the
+// name it must not ask for on macOS is `monospace`: that is a fontconfig alias
+// macOS has not got, and asking for it draws in whatever gpui falls back to.
+//
+// `process.platform` in the shell is the host's name for the platform --
+// Rust's `std::env::consts::OS`, so `macos` -- while these tests see node's
+// `darwin`. Matching only one of them is a silent failure on exactly the
+// system the fallback exists for.
+assert.equal(hostFontFamily("macos"), "Menlo");
+assert.equal(hostFontFamily("darwin"), "Menlo");
+// Everywhere else fontconfig answers, and the empty family lets the kit keep
+// its own `monospace` alias.
+assert.equal(hostFontFamily("linux"), "");
+assert.equal(hostFontFamily("windows"), "");
+assert.equal(hostFontFamily(""), "");
 
 console.log("app render tests passed");

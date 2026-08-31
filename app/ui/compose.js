@@ -781,7 +781,13 @@ export function renderCompose(model, cx) {
             .flex_none()
             .items_center()
             .h(tokens.space(44))
-            .px(tokens.space(14))
+            // The band this window draws itself instead of a `TitleBar`, so it
+            // owes the same leading edge: on macOS the Back control would sit
+            // under the window's own buttons.
+            .pl(
+              Math.max(tokens.space(14), tokens.spacing.windowControlsInset),
+            )
+            .pr(tokens.space(14))
             .border_b(tokens.spacing.hairline)
             .border_color(cx.theme().colors.border)
             .child(

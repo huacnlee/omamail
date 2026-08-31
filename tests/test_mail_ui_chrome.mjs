@@ -111,7 +111,10 @@ const wide = renderMail(model(), cx);
 const header = find(wide, "application-top-bar");
 assert.ok(header, "the mail window has a header");
 assert.equal(styleArg(header, "h"), tokens.space(48));
-assert.equal(styleArg(header, "px"), tokens.space(14));
+// The leading edge is the kit's to decide: it yields to the host's own window
+// buttons where there are any, and this desktop has none.
+assert.equal(styleArg(header, "pr"), tokens.space(14));
+assert.equal(styleArg(header, "pl"), tokens.space(14));
 
 const rendered = ids(wide);
 assert.ok(rendered.includes("application-brand"));

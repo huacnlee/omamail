@@ -470,7 +470,13 @@ const measured = renderCompose(
 
 const band = findDeep(measured, "compose-title-bar");
 assert.equal(styleArg(band, "h"), tokens.space(44));
-assert.equal(styleArg(band, "px"), tokens.space(14));
+assert.equal(styleArg(band, "pr"), tokens.space(14));
+// This band is drawn by the window rather than by `TitleBar`, so it owes the
+// same leading edge itself: it reads the kit's token rather than repeating the
+// number, and on a desktop whose host draws no window buttons that is its own
+// inset.
+assert.equal(styleArg(band, "pl"), tokens.space(14));
+assert.equal(tokens.spacing.windowControlsInset, 0);
 // The title is anchored to the band's own centre rather than balanced between
 // the controls beside it, so it stays put whatever Back's label costs.
 const titleSlot = findDeep(measured, "compose-title-slot");
