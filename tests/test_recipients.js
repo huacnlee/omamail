@@ -28,6 +28,12 @@ assert.strictEqual(
   recipients.accept("other@example.com, ja", contacts[0]),
   "other@example.com, Jane Doe <jane@example.com>"
 )
+// A contact with no name is its address, which is the branch `address()` takes
+// when there is no phrase to put in front of one.
+assert.strictEqual(
+  recipients.accept("ja", { name: "", email: "jane@example.com" }),
+  "jane@example.com"
+)
 assert.strictEqual(
   recipients.append("first@example.com", contacts[0]),
   "first@example.com, Jane Doe <jane@example.com>"

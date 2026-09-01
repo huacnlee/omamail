@@ -4,6 +4,7 @@ import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
 import "Credentials.js" as Credentials
+import "Secrets.js" as Secrets
 
 // An IMAP account's sign-in, which is a server address and a password.
 //
@@ -256,7 +257,8 @@ Item {
     stdout: StdioCollector { id: secretOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      var value = (exitCode === 0 && secretOutput.text) ? String(secretOutput.text).trim() : ""
+      // One trailing newline is the pipe's; everything else is the secret.
+      var value = exitCode === 0 ? Secrets.fromKeyring(secretOutput.text) : ""
       root.handleSecretLookup(value)
     }
   }

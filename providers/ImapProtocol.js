@@ -1,5 +1,7 @@
 .pragma library
 
+.import "../account/Aliases.js" as Aliases
+
 // The IMAP protocol, and nothing else. No transport lives here — `ImapClient.qml`
 // owns the process that speaks to the server — and no message format lives here
 // either: an RFC 822 message is `Message.js`'s subject, and this file hands one
@@ -172,89 +174,6 @@ function isValidHost(value) {
   return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)
 }
 
-var EMAIL_PATTERN = /^[^\s@]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/
-
-function parseAliases(value) {
-  if (!value) return []
-  var rawList = []
-  if (Array.isArray(value)) {
-    rawList = value
-  } else if (typeof value === "string") {
-    rawList = value.split(/[\r\n,]+/)
-  }
-  var out = []
-  var seen = {}
-  for (var i = 0; i < rawList.length; i++) {
-    var item = rawList[i]
-    var email = ""
-    var displayName = ""
-    var isDef = false
-    if (typeof item === "string") {
-      var str = trimmed(item)
-      if (/\(default\)|\[default\]/i.test(str)) {
-        isDef = true
-        str = str.replace(/\(default\)|\[default\]/gi, "").trim()
-      } else if (str.endsWith("*")) {
-        isDef = true
-        str = str.replace(/\*+$/, "").trim()
-      } else if (str.startsWith("*")) {
-        isDef = true
-        str = str.replace(/^\*+/, "").trim()
-      }
-      var matchAngle = str.match(/^(.*?)\s*<([^\s@]+@[^>]+)>\s*$/)
-      if (matchAngle) {
-        displayName = trimmed(matchAngle[1])
-        email = trimmed(matchAngle[2]).toLowerCase()
-      } else {
-        email = trimmed(str).toLowerCase()
-      }
-    } else if (item && typeof item === "object") {
-      email = trimmed(item.email || item.sendAsEmail).toLowerCase()
-      displayName = trimmed(item.displayName || item.name)
-      isDef = item.isDefault === true || item.default === true || item.defaultFrom === true
-    }
-    if (!email || !EMAIL_PATTERN.test(email)) continue
-    if (seen[email]) continue
-    seen[email] = true
-    out.push({
-      email: email,
-      displayName: displayName,
-      isPrimary: false,
-      isDefault: isDef
-    })
-  }
-  var foundDefault = false
-  for (var j = 0; j < out.length; j++) {
-    if (out[j].isDefault) {
-      if (foundDefault) {
-        out[j].isDefault = false
-      } else {
-        foundDefault = true
-      }
-    }
-  }
-  return out
-}
-
-function formatAliases(aliases) {
-  var list = parseAliases(aliases)
-  var entries = []
-  for (var i = 0; i < list.length; i++) {
-    var item = list[i]
-    var str = ""
-    if (item.displayName) {
-      str = item.displayName + " <" + item.email + ">"
-    } else {
-      str = item.email
-    }
-    if (item.isDefault) {
-      str += " (default)"
-    }
-    entries.push(str)
-  }
-  return entries.join(", ")
-}
-
 function normalizedPort(value, fallback) {
   var port = Math.floor(Number(value))
   var backup = Math.floor(Number(fallback)) || DEFAULT_IMAP_PORT
@@ -262,15 +181,21 @@ function normalizedPort(value, fallback) {
   return port
 }
 
+// A host name is case-insensitive, and lowercasing it here is what keeps every
+// later reading of it the same one. `isLoopback` already compares lowercased,
+// so a user who typed "LocalHost" was judged local up here and then failed to
+// match the transport's own loopback patterns further down — which meant the
+// local bridge, the one server that legitimately speaks plaintext, was the one
+// refused for not offering TLS.
 function normalizeSettings(raw) {
   var values = raw || {}
   return {
-    imapHost: trimmed(values.imapHost),
+    imapHost: trimmed(values.imapHost).toLowerCase(),
     imapPort: normalizedPort(values.imapPort, DEFAULT_IMAP_PORT),
-    smtpHost: trimmed(values.smtpHost),
+    smtpHost: trimmed(values.smtpHost).toLowerCase(),
     smtpPort: normalizedPort(values.smtpPort, DEFAULT_SMTP_PORT),
     username: trimmed(values.username),
-    aliases: parseAliases(values.aliases),
+    aliases: Aliases.parse(values.aliases),
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
@@ -315,11 +240,34 @@ function validateSettings(raw) {
 // The URL the transport connects with. Built here rather than in the shell
 // script so the host has been through `isValidHost` on the way, and so the
 // tests can see what a given account would dial.
+// Which ports mean "connect in the clear, then upgrade". Naming the STARTTLS
+// ports rather than the TLS ones is the whole of the difference between this
+// and asking whether the port is 993: a server on 9993, or on whatever a
+// hosting panel picked, speaks TLS from the first byte and has no STARTTLS to
+// offer, so a client that inferred STARTTLS from "not 993" would simply stop
+// connecting to it. These three are the ports the RFCs assign to the upgrade,
+// and a server on any other one is dialled the way it was before this list
+// existed.
+//
+// The upgrade is not optional once it is chosen: `mail-transport.sh` adds
+// `ssl-reqd` to every non-loopback plaintext scheme, so a server that turns
+// out not to offer STARTTLS is refused rather than spoken to in the clear.
+var STARTTLS_IMAP_PORTS = [143]
+var STARTTLS_SMTP_PORTS = [25, 587]
+
+function usesStartTls(port, ports) {
+  var value = Number(port)
+  for (var i = 0; i < ports.length; i++) {
+    if (ports[i] === value) return true
+  }
+  return false
+}
+
 function imapUrl(settings, folder) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.imapHost)) return ""
-  var isTls = Number(values.imapPort) === 993 && !values.insecure
-  var scheme = isTls ? "imaps" : "imap"
+  var plain = values.insecure || usesStartTls(values.imapPort, STARTTLS_IMAP_PORTS)
+  var scheme = plain ? "imap" : "imaps"
   var url = scheme + "://" + values.imapHost + ":" + values.imapPort
   var box = trimmed(folder)
   // The mailbox is a path segment, so anything that could end the segment or
@@ -332,9 +280,11 @@ function imapUrl(settings, folder) {
 function smtpUrl(settings) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.smtpHost)) return ""
-  // Port 465 is implicit TLS (smtps). Port 587 and others use STARTTLS over smtp.
-  var isTls = Number(values.smtpPort) === 465 && !(values.insecure && isLoopback(values.smtpHost))
-  var scheme = isTls ? "smtps" : "smtp"
+  // IMAP and SMTP may name different hosts. The shared local-transport flag
+  // cannot let a loopback IMAP server downgrade a remote SMTP connection.
+  var local = values.insecure && isLoopback(values.smtpHost)
+  var plain = local || usesStartTls(values.smtpPort, STARTTLS_SMTP_PORTS)
+  var scheme = plain ? "smtp" : "smtps"
   return scheme + "://" + values.smtpHost + ":" + values.smtpPort
 }
 

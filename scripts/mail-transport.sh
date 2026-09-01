@@ -114,7 +114,7 @@ if [ "$mode" = "smtp" ]; then
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
-    smtp://127.0.0.1:*|smtp://localhost:*|smtp://::1:*) ;;
+    smtp://127.0.0.1:*|smtp://localhost:*) ;;
     smtp://*) printf 'ssl-reqd\n' ;;
   esac
   printf 'mail-from = "%s"\n' "$(escape "$sender")"
@@ -132,7 +132,7 @@ elif [ "$mode" = "imap-append" ]; then
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
-    imap://127.0.0.1:*|imap://localhost:*|imap://::1:*) ;;
+    imap://127.0.0.1:*|imap://localhost:*) ;;
     imap://*) printf 'ssl-reqd\n' ;;
   esac
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
@@ -161,7 +161,7 @@ else
     printf 'max-time = 60\n'
     printf 'connect-timeout = 20\n'
     case "$url" in
-      imap://127.0.0.1:*|imap://localhost:*|imap://::1:*) ;;
+      imap://127.0.0.1:*|imap://localhost:*) ;;
       imap://*) printf 'ssl-reqd\n' ;;
     esac
     printf 'request = "%s"\n' "$(escape "$(decode "$argument")")"
@@ -181,19 +181,45 @@ fi
 
 # curl is the last stage, so `$?` is curl's own exit code rather than the
 # config builder's.
-set +e
-build_config "$@" | curl \
-  --fail-early \
-  --retry 2 \
-  --retry-all-errors \
-  --retry-delay 1 \
-  --config - \
-  --silent \
-  --show-error \
-  --dump-header "$work/headers" \
-  > "$work/out" 2> "$work/err"
-status=$?
-set -e
+attempt_curl() {
+  build_config "$@" | curl \
+    --fail-early \
+    --config - \
+    --silent \
+    --show-error \
+    --dump-header "$work/headers" \
+    > "$work/out" 2> "$work/err"
+}
+
+# A dropped TLS handshake is worth a second go; a delivered message is not.
+#
+# curl's own `--retry` covers neither on its own: its idea of a transient error
+# is a timeout or an HTTP status, so a handshake that died mid-negotiation is
+# not retried without `--retry-all-errors`. That flag then retries everything —
+# including a transfer that failed *after* the server took it, which for SMTP
+# is the message delivered twice and for APPEND a second copy in the folder.
+# curl cannot tell those apart because by then it has already sent them.
+#
+# So the retry is here, on the three exit codes that mean the command never
+# reached the server at all: the name did not resolve (6), the socket never
+# connected (7), and TLS failed before the session existed (35). Every one of
+# those is safe to repeat whatever the mode is. A rejected password (67) is
+# not retried, because three LOGIN attempts per operation is what iCloud and
+# Gmail lock an app password for.
+attempt=0
+while :; do
+  set +e
+  attempt_curl "$@"
+  status=$?
+  set -e
+  case "$status" in
+    6|7|35) ;;
+    *) break ;;
+  esac
+  attempt=$((attempt + 1))
+  [ "$attempt" -le 2 ] || break
+  sleep 1
+done
 
 printf '%s\n' "$status"
 if [ "$mode" = "imap" ] && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then

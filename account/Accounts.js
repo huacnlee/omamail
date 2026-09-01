@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Aliases.js" as Aliases
+
 // The list of Gmail accounts and which one the window is showing. One account
 // was the original design; several is a list plus a selection, and every rule
 // about what that selection may point at lives here so the QML only has to
@@ -102,68 +104,6 @@ function portOr(value, fallback) {
   return port
 }
 
-function normalizeAliases(value) {
-  if (!value) return []
-  var rawList = []
-  if (Array.isArray(value)) {
-    rawList = value
-  } else if (typeof value === "string") {
-    rawList = value.split(/[\r\n,]+/)
-  }
-  var out = []
-  var seen = {}
-  for (var i = 0; i < rawList.length; i++) {
-    var item = rawList[i]
-    var email = ""
-    var displayName = ""
-    var isDef = false
-    if (typeof item === "string") {
-      var str = trimmed(item)
-      if (/\(default\)|\[default\]/i.test(str)) {
-        isDef = true
-        str = str.replace(/\(default\)|\[default\]/gi, "").trim()
-      } else if (str.endsWith("*")) {
-        isDef = true
-        str = str.replace(/\*+$/, "").trim()
-      } else if (str.startsWith("*")) {
-        isDef = true
-        str = str.replace(/^\*+/, "").trim()
-      }
-      var matchAngle = str.match(/^(.*?)\s*<([^\s@]+@[^>]+)>\s*$/)
-      if (matchAngle) {
-        displayName = trimmed(matchAngle[1])
-        email = trimmed(matchAngle[2]).toLowerCase()
-      } else {
-        email = trimmed(str).toLowerCase()
-      }
-    } else if (item && typeof item === "object") {
-      email = trimmed(item.email || item.sendAsEmail).toLowerCase()
-      displayName = trimmed(item.displayName || item.name)
-      isDef = item.isDefault === true || item.default === true || item.defaultFrom === true
-    }
-    if (!email || !isValidEmail(email)) continue
-    if (seen[email]) continue
-    seen[email] = true
-    out.push({
-      email: email,
-      displayName: displayName,
-      isPrimary: false,
-      isDefault: isDef
-    })
-  }
-  var foundDefault = false
-  for (var j = 0; j < out.length; j++) {
-    if (out[j].isDefault) {
-      if (foundDefault) {
-        out[j].isDefault = false
-      } else {
-        foundDefault = true
-      }
-    }
-  }
-  return out
-}
-
 function makeImapSettings(raw) {
   var values = raw || {}
   return {
@@ -172,7 +112,7 @@ function makeImapSettings(raw) {
     smtpHost: trimmed(values.smtpHost),
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
-    aliases: normalizeAliases(values.aliases),
+    aliases: Aliases.parse(values.aliases),
     insecure: values.insecure === true
   }
 }

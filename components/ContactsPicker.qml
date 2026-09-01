@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
@@ -57,6 +56,21 @@ Item {
     menu.close()
   }
 
+  // The popup closes on a press outside itself, and the control that opens it
+  // is outside it — so the press that looks like "close this" has already done
+  // so, and a plain `opened ? close() : openAt()` would reopen it on the
+  // release every time. The moment it closed is what separates the two.
+  property double closedAt: 0
+
+  function toggleAt(sceneX, sceneY) {
+    if (menu.opened) {
+      close()
+      return
+    }
+    if (Date.now() - closedAt < 250) return
+    openAt(sceneX, sceneY)
+  }
+
   function place() {
     if (!menu.visible) return
     var x = Math.max(Style.space(8), Math.min(anchorX, root.width - menu.width - Style.space(8)))
@@ -75,6 +89,7 @@ Item {
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
     onOpened: root.place()
+    onClosed: root.closedAt = Date.now()
 
     background: Rectangle {
       radius: Style.cornerRadius
@@ -127,7 +142,7 @@ Item {
         implicitHeight: Math.min(contentHeight, Style.space(280))
         clip: true
         model: root.filteredContacts
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        QQC.ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AsNeeded }
 
         delegate: Rectangle {
           id: contactRow

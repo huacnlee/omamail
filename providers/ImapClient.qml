@@ -4,6 +4,7 @@ import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
 import "../message/Message.js" as Mail
+import "../account/Aliases.js" as Aliases
 
 // An IMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //
@@ -561,49 +562,18 @@ Item {
     return newHandle()
   }
 
-  // IMAP has no send-as settings endpoint. Its senders are the mailbox
-  // address and any aliases configured by the user, returned in the same shape
-  // as Gmail aliases so everything above the provider boundary stays provider-neutral.
+  // IMAP has no send-as settings endpoint. Its senders are the mailbox address
+  // and whatever aliases the user configured, returned in the same shape as
+  // Gmail's so everything above the provider boundary stays provider-neutral.
+  // Which of them is the default is `Aliases.sendAsList`'s decision, where the
+  // node tests can reach it.
   function getSendAs(callback) {
     if (typeof callback !== "function") return newHandle()
     var address = String(root.email || "")
-    var settings = auth ? auth.settings : null
-    var customAliases = settings && Array.isArray(settings.aliases) ? settings.aliases : []
+    var configured = auth && auth.settings ? auth.settings.aliases : null
     Qt.callLater(function() {
       if (!root) return
-      var list = []
-      var seen = ({})
-      var hasDefaultAlias = false
-      for (var k = 0; k < customAliases.length; k++) {
-        if (customAliases[k] && customAliases[k].isDefault === true) {
-          hasDefaultAlias = true
-          break
-        }
-      }
-      if (address !== "") {
-        list.push({
-          email: address,
-          displayName: "",
-          isPrimary: true,
-          isDefault: !hasDefaultAlias
-        })
-        seen[address.toLowerCase()] = true
-      }
-      for (var i = 0; i < customAliases.length; i++) {
-        var item = customAliases[i]
-        var email = (typeof item === "string" ? item : (item ? item.email : "")).trim()
-        var isDef = item && typeof item === "object" ? (item.isDefault === true) : false
-        if (email !== "" && !seen[email.toLowerCase()]) {
-          seen[email.toLowerCase()] = true
-          list.push({
-            email: email,
-            displayName: (item && item.displayName) ? String(item.displayName).trim() : "",
-            isPrimary: false,
-            isDefault: isDef
-          })
-        }
-      }
-      callback(list, "")
+      callback(Aliases.sendAsList(address, configured), "")
     })
     return newHandle()
   }

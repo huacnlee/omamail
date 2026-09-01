@@ -182,14 +182,36 @@ deepEqual(model.newArrivals(inbox, { a: true }, true).map(entry => entry.id), ["
 deepEqual(model.newArrivals(inbox, { a: true, c: true }, true), [])
 deepEqual(model.newArrivals([], {}, true), [])
 
-const now = Date.now()
+// The floor keeps an old unread message that was never on the cached page from
+// being announced as an arrival the first time a fetch returns it.
+const floor = Date.parse("2026-08-01T00:00:00Z")
 const timeInbox = [
-  { id: "old", unread: true, inInbox: true, date: new Date(now - 1000000) },
-  { id: "new", unread: true, inInbox: true, date: new Date(now + 1000) },
+  { id: "old", unread: true, inInbox: true, date: new Date(floor - 1000000) },
+  { id: "new", unread: true, inInbox: true, date: new Date(floor + 1000) },
   { id: "nodate", unread: true, inInbox: true, date: null }
 ]
-deepEqual(model.newArrivals(timeInbox, {}, true, now).map(entry => entry.id), ["new"],
-  "messages older than session start or without a date are ignored for notifications")
+deepEqual(model.newArrivals(timeInbox, {}, true, floor).map(entry => entry.id),
+  ["new", "nodate"],
+  "an older message is not an arrival, and one with no date is still announced")
+
+// The floor is the mailbox's own newest timestamp, not this machine's clock.
+// Taken from `Date.now()` on a machine running fast, every arrival is older
+// than a "now" the server has not reached and notifications stop for the whole
+// session — so what seeds it is the page, and it has to come out of the page.
+assert.strictEqual(model.newestDate(timeInbox), floor + 1000)
+assert.strictEqual(model.newestDate([{ id: "x", date: null }]), 0)
+assert.strictEqual(model.newestDate([]), 0)
+assert.strictEqual(model.newestDate(null), 0)
+
+// A clock an hour ahead of the server used to silence the mailbox entirely.
+const skewed = model.newestDate(timeInbox)
+deepEqual(model.newArrivals(timeInbox, {}, true, skewed).map(entry => entry.id),
+  ["new", "nodate"],
+  "the newest row is itself never below the floor it set")
+
+// No floor at all is the shape every caller had before one existed.
+deepEqual(model.newArrivals(timeInbox, {}, true, 0).map(entry => entry.id),
+  ["old", "new", "nodate"])
 
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "Due Friday" }), "Invoice\nDue Friday")
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "" }), "Invoice")

@@ -5,6 +5,7 @@ import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
 import "../message/Message.js" as Mail
+import "../providers/Secrets.js" as Secrets
 
 Item {
   id: root
@@ -575,12 +576,19 @@ Item {
 
   Process {
     id: passwordLookup
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handlePassword(line) }
-    }
+    // `secret-tool lookup` writes the secret with no trailing newline, so a
+    // SplitParser splitting on one never fires its read at all: the password
+    // was found, the callback was not, and the source reported itself as
+    // having no password saved. The whole output, read when the process is
+    // done with, is the same answer without depending on how it ends —
+    // which is what `eventPasswordLookup` below already does.
+    stdout: StdioCollector { id: passwordLookupOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
-    onExited: function(_exitCode) { if (!root.lookupHandled) root.handlePassword("") }
+    onExited: function(exitCode) {
+      // No entry is not an error: it is what a source that has never been
+      // given a password looks like.
+      root.handlePassword(exitCode === 0 ? Secrets.fromKeyring(passwordLookupOutput.text) : "")
+    }
   }
 
   Process {

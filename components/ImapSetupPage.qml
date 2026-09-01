@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/ImapProtocol.js" as Imap
+import "../account/Aliases.js" as Aliases
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
 // guess was wrong — the servers.
@@ -76,7 +77,7 @@ Column {
       usernameField.text = settings.username
     }
     if (settings.aliases) {
-      aliasesField.text = Imap.formatAliases(settings.aliases)
+      aliasesField.text = Aliases.format(settings.aliases)
     }
     if (settings.imapHost !== "") {
       imapHostField.text = settings.imapHost

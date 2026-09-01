@@ -93,4 +93,92 @@ with tempfile.TemporaryDirectory() as temporary:
         {"name": "", "email": "morgan@example.com"},
     ]
 
+
+# --------------------------------------------------------------- the readers
+#
+# These read files this program did not write, so each one is checked against
+# the shape somebody would plausibly produce rather than only the shape the
+# happy path above builds.
+
+import importlib.util
+
+spec = importlib.util.spec_from_file_location("contact_suggestions", SCRIPT)
+harvester = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(harvester)
+
+with tempfile.TemporaryDirectory() as temporary:
+    scratch = Path(temporary)
+
+    # A wrapped address book. Asking whether str(value) contains an "@" is true
+    # of a stringified list, and what came out was a contact named "contacts"
+    # whose address was the whole serialised array.
+    wrapped = scratch / "wrapped.json"
+    wrapped.write_text(
+        json.dumps({"contacts": [{"name": "A", "email": "a@example.com"}]}),
+        encoding="utf-8",
+    )
+    assert harvester.json_contacts(wrapped) == [], harvester.json_contacts(wrapped)
+
+    # The two shapes that are an address book.
+    listed = scratch / "listed.json"
+    listed.write_text(
+        json.dumps([{"name": "Ada", "email": "ada@example.com"},
+                    {"name": "Bad", "email": "not an address"}]),
+        encoding="utf-8",
+    )
+    assert harvester.json_contacts(listed) == [{"name": "Ada", "email": "ada@example.com"}]
+
+    mapped = scratch / "mapped.json"
+    mapped.write_text(
+        json.dumps({"grace@example.com": "Grace", "Alan": "alan@example.com"}),
+        encoding="utf-8",
+    )
+    assert sorted(harvester.json_contacts(mapped), key=lambda row: row["email"]) == [
+        {"name": "Alan", "email": "alan@example.com"},
+        {"name": "Grace", "email": "grace@example.com"},
+    ]
+
+    # A folded vCard, and a malformed property after it. The fold has to be
+    # rejoined before the value is read, and the bad line must not take the
+    # cards that follow it with it.
+    folded = scratch / "book.vcf"
+    folded.write_text(
+        "BEGIN:VCARD\r\n"
+        "FN:Wilhelmina Fitzgerald-Montmorency the Th\r\n ird\r\n"
+        "EMAIL:wilhelmina@example.com\r\n"
+        "END:VCARD\r\n"
+        "BEGIN:VCARD\r\n"
+        "MALFORMED-LINE-WITHOUT-A-COLON\r\n"
+        "FN:Second Card\r\n"
+        "EMAIL:second@example.com\r\n"
+        "END:VCARD\r\n",
+        encoding="utf-8",
+    )
+    assert harvester.parse_vcf(folded) == [
+        {"name": "Wilhelmina Fitzgerald-Montmorency the Third",
+         "email": "wilhelmina@example.com"},
+        {"name": "Second Card", "email": "second@example.com"},
+    ], harvester.parse_vcf(folded)
+
+    # A bulk send is not a room full of the user's contacts, and a display name
+    # the parser filled in from the local part is not a name anybody wrote.
+    cache = scratch / "cache"
+    cache.mkdir()
+    bulk = [{"name": "P%d" % i, "email": "p%d@example.com" % i} for i in range(20)]
+    (cache / "account-x.json").write_text(
+        json.dumps({"queries": {"q": {"summaries": [
+            {"from": {"name": "noreply", "email": "noreply@example.com"},
+             "to": bulk, "cc": [], "bcc": [{"name": "B", "email": "b@example.com"}]},
+            {"from": {"name": "Jane Doe", "email": "jane@example.com"},
+             "to": [{"name": "Me", "email": "me@example.com"}]},
+        ]}}}),
+        encoding="utf-8",
+    )
+    harvested = harvester.omamail_cache_records(cache)
+    addresses = sorted(row["email"] for row in harvested)
+    assert addresses == ["jane@example.com", "me@example.com", "noreply@example.com"], addresses
+    by_email = {row["email"]: row["name"] for row in harvested}
+    assert by_email["noreply@example.com"] == ""
+    assert by_email["jane@example.com"] == "Jane Doe"
+
 print("contact discovery tests passed")
