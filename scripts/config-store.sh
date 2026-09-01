@@ -2,10 +2,11 @@
 # Writes one line from stdin to $XDG_CONFIG_HOME/omamail/<name> with
 # owner-only permissions.
 #
-# Neither file it writes is world-readable: a desktop client's secret is only
+# No file it writes is world-readable: a desktop client's secret is only
 # "not treated as confidential" by Google, which is not the same as public, and
-# the account list names every mailbox on this machine. Plugin settings would
-# have been the obvious home for both, but shell.json is world-readable.
+# the account list names every mailbox on this machine. Compose recovery also
+# contains message text. Plugin settings would have been the obvious home for
+# these files, but shell.json is world-readable.
 #
 # One line, read with `read` rather than `cat`: Quickshell's Process.write()
 # never closes stdin, so anything waiting for EOF hangs forever.
@@ -13,9 +14,9 @@ set -eu
 
 name=${1:-}
 case "$name" in
-  credentials.json|accounts.json|window.json|calendars.json) ;;
+  credentials.json|accounts.json|window.json|calendars.json|compose.json) ;;
   *)
-    printf '%s\n' 'usage: config-store.sh credentials.json|accounts.json|window.json|calendars.json' >&2
+    printf '%s\n' 'usage: config-store.sh credentials.json|accounts.json|window.json|calendars.json|compose.json' >&2
     exit 2
     ;;
 esac

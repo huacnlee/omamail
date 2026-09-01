@@ -354,9 +354,46 @@ Item {
   }
 
   function saveDraft(payload, callback) {
+    var messageId = payload ? String(payload.draftId || "") : ""
+    if (messageId !== "") return updateDraft(messageId, payload, callback)
     return request("POST", Api.draftsPath(), null, Api.draftBody(payload),
       function(status, body, error) {
         if (typeof callback === "function") callback(body, error)
       })
+  }
+
+  // The message list names Gmail's message id. The update endpoint names its
+  // enclosing draft resource, so resolve that immutable id before replacing it.
+  function updateDraft(messageId, payload, callback) {
+    var handle = newHandle()
+
+    function find(pageToken) {
+      root.request("GET", Api.draftsPath(), Api.draftListQuery(pageToken), null,
+        function(status, body, error) {
+          if (handle.aborted) return
+          if (error) {
+            if (typeof callback === "function") callback(null, error)
+            return
+          }
+          var draftId = Api.draftIdForMessage(body, messageId)
+          if (draftId !== "") {
+            root.request("PUT", Api.draftPath(draftId), null, Api.draftBody(payload),
+              function(updateStatus, saved, updateError) {
+                if (typeof callback === "function") callback(saved, updateError)
+              }, false, handle)
+            return
+          }
+          var next = String(body && body.nextPageToken || "")
+          if (next !== "") {
+            find(next)
+            return
+          }
+          if (typeof callback === "function")
+            callback(null, "That draft is no longer in the mailbox")
+        }, false, handle)
+    }
+
+    find("")
+    return handle
   }
 }

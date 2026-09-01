@@ -40,6 +40,15 @@ assert.strictEqual(api.sendAsPath(), "/users/me/settings/sendAs")
 assert.strictEqual(api.attachmentPath("m1", "a1"), "/users/me/messages/m1/attachments/a1")
 assert.strictEqual(api.draftsPath(), "/users/me/drafts")
 assert.strictEqual(api.draftPath("draft/a"), "/users/me/drafts/draft%2Fa")
+deepEqual(api.draftListQuery("next page"), {
+  maxResults: 500,
+  pageToken: "next page"
+})
+assert.strictEqual(api.draftIdForMessage({ drafts: [
+  { id: "resource-1", message: { id: "message-1" } },
+  { id: "resource-2", message: { id: "message-2" } }
+] }, "message-2"), "resource-2")
+assert.strictEqual(api.draftIdForMessage({ drafts: [] }, "message-2"), "")
 deepEqual(api.draftBody({ raw: "encoded", threadId: "thread-1" }), {
   message: { raw: "encoded", threadId: "thread-1" }
 })

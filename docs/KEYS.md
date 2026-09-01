@@ -97,7 +97,7 @@ used to exist, and they had.
 | `reply` | `r` | mail | Reply |
 | `replyAll` | `a` | mail | Reply to all |
 | `forward` | `f` | mail | Forward |
-| `compose` | `c` | mail | Compose |
+| `compose` | `c` | mail | Compose or edit a draft |
 | `createEvent` | `c` | calendar | Create an event |
 | `calendarNext` | `j`, `Down` | calendar | Select the next event |
 | `calendarPrevious` | `k`, `Up` | calendar | Select the previous event |
@@ -128,6 +128,8 @@ used to exist, and they had.
 
 The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
 opens the complete key sheet from every context.
+
+In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
 
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback. Back and `Escape` save a non-empty composition before leaving it. The explicit Discard button remains the destructive exit.
 
