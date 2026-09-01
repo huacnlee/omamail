@@ -121,6 +121,46 @@ if awk '
   fail "changing how a message is read must not re-render or re-fetch it"
 fi
 
+# 3c. Which way a message runs is decided in one place, and the two questions it
+#     answers stay separate.
+#
+# Qt resolves a paragraph's direction from its own first strong character and is
+# good at it. Two things it cannot do are what Direction.js is for, and both are
+# easy to undo by "simplifying" the code that uses it.
+grep -q 'promoteDirection' message/Html.js \
+  || fail "a CSS direction must be promoted to the dir attribute Qt actually reads"
+# The sheet's physical sides and the body's `dir` are one statement. Qt places a
+# list marker on the side the block runs from, so a sheet that indents a list
+# from the right while the block is still left-to-right does not move the bullet
+# — it drops it. Splitting these was tried; the bullets went missing.
+grep -q 'function baseDirectionAttribute' message/Html.js \
+  || fail "the body direction and the stylesheet's sides must be written together"
+if grep -n 'palette.pinned' message/Html.js; then
+  fail "a document has one direction, not a direction and a flag saying whether to mean it"
+fi
+
+# A reply prefix is Latin whatever the thread is written in, so a subject asked
+# with `resolve` rather than `resolveSubject` puts every message in a thread
+# after the first against the wrong edge — which is the bug the module exists
+# for, and the one a refactor is most likely to reintroduce.
+for file in components/MessageRow.qml components/MessageReader.qml bar/BarPreview.qml; do
+  grep -q 'Direction.resolveSubject' "$file" \
+    || fail "$file must strip the reply prefix before asking which way a subject runs"
+done
+
+# The same mistake on the body side. The plain reading of an HTML message
+# carries this client's own `[image N]` markers in front of the sender's first
+# word, so `resolve` on it answers about a Latin "i" that omamail wrote.
+grep -q 'Direction.resolveBody' components/MessageReader.qml \
+  || fail "the reader must look past its own image markers before asking which way a body runs"
+
+# The interface is not mirrored: this setting is a fact about the mail, not
+# about the window around it. A LayoutMirroring here would be a different
+# feature wearing this one's name.
+if grep -rn 'LayoutMirroring' -- "${QML_FILES[@]}"; then
+  fail "message direction must not mirror the interface; it applies to content only"
+fi
+
 # 4. The bar switches `barForeground` when transparent mode needs contrast.
 #    `foreground` is the fixed theme value and does not follow that switch.
 grep -q 'bar ? bar\.barForeground' BarWidget.qml \

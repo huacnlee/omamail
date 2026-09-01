@@ -362,6 +362,87 @@ assert.strictEqual(
   Buffer.from(payload.raw, "base64url").toString("utf8").indexOf("To: a@b.com"), 0)
 assert.strictEqual(message.buildSendPayload({ to: "a@b.com" }).threadId, undefined)
 
+// ------------------------------------------- the direction a message states
+//
+// The compose field is resolved by Qt from the text in it, so the writer sees
+// their own paragraph the right way round. None of that leaves with the
+// message: a `text/plain` part states no direction, and a client with nothing
+// to read assumes left-to-right. An HTML twin beside the plain text is the
+// only thing every client honours, so a right-to-left message grows one.
+{
+  const persian = "سلام، عرض ادب\n\nبا تشکر"
+  const raw = message.buildRawMessage({
+    to: "you@example.com", subject: "سلام", body: persian, boundary: "FABOUND"
+  })
+
+  const parsed = message.parseRfc822(raw)
+  assert.strictEqual(parsed.mimeType, "multipart/alternative")
+  assert.strictEqual(parsed.parts.length, 2)
+  // Least preferred first: a client showing one alternative shows the last it
+  // understands, and the twin is the part carrying the direction.
+  assert.strictEqual(parsed.parts[0].mimeType, "text/plain")
+  assert.strictEqual(message.decodePart(parsed.parts[0]), persian,
+    "the plain part is the message as written, unchanged")
+  assert.strictEqual(parsed.parts[1].mimeType, "text/html")
+  assert.ok(message.decodePart(parsed.parts[1]).indexOf('<body dir="rtl">') > 0)
+
+  // Line breaks are what a plain body says with, so they have to survive the
+  // crossing into markup.
+  assert.ok(message.decodePart(parsed.parts[1]).indexOf("<br>") > 0)
+
+  // The body is a person's typing, not markup, and may not become markup on
+  // the way out.
+  const escaped = message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "سلام <b>&x</b>", boundary: "ESCB"
+  }))
+  assert.strictEqual(message.decodePart(escaped.parts[1]),
+    '<html><body dir="rtl">سلام &lt;b&gt;&amp;x&lt;/b&gt;</body></html>')
+
+  // Left-to-right is what a bare text/plain already means, so saying it would
+  // make every message ever sent multipart in order to repeat the default.
+  const latin = message.buildRawMessage({ to: "a@b.com", body: "Hi Jane,\n\nThanks!" })
+  assert.ok(latin.indexOf("Content-Type: text/plain; charset=UTF-8") > 0)
+  assert.ok(latin.indexOf("multipart") < 0,
+    "a left-to-right message keeps the shape it has always had")
+
+  // A forced setting is not consulted here: the direction is read off the body
+  // by the same rule the reader uses, so what arrives matches what was typed.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "Hello سلام"
+  }).indexOf("multipart") < 0, "first strong character decides, as it does everywhere")
+
+  // An Arabic-Indic number is not a strong character, so an English message
+  // that opens with a price or a date pasted out of one does not become a
+  // right-to-left message on the way out. It did: the digits sit inside the
+  // Arabic block, and the scan asked which block before it asked which class.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "١٢٣ Smith Street\nThe report is attached."
+  }).indexOf("multipart") < 0,
+    "an English body opening with an Arabic-Indic number stays plain text")
+
+  // With an attachment the pair moves one level in. The inner boundary may not
+  // begin with the outer one: `splitMultipart` finds a delimiter by searching
+  // for "--" + boundary anywhere in the body, so a suffixed inner boundary
+  // would be found by the outer scan too and the message would come apart at
+  // the wrong line.
+  const attached = message.buildRawMessage({
+    to: "a@b.com", body: "سلام دوست من", boundary: "OUTER",
+    attachments: [{ filename: "f.txt", mimeType: "text/plain", data: "aGk=" }]
+  })
+  const withFile = message.parseRfc822(attached)
+  assert.strictEqual(withFile.mimeType, "multipart/mixed")
+  assert.strictEqual(withFile.parts.length, 2)
+  assert.strictEqual(withFile.parts[0].mimeType, "multipart/alternative")
+  assert.strictEqual(withFile.parts[0].parts.length, 2)
+  assert.strictEqual(withFile.parts[0].parts[0].mimeType, "text/plain")
+  assert.strictEqual(withFile.parts[0].parts[1].mimeType, "text/html")
+  assert.strictEqual(message.decodePart(withFile.parts[1]), "hi",
+    "the attachment survives the extra nesting")
+  const inner = attached.match(/boundary="(alt_[^"]+)"/)[1]
+  assert.ok(("--" + inner).indexOf("--OUTER") < 0,
+    "the inner delimiter cannot be read as the outer one")
+}
+
 // ------------------------------------------------------------- a calendar
 //
 // An RSVP is an ordinary mail with a `text/calendar` part beside the sentence

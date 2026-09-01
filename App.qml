@@ -1317,6 +1317,7 @@ Item {
           showBack: root.compact
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
+          contentDirection: root.service ? root.service.contentDirection : ""
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -1353,6 +1354,7 @@ Item {
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
+          contentDirection: root.service ? root.service.contentDirection : ""
           onClosed: {
             if (!root.composeDetachingForSave) root.clearComposeRecovery()
             root.leaveCompose()

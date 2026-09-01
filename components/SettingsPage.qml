@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 
 // Where mailboxes are managed.
 //
@@ -149,6 +150,74 @@ Column {
       accent: root.accentColor
       onToggled: if (root.service)
         root.service.setAlwaysRenderHeavyMessages(!root.service.alwaysRenderHeavyMessages)
+    }
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(directionText.implicitHeight, directionTrack.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: directionText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: directionTrack.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Message direction"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        // Says what Auto does rather than only naming it: a reader whose mail
+        // is already laid out correctly has no way to tell whether that is the
+        // setting working or the setting being unnecessary.
+        text: "Auto reads it from the message's own text. The interface is unaffected."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    // Three names for one setting, sharing a track and the seams between them,
+    // the way the reader's own view modes do.
+    Rectangle {
+      id: directionTrack
+      objectName: "contentDirectionTrack"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      width: directionSegments.implicitWidth
+      height: directionSegments.implicitHeight
+      radius: Style.cornerRadius
+      color: "transparent"
+      border.width: 1
+      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+
+      Row {
+        id: directionSegments
+        spacing: 0
+
+        // The labels are the stored values: the shell hands a plugin the words
+        // the schema lists rather than a key behind them, so spelling them
+        // anywhere but Direction.js would be a second place to keep them right.
+        DirectionButton {
+          text: Direction.AUTO; mode: Direction.AUTO; firstSegment: true
+        }
+        DirectionButton { text: Direction.LEFT_TO_RIGHT; mode: Direction.LEFT_TO_RIGHT }
+        DirectionButton { text: Direction.RIGHT_TO_LEFT; mode: Direction.RIGHT_TO_LEFT }
+      }
     }
   }
 
@@ -443,6 +512,28 @@ Column {
       foreground: root.dimColor
       fontFamily: root.panelFontFamily
       onClicked: root.clientSetupRequested()
+    }
+  }
+
+  // One of the three ways a message's direction is arrived at.
+  component DirectionButton: Button {
+    required property string mode
+    property bool firstSegment: false
+    selected: !!root.service && root.service.contentDirection === mode
+    bordered: false
+    foreground: selected ? root.textColor : root.dimColor
+    accent: root.accentColor
+    fontFamily: root.panelFontFamily
+    fontSize: Style.font.caption
+    horizontalPadding: Style.space(7)
+    verticalPadding: Style.space(3)
+    onClicked: if (root.service) root.service.setContentDirection(mode)
+
+    Rectangle {
+      visible: !parent.firstSegment
+      width: 1
+      height: parent.height
+      color: directionTrack.border.color
     }
   }
 }
