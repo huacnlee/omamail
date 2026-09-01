@@ -121,19 +121,38 @@ function isNeutralCode(code) {
   // and currency, which run to the first accented letter at 0x00C0.
   if (code >= 0x007B && code <= 0x00BF) return true
   if (code === 0x00D7 || code === 0x00F7) return true // × ÷
-  if (code >= 0x0660 && code <= 0x0669) return true // Arabic-Indic digits (AN)
+  // The Arabic block's own numbers. These sit inside the strong ranges below,
+  // so they are only reachable because `directionOfCode` asks this question
+  // first — see the note there.
+  if (code >= 0x0600 && code <= 0x0605) return true // Arabic number signs (AN)
+  if (code >= 0x0660 && code <= 0x066C) return true // Arabic-Indic digits and separators
+  if (code === 0x06DD || code === 0x08E2) return true // end of ayah, disputed end of ayah
   if (code >= 0x06F0 && code <= 0x06F9) return true // extended Arabic-Indic digits
+  if (code >= 0x10E60 && code <= 0x10E7E) return true // Rumi numeral symbols (AN)
   if (code >= 0x2000 && code <= 0x2BFF) return true // punctuation, symbols, arrows
   if (code >= 0x3000 && code <= 0x303F) return true // CJK punctuation
   return false
 }
 
 // The direction a single code point asserts, or UNKNOWN when it asserts none.
+//
+// The neutral question comes before the range question, and the order is the
+// whole of it. A block is a range of code points and a direction class is not:
+// the Arabic block holds the Arabic-Indic digits, which are AN and assert
+// nothing, so a scan that asked "is this in a right-to-left block?" first
+// answered RTL for a digit and never reached the line written to say otherwise.
+// That put `١٢٣ hello` on the right and — because `outgoingDirection` reads a
+// body by this same rule — grew a `dir="rtl"` HTML twin onto an English message
+// whose first character happened to be an Arabic-Indic number.
+//
+// The marks stay in front of both: an explicit RLM or ALM is the author saying
+// outright which way this runs, and U+200F sits inside the neutral punctuation
+// range.
 function directionOfCode(code) {
   if (code === RIGHT_TO_LEFT_MARK || code === ARABIC_LETTER_MARK) return RTL
   if (code === LEFT_TO_RIGHT_MARK) return LTR
-  if (isRtlCode(code)) return RTL
   if (isNeutralCode(code)) return UNKNOWN
+  if (isRtlCode(code)) return RTL
   // Everything left is a letter of some script, and every right-to-left script
   // was named above. Falling through to left-to-right rather than listing the
   // hundred that are keeps a newly encoded script — Latin, Cyrillic, Devanagari,

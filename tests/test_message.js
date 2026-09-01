@@ -411,6 +411,15 @@ assert.strictEqual(message.buildSendPayload({ to: "a@b.com" }).threadId, undefin
     to: "a@b.com", body: "Hello سلام"
   }).indexOf("multipart") < 0, "first strong character decides, as it does everywhere")
 
+  // An Arabic-Indic number is not a strong character, so an English message
+  // that opens with a price or a date pasted out of one does not become a
+  // right-to-left message on the way out. It did: the digits sit inside the
+  // Arabic block, and the scan asked which block before it asked which class.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "١٢٣ Smith Street\nThe report is attached."
+  }).indexOf("multipart") < 0,
+    "an English body opening with an Arabic-Indic number stays plain text")
+
   // With an attachment the pair moves one level in. The inner boundary may not
   // begin with the outer one: `splitMultipart` finds a delimiter by searching
   // for "--" + boundary anywhere in the body, so a suffixed inner boundary

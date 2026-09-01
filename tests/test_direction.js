@@ -21,6 +21,27 @@ assert.strictEqual(direction.strongDirectionOf("(!) שלום"), "rtl", "punctuat
 assert.strictEqual(direction.strongDirectionOf("١٢٣ مرحبا"), "rtl", "Arabic-Indic digits are neutral")
 assert.strictEqual(direction.strongDirectionOf("2024 hello"), "ltr")
 
+// The line above cannot fail on the question it names: Arabic follows the
+// digits, so "rtl" is the answer whether they were skipped or read as strong
+// right-to-left. These can. The Arabic block holds its own digits, and they are
+// AN — they assert nothing — so what decides is the Latin word after them.
+assert.strictEqual(direction.strongDirectionOf("١٢٣ hello"), "ltr",
+  "Arabic-Indic digits are in the Arabic block and still assert nothing")
+assert.strictEqual(direction.strongDirectionOf("۲۰۲۴ hello"), "ltr",
+  "and so are the extended ones Persian writes")
+assert.strictEqual(direction.strongDirectionOf("٢٠٢٤٫٥ hello"), "ltr",
+  "with the separators that hold a number together")
+assert.strictEqual(direction.strongDirectionOf("١٢٣"), "",
+  "a subject that is nothing but Arabic-Indic digits chose no direction")
+
+// The marks are the exception, and have to stay in front of the neutral check:
+// U+200F sits inside the punctuation range, and it is an author saying outright
+// which way this runs.
+assert.strictEqual(direction.strongDirectionOf("\u200Fhello"), "rtl",
+  "a right-to-left mark answers even before a Latin word")
+assert.strictEqual(direction.strongDirectionOf("\u200Eمرحبا"), "ltr",
+  "and a left-to-right mark answers before an Arabic one")
+
 // Nothing strong at all is not an answer. A caller that treated it as "ltr"
 // would pin a `dir` onto a document that has no business carrying one.
 assert.strictEqual(direction.strongDirectionOf(""), "")
