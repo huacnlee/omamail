@@ -332,10 +332,28 @@ if "onAccountChosen" not in text or "root.switchAccount(index)" not in text:
     raise SystemExit("test_source.sh: the account picker must use view-preserving switching")
 service = Path("Service.qml").read_text()
 if "accountId: root.calendarAccountId" not in service:
-    raise SystemExit("test_source.sh: the visible Calendar must follow the displayed account")
+    raise SystemExit("test_source.sh: the visible Calendar must be told which account is displayed")
+# What the calendar depends on is what its cache is keyed by, and under the
+# unified view that is not the mailbox: the same calendars are shown whichever
+# one is open. Keying by the account there stored a copy of the same events per
+# account and turned every mailbox switch into a cache miss and a full refetch.
+controller = Path("calendar/CalendarController.qml").read_text()
+if "eventCache.get(refreshScope" not in controller or "eventCache.put(refreshScope" not in controller:
+    raise SystemExit("test_source.sh: the event cache must be keyed by the calendar scope, not the mailbox")
+# The reload watches the scope rather than the two things that go into it. A
+# mailbox switch under the unified view changes nothing on screen, and neither
+# does the setting for a controller that had no mailbox to follow — watching the
+# inputs separately got those two wrong in opposite directions.
+if "onCalendarScopeChanged: reloadVisibleRange()" not in controller:
+    raise SystemExit("test_source.sh: the visible range must reload on a change of scope, not of mailbox")
+if "onAccountIdChanged" in controller or "onUnifiedCalendarViewChanged" in controller:
+    raise SystemExit("test_source.sh: reloading on either input separately is what the scope replaced")
+composer_default = Path("components/CalendarEventComposer.qml").read_text()
+if "preferredCalendarId()" not in composer_default:
+    raise SystemExit("test_source.sh: a new event must open on the mailbox being read, not the first account")
 composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
-    raise SystemExit("test_source.sh: event creation must offer only writable calendars of the current account")
+    raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"

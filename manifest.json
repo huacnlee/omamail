@@ -43,6 +43,7 @@
       "notifyNewMail": "On",
       "oauthPort": 9481,
       "undoSendSeconds": 10,
+      "unifiedCalendarView": false,
       "openOnClick": "Window"
     },
     "schema": [
@@ -125,6 +126,13 @@
         "step": 1,
         "defaultValue": 10,
         "description": "Delays outgoing mail so you can cancel it. Set this to 0 to send immediately."
+      },
+      {
+        "key": "unifiedCalendarView",
+        "type": "boolean",
+        "label": "Unified calendar view",
+        "defaultValue": false,
+        "description": "Show calendars from every connected account instead of following the current mailbox."
       },
       {
         "key": "openOnClick",

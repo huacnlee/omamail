@@ -16,6 +16,7 @@ Item {
     property bool windowOpen: false
     property bool sidebarCollapsed: false
     property bool alwaysShowImages: false
+    property bool unifiedCalendarView: false
     property bool selectedReaderEmpty: false
     property bool selectedReaderTooHeavy: false
     property bool selectedTooHeavy: false

@@ -446,6 +446,7 @@ Column {
 
   CalendarSettings {
     width: parent.width
+    service: root.service
     controller: root.calendarController
     textColor: root.textColor
     dimColor: root.dimColor
