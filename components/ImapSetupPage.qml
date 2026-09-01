@@ -356,6 +356,7 @@ Column {
 
       TextField {
         id: aliasesField
+        objectName: "imap-aliases-field"
         width: parent.width
         foreground: root.textColor
         font.family: root.panelFontFamily
@@ -367,7 +368,7 @@ Column {
     Text {
       width: parent.width
       visible: root.serversVisible
-      text: "Connections are TLS on the port given. Plain text is refused unless the server is on this machine."
+      text: "TLS on connect, or a required STARTTLS upgrade on ports 143, 25 and 587. Plain text is refused unless the server is on this machine."
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
