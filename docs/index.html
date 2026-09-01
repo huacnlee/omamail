@@ -20,6 +20,11 @@ try {
   var t = localStorage.getItem("omamail-theme");
   if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
 } catch (e) {}
+/* Motion is opt-out at the root, so nothing depends on the script at the foot
+   of the page having run — without it every section simply stays visible. */
+if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  document.documentElement.className += " js-anim";
+}
 </script>
 <style>
 /* Tokyo Night, the default. Flexoki Light below, once for the system's choice
@@ -42,6 +47,8 @@ try {
   --green: #9ECE6A;
   --red: #F7768E;
   --cyan: #7DCFFF;
+
+  --glint: #E2F5B8;
 
   --show-sun: block;
   --show-moon: none;
@@ -68,6 +75,8 @@ try {
     --red: #AF3029;
     --cyan: #1F726B;
 
+    --glint: #8CA61F;
+
     --show-sun: none;
     --show-moon: block;
   }
@@ -90,6 +99,8 @@ try {
   --green: #536607;
   --red: #AF3029;
   --cyan: #1F726B;
+
+  --glint: #8CA61F;
 
   --show-sun: none;
   --show-moon: block;
@@ -181,6 +192,8 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  /* Stays on the right even when the bar wraps to two lines. */
+  margin-left: auto;
 }
 .seg {
   display: flex;
@@ -400,7 +413,14 @@ h2 {
   gap: 12px;
 }
 .shot-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.shot-bar { max-width: 622px; aspect-ratio: 622 / 611; }
+.shot-bar { max-width: 380px; aspect-ratio: 622 / 611; }
+.figure-center { text-align: center; }
+.figure-center .shot { margin-left: auto; margin-right: auto; }
+.figure-center figcaption {
+  max-width: 62ch;
+  margin-left: auto;
+  margin-right: auto;
+}
 .shot-span { grid-column: 1 / -1; }
 figure { margin: 0; }
 figure + figure { margin-top: 32px; }
@@ -588,6 +608,74 @@ footer {
 footer p { margin: 0 0 8px; max-width: 68ch; }
 footer p:last-child { margin-bottom: 0; }
 
+/* ---------- motion ----------
+   Section 9 of the Omarchy design system: transform and opacity only, one
+   short movement per state change, and the one approved piece of repeating
+   brand motion — a green glint crossing the ASCII wordmark every few seconds,
+   then complete stillness. */
+
+@keyframes popin {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Percentage background-position runs 0% (gradient's left edge at the element's
+   left) to 100% (right to right). With a 300% background the highlight sits off
+   the element at both ends, so the mark rests solid green and the glint only
+   crosses in between. */
+@keyframes glint {
+  0%, 8% { background-position: 0% 0; }
+  26%, 100% { background-position: 100% 0; }
+}
+
+@keyframes icon-in {
+  from { opacity: 0; transform: rotate(-30deg) scale(0.7); }
+  to { opacity: 1; transform: none; }
+}
+
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .wordmark {
+    background-image: linear-gradient(100deg,
+      var(--green) 44%, var(--glint) 50%, var(--green) 56%);
+    background-size: 300% 100%;
+    background-position: 100% 0;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: glint 7s var(--ease) 1.6s infinite;
+  }
+}
+
+.js-anim .app-icon { animation: popin 260ms var(--ease) both; }
+.js-anim .wordmark {
+  animation: popin 260ms var(--ease) 60ms both,
+    glint 7s var(--ease) 1.6s infinite;
+}
+.js-anim .tagline { animation: popin 260ms var(--ease) 120ms both; }
+.js-anim .standfirst { animation: popin 260ms var(--ease) 170ms both; }
+.js-anim .command { animation: popin 260ms var(--ease) 210ms both; }
+.js-anim .actions { animation: popin 260ms var(--ease) 250ms both; }
+.js-anim .meta { animation: popin 260ms var(--ease) 290ms both; }
+
+/* One movement per section as it arrives, never one per row. */
+.js-anim section > .wrap,
+.js-anim footer > .wrap {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 260ms var(--ease), transform 260ms var(--ease);
+}
+.js-anim section > .wrap.revealed,
+.js-anim footer > .wrap.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+.theme-toggle .icon { animation: icon-in 180ms var(--ease); }
+
+.shot { transition: border-color 150ms var(--ease); }
+.shot:hover { border-color: var(--accent); }
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 900px) {
@@ -600,6 +688,28 @@ footer p:last-child { margin-bottom: 0; }
 
 @media (max-width: 640px) {
   .wrap { padding: 0 16px; }
+
+  /* Section 12.3: keep a shortcut on one line and wrap the description
+     underneath it rather than letting the row scroll sideways. */
+  .table-scroll thead { position: absolute; left: -9999px; }
+  .table-scroll table, .table-scroll tbody, .table-scroll tr, .table-scroll td {
+    display: block;
+    width: auto;
+  }
+  .table-scroll tr {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .table-scroll tr:last-child { border-bottom: 0; }
+  .table-scroll td {
+    padding: 0;
+    border-bottom: 0;
+  }
+  .table-scroll td.keycell {
+    white-space: normal;
+    margin-bottom: 4px;
+  }
+
   .masthead { padding: 36px 0 32px; }
   .tagline { font-size: 1.1875rem; }
   section { padding: 36px 0; }
@@ -616,8 +726,13 @@ footer p:last-child { margin-bottom: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition-duration: 0ms !important; }
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
   .btn:active, .copy:active { transform: none; }
+  .js-anim section > .wrap,
+  .js-anim footer > .wrap { opacity: 1; transform: none; }
 }
 </style>
 </head>
@@ -697,7 +812,7 @@ footer p:last-child { margin-bottom: 0; }
       </div>
       <figcaption data-zh="窄下来就只剩一栏：列表、单封信、写信，一次一件事。">Narrow it and one column is left: the list, one message, one letter being written — a single thing at a time.</figcaption>
     </figure>
-    <figure>
+    <figure class="figure-center">
       <p class="shot-label" data-zh="状态栏快速预览">BAR PREVIEW</p>
       <img class="shot shot-bar" src="images/bar-preview.webp" width="622" alt="Omamail - The quick preview from the bar: latest mail and what is up next" loading="lazy">
       <figcaption data-zh="右键点状态栏里的信封，不打开窗口就能看到最新的邮件和接下来的日程。左键打开窗口，中键收信。">Right-click the envelope in the bar for the latest mail and what is up next, without opening the window. Left-click opens it; middle-click checks for mail.</figcaption>
@@ -908,6 +1023,20 @@ footer p:last-child { margin-bottom: 0; }
   try { stored = localStorage.getItem("omamail-lang"); } catch (e) {}
   if (!stored && /^zh/i.test(navigator.language || "")) stored = "zh";
   if (stored) apply(stored);
+
+  var panels = document.querySelectorAll("section > .wrap, footer > .wrap");
+  if (root.classList.contains("js-anim") && "IntersectionObserver" in window) {
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("revealed");
+        seen.unobserve(entry.target);
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.04 });
+    Array.prototype.forEach.call(panels, function (n) { seen.observe(n); });
+  } else {
+    Array.prototype.forEach.call(panels, function (n) { n.classList.add("revealed"); });
+  }
 
   var copy = document.querySelector(".copy");
   if (copy && navigator.clipboard) {
