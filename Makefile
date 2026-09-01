@@ -80,6 +80,7 @@ test-js:
 	node tests/test_unsubscribe.js
 	node tests/test_mailto.js
 	node tests/test_html.js
+	node tests/test_direction.js
 	node tests/test_cache.js
 	node tests/test_model.js
 	node tests/test_keymap.js

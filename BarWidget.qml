@@ -170,6 +170,7 @@ BarWidget {
       dimColor: Qt.rgba(Color.popups.text.r, Color.popups.text.g,
         Color.popups.text.b, 0.62)
       panelFontFamily: Style.font.family
+      contentDirection: root.gmail ? root.gmail.contentDirection : ""
       onMessageRequested: function(accountId, messageId) {
         root.openMessage(accountId, messageId)
       }

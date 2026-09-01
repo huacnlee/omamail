@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../components"
+import "../message/Direction.js" as Direction
 
 Column {
   id: root
@@ -12,6 +13,18 @@ Column {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
+  // The same setting the window reads. A subject that lands on the right edge
+  // in the list and on the left one here would be the setting half-applied.
+  property string contentDirection: Direction.MODE_DEFAULT
+  // Only a chosen direction reaches the lines that are not subjects: Qt already
+  // resolves a sender's name and a date from their own text.
+  readonly property var textAlignment: alignmentFor(Direction.forced(root.contentDirection))
+
+  function alignmentFor(direction) {
+    if (!Direction.hasAnswer(direction)) return undefined
+    return Direction.isRightToLeft(direction) ? Text.AlignRight : Text.AlignLeft
+  }
+
   width: Style.space(360)
   spacing: Style.space(5)
 
@@ -55,6 +68,10 @@ Column {
           font.bold: mailRow.modelData.unread === true
           elide: Text.ElideRight
           textFormat: Text.PlainText
+          // The reply prefix in front of a subject is Latin whatever the thread
+          // is written in, so the subject is asked on its own account here too.
+          horizontalAlignment: root.alignmentFor(Direction.resolveSubject(
+            mailRow.modelData.subject, root.contentDirection))
         }
         Text {
           width: parent.width
@@ -65,6 +82,7 @@ Column {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
           textFormat: Text.PlainText
+          horizontalAlignment: root.textAlignment
         }
         Text {
           width: parent.width
@@ -74,6 +92,7 @@ Column {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
           textFormat: Text.PlainText
+          horizontalAlignment: root.textAlignment
         }
       }
       MouseArea {
