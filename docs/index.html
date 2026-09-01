@@ -49,6 +49,7 @@ if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)")
   --cyan: #7DCFFF;
 
   --glint: #E2F5B8;
+  --accent-hover: #B4F9F8;
 
   --show-sun: block;
   --show-moon: none;
@@ -76,6 +77,7 @@ if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)")
     --cyan: #1F726B;
 
     --glint: #8CA61F;
+    --accent-hover: #17457C;
 
     --show-sun: none;
     --show-moon: block;
@@ -101,6 +103,7 @@ if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)")
   --cyan: #1F726B;
 
   --glint: #8CA61F;
+  --accent-hover: #17457C;
 
   --show-sun: none;
   --show-moon: block;
@@ -337,15 +340,22 @@ code {
   justify-content: center;
   gap: 8px;
 }
+/* Geometry, weight and hover follow omarchy.org's own .button: uppercase,
+   0.4em radius, 2.9em tall, and the primary lifting to turquoise. The
+   secondary stays the outline variant so the region keeps one primary. */
 .btn {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 0 16px;
+  gap: 1ch;
+  height: 2.9em;
+  padding-inline: 1.15em;
   border: 1px solid var(--muted);
+  border-radius: 0.4em;
   color: var(--foreground);
   text-decoration: none;
   font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
   letter-spacing: 0.06em;
   transition: background 150ms var(--ease), color 150ms var(--ease),
     border-color 150ms var(--ease);
@@ -356,15 +366,22 @@ code {
   color: var(--bright);
 }
 .btn:active { transform: translateY(1px); }
+
 .btn-primary {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: transparent;
   color: var(--accent-ink);
-  font-weight: 700;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.1),
+    0 0.2em 1.2em -0.4em rgba(0, 0, 0, 0.2),
+    0 0.4em 2em -0.8em rgba(0, 0, 0, 0.3),
+    0 0.4em 0.4em -0.8em rgba(0, 0, 0, 0.4),
+    0 0.8em 0.8em -1.2em rgba(0, 0, 0, 0.5),
+    0 1.2em 1.2em -1.6em rgba(0, 0, 0, 0.6);
 }
 .btn-primary:hover {
-  background: var(--bright);
-  border-color: var(--bright);
+  background: var(--accent-hover);
+  border-color: transparent;
   color: var(--accent-ink);
 }
 
