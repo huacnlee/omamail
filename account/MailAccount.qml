@@ -1730,6 +1730,7 @@ Item {
       inReplyTo: values.inReplyTo,
       references: values.references
     })
+    payload.draftId = String(values.draftId || "")
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
     })

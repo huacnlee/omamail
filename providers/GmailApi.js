@@ -121,6 +121,21 @@ function sendPath() { return "/users/me/messages/send" }
 function draftsPath() { return "/users/me/drafts" }
 function draftPath(id) { return "/users/me/drafts/" + encode(id) }
 
+function draftListQuery(pageToken) {
+  return { maxResults: 500, pageToken: String(pageToken || "") }
+}
+
+function draftIdForMessage(payload, messageId) {
+  var wanted = String(messageId || "")
+  var rows = arrayValues(payload && payload.drafts)
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {}
+    if (row.message && String(row.message.id || "") === wanted)
+      return String(row.id || "")
+  }
+  return ""
+}
+
 function sendBody(payload) {
   var source = payload || {}
   var body = { raw: String(source.raw || "") }
