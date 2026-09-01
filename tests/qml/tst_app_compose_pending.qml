@@ -63,6 +63,8 @@ Item {
     property var lastSavedDraft: null
     property string lastLoadedAttachmentId: ""
     property bool failDraftSave: false
+    property bool deferDraftSave: false
+    property var draftSaveCallbacks: []
     property var selectedBody: ({ text: "Original body" })
     property var selectedMessage: ({
       id: "message-1",
@@ -113,8 +115,21 @@ Item {
     }
     function saveDraft(fields, callback) {
       lastSavedDraft = fields
+      if (deferDraftSave) {
+        var queued = draftSaveCallbacks.slice()
+        queued.push(callback)
+        draftSaveCallbacks = queued
+        return
+      }
       callback(failDraftSave ? null : "draft-1",
         failDraftSave ? "server refused it" : "")
+    }
+    function finishDraftSave(index, error) {
+      var queued = draftSaveCallbacks.slice()
+      var callback = queued[index]
+      queued.splice(index, 1)
+      draftSaveCallbacks = queued
+      callback(error ? null : "draft-1", String(error || ""))
     }
     function refresh() {}
     function fail(text) { lastError = String(text || "") }
@@ -150,13 +165,14 @@ Item {
 
     function init() {
       app.opened = false
-      app.composeSavePending = false
       app.loadComposeRecovery("")
       app.clearComposeRecovery()
       mailService.sendPending = false
       mailService.sending = false
       mailService.lastSavedDraft = null
       mailService.failDraftSave = false
+      mailService.deferDraftSave = false
+      mailService.draftSaveCallbacks = []
       mailService.lastError = ""
       mailService.actionStatus = ""
       mailService.lastLoadedAttachmentId = ""
@@ -282,6 +298,50 @@ Item {
       compare(mailService.lastSavedDraft.body, "First draft")
       compare(app.composing, false)
       compare(app.draftSavedNotice, "Draft saved")
+    }
+
+    function test_an_older_save_cannot_clear_a_newer_drafts_recovery() {
+      var compose = composeView()
+      mailService.deferDraftSave = true
+
+      app.startCompose("new")
+      named(compose, "compose-body-editor").text = "First draft"
+      app.goBack()
+
+      app.startCompose("new")
+      named(compose, "compose-body-editor").text = "Second draft"
+      app.goBack()
+      compare(mailService.draftSaveCallbacks.length, 2)
+      compare(app.composeRecovery.draft.body, "Second draft")
+
+      mailService.finishDraftSave(0, "")
+
+      compare(app.composeRecovery.active, true)
+      compare(app.composeRecovery.draft.body, "Second draft",
+        "the first request must not clear the newer recovery snapshot")
+    }
+
+    function test_failed_older_save_waits_behind_newer_recovery() {
+      var compose = composeView()
+      mailService.deferDraftSave = true
+
+      app.startCompose("new")
+      named(compose, "compose-body-editor").text = "First draft"
+      app.goBack()
+      app.startCompose("new")
+      named(compose, "compose-body-editor").text = "Second draft"
+      app.goBack()
+
+      mailService.finishDraftSave(0, "server refused it")
+      compare(app.composeRecovery.draft.body, "Second draft",
+        "the newer in-flight draft keeps the durable recovery slot")
+      compare(named(compose, "compose-body-editor").text, "First draft",
+        "the older failed draft remains available in memory")
+
+      mailService.finishDraftSave(0, "")
+      wait(350)
+      compare(app.composeRecovery.draft.body, "First draft",
+        "once the newer draft is durable, recovery follows the older failed draft")
     }
 
     function test_open_previews_a_draft_and_compose_edits_it() {

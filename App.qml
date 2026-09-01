@@ -41,7 +41,8 @@ Item {
   property var composeRecovery: Recovery.empty()
   property bool composeRecoveryLoaded: false
   property bool composeRecoveryRestoring: false
-  property bool composeSavePending: false
+  property int composeRecoveryRevision: 0
+  property bool composeDetachingForSave: false
   property string lastComposeRecoveryText: ""
   property string composeWritePayload: ""
   property bool composeWriteQueued: false
@@ -74,12 +75,14 @@ Item {
     var raw = Recovery.serialize(composeReturnView, draft)
     if (raw === "") {
       clearComposeRecovery()
-      return
+      return composeRecoveryRevision
     }
     composeRecovery = Recovery.parse(raw)
-    if (raw === lastComposeRecoveryText) return
+    if (raw === lastComposeRecoveryText) return composeRecoveryRevision
+    composeRecoveryRevision++
     lastComposeRecoveryText = raw
     writeComposeRecovery(raw)
+    return composeRecoveryRevision
   }
 
   function scheduleComposeRecovery() {
@@ -87,12 +90,16 @@ Item {
     composeRecoveryTimer.restart()
   }
 
-  function clearComposeRecovery() {
+  function clearComposeRecovery(expectedRevision) {
+    if (expectedRevision !== undefined
+        && Number(expectedRevision) !== composeRecoveryRevision) return false
     composeRecoveryTimer.stop()
     composeRecovery = Recovery.empty()
-    if (lastComposeRecoveryText === "") return
+    composeRecoveryRevision++
+    if (lastComposeRecoveryText === "") return true
     lastComposeRecoveryText = ""
     writeComposeRecovery('{"version":1,"active":false}')
+    return true
   }
 
   function writeComposeRecovery(raw) {
@@ -446,23 +453,27 @@ Item {
       return
     }
     var saved = compose.snapshotDraft()
-    saveComposeRecovery(saved)
-    composeSavePending = true
+    var recoveryRevision = saveComposeRecovery(saved)
+    composeDetachingForSave = true
     compose.detachForSave()
+    composeDetachingForSave = false
     var fields = compose.fieldsForDraft(saved)
     service.saveDraft(fields, function(result, error) {
       if (!root) return
-      root.composeSavePending = false
       if (error) {
         compose.recoverDetachedSave(saved)
-        root.saveComposeRecovery(saved)
+        if (root.composeRecoveryRevision === recoveryRevision)
+          root.saveComposeRecovery(saved)
         service.fail("Could not save draft: " + String(error))
         return
       }
       compose.completeDetachedSave(saved)
       if (compose.opened) root.scheduleComposeRecovery()
-      else root.clearComposeRecovery()
-      root.draftSavedNotice = "Draft saved"
+      else root.clearComposeRecovery(recoveryRevision)
+      var warning = String(result && result.warning || "")
+      root.draftSavedNotice = warning === "" ? "Draft saved" : warning
+      if (warning !== "" && service && typeof service.note === "function")
+        service.note(warning)
       draftSavedTimer.restart()
       if (service.mailboxKey === "drafts") service.refresh()
     })
@@ -1343,7 +1354,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           onClosed: {
-            if (!root.composeSavePending) root.clearComposeRecovery()
+            if (!root.composeDetachingForSave) root.clearComposeRecovery()
             root.leaveCompose()
           }
           onCloseRequested: root.saveAndLeaveCompose()

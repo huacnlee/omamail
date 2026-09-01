@@ -178,14 +178,16 @@ deepEqual(hey.draftEditCommand("draft:42", {
   cc: "",
   bcc: "hidden@example.com",
   subject: "Revised",
-  body: "New body"
+  body: "New body",
+  attachments: [{ path: "/tmp/revised.pdf" }]
 }), [
   "draft", "edit", "42",
   "--to", "jane@example.com",
   "--cc", "",
   "--bcc", "hidden@example.com",
   "--subject", "Revised",
-  "--message", "New body"
+  "--message", "New body",
+  "--attach", "/tmp/revised.pdf"
 ])
 assert.strictEqual(hey.isDroppableFlag("--attach"), false)
 assert.strictEqual(hey.isDroppableFlag("--html"), true)

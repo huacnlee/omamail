@@ -366,7 +366,7 @@ function draftEditCommand(id, fields) {
     "--bcc", String(values.bcc || ""),
     "--subject", String(values.subject || ""),
     "--message", String(values.body || "")
-  ]
+  ].concat(attachArgs(values.attachments))
 }
 
 function attachArgs(files) {

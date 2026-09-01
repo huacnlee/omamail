@@ -753,14 +753,14 @@ Item {
             callback({}, "")
             return
           }
-          var commands = Imap.draftReplacementCommands(sourceId, folder)
-          if (commands.length === 0) {
-            callback(null, "That draft is no longer in the mailbox")
+          var replacement = Imap.draftReplacementPlan(sourceId, folder)
+          if (replacement.commands.length === 0) {
+            callback({ saved: true, warning: replacement.warning }, "")
             return
           }
-          root.run(folder, commands, function(text, replaceError) {
+          root.run(folder, replacement.commands, function(text, replaceError) {
             if (handle.aborted || typeof callback !== "function") return
-            callback(replaceError ? null : {}, replaceError)
+            callback(Imap.draftSaveResult(replaceError), "")
           }, handle)
         })
         process.running = true

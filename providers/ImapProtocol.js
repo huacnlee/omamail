@@ -557,6 +557,24 @@ function draftReplacementCommands(id, draftsFolder) {
   ]
 }
 
+function draftReplacementPlan(id, draftsFolder) {
+  var commands = draftReplacementCommands(id, draftsFolder)
+  return {
+    commands: commands,
+    warning: commands.length > 0 ? ""
+      : "The updated draft was saved, but the old copy could not be identified"
+  }
+}
+
+function draftSaveResult(replaceError) {
+  var detail = trimmed(replaceError)
+  return {
+    saved: true,
+    warning: detail === "" ? ""
+      : "The updated draft was saved, but the old copy could not be removed: " + detail
+  }
+}
+
 function statusCommand(folder) {
   return "STATUS " + quote(folder) + " (MESSAGES UNSEEN)"
 }
