@@ -43,7 +43,13 @@ Item {
     name: "CalendarController"
 
     function init() {
+      // Reset here rather than at the end of each case: a failed compare aborts
+      // the function, so a restore on its last line does not run and one real
+      // failure becomes a cascade that hides it.
       mailService.unifiedCalendarView = false
+      controller.accountId = "imap:work@example.com"
+      controller.refreshScope = ""
+      controller.refreshAccountId = ""
       controller.loading = false
       controller.rangeStart = 0
       controller.rangeEnd = 0
@@ -83,7 +89,6 @@ Item {
       controller.accountId = "one@gmail.com"
       compare(controller.calendarScope, "__unified__",
         "and it does not move when the mailbox does")
-      controller.accountId = "imap:work@example.com"
     }
 
     // An answer that is still correct is not thrown away. Under the unified
@@ -97,7 +102,6 @@ Item {
       controller.accountId = "two@gmail.com"
       compare(controller.refreshScope, controller.calendarScope,
         "the fetch in flight still belongs to the view on screen")
-      controller.accountId = "imap:work@example.com"
     }
 
     // And the default mode is unchanged: there the scope is the account, so a
@@ -108,7 +112,16 @@ Item {
       controller.refreshScope = controller.calendarScope
       controller.accountId = "one@gmail.com"
       verify(controller.refreshScope !== controller.calendarScope)
-      controller.accountId = "imap:work@example.com"
+    }
+
+    // A controller with no mailbox is already showing every source, so the
+    // setting cannot change what it shows — and renaming its scope would
+    // orphan the bar preview's cache entry and refetch every calendar.
+    function test_a_controller_with_no_mailbox_keeps_its_scope() {
+      controller.accountId = ""
+      compare(controller.calendarScope, "")
+      mailService.unifiedCalendarView = true
+      compare(controller.calendarScope, "", "the bar preview was always unified")
     }
 
     function test_changing_calendar_scope_reloads_the_visible_range() {

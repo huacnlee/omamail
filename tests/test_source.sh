@@ -300,8 +300,17 @@ if "accountId: root.calendarAccountId" not in service:
 controller = Path("calendar/CalendarController.qml").read_text()
 if "eventCache.get(refreshScope" not in controller or "eventCache.put(refreshScope" not in controller:
     raise SystemExit("test_source.sh: the event cache must be keyed by the calendar scope, not the mailbox")
-if "onAccountIdChanged: if (!unifiedCalendarView)" not in controller:
-    raise SystemExit("test_source.sh: a mailbox switch must not reload a calendar that does not follow the mailbox")
+# The reload watches the scope rather than the two things that go into it. A
+# mailbox switch under the unified view changes nothing on screen, and neither
+# does the setting for a controller that had no mailbox to follow — watching the
+# inputs separately got those two wrong in opposite directions.
+if "onCalendarScopeChanged: reloadVisibleRange()" not in controller:
+    raise SystemExit("test_source.sh: the visible range must reload on a change of scope, not of mailbox")
+if "onAccountIdChanged" in controller or "onUnifiedCalendarViewChanged" in controller:
+    raise SystemExit("test_source.sh: reloading on either input separately is what the scope replaced")
+composer_default = Path("components/CalendarEventComposer.qml").read_text()
+if "preferredCalendarId()" not in composer_default:
+    raise SystemExit("test_source.sh: a new event must open on the mailbox being read, not the first account")
 composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
     raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")

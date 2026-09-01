@@ -75,7 +75,13 @@ Item {
   readonly property var contextSources: unifiedCalendarView
     ? availableSources : Sources.forAccount(availableSources, accountId)
   // One name for every mailbox, because the unified view is one view.
-  readonly property string calendarScope: unifiedCalendarView
+  //
+  // A controller with no account is already showing every source — the bar
+  // preview is one, and `Sources.forAccount(list, "")` has always returned all
+  // of them — so the setting cannot change what it shows, and renaming its
+  // scope would orphan a cache entry and refetch every calendar to redraw what
+  // was already there.
+  readonly property string calendarScope: unifiedCalendarView && accountId !== ""
     ? "__unified__" : accountId
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
@@ -90,12 +96,12 @@ Item {
     onTriggered: root.nowMs = Date.now()
   }
 
-  // Both of these are the same event — the set of calendars on screen may have
-  // changed — so they ask the same question in the same place. The unified view
-  // does not change with the mailbox, so switching mailboxes under it is not
-  // that event and reloading for it would throw away a correct answer.
-  onAccountIdChanged: if (!unifiedCalendarView) reloadVisibleRange()
-  onUnifiedCalendarViewChanged: reloadVisibleRange()
+  // The one event worth reloading for, said once: what is on screen depends on
+  // the scope, so it is a change of scope that makes the answer stale. A
+  // mailbox switch under the unified view is not one, and neither is turning
+  // the setting on for a controller that had no mailbox to follow — watching
+  // the two inputs separately got both of those wrong in opposite directions.
+  onCalendarScopeChanged: reloadVisibleRange()
 
   // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
   // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
