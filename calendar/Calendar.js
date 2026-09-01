@@ -347,7 +347,7 @@ function googleMoment(value, dateOnly) {
   return { ms: ms, allDay: dateOnly, tzid: "", resolved: true }
 }
 
-function eventsFromGoogle(payload, sourceId) {
+function eventsFromGoogle(payload, sourceId, calendarId) {
   var items = payload && Array.isArray(payload.items) ? payload.items : []
   var out = []
   for (var i = 0; i < items.length; i++) {
@@ -372,15 +372,26 @@ function eventsFromGoogle(payload, sourceId) {
       attendees: Array.isArray(item.attendees) ? item.attendees : [],
       start: start, end: end, recurrence: Array.isArray(item.recurrence)
         ? item.recurrence.join("; ") : "", meetLink: String(item.hangoutLink || ""),
-      sourceId: String(sourceId || ""), href: String(item.htmlLink || ""), source: null
+       sourceId: String(sourceId || ""), calendarId: String(calendarId || "primary"),
+       href: String(item.htmlLink || ""), source: null
     })
   }
   out.sort(compareEvents)
   return out
 }
 
-function googleEventsUrl(startMs, endMs) {
-  return "https://www.googleapis.com/calendar/v3/calendars/primary/events?"
+function googleCalendarsUrl(pageToken) {
+  var url = "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250"
+  return pageToken ? url + "&pageToken=" + encodeURIComponent(String(pageToken)) : url
+}
+
+function googleCalendarEventsUrl(calendarId) {
+  return "https://www.googleapis.com/calendar/v3/calendars/"
+    + encodeURIComponent(String(calendarId || "primary")) + "/events"
+}
+
+function googleEventsUrl(startMs, endMs, calendarId) {
+  return googleCalendarEventsUrl(calendarId) + "?"
     + "singleEvents=true&orderBy=startTime&maxResults=2500"
     + "&timeMin=" + encodeURIComponent(new Date(Number(startMs) || 0).toISOString())
     + "&timeMax=" + encodeURIComponent(new Date(Number(endMs) || 0).toISOString())
@@ -554,8 +565,9 @@ function updateEvent(fields, existing, nowMs) {
   }
 }
 
-function googleEventUrl(eventId) {
-  return "https://www.googleapis.com/calendar/v3/calendars/primary/events/"
+function googleEventUrl(eventId, calendarId) {
+  return "https://www.googleapis.com/calendar/v3/calendars/"
+    + encodeURIComponent(String(calendarId || "primary")) + "/events/"
     + encodeURIComponent(String(eventId || ""))
 }
 

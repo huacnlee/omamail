@@ -331,7 +331,7 @@ var KEYRING_KIND = "refresh-token"
 // A token stored before Calendar support cannot prove it carries the new
 // permission. A versioned lookup leaves that token untouched and presents the
 // sign-in flow again, where Google extends the existing grant.
-var KEYRING_GRANT = "calendar-events-v1"
+var KEYRING_GRANT = "calendar-readonly-v1"
 
 // secret-tool reads an empty attribute value as "match anything", which would
 // hand back some other account's token, so an account with no name yet gets a

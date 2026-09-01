@@ -137,7 +137,7 @@ deepEqual(first, [
   "kind", "refresh-token",
   "client-id", sharedClient,
   "account", "one@gmail.com",
-  "grant", "calendar-events-v1"
+  "grant", "calendar-readonly-v1"
 ])
 assert.notStrictEqual(JSON.stringify(first), JSON.stringify(second),
   "two accounts on one client must not share a keyring entry")

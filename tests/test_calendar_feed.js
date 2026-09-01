@@ -230,17 +230,23 @@ const google = feed.eventsFromGoogle({ items: [{
   start: { dateTime: "2026-08-24T10:00:00+02:00" },
   end: { dateTime: "2026-08-24T11:00:00+02:00" },
   status: "confirmed"
-}] }, "google:me")
+}] }, "google:me", "work/team")
 assert.strictEqual(google.length, 1)
 assert.strictEqual(google[0].uid, "g1")
 assert.strictEqual(google[0].googleId, "g1",
   "the write URL needs the item id, separate from the iCalUID")
 assert.strictEqual(google[0].sourceId, "google:me")
+assert.strictEqual(google[0].calendarId, "work/team")
 assert.strictEqual(google[0].start.ms, Date.parse("2026-08-24T10:00:00+02:00"))
-const googleUrl = feed.googleEventsUrl(Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
-assert.ok(googleUrl.indexOf("https://www.googleapis.com/calendar/v3/calendars/primary/events?") === 0)
+const googleUrl = feed.googleEventsUrl(Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1), "work/team")
+assert.ok(googleUrl.indexOf("https://www.googleapis.com/calendar/v3/calendars/work%2Fteam/events?") === 0)
+assert.ok(feed.googleCalendarsUrl().indexOf("/users/me/calendarList?") > 0)
+assert.strictEqual(feed.googleCalendarEventsUrl("work/team"),
+  "https://www.googleapis.com/calendar/v3/calendars/work%2Fteam/events")
 assert.strictEqual(feed.googleEventUrl("g1_20260824T080000Z"),
   "https://www.googleapis.com/calendar/v3/calendars/primary/events/g1_20260824T080000Z")
+assert.strictEqual(feed.googleEventUrl("g1", "work/team"),
+  "https://www.googleapis.com/calendar/v3/calendars/work%2Fteam/events/g1")
 
 const created = feed.createEvent({
   title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
