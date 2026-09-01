@@ -5,18 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Omamail — mail as a native Omarchy window</title>
 <meta name="description" content="Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages and answers Gmail, HEY and any IMAP mailbox in a native window.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%237AA2F7' d='M1 3h14v10H1V3zm2 2v1l5 3 5-3V5H3zm0 3v3h10V8l-5 3-5-3z'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="images/omamail.svg">
 <meta property="og:title" content="Omamail — mail as a native Omarchy window">
 <meta property="og:description" content="Read, triage and answer Gmail, HEY and any IMAP mailbox inside the omarchy-shell process you already have.">
-<meta property="og:image" content="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00">
+<meta property="og:image" content="https://huacnlee.github.io/omamail/images/og-preview.jpg">
 <meta property="og:url" content="https://huacnlee.github.io/omamail/">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap">
+<script>
+/* Before first paint, so a stored choice never flashes the other theme. */
+try {
+  var t = localStorage.getItem("omamail-theme");
+  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+} catch (e) {}
+</script>
 <style>
+/* Tokyo Night, the default. Flexoki Light below, once for the system's choice
+   and once for the switch's — CSS cannot share one block across a media query
+   and a selector. Keep the two in step. */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 
   --background: #1A1B26;
   --dark-background: #13141C;
@@ -33,11 +43,16 @@
   --red: #F7768E;
   --cyan: #7DCFFF;
 
+  --show-sun: block;
+  --show-moon: none;
+
   --ease: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
     --background: #FFFCF0;
     --dark-background: #F2F0E5;
     --lighter-background: #F2F0E5;
@@ -52,7 +67,32 @@
     --green: #536607;
     --red: #AF3029;
     --cyan: #1F726B;
+
+    --show-sun: none;
+    --show-moon: block;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #FFFCF0;
+  --dark-background: #F2F0E5;
+  --lighter-background: #F2F0E5;
+  --foreground: #100F0F;
+  --bright: #100F0F;
+  --dim: #63625D;
+  --muted: #CECDC3;
+  --hairline: #DAD8CE;
+  --accent: #205EA6;
+  --accent-ink: #FFFCF0;
+  --selection: #E6E4D9;
+  --green: #536607;
+  --red: #AF3029;
+  --cyan: #1F726B;
+
+  --show-sun: none;
+  --show-moon: block;
 }
 
 * { box-sizing: border-box; }
@@ -137,11 +177,16 @@ code {
 }
 .topbar-id b { color: var(--foreground); font-weight: 700; }
 
-.lang {
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.seg {
   display: flex;
   border: 1px solid var(--muted);
 }
-.lang button {
+.seg button {
   appearance: none;
   background: transparent;
   border: 0;
@@ -154,14 +199,38 @@ code {
   cursor: pointer;
   transition: background 150ms var(--ease), color 150ms var(--ease);
 }
-.lang button:last-child { border-right: 0; }
-.lang button:hover { background: var(--selection); color: var(--bright); }
-.lang button[aria-pressed="true"] {
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: var(--selection); color: var(--bright); }
+.seg button[aria-pressed="true"] {
   background: var(--selection);
   color: var(--bright);
   font-weight: 700;
 }
-.lang button[aria-pressed="true"]::before { content: "\2713\00a0"; }
+.seg button[aria-pressed="true"]::before { content: "\2713\00a0"; }
+
+/* Ghost button: no border, no fill — the icon carries it. */
+.theme-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  padding: 0 10px;
+  min-width: 40px;
+  min-height: 34px;
+  cursor: pointer;
+  transition: color 150ms var(--ease);
+}
+.theme-toggle:hover { color: var(--bright); }
+.theme-toggle .icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+.icon-sun { display: var(--show-sun); }
+.icon-moon { display: var(--show-moon); }
 
 /* ---------- masthead ---------- */
 
@@ -169,8 +238,19 @@ code {
   padding: 56px 0 48px;
   border-bottom: 1px solid var(--hairline);
 }
+.masthead .wrap { text-align: center; }
+
+.app-icon {
+  display: block;
+  width: 72px;
+  height: auto;
+  margin: 0 auto 24px;
+}
 
 .wordmark {
+  /* Centred as one block: centring its lines would break the pixel grid. */
+  display: inline-block;
+  text-align: left;
   margin: 0;
   color: var(--green);
   font-weight: 700;
@@ -181,7 +261,7 @@ code {
 }
 
 .tagline {
-  margin: 28px 0 0;
+  margin: 28px auto 0;
   color: var(--bright);
   font-size: 1.375rem;
   font-weight: 400;
@@ -190,7 +270,7 @@ code {
 }
 
 .standfirst {
-  margin: 16px 0 0;
+  margin: 16px auto 0;
   max-width: 62ch;
 }
 
@@ -208,6 +288,7 @@ code {
   align-items: stretch;
   border: 1px solid var(--muted);
   background: var(--lighter-background);
+  text-align: left;
 }
 .command pre {
   margin: 0;
@@ -240,6 +321,7 @@ code {
   margin: 20px 0 0;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 .btn {
@@ -303,17 +385,31 @@ h2 {
 .shot {
   display: block;
   width: 100%;
+  height: auto;
+  object-fit: contain;
   border: 1px solid var(--muted);
   background: var(--dark-background);
 }
-.shot-wide { aspect-ratio: 1472 / 1049; }
+/* Placeholders only — each matches its file, so nothing is ever scaled off ratio. */
+.shot-wide { aspect-ratio: 1593 / 1113; }
+.shot-mini { aspect-ratio: 937 / 1028; }
 .shot-row {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
+.shot-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shot-span { grid-column: 1 / -1; }
 figure { margin: 0; }
+figure + figure { margin-top: 32px; }
+.shot-label {
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
 figcaption {
   margin-top: 10px;
   color: var(--dim);
@@ -516,21 +612,31 @@ footer p:last-child { margin-bottom: 0; }
 <div class="topbar">
   <div class="wrap">
     <span class="topbar-id"><b>Omamail</b> <span data-zh="给 <a href='https://omarchy.org'>Omarchy</a> 写的邮件插件">an <a href="https://omarchy.org">Omarchy</a> plugin</span></span>
-    <div class="lang" role="group" aria-label="Language">
-      <button type="button" data-lang="en" aria-pressed="true">EN</button>
-      <button type="button" data-lang="zh" aria-pressed="false">中文</button>
+    <div class="switches">
+      <button type="button" class="theme-toggle" aria-label="Switch to the light theme">
+        <svg class="icon icon-sun" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0m0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13m8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5M3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8m10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0m-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0m9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707M4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708"/></svg>
+        <svg class="icon icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/></svg>
+      </button>
+      <div class="seg lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="zh" aria-pressed="false">中文</button>
+      </div>
     </div>
   </div>
 </div>
 
 <header class="masthead">
   <div class="wrap">
+    <svg class="app-icon" viewBox="0 0 64 64" role="img" aria-label="Omamail">
+      <path d="M16 51V21l16 17 16-17v30" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linejoin="miter"/>
+      <rect x="5" y="13" width="54" height="38" fill="none" stroke="var(--foreground)" stroke-width="5"/>
+    </svg>
     <pre class="wordmark" aria-hidden="true"> ███  █   █  ███  █   █  ███  █████ █
 █   █ ██ ██ █   █ ██ ██ █   █   █   █
 █   █ █ █ █ █████ █ █ █ █████   █   █
 █   █ █   █ █   █ █   █ █   █   █   █
  ███  █   █ █   █ █   █ █   █ █████ █████</pre>
-    <h1 class="tagline" data-zh="把邮件放进 Omarchy 的原生窗口，而不是浏览器标签页。">Your mail as a native Omarchy window — not a browser tab.</h1>
+    <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">Native mail app special design for Omarchy</h1>
     <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。它运行在你已经启动的 <code>omarchy-shell</code> 进程里，跟随当前主题，并在状态栏显示未读数。">Omamail reads, triages and answers your mail over the official Gmail API, over the HEY CLI 37signals publish, or over IMAP and SMTP for every other mailbox. It runs inside the <code>omarchy-shell</code> process you already have, follows your active theme, and puts an unread count in the bar.</p>
 
     <div class="command">
@@ -556,12 +662,24 @@ footer p:last-child { margin-bottom: 0; }
     <h2><span class="idx">01</span> <span data-zh="它的样子">What it looks like</span></h2>
     <p class="lede" data-zh="宽屏三栏，窄了就一栏。一个真正的 Hyprland 窗口，和别的窗口一样平铺。">Three columns when there is room, one when there is not — a real Hyprland window, tiled like any other.</p>
     <figure>
-      <img class="shot shot-wide" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" alt="Omamail open in Omarchy: mailbox rail, message list and reader side by side" loading="lazy">
+      <p class="shot-label" data-zh="大窗口">FULL WINDOW</p>
       <div class="shot-row">
-        <img class="shot" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" alt="Omamail in mini size: the message list alone in a narrow window" loading="lazy">
-        <img class="shot" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" alt="Omamail in mini size: one message open in a narrow window" loading="lazy">
+        <img class="shot shot-wide shot-span" src="images/full-mail.webp" width="1593" alt="Omamail - Reading a message in the three-column window" loading="lazy">
+        <img class="shot shot-wide" src="images/full-calendar.webp" width="1593" alt="Omamail - The calendar in month view" loading="lazy">
+        <img class="shot shot-wide" src="images/full-compose.webp" width="1593" alt="Omamail - Writing a new message" loading="lazy">
+        <img class="shot shot-wide" src="images/full-settings.webp" width="1593" alt="Omamail - Settings: reading, notifications, undo send and mailboxes" loading="lazy">
+        <img class="shot shot-wide" src="images/full-add-mailbox.webp" width="1593" alt="Omamail - Adding a mailbox: Gmail, HEY or IMAP" loading="lazy">
       </div>
-      <figcaption data-zh="上：完整窗口。下：迷你尺寸——先是列表，打开一封信就进入单栏阅读。">Above: the full window. Below: mini size — the list alone, and one message open in a single detail view.</figcaption>
+      <figcaption data-zh="三栏邮件，加上日历、写信、设置，以及添加邮箱时先问的那一步。">Mail in three columns, plus the calendar, a new message, settings, and the question every new mailbox starts with.</figcaption>
+    </figure>
+    <figure>
+      <p class="shot-label" data-zh="小窗口">MINI SIZE</p>
+      <div class="shot-row shot-row-3">
+        <img class="shot shot-mini" src="images/mini-list.webp" width="937" alt="Omamail - Mini size: the message list, with mailbox tabs above it" loading="lazy">
+        <img class="shot shot-mini" src="images/mini-message.webp" width="937" alt="Omamail - Mini size: one message open in a single detail view" loading="lazy">
+        <img class="shot shot-mini" src="images/mini-compose.webp" width="937" alt="Omamail - Mini size: writing a new message" loading="lazy">
+      </div>
+      <figcaption data-zh="窄下来就只剩一栏：列表、单封信、写信，一次一件事。">Narrow it and one column is left: the list, one message, one letter being written — a single thing at a time.</figcaption>
     </figure>
   </div>
 </section>
@@ -569,28 +687,22 @@ footer p:last-child { margin-bottom: 0; }
 <section>
   <div class="wrap">
     <h2><span class="idx">02</span> <span data-zh="它能打开的邮箱">Mailboxes it can open</span></h2>
-    <p class="lede" data-zh="添加邮箱会先问是哪一种，因为这三套接入方式毫无共同之处。某种邮箱做不到的事，界面上就不提供：它只承诺守得住的东西。">Adding a mailbox asks which kind first, because the three setups have nothing in common. What a mailbox cannot do, the panel does not offer: it only promises what it can keep.</p>
+    <p class="lede" data-zh="三种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Three kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
     <div class="boxes">
       <div class="box">
         <h3>Gmail</h3>
         <span class="kind" data-zh="用 GOOGLE 账号登录">SIGN IN WITH GOOGLE</span>
-        <p data-zh="Google 按 Cloud 项目发放 Gmail API 权限，所以这条路要用一个你自己创建的 OAuth 客户端。设置页分五步带你走完，每一步对应的控制台页面都只有一次点击。">Google issues Gmail API access per Cloud project, so this route uses an OAuth client you create once. The setup page walks it in five steps, each with the console page one click away.</p>
-        <p data-zh="换来的是标签、会话、Gmail 自己的搜索语法，以及一个 Google 真的会拿去学习的“报告垃圾邮件”。">In exchange it gets labels, conversations, Gmail's own search syntax, and a report-spam that Google actually learns from.</p>
-        <p class="absent"><b data-zh="别跳过这一步">DO NOT SKIP</b><span data-zh="在你自己的项目上按“Publish app”。留在 Testing 状态的项目，发放的刷新令牌七天就过期。">Press "Publish app" on your own project. A project left in Testing is issued refresh tokens that expire after seven days.</span></p>
+        <p data-zh="标签、会话、Gmail 自己的搜索语法，以及一个 Google 真的会拿去学习的“报告垃圾邮件”。">Labels, conversations, Gmail's own search syntax, and a report-spam that Google actually learns from.</p>
       </div>
       <div class="box">
         <h3>HEY</h3>
         <span class="kind" data-zh="通过 HEY CLI">THROUGH THE HEY CLI</span>
-        <p data-zh="不需要地址，也不需要密码。HEY 没有 IMAP、没有 POP、没有公开 API，所以 Omamail 通过 37signals 正为此发布的 HEY CLI 读取它。登录、令牌和钥匙串条目都是 <code>hey</code> 的。">No address and no password. HEY publishes no IMAP, no POP and no public API, so Omamail reads it through the HEY CLI 37signals ship for exactly this. The sign-in, the token and the keyring entry are all <code>hey</code>'s.</p>
-        <p data-zh="导航栏是 HEY 自己的那一套：Imbox、New for you、Reply Later、Set Aside、The Feed 和 Paper Trail。">Imbox, New for you, Reply Later, Set Aside, The Feed and Paper Trail are all on the rail — HEY's own.</p>
-        <p class="absent"><b data-zh="这里没有">NOT HERE</b><span data-zh="没有 Sent，没有星标，没有归档，没有会议卡片，没有一键退订——<code>hey</code> 不提供这些。<code>e</code> 和 <code>s</code> 会直说缺的是什么，而不是假装做到。">No Sent, no star, no archive, no meeting card, no one-click unsubscribe — <code>hey</code> does not serve them. <code>e</code> and <code>s</code> name what is missing rather than pretending.</span></p>
+        <p data-zh="不需要地址，也不需要密码：37signals 发布的 <code>hey</code> 持有令牌。">No address and no password — the HEY CLI 37signals publish holds the token.</p>
       </div>
       <div class="box">
         <h3>IMAP</h3>
-        <span class="kind" data-zh="一个地址和一个密码">AN ADDRESS AND A PASSWORD</span>
-        <p data-zh="Fastmail、iCloud、Outlook、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。认识的服务商按地址自动填好，不认识的收在折叠区里等你改。">Fastmail, iCloud, Outlook, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own. Servers are filled in from the address for the ones this knows, and shown behind a disclosure for the ones it does not.</p>
-        <p data-zh="多数服务商要的是应用专用密码，不是你登录网页的那一个——表单会先讲清楚，省得你自己撞上去。发送走 SMTP。">Most providers want an app password rather than the one you sign in to their website with, and the form says so before you find out the hard way. Sending goes out over SMTP.</p>
-        <p class="absent"><b data-zh="这里没有">NOT HERE</b><span data-zh="没有标签，没有服务端会话，没有“报告垃圾邮件”——把信丢进 Junk 文件夹教不会服务器任何事。只有当服务器确实有归档文件夹可以移过去时，归档才会出现。">No labels, no server-side conversations, no report-spam — moving a message to a Junk folder teaches a server nothing. Archive appears only when the server has an archive folder to move to.</span></p>
+        <span class="kind" data-zh="一个地址和一个应用密码">AN ADDRESS AND AN APP PASSWORD</span>
+        <p data-zh="Fastmail、iCloud、Outlook、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。">Fastmail, iCloud, Outlook, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own.</p>
       </div>
     </div>
   </div>
@@ -729,11 +841,47 @@ footer p:last-child { margin-bottom: 0; }
       b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang));
     });
     try { localStorage.setItem("omamail-lang", lang); } catch (e) {}
+    labelTheme();
   }
 
   Array.prototype.forEach.call(buttons, function (b) {
     b.addEventListener("click", function () { apply(b.getAttribute("data-lang")); });
   });
+
+  var themeToggle = document.querySelector(".theme-toggle");
+  var themeLabels = {
+    en: { light: "Switch to the light theme", dark: "Switch to the dark theme" },
+    zh: { light: "切换到浅色主题", dark: "切换到深色主题" }
+  };
+
+  function currentTheme() {
+    var set = root.getAttribute("data-theme");
+    if (set === "light" || set === "dark") return set;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "dark";
+  }
+
+  function labelTheme() {
+    // The button shows, and names, the theme it switches to.
+    themeToggle.setAttribute(
+      "aria-label",
+      themeLabels[lang][currentTheme() === "dark" ? "light" : "dark"]
+    );
+  }
+
+  themeToggle.addEventListener("click", function () {
+    var next = currentTheme() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("omamail-theme", next); } catch (e) {}
+    labelTheme();
+  });
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", labelTheme);
+  }
+
+  labelTheme();
 
   var stored = null;
   try { stored = localStorage.getItem("omamail-lang"); } catch (e) {}
