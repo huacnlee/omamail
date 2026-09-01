@@ -80,7 +80,7 @@ var RTL_RANGES = [
   [0x0860, 0x08FF], // Syriac Supplement, Arabic Extended-A and -B
   [0xFB1D, 0xFB4F], // Hebrew presentation forms
   [0xFB50, 0xFDFF], // Arabic presentation forms-A
-  [0xFE70, 0xFEFF], // Arabic presentation forms-B
+  [0xFE70, 0xFEFC], // Arabic presentation forms-B (the last assigned is FEFC)
   [0x10800, 0x10CFF], // Cypriot, Phoenician, Kharoshthi, Old Hungarian
   [0x10D00, 0x10FFF], // Hanifi Rohingya, Sogdian, Elymaic, Old Sogdian
   [0x1E800, 0x1EFFF] // Mende Kikakui, Adlam, Arabic mathematical alphabets
@@ -129,8 +129,29 @@ function isNeutralCode(code) {
   if (code === 0x06DD || code === 0x08E2) return true // end of ayah, disputed end of ayah
   if (code >= 0x06F0 && code <= 0x06F9) return true // extended Arabic-Indic digits
   if (code >= 0x10E60 && code <= 0x10E7E) return true // Rumi numeral symbols (AN)
+  if (code >= 0x0300 && code <= 0x036F) return true // combining marks (NSM)
   if (code >= 0x2000 && code <= 0x2BFF) return true // punctuation, symbols, arrows
+  if (code >= 0x2E00 && code <= 0x2E7F) return true // supplemental punctuation
   if (code >= 0x3000 && code <= 0x303F) return true // CJK punctuation
+  if (code >= 0xFE00 && code <= 0xFE0F) return true // variation selectors
+  // Fullwidth punctuation, in the three runs around the fullwidth letters —
+  // which are strong left-to-right and are not here.
+  if (code >= 0xFF01 && code <= 0xFF20) return true
+  if (code >= 0xFF3B && code <= 0xFF40) return true
+  if (code >= 0xFF5B && code <= 0xFF65) return true
+  // U+FEFF is the byte order mark, which says nothing about direction and
+  // arrives at the front of a great many plain text parts. It sits just past
+  // the end of Arabic presentation forms-B, so a range that reached the end of
+  // the block would have read a BOM as a strong Arabic letter — and an English
+  // message that carried one would have been laid out right to left.
+  if (code === 0xFEFF) return true
+  // Emoji and the pictographic symbols beside them. A subject opening with one
+  // is the house style of most of the mail anybody receives, and every one of
+  // them is Other Neutral: the emoji says nothing about which way the sentence
+  // after it runs.
+  if (code >= 0x1F000 && code <= 0x1F0FF) return true // mahjong, dominoes, cards
+  if (code >= 0x1F1E6 && code <= 0x1F1FF) return true // regional indicators (flags)
+  if (code >= 0x1F300 && code <= 0x1FAFF) return true // pictographs and symbols
   return false
 }
 
@@ -286,6 +307,31 @@ function resolveSubject(subject, mode) {
   if (chosen === RIGHT_TO_LEFT) return RTL
   if (chosen === LEFT_TO_RIGHT) return LTR
   return subjectDirectionOf(subject)
+}
+
+// ------------------------------------------------------------------ a body
+
+// The plain reading of a message is not only the sender's words. `Html.js`
+// flattens a document by writing `[image 1]` where a picture stood, and a
+// remote image is blocked until the reader asks for it — so an HTML newsletter
+// that opens with a logo, which is most of them, hands this a string beginning
+// with a Latin `i` that omamail wrote itself.
+//
+// That is the same mistake as reading `Re:` as part of a subject, on the body
+// side: a marker this client put there is not the message saying which way it
+// runs. It is removed before the question is asked, and only from the front,
+// because a marker further in sits after whatever already answered.
+var IMAGE_MARKERS = /^(?:\s*\[image(?:\s+\d+)?\])+/
+
+function withoutImageMarkers(text) {
+  return String(text === undefined || text === null ? "" : text).replace(IMAGE_MARKERS, "")
+}
+
+function resolveBody(text, mode) {
+  var chosen = normalizeMode(mode)
+  if (chosen === RIGHT_TO_LEFT) return RTL
+  if (chosen === LEFT_TO_RIGHT) return LTR
+  return strongDirectionOf(withoutImageMarkers(text))
 }
 
 // ---------------------------------------------------------- what QML needs

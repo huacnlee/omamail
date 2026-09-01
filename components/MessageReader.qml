@@ -78,7 +78,7 @@ Item {
   // the message that state nothing, not a ruling over the parts that do.
   readonly property string subjectDirection: Direction.resolveSubject(
     root.summary ? root.summary.subject : "", root.contentDirection)
-  readonly property string bodyDirection: Direction.resolve(
+  readonly property string bodyDirection: Direction.resolveBody(
     root.service && root.service.selectedBody ? root.service.selectedBody.text : "",
     root.contentDirection)
   // The header lines below the subject carry a name, an address and a date, all

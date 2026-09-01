@@ -148,6 +148,12 @@ for file in components/MessageRow.qml components/MessageReader.qml bar/BarPrevie
     || fail "$file must strip the reply prefix before asking which way a subject runs"
 done
 
+# The same mistake on the body side. The plain reading of an HTML message
+# carries this client's own `[image N]` markers in front of the sender's first
+# word, so `resolve` on it answers about a Latin "i" that omamail wrote.
+grep -q 'Direction.resolveBody' components/MessageReader.qml \
+  || fail "the reader must look past its own image markers before asking which way a body runs"
+
 # The interface is not mirrored: this setting is a fact about the mail, not
 # about the window around it. A LayoutMirroring here would be a different
 # feature wearing this one's name.

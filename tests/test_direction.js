@@ -34,6 +34,28 @@ assert.strictEqual(direction.strongDirectionOf("٢٠٢٤٫٥ hello"), "ltr",
 assert.strictEqual(direction.strongDirectionOf("١٢٣"), "",
   "a subject that is nothing but Arabic-Indic digits chose no direction")
 
+// A byte order mark says nothing about direction, and sits one code point past
+// the end of Arabic presentation forms-B. Outlook and a good many PHP mailers
+// put one at the front of a plain text part, so a range that ran to the end of
+// the block laid an English message out right to left.
+assert.strictEqual(direction.strongDirectionOf("\uFEFFHello world"), "ltr",
+  "a byte order mark is not an Arabic letter")
+assert.strictEqual(direction.strongDirectionOf("\uFEFFمرحبا"), "rtl")
+assert.strictEqual(direction.strongDirectionOf("\uFEFC"), "rtl",
+  "and the last character that really is one still is")
+
+// An emoji in front of the subject is how most marketing mail is written, and
+// every one of them is Other Neutral: it says nothing about the sentence after
+// it. The same goes for the combining marks, the supplemental punctuation and
+// the fullwidth punctuation, none of which are letters.
+assert.strictEqual(direction.strongDirectionOf("🎉 مرحبا"), "rtl", "an emoji is neutral")
+assert.strictEqual(direction.strongDirectionOf("🇸🇦 مرحبا"), "rtl", "so is a flag")
+assert.strictEqual(direction.strongDirectionOf("🎉 Hello"), "ltr")
+assert.strictEqual(direction.strongDirectionOf("\u0301 مرحبا"), "rtl", "a combining mark is neutral")
+assert.strictEqual(direction.strongDirectionOf("\uFF01 مرحبا"), "rtl", "fullwidth punctuation is neutral")
+assert.strictEqual(direction.strongDirectionOf("\uFF21bc"), "ltr",
+  "but a fullwidth letter is a letter")
+
 // The marks are the exception, and have to stay in front of the neutral check:
 // U+200F sits inside the punctuation range, and it is an author saying outright
 // which way this runs.
@@ -165,5 +187,28 @@ assert.strictEqual(direction.startEdge("ltr"), "left")
 assert.strictEqual(direction.startEdge(""), "left")
 assert.strictEqual(direction.endEdge("rtl"), "left")
 assert.strictEqual(direction.endEdge("ltr"), "right")
+
+// ------------------------------------------------------------------ a body
+//
+// The plain reading of an HTML message is not only the sender's words: Html.js
+// writes `[image 1]` where a picture stood, and a remote image is blocked until
+// the reader asks for it — so a newsletter opening with a logo hands this a
+// string starting with a Latin "i" that omamail wrote itself.
+assert.strictEqual(direction.resolveBody("[image 1]مرحبا بالعالم", "Auto"), "rtl",
+  "a marker this client wrote is not the message saying which way it runs")
+assert.strictEqual(direction.resolveBody("[image 1][image 2]مرحبا", "Auto"), "rtl")
+assert.strictEqual(direction.resolveBody("[image] مرحبا", "Auto"), "rtl",
+  "the reader's own bare marker too")
+assert.strictEqual(direction.resolveBody("[image 1]Hello", "Auto"), "ltr")
+assert.strictEqual(direction.resolveBody("[image 1]", "Auto"), "",
+  "a body that is nothing but pictures chose no direction")
+
+// Only from the front. A marker further in sits after whatever already
+// answered, so removing it would change nothing and looking for it would cost.
+assert.strictEqual(direction.resolveBody("Hello [image 1] مرحبا", "Auto"), "ltr")
+
+// A chosen direction answers before any of this, as it does everywhere.
+assert.strictEqual(direction.resolveBody("[image 1]Hello", "Right to left"), "rtl")
+assert.strictEqual(direction.resolveBody("مرحبا", "Left to right"), "ltr")
 
 console.log("direction tests passed")
