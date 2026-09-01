@@ -24,6 +24,17 @@ Item {
   property double pendingRangeStart: 0
   property double pendingRangeEnd: 0
   property string refreshAccountId: ""
+  // The scope an answer belongs to, which is not always the mailbox.
+  //
+  // The cache is keyed by it and an in-flight refresh is checked against it, so
+  // it has to name what the visible calendar actually depends on. In the
+  // default mode that is the account; in the unified mode the same sources are
+  // shown whichever mailbox is open, so the account is not part of the
+  // question — keying by it stored one copy of the same events per account,
+  // spent the eight-range budget three times over, and made every mailbox
+  // switch a cache miss: the calendar blanked and every account's calendars
+  // were fetched again to redraw what was already on screen.
+  property string refreshScope: ""
   property var queue: []
   property var activeSource: null
   property string lookedUpPassword: ""
@@ -62,6 +73,9 @@ Item {
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
     ? availableSources : Sources.forAccount(availableSources, accountId)
+  // One name for every mailbox, because the unified view is one view.
+  readonly property string calendarScope: unifiedCalendarView
+    ? "__unified__" : accountId
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
   // The composer offers only calendars a write can run against.
@@ -75,15 +89,21 @@ Item {
     onTriggered: root.nowMs = Date.now()
   }
 
-  onAccountIdChanged: {
-    if (!rangeStart || !rangeEnd || !eventCache.loaded) return
-    events = cachedEventsFor(accountId, rangeStart, rangeEnd)
-    refresh(rangeStart, rangeEnd)
-  }
+  // Both of these are the same event — the set of calendars on screen may have
+  // changed — so they ask the same question in the same place. The unified view
+  // does not change with the mailbox, so switching mailboxes under it is not
+  // that event and reloading for it would throw away a correct answer.
+  onAccountIdChanged: if (!unifiedCalendarView) reloadVisibleRange()
+  onUnifiedCalendarViewChanged: reloadVisibleRange()
 
-  onUnifiedCalendarViewChanged: {
+  // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
+  // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
+  // there, so the only thing the guard changed was whether an empty list was
+  // assigned to a property that could not yet hold anything else: nothing can
+  // have been fetched before the cache loaded, because fetching needs it too.
+  function reloadVisibleRange() {
     if (!rangeStart || !rangeEnd) return
-    events = cachedEventsFor(accountId, rangeStart, rangeEnd)
+    events = cachedEventsFor(calendarScope, rangeStart, rangeEnd)
     refresh(rangeStart, rangeEnd)
   }
 
@@ -114,12 +134,13 @@ Item {
     lastError = ""
     lastErrorKind = ""
     refreshAccountId = accountId
+    refreshScope = calendarScope
     var effectiveSources = sourcesForAccount(refreshAccountId)
     queue = effectiveSources.sources.filter(function(source) {
       return source && source.enabled
     })
     var sourceIds = queue.map(function(source) { return String(source.id || "") })
-    events = eventCache.get(refreshAccountId, rangeStart, rangeEnd, sourceIds)
+    events = eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds)
     loading = true
     processNext()
   }
@@ -130,11 +151,13 @@ Item {
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
-  function cachedEventsFor(wantedAccountId, startMs, endMs) {
-    var values = sourcesForAccount(wantedAccountId).sources.filter(function(source) {
+  // `scope` rather than an account id: in the unified view every mailbox reads
+  // the same entry, and asking for it by account would find nothing.
+  function cachedEventsFor(scope, startMs, endMs) {
+    var values = sourcesForAccount(accountId).sources.filter(function(source) {
       return source && source.enabled
     })
-    return eventCache.get(wantedAccountId, startMs, endMs,
+    return eventCache.get(scope, startMs, endMs,
       values.map(function(source) { return String(source.id || "") }))
   }
 
@@ -450,7 +473,7 @@ Item {
   }
 
   function replaceActiveSourceEvents(values) {
-    if (refreshAccountId !== accountId) return
+    if (refreshScope !== calendarScope) return
     var sourceId = activeSource ? String(activeSource.id || "") : ""
     var next = events.filter(function(event) {
       return String(event && event.sourceId || "") !== sourceId
@@ -466,7 +489,7 @@ Item {
   }
 
   function failSource(reason, kind) {
-    if (refreshAccountId !== accountId) { processNext(); return }
+    if (refreshScope !== calendarScope) { processNext(); return }
     var name = activeSource ? activeSource.name || activeSource.id : "Calendar"
     lastError = name + ": " + String(reason || "Could not load events")
     lastErrorKind = String(kind || "")
@@ -482,11 +505,11 @@ Item {
       }).map(function(source) { return String(source.id || "") })
       var allowed = {}
       for (var i = 0; i < enabled.length; i++) allowed[enabled[i]] = true
-      if (refreshAccountId === accountId) events = events.filter(function(event) {
+      if (refreshScope === calendarScope) events = events.filter(function(event) {
         return allowed[String(event && event.sourceId || "")] === true
       })
-      if (rangeStart && rangeEnd && refreshAccountId === accountId)
-        eventCache.put(refreshAccountId, rangeStart, rangeEnd, events)
+      if (rangeStart && rangeEnd && refreshScope === calendarScope)
+        eventCache.put(refreshScope, rangeStart, rangeEnd, events)
       var nextStart = pendingRangeStart
       var nextEnd = pendingRangeEnd
       pendingRangeStart = 0

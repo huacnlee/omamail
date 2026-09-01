@@ -72,6 +72,45 @@ Item {
         JSON.stringify(expected))
     }
 
+    // The cache is keyed by what the visible calendar depends on. Under the
+    // unified view that is not the mailbox — the same calendars are shown
+    // whichever one is open — so keying by the account stored a copy of the
+    // same events per account and made every mailbox switch a cache miss.
+    function test_the_scope_is_the_mailbox_only_when_the_view_follows_it() {
+      compare(controller.calendarScope, "imap:work@example.com")
+      mailService.unifiedCalendarView = true
+      compare(controller.calendarScope, "__unified__")
+      controller.accountId = "one@gmail.com"
+      compare(controller.calendarScope, "__unified__",
+        "and it does not move when the mailbox does")
+      controller.accountId = "imap:work@example.com"
+    }
+
+    // An answer that is still correct is not thrown away. Under the unified
+    // view a refresh started while one mailbox was open is still an answer
+    // about the same calendars after switching to another.
+    function test_a_mailbox_switch_does_not_discard_a_unified_refresh() {
+      mailService.unifiedCalendarView = true
+      controller.rangeStart = 1000
+      controller.rangeEnd = 2000
+      controller.refreshScope = controller.calendarScope
+      controller.accountId = "two@gmail.com"
+      compare(controller.refreshScope, controller.calendarScope,
+        "the fetch in flight still belongs to the view on screen")
+      controller.accountId = "imap:work@example.com"
+    }
+
+    // And the default mode is unchanged: there the scope is the account, so a
+    // switch does invalidate what was in flight.
+    function test_the_default_mode_still_follows_the_mailbox() {
+      controller.rangeStart = 1000
+      controller.rangeEnd = 2000
+      controller.refreshScope = controller.calendarScope
+      controller.accountId = "one@gmail.com"
+      verify(controller.refreshScope !== controller.calendarScope)
+      controller.accountId = "imap:work@example.com"
+    }
+
     function test_changing_calendar_scope_reloads_the_visible_range() {
       controller.rangeStart = 1000
       controller.rangeEnd = 2000
