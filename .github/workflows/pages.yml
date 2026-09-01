@@ -1,0 +1,42 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/index.html
+      - docs/images/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      # The page is one file, but every screenshot, icon and the og:image it
+      # points at lives in docs/images. Staging only the HTML published a site
+      # whose images all 404, so the whole image directory ships with it.
+      - name: Stage the site
+        run: |
+          mkdir -p _site
+          cp docs/index.html _site/index.html
+          cp -R docs/images _site/images
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

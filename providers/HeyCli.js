@@ -355,6 +355,20 @@ function draftCommand(fields) {
   return command.concat(attachArgs(values.attachments))
 }
 
+function draftEditCommand(id, fields) {
+  var draft = draftIdOf(id)
+  if (draft === "") return []
+  var values = fields || {}
+  return [
+    "draft", "edit", draft,
+    "--to", String(values.to || ""),
+    "--cc", String(values.cc || ""),
+    "--bcc", String(values.bcc || ""),
+    "--subject", String(values.subject || ""),
+    "--message", String(values.body || "")
+  ].concat(attachArgs(values.attachments))
+}
+
 function attachArgs(files) {
   var list = Array.isArray(files) ? files : []
   var out = []

@@ -92,6 +92,23 @@ assert.strictEqual(imap.validateSettings({ username: "jane", imapHost: "" }).ok,
 assert.ok(/valid IMAP server/i.test(
   imap.validateSettings({ username: "jane", imapHost: "a b c" }).error))
 
+// ------------------------------------------------------------------ aliases
+//
+// The alias format itself is `account/Aliases.js` and is tested there. What
+// belongs here is that the setup page's text reaches the settings shape as a
+// parsed list.
+
+const withAliases = imap.setupSettings({
+  address: "primary@icloud.com",
+  username: "primary",
+  imapHost: "imap.mail.me.com",
+  aliases: "alias1@icloud.com (default), alias2@icloud.com"
+})
+assert.strictEqual(withAliases.aliases.length, 2)
+assert.strictEqual(withAliases.aliases[0].email, "alias1@icloud.com")
+assert.strictEqual(withAliases.aliases[0].isDefault, true)
+assert.strictEqual(withAliases.aliases[1].isDefault, false)
+
 // ------------------------------------------------------------------- URLs
 
 assert.strictEqual(
@@ -117,6 +134,32 @@ assert.strictEqual(
   })),
   "smtps://smtp.example.com:465",
   "a local IMAP bridge must not permit plaintext SMTP to a remote host")
+
+// The upgrade ports connect in the clear and are required to upgrade; every
+// other port is TLS from the first byte, which is what a server on a
+// non-standard port actually speaks.
+assert.strictEqual(
+  imap.imapUrl({ imapHost: "imap.example.com", imapPort: 143 }, "INBOX"),
+  "imap://imap.example.com:143/INBOX",
+  "143 is the STARTTLS port")
+assert.strictEqual(
+  imap.imapUrl({ imapHost: "imap.example.com", imapPort: 9993 }, "INBOX"),
+  "imaps://imap.example.com:9993/INBOX",
+  "an unfamiliar port is implicit TLS, not a guess at STARTTLS")
+assert.strictEqual(
+  imap.smtpUrl({ smtpHost: "smtp.mail.me.com", smtpPort: 587 }),
+  "smtp://smtp.mail.me.com:587",
+  "587 is the submission port and upgrades")
+assert.strictEqual(
+  imap.smtpUrl({ smtpHost: "smtp.example.com", smtpPort: 2465 }),
+  "smtps://smtp.example.com:2465",
+  "an unfamiliar SMTP port is implicit TLS")
+
+// A host is case-insensitive, and the transport recognises its loopback
+// exemption by literal text — so the two have to agree on one spelling.
+assert.strictEqual(
+  imap.imapUrl({ imapHost: "LocalHost", imapPort: 1143, insecure: true }, "INBOX"),
+  "imap://localhost:1143/INBOX")
 
 // -------------------------------------------------------------- the query DSL
 
@@ -269,6 +312,27 @@ assert.strictEqual(imap.fullFetchCommand([]), "")
 // Two STOREs, because IMAP has no combined add-and-remove.
 deepEqual(imap.storeCommand([4], ["\\Seen"], []), ["UID STORE 4 +FLAGS.SILENT (\\Seen)"])
 deepEqual(imap.storeCommand([4], [], ["\\Seen"]), ["UID STORE 4 -FLAGS.SILENT (\\Seen)"])
+deepEqual(imap.draftReplacementCommands("42:Drafts", "Drafts"), [
+  "UID STORE 42 +FLAGS.SILENT (\\Deleted)",
+  "UID EXPUNGE 42"
+])
+deepEqual(imap.draftReplacementCommands("42:Archive", "Drafts"), [])
+deepEqual(imap.draftReplacementPlan("42:Drafts", "Drafts"), {
+  commands: [
+    "UID STORE 42 +FLAGS.SILENT (\\Deleted)",
+    "UID EXPUNGE 42"
+  ],
+  warning: ""
+})
+deepEqual(imap.draftReplacementPlan("42:Archive", "Drafts"), {
+  commands: [],
+  warning: "The updated draft was saved, but the old copy could not be identified"
+}, "a stale source id must not turn a completed APPEND into a failed save")
+deepEqual(imap.draftSaveResult("server refused UID EXPUNGE"), {
+  saved: true,
+  warning: "The updated draft was saved, but the old copy could not be removed: server refused UID EXPUNGE"
+}, "a cleanup failure must not invite another APPEND of the saved draft")
+deepEqual(imap.draftSaveResult(""), { saved: true, warning: "" })
 deepEqual(imap.storeCommand([4, 5], ["\\Seen"], ["\\Flagged"]), [
   "UID STORE 4,5 +FLAGS.SILENT (\\Seen)",
   "UID STORE 4,5 -FLAGS.SILENT (\\Flagged)"

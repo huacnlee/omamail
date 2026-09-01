@@ -60,6 +60,7 @@ Item {
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
   // Which way a message's own text is read: worked out from the text, or fixed
   // by the reader. The window's chrome is not affected either way — this is a
   // fact about the mail, not about the interface around it.
@@ -112,6 +113,10 @@ Item {
 
   function setAlwaysRenderHeavyMessages(value) {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
+  }
+
+  function setNotifyNewMail(value) {
+    persistSetting("notifyNewMail", value ? "On" : "Off")
   }
 
   function setContentDirection(value) {

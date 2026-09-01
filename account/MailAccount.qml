@@ -319,6 +319,10 @@ Item {
   // what was already there.
   property var seenIds: ({})
   property bool notificationsPrimed: false
+  // The mailbox's own newest timestamp at the moment notifications were
+  // primed. Set once, from the server's clock rather than this machine's, and
+  // never raised — see `Model.newArrivals`.
+  property double arrivalFloor: 0
   // The unread count needs a baseline of its own, separate from the message
   // cache: a mailbox that has never been opened has no cached page to prime
   // from, and would otherwise never be allowed to announce anything.
@@ -579,6 +583,7 @@ Item {
     seenIds = seen
     // The cache is also a record of what was on screen last time, so a live
     // load on top of it can tell genuinely new mail from a first look.
+    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(restored)
     notificationsPrimed = true
     listRefreshed()
     return true
@@ -885,7 +890,7 @@ Item {
     // never held. That is a result, not newly arrived mail, so it must not turn
     // into a desktop notification.
     var arrivals = append || suppressArrivals === true ? []
-      : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+      : Model.newArrivals(summaries, seenIds, notificationsPrimed, arrivalFloor)
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
@@ -893,6 +898,7 @@ Item {
     // does not get announced again when it comes back.
     for (var key in seenIds) seen[key] = true
     seenIds = seen
+    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(merged)
     notificationsPrimed = true
 
     messages = merged
@@ -1724,6 +1730,7 @@ Item {
       inReplyTo: values.inReplyTo,
       references: values.references
     })
+    payload.draftId = String(values.draftId || "")
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
     })
@@ -2184,6 +2191,7 @@ Item {
     inboxUnread = 0
     listLoaded = false
     seenIds = ({})
+    arrivalFloor = 0
     notificationsPrimed = false
     countPrimed = false
     cacheStore.clear()
