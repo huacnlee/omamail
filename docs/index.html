@@ -628,8 +628,8 @@ footer p:last-child { margin-bottom: 0; }
 <header class="masthead">
   <div class="wrap">
     <svg class="app-icon" viewBox="0 0 64 64" role="img" aria-label="Omamail">
-      <path d="M16 51V21l16 17 16-17v30" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linejoin="miter"/>
-      <rect x="5" y="13" width="54" height="38" fill="none" stroke="var(--foreground)" stroke-width="5"/>
+      <path d="M16 51V26l16 14 16-14v25" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="5" y="13" width="54" height="38" rx="4" fill="none" stroke="var(--foreground)" stroke-width="5"/>
     </svg>
     <pre class="wordmark" aria-hidden="true"> ███  █   █  ███  █   █  ███  █████ █
 █   █ ██ ██ █   █ ██ ██ █   █   █   █
@@ -637,7 +637,7 @@ footer p:last-child { margin-bottom: 0; }
 █   █ █   █ █   █ █   █ █   █   █   █
  ███  █   █ █   █ █   █ █   █ █████ █████</pre>
     <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">Native mail app special design for Omarchy</h1>
-    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。它运行在你已经启动的 <code>omarchy-shell</code> 进程里，跟随当前主题，并在状态栏显示未读数。">Omamail reads, triages and answers your mail over the official Gmail API, over the HEY CLI 37signals publish, or over IMAP and SMTP for every other mailbox. It runs inside the <code>omarchy-shell</code> process you already have, follows your active theme, and puts an unread count in the bar.</p>
+    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。">Omamail reads, triages and answers your mail over the official Gmail API, over the HEY CLI 37signals publish, or over IMAP and SMTP for every other mailbox.</p>
 
     <div class="command">
       <pre><span class="prompt">$ </span><span class="cmd">omarchy plugin add https://github.com/huacnlee/omamail.git --enable</span></pre>
