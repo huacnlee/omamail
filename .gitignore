@@ -8,3 +8,6 @@ node_modules/
 # repository; see AGENTS.md for what is kept and why.
 docs/design/
 docs/superpowers/
+
+# Python leaves these beside the harvester scripts.
+__pycache__/

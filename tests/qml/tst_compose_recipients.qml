@@ -269,5 +269,21 @@ Item {
       compare(named(compose, "compose-to-field").text, "second@example.com")
       compare(named(compose, "compose-body-editor").text, "Second message")
     }
+
+    function test_contacts_button_and_picker() {
+      compose.begin("new", null, "", [])
+      var contactsBtn = named(compose, "compose-contacts-button")
+      var picker = named(compose, "compose-contacts-picker")
+      verify(contactsBtn)
+      verify(picker)
+
+      picker.contactChosen({ name: "Alice", email: "alice@example.com" }, "to")
+      compare(named(compose, "compose-to-field").text, "Alice <alice@example.com>")
+
+      picker.contactChosen({ name: "Bob", email: "bob@example.com" }, "cc")
+      compare(compose.ccVisible, true)
+      compare(named(compose, "compose-cc-field").text, "Bob <bob@example.com>")
+    }
   }
 }
+

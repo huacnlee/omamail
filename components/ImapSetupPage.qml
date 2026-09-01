@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/ImapProtocol.js" as Imap
+import "../account/Aliases.js" as Aliases
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
 // guess was wrong — the servers.
@@ -46,7 +47,8 @@ Column {
       imapPort: imapPortField.text,
       smtpHost: smtpHostField.text.trim(),
       smtpPort: smtpPortField.text,
-      username: usernameField.text
+      username: usernameField.text,
+      aliases: aliasesField.text
     })
   }
 
@@ -73,6 +75,9 @@ Column {
     addressField.text = service ? service.accountAddress : ""
     if (settings.username !== "") {
       usernameField.text = settings.username
+    }
+    if (settings.aliases) {
+      aliasesField.text = Aliases.format(settings.aliases)
     }
     if (settings.imapHost !== "") {
       imapHostField.text = settings.imapHost
@@ -348,12 +353,22 @@ Column {
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Username — only if it is not the address"
       }
+
+      TextField {
+        id: aliasesField
+        objectName: "imap-aliases-field"
+        width: parent.width
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Send-as aliases — comma-separated (e.g. alias@icloud.com (default))"
+      }
     }
 
     Text {
       width: parent.width
       visible: root.serversVisible
-      text: "Connections are TLS on the port given. Plain text is refused unless the server is on this machine."
+      text: "TLS on connect, or a required STARTTLS upgrade on ports 143, 25 and 587. Plain text is refused unless the server is on this machine."
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption

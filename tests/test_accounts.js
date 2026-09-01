@@ -354,7 +354,8 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
     imap: {
       imapHost: "imap.fastmail.com", imapPort: 993,
       smtpHost: "smtp.fastmail.com", smtpPort: 465,
-      username: "jane@fastmail.com"
+      username: "jane@fastmail.com",
+      aliases: "alias@fastmail.com (default), work@domain.com"
     }
   }))
   const reloaded = accounts.find(accounts.load(saved), "imap:jane@fastmail.com")
@@ -362,6 +363,10 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(reloaded.imap.imapHost, "imap.fastmail.com")
   assert.strictEqual(reloaded.imap.smtpPort, 465)
   assert.strictEqual(reloaded.imap.username, "jane@fastmail.com")
+  assert.strictEqual(reloaded.imap.aliases.length, 2)
+  assert.strictEqual(reloaded.imap.aliases[0].email, "alias@fastmail.com")
+  assert.strictEqual(reloaded.imap.aliases[0].isDefault, true)
+  assert.strictEqual(reloaded.imap.aliases[1].isDefault, false)
   assert.strictEqual(reloaded.imap.insecure, false)
 
   // Ports out of range fall back rather than reaching a URL.

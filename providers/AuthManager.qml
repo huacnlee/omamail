@@ -5,6 +5,7 @@ import qs.Commons
 
 import "OAuth.js" as OAuth
 import "Credentials.js" as Credentials
+import "Secrets.js" as Secrets
 
 // Google sign-in and token storage. Nothing else in the plugin needs to know
 // what a refresh token looks like: callers ask for `withAccessToken` and get a
@@ -776,13 +777,12 @@ Item {
 
   Process {
     id: secretLookup
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handleSecretLookup(line) }
-    }
+    stdout: StdioCollector { id: secretLookupOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      if (!root.lookupHandled) root.handleSecretLookup("")
+      // One trailing newline is the pipe's; everything else is the secret.
+      var value = exitCode === 0 ? Secrets.fromKeyring(secretLookupOutput.text) : ""
+      root.handleSecretLookup(value)
     }
   }
 

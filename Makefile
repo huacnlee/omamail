@@ -33,6 +33,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ReaderSkeleton.qml \
 	components/ComposeView.qml \
 	components/RecipientSuggestions.qml \
+	components/ContactsPicker.qml \
 	components/UndoSendToast.qml \
 	components/DraftSavedToast.qml \
 	components/SearchBar.qml \
@@ -67,6 +68,7 @@ test-js:
 	node tests/test_senders.js
 	node tests/test_oauth.js
 	node tests/test_credentials.js
+	node tests/test_secrets.js
 	node tests/test_gmail_api.js
 	node tests/test_message.js
 	node tests/test_calendar.js
@@ -82,6 +84,7 @@ test-js:
 	node tests/test_model.js
 	node tests/test_keymap.js
 	node tests/test_accounts.js
+	node tests/test_aliases.js
 	node tests/test_menu.js
 	node tests/test_provider.js
 	node tests/test_imap.js

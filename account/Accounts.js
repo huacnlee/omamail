@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Aliases.js" as Aliases
+
 // The list of Gmail accounts and which one the window is showing. One account
 // was the original design; several is a list plus a selection, and every rule
 // about what that selection may point at lives here so the QML only has to
@@ -110,6 +112,7 @@ function makeImapSettings(raw) {
     smtpHost: trimmed(values.smtpHost),
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
+    aliases: Aliases.parse(values.aliases),
     insecure: values.insecure === true
   }
 }

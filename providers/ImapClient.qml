@@ -4,6 +4,7 @@ import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
 import "../message/Message.js" as Mail
+import "../account/Aliases.js" as Aliases
 
 // An IMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //
@@ -561,20 +562,18 @@ Item {
     return newHandle()
   }
 
-  // IMAP has no send-as settings endpoint. Its one sender is the mailbox
-  // address the user configured, returned in the same shape as Gmail aliases
-  // so everything above the provider boundary can stay provider-neutral.
+  // IMAP has no send-as settings endpoint. Its senders are the mailbox address
+  // and whatever aliases the user configured, returned in the same shape as
+  // Gmail's so everything above the provider boundary stays provider-neutral.
+  // Which of them is the default is `Aliases.sendAsList`'s decision, where the
+  // node tests can reach it.
   function getSendAs(callback) {
     if (typeof callback !== "function") return newHandle()
     var address = String(root.email || "")
+    var configured = auth && auth.settings ? auth.settings.aliases : null
     Qt.callLater(function() {
       if (!root) return
-      callback(address === "" ? [] : [{
-        email: address,
-        displayName: "",
-        isPrimary: true,
-        isDefault: true
-      }], "")
+      callback(Aliases.sendAsList(address, configured), "")
     })
     return newHandle()
   }
@@ -815,7 +814,10 @@ Item {
         if (typeof callback === "function") callback(null, credentialError || "Not signed in")
         return
       }
-      var sender = settings ? String(settings.username || "") : ""
+      var fromAddresses = Mail.parseAddressList(Mail.headerFrom(parsed.headers, "From"))
+      var sender = (fromAddresses.length > 0 && fromAddresses[0].email)
+        ? fromAddresses[0].email
+        : (settings ? String(settings.username || "") : "") || root.email
       var fields = [Mail.encodeBase64(smtp), Mail.encodeBase64(credentials),
         Mail.encodeBase64(sender), Mail.encodeBase64(message)]
       for (var k = 0; k < recipients.length; k++) fields.push(Mail.encodeBase64(recipients[k]))
