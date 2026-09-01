@@ -61,6 +61,7 @@ test: test-js test-shell test-qml
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node tests/test_compose_recovery.js
 	node tests/test_outbox.js
 	node tests/test_recipients.js
 	node tests/test_senders.js

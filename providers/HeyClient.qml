@@ -623,15 +623,19 @@ Item {
     if (threadId === "" && payload && payload.threadId)
       threadId = String(payload.threadId)
 
-    var command = Cli.draftCommand({
+    var fields = {
       threadId: threadId,
       to: Mail.headerFrom(parsed.headers, "To"),
       cc: Mail.headerFrom(parsed.headers, "Cc"),
       bcc: Mail.headerFrom(parsed.headers, "Bcc"),
       subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject")),
+      body: body,
       attachments: files
-    })
-    run(command, body, function(text, error) {
+    }
+    var draftId = payload ? String(payload.draftId || "") : ""
+    var command = draftId === ""
+      ? Cli.draftCommand(fields) : Cli.draftEditCommand(draftId, fields)
+    run(command, draftId === "" ? body : "", function(text, error) {
       if (handle.aborted) return
       var answer = error ? null : Cli.payload(text)
       if (typeof callback === "function") callback(error ? null : (answer ? answer.data : {}), error)
