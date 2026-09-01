@@ -6,9 +6,16 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
-# Found rather than globbed: the layout groups by module, and a module with no
-# QML in it (message/, today) turns a literal glob into a grep error that hides
-# whatever the check was meant to say.
+# Enumerated rather than globbed: the layout groups by module, and a module
+# with no QML in it (message/, today) turns a literal glob into a grep error
+# that hides whatever the check was meant to say.
+#
+# git does the enumerating rather than `find`. `--cached --others
+# --exclude-standard` is the tracked files plus the ones not committed yet —
+# this checkout's source, so a file you are still writing is checked — and
+# nothing that is ignored. `find` walks ignored paths too, and a linked
+# worktree under .claude/ is a second checkout of this same repository whose
+# copies of these files would be reported here as if they were ours.
 #
 # A read loop rather than `mapfile`, which is bash 4 and absent from the bash
 # 3.2 that macOS still ships — a check that only runs on the deployment target
@@ -16,11 +23,11 @@ fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 # path with a space in it stays one path.
 QML_FILES=()
 while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
-  < <(find . -name '*.qml' -not -path './.git/*' -print0)
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.qml')
 
 JS_FILES=()
 while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
-  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*')
 
 # A developer machine may point /bin/sh at bash while the release runner points
 # it at dash. Bash's global parameter replacement then passes locally and dies
