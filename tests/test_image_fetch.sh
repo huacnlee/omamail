@@ -46,4 +46,24 @@ code=$?
 set -e
 if [ "$code" -ne 0 ]; then ok "a non-network URL is refused"; else bad "a non-network URL is refused"; fi
 
+# A CR or LF in the URL would end the `url = "..."` config line and inject a
+# curl option — `output = <path>` writes the fetched (attacker-served) bytes to
+# a path of the sender's choosing. The value that reaches here is classified up
+# in Html.js through a normaliser that strips these characters, so the URL can
+# read as a public host to the gate and still carry a newline down here. The
+# scheme check does not catch it (the value still starts with https://), so the
+# line-break refusal has to be its own gate.
+nl='
+'
+target="$work/injected"
+rm -f "$target"
+set +e
+printf '%s\n' "$(b64 "https://cdn.example.com/a.png${nl}output = $target")" |
+  CURL_STUB_DUMP="$work/config-inject" PATH="$work/bin:$PATH" sh "$script" >/dev/null 2>&1
+code=$?
+set -e
+if [ "$code" -ne 0 ]; then ok "a URL carrying a line break is refused"; else bad "a URL carrying a line break is refused"; fi
+if [ ! -e "$target" ]; then ok "an injected output option never writes a file"; else bad "an injected output option never writes a file"; fi
+if [ ! -e "$work/config-inject" ]; then ok "no curl config is built for an injected URL"; else bad "no curl config is built for an injected URL"; fi
+
 [ "$failures" -eq 0 ]

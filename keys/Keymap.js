@@ -66,7 +66,7 @@ var BINDINGS = [
   { id: "forward", keys: ["f"], contexts: MAIL,
     group: "Writing", label: "Forward" },
   { id: "compose", keys: ["c"], contexts: MAIL,
-    group: "Writing", label: "Compose", hint: { list: "compose" } },
+    group: "Writing", label: "Compose or edit a draft", hint: { list: "compose" } },
   { id: "createEvent", keys: ["c"], contexts: ["calendar"],
     group: "Writing", label: "Create an event", hint: { calendar: "create" } },
   { id: "calendarNext", keys: ["j", "Down"], contexts: ["calendar"],

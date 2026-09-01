@@ -4,6 +4,7 @@ import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
 import "Credentials.js" as Credentials
+import "Secrets.js" as Secrets
 
 // An IMAP account's sign-in, which is a server address and a password.
 //
@@ -253,15 +254,12 @@ Item {
 
   Process {
     id: secretLookup
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handleSecretLookup(line) }
-    }
+    stdout: StdioCollector { id: secretOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      // No entry is not an error: it is what a mailbox that has never been
-      // signed in to looks like.
-      if (!root.lookupHandled) root.handleSecretLookup("")
+      // One trailing newline is the pipe's; everything else is the secret.
+      var value = exitCode === 0 ? Secrets.fromKeyring(secretOutput.text) : ""
+      root.handleSecretLookup(value)
     }
   }
 

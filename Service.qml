@@ -59,6 +59,7 @@ Item {
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
   readonly property bool unifiedCalendarView: !!settings
     && settings.unifiedCalendarView === true
 
@@ -108,6 +109,10 @@ Item {
 
   function setAlwaysRenderHeavyMessages(value) {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
+  }
+
+  function setNotifyNewMail(value) {
+    persistSetting("notifyNewMail", value ? "On" : "Off")
   }
 
   function setUnifiedCalendarView(value) {

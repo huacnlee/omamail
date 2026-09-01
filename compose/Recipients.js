@@ -89,3 +89,37 @@ function accept(text, contact) {
   var prefix = split >= 0 ? value.substring(0, split + 1).trim() + " " : ""
   return prefix + address(contact)
 }
+
+function append(text, contact) {
+  var addr = address(contact)
+  if (!addr) return String(text || "")
+  var current = String(text || "").trim()
+  if (current === "") return addr
+  current = current.replace(/[,;]+$/, "").trim()
+  var used = usedAddresses(current + ",")
+  var clean = cleanContact(contact)
+  if (clean && used[clean.email.toLowerCase()]) return current
+  return current + ", " + addr
+}
+
+function filter(values, query, limit) {
+  var contacts = normalize(values)
+  var q = String(query || "").trim().toLowerCase()
+  var out = []
+  for (var i = 0; i < contacts.length; i++) {
+    var c = contacts[i]
+    if (q === "" || c.email.toLowerCase().indexOf(q) >= 0 || c.name.toLowerCase().indexOf(q) >= 0) {
+      out.push(c)
+    }
+  }
+  out.sort(function(left, right) {
+    var leftName = (left.name || left.email).toLowerCase()
+    var rightName = (right.name || right.email).toLowerCase()
+    return leftName < rightName ? -1 : (leftName > rightName ? 1 : 0)
+  })
+  if (typeof limit === "number" && limit > 0) {
+    return out.slice(0, limit)
+  }
+  return out
+}
+

@@ -15,6 +15,22 @@ IFS= read -r encoded || fail 'image-fetch.sh: no request on stdin'
 [ -n "$encoded" ] || fail 'image-fetch.sh: empty request'
 url=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail 'image-fetch.sh: bad base64 field'
 
+# The URL crosses into curl's config format, where escape() below neutralises
+# the quote and the backslash but a line break is a field of its own: a CR or
+# LF in the value ends the `url = "..."` line and turns whatever follows into
+# another curl option. The src of a mail <img> is written by a stranger, and
+# `Html.imageSourceKind` classifies it through a normaliser that strips these
+# characters — so a URL that reads as a public host to the gate can still carry
+# a newline down here. Refuse it, the way calendar-write.sh refuses one, before
+# any config is built. (The newline is a literal: command substitution would
+# strip a trailing one.)
+nl='
+'
+cr=$(printf '\r')
+case $url in
+  *"$nl"* | *"$cr"*) fail 'image-fetch.sh: URL may not span lines' ;;
+esac
+
 case "$url" in
   http://*|https://*) ;;
   *) fail 'image-fetch.sh: refusing a URL that is not HTTP(S)' ;;

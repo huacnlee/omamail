@@ -9,11 +9,15 @@ runs inside the `omarchy-shell` process you already have, follows your active
 theme, and puts an unread count in the bar.
 
 
-<img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
+<img width="800" alt="Omamail - Reading a message in the three-column window" src="docs/images/full-mail.webp" />
+
+The calendar, a new message, and the question every new mailbox starts with:
+
+<img width="265" alt="Omamail - The calendar in month view" src="docs/images/full-calendar.webp" /> <img width="265" alt="Omamail - Writing a new message" src="docs/images/full-compose.webp" /> <img width="265" alt="Omamail - Adding a mailbox: Gmail, HEY or IMAP" src="docs/images/full-add-mailbox.webp" />
 
 And with mini size mode:
 
-<img width="330" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" /> <img width="330" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
+<img width="265" alt="Omamail - Mini size: the message list" src="docs/images/mini-list.webp" /> <img width="265" alt="Omamail - Mini size: one message open" src="docs/images/mini-message.webp" /> <img width="265" alt="Omamail - Mini size: writing a new message" src="docs/images/mini-compose.webp" />
 
 Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**,
 **Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any

@@ -1,5 +1,7 @@
 .pragma library
 
+.import "../account/Aliases.js" as Aliases
+
 // The IMAP protocol, and nothing else. No transport lives here — `ImapClient.qml`
 // owns the process that speaks to the server — and no message format lives here
 // either: an RFC 822 message is `Message.js`'s subject, and this file hands one
@@ -179,14 +181,21 @@ function normalizedPort(value, fallback) {
   return port
 }
 
+// A host name is case-insensitive, and lowercasing it here is what keeps every
+// later reading of it the same one. `isLoopback` already compares lowercased,
+// so a user who typed "LocalHost" was judged local up here and then failed to
+// match the transport's own loopback patterns further down — which meant the
+// local bridge, the one server that legitimately speaks plaintext, was the one
+// refused for not offering TLS.
 function normalizeSettings(raw) {
   var values = raw || {}
   return {
-    imapHost: trimmed(values.imapHost),
+    imapHost: trimmed(values.imapHost).toLowerCase(),
     imapPort: normalizedPort(values.imapPort, DEFAULT_IMAP_PORT),
-    smtpHost: trimmed(values.smtpHost),
+    smtpHost: trimmed(values.smtpHost).toLowerCase(),
     smtpPort: normalizedPort(values.smtpPort, DEFAULT_SMTP_PORT),
     username: trimmed(values.username),
+    aliases: Aliases.parse(values.aliases),
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
@@ -211,6 +220,7 @@ function setupSettings(raw) {
     smtpHost: values.smtpHost,
     smtpPort: values.smtpPort,
     username: trimmed(values.username) || trimmed(values.address),
+    aliases: values.aliases,
     insecure: isLoopback(values.imapHost)
   })
 }
@@ -230,10 +240,34 @@ function validateSettings(raw) {
 // The URL the transport connects with. Built here rather than in the shell
 // script so the host has been through `isValidHost` on the way, and so the
 // tests can see what a given account would dial.
+// Which ports mean "connect in the clear, then upgrade". Naming the STARTTLS
+// ports rather than the TLS ones is the whole of the difference between this
+// and asking whether the port is 993: a server on 9993, or on whatever a
+// hosting panel picked, speaks TLS from the first byte and has no STARTTLS to
+// offer, so a client that inferred STARTTLS from "not 993" would simply stop
+// connecting to it. These three are the ports the RFCs assign to the upgrade,
+// and a server on any other one is dialled the way it was before this list
+// existed.
+//
+// The upgrade is not optional once it is chosen: `mail-transport.sh` adds
+// `ssl-reqd` to every non-loopback plaintext scheme, so a server that turns
+// out not to offer STARTTLS is refused rather than spoken to in the clear.
+var STARTTLS_IMAP_PORTS = [143]
+var STARTTLS_SMTP_PORTS = [25, 587]
+
+function usesStartTls(port, ports) {
+  var value = Number(port)
+  for (var i = 0; i < ports.length; i++) {
+    if (ports[i] === value) return true
+  }
+  return false
+}
+
 function imapUrl(settings, folder) {
   var values = normalizeSettings(settings)
   if (!isValidHost(values.imapHost)) return ""
-  var scheme = values.insecure ? "imap" : "imaps"
+  var plain = values.insecure || usesStartTls(values.imapPort, STARTTLS_IMAP_PORTS)
+  var scheme = plain ? "imap" : "imaps"
   var url = scheme + "://" + values.imapHost + ":" + values.imapPort
   var box = trimmed(folder)
   // The mailbox is a path segment, so anything that could end the segment or
@@ -248,7 +282,9 @@ function smtpUrl(settings) {
   if (!isValidHost(values.smtpHost)) return ""
   // IMAP and SMTP may name different hosts. The shared local-transport flag
   // cannot let a loopback IMAP server downgrade a remote SMTP connection.
-  var scheme = values.insecure && isLoopback(values.smtpHost) ? "smtp" : "smtps"
+  var local = values.insecure && isLoopback(values.smtpHost)
+  var plain = local || usesStartTls(values.smtpPort, STARTTLS_SMTP_PORTS)
+  var scheme = plain ? "smtp" : "smtps"
   return scheme + "://" + values.smtpHost + ":" + values.smtpPort
 }
 
@@ -546,6 +582,33 @@ function expungeCommand(uids) {
   // every \Deleted message in the folder, including ones another client marked
   // — which is somebody else's mail disappearing because this one archived.
   return set === "" ? "" : "UID EXPUNGE " + set
+}
+
+function draftReplacementCommands(id, draftsFolder) {
+  var parsed = parseMessageId(id)
+  if (parsed.uid < 1 || parsed.folder !== String(draftsFolder || "")) return []
+  return [
+    "UID STORE " + parsed.uid + " +FLAGS.SILENT (\\Deleted)",
+    expungeCommand([parsed.uid])
+  ]
+}
+
+function draftReplacementPlan(id, draftsFolder) {
+  var commands = draftReplacementCommands(id, draftsFolder)
+  return {
+    commands: commands,
+    warning: commands.length > 0 ? ""
+      : "The updated draft was saved, but the old copy could not be identified"
+  }
+}
+
+function draftSaveResult(replaceError) {
+  var detail = trimmed(replaceError)
+  return {
+    saved: true,
+    warning: detail === "" ? ""
+      : "The updated draft was saved, but the old copy could not be removed: " + detail
+  }
 }
 
 function statusCommand(folder) {

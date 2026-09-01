@@ -461,7 +461,7 @@ grep -q 'placeholderText: "Password or app password"' components/CalendarSetting
   || fail "calendar setup needs its own password field"
 grep -q 'text: "Set password"' components/CalendarSettings.qml \
   || fail "existing CalDAV calendars need a password action"
-grep -q 'credentials.json|accounts.json|window.json|calendars.json' scripts/config-store.sh \
+grep -q 'credentials.json|accounts.json|window.json|calendars.json|compose.json' scripts/config-store.sh \
   || fail "the config writer must accept calendar source records"
 if grep -q 'Five Nextcloud calendars\|imported from Thunderbird\|Nextcloud password' components/CalendarSettings.qml; then
   fail "calendar settings must not describe one user's imported setup"

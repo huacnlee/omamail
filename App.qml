@@ -2,11 +2,13 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
+import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
@@ -31,6 +33,121 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
+  readonly property string composeRecoveryPath: {
+    var config = Quickshell.env("XDG_CONFIG_HOME")
+      || (Quickshell.env("HOME") + "/.config")
+    return config + "/omamail/compose.json"
+  }
+  property var composeRecovery: Recovery.empty()
+  property bool composeRecoveryLoaded: false
+  property bool composeRecoveryRestoring: false
+  property int composeRecoveryRevision: 0
+  property bool composeDetachingForSave: false
+  property string lastComposeRecoveryText: ""
+  property string composeWritePayload: ""
+  property bool composeWriteQueued: false
+
+  function loadComposeRecovery(raw) {
+    lastComposeRecoveryText = String(raw || "")
+    composeRecovery = Recovery.parse(raw)
+    composeRecoveryLoaded = true
+    Qt.callLater(root.restoreComposeRecovery)
+  }
+
+  function restoreComposeRecovery() {
+    if (!opened || !composeRecoveryLoaded || composeRecovery.active !== true
+        || compose.opened || !composeRecovery.draft) return false
+    var accountId = String(composeRecovery.draft.accountId || "")
+    if (accountId !== "" && service
+        && String(service.activeAccountId || "") !== accountId
+        && typeof service.switchTo === "function") service.switchTo(accountId)
+    composeReturnView = String(composeRecovery.returnView || "list")
+    composeRecoveryRestoring = true
+    compose.restoreDraft(composeRecovery.draft)
+    composeRecoveryRestoring = false
+    return true
+  }
+
+  function saveComposeRecovery(saved) {
+    composeRecoveryTimer.stop()
+    var draft = saved || (compose.opened ? compose.snapshotDraft()
+      : (compose.parkedForSend ? compose.pendingDraft : null))
+    var raw = Recovery.serialize(composeReturnView, draft)
+    if (raw === "") {
+      clearComposeRecovery()
+      return composeRecoveryRevision
+    }
+    composeRecovery = Recovery.parse(raw)
+    if (raw === lastComposeRecoveryText) return composeRecoveryRevision
+    composeRecoveryRevision++
+    lastComposeRecoveryText = raw
+    writeComposeRecovery(raw)
+    return composeRecoveryRevision
+  }
+
+  function scheduleComposeRecovery() {
+    if (composeRecoveryRestoring) return
+    composeRecoveryTimer.restart()
+  }
+
+  function clearComposeRecovery(expectedRevision) {
+    if (expectedRevision !== undefined
+        && Number(expectedRevision) !== composeRecoveryRevision) return false
+    composeRecoveryTimer.stop()
+    composeRecovery = Recovery.empty()
+    composeRecoveryRevision++
+    if (lastComposeRecoveryText === "") return true
+    lastComposeRecoveryText = ""
+    writeComposeRecovery('{"version":1,"active":false}')
+    return true
+  }
+
+  function writeComposeRecovery(raw) {
+    composeWritePayload = String(raw || "")
+    if (!service || String(service.pluginDir || "") === "") return
+    if (composeRecoveryWriter.running) {
+      composeWriteQueued = true
+      return
+    }
+    composeWriteQueued = false
+    composeRecoveryWriter.command = [String(service.pluginDir)
+      + "/scripts/config-store.sh", "compose.json"]
+    composeRecoveryWriter.running = true
+  }
+
+  FileView {
+    id: composeRecoveryFile
+    path: root.composeRecoveryPath
+    printErrors: false
+    onLoaded: root.loadComposeRecovery(text())
+    onLoadFailed: root.loadComposeRecovery("")
+  }
+
+  Timer {
+    id: composeRecoveryTimer
+    interval: 300
+    repeat: false
+    onTriggered: root.saveComposeRecovery()
+  }
+
+  Process {
+    id: composeRecoveryWriter
+    stdinEnabled: true
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onStarted: {
+      write(root.composeWritePayload + "\n")
+      root.composeWritePayload = ""
+    }
+    onExited: {
+      if (root.composeWriteQueued) {
+        root.composeWriteQueued = false
+        Qt.callLater(function() {
+          root.writeComposeRecovery(root.composeWritePayload)
+        })
+      } else root.composeWritePayload = ""
+    }
+  }
 
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
@@ -178,6 +295,7 @@ Item {
     }
     var draft = Mailto.draftFromPayload(payload)
     if (draft) root.openDraft(draft)
+    Qt.callLater(root.restoreComposeRecovery)
     // The list is usually already loaded by the time the window is summoned —
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
@@ -187,6 +305,7 @@ Item {
 
   function close() {
     closingFromHost = true
+    if (compose.opened || compose.parkedForSend) saveComposeRecovery()
     opened = false
     if (service) service.windowOpen = false
     closingFromHost = false
@@ -205,15 +324,22 @@ Item {
     pendingDraftId = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
-    if (service.mailboxKey === "drafts") {
-      composeReturnView = currentView
-      pendingDraftId = cursorId
-      service.select(cursorId)
-      Qt.callLater(root.resumeHeldDraft)
-      return
-    }
     service.select(cursorId)
     currentView = "reader"
+  }
+
+  function editDraft(id) {
+    if (!service || service.mailboxKey !== "drafts") return false
+    var draftId = String(id || "")
+    if (draftId === "") return false
+    composeReturnView = currentView
+    pendingComposeMode = ""
+    pendingDraftId = draftId
+    if (service.selectedId !== draftId || service.detailLoading
+        || !service.detailPainted || !service.selectedMessage) service.select(draftId)
+    resumeHeldDraft()
+    if (pendingDraftId !== "") Qt.callLater(root.resumeHeldDraft)
+    return true
   }
 
   function backToList() {
@@ -326,17 +452,28 @@ Item {
       compose.finish()
       return
     }
-    var saved = compose.detachForSave()
+    var saved = compose.snapshotDraft()
+    var recoveryRevision = saveComposeRecovery(saved)
+    composeDetachingForSave = true
+    compose.detachForSave()
+    composeDetachingForSave = false
     var fields = compose.fieldsForDraft(saved)
     service.saveDraft(fields, function(result, error) {
       if (!root) return
       if (error) {
         compose.recoverDetachedSave(saved)
+        if (root.composeRecoveryRevision === recoveryRevision)
+          root.saveComposeRecovery(saved)
         service.fail("Could not save draft: " + String(error))
         return
       }
       compose.completeDetachedSave(saved)
-      root.draftSavedNotice = "Draft saved"
+      if (compose.opened) root.scheduleComposeRecovery()
+      else root.clearComposeRecovery(recoveryRevision)
+      var warning = String(result && result.warning || "")
+      root.draftSavedNotice = warning === "" ? "Draft saved" : warning
+      if (warning !== "" && service && typeof service.note === "function")
+        service.note(warning)
       draftSavedTimer.restart()
       if (service.mailboxKey === "drafts") service.refresh()
     })
@@ -442,6 +579,7 @@ Item {
     if (id === "replyAll") return composeFromCursor("replyAll")
     if (id === "forward") return composeFromCursor("forward")
     if (id === "compose") {
+      if (service && service.mailboxKey === "drafts" && editDraft(cursorId)) return
       composeReturnView = currentView
       return startCompose("new")
     }
@@ -526,7 +664,11 @@ Item {
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onReplySent() { compose.completePendingSend() }
+    function onReplySent() {
+      if (!compose.completePendingSend()) return
+      if (compose.opened) root.scheduleComposeRecovery()
+      else root.clearComposeRecovery()
+    }
     // Every time the list is replaced — first arrival, a mailbox switch, a
     // search, a refresh that dropped things. A cursor whose message survived
     // keeps its place; one whose message is gone would be unfindable, and an
@@ -1211,9 +1353,16 @@ Item {
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
-          onClosed: root.leaveCompose()
+          onClosed: {
+            if (!root.composeDetachingForSave) root.clearComposeRecovery()
+            root.leaveCompose()
+          }
           onCloseRequested: root.saveAndLeaveCompose()
-          onSendQueued: root.backToList()
+          onSendQueued: {
+            root.saveComposeRecovery(compose.pendingDraft)
+            root.backToList()
+          }
+          onDraftChanged: root.scheduleComposeRecovery()
         }
 
         CalendarEventComposer {
