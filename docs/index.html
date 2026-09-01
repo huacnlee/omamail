@@ -400,6 +400,7 @@ h2 {
   gap: 12px;
 }
 .shot-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shot-bar { max-width: 622px; aspect-ratio: 622 / 611; }
 .shot-span { grid-column: 1 / -1; }
 figure { margin: 0; }
 figure + figure { margin-top: 32px; }
@@ -432,9 +433,24 @@ figcaption {
 .box:last-child { border-right: 0; }
 .box h3 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 0.9375rem;
   font-weight: 700;
   color: var(--bright);
+}
+.mark {
+  display: block;
+  width: 20px;
+  height: auto;
+  flex: none;
+}
+svg.mark {
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
 }
 .box .kind {
   display: block;
@@ -628,7 +644,7 @@ footer p:last-child { margin-bottom: 0; }
 <header class="masthead">
   <div class="wrap">
     <svg class="app-icon" viewBox="0 0 64 64" role="img" aria-label="Omamail">
-      <path d="M16 51V26l16 14 16-14v25" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M16 51V24l16 15 16-15v27" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
       <rect x="5" y="13" width="54" height="38" rx="4" fill="none" stroke="var(--foreground)" stroke-width="5"/>
     </svg>
     <pre class="wordmark" aria-hidden="true"> ███  █   █  ███  █   █  ███  █████ █
@@ -681,6 +697,11 @@ footer p:last-child { margin-bottom: 0; }
       </div>
       <figcaption data-zh="窄下来就只剩一栏：列表、单封信、写信，一次一件事。">Narrow it and one column is left: the list, one message, one letter being written — a single thing at a time.</figcaption>
     </figure>
+    <figure>
+      <p class="shot-label" data-zh="状态栏快速预览">BAR PREVIEW</p>
+      <img class="shot shot-bar" src="images/bar-preview.webp" width="622" alt="Omamail - The quick preview from the bar: latest mail and what is up next" loading="lazy">
+      <figcaption data-zh="右键点状态栏里的信封，不打开窗口就能看到最新的邮件和接下来的日程。左键打开窗口，中键收信。">Right-click the envelope in the bar for the latest mail and what is up next, without opening the window. Left-click opens it; middle-click checks for mail.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -690,17 +711,17 @@ footer p:last-child { margin-bottom: 0; }
     <p class="lede" data-zh="三种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Three kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
     <div class="boxes">
       <div class="box">
-        <h3>Gmail</h3>
+        <h3><img class="mark" src="images/gmail.png" width="20" alt="" loading="lazy">Gmail</h3>
         <span class="kind" data-zh="用 GOOGLE 账号登录">SIGN IN WITH GOOGLE</span>
         <p data-zh="标签、会话、Gmail 自己的搜索语法，以及一个 Google 真的会拿去学习的“报告垃圾邮件”。">Labels, conversations, Gmail's own search syntax, and a report-spam that Google actually learns from.</p>
       </div>
       <div class="box">
-        <h3>HEY</h3>
+        <h3><img class="mark" src="images/hey.png" width="20" alt="" loading="lazy">HEY</h3>
         <span class="kind" data-zh="通过 HEY CLI">THROUGH THE HEY CLI</span>
         <p data-zh="不需要地址，也不需要密码：37signals 发布的 <code>hey</code> 持有令牌。">No address and no password — the HEY CLI 37signals publish holds the token.</p>
       </div>
       <div class="box">
-        <h3>IMAP</h3>
+        <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>IMAP</h3>
         <span class="kind" data-zh="一个地址和一个应用密码">AN ADDRESS AND AN APP PASSWORD</span>
         <p data-zh="Fastmail、iCloud、Outlook、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。">Fastmail, iCloud, Outlook, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own.</p>
       </div>
