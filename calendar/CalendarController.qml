@@ -45,6 +45,9 @@ Item {
   property var eventDraft: null
   property var eventRequest: null
   property bool eventRequestTimedOut: false
+  property string eventPurpose: ""
+  property string invitationAccountId: ""
+  property string invitationSourceName: ""
   // One write at a time, create or otherwise: the password lookup, the writer
   // and the deadline all hold one operation's state, so update and delete
   // share this guard with create rather than growing their own.
@@ -81,6 +84,7 @@ Item {
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
   signal eventCreated(bool ok, string error)
+  signal invitationImported(string accountId, bool ok, string error, string sourceName)
   signal eventUpdated(bool ok, string error)
   signal eventDeleted(bool ok, string error)
 
@@ -146,8 +150,40 @@ Item {
     if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return false }
+    return startEvent(source, built, "create", "")
+  }
+
+  function importInvitation(wantedAccountId, providerId, invite) {
+    // Gmail keeps its own invitation in Google Calendar. An import here would
+    // create a second event, so only the mailbox with no calendar server asks.
+    if (String(providerId || "").toLowerCase() !== "imap") return false
+    if (creatingEvent || eventWriting) {
+      invitationImported(String(wantedAccountId || ""), false,
+        "Another event change is still in progress", "")
+      return false
+    }
+    var candidates = sourcesForAccount(wantedAccountId)
+    var source = Sources.invitationTarget(candidates, providerId)
+    var refusal = Calendar.writeRefusal(source, null)
+    if (refusal !== "") {
+      invitationImported(String(wantedAccountId || ""), false, refusal, "")
+      return false
+    }
+    var built = Calendar.importInvitation(invite, Date.now())
+    if (!built.ok) {
+      invitationImported(String(wantedAccountId || ""), false, built.error,
+        String(source.name || source.id || "Calendar"))
+      return false
+    }
+    return startEvent(source, built, "invitation", wantedAccountId)
+  }
+
+  function startEvent(source, built, purpose, wantedAccountId) {
     eventSource = source
     eventDraft = built
+    eventPurpose = String(purpose || "create")
+    invitationAccountId = String(wantedAccountId || "")
+    invitationSourceName = String(source.name || source.id || "Calendar")
     creatingEvent = true
     if (source.kind === "google") createGoogleEvent()
     else {
@@ -159,13 +195,21 @@ Item {
   }
 
   function finishEvent(ok, error) {
+    var purpose = eventPurpose
+    var importedFor = invitationAccountId
+    var sourceName = invitationSourceName
     eventDeadline.stop()
     creatingEvent = false
     eventSource = null
     eventDraft = null
     eventRequest = null
     eventRequestTimedOut = false
-    eventCreated(ok, String(error || ""))
+    eventPurpose = ""
+    invitationAccountId = ""
+    invitationSourceName = ""
+    if (purpose === "invitation")
+      invitationImported(importedFor, ok, String(error || ""), sourceName)
+    else eventCreated(ok, String(error || ""))
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
 

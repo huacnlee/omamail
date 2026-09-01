@@ -501,6 +501,34 @@ function createEvent(fields, nowMs) {
   return result
 }
 
+// Turn an accepted mail invitation into a calendar event. Its UID is kept so
+// a repeated CalDAV PUT updates the same resource instead of making a copy.
+function importInvitation(invite, nowMs) {
+  var event = invite || {}
+  if (!event.start || !event.end)
+    return { ok: false, error: "The invitation has no complete event time" }
+  var checked = validateEventFields({
+    title: event.summary,
+    startMs: event.start.ms,
+    endMs: event.end.ms,
+    description: event.description,
+    location: event.location
+  })
+  if (!checked.ok) return checked
+  var uid = String(event.uid || "").trim()
+  if (uid === "") return { ok: false, error: "The invitation has no identity" }
+  var rule = String(event.recurrenceRule || "").replace(/\r\n|\n|\r/g, "")
+  var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0))
+  var stampMs = Number(nowMs) || Date.now()
+  var allDay = event.start.allDay === true && event.end.allDay === true
+  var result = {
+    ok: true,
+    uid: uid,
+    ics: veventLines(icsText(uid), sequence, stampMs, checked, rule, allDay).join("\r\n")
+  }
+  return result
+}
+
 // Whether a write can run against this source at all. A read-only calendar
 // refuses every write. A recurring CalDAV event is one ICS holding a rule,
 // its exceptions and its exclusions; rewriting that file from the fields the

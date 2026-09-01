@@ -340,6 +340,19 @@ assert.strictEqual(calendar.canRespond(reply, "jason@example.com"), false,
   assert.strictEqual(calendar.withResponse(null, "a@b.com", "accepted"), null)
 }
 
+// A live message read carries the organiser's unchanged REQUEST. Keep the
+// response from the cached copy when both copies describe the same event.
+{
+  const answered = calendar.withResponse(invite, "jason@example.com", "accepted")
+  const refreshed = calendar.preserveResponse(invite, answered, "jason@example.com")
+  assert.strictEqual(calendar.responseOf(refreshed, "jason@example.com"), "accepted")
+  assert.strictEqual(calendar.preserveResponse(invite,
+    Object.assign({}, answered, { uid: "another-event" }), "jason@example.com"), invite,
+  "a response from another cached event must not cross message boundaries")
+  assert.strictEqual(calendar.preserveResponse(invite, invite, "jason@example.com"), invite,
+    "an unanswered cache copy must leave the live invitation unchanged")
+}
+
 // -------------------------------------------------------------- the reply
 
 const me = { name: "Jason Lee", email: "jason@example.com" }

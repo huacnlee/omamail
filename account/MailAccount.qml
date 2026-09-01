@@ -969,7 +969,18 @@ Item {
     detailLive = false
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
-      if (root.detailLive || !cached) return
+      if (!cached) return
+      // A live fetch carries the organiser's original REQUEST. If it won the
+      // race, restore the response from disk and write that merged copy back.
+      if (root.detailLive) {
+        var restored = Calendar.preserveResponse(root.selectedInvite,
+          cached.invite, root.receivedAsAddress)
+        if (restored !== root.selectedInvite) {
+          root.selectedInvite = restored
+          bodyCache.put(messageId, root.bodyRecord(restored))
+        }
+        return
+      }
       // The text is read out of the cached markup rather than taken off the
       // disk beside it, on the same grounds the document is: what the cache
       // holds is the sender's HTML, so a fix to how a message reads reaches
@@ -1030,21 +1041,15 @@ Item {
         root.selectedImages = ready.plainText ? ready.plainText.images : []
       }
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedInvite = Calendar.fromPayload(payload.payload)
+      root.selectedInvite = Calendar.preserveResponse(
+        Calendar.fromPayload(payload.payload), root.selectedInvite,
+        root.receivedAsAddress)
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
       // What the reader is showing, which is not `decoded` when the cache had
       // already painted this markup: that text came from `Mail.extractBody`'s
       // own flattening, and its images are numbered by a different walk than
       // the list beside it here.
-      var record = ({
-        text: root.selectedBody.text,
-        source: root.selectedBody.source,
-        html: rawHtml,
-        attachments: root.selectedAttachments,
-        images: root.selectedImages,
-        invite: root.selectedInvite,
-        unsubscribe: root.selectedUnsubscribe
-      })
+      var record = root.bodyRecord(root.selectedInvite)
       bodyCache.put(messageId, record)
       // Gmail describes the calendar part rather than sending it whenever the
       // organiser's calendar named the file, which Google's own does — so the
@@ -1071,7 +1076,9 @@ Item {
         if (serial !== root.detailSerial) return
         root.inviteHandle = null
         if (error || !data) return
-        var invite = Calendar.fromAttachment(part, data)
+        var invite = Calendar.preserveResponse(
+          Calendar.fromAttachment(part, data), root.selectedInvite,
+          root.receivedAsAddress)
         if (!invite) return
         root.selectedInvite = invite
         record.invite = invite
@@ -1783,13 +1790,14 @@ Item {
   }
 
   signal replySent()
+  signal invitationAccepted(var invite)
 
   // ------------------------------------------------------------------ RSVP
 
-  // Answering an invitation is sending a mail, which is the whole reason this
-  // needs no calendar API, no second OAuth scope, and works the same on IMAP
-  // as on Gmail: an RFC 5546 REPLY addressed to the organiser is what every
-  // calendar server is already listening for.
+  // The answer itself is a mail. An RFC 5546 REPLY addressed to the organiser
+  // is what every calendar server listens for, and works the same on IMAP as
+  // on Gmail. After a successful IMAP acceptance, Service may also copy the
+  // event into the user's configured CalDAV calendar.
   //
   // Not routed through `send`: that one is the compose window's, and finishing
   // emits `replySent`, which closes it. This finishes with a card that has
@@ -1841,7 +1849,8 @@ Item {
       }
       root.note("Answer sent to " + fields.to)
       if (root.selectedId !== messageId) return
-      root.rememberResponse(messageId, invited, answeringAs, answer)
+      var remembered = root.rememberResponse(messageId, invited, answeringAs, answer)
+      if (answer === "accepted") root.invitationAccepted(remembered)
     })
   }
 
@@ -1855,15 +1864,20 @@ Item {
   function rememberResponse(messageId, invited, answeringAs, answer) {
     var updated = Calendar.withResponse(invited, answeringAs, answer)
     selectedInvite = updated
-    bodyCache.put(messageId, ({
+    bodyCache.put(messageId, bodyRecord(updated))
+    return updated
+  }
+
+  function bodyRecord(invite) {
+    return ({
       text: selectedBody.text,
       source: selectedBody.source,
       html: sourceHtml,
       attachments: selectedAttachments,
       images: selectedImages,
-      invite: updated,
+      invite: invite,
       unsubscribe: selectedUnsubscribe
-    }))
+    })
   }
 
   // ----------------------------------------------------------- unsubscribe
