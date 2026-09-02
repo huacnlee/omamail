@@ -50,6 +50,7 @@ var MAILBOXES = [
   { key: "sent", label: "Sent", icon: "send", query: "folder:\\Sent" },
   { key: "drafts", label: "Drafts", icon: "compose", query: "folder:\\Drafts" },
   { key: "archive", label: "Archive", icon: "archive", query: "folder:\\Archive", optional: true },
+  { key: "spam", label: "Junk", icon: "spam", query: "folder:\\Junk", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "folder:\\Trash", optional: true }
 ]
 

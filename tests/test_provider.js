@@ -82,7 +82,7 @@ assert.strictEqual(provider.unavailableReason("hey"), "")
 
 // The glyphs ActionIcon actually draws. A mailbox naming anything else renders
 // as nothing at all.
-const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash", "reply", "pin", "label", "compose"]
+const DRAWN = ["inbox", "unread", "star", "send", "archive", "trash", "spam", "reply", "pin", "label", "compose"]
 
 // Every provider's first mailbox is its inbox: `mailboxFor` falls back to it,
 // which is what a key belonging to another provider lands on mid-switch.
@@ -100,6 +100,17 @@ for (const id of ids) {
     assert.ok(box.label !== "", id + "/" + box.key + " needs a label for its tooltip")
   }
 }
+
+// Spam is reachable on the rail rather than only by knowing to type `in:spam`.
+// HEY is left out on purpose: `hey spam` moves a thread and trains the filter,
+// but the CLI serves no spam box to list, and a mailbox that cannot be opened
+// is worse than none.
+for (const id of ["gmail", "imap"]) {
+  const spam = provider.mailboxes(id).filter(box => box.key === "spam")
+  assert.strictEqual(spam.length, 1, id + " has one spam mailbox")
+  assert.ok(spam[0].optional, id + "/spam yields the strip before the inbox does")
+}
+assert.strictEqual(provider.mailboxes("hey").filter(box => box.key === "spam").length, 0)
 
 // A mutation of the returned list must not reach the provider definition.
 const boxes = provider.mailboxes("gmail")

@@ -78,6 +78,10 @@ var MAILBOXES = [
   // is somewhere anyone works from — they are places you go looking for
   // something specific, and search reaches both.
   { key: "all", label: "All mail", icon: "archive", query: "in:anywhere -in:spam -in:trash", optional: true },
+  // Where a message nobody can find has usually gone. Gmail keeps it out of an
+  // ordinary search on purpose, so without a mailbox the only way in is knowing
+  // to type `in:spam` — which is knowing the answer already.
+  { key: "spam", label: "Spam", icon: "spam", query: "in:spam", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "in:trash", optional: true }
 ]
 
