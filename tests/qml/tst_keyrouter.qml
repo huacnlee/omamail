@@ -91,12 +91,11 @@ Item {
       compare(host.lastId, "", "e is a letter in a query")
     }
 
-    function test_a_modified_key_still_reaches_a_draft() {
+    function test_old_help_key_is_dead_in_a_draft() {
       host.context = "compose"
       wait(20)
       keyClick(Qt.Key_K, Qt.ControlModifier)
-      compare(host.lastId, "help",
-        "Ctrl+K opens the shortcut sheet from inside a draft")
+      compare(host.lastId, "", "Ctrl+K is no longer Help")
     }
 
     function test_alt_z_undoes_send_while_composing() {

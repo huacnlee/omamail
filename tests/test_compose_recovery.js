@@ -52,6 +52,9 @@ assert.strictEqual(recovery.hasMeaningfulDraft({
 assert.strictEqual(recovery.hasMeaningfulDraft({
   body: "Something\n\nMaarten", placedBody: "\n\nMaarten"
 }), true, "a sentence above the sign-off is")
+assert.strictEqual(recovery.hasMeaningfulDraft({
+  body: "\n\nMaarten", placedBody: "\n\nMaarten", bodyWasEdited: true
+}), true, "typing and deleting back to the sign-off is still an edit")
 
 // A row written before placedBody existed has none, so any body at all differs
 // from it and the draft is still offered back.

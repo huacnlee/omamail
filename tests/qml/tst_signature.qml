@@ -246,6 +246,24 @@ Item {
       compare(editor.text, "Half a sentence\n\nMaarten")
     }
 
+    // Equality with the placed body is not an edit history. If somebody types
+    // and then deletes back to the sign-off, the result looks untouched but it
+    // is still their draft and a mailbox switch must not rewrite it.
+    function test_an_edit_reverted_to_the_signature_stays_the_users_body() {
+      mailService.activeSignature = "Maarten"
+      compose.begin("new", null, "", [])
+      var editor = named(compose, "compose-body-editor")
+      editor.forceActiveFocus()
+      editor.cursorPosition = 0
+      keyClick(Qt.Key_X)
+      keyClick(Qt.Key_Backspace)
+      compare(editor.text, "\n\nMaarten")
+
+      compare(compose.hasMeaningfulDraft(), true)
+      mailService.activeSignature = "Work Signature"
+      compare(editor.text, "\n\nMaarten")
+    }
+
     // The settings field used to be built over accountSummaries, which a poll
     // replaces twice a cycle with no account having changed — destroying the
     // delegate, and the text and the keyboard with it, mid-word.

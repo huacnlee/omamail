@@ -180,7 +180,8 @@ Item {
           tooltipText: "Show the current date"
           foreground: root.accentColor
           accent: root.accentColor
-          bordered: false
+          // A ghost at the icon buttons' size, like Compose in the header.
+          ghost: true
           fontFamily: root.panelFontFamily
           fontSize: Style.font.caption
           onClicked: root.goToday()
@@ -201,7 +202,8 @@ Item {
           ActionIcon {
             anchors.centerIn: parent
             name: "refresh"
-            iconSize: Style.font.iconSmall
+            // The same size as the chevrons beside it and Check mail above.
+            iconSize: Style.font.icon
             color: root.accentColor
 
             RotationAnimator on rotation {

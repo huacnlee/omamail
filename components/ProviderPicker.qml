@@ -21,20 +21,10 @@ Column {
   required property color dimColor
   required property color accentColor
   required property string panelFontFamily
-  property bool canLeave: false
 
   signal chosen(string providerId)
-  signal backRequested()
 
   spacing: Style.space(16)
-
-  BackBar {
-    visible: root.canLeave
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
-  }
 
   Column {
     width: parent.width

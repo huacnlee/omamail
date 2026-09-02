@@ -51,13 +51,12 @@ DropArea {
   // and a binding would overwrite what they had changed.
   readonly property string accountSignature: root.service
     ? String(root.service.activeSignature || "") : ""
-  // The body exactly as `placeBody` left it. A body still equal to this is one
-  // nobody has written in: that is what separates a compose window the user
-  // opened and abandoned from one they typed a sentence into and then cleared,
-  // which no length or trim can tell apart. It is also what makes replacing the
-  // sign-off safe when the sending mailbox changes — there is nothing of theirs
-  // in there to overwrite.
+  // The body exactly as `placeBody` left it, plus whether the editor has seen a
+  // user edit. Equality alone is not an edit history: somebody can type and
+  // delete back to the same text. Together they separate an abandoned compose
+  // from a body the user has taken ownership of.
   property string placedBody: ""
+  property bool bodyWasEdited: false
   // What it was built from, so it can be built again for another mailbox.
   property string bodyPrefix: ""
   property string bodyQuote: ""
@@ -157,6 +156,7 @@ DropArea {
     subjectField.text = ""
     bodyEdit.text = ""
     placedBody = ""
+    bodyWasEdited = false
     bodyPrefix = ""
     bodyQuote = ""
     accountId = ""
@@ -197,7 +197,7 @@ DropArea {
   // body is still the one placed, or this would overwrite what was typed.
   onAccountSignatureChanged: {
     if (!opened || mode === "draft") return
-    if (bodyEdit.text !== placedBody) return
+    if (bodyWasEdited || bodyEdit.text !== placedBody) return
     placeBody()
   }
 
@@ -209,6 +209,7 @@ DropArea {
       subject: subjectField.text,
       body: bodyEdit.text,
       placedBody: placedBody,
+      bodyWasEdited: bodyWasEdited,
       accountId: accountId,
       sourceDraftId: sourceDraftId,
       mode: mode,
@@ -250,6 +251,7 @@ DropArea {
     subjectField.text = String(saved.subject || "")
     bodyEdit.text = String(saved.body || "")
     placedBody = String(saved.placedBody || "")
+    bodyWasEdited = saved.bodyWasEdited === true
     opened = true
     rehydrateDraftAttachments()
   }
@@ -490,6 +492,7 @@ DropArea {
       // it is theirs — including the sign-off it already carries.
       bodyEdit.text = String(values.body || "")
       placedBody = ""
+      bodyWasEdited = true
       bodyPrefix = ""
       bodyQuote = ""
     } else {
@@ -564,7 +567,7 @@ DropArea {
     if (String(ccField.text || "").trim() !== "") return true
     if (String(bccField.text || "").trim() !== "") return true
     if (String(subjectField.text || "").trim() !== "") return true
-    if (String(bodyEdit.text || "") !== placedBody
+    if ((bodyWasEdited || String(bodyEdit.text || "") !== placedBody)
       && String(bodyEdit.text || "").trim() !== "") return true
     return allOutgoingAttachments().length > 0
   }
@@ -1565,6 +1568,7 @@ DropArea {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       onTextChanged: root.noteDraftChanged()
+      onTextEdited: root.bodyWasEdited = true
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }

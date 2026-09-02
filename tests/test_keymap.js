@@ -94,10 +94,10 @@ const help = byId("help")
 assert.strictEqual(keymap.isEnabled(help, "list", true), true,
   "the sheet's own key has to close the sheet")
 
-// The key sheet remains reachable while a field owns ordinary typing.
-assert.strictEqual(keymap.isSequenceEnabled(help, "Ctrl+K", "compose", false), true)
+// A bare question mark belongs to mailbox navigation, never text entry.
+deepEqual(help.keys, ["?"])
 assert.strictEqual(keymap.isSequenceEnabled(help, "?", "compose", false), false,
-  "the old bare help key remains mailbox-only")
+  "a question mark remains text inside a draft")
 assert.strictEqual(keymap.isSequenceEnabled(help, "?", "list", false), true)
 assert.strictEqual(byId("helpAnywhere"), undefined,
   "one help action must render as one row")
@@ -135,8 +135,7 @@ groups.forEach(function (group) {
 assert.strictEqual(keymap.displayFor(byId("cursorUp")), "k, Up",
   "the sheet names every key that works")
 assert.strictEqual(keymap.displayFor(byId("cursorDown")), "j, Down")
-assert.strictEqual(keymap.displayFor(byId("help")), "Ctrl+K, ?, Ctrl+/, Ctrl+?",
-  "a slash inside a sequence must not read as the separator")
+assert.strictEqual(keymap.displayFor(byId("help")), "?")
 
 // Qt's sequence syntax is not the UI's.
 assert.strictEqual(keymap.readableSequence("g,i"), "g then i",
@@ -252,11 +251,8 @@ listSequences.forEach(function (row) {
     "each entry carries its id, its sequence, and the row it came from")
 })
 assert.strictEqual(keymap.sequencesFor("compose").filter(function (row) {
-  return row.id === "help" && row.sequence === "Ctrl+K"
-}).length, 1, "the universal sequence reaches text-entry contexts")
-assert.strictEqual(keymap.sequencesFor("compose").filter(function (row) {
-  return row.id === "help" && row.sequence === "?"
-}).length, 0, "the mailbox-only sequence stays out of text-entry contexts")
+  return row.id === "help"
+}).length, 0, "Help stays out of text-entry contexts")
 
 // -------------------------------------------------- the doc cannot drift
 
