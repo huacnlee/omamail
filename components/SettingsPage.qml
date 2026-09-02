@@ -29,7 +29,9 @@ Column {
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
   // is replaced on a poll, which would rebuild the field being typed in.
-  readonly property var signatureAccounts: service ? service.accountSignatures : []
+  readonly property var signatureAccounts: service
+    && Array.isArray(service.accountSignatures) ? service.accountSignatures : []
+  property string selectedSignatureAccountId: ""
 
   // The page's sections and where each begins, for the rail beside it. Read
   // off the headings themselves, so a section that grows moves the ones
@@ -44,6 +46,49 @@ Column {
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+
+  function signatureAccount(id) {
+    for (var i = 0; i < signatureAccounts.length; i++)
+      if (String(signatureAccounts[i].id || "") === String(id || ""))
+        return signatureAccounts[i]
+    return null
+  }
+
+  function signatureOptions() {
+    var out = []
+    for (var i = 0; i < signatureAccounts.length; i++)
+      out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
+    return out
+  }
+
+  function saveSignature() {
+    if (service && selectedSignatureAccountId !== "")
+      service.setAccountSignature(selectedSignatureAccountId, signatureEdit.text)
+  }
+
+  function selectSignatureAccount(id) {
+    var next = signatureAccount(id)
+    if (!next || String(next.id || "") === selectedSignatureAccountId) return
+    saveSignature()
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  function ensureSignatureAccount() {
+    if (signatureAccounts.length === 0) {
+      selectedSignatureAccountId = ""
+      signatureEdit.text = ""
+      return
+    }
+    if (signatureAccount(selectedSignatureAccountId)) return
+    var activeId = service ? String(service.activeAccountId || "") : ""
+    var next = signatureAccount(activeId) || signatureAccounts[0]
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  onSignatureAccountsChanged: ensureSignatureAccount()
+  Component.onCompleted: ensureSignatureAccount()
 
   spacing: Style.space(16)
 
@@ -353,9 +398,9 @@ Column {
     }
   }
 
-  // A signature signs a mailbox, not a window, so there is one field per
-  // account. With a single account that is simply the field — the address
-  // above it appears only once there is a second one to tell it apart from.
+  // A signature signs a mailbox, not a window. Only the selected mailbox is
+  // expanded here: a long account list should not turn Writing into a stack of
+  // editors, and switching is an explicit answer to which identity is edited.
   Column {
     objectName: "settings-signature-section"
     width: parent.width
@@ -373,78 +418,63 @@ Column {
       bottomPadding: Style.space(4)
     }
 
-    Repeater {
-      model: root.signatureAccounts
+    Dropdown {
+      objectName: "settings-signature-account-picker"
+      visible: root.signatureAccounts.length > 1
+      width: parent.width
+      showLabel: false
+      value: root.selectedSignatureAccountId
+      options: root.signatureOptions()
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { root.selectSignatureAccount(next) }
+    }
 
-      Column {
-        id: signatureRow
-        required property var modelData
+    Rectangle {
+      width: parent.width
+      implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
+        + Style.space(20)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
 
-        width: parent.width
-        spacing: Style.space(2)
+      // The padding is part of the field visually, so it is part of its click
+      // target too. Kept behind the editor so clicks on text still place the
+      // cursor normally.
+      MouseArea {
+        anchors.fill: parent
+        onClicked: signatureEdit.forceActiveFocus()
+      }
 
-        Text {
-          visible: root.signatureAccounts.length > 1
-          width: parent.width
-          textFormat: Text.PlainText
-          text: signatureRow.modelData.email
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
-        }
+      TextEdit {
+        id: signatureEdit
+        objectName: "settings-signature-editor"
+        anchors.fill: parent
+        anchors.margins: Style.space(10)
+        activeFocusOnTab: true
+        selectByMouse: true
+        wrapMode: TextEdit.Wrap
+        textFormat: TextEdit.PlainText
+        color: root.textColor
+        selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+        selectedTextColor: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
 
-        Rectangle {
-          width: parent.width
-          implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
-            + Style.space(20)
-          radius: Style.cornerRadius
-          color: Style.normalFillFor(root.textColor, root.accentColor)
+        // The editor survives account-list updates and routine mailbox polls.
+        // Its text changes only when the selected identity changes.
+        onActiveFocusChanged: if (!activeFocus) root.saveSignature()
+      }
 
-          TextEdit {
-            id: signatureEdit
-            objectName: "settings-signature-editor"
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: Style.space(10)
-            activeFocusOnTab: true
-            selectByMouse: true
-            wrapMode: TextEdit.Wrap
-            textFormat: TextEdit.PlainText
-            color: root.textColor
-            selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
-            selectedTextColor: root.textColor
-            font.family: root.panelFontFamily
-            font.pixelSize: Style.font.bodySmall
-
-            // Filled once from the row this Repeater built, never bound to it.
-            // Saving rewrites the account list, which rebuilds these rows: a
-            // binding would then reassign the text under the cursor.
-            Component.onCompleted: text = String(signatureRow.modelData.signature || "")
-
-            // Saved when the field is done with rather than on every keystroke,
-            // for the same reason. By the time the rows are rebuilt the stored
-            // text is what is already on screen, so nothing moves.
-            onActiveFocusChanged: if (!activeFocus) signatureRow.save()
-            Component.onDestruction: signatureRow.save()
-          }
-
-          Text {
-            anchors.left: signatureEdit.left
-            anchors.top: signatureEdit.top
-            visible: signatureEdit.text === ""
-            text: "No signature"
-            color: root.dimColor
-            font.family: root.panelFontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-        }
-
-        function save() {
-          if (root.service)
-            root.service.setAccountSignature(signatureRow.modelData.id, signatureEdit.text)
-        }
+      Text {
+        anchors.left: signatureEdit.left
+        anchors.top: signatureEdit.top
+        enabled: false
+        visible: signatureEdit.text === ""
+        text: "No signature"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
       }
     }
 
@@ -457,6 +487,8 @@ Column {
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
     }
+
+    Component.onDestruction: root.saveSignature()
   }
 
   // ------------------------------------------------------------- mailboxes

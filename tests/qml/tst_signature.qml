@@ -4,7 +4,7 @@ import "../../components" as Omamail
 
 // A signature is placed by the compose view and edited on the settings page,
 // and neither half is reachable from node: one owns a text editor's contents,
-// the other is a Repeater that rebuilds itself out of the write it causes.
+// and the other switches one live editor between account identities.
 Item {
   width: 900
   height: 700
@@ -71,6 +71,7 @@ Item {
       savedId = String(id || "")
       savedText = String(text || "")
       saveCount = saveCount + 1
+      if (id === activeAccountId) activeSignature = String(text || "").trim()
     }
   }
 
@@ -115,6 +116,15 @@ Item {
       return null
     }
 
+    function namedAll(item, objectName, found) {
+      var out = found || []
+      if (!item) return out
+      if (item.objectName === objectName) out.push(item)
+      var values = item.children || []
+      for (var i = 0; i < values.length; i++) namedAll(values[i], objectName, out)
+      return out
+    }
+
     function summary() {
       return ({
         threadId: "t1", messageId: "m1", subject: "Hello",
@@ -125,15 +135,12 @@ Item {
 
     function init() {
       mailService.activeSignature = ""
-      // Rebuilt rather than assigned back field by field: replacing the list is
-      // what rebuilds the Repeater's rows, which is how a test that typed into
-      // the field hands the next one a field holding what is stored.
       mailService.accountSummaries = [({
         id: "me@example.com", email: "me@example.com", provider: "gmail",
         label: "me", unread: 0, active: true, signedIn: true, busy: false, error: ""
       })]
-      // Emptied first, so the next test is handed a field built from what is
-      // stored rather than whatever the last one typed into it.
+      // Emptied first so the editor drops the previous test's selection and
+      // loads this test's stored signature when the account returns.
       mailService.accountSignatures = []
       wait(30)
       mailService.accountSignatures = [({
@@ -196,9 +203,47 @@ Item {
       compare(editor.text, "Maarten\nmadra.nl")
     }
 
-    // Saved when the field is done with, not on every keystroke: the write
-    // rebuilds these rows, and a save per character would do it under the
-    // cursor.
+    function test_the_whole_signature_box_focuses_the_editor() {
+      var editor = named(settings, "settings-signature-editor")
+      verify(editor)
+      compose.forceActiveFocus()
+      verify(!editor.activeFocus)
+
+      mouseClick(editor.parent, editor.parent.width / 2, editor.parent.height - 5)
+      verify(editor.activeFocus, "the blank lower half belongs to the editor")
+    }
+
+    function test_one_editor_switches_between_accounts() {
+      mailService.accountSignatures = [
+        { id: "me@example.com", email: "me@example.com", signature: "Maarten" },
+        { id: "work@example.com", email: "work@example.com", signature: "Work" }
+      ]
+      wait(30)
+
+      compare(namedAll(settings, "settings-signature-editor").length, 1)
+      var picker = named(settings, "settings-signature-account-picker")
+      verify(picker, "more than one account shows a picker")
+      compare(picker.value, "me@example.com")
+      named(settings, "settings-signature-editor").text = "Changed personal"
+      picker.changed("work@example.com")
+      compare(mailService.savedId, "me@example.com")
+      compare(mailService.savedText, "Changed personal")
+      compare(named(settings, "settings-signature-editor").text, "Work")
+    }
+
+    function test_a_saved_signature_is_visible_in_compose() {
+      var editor = named(settings, "settings-signature-editor")
+      editor.forceActiveFocus()
+      editor.text = "Visible before send"
+      compose.forceActiveFocus()
+      tryCompare(mailService, "activeSignature", "Visible before send")
+
+      compose.begin("new", null, "", [])
+      compare(named(compose, "compose-body-editor").text,
+        "\n\nVisible before send")
+    }
+
+    // Saved when the field is done with, not on every keystroke.
     // A compose window nobody wrote in is not a draft. The body holds the
     // sign-off it was opened with, which `trim()` alone reads as content — so
     // Escape used to upload a draft containing only the user's own signature,
