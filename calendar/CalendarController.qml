@@ -42,6 +42,9 @@ Item {
   property bool lookupHandled: false
   property var googleRequest: null
   property bool googleRequestTimedOut: false
+  property var googleCalendarQueue: []
+  property string googleCalendarPageToken: ""
+  property bool googleEventsStarted: false
   property var passwordSaveQueue: []
   property string passwordToSave: ""
   property bool savingPassword: false
@@ -278,9 +281,11 @@ Item {
       root.eventRequest = request
       root.eventRequestTimedOut = false
       if (root.writeOp === "delete") {
-        request.open("DELETE", Calendar.googleEventUrl(eventId))
+         request.open("DELETE", Calendar.googleEventUrl(eventId,
+           writeEvent && writeEvent.calendarId))
       } else {
-        request.open("PATCH", Calendar.googleEventUrl(eventId))
+         request.open("PATCH", Calendar.googleEventUrl(eventId,
+           writeEvent && writeEvent.calendarId))
         request.setRequestHeader("Content-Type", "application/json")
       }
       request.setRequestHeader("Authorization", "Bearer " + token)
@@ -326,7 +331,8 @@ Item {
       var request = new XMLHttpRequest()
       root.eventRequest = request
       root.eventRequestTimedOut = false
-      request.open("POST", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
+      request.open("POST", Calendar.googleCalendarEventsUrl(
+        eventSource && eventSource.calendarId))
       request.setRequestHeader("Authorization", "Bearer " + token)
       request.setRequestHeader("Content-Type", "application/json")
       request.onreadystatechange = function() {
@@ -479,16 +485,16 @@ Item {
     passwordStore.running = true
   }
 
-  function replaceActiveSourceEvents(values) {
+  function replaceActiveSourceEvents(values, clear) {
     if (refreshScope !== calendarScope) return
     var sourceId = activeSource ? String(activeSource.id || "") : ""
-    var next = events.filter(function(event) {
+    var next = clear !== false ? events.filter(function(event) {
       return String(event && event.sourceId || "") !== sourceId
-    })
+    }) : events.slice()
     var additions = Array.isArray(values) ? values : []
     for (var i = 0; i < additions.length; i++) {
-      additions[i].sourceName = activeSource
-        ? String(activeSource.name || activeSource.id || "Calendar") : "Calendar"
+      additions[i].sourceName = String(additions[i].sourceName || (activeSource
+        ? activeSource.name || activeSource.id || "Calendar" : "Calendar"))
       next.push(additions[i])
     }
     next.sort(Calendar.compareEvents)
@@ -562,12 +568,19 @@ Item {
       failSource("Google calendar access is unavailable")
       return
     }
+    googleCalendarQueue = []
+    googleCalendarPageToken = ""
+    googleEventsStarted = false
+    startGoogleCalendarList()
+  }
+
+  function startGoogleCalendarList() {
     service.withGoogleAccessToken(activeSource.accountId, function(token, error) {
       if (!token) { root.failSource(error); return }
       var request = new XMLHttpRequest()
       root.googleRequest = request
       root.googleRequestTimedOut = false
-      request.open("GET", Calendar.googleEventsUrl(root.rangeStart, root.rangeEnd))
+      request.open("GET", Calendar.googleCalendarsUrl(root.googleCalendarPageToken))
       request.setRequestHeader("Authorization", "Bearer " + token)
       request.onreadystatechange = function() {
         if (request.readyState !== XMLHttpRequest.DONE) return
@@ -587,8 +600,58 @@ Item {
         var payload = null
         try { payload = JSON.parse(request.responseText) } catch (e) {}
         if (!payload) { root.failSource("Google Calendar returned an unreadable response"); return }
-        root.replaceActiveSourceEvents(Calendar.eventsFromGoogle(payload, root.activeSource.id))
-        root.processNext()
+        var calendars = Array.isArray(payload.items) ? payload.items : []
+        for (var i = 0; i < calendars.length; i++) {
+          if (calendars[i] && calendars[i].id) root.googleCalendarQueue.push(calendars[i])
+        }
+        root.googleCalendarPageToken = String(payload.nextPageToken || "")
+        if (root.googleCalendarPageToken !== "") root.startGoogleCalendarList()
+        else {
+          root.replaceActiveSourceEvents([], true)
+          root.googleEventsStarted = true
+          root.startGoogleCalendar()
+        }
+      }
+      googleDeadline.restart()
+      request.send()
+      token = ""
+    })
+  }
+
+  function startGoogleCalendar() {
+    if (googleCalendarQueue.length === 0) { processNext(); return }
+    var pending = googleCalendarQueue.slice()
+    var calendar = pending.shift()
+    googleCalendarQueue = pending
+    service.withGoogleAccessToken(activeSource.accountId, function(token, error) {
+      if (!token) { root.failSource(error); return }
+      var request = new XMLHttpRequest()
+      root.googleRequest = request
+      root.googleRequestTimedOut = false
+      request.open("GET", Calendar.googleEventsUrl(root.rangeStart, root.rangeEnd, calendar.id))
+      request.setRequestHeader("Authorization", "Bearer " + token)
+      request.onreadystatechange = function() {
+        if (request.readyState !== XMLHttpRequest.DONE) return
+        googleDeadline.stop()
+        root.googleRequest = null
+        var timedOut = root.googleRequestTimedOut
+        root.googleRequestTimedOut = false
+        if (request.status < 200 || request.status >= 300) {
+          var reason = timedOut
+            ? "The Google Calendar request timed out"
+            : Calendar.googleResponseError(request.status, request.responseText)
+          root.failSource(reason, !timedOut
+            && Calendar.isGoogleCalendarApiDisabledError(reason) ? "googleApiDisabled" : "")
+          return
+        }
+        var payload = null
+        try { payload = JSON.parse(request.responseText) } catch (e) {}
+        if (!payload) { root.failSource("Google Calendar returned an unreadable response"); return }
+        var additions = Calendar.eventsFromGoogle(payload, root.activeSource.id, calendar.id)
+        for (var i = 0; i < additions.length; i++)
+          additions[i].sourceName = String(calendar.summary || calendar.id)
+        root.replaceActiveSourceEvents(additions, false)
+        root.startGoogleCalendar()
       }
       googleDeadline.restart()
       request.send()

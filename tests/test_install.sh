@@ -83,11 +83,11 @@ chmod +x "$test_root/bin/secret-tool"
 KEYRING_CALLS="$test_root/keyring-calls" PATH="$test_root/bin:$PATH" \
   sh scripts/keyring-store.sh \
     service omamail kind refresh-token client-id client account me@example.com \
-    grant calendar-events-v1 <<EOF
+    grant calendar-readonly-v1 <<EOF
 token
 EOF
 expected_calls='clear service omamail kind refresh-token client-id client account me@example.com
-store --label=Omamail refresh token service omamail kind refresh-token client-id client account me@example.com grant calendar-events-v1'
+  store --label=Omamail refresh token service omamail kind refresh-token client-id client account me@example.com grant calendar-readonly-v1'
 actual_calls=$(cat "$test_root/keyring-calls")
 [ "$actual_calls" = "$expected_calls" ] \
   || fail "keyring-store.sh did not replace the unversioned grant before storing the versioned one"

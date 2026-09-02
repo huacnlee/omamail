@@ -25,7 +25,8 @@ var CALLBACK_PATH = "/oauth2callback"
 var SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar.events"
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.readonly"
 ]
 
 function normalizedPort(value) {
