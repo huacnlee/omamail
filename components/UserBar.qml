@@ -14,6 +14,10 @@ Rectangle {
   required property color dimColor
   required property string panelFontFamily
   property string email: ""
+  // The short name for the row; the address is the tooltip and the status
+  // line. An address here was elided from the middle in every rail width
+  // that mattered, which is the one way to make an address unreadable.
+  property string label: ""
   property bool collapsed: false
 
   // Two things live in this row: which mailbox you are in, and everything
@@ -40,20 +44,39 @@ Rectangle {
   Rectangle {
     id: avatar
     anchors.left: parent.left
-    anchors.leftMargin: root.collapsed ? (parent.width - width) / 2 : Style.space(8)
+    // The rail's rows sit in a column inset by 6, and their glyphs 8 further
+    // in; the avatar is the top of that same column of marks, so it takes
+    // both, or it stands a step to the left of every icon under it.
+    anchors.leftMargin: root.collapsed ? (parent.width - width) / 2 : Style.space(6) + Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
-    width: Style.space(22)
+    // The size of the rail's icons below it, so the column of marks down the
+    // left edge is one column.
+    width: Style.font.icon
     height: width
     radius: width / 2
     color: Style.selectedFillFor(root.textColor, root.accentColor)
 
+    // Centred on the letter's ink, not its line box: a capital sits high in
+    // the box, and centring the box puts it visibly above the middle of a
+    // circle this small. Same correction ActionIcon makes for its glyphs.
+    TextMetrics {
+      id: initialMetrics
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      text: root.initial
+    }
+
     Text {
-      anchors.centerIn: parent
+      id: initialText
       text: root.initial
       color: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
+      x: (avatar.width - initialMetrics.tightBoundingRect.width) / 2 - initialMetrics.tightBoundingRect.x
+      y: (avatar.height - initialMetrics.tightBoundingRect.height) / 2
+        - (initialText.baselineOffset + initialMetrics.tightBoundingRect.y)
     }
   }
 
@@ -65,11 +88,11 @@ Rectangle {
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
     textFormat: Text.PlainText
-    text: root.email === "" ? "Not connected" : root.email
+    text: root.label !== "" ? root.label : (root.email === "" ? "Not connected" : root.email)
     color: root.dimColor
     font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    elide: Text.ElideMiddle
+    font.pixelSize: Style.font.bodySmall
+    elide: Text.ElideRight
   }
 
   HoverHandler { id: hover }
@@ -82,7 +105,7 @@ Rectangle {
   }
 
   PanelToolTip {
-    visible: root.collapsed && hover.hovered
+    visible: hover.hovered && (root.collapsed || root.label !== "")
     text: root.email === "" ? "Not connected" : root.email
     fontFamily: root.panelFontFamily
   }

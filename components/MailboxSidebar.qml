@@ -175,6 +175,7 @@ Item {
       dimColor: root.dimColor
       panelFontFamily: root.panelFontFamily
       email: root.service ? root.service.accountEmail : ""
+      label: root.service && root.service.accountLabel ? String(root.service.accountLabel) : ""
       accountCount: root.service ? root.service.accountCount : 1
       collapsed: root.collapsed
       switcherOpen: root.switcherOpen

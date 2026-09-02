@@ -20,10 +20,8 @@ Column {
   required property color dangerColor
   required property color accentColor
   required property string panelFontFamily
-  property bool canLeave: false
   property int accountCount: 1
 
-  signal backRequested()
   signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
@@ -38,14 +36,6 @@ Column {
   readonly property string installCommand: "curl -fsSL https://hey.com/install-cli | bash"
 
   spacing: Style.space(16)
-
-  BackBar {
-    visible: root.canLeave
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
-  }
 
   // ------------------------------------------------------------------ hero
 

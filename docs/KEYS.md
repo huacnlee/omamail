@@ -162,8 +162,14 @@ no event, so what follows Ctrl still goes where it always went. It clears on
 waiting for one that is not coming would paint the numbers on permanently.
 
 `Escape` is the only bare key bound everywhere, because it is the way out of
-everywhere. What it means in each place is one list in `goBack()`, in the order
-the window is stacked.
+everywhere. Where it goes is not decided by the key: the window keeps a history
+of the places it has been — a stack in `App.qml`, ruled by
+`account/Navigation.js` — and `Escape`, like every Back bar, calls `back()`,
+which pops one entry. A draft, the event form and the shortcut sheet are
+entries too, so the sheet closes before the message under it, and a reply
+raised from the list returns to the list, not to the message it opened on the
+way. On the root, `back()` clears a search if there is one and otherwise closes
+the window.
 
 ## What survives an overlay
 
@@ -266,7 +272,8 @@ keyboard has to land on a plain `Item`.
 
 **A window `Shortcut` beats a focused item's `Keys` handler.** A local
 `Keys.onEscapePressed` looks live and never runs. `SearchBar` had one; what it
-did lives in `goBack()` now.
+did lives in `goBack()` now, which clears the field and then hands the key to
+`back()`.
 
 And one thing that is *not* a problem, recorded because it was assumed to be:
 Qt already gives a focused `TextInput` the bare keys before any `Shortcut` sees

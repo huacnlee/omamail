@@ -43,6 +43,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/BackBar.qml \
 	components/UserBar.qml \
 	components/SettingsPage.qml \
+	components/SettingsSidebar.qml \
 	components/CalendarSettings.qml \
 	components/CalendarEventComposer.qml \
 	components/CalendarEventDetail.qml \
@@ -83,8 +84,9 @@ test-js:
 	node tests/test_direction.js
 	node tests/test_cache.js
 	node tests/test_model.js
-	node tests/test_keymap.js
 	node tests/test_icons.js
+	node tests/test_navigation.js
+	node tests/test_keymap.js
 	node tests/test_accounts.js
 	node tests/test_aliases.js
 	node tests/test_menu.js

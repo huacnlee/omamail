@@ -307,7 +307,9 @@ right = text.index('anchors.right: parent.right')
 if today > right:
     raise SystemExit("test_source.sh: Go to today must sit with the date on the left")
 today_block = text[today:text.index('}', today)]
-if 'bordered: false' not in today_block:
+# A ghost: no box at rest. `ghost: true` is the icon buttons' look; a plain
+# `bordered: false` is the older text-only form and still counts.
+if 'ghost: true' not in today_block and 'bordered: false' not in today_block:
     raise SystemExit("test_source.sh: Go to today must be a text-only action")
 if 'iconName: "refresh"' in text:
     raise SystemExit("test_source.sh: calendar refresh belongs in the window header")
@@ -500,7 +502,10 @@ if awk '
 ' components/CalendarView.qml; then
   fail "activating a calendar event must not jump to its provider"
 fi
-grep -q 'calendarView.detailOpen' App.qml \
+# The overview is an entry on the navigation stack, so Back reaches it before
+# the calendar under it; `back()` asks the view to close it and the view's own
+# change pops the entry.
+grep -q 'leaving.kind === "calendarDetail"' App.qml \
   || fail "Escape must close the native calendar event overview first"
 if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml; then
   fail "event creation must use the central Escape route, not an ambiguous duplicate"

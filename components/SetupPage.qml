@@ -20,7 +20,6 @@ Column {
   required property color dangerColor
   required property color accentColor
   required property string panelFontFamily
-  property bool canLeave: false
   property int accountCount: 1
   property bool secretVisible: false
   property bool detailVisible: false
@@ -29,7 +28,6 @@ Column {
   // break the binding that closes it again.
   property bool clientStepReopened: false
 
-  signal backRequested()
   signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
@@ -76,14 +74,6 @@ Column {
   // beside the hero, because that is where it sits on the reader and the
   // compose form, and a control that moves between pages reads as a different
   // control on each of them.
-  BackBar {
-    visible: root.canLeave
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
-  }
-
   // ------------------------------------------------------------------ hero
 
   ProviderHero {
@@ -296,8 +286,15 @@ Column {
   Row {
     visible: root.signedIn || root.accountCount > 1
     spacing: Style.space(8)
+    // An unbordered button carries its padding inside an invisible box, so
+    // standing first in the row it looks indented. Pulled left by that much
+    // whenever it is first, so its text sits on the content edge like
+    // everything above it.
+    anchors.left: parent.left
+    anchors.leftMargin: signOutButton.visible ? 0 : -removeButton.horizontalPadding
 
     Button {
+      id: signOutButton
       visible: root.signedIn
       text: "Sign out"
       foreground: root.textColor
@@ -307,6 +304,7 @@ Column {
     }
 
     Button {
+      id: removeButton
       visible: root.accountCount > 1
       text: "Remove account"
       foreground: root.dangerColor
@@ -336,12 +334,17 @@ Column {
     foreground: root.textColor
   }
 
+  // Padding kept — without it the hover box hugs the text — and the button
+  // pulled left by the same amount, so the text still sits on the content
+  // edge with the paragraphs above it.
   Button {
+    id: detailToggle
     text: root.detailVisible ? "Hide the details" : "Need more detail?"
     foreground: root.dimColor
     bordered: false
     leftAlign: true
-    horizontalPadding: 0
+    anchors.left: parent.left
+    anchors.leftMargin: -detailToggle.horizontalPadding
     fontSize: Style.font.caption
     onClicked: root.detailVisible = !root.detailVisible
   }
