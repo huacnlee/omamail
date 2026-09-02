@@ -129,14 +129,15 @@ it lives in are all `hey`'s, and Omamail never asks for your HEY password.
 Install it once:
 
 ```bash
-curl -fsSL https://hey.com/install-cli | bash
+omarchy-mise-install github:basecamp/hey-cli hey
 ```
 
-Recent versions of Omarchy install it for you as a lazy mise tool, and
-`omarchy-mise-install github:basecamp/hey-cli hey` does the same thing by hand.
-Either way it lands in `~/.local/bin`, which is where Omamail looks when it is
-not already on `PATH`. Then choose **HEY** on the setup page and press **Sign in
-to HEY** — that opens HEY in your browser, and nothing else is asked of you.
+Recent versions of Omarchy install it for you as a lazy mise tool, so that line
+is only for doing it by hand; [37signals' own installer][hey-cli] is the other
+route. Either way it lands in `~/.local/bin`, which is where Omamail looks when
+it is not already on `PATH`. Then choose **HEY** on the setup page and press
+**Sign in to HEY** — that opens HEY in your browser, and nothing else is asked
+of you.
 
 The rail is HEY's own: Imbox, New for you, Reply Later, Set Aside, The Feed and
 Paper Trail. **No Sent** — HEY's API has one, but `hey` does not serve it yet:
