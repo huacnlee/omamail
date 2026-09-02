@@ -45,8 +45,6 @@ fi
 printf '%s\n' 'Validating plugin…'
 omarchy plugin validate "$project_dir"
 
-"$project_dir/scripts/migrate-storage.sh"
-
 mkdir -p "$plugin_home"
 if [[ ! -e "$install_path" && ! -L "$install_path" \
     && ( -e "$old_install_path" || -L "$old_install_path" ) ]]; then

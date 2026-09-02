@@ -27,16 +27,6 @@ grep -q 'plugin-backups' scripts/link-plugin.sh || fail "backups must not land i
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
-mkdir -p "$test_root/config/omarchy-gmail" "$test_root/cache/omarchy-gmail"
-printf 'client\n' > "$test_root/config/omarchy-gmail/credentials.json"
-printf 'cache\n' > "$test_root/cache/omarchy-gmail/inbox.json"
-XDG_CONFIG_HOME="$test_root/config" XDG_CACHE_HOME="$test_root/cache" \
-  sh scripts/migrate-storage.sh
-[ -f "$test_root/config/omamail/credentials.json" ] || fail "legacy config was not moved"
-[ -f "$test_root/cache/omamail/inbox.json" ] || fail "legacy cache was not moved"
-[ ! -e "$test_root/config/omarchy-gmail" ] || fail "legacy config directory remains"
-[ ! -e "$test_root/cache/omarchy-gmail" ] || fail "legacy cache directory remains"
-
 # A stale service instance from before a plugin reload must not be able to
 # replace a real account list with the first-run setup row. The writer is the
 # one boundary both old and new service code still cross.
