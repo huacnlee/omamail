@@ -19,6 +19,10 @@ Item {
   // that looks untouched while its own popup is up leaves the popup looking
   // unattached to anything.
   property bool selected: false
+  // Working on the thing the button asks for — checking for mail, say. The
+  // glyph turns while it is, and stays at full strength: a button that only
+  // went dim said "you cannot" when the truth was "already doing it".
+  property bool busy: false
   property real iconSize: Style.font.icon
   property real size: Math.max(Style.space(24), iconSize + Style.spacing.sm * 2)
   property real visualInset: Style.space(2)
@@ -32,7 +36,7 @@ Item {
   implicitHeight: size
   width: size
   height: size
-  opacity: enabled ? 1.0 : 0.4
+  opacity: enabled || busy ? 1.0 : 0.4
 
   Rectangle {
     anchors.fill: parent
@@ -44,11 +48,23 @@ Item {
   }
 
   ActionIcon {
+    id: glyph
     anchors.centerIn: parent
     name: root.iconName
     iconSize: root.iconSize
     color: root.hot || root.selected ? root.hoverColor : root.foreground
     filled: root.filled
+
+    // A full turn a second, and back to upright the moment the work ends so
+    // the glyph never rests at a tilt.
+    RotationAnimation on rotation {
+      running: root.busy
+      loops: Animation.Infinite
+      from: 0
+      to: 360
+      duration: 1000
+      onRunningChanged: if (!running) glyph.rotation = 0
+    }
   }
 
   MouseArea {

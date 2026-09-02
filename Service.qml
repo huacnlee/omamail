@@ -604,6 +604,13 @@ Item {
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
+  // The short name the switcher shows for the account on screen — the label
+  // the user gave it, or the local part of its address. The sidebar's user
+  // bar shows this; the full address is on the status line.
+  readonly property string accountLabel: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? Accounts.label(entry) : ""
+  }
   readonly property var sendAsAliases: current ? current.availableSendAsAliases : []
   // Every address a new message may be sent as, across signed-in mailboxes.
   // Compose reads this and hides the ones that do not belong on a reply.

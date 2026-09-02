@@ -8,6 +8,7 @@ import qs.Ui
 
 import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
+import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
 import "message/Mailto.js" as Mailto
@@ -61,7 +62,9 @@ Item {
     if (accountId !== "" && service
         && String(service.activeAccountId || "") !== accountId
         && typeof service.switchTo === "function") service.switchTo(accountId)
-    composeReturnView = String(composeRecovery.returnView || "list")
+    // The draft was raised over the reader if the file says so; otherwise it
+    // returns to the root, whichever root the window is on now.
+    pendingComposeReturnTo = composeRecovery.returnView === "reader" ? Nav.depth(nav) : 1
     composeRecoveryRestoring = true
     compose.restoreDraft(composeRecovery.draft)
     composeRecoveryRestoring = false
@@ -72,7 +75,7 @@ Item {
     composeRecoveryTimer.stop()
     var draft = saved || (compose.opened ? compose.snapshotDraft()
       : (compose.parkedForSend ? compose.pendingDraft : null))
-    var raw = Recovery.serialize(composeReturnView, draft)
+    var raw = Recovery.serialize(composeReturnView(), draft)
     if (raw === "") {
       clearComposeRecovery()
       return composeRecoveryRevision
@@ -201,8 +204,6 @@ Item {
   readonly property bool wide: window.width >= Style.space(1000)
   readonly property bool compact: window.width < Style.space(760)
 
-  property string currentView: "list"
-  readonly property bool calendarVisible: currentView === "calendar"
   property string cursorId: ""
   // Kept across messages, and across the window being closed: how somebody
   // reads their mail is a fact about them, not about the message that made them
@@ -219,24 +220,147 @@ Item {
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
   }
-  property bool shortcutHelpVisible: false
-  property bool setupVisible: false
-  // Which kind of mailbox is being added. Asked before either form, because the
-  // two have nothing in common and guessing from the address would be worse
-  // than asking — a Gmail address is a legitimate IMAP account too.
-  property bool pickingProvider: false
-  // Latched once the question has been answered, so the chooser does not come
-  // back every time a half-finished setup re-renders.
-  property bool providerChosen: false
-  // Latched while a setup or edit page is open. Service.providerId briefly
-  // falls back to Gmail while an account host is rebuilt after saving; that is
-  // transport lifecycle, not a request to replace an IMAP page with Gmail's.
-  property string editingProvider: ""
-  // Set while a picked provider is being turned into an account row, so the
-  // signal that normally lands the user in Settings leaves them on the form.
-  property bool openingNewMailbox: false
-  property bool accountDraftOpen: false
-  property bool settingsVisible: false
+  // ---------------------------------------------------------- navigation
+  //
+  // Where the window is, as a history: one entry per place, the newest last.
+  // Every `visible:` below is read off the top of it, and every Back — the
+  // bars on the pages, Escape, a draft closing — is one function, `back()`.
+  // The rules live in `account/Navigation.js`; this file only applies them.
+  //
+  // Overlays (a draft, the event form, the shortcut sheet) are entries too,
+  // but their open state is owned by the view that draws them, so the stack
+  // follows the view rather than the other way round: the view opening pushes,
+  // the view closing pops. `back()` on one asks the view to close and lets
+  // that pop happen, which is why a draft that refuses to close — because it
+  // is saving, or has a recovered draft to show next — stays on the stack.
+  property var nav: Nav.rootFor(({}))
+  readonly property var navKinds: Nav.kinds(nav)
+  readonly property var navPage: Nav.page(nav)
+  readonly property var navOverlay: Nav.overlay(nav)
+  readonly property string page: navPage.kind
+  readonly property string overlay: navOverlay ? navOverlay.kind : ""
+  readonly property string currentView: page === "reader" ? "reader"
+    : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
+  readonly property bool calendarVisible: currentView === "calendar"
+  readonly property bool showSettings: page === "settings"
+  readonly property bool showPicker: page === "picker"
+  readonly property bool showSetup: page === "setup"
+  // Anything the window goes *into*. The mail chrome stands down for all of it.
+  readonly property bool showPage: showSettings || showPicker || showSetup
+  readonly property bool composing: overlay === "compose" || overlay === "eventComposer"
+  readonly property bool shortcutHelpVisible: overlay === "help"
+  readonly property string editingProvider: page === "setup" ? String(navPage.provider || "") : ""
+  readonly property bool accountDraftOpen: page === "setup" && navPage.draft === true
+
+  // What the root is made of. Recomputed when a mailbox becomes usable or
+  // stops being — and, before any is, whenever the service learns more about
+  // the accounts it has, but only while the user has not moved off the root
+  // it was given: a form they backed out of must not come back because the
+  // address they typed was saved.
+  readonly property var rootState: ({
+    anyReady: anyReady,
+    hasSavedAccounts: !!service && service.hasSavedAccounts === true,
+    setupUnderway: setupUnderway,
+    provider: service ? String(service.providerId || "") : "",
+    view: currentView
+  })
+  property bool navUntouched: true
+  property bool wasReady: false
+  onRootStateChanged: {
+    var flipped = rootState.anyReady !== wasReady
+    wasReady = rootState.anyReady
+    if (flipped || (!rootState.anyReady && navUntouched)) resetNavigation()
+  }
+  function resetNavigation() {
+    nav = Nav.rootFor(rootState)
+    navUntouched = true
+    pendingComposeReturnTo = -1
+  }
+  function rootKind() {
+    return nav.length > 0 && nav[0].kind === "calendar" ? "calendar" : "list"
+  }
+
+  function pushEntry(kind, fields) {
+    navUntouched = false
+    nav = Nav.push(nav, Nav.entry(kind, fields))
+  }
+
+  // An overlay whose view has closed, wherever it sits. Usually the top; a
+  // draft can also finish under the shortcut sheet, and then the sheet goes
+  // with it — it was drawn over a place that no longer exists.
+  function dropOverlay(kind) {
+    var stack = nav
+    if (Nav.top(stack).kind === kind) {
+      navUntouched = false
+      nav = Nav.pop(stack)
+      return
+    }
+    for (var i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].kind !== kind) continue
+      var keep = typeof stack[i].returnTo === "number" ? stack[i].returnTo : i
+      navUntouched = false
+      nav = stack.slice(0, Math.max(1, Math.min(keep, i)))
+      return
+    }
+  }
+
+  // Back. Whatever is on top is asked to leave; a view that owns its own open
+  // state closes and pops itself, everything else pops here. Nothing to pop
+  // means the root, and Back on the root is the way out of the window — after
+  // clearing a search, which is the nearer thing to leave.
+  function back() {
+    var leaving = Nav.top(nav)
+    pendingComposeReturnTo = -1
+    if (leaving.kind === "compose") return saveAndLeaveCompose()
+    if (leaving.kind === "eventComposer") return eventComposer.close()
+    if (leaving.kind === "calendarDetail") return calendarView.closeDetail()
+    if (leaving.kind === "reader") {
+      pendingComposeMode = ""
+      pendingDraftId = ""
+      if (service) service.clearSelection()
+    }
+    if (leaving.kind === "setup" && leaving.draft === true && service)
+      service.discardCurrentDraft()
+    var next = Nav.pop(nav)
+    if (next === nav) {
+      if (service && service.searchQuery !== "") service.search("")
+      else requestClose()
+      return
+    }
+    navUntouched = false
+    nav = next
+    Qt.callLater(function() { focusScope.applyContextFocus() })
+  }
+
+  function openHelp() {
+    if (overlay !== "help") pushEntry("help")
+  }
+  function dismissHelp() {
+    if (overlay === "help") dropOverlay("help")
+  }
+  function toggleHelp() {
+    if (overlay === "help") dismissHelp()
+    else openHelp()
+  }
+
+  // The pages a mailbox stands behind. Each is a push, so Back retraces it.
+  function addMailbox() {
+    dismissHelp()
+    pushEntry("picker")
+  }
+  function chooseProvider(providerId) {
+    if (!service) return
+    // On first run the row already exists and only needs its kind; after
+    // that, adding a mailbox is what makes one — and that row is a draft
+    // until it is saved, so backing out of its form discards it.
+    var draft = service.hasSavedAccounts === true
+    if (draft) service.addAccount(providerId)
+    else service.configureCurrentAccount({ provider: providerId })
+    pushEntry("setup", { provider: String(providerId || ""), draft: draft })
+  }
+  function openClientSetup() {
+    pushEntry("setup", { provider: "gmail", draft: false })
+  }
   // Something the window needs to say that no account is reporting — refusing a
   // duplicate mailbox, for one. Cleared on a timer so it cannot outlive its
   // moment on the status line.
@@ -255,26 +379,18 @@ Item {
   }
 
   function openSettings() {
-    shortcutHelpVisible = false
-    setupVisible = false
-    settingsVisible = true
+    dismissHelp()
+    if (page !== "settings") pushEntry("settings")
   }
 
   readonly property bool ready: !!service && service.ready
   // The walkthrough is for having no mailbox at all. A mailbox that has been
   // added but not signed in yet belongs in settings, next to the ones that are.
   readonly property bool anyReady: !!service && service.anyAccountReady
-  readonly property bool showSetup: setupVisible || !anyReady
   // A setup already part-done answers the question by itself: an account with
   // credentials has had its kind chosen, whether or not this window asked.
   readonly property bool setupUnderway: !!service && !!service.auth
-    && service.auth.credentialsPresent
-  readonly property bool showPicker: showSetup
-    && (pickingProvider || (!providerChosen && !anyReady && !setupUnderway))
-  readonly property bool showSettings: settingsVisible && !showSetup
-  // Anything the window goes *into*. The mail chrome stands down for all of it.
-  readonly property bool showPage: showSetup || showSettings
-  readonly property bool composing: compose.opened || eventComposer.opened
+    && service.auth.credentialsPresent === true
 
   function open(payloadJson) {
     var payload = ({})
@@ -288,7 +404,7 @@ Item {
       root.openMessage(String(payload.messageId))
     })
     if (payload.view === "calendar") {
-      currentView = "calendar"
+      showCalendar()
       Qt.callLater(function() {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
@@ -325,14 +441,17 @@ Item {
     reader.forceRichAnyway = false
     cursorId = String(id || "")
     service.select(cursorId)
-    currentView = "reader"
+    // A message opens over the list. From anywhere else — a notification
+    // arriving while Settings is up — it opens over a fresh list, because
+    // Back from a message means the list it came from.
+    if (page !== "list" && page !== "reader") nav = Nav.resetTo(nav, "list")
+    pushEntry("reader", { id: cursorId })
   }
 
   function editDraft(id) {
     if (!service || service.mailboxKey !== "drafts") return false
     var draftId = String(id || "")
     if (draftId === "") return false
-    composeReturnView = currentView
     pendingComposeMode = ""
     pendingDraftId = draftId
     if (service.selectedId !== draftId || service.detailLoading
@@ -342,12 +461,22 @@ Item {
     return true
   }
 
+  // The list, fresh: what a mailbox switch, a search, a queued send and the
+  // reader's own "back to list" key all mean. Not a Back — the history is
+  // dropped because the list under it has changed.
   function backToList() {
     pendingComposeMode = ""
     pendingDraftId = ""
+    pendingComposeReturnTo = -1
     if (service) service.clearSelection()
-    currentView = "list"
+    navUntouched = false
+    nav = Nav.resetTo(nav, "list")
     Qt.callLater(function() { focusScope.applyContextFocus() })
+  }
+
+  function showCalendar() {
+    navUntouched = false
+    nav = Nav.replaceRoot(nav, "calendar")
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -383,12 +512,35 @@ Item {
   // the list row's own Reply menu did. Held until the fetch lands instead.
   property string pendingComposeMode: ""
   property string pendingDraftId: ""
-  // Where the draft was raised from, so that leaving it goes back there.
-  // Answering from the list opens the message being answered — that is the
-  // reply's doing, not somewhere the reader asked to be — so closing the draft
-  // has to leave the message with it. Anything raised while reading stays in
-  // the reader, which is where it came from.
-  property string composeReturnView: ""
+  // Where the draft will return to, recorded before anything is pushed on its
+  // behalf. Answering from the list opens the message being answered — that
+  // is the reply's doing, not somewhere the reader asked to be — so the depth
+  // to come back to is taken before the reader goes on. -1 means "wherever
+  // the draft opens", which `push` fills in.
+  property int pendingComposeReturnTo: -1
+
+  // The draft's entry, once the view has opened. The reply raised from the
+  // list has been holding its depth in pendingComposeReturnTo since before
+  // the message it answers was fetched; everything else returns to the place
+  // it was raised over.
+  function trackComposeOpened() {
+    var fields = {}
+    if (pendingComposeReturnTo >= 0) fields.returnTo = pendingComposeReturnTo
+    pendingComposeReturnTo = -1
+    pushEntry("compose", fields)
+  }
+
+  // What compose recovery writes: the reader, if leaving the draft would keep
+  // one open underneath, else the list. The file format predates the stack
+  // and says only that much.
+  function composeReturnView() {
+    for (var i = nav.length - 1; i >= 0; i--) {
+      if (nav[i].kind !== "compose") continue
+      var keep = typeof nav[i].returnTo === "number" ? nav[i].returnTo : i
+      return keep >= 2 && nav[keep - 1].kind === "reader" ? "reader" : "list"
+    }
+    return currentView === "reader" ? "reader" : "list"
+  }
 
   function startCompose(mode) {
     if (!service) return
@@ -408,7 +560,6 @@ Item {
   function openDraft(draft) {
     if (!draft) return
     pendingDraftId = ""
-    composeReturnView = currentView
     compose.beginDraft(draft)
   }
 
@@ -434,17 +585,17 @@ Item {
   // would throw away the body that is on screen and fetch it again.
   function composeFromCursor(mode) {
     if (!service || cursorId === "") return
-    composeReturnView = currentView
+    pendingComposeReturnTo = Nav.depth(nav)
     if (service.selectedId !== cursorId) openMessage(cursorId)
     startCompose(mode)
   }
 
   // A draft closed by its own Back, by Escape, by Discard, or by having been
-  // sent. All four are the same question: where was this raised from.
+  // sent. All four are the same question: where was this raised from — and
+  // the entry knows.
   function leaveCompose() {
-    var from = composeReturnView
-    composeReturnView = ""
-    if (from === "list" && currentView === "reader") backToList()
+    pendingComposeReturnTo = -1
+    dropOverlay("compose")
   }
 
   function saveAndLeaveCompose() {
@@ -580,7 +731,6 @@ Item {
     if (id === "forward") return composeFromCursor("forward")
     if (id === "compose") {
       if (service && service.mailboxKey === "drafts" && editDraft(cursorId)) return
-      composeReturnView = currentView
       return startCompose("new")
     }
     if (id === "createEvent") return eventComposer.begin()
@@ -606,14 +756,14 @@ Item {
     if (id === "calendar") {
       if (calendarVisible) backToList()
       else {
-        currentView = "calendar"
+        showCalendar()
         calendarView.refresh()
       }
       return
     }
     if (id === "mailView") return backToList()
     if (id === "calendarView") {
-      currentView = "calendar"
+      showCalendar()
       calendarView.refresh()
       return
     }
@@ -627,38 +777,26 @@ Item {
       return
     }
     if (id === "settings") return openSettings()
-    if (id === "help") {
-      shortcutHelpVisible = !shortcutHelpVisible
-      return
-    }
+    if (id === "help") return toggleHelp()
     if (id === "back") return goBack()
   }
 
-  // What Escape means, in the order the window is stacked. The row menu, the
-  // app menu and the account switcher are absent on purpose: a QQC.Popup with
-  // CloseOnEscape consumes the key itself, so a branch for them here would
-  // never run.
+  // Escape. The row menu, the app menu and the account switcher are absent on
+  // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
+  // branch for them here would never run. Everything else is the history.
   function goBack() {
-    if (shortcutHelpVisible) shortcutHelpVisible = false
-    // A query being typed is the nearest thing to leave: clear it if there is
-    // one, then hand the keyboard back to the mailbox. This used to live in
-    // SearchBar as its own Keys handler, which a window Shortcut silently beats.
     // A query being typed is the nearest thing to leave: clear it if there is
     // one, then hand the keyboard back. Parked directly rather than through
     // applyContextFocus, which would still read the context as "search" —
-    // the field has not lost the focus yet at this point.
-    else if (searchBar.fieldFocused) {
+    // the field has not lost the focus yet at this point. This used to live
+    // in SearchBar as its own Keys handler, which a window Shortcut silently
+    // beats.
+    if (searchBar.fieldFocused) {
       if (searchBar.queryText !== "") searchBar.clear()
       focusScope.parkKeyboard()
+      return
     }
-    else if (eventComposer.opened) eventComposer.close()
-    else if (compose.opened) saveAndLeaveCompose()
-    else if (setupVisible) setupVisible = false
-    else if (settingsVisible) settingsVisible = false
-    else if (currentView === "calendar" && calendarView.detailOpen) calendarView.closeDetail()
-    else if (currentView === "reader" || currentView === "calendar") backToList()
-    else if (service && service.searchQuery !== "") service.search("")
-    else requestClose()
+    back()
   }
 
   Connections {
@@ -698,28 +836,12 @@ Item {
       root.cursorId = Model.cursorAfterReload(
         root.service ? root.service.messages : [], root.cursorId)
     }
-    // A new account has no mailbox yet, so the only useful place to be is the
-    // page that gives it one.
-    // A new mailbox appears as a row in Settings, waiting to be signed in.
-    // Sending the window to the first-run walkthrough instead showed a setup
-    // that was already finished, for a different account.
     function onDuplicateAccount(email) {
       root.notice = email + " is already added"
     }
-    function onAccountAdded() {
-      // A mailbox added through the chooser goes straight to its own form; the
-      // user has already said what they want and asking them to find the new
-      // row in Settings would be a step backwards. One added any other way
-      // still appears there, waiting to be signed in.
-      if (root.openingNewMailbox) {
-        root.openingNewMailbox = false
-        root.settingsVisible = false
-        root.setupVisible = true
-        return
-      }
-      root.setupVisible = false
-      root.settingsVisible = true
-    }
+    // accountAdded is not handled here on purpose: the chooser that added the
+    // row pushes its form itself, so the stack says where the user is going
+    // before the service has finished making the row.
   }
 
   // The setup pages. Built by the Loader above, one at a time, so the ones not
@@ -732,26 +854,9 @@ Item {
       dimColor: root.dim
       accentColor: root.accent
       panelFontFamily: root.fontFamily
-      canLeave: root.anyReady
-      onBackRequested: {
-        root.pickingProvider = false
-        root.editingProvider = ""
-        root.setupVisible = false
-      }
-      onChosen: function(providerId) {
-        root.pickingProvider = false
-        root.providerChosen = true
-        root.editingProvider = providerId
-        // On first run the row already exists and only needs its kind; after
-        // that, adding a mailbox is what makes one.
-        if (root.service && root.service.hasSavedAccounts) {
-          root.openingNewMailbox = true
-          root.accountDraftOpen = true
-          root.service.addAccount(providerId)
-        } else if (root.service) {
-          root.service.configureCurrentAccount({ provider: providerId })
-        }
-      }
+      // Back is shown wherever there is something to go back to — which on
+      // first run, where the chooser is the root, there is not.
+      onChosen: function(providerId) { root.chooseProvider(providerId) }
     }
   }
 
@@ -765,9 +870,7 @@ Item {
       dangerColor: root.danger
       accentColor: root.accent
       panelFontFamily: root.fontFamily
-      canLeave: root.anyReady
       accountCount: root.service ? root.service.accountCount : 1
-      onBackRequested: root.leaveSetup()
       onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
   }
@@ -782,9 +885,7 @@ Item {
       dangerColor: root.danger
       accentColor: root.accent
       panelFontFamily: root.fontFamily
-      canLeave: root.anyReady
       accountCount: root.service ? root.service.accountCount : 1
-      onBackRequested: root.leaveSetup()
       onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
   }
@@ -799,9 +900,7 @@ Item {
       dangerColor: root.danger
       accentColor: root.accent
       panelFontFamily: root.fontFamily
-      canLeave: root.anyReady
       accountCount: root.service ? root.service.accountCount : 1
-      onBackRequested: root.leaveSetup()
       onRemoveRequested: root.removeCurrentAccountFromEditor()
     }
   }
@@ -812,7 +911,7 @@ Item {
     var mailbox = service.mailboxKey
     if (service.switchToIndex(index) !== true) return false
     if (keepCalendar) {
-      currentView = "calendar"
+      showCalendar()
       return true
     }
     var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
@@ -824,20 +923,10 @@ Item {
   function editAccount(index) {
     if (!service) return
     var accounts = service.accountSummaries || []
-    editingProvider = index >= 0 && index < accounts.length
+    var provider = index >= 0 && index < accounts.length
       ? String(accounts[index].provider || "gmail") : "gmail"
     if (!service.switchToIndex(index)) return
-    providerChosen = true
-    pickingProvider = false
-    settingsVisible = false
-    setupVisible = true
-  }
-
-  function leaveSetup() {
-    if (accountDraftOpen && service) service.discardCurrentDraft()
-    accountDraftOpen = false
-    setupVisible = false
-    editingProvider = ""
+    pushEntry("setup", { provider: provider, draft: false })
   }
 
   function removeCurrentAccountFromEditor() {
@@ -854,9 +943,11 @@ Item {
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
     service.removeAccountAt(index)
-    accountDraftOpen = false
-    leaveSetup()
-    settingsVisible = true
+    // The editor's page is gone with its account. Settings is where the rest
+    // of them are, over a fresh root: the list underneath may have changed
+    // mailbox with the removal.
+    navUntouched = false
+    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
   }
 
   // A delete asks first, and asks naming the target. Only the confirmation
@@ -1073,12 +1164,13 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(4)
+          spacing: Style.space(8)
 
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
           IconButton {
+            objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing
             iconName: "refresh"
@@ -1090,6 +1182,9 @@ Item {
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
+            busy: !!root.service && (root.calendarVisible
+              ? !!(root.service.calendarController && root.service.calendarController.loading)
+              : root.service.listLoading === true)
             enabled: root.ready && (root.calendarVisible
               ? !(root.service && root.service.calendarController.loading)
               : !(root.service && root.service.listLoading))
@@ -1099,12 +1194,14 @@ Item {
             }
           }
 
-          IconTextButton {
+          Button {
+            objectName: "create-event-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event..."
-            iconName: "plus"
+            text: "Create event"
+            tooltipText: "Create event"
             foreground: root.dim
+            bordered: true
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
@@ -1112,19 +1209,19 @@ Item {
             onClicked: eventComposer.begin()
           }
 
-          IconButton {
+          Button {
+            objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && !root.calendarVisible
-            iconName: "send"
+            text: "Compose"
             tooltipText: "Compose · c"
             foreground: root.dim
-            hoverColor: root.foreground
+            bordered: true
+            accent: root.accent
             fontFamily: root.fontFamily
+            fontSize: Style.font.caption
             enabled: root.ready
-            onClicked: {
-              root.composeReturnView = root.currentView
-              root.startCompose("new")
-            }
+            onClicked: root.startCompose("new")
           }
 
         }
@@ -1159,13 +1256,11 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
-          switcherOpen: accountSwitcher.opened
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
-          onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
-            root.currentView = "calendar"
+            root.showCalendar()
             calendarView.refresh()
           }
           // Not a search: the provider decides what selecting a label means,
@@ -1323,11 +1418,8 @@ Item {
           }
           onZoomRequested: function(step) { root.zoomBy(step) }
           onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
-          onBackRequested: root.backToList()
-          onComposeRequested: function(mode) {
-            root.composeReturnView = root.currentView
-            root.startCompose(mode)
-          }
+          onBackRequested: root.back()
+          onComposeRequested: function(mode) { root.startCompose(mode) }
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
           }
@@ -1355,9 +1447,15 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           contentDirection: root.service ? root.service.contentDirection : ""
+          // The stack follows the view: opening pushes, closing pops — and
+          // the pop is here rather than on `closed`, because a draft parked
+          // for sending closes without saying so.
+          onOpenedChanged: {
+            if (opened) root.trackComposeOpened()
+            else root.leaveCompose()
+          }
           onClosed: {
             if (!root.composeDetachingForSave) root.clearComposeRecovery()
-            root.leaveCompose()
           }
           onCloseRequested: root.saveAndLeaveCompose()
           onSendQueued: {
@@ -1372,6 +1470,10 @@ Item {
           anchors.fill: parent
           z: 20
           visible: opened && !root.showPage
+          onOpenedChanged: {
+            if (opened) root.pushEntry("eventComposer", {})
+            else root.dropOverlay("eventComposer")
+          }
           controller: root.service ? root.service.calendarController : null
           textColor: root.foreground
           backgroundColor: root.background
@@ -1403,6 +1505,13 @@ Item {
             calendarTodayBackgroundColor: root.calendarTodayBackground
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
+            // An event opened for reading is a place, so Back closes it before
+            // it leaves the calendar. The view owns the open state; the stack
+            // follows it.
+            onDetailOpenChanged: {
+              if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
+              else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+            }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
             onOpenRequested: function(url) { Qt.openUrlExternally(url) }
@@ -1411,13 +1520,39 @@ Item {
           }
         }
 
+        // The one Back for every page the window goes into — settings, the
+        // chooser, a form. Always at the same height, and always on the left
+        // edge of the page's own block — the rail's edge on Settings, the
+        // form's on the rest — so it belongs to the page rather than to the
+        // window's corner, and going a level deeper never moves it up or
+        // down. A page that is the root (first run's chooser) has nothing
+        // behind it and shows none.
+        BackBar {
+          id: pageBack
+          objectName: "page-back"
+          x: Style.space(18) + (root.showSettings ? settingsArea.blockLeft : setup.x)
+          anchors.top: parent.top
+          anchors.topMargin: Style.space(18)
+          visible: root.showPage && Nav.depth(root.nav) > 1
+          textColor: root.foreground
+          dimColor: root.dim
+          panelFontFamily: root.fontFamily
+          onActivated: root.back()
+        }
+        // Where a page's content starts: under the Back when there is one.
+        readonly property real pageTop: Style.space(18)
+          + (pageBack.visible ? pageBack.height + Style.space(16) : 0)
+
         // Setup takes the whole body: there is nothing else to look at until
         // the mailbox is connected.
         Flickable {
           id: setupFlick
           anchors.fill: parent
           anchors.margins: Style.space(18)
-          visible: root.showSetup
+          anchors.topMargin: parent.pageTop
+          // The chooser and the forms share this page: the Loader below picks
+          // which. Hiding it for one of them is a blank window.
+          visible: root.showSetup || root.showPicker
           contentWidth: width
           contentHeight: setupHolder.implicitHeight
           clip: true
@@ -1440,12 +1575,14 @@ Item {
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
+            objectName: "setup-page"
             // A measure this long is unreadable across a wide window, so it is
             // capped rather than stretched.
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(setupHolder.width, Style.space(560))
-            readonly property string kind: Model.setupProvider(root.editingProvider,
-              root.service ? root.service.providerId : "")
+            // The provider is on the entry, so a service that briefly reports
+            // Gmail while it rebuilds an account host cannot swap the page.
+            readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
             sourceComponent: root.showPicker
               ? providerPickerPage
               : (setup.kind === "imap" ? imapSetupPage
@@ -1455,11 +1592,68 @@ Item {
         }
 
         // The settings page, which is where mailboxes are added and removed.
-        Flickable {
-          id: settingsFlick
+        // One long page with a rail of its section names beside it: the rail
+        // scrolls the page, it does not split it. Below `compact` there is no
+        // room for a rail, and the page scrolls as it always did.
+        Item {
+          id: settingsArea
           anchors.fill: parent
           anchors.margins: Style.space(18)
+          anchors.topMargin: parent.pageTop
           visible: root.showSettings
+
+          // The rail and the page are one block, centred together: the rail
+          // sits against the page's left edge rather than against the
+          // window's, so the two read as one thing with two columns.
+          readonly property real railWidth: settingsRail.visible
+            ? settingsRail.width + Style.space(18) : 0
+          readonly property real pageWidth: Math.min(width - railWidth, Style.space(560))
+          readonly property real blockLeft: Math.max(0, (width - railWidth - pageWidth) / 2)
+
+          SettingsSidebar {
+            id: settingsRail
+            objectName: "settings-sidebar"
+            visible: !root.compact
+            // Above the Flickable, which spans the whole block and would
+            // otherwise take the clicks meant for the rail under it.
+            z: 1
+            x: settingsArea.blockLeft
+            anchors.top: parent.top
+            width: Style.space(176)
+            sections: settings.sections
+            activeKey: Model.activeSettingsSection(settings.sections, settingsFlick.contentY)
+            textColor: root.foreground
+            dimColor: root.dim
+            accentColor: root.accent
+            panelFontFamily: root.fontFamily
+            onSectionRequested: function(key) {
+              var target = Model.settingsScrollTarget(settings.sections, key,
+                settingsFlick.contentHeight, settingsFlick.height)
+              if (target < 0) return
+              settingsScroll.stop()
+              settingsScroll.to = target
+              settingsScroll.start()
+            }
+          }
+
+          // A slide rather than a jump, so the eye can follow where the page
+          // went. Not a Behavior on contentY: that would also slow the wheel.
+          NumberAnimation {
+            id: settingsScroll
+            target: settingsFlick
+            property: "contentY"
+            duration: 160
+            easing.type: Easing.OutQuad
+          }
+
+        Flickable {
+          id: settingsFlick
+          // The whole width, rail included: the wheel scrolls the page from
+          // anywhere in the block, and the scrollbar keeps the window's edge.
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
           contentWidth: width
           contentHeight: settingsHolder.implicitHeight
           clip: true
@@ -1469,12 +1663,16 @@ Item {
           Item {
             id: settingsHolder
             width: settingsFlick.width
-            implicitHeight: settings.implicitHeight
+            // Padded under the page so the last section can reach the top,
+            // which is what makes a click on it land where it says.
+            implicitHeight: Model.settingsContentHeight(settings.sections,
+              settings.implicitHeight, settingsFlick.height)
 
             SettingsPage {
               id: settings
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: Math.min(settingsHolder.width, Style.space(560))
+              objectName: "settings-page"
+              x: settingsArea.blockLeft + settingsArea.railWidth
+              width: settingsArea.pageWidth
               service: root.service
               calendarController: root.service ? root.service.calendarController : null
               textColor: root.foreground
@@ -1482,20 +1680,13 @@ Item {
               accentColor: root.accent
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
-              onBackRequested: root.settingsVisible = false
-              onClientSetupRequested: {
-                root.editingProvider = "gmail"
-                root.setupVisible = true
-              }
+              onClientSetupRequested: root.openClientSetup()
               // Which kind first, then the form for it.
-              onAddRequested: {
-                root.editingProvider = ""
-                root.pickingProvider = true
-                root.setupVisible = true
-              }
+              onAddRequested: root.addMailbox()
               onEditRequested: function(index) { root.editAccount(index) }
             }
           }
+        }
         }
       }
 
@@ -1552,8 +1743,13 @@ Item {
         // The status line is where a view toggle belongs.
         IconButton {
           id: railToggle
+          // In line with the rail's own column of glyphs above it: those sit
+          // 6 (the column's inset) + 8 (the row's) from the left, at the
+          // rail's glyph size. The button is wider than its glyph, so it
+          // starts that much further left.
+          readonly property real railGlyphLeft: Style.space(6) + Style.space(8)
           anchors.left: parent.left
-          anchors.leftMargin: Style.space(8)
+          anchors.leftMargin: railGlyphLeft - (size - iconSize) / 2
           anchors.verticalCenter: parent.verticalCenter
           visible: !root.compact && !root.showPage && !root.composing
           iconName: "sidebar"
@@ -1563,16 +1759,21 @@ Item {
           // and this control has no business drawing attention to itself.
           foreground: root.dim
           hoverColor: root.foreground
-          iconSize: Style.font.iconSmall
+          iconSize: Style.font.icon
           size: Style.space(24)
           fontFamily: root.fontFamily
           onClicked: root.toggleSidebar()
         }
 
-        Text {
-          id: accountLine
+        Item {
+          id: accountSlot
           anchors.left: railToggle.visible ? railToggle.right : parent.left
-          anchors.leftMargin: railToggle.visible ? Style.space(8) : Style.space(14)
+          // The rail's labels sit 9 after their glyph; the toggle's box runs
+          // past its glyph by half its slack, so the text starts that much
+          // less after the box.
+          anchors.leftMargin: railToggle.visible
+            ? Style.space(9) - (railToggle.size - railToggle.iconSize) / 2
+            : Style.space(14)
           // An invisible sibling still holds its place, so the hints must only
           // take room from this line while they are actually on screen.
           anchors.right: statusBar.hasNotice
@@ -1580,21 +1781,57 @@ Item {
             : (keyHints.visible ? keyHints.left : parent.right)
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
-          // The account already has a home in the sidebar's user bar, so this
-          // says something the window does not say anywhere else: how current
-          // the list is. When the sidebar is hidden it takes the account back,
-          // because then nothing else is carrying it.
-          text: {
-            if (!root.service) return "Not connected"
-            if (!root.ready) return "Not connected"
-            if (root.compact) return root.service.accountEmail
-            return Model.statusSummary(root.service.syncedLabel)
-          }
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          height: Style.space(24)
 
+          Item {
+            id: accountControl
+            objectName: "status-account-button"
+            property bool selected: accountSwitcher.opened
+            width: Math.min(parent.width, accountText.implicitWidth + Style.space(8))
+            height: parent.height
+
+            Rectangle {
+              id: accountBackground
+              anchors.fill: parent
+              anchors.margins: Style.space(2)
+              radius: Style.cornerRadius
+              color: accountMouse.pressed
+                ? Style.pressedFillFor(root.foreground, root.accent)
+                : (accountControl.selected
+                  ? Style.selectedFillFor(root.foreground, root.accent)
+                  : (accountMouse.containsMouse
+                    ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
+            }
+
+            Text {
+              id: accountText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(4)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(4)
+              anchors.verticalCenter: parent.verticalCenter
+              // The full address lives here at every window width; the sync
+              // age follows it, and the line opens the account controls.
+              text: {
+                if (!root.service || !root.ready) return "Not connected"
+                return Model.accountStatusLine(root.service.accountEmail, root.service.syncedLabel)
+              }
+              color: accountMouse.containsMouse || accountControl.selected ? root.foreground : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            MouseArea {
+              id: accountMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              onClicked: {
+                var scene = accountControl.mapToGlobal(0, 0)
+                accountSwitcher.openAt(scene.x, scene.y)
+              }
+            }
+          }
         }
 
         // The right of the status line carries one of two things: what the
@@ -1642,8 +1879,7 @@ Item {
         }
       }
 
-      // The account menu. It has no trigger of its own: the sidebar's user bar
-      // opens it, and so does the status bar when the sidebar is hidden.
+      // The window menu is opened by the menu button beside the mark.
       AppMenu {
         id: appMenu
         anchors.fill: parent
@@ -1656,14 +1892,22 @@ Item {
         accountCount: root.service ? root.service.accountCount : 1
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
-        onShortcutsRequested: root.shortcutHelpVisible = true
+        onShortcutsRequested: root.openHelp()
+        onInboxRequested: {
+          root.backToList()
+          if (root.service) root.service.selectMailbox("inbox")
+        }
+        onCalendarRequested: {
+          root.showCalendar()
+          calendarView.refresh()
+        }
         onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
       }
 
-      // Every mailbox, with its own unread count, opened from the user bar.
+      // Every mailbox, opened from the address in the status bar.
       Timer {
         id: noticeTimer
         interval: 6000
@@ -1684,11 +1928,7 @@ Item {
         onAccountChosen: function(index) {
           root.switchAccount(index)
         }
-        onAddAccountRequested: {
-          root.editingProvider = ""
-          root.pickingProvider = true
-          root.setupVisible = true
-        }
+        onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()
         }
@@ -1728,7 +1968,7 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onComposeRequested: function(mode, id) {
-          root.composeReturnView = root.currentView
+          root.pendingComposeReturnTo = Nav.depth(root.nav)
           root.openMessage(id)
           root.startCompose(mode)
         }
@@ -1746,7 +1986,7 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
-        onDismissed: root.shortcutHelpVisible = false
+        onDismissed: root.dismissHelp()
       }
 
       // ---------------------------------------------------------- keyboard

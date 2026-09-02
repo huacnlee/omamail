@@ -31,10 +31,6 @@ Item {
   property var slots: []
   property bool numbersVisible: false
 
-  // Forwarded to the user bar, which is the control those popups hang off.
-  property bool switcherOpen: false
-  signal switcherRequested(real sceneX, real sceneY)
-
   readonly property var userLabels: {
     var all = root.service ? root.service.labels : []
     var out = []
@@ -140,10 +136,7 @@ Item {
     }
   }
 
-  // The account lives at the foot of the rail, which is where a desktop app
-  // keeps it. The control that shows and hides the rail is in the header
-  // instead — a button that can disappear with the thing it toggles is a
-  // button you cannot press to get it back.
+  // Calendar stays fixed at the foot of the rail while mailbox labels scroll.
   Column {
     id: footer
     anchors.left: parent.left
@@ -161,24 +154,6 @@ Item {
     Item {
       width: parent.width
       height: Style.space(6)
-    }
-
-    PanelSeparator {
-      width: parent.width
-      foreground: root.textColor
-    }
-
-    UserBar {
-      width: parent.width
-      textColor: root.textColor
-      accentColor: root.accentColor
-      dimColor: root.dimColor
-      panelFontFamily: root.panelFontFamily
-      email: root.service ? root.service.accountEmail : ""
-      accountCount: root.service ? root.service.accountCount : 1
-      collapsed: root.collapsed
-      switcherOpen: root.switcherOpen
-      onSwitcherRequested: function(sceneX, sceneY) { root.switcherRequested(sceneX, sceneY) }
     }
 
   }
