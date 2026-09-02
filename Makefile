@@ -55,7 +55,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
 
-.PHONY: test test-js test-shell test-qml qml-check validate bench
+.PHONY: test test-js test-shell test-qml qml-check validate bench install
 
 test: test-js test-shell test-qml
 
@@ -97,7 +97,7 @@ test-shell:
 	python3 tests/test_qml_text_format.py
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
-	bash tests/test_install.sh
+	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_unsubscribe_transport.sh
@@ -145,3 +145,8 @@ qml-check:
 validate: test qml-check
 	omarchy plugin validate .
 	git diff --check
+
+# Symlinks this checkout into ~/.config/omarchy/plugins so QML edits are read
+# live. Development only — the marketplace installs the plugin itself.
+install:
+	bash scripts/link-plugin.sh

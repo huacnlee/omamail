@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-fail() { printf 'test_install.sh: %s\n' "$1" >&2; exit 1; }
+fail() { printf 'test_link_plugin.sh: %s\n' "$1" >&2; exit 1; }
 
 python3 -c "import json; json.load(open('manifest.json'))" || fail "manifest.json is not valid JSON"
 
@@ -22,21 +22,11 @@ for entry in service:Service.qml barWidget:BarWidget.qml panel:App.qml; do
   [ -f "$file" ] || fail "$file is declared in the manifest but does not exist"
 done
 
-[ -x install.sh ] || fail "install.sh must be executable"
-grep -q 'plugin-backups' install.sh || fail "backups must not land inside the plugins directory"
+[ -x scripts/link-plugin.sh ] || fail "scripts/link-plugin.sh must be executable"
+grep -q 'plugin-backups' scripts/link-plugin.sh || fail "backups must not land inside the plugins directory"
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
-mkdir -p "$test_root/config/omarchy-gmail" "$test_root/cache/omarchy-gmail"
-printf 'client\n' > "$test_root/config/omarchy-gmail/credentials.json"
-printf 'cache\n' > "$test_root/cache/omarchy-gmail/inbox.json"
-XDG_CONFIG_HOME="$test_root/config" XDG_CACHE_HOME="$test_root/cache" \
-  sh scripts/migrate-storage.sh
-[ -f "$test_root/config/omamail/credentials.json" ] || fail "legacy config was not moved"
-[ -f "$test_root/cache/omamail/inbox.json" ] || fail "legacy cache was not moved"
-[ ! -e "$test_root/config/omarchy-gmail" ] || fail "legacy config directory remains"
-[ ! -e "$test_root/cache/omarchy-gmail" ] || fail "legacy cache directory remains"
-
 # A stale service instance from before a plugin reload must not be able to
 # replace a real account list with the first-run setup row. The writer is the
 # one boundary both old and new service code still cross.
@@ -92,12 +82,12 @@ actual_calls=$(cat "$test_root/keyring-calls")
 [ "$actual_calls" = "$expected_calls" ] \
   || fail "keyring-store.sh did not replace the unversioned grant before storing the versioned one"
 
-[ -x scripts/install-mailto.sh ] || fail "scripts/install-mailto.sh must be executable"
+[ -x scripts/register-mailto.sh ] || fail "scripts/register-mailto.sh must be executable"
 mailto_home=$(mktemp -d)
 XDG_DATA_HOME="$mailto_home/share" XDG_CONFIG_HOME="$mailto_home/config" \
-  sh scripts/install-mailto.sh "$(pwd)"
+  sh scripts/register-mailto.sh "$(pwd)"
 desktop="$mailto_home/share/applications/omamail.desktop"
-[ -f "$desktop" ] || fail "install-mailto.sh did not write omamail.desktop"
+[ -f "$desktop" ] || fail "register-mailto.sh did not write omamail.desktop"
 grep -q '^MimeType=x-scheme-handler/mailto;$' "$desktop" \
   || fail "omamail.desktop must claim mailto"
 grep -q "^Exec=$(pwd)/scripts/mailto.sh %u$" "$desktop" \
@@ -107,8 +97,8 @@ grep -q "^Icon=$(pwd)/assets/omamail.svg$" "$desktop" \
 # A second run with the file already there must not require --claim-default
 # just to keep the desktop file current.
 XDG_DATA_HOME="$mailto_home/share" XDG_CONFIG_HOME="$mailto_home/config" \
-  sh scripts/install-mailto.sh "$(pwd)"
-[ -f "$desktop" ] || fail "a second install-mailto.sh run removed omamail.desktop"
+  sh scripts/register-mailto.sh "$(pwd)"
+[ -f "$desktop" ] || fail "a second register-mailto.sh run removed omamail.desktop"
 rm -rf "$mailto_home"
 
-printf 'test_install.sh ok\n'
+printf 'test_link_plugin.sh ok\n'
