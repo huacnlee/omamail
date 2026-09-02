@@ -190,7 +190,7 @@ Rectangle {
         IconTextButton {
           visible: root.canWrite
           text: "Edit..."
-          iconName: "compose"
+          iconName: "edit"
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily

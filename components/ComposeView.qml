@@ -46,6 +46,20 @@ DropArea {
   property string accountId: ""
   // The provider message that this form replaces when it is saved.
   property string sourceDraftId: ""
+  // The active account's sign-off, read when a draft is started rather than
+  // bound into the editor: the text is the user's to edit once it is in there,
+  // and a binding would overwrite what they had changed.
+  readonly property string accountSignature: root.service
+    ? String(root.service.activeSignature || "") : ""
+  // The body exactly as `placeBody` left it, plus whether the editor has seen a
+  // user edit. Equality alone is not an edit history: somebody can type and
+  // delete back to the same text. Together they separate an abandoned compose
+  // from a body the user has taken ownership of.
+  property string placedBody: ""
+  property bool bodyWasEdited: false
+  // What it was built from, so it can be built again for another mailbox.
+  property string bodyPrefix: ""
+  property string bodyQuote: ""
   // Both popups reparent themselves into the window overlay, so their state is
   // not reachable by walking this view's children. Named here so the tests can
   // ask whether a control put its own popup away.
@@ -141,6 +155,10 @@ DropArea {
     bccField.text = ""
     subjectField.text = ""
     bodyEdit.text = ""
+    placedBody = ""
+    bodyWasEdited = false
+    bodyPrefix = ""
+    bodyQuote = ""
     accountId = ""
     sourceDraftId = ""
     mode = "new"
@@ -166,6 +184,23 @@ DropArea {
     if (forgetAttachments) forgetOwned(owned)
   }
 
+  // Rebuilt rather than patched: the signature is not at a known offset once
+  // the quote is under it, and searching for the old one to swap would find a
+  // sign-off the user had quoted from somebody else.
+  function placeBody() {
+    placedBody = bodyPrefix + Mail.composeBody(root.accountSignature, bodyQuote)
+    bodyEdit.text = placedBody
+  }
+
+  // From reaches every mailbox, and choosing one switches the active account
+  // under the open window. The sign-off has to follow it — but only while the
+  // body is still the one placed, or this would overwrite what was typed.
+  onAccountSignatureChanged: {
+    if (!opened || mode === "draft") return
+    if (bodyWasEdited || bodyEdit.text !== placedBody) return
+    placeBody()
+  }
+
   function snapshotDraft() {
     return ({
       to: toField.text,
@@ -173,6 +208,8 @@ DropArea {
       bcc: bccField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
+      placedBody: placedBody,
+      bodyWasEdited: bodyWasEdited,
       accountId: accountId,
       sourceDraftId: sourceDraftId,
       mode: mode,
@@ -213,6 +250,8 @@ DropArea {
     bccField.text = String(saved.bcc || "")
     subjectField.text = String(saved.subject || "")
     bodyEdit.text = String(saved.body || "")
+    placedBody = String(saved.placedBody || "")
+    bodyWasEdited = saved.bodyWasEdited === true
     opened = true
     rehydrateDraftAttachments()
   }
@@ -391,6 +430,7 @@ DropArea {
     mode = String(nextMode || "new")
     accountId = root.service ? String(root.service.activeAccountId || "") : ""
     opened = true
+    var quoted = ""
 
     if (summary && mode !== "new") {
       var replyTo = summary.replyTo && summary.replyTo.email
@@ -417,8 +457,12 @@ DropArea {
           ccVisible = ccField.text !== ""
         }
       }
-      bodyEdit.text = "\n\n" + Mail.quoteBody(summary, String(bodyText || ""))
+      quoted = Mail.quoteBody(summary, String(bodyText || ""))
     }
+
+    bodyPrefix = ""
+    bodyQuote = quoted
+    placeBody()
 
     selectPreferredFrom()
     if (root.service) root.service.refreshRecipientContacts()
@@ -443,7 +487,19 @@ DropArea {
     bccField.text = String(values.bcc || "")
     bccVisible = bccField.text !== ""
     subjectField.text = String(values.subject || "")
-    bodyEdit.text = String(values.body || "")
+    if (mode === "draft") {
+      // Somebody wrote this and it was saved. None of it was placed, so all of
+      // it is theirs — including the sign-off it already carries.
+      bodyEdit.text = String(values.body || "")
+      placedBody = ""
+      bodyWasEdited = true
+      bodyPrefix = ""
+      bodyQuote = ""
+    } else {
+      bodyPrefix = String(values.body || "")
+      bodyQuote = ""
+      placeBody()
+    }
     var chosenFrom = String(values.from || "")
     if (chosenFrom !== "") {
       fromEmail = chosenFrom
@@ -511,7 +567,8 @@ DropArea {
     if (String(ccField.text || "").trim() !== "") return true
     if (String(bccField.text || "").trim() !== "") return true
     if (String(subjectField.text || "").trim() !== "") return true
-    if (String(bodyEdit.text || "").trim() !== "") return true
+    if ((bodyWasEdited || String(bodyEdit.text || "") !== placedBody)
+      && String(bodyEdit.text || "").trim() !== "") return true
     return allOutgoingAttachments().length > 0
   }
 
@@ -1511,6 +1568,7 @@ DropArea {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       onTextChanged: root.noteDraftChanged()
+      onTextEdited: root.bodyWasEdited = true
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }

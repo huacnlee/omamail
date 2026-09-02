@@ -812,4 +812,31 @@ assert.strictEqual(message.fromHeader("jane@example.com", "Jane Roe"),
 assert.strictEqual(message.parseAddress(message.addressHeader("jane@example.com", "Jane Roe")).name,
   "Jane Roe", "what is written comes back")
 
+// ---------------------------------------------------------------- compose
+
+// With nothing to place, the body a compose window opens with is what it was
+// before signatures existed: empty for a new message, two blank lines above
+// the quote for a reply. That equivalence is what makes the field optional.
+assert.strictEqual(message.composeBody("", ""), "")
+assert.strictEqual(message.composeBody("", "> quoted"), "\n\n> quoted")
+assert.strictEqual(message.composeBody(null, undefined), "")
+
+// The signature goes under the cursor and above the quote, so a reply reads as
+// the reply, the sign-off, then the thread being answered.
+assert.strictEqual(message.composeBody("Maarten", ""), "\n\nMaarten")
+assert.strictEqual(message.composeBody("Maarten", "> quoted"),
+  "\n\nMaarten\n\n> quoted")
+
+// A multi-line signature is placed as written. Only the ends are trimmed:
+// blank lines around it are this function's to decide, and the ones inside it
+// are the user's.
+assert.strictEqual(message.composeBody("\n  Maarten\nmadra.nl  \n", "> quoted"),
+  "\n\nMaarten\nmadra.nl\n\n> quoted")
+
+// Whitespace is not a signature. A field holding only spaces or newlines must
+// produce the same body as an empty one, or every reply gains a blank gap the
+// user cannot see the cause of.
+assert.strictEqual(message.composeBody("   \n  ", "> quoted"), "\n\n> quoted")
+assert.strictEqual(message.composeBody("\n\n", ""), "")
+
 console.log("test_message.js ok")

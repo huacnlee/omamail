@@ -134,7 +134,7 @@ Required semantic properties are preferable to hidden dependencies on `App.qml`.
 
 Menus, the account switcher, the image popover, and shortcut help all draw above the mail panes, but they do not share one implementation or input model.
 
-`App.qml` states back-navigation precedence for the non-popup surfaces it composes. Each Qt popup owns its close policy, placement, and popup-local keys; each plain overlay participates in the application key context and `goBack()`. Feature views supply content and translate activation back into domain actions. There is no common overlay manager between them.
+`App.qml` keeps one navigation history for the non-popup surfaces it composes: a stack of entries, ruled by `account/Navigation.js`, with the pages (list, calendar, reader, event detail, settings, provider chooser, setup form) and the plain overlays (compose, event composer, shortcut help) as its entries. Every `visible:` is read off the top of that stack, and `back()` is the one way out: it pops an entry, or asks the view that owns an overlay's open state to close so that the view's own change pops it. Each Qt popup owns its close policy, placement, and popup-local keys and stays outside the stack; each plain overlay participates in the application key context and the stack. Feature views supply content and translate activation back into domain actions. There is no common overlay manager between them.
 
 An overlay contract includes:
 

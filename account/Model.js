@@ -15,15 +15,6 @@
 
 // ------------------------------------------------------------ setup state
 
-// A setup page opened for a known provider must not change type while saving
-// rebuilds the service's current account. During that one frame the service
-// reports its compatibility fallback (Gmail), not a user choice.
-function setupProvider(chosen, live) {
-  var stable = String(chosen === undefined || chosen === null ? "" : chosen).trim()
-  if (stable !== "") return stable
-  return String(live === undefined || live === null ? "" : live).trim() || "gmail"
-}
-
 function mailboxAfterAccountSwitch(currentKey, targetMailboxes) {
   var key = String(currentKey || "")
   var mailboxes = Array.isArray(targetMailboxes) ? targetMailboxes : []
@@ -690,8 +681,27 @@ function resultSummary(list, estimate, hasMore) {
   return shown + " of about " + total
 }
 
-function statusSummary(syncLabel) {
-  return String(syncLabel || "")
+// The status line at the foot of the window: the account, then how current
+// its list is. The address is the long part and goes first, where it is
+// read; the sync age is short and follows, because "huacnlee@gmail.com ·
+// 1m ago" is one fact about one mailbox, and the mailbox is the subject.
+//
+// The account's own label ("Synced 1m ago") is a sentence for a place with
+// room for one. After an address it is a clause, so the verb goes: the
+// address is what was synced.
+function syncedShort(syncLabel) {
+  var label = String(syncLabel || "")
+  if (label === "") return ""
+  if (label === "Checking for mail") return "checking"
+  var match = /^Synced (.+)$/.exec(label)
+  return match ? match[1] : label
+}
+
+function accountStatusLine(email, syncLabel) {
+  var address = String(email || "")
+  if (address === "") return "Not connected"
+  var age = syncedShort(syncLabel)
+  return age === "" ? address : address + " · " + age
 }
 
 // A title cut around the one word in it that is a link.
@@ -718,4 +728,70 @@ function truncate(text, limit) {
   var value = String(text || "")
   var max = Math.max(4, Math.floor(Number(limit) || 80))
   return value.length <= max ? value : value.substring(0, max - 1) + "…"
+}
+
+// ------------------------------------------------------- settings sidebar
+
+// The settings page is one long scroll with a rail of its section names
+// beside it. The rail is for getting about, not for splitting the page into
+// several: a click scrolls, and the highlight follows the scroll. Both of
+// those are decisions about numbers, so they are made here.
+
+function sortedSections(sections) {
+  var values = Array.isArray(sections) ? sections.slice() : []
+  var known = []
+  for (var i = 0; i < values.length; i++) {
+    var entry = values[i] || {}
+    var y = Number(entry.y)
+    if (!isFinite(y) || String(entry.key || "") === "") continue
+    known.push({ key: String(entry.key), y: y })
+  }
+  known.sort(function(a, b) { return a.y - b.y })
+  return known
+}
+
+// The section the reader is looking at: the last heading at or above the top
+// of the viewport, or the first section while the page is above them all.
+// This only works because the page is padded so that every heading can reach
+// the top (`settingsContentHeight`); without that the last sections could
+// never be the answer, and a click on one would highlight its neighbour —
+// the one annoyance everyone knows from anchor links.
+function activeSettingsSection(sections, contentY) {
+  var known = sortedSections(sections)
+  if (known.length === 0) return ""
+  var top = Number(contentY) || 0
+  var active = known[0].key
+  for (var i = 0; i < known.length; i++) {
+    if (known[i].y <= top) active = known[i].key
+  }
+  return active
+}
+
+// How tall the scrollable content is: the page, or enough more of it that the
+// last heading can be scrolled to the top of the viewport. The extra is empty
+// space under the page, which is what lets "scroll to Calendars" mean
+// Calendars at the top rather than Calendars somewhere in the bottom half.
+function settingsContentHeight(sections, pageHeight, viewportHeight) {
+  var known = sortedSections(sections)
+  var page = Math.max(0, Number(pageHeight) || 0)
+  var viewport = Math.max(0, Number(viewportHeight) || 0)
+  if (known.length === 0) return page
+  return Math.max(page, known[known.length - 1].y + viewport)
+}
+
+// Where a click on a section name scrolls to: its heading, clamped into the
+// range the page can actually reach, so the last section lands at the end of
+// the page rather than asking for a gap under it. -1 for a name the page does
+// not have, which the caller ignores.
+function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
+  var known = sortedSections(sections)
+  var wanted = String(key || "")
+  for (var i = 0; i < known.length; i++) {
+    if (known[i].key !== wanted) continue
+    var content = Number(contentHeight) || 0
+    var viewport = Number(viewportHeight) || 0
+    var limit = Math.max(0, content - viewport)
+    return Math.max(0, Math.min(known[i].y, limit))
+  }
+  return -1
 }

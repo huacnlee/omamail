@@ -888,6 +888,28 @@ function quoteBody(summary, body) {
   return (header ? header + "\n" : "") + quoted.join("\n")
 }
 
+// The body a compose window opens with. Two blank lines to type into, then
+// whatever the user did not type but must be able to edit.
+//
+// A signature and a quote are the same kind of thing here — text placed under
+// the cursor rather than by it — so they are joined the same way instead of
+// being special-cased against each other. That is what keeps the signature
+// next to the words it signs: below the reply, above the quoted thread, rather
+// than stranded under a screen of somebody else's message.
+//
+// With no signature set this returns exactly what the caller used to build by
+// hand, which is what makes the field optional rather than a new shape of
+// draft.
+function composeBody(signature, quoted) {
+  var parts = []
+  var sign = String(signature === undefined || signature === null ? "" : signature).trim()
+  var quote = String(quoted === undefined || quoted === null ? "" : quoted)
+  if (sign !== "") parts.push(sign)
+  if (quote !== "") parts.push(quote)
+  if (parts.length === 0) return ""
+  return "\n\n" + parts.join("\n\n")
+}
+
 function replySubject(subject) {
   var text = String(subject || "").trim()
   if (/^re:/i.test(text)) return text

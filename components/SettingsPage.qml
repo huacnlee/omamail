@@ -22,22 +22,75 @@ Column {
   required property color urgentColor
   required property string panelFontFamily
 
-  signal backRequested()
   signal clientSetupRequested()
   signal addRequested()
   signal editRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
+  // A separate list on purpose: accountSummaries carries live mailbox state and
+  // is replaced on a poll, which would rebuild the field being typed in.
+  readonly property var signatureAccounts: service
+    && Array.isArray(service.accountSignatures) ? service.accountSignatures : []
+  property string selectedSignatureAccountId: ""
+
+  // The page's sections and where each begins, for the rail beside it. Read
+  // off the headings themselves, so a section that grows moves the ones
+  // below it in the rail's map as well as on screen. The calendars section
+  // is a component with its own heading, so its top stands in.
+  readonly property var sections: [
+    { key: "reading", title: "Reading", y: readingHeading.y },
+    { key: "notifications", title: "Notifications", y: notificationsHeading.y },
+    { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
+    { key: "calendars", title: "Calendars", y: calendarsSection.y },
+    { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
+  ]
   readonly property var auth: service ? service.auth : null
 
-  spacing: Style.space(16)
-
-  BackBar {
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
+  function signatureAccount(id) {
+    for (var i = 0; i < signatureAccounts.length; i++)
+      if (String(signatureAccounts[i].id || "") === String(id || ""))
+        return signatureAccounts[i]
+    return null
   }
+
+  function signatureOptions() {
+    var out = []
+    for (var i = 0; i < signatureAccounts.length; i++)
+      out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
+    return out
+  }
+
+  function saveSignature() {
+    if (service && selectedSignatureAccountId !== "")
+      service.setAccountSignature(selectedSignatureAccountId, signatureEdit.text)
+  }
+
+  function selectSignatureAccount(id) {
+    var next = signatureAccount(id)
+    if (!next || String(next.id || "") === selectedSignatureAccountId) return
+    saveSignature()
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  function ensureSignatureAccount() {
+    if (signatureAccounts.length === 0) {
+      selectedSignatureAccountId = ""
+      signatureEdit.text = ""
+      return
+    }
+    if (signatureAccount(selectedSignatureAccountId)) return
+    var activeId = service ? String(service.activeAccountId || "") : ""
+    var next = signatureAccount(activeId) || signatureAccounts[0]
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  onSignatureAccountsChanged: ensureSignatureAccount()
+  Component.onCompleted: ensureSignatureAccount()
+
+  spacing: Style.space(16)
 
   Text {
     text: "Settings"
@@ -50,6 +103,7 @@ Column {
   // --------------------------------------------------------------- reading
 
   Text {
+    id: readingHeading
     text: "READING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -224,6 +278,7 @@ Column {
   // -------------------------------------------------------- notifications
 
   Text {
+    id: notificationsHeading
     text: "NOTIFICATIONS"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -281,6 +336,7 @@ Column {
   // --------------------------------------------------------------- writing
 
   Text {
+    id: writingHeading
     text: "WRITING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -342,9 +398,103 @@ Column {
     }
   }
 
+  // A signature signs a mailbox, not a window. Only the selected mailbox is
+  // expanded here: a long account list should not turn Writing into a stack of
+  // editors, and switching is an explicit answer to which identity is edited.
+  Column {
+    objectName: "settings-signature-section"
+    width: parent.width
+    spacing: Style.space(2)
+    // The heading and the note below belong to the fields. With no mailbox
+    // signed in there are none, and first run would otherwise show an
+    // explanation with nothing between it and the heading.
+    visible: root.signatureAccounts.length > 0
+
+    Text {
+      text: "Signature"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      bottomPadding: Style.space(4)
+    }
+
+    Dropdown {
+      objectName: "settings-signature-account-picker"
+      visible: root.signatureAccounts.length > 1
+      width: parent.width
+      showLabel: false
+      value: root.selectedSignatureAccountId
+      options: root.signatureOptions()
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { root.selectSignatureAccount(next) }
+    }
+
+    Rectangle {
+      width: parent.width
+      implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
+        + Style.space(20)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+
+      // The padding is part of the field visually, so it is part of its click
+      // target too. Kept behind the editor so clicks on text still place the
+      // cursor normally.
+      MouseArea {
+        anchors.fill: parent
+        onClicked: signatureEdit.forceActiveFocus()
+      }
+
+      TextEdit {
+        id: signatureEdit
+        objectName: "settings-signature-editor"
+        anchors.fill: parent
+        anchors.margins: Style.space(10)
+        activeFocusOnTab: true
+        selectByMouse: true
+        wrapMode: TextEdit.Wrap
+        textFormat: TextEdit.PlainText
+        color: root.textColor
+        selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+        selectedTextColor: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+
+        // The editor survives account-list updates and routine mailbox polls.
+        // Its text changes only when the selected identity changes.
+        onActiveFocusChanged: if (!activeFocus) root.saveSignature()
+      }
+
+      Text {
+        anchors.left: signatureEdit.left
+        anchors.top: signatureEdit.top
+        enabled: false
+        visible: signatureEdit.text === ""
+        text: "No signature"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    Text {
+      width: parent.width
+      text: "Sits under a new message, and above the quoted text in a reply. "
+        + "Sent as written — no separator line is added in front of it."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Component.onDestruction: root.saveSignature()
+  }
+
   // ------------------------------------------------------------- mailboxes
 
   Text {
+    id: mailboxesHeading
     text: "MAILBOXES"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -445,6 +595,7 @@ Column {
   }
 
   CalendarSettings {
+    id: calendarsSection
     width: parent.width
     service: root.service
     controller: root.calendarController
@@ -463,6 +614,7 @@ Column {
   // ---------------------------------------------------------- oauth client
 
   Text {
+    id: oauthHeading
     text: "GOOGLE OAUTH CLIENT"
     color: root.dimColor
     font.family: root.panelFontFamily

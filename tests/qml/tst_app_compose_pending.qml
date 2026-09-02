@@ -195,7 +195,7 @@ Item {
         bcc: [],
         fullTime: "today"
       })
-      app.currentView = "list"
+      app.resetNavigation()
       app.cursorId = ""
       var compose = composeView()
       if (compose) {

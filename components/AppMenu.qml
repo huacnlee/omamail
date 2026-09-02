@@ -31,8 +31,8 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
-  readonly property var menuRows: [markRow, webRow, switchRow, settingsRow,
-    shortcutsRow, projectRow, authorRow]
+  readonly property var menuRows: [inboxRow, calendarRow, markRow, webRow,
+    switchRow, settingsRow, shortcutsRow, projectRow, authorRow]
 
   function openAt(sceneX, sceneY) {
     var local = root.mapFromGlobal(sceneX, sceneY)
@@ -70,6 +70,11 @@ Item {
   signal markAllReadRequested()
   signal openWebRequested()
   signal shortcutsRequested()
+  // The two places the window is for, as a pair. The sidebar has both, but
+  // a narrow window has no sidebar, and then these rows are the only way
+  // from one to the other.
+  signal inboxRequested()
+  signal calendarRequested()
   signal setupRequested()
   signal switchAccountRequested()
   signal projectRequested()
@@ -100,7 +105,12 @@ Item {
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
     onOpened: {
-      root.cursorIndex = Menu.firstSelectable(root.selectableRows())
+      // No row lit until a key asks for one. Opening with the first row
+      // highlighted read as "this is where you are" once the first row
+      // became Inbox — on the calendar, a menu saying Inbox was selected.
+      // j/k from nowhere start at the first or last row, so the keyboard
+      // loses nothing.
+      root.cursorIndex = -1
       root.place()
     }
     background: Rectangle {
@@ -126,6 +136,21 @@ Item {
       }
 
       MenuRow {
+        id: inboxRow
+        text: "Inbox"
+        onActivated: { menu.close(); root.inboxRequested() }
+      }
+      MenuRow {
+        id: calendarRow
+        text: "Calendar"
+        onActivated: { menu.close(); root.calendarRequested() }
+      }
+      MenuSeparatorLine {
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+
+      MenuRow {
         id: markRow
         // "These" and not "all": it marks the messages that are loaded, which
         // is what you are looking at, not every message the mailbox holds.
@@ -141,11 +166,6 @@ Item {
         onActivated: { menu.close(); root.openWebRequested() }
       }
 
-      MenuSeparatorLine {
-        width: menu.width - menu.leftPadding - menu.rightPadding
-        lineColor: root.textColor
-      }
-
       MenuRow {
         id: switchRow
         text: "Switch account..."
@@ -157,7 +177,6 @@ Item {
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }
-
       MenuSeparatorLine {
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor

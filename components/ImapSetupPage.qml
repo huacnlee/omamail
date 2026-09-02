@@ -21,12 +21,10 @@ Column {
   required property color dangerColor
   required property color accentColor
   required property string panelFontFamily
-  property bool canLeave: false
   property int accountCount: 1
   property bool passwordVisible: false
   property bool serversVisible: false
 
-  signal backRequested()
   signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
@@ -132,14 +130,6 @@ Column {
     }
   }
 
-  BackBar {
-    visible: root.canLeave
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
-  }
-
   // ------------------------------------------------------------------ hero
 
   Column {
@@ -199,6 +189,7 @@ Column {
 
     TextField {
       id: addressField
+      objectName: "imap-address-field"
       width: parent.width
       foreground: root.textColor
       font.family: root.panelFontFamily
@@ -210,15 +201,49 @@ Column {
 
     // What a provider wants instead of the website password. Shown as soon as
     // the address names one, because someone typing their everyday password
-    // into this box will otherwise be told only that it was rejected.
-    Text {
+    // into this box will otherwise be told only that it was rejected. A box
+    // rather than a line of caption: a Gmail user who has just been refused by
+    // Google is about to be refused again, and this is the sentence that
+    // stops it — so it is drawn in body text, with the page that explains the
+    // app password one tap away.
+    Rectangle {
       width: parent.width
       visible: root.suggestion.note !== ""
-      text: root.suggestion.note
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
+      implicitHeight: noteColumn.implicitHeight + Style.space(20)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+      border.width: 1
+      border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+
+      Column {
+        id: noteColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(12)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(6)
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: root.suggestion.note
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        LinkLabel {
+          objectName: "imap-password-guide"
+          visible: root.suggestion.guideUrl !== ""
+          text: root.suggestion.guideLabel + "..."
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          tooltipText: root.suggestion.guideUrl
+          onActivated: Qt.openUrlExternally(root.suggestion.guideUrl)
+        }
+      }
     }
 
     Item {

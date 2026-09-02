@@ -47,9 +47,16 @@ var PRESETS = [
     smtpHost: "smtp.gmail.com", smtpPort: 465,
     // Google turned off password sign-in for IMAP. An app password works only
     // with 2-Step Verification on, and that is the sentence users need to see
-    // before they go looking for a setting that is not there.
-    note: "Needs an app password, which Google only offers with 2-Step Verification on. "
-      + "The Gmail provider signs in with Google directly and does not need one."
+    // before they go looking for a setting that is not there — with the page
+    // that walks them through it, because "app password" is not a term anyone
+    // can act on from memory.
+    note: "Google no longer accepts your account password here. Create an app password "
+      + "(Google offers one only with 2-Step Verification on) and paste it below — "
+      + "or go back and pick Gmail to sign in with Google and skip all of this.",
+    guide: {
+      url: "https://support.google.com/accounts/answer/185833",
+      label: "How to create a Google app password"
+    }
   },
   {
     id: "icloud",
@@ -57,7 +64,11 @@ var PRESETS = [
     domains: ["icloud.com", "me.com", "mac.com"],
     imapHost: "imap.mail.me.com", imapPort: 993,
     smtpHost: "smtp.mail.me.com", smtpPort: 587,
-    note: "Needs an app-specific password from appleid.apple.com."
+    note: "Needs an app-specific password from appleid.apple.com.",
+    guide: {
+      url: "https://support.apple.com/102654",
+      label: "How to create an Apple app-specific password"
+    }
   },
   {
     id: "fastmail",
@@ -147,7 +158,11 @@ function suggestedSettings(address) {
       username: trimmed(address),
       insecure: preset.insecure === true,
       preset: preset.id,
-      note: String(preset.note || "")
+      note: String(preset.note || ""),
+      // Where the note's instruction is spelled out, for the providers whose
+      // password is not the one the user knows. Empty for the rest.
+      guideUrl: preset.guide ? String(preset.guide.url || "") : "",
+      guideLabel: preset.guide ? String(preset.guide.label || "") : ""
     }
   }
   return {
@@ -158,7 +173,9 @@ function suggestedSettings(address) {
     username: trimmed(address),
     insecure: false,
     preset: "",
-    note: ""
+    note: "",
+    guideUrl: "",
+    guideLabel: ""
   }
 }
 
