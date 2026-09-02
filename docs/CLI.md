@@ -69,3 +69,5 @@ A failure with `--json` is `{ "ok": false, "error": "…", "code": "auth" }` on 
 ## What it does not do
 
 It does not sign a mailbox in. Gmail's OAuth walkthrough, IMAP's password form and HEY's browser flow stay in the window, because each of those is a one-time conversation with a human. It does not download attachments. It does not send until `--to` and a body are both present.
+
+HEY's thread read returns the conversation body and not the subject or sender — that is how `hey threads` answers. List first, then read.
