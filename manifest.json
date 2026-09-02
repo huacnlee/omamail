@@ -5,7 +5,8 @@
   "version": "0.7.0",
   "author": "huacnlee",
   "license": "MIT",
-  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
+  "homepage": "https://huacnlee.github.io/omamail/",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, Proton Bridge, or your own server — several accounts at once, each with its own inbox and unread count. Keyboard-first, three columns when there is room and one when there is not, and it follows your theme. Meeting invitations are drawn as meetings you can answer, newsletters unsubscribe in one click, and remote images stay blocked until you ask.",
   "kinds": [
     "service",
     "bar-widget",
