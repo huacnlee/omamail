@@ -898,12 +898,25 @@ function redact(text) {
 
 // Whether the tagged completion said OK. curl hides the tag from us for a
 // custom request, so this reads what it does surface.
+//
+// Only the *last* response line can be that completion — mid-response lines
+// are untagged data, and with a FETCH that data is the message itself. A
+// server-side spam scanner header like "X-Spam-Flag: NO" reads exactly like
+// a tagged NO to a regex that isn't told where the literal ends, so this
+// goes through `splitResponse` first: it already folds each literal into the
+// one line it belongs to, which is the only way to reach the true last line
+// without a regex trying to count octets.
+function lastResponseLine(text) {
+  var lines = splitResponse(text)
+  return lines.length ? lines[lines.length - 1] : ""
+}
+
 function isFailure(text) {
-  return /^\S+\s+(NO|BAD)\s/im.test(String(text || ""))
+  return /^\S+\s+(NO|BAD)\b/i.test(lastResponseLine(text))
 }
 
 function failureDetail(text) {
-  var match = String(text || "").match(/^\S+\s+(?:NO|BAD)\s+([\s\S]*)$/im)
+  var match = lastResponseLine(text).match(/^\S+\s+(?:NO|BAD)\s+([\s\S]*)$/i)
   return match ? trimmed(match[1].split(/[\r\n]/)[0]) : ""
 }
 
