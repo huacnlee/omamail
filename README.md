@@ -209,7 +209,7 @@ issued refresh tokens that expire after seven days, so the app would sign you
 out every week. Publishing shows an "unverified app" warning once — expected
 for a client you made yourself, since you are the developer and the only user.
 
-If you have the `gcloud` CLI, `scripts/google-cloud-setup.sh` does the two
+If you have the `gcloud` CLI, `scripts/google-cloud-project.sh` does the two
 steps that have an API — creating the project and enabling Gmail — and opens
 the console on the rest with the project already selected. The consent screen
 and the client itself are console-only; there is no CLI for them.
@@ -302,7 +302,7 @@ calendars and writes events.
 ## Development
 
 ```bash
-./install.sh          # symlink this checkout into ~/.config/omarchy/plugins
+make install          # symlink this checkout into ~/.config/omarchy/plugins
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 

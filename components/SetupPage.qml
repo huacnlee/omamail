@@ -352,7 +352,7 @@ Column {
     text: "In Google Cloud, pick or create a project. Under APIs and Services, enable the Gmail API. "
       + "On the consent screen add the Gmail address you want to read as a test user, then press Publish app. "
       + "Under Credentials, create an OAuth client with application type Desktop app, and paste its client ID above.\n\n"
-      + "Steps one and two have a CLI: run scripts/google-cloud-setup.sh if you have gcloud. "
+      + "Steps one and two have a CLI: run scripts/google-cloud-project.sh if you have gcloud. "
       + "The consent screen and the client itself are console-only.\n\n"
       + (root.auth ? "The client is saved to " + root.auth.credentialsPath + ", readable only by you. "
         + "You can also copy the JSON the console downloads to that path instead of pasting. " : "")

@@ -965,8 +965,8 @@ grep -q 'function beginDraft' components/ComposeView.qml \
   || fail "ComposeView must fill a new draft from a mailto"
 grep -q 'omarchy-shell shell summon' scripts/mailto.sh \
   || fail "the mailto handler must summon Omamail, not toggle it"
-grep -q 'install-mailto.sh' install.sh \
-  || fail "install.sh must register the mailto desktop handler"
+grep -q 'register-mailto.sh' scripts/link-plugin.sh \
+  || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
 grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \

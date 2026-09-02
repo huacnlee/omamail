@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 plugin_id="omamail"
 old_plugin_id="gmail.omarchy"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -74,7 +74,7 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable "$plugin_id"
 
 printf '%s\n' 'Registering Omamail as the mailto handler…'
-"$project_dir/scripts/install-mailto.sh" "$install_path" --claim-default
+"$project_dir/scripts/register-mailto.sh" "$install_path" --claim-default
 
 printf 'Omamail installed for development at %s\n' "$install_path"
 printf '%s\n' 'Click the envelope in the bar. QML edits are read through the symlink.'

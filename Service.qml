@@ -83,7 +83,7 @@ Item {
 
   function registerMailtoHandler() {
     if (pluginDir === "" || mailtoInstaller.running) return
-    mailtoInstaller.command = [pluginDir + "/scripts/install-mailto.sh", pluginDir]
+    mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
     mailtoInstaller.running = true
   }
 
