@@ -28,6 +28,8 @@ The repository root contains only the QML entry points the shell loads:
 - `BarWidget.qml` is the shell-facing trigger and settings bridge.
 - `App.qml` composes the application window. It owns visible navigation, action dispatch, focus context, non-popup surfaces, and the arrangement of the major panes.
 
+`omamail` on the command line is another client of the same accounts, credentials and provider libraries. It is not a shell entry point and it must not become a second implementation of Gmail, IMAP or HEY: `cli/Cli.js` decides what a flag means, and `cli/run.js` drives the same `.js` modules the window does.
+
 This composition boundary is shaped by the shell entry-point contract and Qt's focus and popup behavior. `App.qml` coordinates:
 
 - which page or mailbox surface is active;

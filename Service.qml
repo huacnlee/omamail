@@ -87,6 +87,12 @@ Item {
     mailtoInstaller.running = true
   }
 
+  function registerCli() {
+    if (pluginDir === "" || cliInstaller.running) return
+    cliInstaller.command = [pluginDir + "/scripts/register-cli.sh", pluginDir]
+    cliInstaller.running = true
+  }
+
   function applySettings(values) {
     var next = ({})
     for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
@@ -1002,8 +1008,15 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
   }
 
+  Process {
+    id: cliInstaller
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
   Component.onCompleted: {
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
+    Qt.callLater(root.registerCli)
   }
 }

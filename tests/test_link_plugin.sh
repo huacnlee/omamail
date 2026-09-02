@@ -101,4 +101,11 @@ XDG_DATA_HOME="$mailto_home/share" XDG_CONFIG_HOME="$mailto_home/config" \
 [ -f "$desktop" ] || fail "a second register-mailto.sh run removed omamail.desktop"
 rm -rf "$mailto_home"
 
+[ -x scripts/register-cli.sh ] || fail "scripts/register-cli.sh must be executable"
+[ -x scripts/omamail ] || fail "scripts/omamail must be executable"
+cli_home=$(mktemp -d)
+XDG_BIN_HOME="$cli_home/bin" sh scripts/register-cli.sh "$(pwd)"
+[ -L "$cli_home/bin/omamail" ] || fail "register-cli.sh did not symlink omamail"
+rm -rf "$cli_home"
+
 printf 'test_link_plugin.sh ok\n'

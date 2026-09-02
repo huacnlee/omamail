@@ -27,7 +27,7 @@ while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
 
 JS_FILES=()
 while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
-  < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*')
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*' ':!cli/run.js')
 
 # A developer machine may point /bin/sh at bash while the release runner points
 # it at dash. Bash's global parameter replacement then passes locally and dies
@@ -969,6 +969,10 @@ grep -q 'register-mailto.sh' scripts/link-plugin.sh \
   || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
+grep -q 'register-cli.sh' scripts/link-plugin.sh \
+  || fail "link-plugin.sh must put omamail on PATH"
+grep -q 'registerCli' Service.qml \
+  || fail "the service must register the CLI when the plugin loads"
 grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \
   || fail "HEY must pass a mailto Bcc through to hey compose"
 grep -q 'signal mailtoRequested(string url)' components/MessageReader.qml \

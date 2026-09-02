@@ -7,7 +7,8 @@ logic, running inside the existing `omarchy-shell` process.
 ## Product shape
 
 **This is a full application window, not a bar popup.** The bar widget exists
-only as an unread indicator and a launcher.
+only as an unread indicator and a launcher. `omamail` on the command line is
+another client of the same accounts, not a fourth plugin kind.
 
 Three plugin entry points (`manifest.kinds`):
 
@@ -68,6 +69,8 @@ guided by an in-app four-step walkthrough.
 - Full keyboard operation with Gmail's key bindings
 - Several accounts at once, each with its own cache and unread count, switched
   from the sidebar, the menu, or `Alt+A`
+- Command line: `omamail`, a `gh`-style noun-verb interface with `--json`, so
+  an agent or a script uses the same mailboxes the window is signed into
 
 **Explicitly out of scope**
 

@@ -29,6 +29,7 @@ three directories away from the client that calls it.
 | `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
 | `calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
 | `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
+| `cli/` | The command-line interface agents and terminals use: argument parsing and output shape in `.js`, the node runner, the launcher that lands on `PATH`. |
 | `components/` | Views. They draw what they are given and decide nothing. |
 
 - `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML
@@ -44,7 +45,9 @@ three directories away from the client that calls it.
 - The `.js` files are read by the QML engine. They start with `.pragma library`
   and use `var` and `function` only — no `const`, `let`, arrow functions, or
   template literals. `tests/test_source.sh` finds them wherever they are, so a
-  new module is covered without being added to a list.
+  new module is covered without being added to a list. `cli/run.js` is the one
+  exception: it is the Node process the CLI execs, so it may use the language
+  Node understands.
 - Everything that parses, formats, or decides lives in one of them, so the node
   tests can reach it without a compositor. QML holds no logic worth testing.
 - One JS resource may build on others with QML's `.import "Other.js" as Other`,

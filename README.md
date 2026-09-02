@@ -76,7 +76,7 @@ other IMAP server — including one you run yourself.
 
 ## What it is
 
-Three parts, one plugin:
+Three parts, one plugin — and a command for everything else:
 
 - an **unread badge** in the bar, which keeps counting whether or not the
   window is open
@@ -84,7 +84,10 @@ Three parts, one plugin:
   with your mailboxes, the message list, and the reader side by side
 - **compose and reply inside that same window**, because a second window would
   take a region of its own under Omarchy's panel mechanism. A `mailto:` link
-  from elsewhere on the desktop opens that same compose form.
+  from elsewhere on the desktop opens that same compose form
+- **`omamail` on the command line**, so an agent or a script talks to the same
+  mailboxes the window is signed into. `omamail --help` is the map; `--json`
+  is the machine-readable shape.
 
 ## Add it to Omarchy
 
@@ -243,6 +246,24 @@ and the client itself are console-only; there is no CLI for them.
 | `Ctrl+?` | Every shortcut |
 
 Search paints matching cached rows first and adds server results as they arrive. It takes Gmail's own operator syntax straight through — `from:jane`, `has:attachment`, `older_than:7d`. The Unread mailbox leaves Promotions, Social and Forums out rather than asking for Primary: Gmail's categories do not remove the `INBOX` label, so an unread filter without that exclusion comes back as the whole promotional backlog rather than the mail you have not read — while one that asks for Primary comes back empty on any account where Gmail is not applying the category labels, which is unread mail with nothing left to say so. Updates stays in, because receipts, deliveries and notifications land there. Right-click any row in the list for archive, trash, spam, star and read/unread without leaving the keyboard cursor behind.
+
+## Command line
+
+Once the plugin is enabled, `omamail` is on `PATH` (`~/.local/bin/omamail`). It is another client of the same accounts file and the same keyring — not a second copy of your mail, and not a way around signing in through the window.
+
+```bash
+omamail account list
+omamail list --json
+omamail read <id>
+omamail send --to jane@example.com --subject "Hello" --body "Hi Jane"
+omamail reply <id> --body "Thanks" --all
+omamail archive <id>
+omamail search 'from:jane newer_than:7d'
+```
+
+`--json` is the shape agents should ask for. Message ids are stable (Gmail's own, `<uid>:<folder>` on IMAP, `<posting>:<topic>` on HEY), never row numbers. `omamail --help` is the rest of the map; `docs/CLI.md` is the same contract written down.
+
+Node.js is required for the command. The window itself still needs none of it.
 
 ## What it does not do
 

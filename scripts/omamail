@@ -1,0 +1,36 @@
+#!/bin/sh
+# Command-line interface to the mailboxes signed into Omamail.
+#
+# Agents, scripts and a terminal all go through here. The window is a client
+# of the same accounts file and the same keyring; this is another.
+set -eu
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+# Follow the symlink so a ~/.local/bin/omamail still finds the plugin tree.
+script=$0
+if command -v readlink >/dev/null 2>&1; then
+  resolved=$(readlink -f "$script" 2>/dev/null || true)
+  if [ -n "$resolved" ]; then
+    script=$resolved
+  fi
+fi
+root=$(CDPATH= cd -- "$(dirname -- "$script")/.." && pwd)
+
+[ -f "$root/cli/run.js" ] || fail 'omamail: the plugin tree is missing cli/run.js'
+[ -f "$root/manifest.json" ] || fail 'omamail: the plugin tree is missing manifest.json'
+
+if command -v node >/dev/null 2>&1; then
+  node_bin=node
+elif command -v nodejs >/dev/null 2>&1; then
+  node_bin=nodejs
+else
+  fail 'omamail: node is required. Install Node.js to talk to mail from the command line.'
+fi
+
+OMAMAIL_ROOT=$root
+export OMAMAIL_ROOT
+exec "$node_bin" "$root/cli/run.js" "$@"
