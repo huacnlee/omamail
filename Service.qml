@@ -139,6 +139,13 @@ Item {
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
+  // Read here rather than in the compose view, so the window never reaches into
+  // the account list itself. A pending account has no id and so no signature,
+  // which is the same answer as having set none.
+  readonly property string activeSignature: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? String(entry.signature || "") : ""
+  }
   readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
     ? String(current.accountId) : "__no_google_account__"
 
@@ -346,6 +353,17 @@ Item {
   // never written, and the watcher then read the older file back over it.
   property bool accountsSaveQueued: false
 
+  // Identical text is not a write. The editor saves when it is done with
+  // rather than on every keystroke, but it is also rebuilt by the write it
+  // causes — so the value it hands back on the way out is routinely the one
+  // already on disk, and a file round trip for it would be pure cost.
+  function setAccountSignature(id, text) {
+    var next = Accounts.setSignature(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
   function saveAccounts() {
     if (!accountsLoaded) return
     // A nameless row is setup state, never a mailbox. There is no legitimate
@@ -544,6 +562,26 @@ Item {
   }
 
   // The switcher's model: every mailbox, its count, and why it is not usable.
+  // Deliberately not part of accountSummaries. That array is rebuilt from
+  // `unread`, `active`, `signedIn`, `busy` and `error`, so a poll replaces it
+  // twice a cycle with no account having changed — and a settings field built
+  // over it is destroyed and refilled under whoever is typing in it. This
+  // changes only when the account list does.
+  readonly property var accountSignatures: {
+    var out = []
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      // A mailbox part-way through being added has no id to save against.
+      if (!accounts[i].id) continue
+      out.push({
+        id: accounts[i].id,
+        email: accounts[i].email,
+        signature: String(accounts[i].signature || "")
+      })
+    }
+    return out
+  }
+
   readonly property var accountSummaries: {
     var out = []
     var accounts = accountList ? accountList.accounts : []

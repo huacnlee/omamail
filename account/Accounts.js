@@ -133,7 +133,8 @@ function makeAccount(account) {
     clientId: trimmed(raw.clientId),
     clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
-    label: trimmed(raw.label)
+    label: trimmed(raw.label),
+    signature: trimmed(raw.signature)
   }
 }
 
@@ -282,6 +283,27 @@ function discardDraftAt(list, index) {
   if (!isFinite(at) || at < 0 || at >= source.accounts.length) return source
   if (source.accounts[at].id !== "") return source
   return removeAt(source, at)
+}
+
+// The sign-off belongs to the mailbox rather than to the window. Two accounts
+// are two identities, and one signature under both is wrong for whichever it
+// was not written for — so it sits beside the label, which is the other thing
+// here the user chose and the server did not. Nothing about it is secret; the
+// keyring holds what is.
+//
+// Stored as typed, with no separator added. A client that inserts "-- " turns
+// every signature into two decisions — what it says, and whether the line it
+// grew is wanted — and the user who wants one can type it.
+function setSignature(list, id, text) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  // Rebuilt rather than patched, so an entry that reached the list before this
+  // field existed comes out of a write with the same shape as every other.
+  var entry = makeAccount(next.accounts[at])
+  entry.signature = trimmed(text)
+  next.accounts[at] = entry
+  return next
 }
 
 function setActive(list, id) {
