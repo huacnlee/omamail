@@ -30,6 +30,7 @@ three directories away from the client that calls it.
 | `calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
 | `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
 | `cli/` | The command-line interface agents and terminals use: argument parsing and output shape in `.js`, the node runner, the launcher that lands on `PATH`. |
+| `agents/` | The skill that tells an agent to use that command: `SKILL.md`, installed next to `omamail` on PATH. |
 | `components/` | Views. They draw what they are given and decide nothing. |
 
 - `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML

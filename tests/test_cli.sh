@@ -69,15 +69,19 @@ printf '%s\n' "$listed" | grep -q '"active":true' \
   || fail "account list --json must mark the active mailbox"
 
 bin_home="$work/bin"
-XDG_BIN_HOME="$bin_home" sh scripts/register-cli.sh "$(pwd)"
+HOME="$work" XDG_BIN_HOME="$bin_home" sh scripts/register-cli.sh "$(pwd)"
 [ -L "$bin_home/omamail" ] || fail "register-cli.sh must symlink omamail into the bin dir"
 [ "$(readlink -f "$bin_home/omamail")" = "$(readlink -f "$(pwd)/scripts/omamail")" ] \
   || fail "the omamail symlink must point at this checkout's launcher"
+[ -L "$work/.agents/skills/omamail" ] || fail "register-cli.sh must symlink the agents skill"
+[ "$(readlink -f "$work/.agents/skills/omamail")" = "$(readlink -f "$(pwd)/agents")" ] \
+  || fail "the agents skill symlink must point at this checkout's agents/"
+[ -f "$work/.agents/skills/omamail/SKILL.md" ] || fail "the agents skill must contain SKILL.md"
 
 # A real file in the way is left alone.
 rm -f "$bin_home/omamail"
 printf '%s\n' 'other' > "$bin_home/omamail"
-XDG_BIN_HOME="$bin_home" sh scripts/register-cli.sh "$(pwd)" 2>/dev/null \
+HOME="$work" XDG_BIN_HOME="$bin_home" sh scripts/register-cli.sh "$(pwd)" 2>/dev/null \
   || fail "register-cli.sh must not fail when a regular file is already there"
 [ "$(cat "$bin_home/omamail")" = other ] \
   || fail "register-cli.sh must not replace a regular file named omamail"
