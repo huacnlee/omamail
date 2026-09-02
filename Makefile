@@ -84,6 +84,7 @@ test-js:
 	node tests/test_cache.js
 	node tests/test_model.js
 	node tests/test_keymap.js
+	node tests/test_icons.js
 	node tests/test_accounts.js
 	node tests/test_aliases.js
 	node tests/test_menu.js
