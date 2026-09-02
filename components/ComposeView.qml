@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 import "../message/Message.js" as Mail
 import "../compose/Recipients.js" as Recipients
 import "../compose/Senders.js" as Senders
@@ -60,6 +61,11 @@ DropArea {
   // What it was built from, so it can be built again for another mailbox.
   property string bodyPrefix: ""
   property string bodyQuote: ""
+  // Both popups reparent themselves into the window overlay, so their state is
+  // not reachable by walking this view's children. Named here so the tests can
+  // ask whether a control put its own popup away.
+  readonly property bool fromMenuOpened: fromMenu.opened
+  readonly property bool contactsPickerOpened: contactsPicker.opened
   property int restoreRevision: 0
   property real restoreFlashOpacity: 0
   property string mode: "new"
@@ -141,6 +147,10 @@ DropArea {
   function clearCurrentDraft(forgetAttachments) {
     forwardLoadSerial++
     fromMenu.close()
+    // Both of these live in the window overlay, and this view is hidden rather
+    // than destroyed — so a popup left open outlives the draft it belonged to
+    // and sits over the message list.
+    contactsPicker.close()
     toField.text = ""
     ccField.text = ""
     bccField.text = ""
@@ -290,6 +300,27 @@ DropArea {
     root.accountId = accountId
     if (String(root.service.activeAccountId || "") === accountId) return
     if (typeof root.service.switchTo === "function") root.service.switchTo(accountId)
+  }
+
+  // When a control opens a popup that closes on a press outside itself, the
+  // press that reaches the control has already closed it — so by the time the
+  // release becomes a click, `opened` reads false and the toggle opens it
+  // straight back up. The control could never be used to put its own popup
+  // away, and it flickers instead. The moment it closed is what tells "the
+  // user wants this open" apart from "this just closed under the same press".
+  property double fromMenuClosedAt: 0
+
+  function reopeningAfterOutsidePress(closedAt) {
+    return Date.now() - closedAt < 250
+  }
+
+  function toggleFromMenu() {
+    if (fromMenu.opened) {
+      fromMenu.close()
+      return
+    }
+    if (reopeningAfterOutsidePress(fromMenuClosedAt)) return
+    fromMenu.open()
   }
 
   function placeFromMenu() {
@@ -491,6 +522,17 @@ DropArea {
 
   // The Back control asks the window to save. Discard stays local and
   // destructive. The window owns the save because it owns the provider.
+  // Which way what is being written runs. Qt resolves an editable field from
+  // the text already in it, so Auto needs nothing added; a direction the writer
+  // has chosen has to be carried to the fields, including the empty ones — a
+  // reply begun in a right-to-left mailbox should put the caret on the right
+  // before there is any text to work it out from.
+  property string contentDirection: Direction.MODE_DEFAULT
+  readonly property string writingDirection: Direction.forced(root.contentDirection)
+  readonly property var composeAlignment: Direction.hasAnswer(root.writingDirection)
+    ? (Direction.isRightToLeft(root.writingDirection) ? Text.AlignRight : Text.AlignLeft)
+    : undefined
+
   signal closed()
   signal closeRequested()
   signal sendQueued()
@@ -931,7 +973,7 @@ DropArea {
         leftAlign: true
         selected: fromMenu.opened
         enabled: root.canChooseFrom
-        onClicked: fromMenu.opened ? fromMenu.close() : fromMenu.open()
+        onClicked: root.toggleFromMenu()
 
         // The kit's own chevron is a font glyph, which at this size renders
         // thinner than every other mark in the window. This is the app's drawn
@@ -983,6 +1025,19 @@ DropArea {
         anchors.rightMargin: Style.space(18)
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(4)
+
+        Button {
+          id: contactsButton
+          objectName: "compose-contacts-button"
+          text: "Contacts"
+          foreground: contactsPicker.opened ? root.textColor : root.dimColor
+          bordered: false
+          fontSize: Style.font.caption
+          onClicked: {
+            var global = contactsButton.mapToGlobal(0, contactsButton.height)
+            contactsPicker.toggleAt(global.x, global.y)
+          }
+        }
 
         Button {
           id: ccToggle
@@ -1261,6 +1316,7 @@ DropArea {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Subject"
+        horizontalAlignment: root.composeAlignment
         KeyNavigation.tab: bodyEdit
         onTextChanged: root.noteDraftChanged()
         onAccepted: bodyEdit.forceActiveFocus()
@@ -1378,6 +1434,7 @@ DropArea {
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.placeFromMenu()
     onOpened: root.placeFromMenu()
+    onClosed: root.fromMenuClosedAt = Date.now()
     background: Rectangle {
       radius: Style.cornerRadius
       color: Qt.rgba(root.popupBackgroundColor.r, root.popupBackgroundColor.g,
@@ -1442,6 +1499,32 @@ DropArea {
     }
   }
 
+  ContactsPicker {
+    id: contactsPicker
+    objectName: "compose-contacts-picker"
+    contacts: root.contactBook
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onContactChosen: function(contact, target) {
+      if (target === "cc") {
+        root.ccVisible = true
+        ccField.text = Recipients.append(ccField.text, contact)
+        ccField.forceActiveFocus()
+      } else if (target === "bcc") {
+        root.bccVisible = true
+        bccField.text = Recipients.append(bccField.text, contact)
+        bccField.forceActiveFocus()
+      } else {
+        toField.text = Recipients.append(toField.text, contact)
+        toField.forceActiveFocus()
+      }
+    }
+  }
+
   // ------------------------------------------------------------- body
   //
   // The kit has no multi-line field, so this is a TextEdit on the plain
@@ -1475,6 +1558,7 @@ DropArea {
       selectByMouse: true
       wrapMode: TextEdit.Wrap
       textFormat: TextEdit.PlainText
+      horizontalAlignment: root.composeAlignment
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor

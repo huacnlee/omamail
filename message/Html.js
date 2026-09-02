@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Direction.js" as Direction
+
 // Message HTML, reduced to what Qt's rich text engine may safely be handed.
 //
 // This is not a renderer. Qt already is one: a QTextDocument behind the
@@ -1072,6 +1074,34 @@ function promoteImageDimensions(node, declarations) {
   }
 }
 
+// The same promotion, for the same reason, on the other property Qt reads in
+// only one of its two spellings.
+//
+// Qt's rich text engine honours the `dir` attribute and ignores the CSS
+// `direction` property outright. A mail template written for a browser has no
+// reason to use the attribute — CSS is where a browser reads it — so an Arabic
+// or Hebrew newsletter that sets `style="direction:rtl"` arrives with its
+// direction stated in the one spelling the renderer does not look at, and is
+// laid out left-to-right against the wrong margin.
+//
+// The declaration is left in place rather than moved: it is the sender's, it is
+// correct, and something other than Qt may yet read this document.
+var DIRECTION_VALUES = { ltr: true, rtl: true }
+
+function promoteDirection(node, declarations) {
+  if (declarations === null) return
+  // The sender's own attribute wins. It is the more specific statement of the
+  // two, and it is the one they wrote for a client that reads it.
+  if (attributeOf(node, "dir") !== null) return
+  for (var i = 0; i < declarations.length; i++) {
+    if (declarations[i].name !== "direction") continue
+    var value = String(declarations[i].value).trim().toLowerCase()
+    if (DIRECTION_VALUES[value] !== true) continue
+    setAttribute(node, "dir", value)
+    return
+  }
+}
+
 function hasDirectImage(node) {
   for (var i = 0; i < node.children.length; i++) {
     if (node.children[i].type !== "text" && node.children[i].name === "img") return true
@@ -1245,6 +1275,7 @@ function sanitize(html, options) {
         && isHiddenBy(declarations)) continue
 
       promoteImageDimensions(child, declarations)
+      promoteDirection(child, declarations)
       cleanAttributes(child, keepColors, declarations)
 
       if (child.name === "img" && !keepImage(child)) continue
@@ -1598,6 +1629,28 @@ function relaxFixedWidths(html, available) {
   return serialize(parse(html), fitting(false, false, true, available))
 }
 
+// Which way the document runs, said in the two spellings that have to agree.
+//
+// The stylesheets below are written in physical sides — Qt's rich text engine
+// reads `margin-left` and has never heard of `margin-inline-start` — so a list
+// indent, a quote bar and a header's alignment are each given a side when the
+// sheet is built. The `dir` on the body is the same statement in the other
+// spelling, and the two are written together or not at all.
+//
+// Separating them was tried and is wrong, visibly: a sheet that indents a list
+// from the right while the block is still left-to-right does not move the
+// bullet to the right, it drops the bullet altogether. Qt places a list marker
+// on the side the block runs from, and a margin alone does not tell it which
+// side that is.
+//
+// A base direction is a default, not an override. A sender who states `dir` on
+// their own element — or writes `direction` in CSS, which `promoteDirection`
+// turns into the same thing — still wins inside it, so this supplies an answer
+// only where the document gives none.
+function baseDirectionAttribute(palette) {
+  return Direction.attributeFor(String(palette.direction || ""))
+}
+
 // Wraps the sanitised body in a document. `colors` styles the parts the sender
 // did not: the ground, the default text, links and quoted replies.
 function documentFor(bodyHtml, colors) {
@@ -1610,6 +1663,9 @@ function documentFor(bodyHtml, colors) {
   // on a wrapper the sender's markup sits inside.
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
   var maxImage = Math.floor(Number(palette.maxImageWidth) || 0)
+  // Which way the message runs — see `baseDirectionAttribute` below.
+  var direction = String(palette.direction || "")
+  var quoteEdge = Direction.startEdge(direction)
 
   // No parse at all when the caller kept the document: this is rebuilt on every
   // relayout, and the body it is built from has not changed.
@@ -1624,10 +1680,14 @@ function documentFor(bodyHtml, colors) {
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
     + "a{color:" + link + ";}"
-    + "blockquote{color:" + quote + ";margin-left:8px;padding-left:8px;}"
+    // The quote rule indents from the side the text starts on. Qt reads only
+    // physical properties — there is no `margin-inline-start` in a
+    // QTextDocument — so the side is chosen here rather than by the renderer.
+    + "blockquote{color:" + quote + ";margin-" + quoteEdge + ":8px;padding-"
+      + quoteEdge + ":8px;}"
     + "td,th{padding:2px;}"
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
-    + "</style></head><body>"
+    + "</style></head><body" + baseDirectionAttribute(palette) + ">"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
     + serialize(root, fit)
     + (pad > 0 ? "</div>" : "")
@@ -2589,6 +2649,15 @@ function readerDocumentFor(source, colors) {
   // grows past it.
   var gap = Math.max(4, Math.round(base * 0.85))
   var rule = Math.max(2, Math.round(base * 0.5))
+  // Reading mode rebuilds the document, so every indent and every column in it
+  // is this file's own rather than the sender's — and every one of them is
+  // written as a physical side, because that is the only kind Qt reads. A
+  // right-to-left message read in a sheet whose lists indent from the left and
+  // whose headers align left is the sender's own layout problem reproduced by
+  // the view that exists to replace it.
+  var direction = String(palette.direction || "")
+  var startEdge = Direction.startEdge(direction)
+  var endEdge = Direction.endEdge(direction)
 
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
@@ -2605,16 +2674,19 @@ function readerDocumentFor(source, colors) {
     // Disable QTextDocument's own marker indent and provide one fixed
     // two-character column. Leaving both active doubled the indentation.
     + "ul,ol{margin-top:0px;margin-bottom:" + gap
-      + "px;margin-left:26px;-qt-list-indent:0;}"
+      + "px;margin-" + startEdge + ":26px;-qt-list-indent:0;}"
     + "li{margin-bottom:" + rule + "px;}"
-    + "blockquote{color:" + quote + ";margin-left:" + rule
-      + "px;padding-left:" + gap + "px;margin-top:0px;margin-bottom:" + gap + "px;}"
+    + "blockquote{color:" + quote + ";margin-" + startEdge + ":" + rule
+      + "px;padding-" + startEdge + ":" + gap
+      + "px;margin-top:0px;margin-bottom:" + gap + "px;}"
     + "pre{margin-top:0px;margin-bottom:" + gap + "px;}"
+    // The gutter goes after the cell's text, so a column keeps its gap from the
+    // next one along rather than from the one it has already passed.
     + "td,th{padding-top:" + rule + "px;padding-bottom:" + rule
-      + "px;padding-right:" + gap + "px;}"
-    + "th{font-weight:bold;text-align:left;}"
+      + "px;padding-" + endEdge + ":" + gap + "px;}"
+    + "th{font-weight:bold;text-align:" + startEdge + ";}"
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
-    + "</style></head><body>"
+    + "</style></head><body" + baseDirectionAttribute(palette) + ">"
     + serialize(documentTree(source))
     + "</body></html>"
 }
@@ -2861,7 +2933,12 @@ function plainTextDocument(text, colors, linkImages) {
   return "<html><head><style type=\"text/css\">"
     + "body{color:" + foreground + ";background-color:" + background + ";}"
     + "a{color:" + link + ";}"
-    + "</style></head><body>" + body + "</body></html>"
+    // Plain text has no indent of its own to mirror, so the direction is the
+    // whole of what it takes. Qt resolves each line of a `<br>`-joined body
+    // separately either way; the base direction is what the lines with nothing
+    // strong in them fall back to.
+    + "</style></head><body" + baseDirectionAttribute(palette) + ">"
+    + body + "</body></html>"
 }
 
 // The index a marker link carries, or 0 when the link is something else.

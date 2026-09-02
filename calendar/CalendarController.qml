@@ -5,6 +5,7 @@ import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
 import "../message/Message.js" as Mail
+import "../providers/Secrets.js" as Secrets
 
 Item {
   id: root
@@ -24,6 +25,17 @@ Item {
   property double pendingRangeStart: 0
   property double pendingRangeEnd: 0
   property string refreshAccountId: ""
+  // The scope an answer belongs to, which is not always the mailbox.
+  //
+  // The cache is keyed by it and an in-flight refresh is checked against it, so
+  // it has to name what the visible calendar actually depends on. In the
+  // default mode that is the account; in the unified mode the same sources are
+  // shown whichever mailbox is open, so the account is not part of the
+  // question — keying by it stored one copy of the same events per account,
+  // spent the eight-range budget three times over, and made every mailbox
+  // switch a cache miss: the calendar blanked and every account's calendars
+  // were fetched again to redraw what was already on screen.
+  property string refreshScope: ""
   property var queue: []
   property var activeSource: null
   property string lookedUpPassword: ""
@@ -58,7 +70,19 @@ Item {
   property bool eventWriting: false
   readonly property var availableSources: Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : [])
-  readonly property var contextSources: Sources.forAccount(availableSources, accountId)
+  readonly property bool unifiedCalendarView: !!service
+    && service.unifiedCalendarView === true
+  readonly property var contextSources: unifiedCalendarView
+    ? availableSources : Sources.forAccount(availableSources, accountId)
+  // One name for every mailbox, because the unified view is one view.
+  //
+  // A controller with no account is already showing every source — the bar
+  // preview is one, and `Sources.forAccount(list, "")` has always returned all
+  // of them — so the setting cannot change what it shows, and renaming its
+  // scope would orphan a cache entry and refetch every calendar to redraw what
+  // was already there.
+  readonly property string calendarScope: unifiedCalendarView && accountId !== ""
+    ? "__unified__" : accountId
   readonly property var sourceGroups: Sources.groupByAccount(
     contextSources, service ? service.accountSummaries : [])
   // The composer offers only calendars a write can run against.
@@ -72,9 +96,21 @@ Item {
     onTriggered: root.nowMs = Date.now()
   }
 
-  onAccountIdChanged: {
-    if (!rangeStart || !rangeEnd || !eventCache.loaded) return
-    events = cachedEventsFor(accountId, rangeStart, rangeEnd)
+  // The one event worth reloading for, said once: what is on screen depends on
+  // the scope, so it is a change of scope that makes the answer stale. A
+  // mailbox switch under the unified view is not one, and neither is turning
+  // the setting on for a controller that had no mailbox to follow — watching
+  // the two inputs separately got both of those wrong in opposite directions.
+  onCalendarScopeChanged: reloadVisibleRange()
+
+  // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
+  // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
+  // there, so the only thing the guard changed was whether an empty list was
+  // assigned to a property that could not yet hold anything else: nothing can
+  // have been fetched before the cache loaded, because fetching needs it too.
+  function reloadVisibleRange() {
+    if (!rangeStart || !rangeEnd) return
+    events = cachedEventsFor(calendarScope, rangeStart, rangeEnd)
     refresh(rangeStart, rangeEnd)
   }
 
@@ -105,26 +141,30 @@ Item {
     lastError = ""
     lastErrorKind = ""
     refreshAccountId = accountId
+    refreshScope = calendarScope
     var effectiveSources = sourcesForAccount(refreshAccountId)
     queue = effectiveSources.sources.filter(function(source) {
       return source && source.enabled
     })
     var sourceIds = queue.map(function(source) { return String(source.id || "") })
-    events = eventCache.get(refreshAccountId, rangeStart, rangeEnd, sourceIds)
+    events = eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds)
     loading = true
     processNext()
   }
 
   function sourcesForAccount(wantedAccountId) {
-    return Sources.forAccount(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), wantedAccountId)
+    var available = Sources.withGoogleAccounts(
+      sourceList, service ? service.accountSummaries : [])
+    return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
-  function cachedEventsFor(wantedAccountId, startMs, endMs) {
-    var values = sourcesForAccount(wantedAccountId).sources.filter(function(source) {
+  // `scope` rather than an account id: in the unified view every mailbox reads
+  // the same entry, and asking for it by account would find nothing.
+  function cachedEventsFor(scope, startMs, endMs) {
+    var values = sourcesForAccount(accountId).sources.filter(function(source) {
       return source && source.enabled
     })
-    return eventCache.get(wantedAccountId, startMs, endMs,
+    return eventCache.get(scope, startMs, endMs,
       values.map(function(source) { return String(source.id || "") }))
   }
 
@@ -440,7 +480,7 @@ Item {
   }
 
   function replaceActiveSourceEvents(values) {
-    if (refreshAccountId !== accountId) return
+    if (refreshScope !== calendarScope) return
     var sourceId = activeSource ? String(activeSource.id || "") : ""
     var next = events.filter(function(event) {
       return String(event && event.sourceId || "") !== sourceId
@@ -456,7 +496,7 @@ Item {
   }
 
   function failSource(reason, kind) {
-    if (refreshAccountId !== accountId) { processNext(); return }
+    if (refreshScope !== calendarScope) { processNext(); return }
     var name = activeSource ? activeSource.name || activeSource.id : "Calendar"
     lastError = name + ": " + String(reason || "Could not load events")
     lastErrorKind = String(kind || "")
@@ -472,11 +512,11 @@ Item {
       }).map(function(source) { return String(source.id || "") })
       var allowed = {}
       for (var i = 0; i < enabled.length; i++) allowed[enabled[i]] = true
-      if (refreshAccountId === accountId) events = events.filter(function(event) {
+      if (refreshScope === calendarScope) events = events.filter(function(event) {
         return allowed[String(event && event.sourceId || "")] === true
       })
-      if (rangeStart && rangeEnd && refreshAccountId === accountId)
-        eventCache.put(refreshAccountId, rangeStart, rangeEnd, events)
+      if (rangeStart && rangeEnd && refreshScope === calendarScope)
+        eventCache.put(refreshScope, rangeStart, rangeEnd, events)
       var nextStart = pendingRangeStart
       var nextEnd = pendingRangeEnd
       pendingRangeStart = 0
@@ -575,12 +615,19 @@ Item {
 
   Process {
     id: passwordLookup
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handlePassword(line) }
-    }
+    // `secret-tool lookup` writes the secret with no trailing newline, so a
+    // SplitParser splitting on one never fires its read at all: the password
+    // was found, the callback was not, and the source reported itself as
+    // having no password saved. The whole output, read when the process is
+    // done with, is the same answer without depending on how it ends —
+    // which is what `eventPasswordLookup` below already does.
+    stdout: StdioCollector { id: passwordLookupOutput; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
-    onExited: function(_exitCode) { if (!root.lookupHandled) root.handlePassword("") }
+    onExited: function(exitCode) {
+      // No entry is not an error: it is what a source that has never been
+      // given a password looks like.
+      root.handlePassword(exitCode === 0 ? Secrets.fromKeyring(passwordLookupOutput.text) : "")
+    }
   }
 
   Process {

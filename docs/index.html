@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Omamail — mail as a native Omarchy window</title>
+<meta name="description" content="Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages and answers Gmail, HEY and any IMAP mailbox in a native window.">
+<link rel="icon" type="image/svg+xml" href="images/omamail.svg">
+<meta property="og:title" content="Omamail — mail as a native Omarchy window">
+<meta property="og:description" content="Read, triage and answer Gmail, HEY and any IMAP mailbox inside the omarchy-shell process you already have.">
+<meta property="og:image" content="https://huacnlee.github.io/omamail/images/og-preview.jpg">
+<meta property="og:url" content="https://huacnlee.github.io/omamail/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap">
+<script>
+/* Before first paint, so a stored choice never flashes the other theme. */
+try {
+  var t = localStorage.getItem("omamail-theme");
+  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+} catch (e) {}
+/* Motion is opt-out at the root, so nothing depends on the script at the foot
+   of the page having run — without it every section simply stays visible. */
+if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  document.documentElement.className += " js-anim";
+}
+</script>
+<style>
+/* Tokyo Night, the default. Flexoki Light below, once for the system's choice
+   and once for the switch's — CSS cannot share one block across a media query
+   and a selector. Keep the two in step. */
+:root {
+  color-scheme: dark;
+
+  --background: #1A1B26;
+  --dark-background: #13141C;
+  --lighter-background: #24283B;
+  --foreground: #A9B1D6;
+  --bright: #C0CAF5;
+  --dim: #7F88B3;
+  --muted: #414868;
+  --hairline: #2C3048;
+  --accent: #7AA2F7;
+  --accent-ink: #10121B;
+  --selection: #292E42;
+  --green: #9ECE6A;
+  --red: #F7768E;
+  --cyan: #7DCFFF;
+
+  --glint: #E2F5B8;
+
+  --show-sun: block;
+  --show-moon: none;
+
+  --ease: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --background: #FFFCF0;
+    --dark-background: #F2F0E5;
+    --lighter-background: #F2F0E5;
+    --foreground: #100F0F;
+    --bright: #100F0F;
+    --dim: #63625D;
+    --muted: #CECDC3;
+    --hairline: #DAD8CE;
+    --accent: #205EA6;
+    --accent-ink: #FFFCF0;
+    --selection: #E6E4D9;
+    --green: #536607;
+    --red: #AF3029;
+    --cyan: #1F726B;
+
+    --glint: #8CA61F;
+
+    --show-sun: none;
+    --show-moon: block;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #FFFCF0;
+  --dark-background: #F2F0E5;
+  --lighter-background: #F2F0E5;
+  --foreground: #100F0F;
+  --bright: #100F0F;
+  --dim: #63625D;
+  --muted: #CECDC3;
+  --hairline: #DAD8CE;
+  --accent: #205EA6;
+  --accent-ink: #FFFCF0;
+  --selection: #E6E4D9;
+  --green: #536607;
+  --red: #AF3029;
+  --cyan: #1F726B;
+
+  --glint: #8CA61F;
+
+  --show-sun: none;
+  --show-moon: block;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Sarasa Mono SC",
+    "Noto Sans Mono CJK SC", ui-monospace, monospace;
+  font-size: clamp(15px, 0.4vw + 14px, 16px);
+  font-weight: 300;
+  line-height: 1.5;
+  font-variant-ligatures: none;
+}
+
+::selection { background: var(--selection); color: var(--bright); }
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 150ms var(--ease);
+}
+a:hover { color: var(--bright); }
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+code, kbd, pre { font-family: inherit; font-size: inherit; }
+
+code {
+  background: var(--lighter-background);
+  border: 1px solid var(--hairline);
+  color: var(--cyan);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.wrap {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+.skip:focus {
+  left: 12px;
+  top: 12px;
+  z-index: 2;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  border-bottom: 1px solid var(--hairline);
+  background: var(--dark-background);
+}
+.topbar .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  flex-wrap: wrap;
+}
+.topbar-id {
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+.topbar-id b { color: var(--foreground); font-weight: 700; }
+
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  /* Stays on the right even when the bar wraps to two lines. */
+  margin-left: auto;
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--muted);
+}
+.seg button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--muted);
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  min-height: 26px;
+  cursor: pointer;
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: var(--selection); color: var(--bright); }
+/* Fill and weight carry the current choice, not colour alone. */
+.seg button[aria-pressed="true"] {
+  background: var(--selection);
+  color: var(--bright);
+  font-weight: 700;
+}
+
+/* Ghost button: no border, no fill — the icon carries it. */
+.theme-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  padding: 0 8px;
+  min-width: 30px;
+  min-height: 26px;
+  cursor: pointer;
+  transition: color 150ms var(--ease);
+}
+.theme-toggle:hover { color: var(--bright); }
+.theme-toggle .icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+.icon-sun { display: var(--show-sun); }
+.icon-moon { display: var(--show-moon); }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  padding: 56px 0 48px;
+  border-bottom: 1px solid var(--hairline);
+}
+.masthead .wrap { text-align: center; }
+
+.app-icon {
+  display: block;
+  width: 72px;
+  height: auto;
+  margin: 0 auto 24px;
+}
+
+.wordmark {
+  /* Centred as one block: centring its lines would break the pixel grid. */
+  display: inline-block;
+  text-align: left;
+  margin: 0;
+  color: var(--green);
+  font-weight: 700;
+  font-size: min(2.35vw, 14px);
+  line-height: 1.05;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.tagline {
+  margin: 28px auto 0;
+  color: var(--bright);
+  font-size: 1.375rem;
+  font-weight: 400;
+  line-height: 1.35;
+  max-width: 34em;
+}
+
+.standfirst {
+  margin: 16px auto 0;
+  max-width: 62ch;
+}
+
+.meta {
+  margin: 20px 0 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* ---------- command block ---------- */
+
+.command {
+  margin: 28px 0 0;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--muted);
+  background: var(--lighter-background);
+  text-align: left;
+}
+.command pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  flex: 1;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.command .prompt { color: var(--green); user-select: none; }
+.command .cmd { color: var(--bright); }
+.copy {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--muted);
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0 14px;
+  min-width: 88px;
+  cursor: pointer;
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+}
+.copy:hover { background: var(--selection); color: var(--bright); }
+.copy:active { transform: translateY(1px); }
+.copy[data-state="done"] { color: var(--green); }
+
+.actions {
+  margin: 20px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--muted);
+  color: var(--foreground);
+  text-decoration: none;
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  transition: background 150ms var(--ease), color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+.btn:hover {
+  background: var(--selection);
+  border-color: var(--accent);
+  color: var(--bright);
+}
+.btn:active { transform: translateY(1px); }
+
+/* ---------- sections ---------- */
+
+section { border-bottom: 1px solid var(--hairline); padding: 48px 0; }
+section:last-of-type { border-bottom: 0; }
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--bright);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.idx {
+  color: var(--green);
+  font-weight: 700;
+  font-size: 0.8125rem;
+}
+.lede {
+  margin: 0 0 28px;
+  color: var(--dim);
+  max-width: 68ch;
+}
+
+/* ---------- shots ---------- */
+
+.shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--muted);
+  background: var(--dark-background);
+}
+/* Placeholders only — each matches its file, so nothing is ever scaled off ratio. */
+.shot-wide { aspect-ratio: 1593 / 1113; }
+.shot-mini { aspect-ratio: 937 / 1028; }
+.shot-row {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.shot-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shot-bar { max-width: 380px; aspect-ratio: 622 / 611; }
+.figure-center { text-align: center; }
+.figure-center .shot { margin-left: auto; margin-right: auto; }
+.figure-center figcaption {
+  max-width: 62ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+.shot-span { grid-column: 1 / -1; }
+figure { margin: 0; }
+figure + figure { margin-top: 32px; }
+.shot-label {
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+figcaption {
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* ---------- mailbox comparison ---------- */
+
+.boxes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--muted);
+}
+.box {
+  padding: 20px;
+  border-right: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+}
+.box:last-child { border-right: 0; }
+.box h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--bright);
+}
+.mark {
+  display: block;
+  width: 20px;
+  height: auto;
+  flex: none;
+}
+svg.mark {
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+.box .kind {
+  display: block;
+  margin: 4px 0 14px;
+  color: var(--dim);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+.box p { margin: 0 0 14px; font-size: 0.9375rem; }
+.box .absent {
+  margin: auto 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  color: var(--dim);
+  font-size: 0.875rem;
+}
+.box .absent b {
+  display: block;
+  color: var(--red);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+/* ---------- feature list ---------- */
+
+.features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
+}
+.features li {
+  padding: 14px 0;
+  border-top: 1px solid var(--hairline);
+  display: grid;
+  grid-template-columns: 3ch 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+.features .n { color: var(--green); font-size: 0.8125rem; }
+.features b {
+  display: block;
+  color: var(--bright);
+  font-weight: 700;
+  font-size: 0.9375rem;
+}
+.features .t { font-size: 0.9375rem; }
+
+/* ---------- keys ---------- */
+
+.table-scroll { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--muted);
+}
+th, td {
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 0.9375rem;
+  vertical-align: baseline;
+}
+th {
+  color: var(--dim);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--selection); }
+td.keycell { white-space: nowrap; width: 1%; }
+
+kbd {
+  display: inline-block;
+  border: 1px solid var(--muted);
+  background: var(--background);
+  color: var(--bright);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  padding: 1px 7px;
+  min-width: 2ch;
+  text-align: center;
+}
+.sep { color: var(--dim); padding: 0 2px; }
+
+/* ---------- prose blocks ---------- */
+
+.prose { max-width: 68ch; }
+.prose p { margin: 0 0 16px; }
+.prose p:last-child { margin-bottom: 0; }
+.prose b { color: var(--bright); font-weight: 700; }
+
+pre.block {
+  margin: 0 0 20px;
+  padding: 14px;
+  border: 1px solid var(--muted);
+  background: var(--lighter-background);
+  color: var(--bright);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+pre.block .prompt { color: var(--green); user-select: none; }
+pre.block .c { color: var(--dim); }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+}
+.grid-2 h3 {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--dim);
+}
+
+/* ---------- footer ---------- */
+
+footer {
+  border-top: 1px solid var(--hairline);
+  background: var(--dark-background);
+  padding: 32px 0 48px;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+footer p { margin: 0 0 8px; max-width: 68ch; }
+footer p:last-child { margin-bottom: 0; }
+
+/* ---------- motion ----------
+   Section 9 of the Omarchy design system: transform and opacity only, one
+   short movement per state change, and the one approved piece of repeating
+   brand motion — a green glint crossing the ASCII wordmark every few seconds,
+   then complete stillness. */
+
+@keyframes popin {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Percentage background-position runs 0% (gradient's left edge at the element's
+   left) to 100% (right to right). With a 300% background the highlight sits off
+   the element at both ends, so the mark rests solid green and the glint only
+   crosses in between. */
+@keyframes glint {
+  0%, 8% { background-position: 0% 0; }
+  26%, 100% { background-position: 100% 0; }
+}
+
+@keyframes icon-in {
+  from { opacity: 0; transform: rotate(-30deg) scale(0.7); }
+  to { opacity: 1; transform: none; }
+}
+
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .wordmark {
+    background-image: linear-gradient(100deg,
+      var(--green) 44%, var(--glint) 50%, var(--green) 56%);
+    background-size: 300% 100%;
+    background-position: 100% 0;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: glint 7s var(--ease) 1.6s infinite;
+  }
+}
+
+.js-anim .app-icon { animation: popin 260ms var(--ease) both; }
+.js-anim .wordmark {
+  animation: popin 260ms var(--ease) 60ms both,
+    glint 7s var(--ease) 1.6s infinite;
+}
+.js-anim .tagline { animation: popin 260ms var(--ease) 120ms both; }
+.js-anim .standfirst { animation: popin 260ms var(--ease) 170ms both; }
+.js-anim .command { animation: popin 260ms var(--ease) 210ms both; }
+.js-anim .actions { animation: popin 260ms var(--ease) 250ms both; }
+.js-anim .meta { animation: popin 260ms var(--ease) 290ms both; }
+
+/* One movement per section as it arrives, never one per row. */
+.js-anim section > .wrap,
+.js-anim footer > .wrap {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 260ms var(--ease), transform 260ms var(--ease);
+}
+.js-anim section > .wrap.revealed,
+.js-anim footer > .wrap.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+.theme-toggle .icon { animation: icon-in 180ms var(--ease); }
+
+.shot { transition: border-color 150ms var(--ease); }
+.shot:hover { border-color: var(--accent); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .boxes { grid-template-columns: 1fr; }
+  .box { border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .box:last-child { border-bottom: 0; }
+  .features { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* Narrow enough that the bar would wrap: the name alone carries it. */
+@media (max-width: 520px) {
+  .topbar-id .desc { display: none; }
+}
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 16px; }
+
+  /* Section 12.3: keep a shortcut on one line and wrap the description
+     underneath it rather than letting the row scroll sideways. */
+  .table-scroll thead { position: absolute; left: -9999px; }
+  .table-scroll table, .table-scroll tbody, .table-scroll tr, .table-scroll td {
+    display: block;
+    width: auto;
+  }
+  .table-scroll tr {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .table-scroll tr:last-child { border-bottom: 0; }
+  .table-scroll td {
+    padding: 0;
+    border-bottom: 0;
+  }
+  .table-scroll td.keycell {
+    white-space: normal;
+    margin-bottom: 4px;
+  }
+
+  .masthead { padding: 36px 0 32px; }
+  .tagline { font-size: 1.1875rem; }
+  section { padding: 36px 0; }
+  .shot-row { grid-template-columns: 1fr; }
+  .command { flex-direction: column; }
+  .copy {
+    border-left: 0;
+    border-top: 1px solid var(--muted);
+    min-height: 44px;
+    text-align: left;
+    padding: 0 14px;
+  }
+  .btn { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+  .btn:active, .copy:active { transform: none; }
+  .js-anim section > .wrap,
+  .js-anim footer > .wrap { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main" data-zh="跳到正文">Skip to content</a>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="topbar-id"><b>Omamail</b> <span class="desc" data-zh="给 <a href='https://omarchy.org'>Omarchy</a> 写的邮件插件">an <a href="https://omarchy.org">Omarchy</a> plugin</span></span>
+    <div class="switches">
+      <button type="button" class="theme-toggle" aria-label="Switch to the light theme">
+        <svg class="icon icon-sun" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0m0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13m8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5M3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8m10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0m-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0m9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707M4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708"/></svg>
+        <svg class="icon icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/></svg>
+      </button>
+      <div class="seg lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="zh" aria-pressed="false">中文</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<header class="masthead">
+  <div class="wrap">
+    <svg class="app-icon" viewBox="0 0 64 64" role="img" aria-label="Omamail">
+      <path d="M16 51V24l16 15 16-15v27" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="5" y="13" width="54" height="38" rx="4" fill="none" stroke="var(--foreground)" stroke-width="5"/>
+    </svg>
+    <pre class="wordmark" aria-hidden="true"> ███  █   █  ███  █   █  ███  █████ █
+█   █ ██ ██ █   █ ██ ██ █   █   █   █
+█   █ █ █ █ █████ █ █ █ █████   █   █
+█   █ █   █ █   █ █   █ █   █   █   █
+ ███  █   █ █   █ █   █ █   █ █████ █████</pre>
+    <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">Native mail app special design for Omarchy</h1>
+    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。">Omamail reads, triages and answers your mail over the official Gmail API, over the HEY CLI 37signals publish, or over IMAP and SMTP for every other mailbox.</p>
+
+    <div class="command">
+      <pre><span class="prompt">$ </span><span class="cmd">omarchy plugin add https://github.com/huacnlee/omamail.git --enable</span></pre>
+      <button type="button" class="copy" data-zh="复制" data-copy="omarchy plugin add https://github.com/huacnlee/omamail.git --enable">Copy</button>
+    </div>
+
+    <div class="actions">
+      <a class="btn" href="https://plugins.omarchy.org/plugin.html?id=omamail">OMARCHY PLUGIN</a>
+      <a class="btn" href="https://github.com/huacnlee/omamail">GITHUB</a>
+    </div>
+
+    <p class="meta" data-zh="Quickshell 插件 · 服务、状态栏组件、面板 · MIT 许可">Quickshell plugin · service, bar widget and panel · MIT licensed</p>
+  </div>
+</header>
+
+<main id="main">
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">01</span> <span data-zh="它的样子">What it looks like</span></h2>
+    <p class="lede" data-zh="宽屏三栏，窄了就一栏。一个真正的 Hyprland 窗口，和别的窗口一样平铺。">Three columns when there is room, one when there is not — a real Hyprland window, tiled like any other.</p>
+    <figure>
+      <p class="shot-label" data-zh="大窗口">FULL WINDOW</p>
+      <div class="shot-row">
+        <img class="shot shot-wide shot-span" src="images/full-mail.webp" width="1593" alt="Omamail - Reading a message in the three-column window" loading="lazy">
+        <img class="shot shot-wide" src="images/full-calendar.webp" width="1593" alt="Omamail - The calendar in month view" loading="lazy">
+        <img class="shot shot-wide" src="images/full-compose.webp" width="1593" alt="Omamail - Writing a new message" loading="lazy">
+        <img class="shot shot-wide" src="images/full-settings.webp" width="1593" alt="Omamail - Settings: reading, notifications, undo send and mailboxes" loading="lazy">
+        <img class="shot shot-wide" src="images/full-add-mailbox.webp" width="1593" alt="Omamail - Adding a mailbox: Gmail, HEY or IMAP" loading="lazy">
+      </div>
+      <figcaption data-zh="三栏邮件，加上日历、写信、设置，以及添加邮箱时先问的那一步。">Mail in three columns, plus the calendar, a new message, settings, and the question every new mailbox starts with.</figcaption>
+    </figure>
+    <figure>
+      <p class="shot-label" data-zh="小窗口">MINI SIZE</p>
+      <div class="shot-row shot-row-3">
+        <img class="shot shot-mini" src="images/mini-list.webp" width="937" alt="Omamail - Mini size: the message list, with mailbox tabs above it" loading="lazy">
+        <img class="shot shot-mini" src="images/mini-message.webp" width="937" alt="Omamail - Mini size: one message open in a single detail view" loading="lazy">
+        <img class="shot shot-mini" src="images/mini-compose.webp" width="937" alt="Omamail - Mini size: writing a new message" loading="lazy">
+      </div>
+      <figcaption data-zh="窄下来就只剩一栏：列表、单封信、写信，一次一件事。">Narrow it and one column is left: the list, one message, one letter being written — a single thing at a time.</figcaption>
+    </figure>
+    <figure class="figure-center">
+      <p class="shot-label" data-zh="状态栏快速预览">BAR PREVIEW</p>
+      <img class="shot shot-bar" src="images/bar-preview.webp" width="622" alt="Omamail - The quick preview from the bar: latest mail and what is up next" loading="lazy">
+      <figcaption data-zh="右键点状态栏里的信封，不打开窗口就能看到最新的邮件和接下来的日程。左键打开窗口，中键收信。">Right-click the envelope in the bar for the latest mail and what is up next, without opening the window. Left-click opens it; middle-click checks for mail.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">02</span> <span data-zh="它能打开的邮箱">Mailboxes it can open</span></h2>
+    <p class="lede" data-zh="三种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Three kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
+    <div class="boxes">
+      <div class="box">
+        <h3><img class="mark" src="images/gmail.png" width="20" alt="" loading="lazy">Gmail</h3>
+        <span class="kind" data-zh="用 GOOGLE 账号登录">SIGN IN WITH GOOGLE</span>
+        <p data-zh="标签、会话、Gmail 自己的搜索语法，以及一个 Google 真的会拿去学习的“报告垃圾邮件”。">Labels, conversations, Gmail's own search syntax, and a report-spam that Google actually learns from.</p>
+      </div>
+      <div class="box">
+        <h3><img class="mark" src="images/hey.png" width="20" alt="" loading="lazy">HEY</h3>
+        <span class="kind" data-zh="通过 HEY CLI">THROUGH THE HEY CLI</span>
+        <p data-zh="不需要地址，也不需要密码：37signals 发布的 <code>hey</code> 持有令牌。">No address and no password — the HEY CLI 37signals publish holds the token.</p>
+      </div>
+      <div class="box">
+        <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>IMAP</h3>
+        <span class="kind" data-zh="一个地址和一个应用密码">AN ADDRESS AND AN APP PASSWORD</span>
+        <p data-zh="Fastmail、iCloud、Outlook、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。">Fastmail, iCloud, Outlook, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">03</span> <span data-zh="它做什么">What it does</span></h2>
+    <p class="lede" data-zh="为坐进 Omarchy 而设计，而不是把一个网页应用塞进窗口里。">Designed to sit inside Omarchy, not to look like a web app in a window.</p>
+    <ul class="features">
+      <li><span class="n">01</span><span class="t"><b data-zh="等宽、直角、够密">Monospace, square, dense</b><span data-zh="屏幕上除了你的邮件，没有别的东西。">Nothing on screen that is not your mail.</span></span></li>
+      <li><span class="n">02</span><span class="t"><b data-zh="键盘优先">Keyboard-first</b><span data-zh="移动、归档、加星、回复、撰写、换邮箱、换账号、搜索，都有键。">Move, archive, star, reply, compose, switch mailbox, switch account, search.</span></span></li>
+      <li><span class="n">03</span><span class="t"><b data-zh="一直在数">Always counting</b><span data-zh="窗口关着的时候未读徽标照常工作，每个账号都算，新信落地时发一条桌面通知。">The unread badge keeps working while the window is shut, for every account, with a notification when new mail lands.</span></span></li>
+      <li><span class="n">04</span><span class="t"><b data-zh="一个窗口">One window</b><span data-zh="读信、归档、加星、删除、搜索、回信，不必再开一个占据独立区域的窗口。">Read, archive, star, trash, search and answer without a second window taking a region of its own.</span></span></li>
+      <li><span class="n">05</span><span class="t"><b data-zh="能回复的会议邀请">Invitations you can answer</b><span data-zh="从邮件自带的日历部分读出会议，用你的时区而不是组织者的时区画出来。是 / 也许 / 否直接回复组织者。Gmail 和 IMAP 都行，HEY 不行。">Read out of the message's own calendar part and drawn as a meeting, in your clock rather than the organiser's. Yes, Maybe and No answer the organiser. Gmail and IMAP alike; not HEY.</span></span></li>
+      <li><span class="n">06</span><span class="t"><b data-zh="一键退订">Off a list in one click</b><span data-zh="支持一键退订的邮件不必离开窗口就能退掉。在你开口之前，绝不会去请求发件人的地址。">A newsletter that supports one-click unsubscribing is unsubscribed from without leaving the window. Nothing is ever fetched from a sender's address until you ask.</span></span></li>
+      <li><span class="n">07</span><span class="t"><b data-zh="图片默认拦下">Images stay blocked</b><span data-zh="加载发件人的图片等于告诉对方这封信被读了、用的哪个地址、什么时候。要加载得你开口，而且只对那一封生效。">Loading a sender's pictures tells them the mail was read, from which address and when. They load when you ask, for that one message.</span></span></li>
+      <li><span class="n">08</span><span class="t"><b data-zh="你的主题">Your theme</b><span data-zh="每一个颜色都来自当前的 Omarchy 主题，桌面一换，邮箱立刻跟着换。">Every colour comes from the active Omarchy theme, so the mailbox changes the moment the desktop does.</span></span></li>
+      <li><span class="n">09</span><span class="t"><b data-zh="凭据在钥匙串里">Keyring-backed</b><span data-zh="Gmail 刷新令牌和每一个 IMAP 密码都放在 GNOME Keyring 里：不在配置文件里，也不在命令行上。">The Gmail refresh token and every IMAP password live in GNOME Keyring — never in a config file, never on a command line.</span></span></li>
+      <li><span class="n">10</span><span class="t"><b data-zh="多个邮箱">Several mailboxes</b><span data-zh="每个账号有自己的收件箱、缓存和未读数；列表、标签和头像按账号缓存，所以切换从不等网络。">Each with its own inbox, cache and unread count. List, labels and profile are cached per account, so switching never waits on the network.</span></span></li>
+      <li><span class="n">11</span><span class="t"><b data-zh="mailto: 链接">mailto: links</b><span data-zh="插件启用之后，桌面上任何地方点一个地址——浏览器、PDF、通知——都在这里打开撰写。">Once the plugin is enabled, clicking an address anywhere on the desktop opens compose here.</span></span></li>
+      <li><span class="n">12</span><span class="t"><b data-zh="撤销发送">Undo send</b><span data-zh="出站邮件默认延迟十秒，够你反悔。设成 0 就立即发送。">Outgoing mail is delayed by ten seconds so you can cancel it. Set it to 0 to send immediately.</span></span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">04</span> <span data-zh="按键">Keys</span></h2>
+    <p class="lede" data-zh="键盘属于这个应用，上下文决定一个键在哪里意味着什么。所有绑定只写在一张表里，快捷键面板和状态栏提示都从那张表渲染。">The keyboard belongs to the application, and the context says what a key means where. Every binding lives in one table; the shortcut sheet and the status-bar hints render from it.</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col" data-zh="按键">Key</th>
+            <th scope="col" data-zh="作用">What it does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="keycell"><kbd>j</kbd><span class="sep">/</span><kbd>k</kbd></td><td data-zh="下移 / 上移">Move down / up</td></tr>
+          <tr><td class="keycell"><kbd>Return</kbd><span class="sep">or</span><kbd>o</kbd></td><td data-zh="打开选中的邮件">Open the selected message</td></tr>
+          <tr><td class="keycell"><kbd>Escape</kbd></td><td data-zh="回到列表；在列表里则关闭窗口">Back to the list; close the window from the list</td></tr>
+          <tr><td class="keycell"><kbd>e</kbd></td><td data-zh="归档">Archive</td></tr>
+          <tr><td class="keycell"><kbd>d</kbd></td><td data-zh="移到废纸篓">Move to trash</td></tr>
+          <tr><td class="keycell"><kbd>s</kbd></td><td data-zh="加星或取消星标">Star or unstar</td></tr>
+          <tr><td class="keycell"><kbd>Shift</kbd> + <kbd>I</kbd><span class="sep">/</span><kbd>Shift</kbd> + <kbd>U</kbd></td><td data-zh="标为已读 / 未读">Mark read / unread</td></tr>
+          <tr><td class="keycell"><kbd>r</kbd><span class="sep">/</span><kbd>a</kbd><span class="sep">/</span><kbd>f</kbd></td><td data-zh="回复、全部回复、转发">Reply, reply all, forward</td></tr>
+          <tr><td class="keycell"><kbd>c</kbd></td><td data-zh="写新邮件">Compose</td></tr>
+          <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>Return</kbd></td><td data-zh="发送">Send</td></tr>
+          <tr><td class="keycell"><kbd>/</kbd><span class="sep">or</span><kbd>Ctrl</kbd> + <kbd>K</kbd></td><td data-zh="搜索">Search</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>1</kbd> … <kbd>Alt</kbd> + <kbd>0</kbd></td><td data-zh="导航栏上对应编号的邮箱——按住 Alt，导航栏会说明哪个是哪个">The mailbox with that number on the rail — hold Alt and the rail says which is which</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>A</kbd></td><td data-zh="切换账号">Switch account</td></tr>
+          <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>=</kbd><span class="sep">/</span><kbd>Ctrl</kbd> + <kbd>-</kbd><span class="sep">/</span><kbd>Ctrl</kbd> + <kbd>0</kbd></td><td data-zh="缩放正文，或复位">Zoom the message body, or reset it</td></tr>
+          <tr><td class="keycell"><kbd>F5</kbd></td><td data-zh="收信">Check for mail</td></tr>
+          <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>?</kbd></td><td data-zh="其余全部快捷键">Every shortcut</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">05</span> <span data-zh="它不做什么">What it does not do</span></h2>
+    <div class="prose">
+      <p data-zh="<b>没有内嵌浏览器。</b>邮件在 Omamail 自己构建的阅读视图里打开：标题、段落、列表和链接，用你自己的字体，行宽舒服，里面没有发件人的任何排版。发件人自己的版式离你只有一次点击，那一份走 Qt 自己的富文本引擎，它处理的正是真实邮件实际写成的 HTML 4 加行内样式那一子集。插件里根本嵌不进浏览器引擎：<code>QtWebEngineQuick::initialize()</code> 必须在宿主进程构建 <code>QGuiApplication</code> 之前运行，而插件加载得晚得多。"><b>No embedded browser.</b> A message opens in a reading view Omamail builds itself: headings, paragraphs, lists and links in your own type at a readable measure, with none of the sender's presentation in it. The sender's own layout is one click away, and that one renders through Qt's own rich text engine. A browser engine cannot be embedded in a plugin at all: <code>QtWebEngineQuick::initialize()</code> has to run before the host process builds its <code>QGuiApplication</code>, and a plugin loads long after that.</p>
+      <p data-zh="<b>不能下载附件。</b>暂时还不能。"><b>No attachment downloads.</b> Not yet.</p>
+      <p data-zh="<b>不会替你去敲自己网络的门。</b>指向本机或本机所在网络的图片——回环地址、私有地址、<code>.local</code> 名称、<code>file:</code>——永远不会被拉取，无论你请求多少次。"><b>It will not knock on your own network's door.</b> Images pointed at this machine or at the network around it — loopback, private addresses, <code>.local</code> names, <code>file:</code> — are never fetched at all, however often you ask.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="idx">06</span> <span data-zh="装上和卸掉">Install and remove</span></h2>
+    <div class="grid-2">
+      <div>
+        <h3 data-zh="装上">INSTALL</h3>
+        <pre class="block"><span class="prompt">$ </span>omarchy plugin add https://github.com/huacnlee/omamail.git --enable</pre>
+        <div class="prose">
+          <p data-zh="然后点状态栏里的信封。想用键盘打开，把这一行加进 <code>~/.config/hypr/bindings.lua</code>：">Then click the envelope in the bar. To open it from the keyboard, add this to <code>~/.config/hypr/bindings.lua</code>:</p>
+        </div>
+        <pre class="block">o.bind("SUPER + SHIFT + G", "Omamail",
+       "omarchy shell shell toggle omamail '{}'")</pre>
+        <div class="prose">
+          <p data-zh="目标是 <code>shell</code>，不是插件 id：窗口由 shell 召唤，而 shell 正是最初加载它的那一个。">The target is <code>shell</code>, not the plugin id: the window is summoned by the shell, which is what loads it in the first place.</p>
+          <p data-zh="需要 Omarchy 4，外加 <code>socat</code>、<code>secret-tool</code>、<code>openssl</code>、<code>xdg-open</code> 和 <code>curl</code>——这些 Omarchy 都已经自带。HEY 邮箱还需要 <code>hey</code>。">Requires Omarchy 4, plus <code>socat</code>, <code>secret-tool</code>, <code>openssl</code>, <code>xdg-open</code> and <code>curl</code> — all of which Omarchy already ships. A HEY mailbox additionally needs <code>hey</code>.</p>
+        </div>
+      </div>
+      <div>
+        <h3 data-zh="卸掉">REMOVE</h3>
+        <pre class="block"><span class="prompt">$ </span>omarchy plugin remove omamail</pre>
+        <div class="prose">
+          <p data-zh="这只带走插件本身。它写下的东西都不在你的 Omarchy 配置里，所以清不清理是另一回事，完全由你决定：">That takes the plugin itself. Nothing it wrote lives inside your Omarchy config, so removing those is separate and entirely up to you:</p>
+        </div>
+        <pre class="block"><span class="prompt">$ </span>secret-tool clear service omamail  <span class="c"># credentials</span>
+<span class="prompt">$ </span>hey auth logout                    <span class="c"># HEY session</span>
+<span class="prompt">$ </span>rm -rf ~/.config/omamail           <span class="c"># accounts</span>
+<span class="prompt">$ </span>rm -rf ~/.cache/omamail            <span class="c"># cached mail</span></pre>
+        <div class="prose">
+          <p data-zh="在应用里退出登录，本身就会清掉钥匙串条目。这个插件从不改动你的 shell、Hyprland 或主题配置。">Signing out from inside the app clears the keyring entry on its own. The plugin never edits your shell, Hyprland or theme configuration.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p data-zh="Omamail 是一个独立项目，与 Google 和 37signals 均无关联。Gmail 是 Google LLC 的商标；HEY 是 37signals, LLC 的商标。">Omamail is an independent project and is not affiliated with Google or 37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals, LLC.</p>
+    <p><span data-zh="作者">By</span> <a href="https://github.com/huacnlee">Jason Lee</a> · <a href="https://github.com/huacnlee/omamail/blob/main/LICENSE">MIT</a> · <a href="https://github.com/huacnlee/omamail">github.com/huacnlee/omamail</a> · <a href="https://omarchy.org">omarchy.org</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var nodes = document.querySelectorAll("[data-zh]");
+  var buttons = document.querySelectorAll(".lang button");
+  var copyLabels = { en: "Copied", zh: "已复制" };
+  var lang = "en";
+
+  Array.prototype.forEach.call(nodes, function (n) {
+    n.setAttribute("data-en", n.innerHTML);
+  });
+
+  function apply(next) {
+    lang = next === "zh" ? "zh" : "en";
+    Array.prototype.forEach.call(nodes, function (n) {
+      n.innerHTML = n.getAttribute("data-" + lang);
+    });
+    root.lang = lang === "zh" ? "zh-Hans" : "en";
+    Array.prototype.forEach.call(buttons, function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang));
+    });
+    try { localStorage.setItem("omamail-lang", lang); } catch (e) {}
+    labelTheme();
+  }
+
+  Array.prototype.forEach.call(buttons, function (b) {
+    b.addEventListener("click", function () { apply(b.getAttribute("data-lang")); });
+  });
+
+  var themeToggle = document.querySelector(".theme-toggle");
+  var themeLabels = {
+    en: { light: "Switch to the light theme", dark: "Switch to the dark theme" },
+    zh: { light: "切换到浅色主题", dark: "切换到深色主题" }
+  };
+
+  function currentTheme() {
+    var set = root.getAttribute("data-theme");
+    if (set === "light" || set === "dark") return set;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "dark";
+  }
+
+  function labelTheme() {
+    // The button shows, and names, the theme it switches to.
+    themeToggle.setAttribute(
+      "aria-label",
+      themeLabels[lang][currentTheme() === "dark" ? "light" : "dark"]
+    );
+  }
+
+  themeToggle.addEventListener("click", function () {
+    var next = currentTheme() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("omamail-theme", next); } catch (e) {}
+    labelTheme();
+  });
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", labelTheme);
+  }
+
+  labelTheme();
+
+  var stored = null;
+  try { stored = localStorage.getItem("omamail-lang"); } catch (e) {}
+  if (!stored && /^zh/i.test(navigator.language || "")) stored = "zh";
+  if (stored) apply(stored);
+
+  var panels = document.querySelectorAll("section > .wrap, footer > .wrap");
+  if (root.classList.contains("js-anim") && "IntersectionObserver" in window) {
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("revealed");
+        seen.unobserve(entry.target);
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.04 });
+    Array.prototype.forEach.call(panels, function (n) { seen.observe(n); });
+  } else {
+    Array.prototype.forEach.call(panels, function (n) { n.classList.add("revealed"); });
+  }
+
+  var copy = document.querySelector(".copy");
+  if (copy && navigator.clipboard) {
+    copy.addEventListener("click", function () {
+      navigator.clipboard.writeText(copy.getAttribute("data-copy")).then(function () {
+        copy.textContent = copyLabels[lang];
+        copy.setAttribute("data-state", "done");
+        setTimeout(function () {
+          copy.innerHTML = copy.getAttribute("data-" + lang);
+          copy.removeAttribute("data-state");
+        }, 1600);
+      });
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

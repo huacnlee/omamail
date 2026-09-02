@@ -6,9 +6,16 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
-# Found rather than globbed: the layout groups by module, and a module with no
-# QML in it (message/, today) turns a literal glob into a grep error that hides
-# whatever the check was meant to say.
+# Enumerated rather than globbed: the layout groups by module, and a module
+# with no QML in it (message/, today) turns a literal glob into a grep error
+# that hides whatever the check was meant to say.
+#
+# git does the enumerating rather than `find`. `--cached --others
+# --exclude-standard` is the tracked files plus the ones not committed yet —
+# this checkout's source, so a file you are still writing is checked — and
+# nothing that is ignored. `find` walks ignored paths too, and a linked
+# worktree under .claude/ is a second checkout of this same repository whose
+# copies of these files would be reported here as if they were ours.
 #
 # A read loop rather than `mapfile`, which is bash 4 and absent from the bash
 # 3.2 that macOS still ships — a check that only runs on the deployment target
@@ -16,11 +23,11 @@ fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 # path with a space in it stays one path.
 QML_FILES=()
 while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
-  < <(find . -name '*.qml' -not -path './.git/*' -print0)
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.qml')
 
 JS_FILES=()
 while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
-  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*')
 
 # A developer machine may point /bin/sh at bash while the release runner points
 # it at dash. Bash's global parameter replacement then passes locally and dies
@@ -119,6 +126,46 @@ if awk '
   END { exit found ? 0 : 1 }
 ' Service.qml; then
   fail "changing how a message is read must not re-render or re-fetch it"
+fi
+
+# 3c. Which way a message runs is decided in one place, and the two questions it
+#     answers stay separate.
+#
+# Qt resolves a paragraph's direction from its own first strong character and is
+# good at it. Two things it cannot do are what Direction.js is for, and both are
+# easy to undo by "simplifying" the code that uses it.
+grep -q 'promoteDirection' message/Html.js \
+  || fail "a CSS direction must be promoted to the dir attribute Qt actually reads"
+# The sheet's physical sides and the body's `dir` are one statement. Qt places a
+# list marker on the side the block runs from, so a sheet that indents a list
+# from the right while the block is still left-to-right does not move the bullet
+# — it drops it. Splitting these was tried; the bullets went missing.
+grep -q 'function baseDirectionAttribute' message/Html.js \
+  || fail "the body direction and the stylesheet's sides must be written together"
+if grep -n 'palette.pinned' message/Html.js; then
+  fail "a document has one direction, not a direction and a flag saying whether to mean it"
+fi
+
+# A reply prefix is Latin whatever the thread is written in, so a subject asked
+# with `resolve` rather than `resolveSubject` puts every message in a thread
+# after the first against the wrong edge — which is the bug the module exists
+# for, and the one a refactor is most likely to reintroduce.
+for file in components/MessageRow.qml components/MessageReader.qml bar/BarPreview.qml; do
+  grep -q 'Direction.resolveSubject' "$file" \
+    || fail "$file must strip the reply prefix before asking which way a subject runs"
+done
+
+# The same mistake on the body side. The plain reading of an HTML message
+# carries this client's own `[image N]` markers in front of the sender's first
+# word, so `resolve` on it answers about a Latin "i" that omamail wrote.
+grep -q 'Direction.resolveBody' components/MessageReader.qml \
+  || fail "the reader must look past its own image markers before asking which way a body runs"
+
+# The interface is not mirrored: this setting is a fact about the mail, not
+# about the window around it. A LayoutMirroring here would be a different
+# feature wearing this one's name.
+if grep -rn 'LayoutMirroring' -- "${QML_FILES[@]}"; then
+  fail "message direction must not mirror the interface; it applies to content only"
 fi
 
 # 4. The bar switches `barForeground` when transparent mode needs contrast.
@@ -292,10 +339,28 @@ if "onAccountChosen" not in text or "root.switchAccount(index)" not in text:
     raise SystemExit("test_source.sh: the account picker must use view-preserving switching")
 service = Path("Service.qml").read_text()
 if "accountId: root.calendarAccountId" not in service:
-    raise SystemExit("test_source.sh: the visible Calendar must follow the displayed account")
+    raise SystemExit("test_source.sh: the visible Calendar must be told which account is displayed")
+# What the calendar depends on is what its cache is keyed by, and under the
+# unified view that is not the mailbox: the same calendars are shown whichever
+# one is open. Keying by the account there stored a copy of the same events per
+# account and turned every mailbox switch into a cache miss and a full refetch.
+controller = Path("calendar/CalendarController.qml").read_text()
+if "eventCache.get(refreshScope" not in controller or "eventCache.put(refreshScope" not in controller:
+    raise SystemExit("test_source.sh: the event cache must be keyed by the calendar scope, not the mailbox")
+# The reload watches the scope rather than the two things that go into it. A
+# mailbox switch under the unified view changes nothing on screen, and neither
+# does the setting for a controller that had no mailbox to follow — watching the
+# inputs separately got those two wrong in opposite directions.
+if "onCalendarScopeChanged: reloadVisibleRange()" not in controller:
+    raise SystemExit("test_source.sh: the visible range must reload on a change of scope, not of mailbox")
+if "onAccountIdChanged" in controller or "onUnifiedCalendarViewChanged" in controller:
+    raise SystemExit("test_source.sh: reloading on either input separately is what the scope replaced")
+composer_default = Path("components/CalendarEventComposer.qml").read_text()
+if "preferredCalendarId()" not in composer_default:
+    raise SystemExit("test_source.sh: a new event must open on the mailbox being read, not the first account")
 composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
-    raise SystemExit("test_source.sh: event creation must offer only writable calendars of the current account")
+    raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")
 PY
 grep -q 'text: "Create event\.\.\."' App.qml \
   || fail "calendar mode needs a Create event... header action"
@@ -900,8 +965,8 @@ grep -q 'function beginDraft' components/ComposeView.qml \
   || fail "ComposeView must fill a new draft from a mailto"
 grep -q 'omarchy-shell shell summon' scripts/mailto.sh \
   || fail "the mailto handler must summon Omamail, not toggle it"
-grep -q 'install-mailto.sh' install.sh \
-  || fail "install.sh must register the mailto desktop handler"
+grep -q 'register-mailto.sh' scripts/link-plugin.sh \
+  || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
 grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \

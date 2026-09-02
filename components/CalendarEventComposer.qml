@@ -66,10 +66,30 @@ Rectangle {
     recurring = false
     recurrenceFrequency = "WEEKLY"
     resultText.text = ""
-    var groups = controller ? controller.writableSourceGroups : []
-    selectedSourceId = groups.length ? String(groups[0].calendars[0].id) : ""
+    // The mailbox being read is the one the event most likely belongs to, and
+    // under the unified view it is not the first group: `groupByAccount` walks
+    // the stored accounts in their own order, so "Create event..." from mailbox
+    // B would otherwise open with A's calendar chosen and write there unless
+    // the user noticed the picker.
+    selectedSourceId = preferredCalendarId()
     opened = true
     Qt.callLater(titleField.forceActiveFocus)
+  }
+
+  function preferredCalendarId() {
+    var groups = controller ? controller.writableSourceGroups : []
+    if (!groups.length) return ""
+    // `groupByAccount` names an account's group "account:" + its id, which is
+    // the only place the owner survives into the group.
+    var wanted = controller ? String(controller.accountId || "") : ""
+    if (wanted !== "") {
+      for (var i = 0; i < groups.length; i++) {
+        if (String(groups[i].id || "") !== "account:" + wanted) continue
+        if (groups[i].calendars && groups[i].calendars.length)
+          return String(groups[i].calendars[0].id)
+      }
+    }
+    return String(groups[0].calendars[0].id)
   }
 
   function beginEdit(sourceId, event) {

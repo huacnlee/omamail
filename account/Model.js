@@ -586,18 +586,55 @@ function barTooltip(state, email, unread, provider, authKind) {
 
 // ------------------------------------------------------------ new mail
 
+// The newest timestamp in a page of rows, in milliseconds, or zero if none of
+// them carry one. This is the mailbox's own clock rather than this machine's,
+// which is the whole point of it below.
+function newestDate(summaries) {
+  var list = Array.isArray(summaries) ? summaries : []
+  var newest = 0
+  for (var i = 0; i < list.length; i++) {
+    var summary = list[i]
+    if (!summary || !summary.date || typeof summary.date.getTime !== "function") continue
+    var time = summary.date.getTime()
+    if (isFinite(time) && time > newest) newest = time
+  }
+  return newest
+}
+
 // Only messages the panel has not seen before, and only ones that are actually
 // new rather than merely newly fetched: the first load after start must not
 // fire a notification for every message already sitting in the inbox.
-function newArrivals(summaries, seenIds, primed) {
+//
+// `seenIds` answers that for everything the first page held, and `floorMs`
+// answers it for the rest — an unread message from last year that was never on
+// the cached page is not an arrival just because this is the fetch that first
+// returned it. The floor is the newest timestamp the mailbox itself reported
+// when notifications were primed, so the comparison is the server's clock
+// against the server's clock. Taking it from `Date.now()` instead is what made
+// a machine whose clock ran fast stop notifying altogether, silently and for
+// the whole session: every arrival was older than a "now" that had not
+// happened yet on the server.
+//
+// It is set once and never raised, so a message that arrives out of order —
+// which a mailing list does routinely — is still announced.
+//
+// A row with no usable date is announced rather than dropped. `seenIds` is the
+// guard that matters, and a provider that does not date a summary would
+// otherwise never notify at all.
+function newArrivals(summaries, seenIds, primed, floorMs) {
   if (!primed) return []
   var list = Array.isArray(summaries) ? summaries : []
   var seen = seenIds || {}
   var arrivals = []
+  var floor = typeof floorMs === "number" && isFinite(floorMs) && floorMs > 0 ? floorMs : 0
   for (var i = 0; i < list.length; i++) {
     var summary = list[i]
     if (!summary || !summary.unread || !summary.inInbox) continue
     if (seen[summary.id]) continue
+    if (floor > 0 && summary.date && typeof summary.date.getTime === "function") {
+      var time = summary.date.getTime()
+      if (isFinite(time) && time < floor) continue
+    }
     arrivals.push(summary)
   }
   return arrivals

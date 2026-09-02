@@ -12,6 +12,7 @@ import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
+import "message/Direction.js" as Direction
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -48,16 +49,26 @@ Item {
     refreshIntervalSec: 120,
     maxMessages: 25,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
+    contentDirection: Direction.MODE_DEFAULT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
-    undoSendSeconds: 10
+    undoSendSeconds: 10,
+    unifiedCalendarView: false
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  // Which way a message's own text is read: worked out from the text, or fixed
+  // by the reader. The window's chrome is not affected either way — this is a
+  // fact about the mail, not about the interface around it.
+  readonly property string contentDirection: Direction.normalizeMode(
+    settings ? settings.contentDirection : null)
+  readonly property bool unifiedCalendarView: !!settings
+    && settings.unifiedCalendarView === true
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -72,7 +83,7 @@ Item {
 
   function registerMailtoHandler() {
     if (pluginDir === "" || mailtoInstaller.running) return
-    mailtoInstaller.command = [pluginDir + "/scripts/install-mailto.sh", pluginDir]
+    mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
     mailtoInstaller.running = true
   }
 
@@ -105,6 +116,18 @@ Item {
 
   function setAlwaysRenderHeavyMessages(value) {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
+  }
+
+  function setNotifyNewMail(value) {
+    persistSetting("notifyNewMail", value ? "On" : "Off")
+  }
+
+  function setContentDirection(value) {
+    persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setUnifiedCalendarView(value) {
+    persistSetting("unifiedCalendarView", value === true)
   }
 
   // ---------------------------------------------------------- the accounts

@@ -49,8 +49,8 @@ fi
 
 # Behind the remote means the release would omit commits that are already on
 # main, and the push would be rejected afterwards anyway.
-git fetch --quiet origin main
-[ "$(git rev-list --count HEAD..origin/main)" -eq 0 ] \
+remote_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+git merge-base --is-ancestor "$remote_main" HEAD 2>/dev/null \
   || fail "main is behind origin/main; pull first"
 
 # The suite the release workflow runs, run before the tag rather than after it.
