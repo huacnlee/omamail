@@ -122,12 +122,12 @@ used to exist, and they had.
 | `zoomReset` | `Ctrl+Shift+0` | reader | Reset the zoom |
 | `refresh` | `F5` | all | Check for mail |
 | `settings` | `Ctrl+,` | all | Open settings |
-| `help` | `Ctrl+K`, `?`, `Ctrl+/`, `Ctrl+?` | mail | Toggle all keybindings |
+| `help` | `?` | mail | Toggle all keybindings |
 | `back` | `Escape` | all | Back, or close the window |
 <!-- END BINDINGS -->
 
-The bare `/` stays in the mailbox because fields need it as text. `Ctrl+K`
-opens the complete key sheet from every context.
+The bare `?` opens the complete key sheet from mail. In a text-entry context it
+stays text, like every other bare character except `Escape`.
 
 In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
 

@@ -22,11 +22,15 @@ fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 # is a check nobody runs while writing the code. NUL-separated either way, so a
 # path with a space in it stays one path.
 QML_FILES=()
-while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
+while IFS= read -r -d '' found; do
+  [ ! -f "$found" ] || QML_FILES+=("$found")
+done \
   < <(git ls-files -z --cached --others --exclude-standard -- '*.qml')
 
 JS_FILES=()
-while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
+while IFS= read -r -d '' found; do
+  [ ! -f "$found" ] || JS_FILES+=("$found")
+done \
   < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*')
 
 # A developer machine may point /bin/sh at bash while the release runner points
@@ -196,8 +200,22 @@ done
 if grep -n 'modelData\.unread' components/AccountSwitcher.qml; then
   fail "the account switcher must identify mailboxes without count badges"
 fi
-grep -q 'mapToGlobal(0, 0)' components/UserBar.qml \
-  || fail "the account switcher must anchor to the user bar, not the click position"
+if [ -e components/UserBar.qml ] || grep -q 'UserBar {' components/MailboxSidebar.qml; then
+  fail "the account control belongs in the status bar, not the sidebar"
+fi
+grep -q 'objectName: "status-account-button"' App.qml \
+  || fail "the status address must be the account switcher trigger"
+grep -q 'selected: accountSwitcher.opened' App.qml \
+  || fail "the status account trigger must stay selected while its popup is open"
+grep -q 'accountSwitcher.openAt(scene.x, scene.y)' App.qml \
+  || fail "the account switcher must anchor to the status address"
+awk '
+  /id: accountBackground/ { in_background = 1 }
+  in_background && /anchors.margins: Style.space\(2\)/ { found = 1 }
+  in_background && /^            }/ { exit !found }
+  END { exit !found }
+' App.qml \
+  || fail "the status account hover must use the same visual inset as the sidebar toggle"
 awk '
   /id: footer$/ { in_footer = 1 }
   in_footer && /anchors.leftMargin: Style.space\(8\)/ { left = 1 }
@@ -366,19 +384,33 @@ composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
     raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")
 PY
-grep -q 'text: "Create event\.\.\."' App.qml \
-  || fail "calendar mode needs a Create event... header action"
+python3 - <<'PY'
+from pathlib import Path
+
+text = Path("App.qml").read_text()
+header = text[text.index("id: headerRight"):text.index("PanelSeparator {", text.index("id: headerRight"))]
+if "spacing: Style.space(8)" not in header:
+    raise SystemExit("test_source.sh: refresh needs breathing room before the header action")
+for name in ("create-event-button", "compose-button"):
+    marker = 'objectName: "' + name + '"'
+    start = text.index(marker)
+    opening = text.rfind("\n          Button {", 0, start)
+    if opening < 0:
+        raise SystemExit("test_source.sh: " + name + " must use a normal text button")
+    block = text[opening:text.index("\n          }", start)]
+    if "iconName:" in block:
+        raise SystemExit("test_source.sh: " + name + " must not carry an icon")
+PY
 python3 - <<'PY'
 from pathlib import Path
 
 sidebar = Path("components/MailboxSidebar.qml").read_text()
 footer = sidebar[sidebar.index("id: footer"):sidebar.index("component Entry:")]
 if 'label: "Calendar"' not in footer or "calendarRequested" not in footer:
-    raise SystemExit("test_source.sh: Calendar must be fixed above the sidebar account row")
+    raise SystemExit("test_source.sh: Calendar must stay fixed at the foot of the sidebar")
 calendar = footer.index('label: "Calendar"')
-separator = footer.index("PanelSeparator", calendar)
-if "Style.space(6)" not in footer[calendar:separator]:
-    raise SystemExit("test_source.sh: Calendar must keep a gap above the account separator")
+if "Style.space(6)" not in footer[calendar:]:
+    raise SystemExit("test_source.sh: Calendar must keep breathing room at the sidebar foot")
 
 app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
@@ -792,7 +824,7 @@ grep -q 'accountId = Accounts.accountId(accountEmail, providerId)' account/MailA
 # for actual links such as URLs inside the message reader.
 for file in components/IconButton.qml components/IconTextButton.qml components/AppMenu.qml \
   components/MessageMenu.qml components/AccountSwitcher.qml components/ProviderPicker.qml \
-  components/MailboxSidebar.qml components/UserBar.qml; do
+  components/MailboxSidebar.qml; do
   if grep -n 'PointingHandCursor' "$file"; then
     fail "$file uses a web-link cursor for a native control"
   fi
@@ -811,8 +843,22 @@ grep -q 'text: "Add a mailbox\.\.\."' components/SettingsPage.qml \
   || fail "Add a mailbox opens a workflow and needs an ellipsis"
 grep -q 'tooltipText: "Add another mail account"' components/SettingsPage.qml \
   || fail "the add-account tooltip must be provider-neutral"
+python3 - <<'PY'
+from pathlib import Path
+
+menu = Path("components/AppMenu.qml").read_text()
+calendar = menu.index("id: calendarRow")
+settings = menu.index("id: settingsRow")
+switch = menu.index("id: switchRow")
+separator = menu.index("MenuSeparatorLine {", switch)
+if not calendar < switch < settings < separator:
+    raise SystemExit("test_source.sh: Settings must stay with the account actions below Calendar")
+settings_block = menu[settings:menu.index("}", settings)]
+if 'text: "Settings..."' not in settings_block:
+    raise SystemExit("test_source.sh: Settings opens an extra page and needs an ellipsis")
+PY
 if awk '
-  /id: accountLine/ { in_status = 1 }
+  /id: accountControl/ { in_status = 1 }
   in_status && /resultSummary/ { exit 0 }
   in_status && /^        }/ { exit 1 }
   END { exit 1 }
@@ -946,6 +992,7 @@ limit=$((128 * 1024))
 preview_limit=$((384 * 1024))
 oversized=$(git ls-files -z \
   | xargs -0 -I{} sh -c '
+      [ -f "{}" ] || exit 0
       case "{}" in
         preview.png) ceiling='"$preview_limit"' ;;
         *) ceiling='"$limit"' ;;

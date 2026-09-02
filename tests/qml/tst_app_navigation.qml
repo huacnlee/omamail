@@ -355,6 +355,34 @@ Item {
       compare(kinds(), "list", "the list is not a step back from the calendar")
     }
 
+    function test_the_status_address_opens_the_account_switcher() {
+      var trigger = named(app, "status-account-button")
+      verify(trigger && trigger.visible, "the status address is the account-menu trigger")
+      var switcher = having(app, function(it) {
+        return typeof it.openCentered === "function" && typeof it.accountChosen === "function"
+      })
+      verify(switcher && !switcher.opened)
+
+      mouseClick(trigger)
+      tryCompare(switcher, "opened", true)
+      compare(trigger.selected, true, "the trigger stays selected while its popup is open")
+      switcher.close()
+    }
+
+    function test_header_creation_actions_keep_their_labels() {
+      var compose = named(app, "compose-button")
+      verify(compose && compose.visible)
+      compare(compose.text, "Compose")
+      compare(typeof compose.iconName, "undefined")
+
+      app.showCalendar()
+      waitForRendering(app)
+      var createEvent = named(app, "create-event-button")
+      verify(createEvent && createEvent.visible)
+      compare(createEvent.text, "Create event")
+      compare(typeof createEvent.iconName, "undefined")
+    }
+
     function test_an_event_opened_for_reading_is_a_place() {
       app.runShortcut("calendarView", "")
       var calendar = having(app, function(it) { return typeof it.closeDetail === "function" })

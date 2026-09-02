@@ -145,7 +145,6 @@ Item {
         text: "Calendar"
         onActivated: { menu.close(); root.calendarRequested() }
       }
-
       MenuSeparatorLine {
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
@@ -178,7 +177,6 @@ Item {
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }
-
       MenuSeparatorLine {
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor

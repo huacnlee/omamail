@@ -26,6 +26,7 @@ var GLYPHS = {
   browser: 0xF03CC,      // open-in-new
   refresh: 0xF0450,      // refresh
   send: 0xF048A,         // send — the plane, solid: the outline one hatches at 16px
+  sent: 0xF10DD,         // email-send-outline — balanced with the sidebar's outline glyphs
   undo: 0xF054C,         // undo
   menu: 0xF035C,         // menu
   plus: 0xF0415,         // plus

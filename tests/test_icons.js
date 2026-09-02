@@ -24,6 +24,8 @@ assert.strictEqual(icons.glyph("unread", true), icons.glyph("unread", false), "n
 // Two names that must not be confused with each other, because they sit in
 // the same row: the mail-forward arrow is not "next".
 assert.notStrictEqual(icons.glyph("forward"), icons.glyph("chevronRight"))
+assert.strictEqual(icons.glyph("sent").codePointAt(0), 0xF10DD,
+  "the Sent mailbox uses the balanced email-send-outline glyph")
 
 // Every icon a view asks for by name is defined. Scans the QML for the
 // literal names handed to ActionIcon, IconButton, IconTextButton and

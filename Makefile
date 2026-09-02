@@ -41,7 +41,6 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/AccountSwitcher.qml \
 	components/AccountRemovalDialog.qml \
 	components/BackBar.qml \
-	components/UserBar.qml \
 	components/SettingsPage.qml \
 	components/SettingsSidebar.qml \
 	components/CalendarSettings.qml \

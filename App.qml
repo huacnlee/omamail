@@ -1164,12 +1164,13 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(4)
+          spacing: Style.space(8)
 
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
           IconButton {
+            objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing
             iconName: "refresh"
@@ -1193,15 +1194,14 @@ Item {
             }
           }
 
-          IconTextButton {
+          Button {
+            objectName: "create-event-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event..."
-            iconName: "plus"
-            // A ghost, like Compose and Check mail beside it: one row, one look.
-            ghost: true
+            text: "Create event"
+            tooltipText: "Create event"
             foreground: root.dim
-            hoverColor: root.foreground
+            bordered: true
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
@@ -1209,22 +1209,14 @@ Item {
             onClicked: eventComposer.begin()
           }
 
-          // Named, not just drawn: a paper plane on its own was reported as
-          // hard to find. The label goes when the window is too narrow to
-          // carry it, and the tooltip carries it then.
-          // Named as well as drawn, when there is room: the report was that
-          // nobody found New message under an icon alone. A ghost like the
-          // icon buttons beside it, so the row stays one row.
-          IconTextButton {
+          Button {
             objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && !root.calendarVisible
-            iconName: "send"
-            text: root.compact ? "" : "Compose"
+            text: "Compose"
             tooltipText: "Compose · c"
-            ghost: true
             foreground: root.dim
-            hoverColor: root.foreground
+            bordered: true
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
@@ -1264,10 +1256,8 @@ Item {
           accentColor: root.accent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
-          switcherOpen: accountSwitcher.opened
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
-          onSwitcherRequested: function(sceneX, sceneY) { accountSwitcher.openAt(sceneX, sceneY) }
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
             root.showCalendar()
@@ -1775,8 +1765,8 @@ Item {
           onClicked: root.toggleSidebar()
         }
 
-        Text {
-          id: accountLine
+        Item {
+          id: accountSlot
           anchors.left: railToggle.visible ? railToggle.right : parent.left
           // The rail's labels sit 9 after their glyph; the toggle's box runs
           // past its glyph by half its slack, so the text starts that much
@@ -1791,18 +1781,57 @@ Item {
             : (keyHints.visible ? keyHints.left : parent.right)
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
-          // The full address lives here, whatever the window's width: the
-          // sidebar's user bar has room for a name, not an address, and a
-          // narrow window has no sidebar at all. The sync age follows it.
-          text: {
-            if (!root.service || !root.ready) return "Not connected"
-            return Model.accountStatusLine(root.service.accountEmail, root.service.syncedLabel)
-          }
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          height: Style.space(24)
 
+          Item {
+            id: accountControl
+            objectName: "status-account-button"
+            property bool selected: accountSwitcher.opened
+            width: Math.min(parent.width, accountText.implicitWidth + Style.space(8))
+            height: parent.height
+
+            Rectangle {
+              id: accountBackground
+              anchors.fill: parent
+              anchors.margins: Style.space(2)
+              radius: Style.cornerRadius
+              color: accountMouse.pressed
+                ? Style.pressedFillFor(root.foreground, root.accent)
+                : (accountControl.selected
+                  ? Style.selectedFillFor(root.foreground, root.accent)
+                  : (accountMouse.containsMouse
+                    ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
+            }
+
+            Text {
+              id: accountText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(4)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(4)
+              anchors.verticalCenter: parent.verticalCenter
+              // The full address lives here at every window width; the sync
+              // age follows it, and the line opens the account controls.
+              text: {
+                if (!root.service || !root.ready) return "Not connected"
+                return Model.accountStatusLine(root.service.accountEmail, root.service.syncedLabel)
+              }
+              color: accountMouse.containsMouse || accountControl.selected ? root.foreground : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            MouseArea {
+              id: accountMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              onClicked: {
+                var scene = accountControl.mapToGlobal(0, 0)
+                accountSwitcher.openAt(scene.x, scene.y)
+              }
+            }
+          }
         }
 
         // The right of the status line carries one of two things: what the
@@ -1850,8 +1879,7 @@ Item {
         }
       }
 
-      // The account menu. It has no trigger of its own: the sidebar's user bar
-      // opens it, and so does the status bar when the sidebar is hidden.
+      // The window menu is opened by the menu button beside the mark.
       AppMenu {
         id: appMenu
         anchors.fill: parent
@@ -1879,7 +1907,7 @@ Item {
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
       }
 
-      // Every mailbox, with its own unread count, opened from the user bar.
+      // Every mailbox, opened from the address in the status bar.
       Timer {
         id: noticeTimer
         interval: 6000
