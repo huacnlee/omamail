@@ -539,6 +539,26 @@ Item {
   }
 
   // The switcher's model: every mailbox, its count, and why it is not usable.
+  // Deliberately not part of accountSummaries. That array is rebuilt from
+  // `unread`, `active`, `signedIn`, `busy` and `error`, so a poll replaces it
+  // twice a cycle with no account having changed — and a settings field built
+  // over it is destroyed and refilled under whoever is typing in it. This
+  // changes only when the account list does.
+  readonly property var accountSignatures: {
+    var out = []
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      // A mailbox part-way through being added has no id to save against.
+      if (!accounts[i].id) continue
+      out.push({
+        id: accounts[i].id,
+        email: accounts[i].email,
+        signature: String(accounts[i].signature || "")
+      })
+    }
+    return out
+  }
+
   readonly property var accountSummaries: {
     var out = []
     var accounts = accountList ? accountList.accounts : []
@@ -549,7 +569,6 @@ Item {
         email: accounts[i].email,
         provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
-        signature: String(accounts[i].signature || ""),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
         signedIn: host ? host.ready : false,

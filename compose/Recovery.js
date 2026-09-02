@@ -52,6 +52,11 @@ function draft(value) {
     bcc: text(row.bcc),
     subject: text(row.subject),
     body: text(row.body),
+    // What the compose window placed in the body rather than what was typed
+    // into it. A row written before this existed has none, which reads as an
+    // empty string — so any body at all differs from it, and a recovered draft
+    // from the previous build is still offered back.
+    placedBody: text(row.placedBody),
     accountId: text(row.accountId),
     sourceDraftId: text(row.sourceDraftId),
     mode: text(row.mode) || "new",
@@ -74,7 +79,10 @@ function hasMeaningfulDraft(value) {
   if (text(row.cc).trim() !== "") return true
   if (text(row.bcc).trim() !== "") return true
   if (text(row.subject).trim() !== "") return true
-  if (text(row.body).trim() !== "") return true
+  // A body still exactly as the compose window placed it — a signature, a
+  // quote, or both — is a window nobody wrote in, and recovering one at the
+  // next launch would offer back a draft the user never started.
+  if (text(row.body) !== text(row.placedBody) && text(row.body).trim() !== "") return true
   if (Array.isArray(row.forwardedAttachments) && row.forwardedAttachments.length > 0)
     return true
   return Array.isArray(row.draftAttachments) && row.draftAttachments.length > 0

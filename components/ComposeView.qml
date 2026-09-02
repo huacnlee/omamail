@@ -50,6 +50,16 @@ DropArea {
   // and a binding would overwrite what they had changed.
   readonly property string accountSignature: root.service
     ? String(root.service.activeSignature || "") : ""
+  // The body exactly as `placeBody` left it. A body still equal to this is one
+  // nobody has written in: that is what separates a compose window the user
+  // opened and abandoned from one they typed a sentence into and then cleared,
+  // which no length or trim can tell apart. It is also what makes replacing the
+  // sign-off safe when the sending mailbox changes — there is nothing of theirs
+  // in there to overwrite.
+  property string placedBody: ""
+  // What it was built from, so it can be built again for another mailbox.
+  property string bodyPrefix: ""
+  property string bodyQuote: ""
   property int restoreRevision: 0
   property real restoreFlashOpacity: 0
   property string mode: "new"
@@ -136,6 +146,9 @@ DropArea {
     bccField.text = ""
     subjectField.text = ""
     bodyEdit.text = ""
+    placedBody = ""
+    bodyPrefix = ""
+    bodyQuote = ""
     accountId = ""
     sourceDraftId = ""
     mode = "new"
@@ -161,6 +174,23 @@ DropArea {
     if (forgetAttachments) forgetOwned(owned)
   }
 
+  // Rebuilt rather than patched: the signature is not at a known offset once
+  // the quote is under it, and searching for the old one to swap would find a
+  // sign-off the user had quoted from somebody else.
+  function placeBody() {
+    placedBody = bodyPrefix + Mail.composeBody(root.accountSignature, bodyQuote)
+    bodyEdit.text = placedBody
+  }
+
+  // From reaches every mailbox, and choosing one switches the active account
+  // under the open window. The sign-off has to follow it — but only while the
+  // body is still the one placed, or this would overwrite what was typed.
+  onAccountSignatureChanged: {
+    if (!opened || mode === "draft") return
+    if (bodyEdit.text !== placedBody) return
+    placeBody()
+  }
+
   function snapshotDraft() {
     return ({
       to: toField.text,
@@ -168,6 +198,7 @@ DropArea {
       bcc: bccField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
+      placedBody: placedBody,
       accountId: accountId,
       sourceDraftId: sourceDraftId,
       mode: mode,
@@ -208,6 +239,7 @@ DropArea {
     bccField.text = String(saved.bcc || "")
     subjectField.text = String(saved.subject || "")
     bodyEdit.text = String(saved.body || "")
+    placedBody = String(saved.placedBody || "")
     opened = true
     rehydrateDraftAttachments()
   }
@@ -395,7 +427,9 @@ DropArea {
       quoted = Mail.quoteBody(summary, String(bodyText || ""))
     }
 
-    bodyEdit.text = Mail.composeBody(root.accountSignature, quoted)
+    bodyPrefix = ""
+    bodyQuote = quoted
+    placeBody()
 
     selectPreferredFrom()
     if (root.service) root.service.refreshRecipientContacts()
@@ -420,9 +454,18 @@ DropArea {
     bccField.text = String(values.bcc || "")
     bccVisible = bccField.text !== ""
     subjectField.text = String(values.subject || "")
-    bodyEdit.text = mode === "draft"
-      ? String(values.body || "")
-      : String(values.body || "") + Mail.composeBody(root.accountSignature, "")
+    if (mode === "draft") {
+      // Somebody wrote this and it was saved. None of it was placed, so all of
+      // it is theirs — including the sign-off it already carries.
+      bodyEdit.text = String(values.body || "")
+      placedBody = ""
+      bodyPrefix = ""
+      bodyQuote = ""
+    } else {
+      bodyPrefix = String(values.body || "")
+      bodyQuote = ""
+      placeBody()
+    }
     var chosenFrom = String(values.from || "")
     if (chosenFrom !== "") {
       fromEmail = chosenFrom
@@ -479,7 +522,8 @@ DropArea {
     if (String(ccField.text || "").trim() !== "") return true
     if (String(bccField.text || "").trim() !== "") return true
     if (String(subjectField.text || "").trim() !== "") return true
-    if (String(bodyEdit.text || "").trim() !== "") return true
+    if (String(bodyEdit.text || "") !== placedBody
+      && String(bodyEdit.text || "").trim() !== "") return true
     return allOutgoingAttachments().length > 0
   }
 

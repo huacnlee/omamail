@@ -27,6 +27,9 @@ Column {
   signal editRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
+  // A separate list on purpose: accountSummaries carries live mailbox state and
+  // is replaced on a poll, which would rebuild the field being typed in.
+  readonly property var signatureAccounts: service ? service.accountSignatures : []
   readonly property var auth: service ? service.auth : null
 
   spacing: Style.space(16)
@@ -220,8 +223,13 @@ Column {
   // account. With a single account that is simply the field — the address
   // above it appears only once there is a second one to tell it apart from.
   Column {
+    objectName: "settings-signature-section"
     width: parent.width
     spacing: Style.space(2)
+    // The heading and the note below belong to the fields. With no mailbox
+    // signed in there are none, and first run would otherwise show an
+    // explanation with nothing between it and the heading.
+    visible: root.signatureAccounts.length > 0
 
     Text {
       text: "Signature"
@@ -232,7 +240,7 @@ Column {
     }
 
     Repeater {
-      model: root.accounts
+      model: root.signatureAccounts
 
       Column {
         id: signatureRow
@@ -240,11 +248,9 @@ Column {
 
         width: parent.width
         spacing: Style.space(2)
-        // A mailbox that has not signed in yet has no id to save against.
-        visible: String(modelData.id || "") !== ""
 
         Text {
-          visible: root.accounts.length > 1
+          visible: root.signatureAccounts.length > 1
           width: parent.width
           textFormat: Text.PlainText
           text: signatureRow.modelData.email

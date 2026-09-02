@@ -42,11 +42,17 @@ Item {
     property int undoSendSeconds: 10
     property var auth: mailAuth
 
-    // What the settings page renders, and what a save has to come back as.
+    // Live mailbox state. Replaced on every poll, which is the point of the
+    // poll test below.
     property var accountSummaries: [({
       id: "me@example.com", email: "me@example.com", provider: "gmail",
-      label: "me", signature: "Maarten\nmadra.nl", unread: 0, active: true,
-      signedIn: true, busy: false, error: ""
+      label: "me", unread: 0, active: true, signedIn: true, busy: false, error: ""
+    })]
+
+    // What the signature field is built over: only what a signature edit
+    // changes.
+    property var accountSignatures: [({
+      id: "me@example.com", email: "me@example.com", signature: "Maarten\nmadra.nl"
     })]
 
     property string savedId: ""
@@ -119,6 +125,21 @@ Item {
 
     function init() {
       mailService.activeSignature = ""
+      // Rebuilt rather than assigned back field by field: replacing the list is
+      // what rebuilds the Repeater's rows, which is how a test that typed into
+      // the field hands the next one a field holding what is stored.
+      mailService.accountSummaries = [({
+        id: "me@example.com", email: "me@example.com", provider: "gmail",
+        label: "me", unread: 0, active: true, signedIn: true, busy: false, error: ""
+      })]
+      // Emptied first, so the next test is handed a field built from what is
+      // stored rather than whatever the last one typed into it.
+      mailService.accountSignatures = []
+      wait(30)
+      mailService.accountSignatures = [({
+        id: "me@example.com", email: "me@example.com", signature: "Maarten\nmadra.nl"
+      })]
+      wait(30)
       mailService.saveCount = 0
       compose.reset()
       compose.opened = false
@@ -178,6 +199,87 @@ Item {
     // Saved when the field is done with, not on every keystroke: the write
     // rebuilds these rows, and a save per character would do it under the
     // cursor.
+    // A compose window nobody wrote in is not a draft. The body holds the
+    // sign-off it was opened with, which `trim()` alone reads as content — so
+    // Escape used to upload a draft containing only the user's own signature,
+    // once per abandoned compose.
+    function test_an_untouched_signed_compose_is_not_a_draft() {
+      mailService.activeSignature = "Maarten"
+      compose.begin("new", null, "", [])
+      compare(compose.hasMeaningfulDraft(), false)
+
+      compose.beginDraft({ mode: "new", body: "" }, "", [])
+      compare(compose.hasMeaningfulDraft(), false, "a mailto: is the same window")
+
+      compose.begin("new", null, "", [])
+      var editor = named(compose, "compose-body-editor")
+      editor.text = "Something" + editor.text
+      compare(compose.hasMeaningfulDraft(), true, "a sentence above it is a draft")
+    }
+
+    // A reply is a draft on its quote alone, signed or not.
+    function test_a_reply_is_still_a_draft() {
+      mailService.activeSignature = "Maarten"
+      compose.begin("reply", summary(), "Body", [])
+      compare(compose.hasMeaningfulDraft(), true)
+    }
+
+    // The sending mailbox reaches every account through the From menu, and the
+    // sign-off has to follow it — the whole reason the field is per-account.
+    function test_changing_the_sending_mailbox_re_signs_an_untouched_body() {
+      mailService.activeSignature = "Maarten"
+      compose.begin("new", null, "", [])
+      var editor = named(compose, "compose-body-editor")
+      compare(editor.text, "\n\nMaarten")
+
+      mailService.activeSignature = "Work Signature"
+      compare(editor.text, "\n\nWork Signature")
+    }
+
+    function test_changing_it_does_not_overwrite_what_was_typed() {
+      mailService.activeSignature = "Maarten"
+      compose.begin("new", null, "", [])
+      var editor = named(compose, "compose-body-editor")
+      editor.text = "Half a sentence\n\nMaarten"
+
+      mailService.activeSignature = "Work Signature"
+      compare(editor.text, "Half a sentence\n\nMaarten")
+    }
+
+    // The settings field used to be built over accountSummaries, which a poll
+    // replaces twice a cycle with no account having changed — destroying the
+    // delegate, and the text and the keyboard with it, mid-word.
+    function test_a_poll_does_not_disturb_a_signature_being_typed() {
+      var editor = named(settings, "settings-signature-editor")
+      verify(editor)
+      editor.forceActiveFocus()
+      editor.text = "Half a sign-"
+
+      mailService.accountSummaries = [({
+        id: "me@example.com", email: "me@example.com", provider: "gmail",
+        label: "me", unread: 0, active: true, signedIn: true,
+        busy: true, error: ""
+      })]
+      wait(30)
+
+      var live = named(settings, "settings-signature-editor")
+      compare(live.text, "Half a sign-", "the field is not refilled under the cursor")
+      verify(live.activeFocus, "and the keyboard is still in it")
+      compare(mailService.saveCount, 0, "a poll is not a save")
+    }
+
+    // First run has no signed-in mailbox and so no field. A heading and an
+    // explanation with nothing between them is not a setting.
+    function test_the_section_is_absent_until_a_mailbox_exists() {
+      var section = named(settings, "settings-signature-section")
+      verify(section)
+      compare(section.visible, true)
+
+      mailService.accountSignatures = []
+      wait(30)
+      compare(section.visible, false)
+    }
+
     function test_the_field_saves_when_focus_leaves_it() {
       var editor = named(settings, "settings-signature-editor")
       verify(editor)
