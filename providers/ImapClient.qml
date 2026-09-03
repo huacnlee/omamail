@@ -105,15 +105,32 @@ Item {
         return
       }
 
+      // Some servers refuse every SELECT until the client has identified itself
+      // — see `Imap.idCommand` — and curl derives its SELECT from the URL's
+      // path before the first command it was handed. `imap-id` is the way past
+      // that: the opening command runs against the server itself, the rest
+      // against the mailbox, all on the one connection.
+      //
+      // Only where a mailbox is actually opened, and only to a server that
+      // advertised ID — one that has not heard of it answers BAD, and
+      // --fail-early would discard the whole invocation with it. Every folder
+      // request runs behind `ensureFolders`, so the capabilities are known by
+      // the time this asks.
+      var opening = folder !== "" && Imap.hasCapability(root.serverCapabilities, "ID")
+        ? Imap.idCommand() : ""
+
       // Every field crosses base64-encoded, so a password containing a quote,
       // a space or a backslash needs no escaping anywhere along the way — and
       // none of it reaches the process table.
-      var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials)]
+      var fields = opening === ""
+        ? [Mail.encodeBase64(url), Mail.encodeBase64(credentials)]
+        : [Mail.encodeBase64(Imap.imapUrl(auth.settings, "")), Mail.encodeBase64(url),
+           Mail.encodeBase64(credentials), Mail.encodeBase64(opening)]
       for (var j = 0; j < wanted.length; j++) fields.push(Mail.encodeBase64(wanted[j]))
 
       var process = transportComponent.createObject(root, {
         command: [root.transport],
-        requestLine: "imap " + fields.join(" ")
+        requestLine: (opening === "" ? "imap " : "imap-id ") + fields.join(" ")
       })
       if (!process) {
         root.inFlight = Math.max(0, root.inFlight - 1)

@@ -643,6 +643,26 @@ function capabilityCommand() {
   return "CAPABILITY"
 }
 
+// RFC 2971's client identification, sent to any server that advertises ID.
+// Most servers tolerate its absence, which is why it went missing for so long.
+// Coremail does not: it answers every SELECT with "Unsafe Login" until this has
+// arrived, and that is how the omission was found rather than what it is for.
+//
+// Delivered by the transport's `imap-id` mode, which is the only way to get a
+// command in front of the SELECT curl derives from a URL's path.
+//
+// Sent only to a server that advertised ID: one that has never heard of it
+// answers BAD, and the transport runs curl with --fail-early, so that single
+// BAD would take every command after it.
+//
+// A name and nothing else. This string goes into someone else's server log,
+// and the operating system, the hostname and the user are none of its
+// business — RFC 2971 section 3.3 says as much.
+function idCommand() {
+  return "ID (\"name\" \"omamail\")"
+}
+
+
 // ------------------------------------------------------- search translation
 
 // The criteria a mailbox query carries are already IMAP's own words (UNSEEN,

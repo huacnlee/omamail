@@ -355,6 +355,10 @@ assert.strictEqual(imap.moveCommand([4], "Archive"), "UID MOVE 4 \"Archive\"")
 assert.strictEqual(imap.copyCommand([4], "Sent Items"), "UID COPY 4 \"Sent Items\"")
 assert.strictEqual(imap.statusCommand("INBOX"), "STATUS \"INBOX\" (MESSAGES UNSEEN)")
 
+// A name and nothing else: this goes into someone else's server log, and the
+// host and the user are none of its business (RFC 2971 section 3.3).
+assert.strictEqual(imap.idCommand(), 'ID ("name" "omamail")')
+
 // UID EXPUNGE, never plain EXPUNGE: the latter removes every \Deleted message
 // in the folder, including ones another client marked.
 assert.strictEqual(imap.expungeCommand([4, 5]), "UID EXPUNGE 4,5")
