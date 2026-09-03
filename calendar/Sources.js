@@ -259,6 +259,20 @@ function writable(source) {
   return !!source && source.readOnly !== true
 }
 
+// An IMAP mailbox has no calendar server of its own. Copy its accepted
+// invitation to the first configured CalDAV calendar. Gmail is excluded:
+// Google Calendar already owns that account's invitation and may add it itself.
+function invitationTarget(list, providerId) {
+  if (trimmed(providerId).toLowerCase() !== "imap") return null
+  var values = list && Array.isArray(list.sources) ? list.sources : []
+  for (var i = 0; i < values.length; i++) {
+    var source = values[i]
+    if (source && source.kind === "caldav" && source.enabled !== false
+        && writable(source)) return source
+  }
+  return null
+}
+
 // The picker groups with the read-only calendars left out, and a group left
 // empty by that left out too.
 function writableGroups(groups) {

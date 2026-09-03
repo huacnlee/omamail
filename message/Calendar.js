@@ -1215,6 +1215,17 @@ function withResponse(invite, address, response) {
   return copy
 }
 
+// A message refresh returns the organiser's original REQUEST, which cannot
+// contain a response sent later. Carry the cached response onto the fresh
+// copy, but only when both copies name the same event.
+function preserveResponse(invite, cachedInvite, address) {
+  if (!invite || !cachedInvite) return invite
+  if (String(invite.uid || "") === ""
+      || String(invite.uid || "") !== String(cachedInvite.uid || "")) return invite
+  var response = responseOf(cachedInvite, address)
+  return response === "" ? invite : withResponse(invite, address, response)
+}
+
 // Whether the panel may draw the buttons at all. A cancellation and a reply
 // somebody else sent are both invitations worth showing and neither is one to
 // answer, and an organiser cannot RSVP to their own meeting.

@@ -895,6 +895,12 @@ Item {
     service: root
     pluginDir: root.pluginDir
     accountId: root.calendarAccountId
+    onInvitationImported: function(accountId, ok, error, sourceName) {
+      var host = root.findAccount(accountId)
+      if (!host) return
+      if (ok) host.note("Event added to " + sourceName)
+      else host.fail(error || "Could not add the event to a calendar")
+    }
     onSourceListChanged: {
       barCalendar.sourceList = sourceList
       Qt.callLater(root.refreshCalendarPreview)
@@ -954,6 +960,9 @@ Item {
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
+      onInvitationAccepted: function(invite) {
+        sharedCalendar.importInvitation(accountId, providerId, invite)
+      }
 
       Component.onCompleted: Qt.callLater(root.refreshCurrent)
       Component.onDestruction: Qt.callLater(root.refreshCurrent)

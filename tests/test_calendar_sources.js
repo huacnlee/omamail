@@ -84,6 +84,17 @@ assert.strictEqual(JSON.stringify(forDraft.sources.map(function (source) { retur
   JSON.stringify(["nextcloud-personal"]),
   "a draft account must not inherit another account's Google calendar")
 
+assert.strictEqual(sources.invitationTarget(forMe, "gmail"), null,
+  "Gmail must not copy an invitation that Google Calendar already manages")
+assert.strictEqual(sources.invitationTarget(forMe, "hey"), null,
+  "a HEY response must not imply a CalDAV calendar owner")
+assert.strictEqual(sources.invitationTarget(forDraft, "imap").id,
+  "nextcloud-personal",
+  "an IMAP account uses the first enabled writable CalDAV calendar")
+const noWritable = sources.setEnabled(readOnlyList, "nextcloud-personal", false)
+assert.strictEqual(sources.invitationTarget(noWritable, "imap"), null,
+  "disabled and read-only calendars cannot receive an invitation")
+
 let hiddenGoogle = sources.add(list, {
   id: "google:me@gmail.com", kind: "google", name: "Personal Google",
   accountId: "me@gmail.com", enabled: false, readOnly: true

@@ -78,6 +78,12 @@ fi
 # require what it needs — and it needs the plugin directory to find its scripts.
 grep -q 'required property string pluginDir' account/MailAccount.qml \
   || fail "MailAccount must require the plugin directory it runs scripts from"
+grep -q 'signal invitationAccepted(var invite)' account/MailAccount.qml \
+  || fail "MailAccount must report an accepted invitation to the calendar owner"
+grep -q 'onInvitationAccepted:' Service.qml \
+  || fail "Service must route accepted invitations into the calendar controller"
+grep -q 'function importInvitation' calendar/CalendarController.qml \
+  || fail "the calendar controller must import accepted invitations"
 
 # The window drives this; the unread poll keeps running while it is false.
 grep -q 'property bool windowOpen' Service.qml || fail "Service.qml must expose windowOpen"

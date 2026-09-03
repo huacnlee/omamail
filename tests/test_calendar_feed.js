@@ -258,6 +258,25 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(created.google)), {
   end: { dateTime: "2026-08-24T09:00:00.000Z" }
 })
 
+const imported = feed.importInvitation({
+  uid: "meeting@example.com", sequence: 3, summary: "Invited meeting",
+  description: "Agenda", location: "Room 4",
+  start: { ms: Date.UTC(2026, 7, 24, 8, 0), allDay: false },
+  end: { ms: Date.UTC(2026, 7, 24, 9, 0), allDay: false },
+  recurrenceRule: "FREQ=WEEKLY;INTERVAL=1"
+}, 5678)
+assert.strictEqual(imported.ok, true)
+assert.strictEqual(imported.uid, "meeting@example.com")
+assert.ok(imported.ics.indexOf("UID:meeting@example.com") > 0,
+  "an imported invitation keeps its identity for idempotent CalDAV writes")
+assert.ok(imported.ics.indexOf("SEQUENCE:3") > 0)
+assert.ok(imported.ics.indexOf("RRULE:FREQ=WEEKLY;INTERVAL=1") > 0)
+assert.ok(imported.ics.indexOf("SUMMARY:Invited meeting") > 0)
+assert.strictEqual("google" in imported, false,
+  "an IMAP invitation import builds no unused Google Calendar request")
+assert.strictEqual(feed.importInvitation({ uid: "x", summary: "No time" }, 1).error,
+  "The invitation has no complete event time")
+
 const recurring = feed.createEvent({
   title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
   endMs: Date.UTC(2026, 7, 24, 9, 0),
