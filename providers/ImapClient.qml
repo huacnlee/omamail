@@ -522,8 +522,12 @@ Item {
         var folder = root.folders[i]
         if (!folder.selectable) continue
         out.push({
+          // The id and the wire name stay exactly as the server said them:
+          // one is a cache key, the other is what goes back in a SELECT. Only
+          // the name the sidebar prints is decoded, which is why nothing here
+          // has to be encoded again on the way out.
           id: folder.name,
-          name: folder.name,
+          name: Imap.decodeMailbox(folder.name),
           rawName: folder.name,
           // "system" means the mailbox row already offers it, so the sidebar
           // lists only the rest below. Judged on SPECIAL-USE rather than on the

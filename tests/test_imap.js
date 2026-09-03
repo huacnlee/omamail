@@ -598,6 +598,58 @@ deepEqual(imap.flagPlanForLabels(["STARRED"], ["UNREAD"], {}),
 
 deepEqual(imap.flagPlanForLabels(null, null, null), { add: [], remove: [], move: "" })
 
+// ------------------------------------------------------- mailbox names
+
+// RFC 3501 section 5.1.3. These seven are the folders a real 163.com mailbox
+// lists, verbatim, and what the sidebar printed before this existed.
+assert.strictEqual(imap.decodeMailbox("&g0l6P3ux-"), "\u8349\u7a3f\u7bb1")
+assert.strictEqual(imap.decodeMailbox("&XfJT0ZAB-"), "\u5df2\u53d1\u9001")
+assert.strictEqual(imap.decodeMailbox("&XfJSIJZk-"), "\u5df2\u5220\u9664")
+assert.strictEqual(imap.decodeMailbox("&V4NXPpCuTvY-"), "\u5783\u573e\u90ae\u4ef6")
+assert.strictEqual(imap.decodeMailbox("&dcVr0mWHTvZZOQ-"), "\u75c5\u6bd2\u6587\u4ef6\u5939")
+assert.strictEqual(imap.decodeMailbox("&Xn9USpCuTvY-"), "\u5e7f\u544a\u90ae\u4ef6")
+assert.strictEqual(imap.decodeMailbox("&i6KWBZCuTvY-"), "\u8ba2\u9605\u90ae\u4ef6")
+
+// Plain US-ASCII is already the name, and must come back untouched — it is
+// also what every lookup and every cache key is keyed on.
+assert.strictEqual(imap.decodeMailbox("INBOX"), "INBOX")
+assert.strictEqual(imap.decodeMailbox("[Gmail]/All Mail"), "[Gmail]/All Mail")
+assert.strictEqual(imap.decodeMailbox(""), "")
+assert.strictEqual(imap.decodeMailbox(null), "")
+
+// "&-" is how the protocol spells an ampersand, and a shift run can sit
+// anywhere in a hierarchy or beside another one.
+assert.strictEqual(imap.decodeMailbox("&-"), "&")
+assert.strictEqual(imap.decodeMailbox("Bed &- Breakfast"), "Bed & Breakfast")
+assert.strictEqual(imap.decodeMailbox("Parent/&g0l6P3ux-"), "Parent/\u8349\u7a3f\u7bb1")
+assert.strictEqual(imap.decodeMailbox("&g0l6P3ux-x&XfJT0ZAB-"),
+  "\u8349\u7a3f\u7bb1x\u5df2\u53d1\u9001")
+
+// The run carries UTF-16BE, so a character outside the BMP arrives as a
+// surrogate pair — which is what a JavaScript string is made of anyway.
+assert.strictEqual(imap.decodeMailbox("&2DzfiQ-"), "\ud83c\udf89")
+
+// A name that does not decode is passed through rather than dropped: a server
+// sending something malformed is not a reason to hide a folder, and the
+// undecoded name is still the one that selects it.
+assert.strictEqual(imap.decodeMailbox("&abc"), "&abc", "an unterminated run")
+assert.strictEqual(imap.decodeMailbox("&!!!-"), "&!!!-", "not modified base64")
+assert.strictEqual(imap.decodeMailbox("&A-"), "&A-", "half of a code unit")
+assert.strictEqual(imap.decodeMailbox("&AAEB-"), "&AAEB-", "a run cut mid-unit")
+
+// The decoded name is for reading. The id and the wire name are what a cache
+// key and a SELECT are built from, and decoding either would make every
+// non-ASCII folder unselectable.
+const clientSource = require("fs").readFileSync(
+  require("path").join(__dirname, "..", "providers", "ImapClient.qml"), "utf8")
+const labelShape = clientSource.slice(clientSource.indexOf("function getLabels"))
+  .slice(0, clientSource.slice(clientSource.indexOf("function getLabels")).indexOf("callback(out"))
+assert.ok(/name:\s*Imap\.decodeMailbox\(folder\.name\)/.test(labelShape),
+  "the name the sidebar prints must be decoded")
+assert.ok(/id:\s*folder\.name\b/.test(labelShape), "the id must stay as the server said it")
+assert.ok(/rawName:\s*folder\.name\b/.test(labelShape),
+  "the name that goes back in a SELECT must stay as the server said it")
+
 // ------------------------------------------------------------------ errors
 
 assert.strictEqual(imap.responseError(7, "", ""),

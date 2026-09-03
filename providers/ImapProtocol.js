@@ -896,6 +896,89 @@ function parseList(text) {
   return out
 }
 
+// ------------------------------------------------- mailbox names on the wire
+//
+// A mailbox name is not text. RFC 3501 section 5.1.3 carries it in "modified
+// UTF-7": everything outside printable US-ASCII is shifted into a base64 run
+// introduced by "&" and closed by "-", with "," standing in for base64's "/"
+// because "/" is a hierarchy delimiter, and "&-" spelling a literal "&".
+//
+// So a Chinese mailbox arrives as "&g0l6P3ux-" and a sidebar that prints what
+// the server said prints that. This is the only place it is turned back into
+// the name its owner gave it — and the decoded form is for display and nothing
+// else. Every name that goes back to the server travels as `rawName`, exactly
+// as it arrived, so nothing here has to be re-encoded and no round trip can
+// lose a byte in the process.
+//
+// Anything that does not decode is passed through unchanged rather than
+// rejected: a server that sends a bare "&" is not a reason to hide a folder.
+
+var MODIFIED_BASE64 =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,"
+
+// The base64 run holds UTF-16BE, so it decodes to whole code units — which is
+// what a JavaScript string is made of, surrogate pairs included.
+function decodeShift(chunk) {
+  var bits = 0
+  var width = 0
+  var units = []
+  var pending = -1
+  for (var i = 0; i < chunk.length; i++) {
+    var value = MODIFIED_BASE64.indexOf(chunk.charAt(i))
+    if (value < 0) return null
+    bits = (bits << 6) | value
+    width += 6
+    if (width < 8) continue
+    width -= 8
+    var byte = (bits >> width) & 0xff
+    if (pending < 0) pending = byte
+    else {
+      units.push((pending << 8) | byte)
+      pending = -1
+    }
+  }
+  // A trailing half of a code unit means the run was truncated, and the bits
+  // left over past the last whole byte are the run's padding, which must be
+  // zero. A run that yields no code unit at all is malformed too: the one
+  // legitimately empty run is "&-", and that is an ampersand, handled above.
+  if (pending >= 0) return null
+  if (width > 0 && (bits & ((1 << width) - 1)) !== 0) return null
+  if (units.length === 0) return null
+  var out = ""
+  for (var j = 0; j < units.length; j++) out += String.fromCharCode(units[j])
+  return out
+}
+
+function decodeMailbox(name) {
+  var text = String(name === undefined || name === null ? "" : name)
+  if (text.indexOf("&") < 0) return text
+  var out = ""
+  var at = 0
+  while (at < text.length) {
+    if (text.charAt(at) !== "&") {
+      out += text.charAt(at)
+      at++
+      continue
+    }
+    var close = text.indexOf("-", at + 1)
+    if (close < 0) {
+      // An unterminated run is not a name this can improve on.
+      out += text.substring(at)
+      break
+    }
+    var chunk = text.substring(at + 1, close)
+    if (chunk === "") {
+      // "&-" is how the protocol spells an ampersand.
+      out += "&"
+    } else {
+      var decoded = decodeShift(chunk)
+      out += decoded === null ? text.substring(at, close + 1) : decoded
+    }
+    at = close + 1
+  }
+  return out
+}
+
 // The SPECIAL-USE attributes this plugin cares about, mapped to the folder the
 // server named. A server that advertises none leaves the map empty and
 // `resolveFolder` falls back to the plain word.
