@@ -225,7 +225,8 @@ Item {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: "All mailboxes"
+            // The same string the status line shows, from one place.
+            text: Model.UNIFIED_LABEL
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
