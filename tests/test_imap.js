@@ -611,6 +611,31 @@ assert.strictEqual(imap.responseError(0, "", "fallback text"), "fallback text")
 assert.ok(/over its storage quota/i.test(imap.responseError(0, "A1 NO [OVERQUOTA] mailbox full", "")))
 assert.ok(/no longer on the server/i.test(imap.responseError(0, "A1 NO [NONEXISTENT] no such folder", "")))
 
+// curl spends exit 67 on both a denied login and a refused SELECT, and the only
+// thing separating them is the sentence beside it. Reading the second as the
+// first is what told a NetEase user their password had been rejected: those
+// servers refuse SELECT until the client has sent ID, and the password was
+// right the whole time.
+assert.strictEqual(imap.responseError(67, "curl: (67) Access denied. ", ""),
+  "The server rejected that username or password")
+assert.strictEqual(imap.responseError(67, "curl: (67) Select failed", ""),
+  "The mail server refused that command",
+  "a folder that would not open is not a password that was refused")
+assert.strictEqual(imap.responseError(21, "curl: (21) Quote command returned error", ""),
+  "The mail server refused that command")
+
+// The server said why. curl only said that something failed, and picked an exit
+// code it shares with an unrelated failure — so the server's own words win.
+assert.strictEqual(
+  imap.transportError(67, "A3 NO SELECT Unsafe Login. Please contact kefu@188.com for help",
+    "curl: (67) Select failed", ""),
+  "SELECT Unsafe Login. Please contact kefu@188.com for help")
+assert.strictEqual(
+  imap.transportError(67, "A2 OK LOGIN completed", "curl: (67) Access denied. ", ""),
+  "The server rejected that username or password",
+  "with no tagged failure to read, the exit code is all there is")
+assert.strictEqual(imap.transportError(0, "A1 OK done", "", "fallback text"), "fallback text")
+
 // A server's [ALERT] is written for the user by definition — the RFC says a
 // client must show it — so it is passed through rather than translated.
 assert.strictEqual(

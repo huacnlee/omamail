@@ -1036,6 +1036,14 @@ function responseError(status, detail, fallback) {
   if (code === 35) return "A secure connection to the mail server could not be established"
   if (code === 60 || code === 51)
     return "The mail server's security certificate could not be verified"
+  // curl gives a refused SELECT the same exit code as a denied login — 67, with
+  // only "Select failed" against "Access denied" to tell them apart — and 21 to
+  // a command the server answered BAD. Reading either as an authentication
+  // failure sends someone off to change a password that was never the problem:
+  // a server that will not open a folder still took the password, and saying
+  // otherwise is the one error message a user cannot act on.
+  if (code === 21 || (code === 67 && /select failed/i.test(text)))
+    return "The mail server refused that command"
   if (code === 67 || /AUTHENTICATIONFAILED|invalid credentials|login failed/i.test(text))
     return "The server rejected that username or password"
   if (/\[ALERT\]/i.test(text)) {
@@ -1049,6 +1057,21 @@ function responseError(status, detail, fallback) {
     return "That folder is no longer on the server"
   if (text !== "") return redact(text)
   return fallback || "The mail server could not complete this request"
+}
+
+// The error for a finished transport call, whichever half of it failed.
+//
+// curl's exit code says that something went wrong; the server's own tagged NO
+// or BAD says what, and it is in the response even when curl exits non-zero.
+// Preferring it is what keeps a refused command reported in the words the
+// server chose rather than as whichever of curl's exit codes it happened to
+// share with an unrelated failure.
+function transportError(status, response, detail, fallback) {
+  if (isFailure(response)) {
+    var served = failureDetail(response)
+    if (trimmed(served) !== "") return responseError(0, served, fallback)
+  }
+  return responseError(status, detail, fallback)
 }
 
 // A password can end up in a curl error line, in a server's echo of a failed

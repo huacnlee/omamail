@@ -135,7 +135,7 @@ Item {
         var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
         var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
         if (status !== 0) {
-          callback("", Imap.responseError(status, detail, ""))
+          callback("", Imap.transportError(status, text, detail, ""))
           return
         }
         // curl exits 0 for a command the server refused, so the tagged
@@ -877,7 +877,7 @@ Item {
       var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
       var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
       if (status !== 0) {
-        callback(false, Imap.responseError(status, detail, ""))
+        callback(false, Imap.transportError(status, text, detail, ""))
         return
       }
       if (Imap.isFailure(text)) {
