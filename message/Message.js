@@ -953,6 +953,21 @@ function messageIdValue(given, from, nowMs) {
   return "<" + now.toString(36) + "." + random + ".omamail@" + messageIdDomain(from) + ">"
 }
 
+// The date a message states, in RFC 5322's own shape: a numeric zone rather than toUTCString's obsolete GMT.
+function sentDate(given, nowMs) {
+  var stated = headerSafe(given).trim()
+  // A stated date has to parse back as one, or it is not a date.
+  if (stated !== "" && !isNaN((new Date(stated)).getTime())) return stated
+  var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
+  if (isNaN(date.getTime())) date = new Date()
+  var offset = -date.getTimezoneOffset()
+  var minutes = Math.abs(offset)
+  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " " + MONTHS[date.getMonth()]
+    + " " + date.getFullYear() + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    + ":" + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
+    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
+}
+
 // One method name, and nothing that could end the header early: this string
 // arrives from a calendar file somebody else wrote.
 function calendarMethod(value) {
@@ -1046,6 +1061,8 @@ function buildRawMessage(fields) {
     lines.push("In-Reply-To: " + inReplyTo)
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
+  // RFC 5322 requires a Date on a message this client originates, and the writer's clock is the one it means.
+  lines.push("Date: " + sentDate(values.date))
   // RFC 5322 asks every message for an id, and a relay told not to add missing headers relays none.
   lines.push("Message-ID: " + messageIdValue(values.messageId, values.from))
   lines.push("MIME-Version: 1.0")

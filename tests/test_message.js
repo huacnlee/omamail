@@ -632,6 +632,57 @@ assert.strictEqual(message.extractHtml({
   assert.strictEqual(headerNames(forged).filter((name) => name === "Message-ID").length, 1)
 }
 
+// ------------------------------------------------------------------- Date
+//
+// RFC 5322 requires a Date on a message this client originates. Without one a
+// reader falls back to the time the message was delivered or stored, which is
+// not the time it was written — this client delays a send behind an undo
+// window, so those are not the same moment.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const clock = Date.UTC(2026, 8, 3, 10, 4, 31)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Date").length, 1,
+    "one Date, and only one")
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+
+  // The shape RFC 5322 §3.3 states, with a numeric zone rather than the
+  // obsolete GMT that toUTCString would give.
+  const stamped = message.sentDate("", clock)
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(stamped),
+    stamped)
+  assert.strictEqual(new Date(stamped).getTime(), clock,
+    "a local-offset Date names the instant it was made from")
+  assert.strictEqual(
+    message.messageDate({ payload: { headers: [{ name: "Date", value: stamped }] } }).getTime(), clock,
+    "this file's own reader gets the instant back out of it")
+
+  // Stated by the caller, the way the id and the boundary already are.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "Thu, 03 Sep 2026 12:04:31 +0200"
+  }).indexOf("Date: Thu, 03 Sep 2026 12:04:31 +0200\r\n") > 0)
+  assert.strictEqual(new Date(message.sentDate("Thu, 03 Sep 2026 10:04:31 +0000")).getTime(), clock,
+    "a caller who wants no offset says so through the same field")
+
+  // A stated value that is not a date is replaced, and a line break in one can
+  // become neither a second header nor a mangled first one.
+  const forged = message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "not a date\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Date").length, 1)
+
+  // The header survives a round trip through this file's own parser.
+  assert.strictEqual(message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: stamped
+  })).headers.filter((header) => header.name === "Date").length, 1)
+}
+
 // ------------------------------------------------------ RFC 822 → payload
 //
 // The adapter that lets an IMAP message drive the same reader a Gmail message
