@@ -68,7 +68,9 @@ Item {
     undoSendSeconds: 10,
     unifiedCalendarView: false,
     showBarIcon: true,
-    unifiedMailboxes: false
+    unifiedMailboxes: false,
+    previewOnCursor: false,
+    markReadDelaySec: 2
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -96,6 +98,19 @@ Item {
   // typo rather than an answer given in the interface, and a typo should not
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
+
+  // Whether the cursor reaching a message is enough to show it.
+  readonly property bool previewOnCursor: !!settings
+    && settings.previewOnCursor === true
+
+  // How long the cursor has to stay before a previewed message counts as
+  // read. Clamped rather than trusted: this is a hand-editable file, and a
+  // negative interval on a Timer never fires at all.
+  readonly property int markReadDelaySec: {
+    var value = Math.floor(Number(settings ? settings.markReadDelaySec : 2))
+    if (!isFinite(value) || value < 0) return 2
+    return Math.min(30, value)
+  }
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -169,6 +184,16 @@ Item {
   // survives a restart.
   function setUnifiedMailboxes(value) {
     persistSetting("unifiedMailboxes", value === true)
+  }
+
+  function setPreviewOnCursor(value) {
+    persistSetting("previewOnCursor", value === true)
+  }
+
+  function setMarkReadDelaySec(value) {
+    var next = Math.floor(Number(value))
+    if (!isFinite(next) || next < 0) next = 0
+    persistSetting("markReadDelaySec", Math.min(30, next))
   }
 
   // ---------------------------------------------------------- the accounts
@@ -1200,7 +1225,7 @@ Item {
     }
     eachHost(function(host) { if (host.hasMore) host.loadMore() })
   }
-  function select(id) {
+  function select(id, previewOnly) {
     if (!unified) {
       if (current) current.select(id)
       return
@@ -1212,7 +1237,7 @@ Item {
     // attachment row after the reader had moved on.
     eachHost(function(other) { if (other !== host) other.clearSelection() })
     selectionHost = host
-    host.select(sourceIdFor(id))
+    host.select(sourceIdFor(id), previewOnly)
   }
   function clearSelection() {
     if (!unified) {
@@ -1221,6 +1246,14 @@ Item {
     }
     eachHost(function(host) { host.clearSelection() })
     selectionHost = null
+  }
+  function markPreviewRead(id) {
+    if (!id) return false
+    if (unified) {
+      var host = hostForId(id)
+      return host ? host.markPreviewRead(sourceIdFor(id)) : false
+    }
+    return current ? current.markPreviewRead(id) : false
   }
   // The notice's own button, which is the switch: what it turns on is every
   // message, and it says so.
