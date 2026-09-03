@@ -18,8 +18,13 @@ Item {
   readonly property string filename: root.attachment
     ? String(root.attachment.filename || "attachment") : "attachment"
 
+  // The button too, and that is not a detail: it is a 24px control beside
+  // 15px of caption text, so a height taken from the text alone leaves it
+  // hanging four pixels out of the row at both ends — clipped by the reader's
+  // own scroller, which left the filename as the only thing that could be
+  // clicked and opening as the only thing that could happen.
   implicitHeight: Math.max(icon.implicitHeight, filenameLink.implicitHeight,
-    sizeLabel.implicitHeight)
+    sizeLabel.implicitHeight, saveButton.implicitHeight)
 
   ActionIcon {
     id: icon

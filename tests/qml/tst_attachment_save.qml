@@ -87,7 +87,21 @@ Item {
       var saveLeft = save.mapToItem(row, 0, 0).x
       verify(saveLeft > 0)
       verify(saveLeft + save.width <= row.width + 1,
-        "the button stays inside the row")
+        "the button stays inside the row horizontally")
+    }
+
+    // And vertically, which is the half that was missing. A 24px control in a
+    // row measured from 15px of caption text hangs out of both ends and the
+    // reader's scroller clips it, leaving the filename as the only thing that
+    // can be clicked — so the row reports a height that holds it.
+    function test_the_button_fits_inside_the_row() {
+      var save = find("attachment-save-button")
+      verify(row.implicitHeight >= save.implicitHeight,
+        "the row is at least as tall as the tallest thing in it")
+      var top = save.mapToItem(row, 0, 0).y
+      verify(top >= 0, "the button does not start above the row")
+      verify(top + save.height <= row.height + 1,
+        "and does not end below it")
     }
   }
 }
