@@ -816,6 +816,23 @@ function syncedShort(syncLabel) {
   return match ? match[1] : label
 }
 
+// What is being read, at the foot of the rail and in the switcher. One string
+// in one place: the switcher names the row and the status line names what the
+// row selected, and two literals would drift apart.
+var UNIFIED_LABEL = "All mailboxes"
+
+// The foot of the rail, which says what is being read and how long ago it was
+// checked.
+//
+// A combined view has no address to give, and no age either: the sync label
+// belongs to one mailbox, and putting it after "All mailboxes" would be a
+// claim about every one of them made from whichever happened to be active
+// underneath.
+function readingStatusLine(unified, email, syncLabel) {
+  if (unified === true) return UNIFIED_LABEL
+  return accountStatusLine(email, syncLabel)
+}
+
 function accountStatusLine(email, syncLabel) {
   var address = String(email || "")
   if (address === "") return "Not connected"

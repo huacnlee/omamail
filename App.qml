@@ -1910,7 +1910,8 @@ Item {
               // age follows it, and the line opens the account controls.
               text: {
                 if (!root.service || !root.ready) return "Not connected"
-                return Model.accountStatusLine(root.service.accountEmail, root.service.syncedLabel)
+                return Model.readingStatusLine(root.service.unified,
+                  root.service.accountEmail, root.service.syncedLabel)
               }
               color: accountMouse.containsMouse || accountControl.selected ? root.foreground : root.dim
               font.family: root.fontFamily
