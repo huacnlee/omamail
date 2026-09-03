@@ -122,7 +122,7 @@ Item {
       for (var i = 0; i < log.length; i++) if (log[i] === text) n++
       return n
     }
-    function indexOfActiveAccount() { return 0 }
+    function editingIndex() { return 0 }
     function addAccount(provider) {
       record("add:" + String(provider || ""))
       accountCount += 1

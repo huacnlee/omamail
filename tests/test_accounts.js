@@ -28,6 +28,18 @@ assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
 assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
   { id: "", email: "" }
 ] }), false)
+// A non-empty address is not the test. A row holding something that is not an
+// address derives no id, so every lookup here treats it as a draft; counting it
+// as a saved account is what let `Service.saveAccounts` write a list whose only
+// entry was unusable, replacing a working mailbox on disk with a row that could
+// not be selected, edited or removed.
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "", email: "ada" }
+] }), false, "a username in the address field is setup state, not an account")
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "", email: "ada" },
+  { id: "ada@example.com", email: "ada@example.com" }
+] }), true, "one real mailbox alongside it is still a saved list")
 assert.strictEqual(accounts.active(accounts.emptyList()), null)
 assert.strictEqual(accounts.find(accounts.emptyList(), "a@example.com"), null)
 
@@ -245,7 +257,7 @@ assert.strictEqual(messy.activeId, "bob@example.com")
 let saved = accounts.emptyList()
 saved = accounts.add(saved, account("ada@example.com", { label: "工作邮箱" }))
 saved = accounts.add(saved, account("bob@example.com", { label: "Personal" }))
-saved = accounts.add(saved, account("", { clientId: "cid5" }))
+saved = accounts.add(saved, account("", { clientId: "cid5", pending: true }))
 saved = accounts.setActive(saved, "bob@example.com")
 
 const text = accounts.serialize(saved)
@@ -265,6 +277,130 @@ const multiline = accounts.serialize(accounts.add(accounts.emptyList(), account(
 assert.strictEqual(multiline.indexOf("\n"), -1)
 assert.strictEqual(accounts.load(multiline).accounts[0].label, "a\nb")
 
+// ------------------------------------------------------ repairing an address
+//
+// The IMAP form used to save whatever the address field held, unchecked. A
+// username typed there became the row's address, and since the id is derived
+// from the address the row stopped being addressable: it could not be
+// selected, signed, switched to or removed, and the next write dropped it.
+//
+// The address was never actually lost. `setupSettings` folds the address into
+// the username when no separate one was given, so `imap.username` still holds
+// it — and a row that can be repaired is repaired on the way in.
+const damaged = JSON.stringify({ version: accounts.VERSION, accounts: [{
+  email: "ada", provider: "imap", imap: {
+    imapHost: "imap.example.org", smtpHost: "smtp.example.org",
+    username: "ada@example.org" } }], activeId: "" })
+const mended = accounts.load(damaged)
+assert.strictEqual(mended.accounts[0].email, "ada@example.org",
+  "the address comes back from the username it was folded into")
+assert.strictEqual(mended.accounts[0].id, "imap:ada@example.org")
+assert.strictEqual(mended.activeId, "imap:ada@example.org", "and the row is selectable again")
+assert.strictEqual(mended.accounts[0].imap.imapHost, "imap.example.org",
+  "everything else about the row is untouched")
+
+// Only where there is an address to adopt. A username that is not one leaves
+// the row exactly as unusable as it was — better than inventing something.
+const unfixable = accounts.load(JSON.stringify({ version: accounts.VERSION, accounts: [{
+  email: "ada", provider: "imap", imap: { imapHost: "imap.example.org", username: "ada" } }],
+  activeId: "" }))
+assert.strictEqual(unfixable.accounts[0].email, "ada")
+assert.strictEqual(unfixable.accounts[0].id, "")
+
+// A Gmail row has no username to adopt, and one that turned up there would not
+// be an address this may act on.
+const gmailRow = accounts.load(JSON.stringify({ version: accounts.VERSION, accounts: [{
+  email: "ada", provider: "gmail", imap: { username: "ada@example.org" } }], activeId: "" }))
+assert.strictEqual(gmailRow.accounts[0].email, "ada")
+
+// And not while the form is open: `add` must never adopt a username, or typing
+// one into the servers section would fill in an address nobody asked for.
+const typing = accounts.add(accounts.emptyList(),
+  { email: "", provider: "imap", imap: { username: "ada@example.org" }, pending: true })
+assert.strictEqual(typing.accounts[0].email, "", "a row being typed into invents nothing")
+
+// A real address makes a row a mailbox whatever the flag says, because
+// `configureAccount` copies every key of the row it edits and a flag that had
+// to be cleared by hand would have outlived setup.
+const configured = accounts.add(accounts.emptyList(),
+  { email: "ada@example.org", provider: "imap", pending: true })
+assert.strictEqual(configured.accounts[0].pending, false)
+
+// The whole sequence, as it happened: a corrupted mailbox on disk, then an
+// unrelated account added. It was that second step that satisfied the old
+// list-wide guard and let the write through with the first row missing.
+let recovered = accounts.load(damaged)
+recovered = accounts.add(recovered, account("bob@example.com"))
+const payload = accounts.savedOnly(recovered)
+assert.strictEqual(accounts.count(payload), 2, "adding one mailbox must not delete another")
+deepEqual(payload.accounts.map(a => a.email), ["ada@example.org", "bob@example.com"])
+assert.strictEqual(accounts.dropsNamedMailbox(recovered, payload), false)
+
+// -------------------------------------------------------------- what is written
+//
+// The row `add` creates before anything has been typed into it is the setup
+// form's working state, not a mailbox, and it says so — `pending`. Any save
+// used to carry whichever draft happened to be open along with it, leaving a
+// "New mailbox" on disk that nothing could select and nothing could remove.
+const withDraft = accounts.savedOnly(saved)
+assert.strictEqual(accounts.count(saved), 3, "savedOnly leaves its input alone")
+assert.strictEqual(accounts.count(withDraft), 2, "the draft row is not written")
+deepEqual(withDraft.accounts.map(a => a.id), ["ada@example.com", "bob@example.com"])
+assert.strictEqual(withDraft.activeId, "bob@example.com", "the selection is kept")
+assert.strictEqual(accounts.draftCount(saved), 1)
+
+// A draft is a row that says it is one. Inferring it from a missing id read a
+// mailbox whose address had been corrupted as working state and dropped it
+// here — which is how adding one mailbox deleted a different, working one.
+// This row has no id either, and it is not a draft: its servers were typed in
+// and its password is in the keyring.
+let broken = accounts.emptyList()
+broken = accounts.add(broken, account("ada@example.com"))
+broken = accounts.add(broken, account("ada", { provider: "imap",
+  imap: { imapHost: "imap.example.org", username: "ada" } }))
+assert.strictEqual(accounts.count(accounts.savedOnly(broken)), 2,
+  "a mailbox with an unusable address is kept, not quietly deleted")
+assert.strictEqual(accounts.draftCount(broken), 0)
+
+// A row holding nothing at all is a different thing: the leftover of an Add
+// nobody filled in, and there is nothing in one to preserve.
+let hollow = accounts.emptyList()
+hollow = accounts.add(hollow, account("ada@example.com"))
+hollow = accounts.add(hollow, { email: "" })
+assert.strictEqual(accounts.count(accounts.savedOnly(hollow)), 1)
+assert.strictEqual(accounts.carriesData({ email: "", imap: {} }), false)
+assert.ok(accounts.carriesData({ id: "", imap: { username: "ada@example.org" } }))
+
+// Nothing may drop a mailbox the list can name. The guard this replaces asked
+// only whether the payload still held *some* mailbox, which one freshly added
+// account was enough to satisfy.
+assert.ok(accounts.dropsNamedMailbox(broken, accounts.emptyList()))
+assert.strictEqual(accounts.dropsNamedMailbox(saved, accounts.savedOnly(saved)), false)
+assert.strictEqual(accounts.dropsNamedMailbox(broken, accounts.savedOnly(broken)), false)
+
+// The selection follows when the row it named is the one dropped.
+let activeDraft = accounts.add(accounts.emptyList(), account("ada@example.com"))
+activeDraft = accounts.add(activeDraft, account(""))
+activeDraft.activeId = ""
+assert.strictEqual(accounts.savedOnly(activeDraft).activeId, "ada@example.com",
+  "a list written with no selection still names a mailbox")
+
+// Nothing to keep is left empty rather than invented; the write guard in
+// Service.saveAccounts is what stops that reaching disk.
+assert.strictEqual(accounts.count(accounts.savedOnly(
+  accounts.add(accounts.emptyList(), { email: "", pending: true }))), 0)
+assert.strictEqual(accounts.serialize(accounts.savedOnly(saved)).indexOf("\n"), -1)
+
+// An idless row is not necessarily the setup form's draft. A legacy mailbox
+// whose address cannot be repaired is deliberately kept by `savedOnly`, and
+// cancelling a draft must not become a second path that silently deletes it.
+const damagedDraftLookalike = accounts.add(accounts.emptyList(), {
+  email: "ada", provider: "imap",
+  imap: { imapHost: "imap.example.org", username: "ada" }
+})
+assert.strictEqual(accounts.count(accounts.discardDraftAt(damagedDraftLookalike, 0)), 1,
+  "only a row marked pending may be discarded as a draft")
+
 // ------------------------------------------------------- removing by index
 //
 // A pending account has no id, so nothing can name it — and a sign-in that
@@ -273,7 +409,7 @@ assert.strictEqual(accounts.load(multiline).accounts[0].label, "a\nb")
 
 let pendingList = accounts.emptyList()
 pendingList = accounts.add(pendingList, { email: "one@example.com", clientId: "c1" })
-pendingList = accounts.add(pendingList, { email: "", clientId: "c2" })
+pendingList = accounts.add(pendingList, { email: "", clientId: "c2", pending: true })
 pendingList = accounts.add(pendingList, { email: "two@example.com", clientId: "c3" })
 assert.strictEqual(accounts.count(pendingList), 3)
 

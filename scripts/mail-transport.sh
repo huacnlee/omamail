@@ -12,6 +12,7 @@
 # One line, fields separated by spaces:
 #
 #   imap <b64 url> <b64 user:password> <b64 command> [<b64 command> ...]
+#   imap-id <b64 root url> <b64 url> <b64 user:password> <b64 preamble> <b64 command> ...
 #   imap-append <b64 url> <b64 user:password> <b64 message>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
 #
@@ -72,13 +73,32 @@ set -- $line
 [ $# -ge 4 ] || fail 'mail-transport.sh: usage: <mode> <url> <credentials> <arg>...'
 
 mode=$1
-url=$(decode "$2")
-credentials=$(decode "$3")
-shift 3
+# `imap-id` carries two URLs. The first section has to reach the server without
+# naming a mailbox: curl opens a URL's path before the first command it was
+# given, so a path there is a SELECT that nothing can be placed in front of,
+# and some servers refuse SELECT until the client has sent RFC 2971's ID. The
+# connection is reused across the sections, so a command sent by the first one
+# still applies to the mailbox the next one opens.
+if [ "$mode" = imap-id ]; then
+  [ $# -ge 6 ] || fail 'mail-transport.sh: imap-id needs a root url, a url, credentials, a preamble and a command'
+  root_url=$(decode "$2")
+  url=$(decode "$3")
+  credentials=$(decode "$4")
+  shift 4
+  case "$root_url" in
+    imaps://*|imap://*) ;;
+    *) fail 'mail-transport.sh: refusing a root URL that is not imap(s)' ;;
+  esac
+  escaped_root_url=$(escape "$root_url")
+else
+  url=$(decode "$2")
+  credentials=$(decode "$3")
+  shift 3
+fi
 
 case "$mode" in
-  imap|imap-append|smtp) ;;
-  *) fail 'mail-transport.sh: mode must be imap, imap-append or smtp' ;;
+  imap|imap-id|imap-append|smtp) ;;
+  *) fail 'mail-transport.sh: mode must be imap, imap-id, imap-append or smtp' ;;
 esac
 
 # The URL is built and validated by Imap.js, which has already refused anything
@@ -147,8 +167,22 @@ else
   first=1
   for argument in "$@"; do
     [ "$first" = "1" ] || printf 'next\n'
+    # In imap-id the opening command runs against the server rather than a
+    # mailbox, so that it lands in front of the SELECT curl derives from the
+    # path. Every later section names the mailbox as usual.
+    if [ "$mode" = imap-id ] && [ "$first" = "1" ]; then
+      printf 'url = "%s"\n' "$escaped_root_url"
+      # The opening command's own reply is of no interest, and leaving it on
+      # stdout would be worse than useless: the test below reads a non-empty
+      # stdout as "the answer is here", and a single-UID BODY FETCH is the one
+      # request whose answer really does arrive there. One stray line from this
+      # section is enough to make a message body look like an empty one.
+      # `output` is per-section, so only this reply is discarded.
+      printf 'output = "%s"\n' "/dev/null"
+    else
+      printf 'url = "%s"\n' "$escaped_url"
+    fi
     first=0
-    printf 'url = "%s"\n' "$escaped_url"
     # Desktop HTTP/SOCKS proxy settings are for web traffic. In particular,
     # Omarchy's local SOCKS proxy accepts the IMAPS socket and then drops its
     # TLS handshake, which curl reports as error 35. Direct mail transport also
@@ -222,7 +256,8 @@ while :; do
 done
 
 printf '%s\n' "$status"
-if [ "$mode" = "imap" ] && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
+if { [ "$mode" = "imap" ] || [ "$mode" = "imap-id" ]; } \
+  && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
   # libcurl recognises only a single numeric UID as a BODY FETCH. A legal IMAP
   # sequence-set is treated as a generic custom request, whose response is
   # delivered through curl's protocol-header callback instead of stdout.

@@ -217,7 +217,19 @@ Item {
   function switchToIndex(index) {
     var accounts = accountList ? accountList.accounts : []
     if (index < 0 || index >= accounts.length) return false
-    if (index === indexOfActiveAccount()) return true
+    // Already the row the id names — but `activeIndex` can still be holding a
+    // draft opened before this call, and it outranks the id everywhere the
+    // editing row is worked out. Clearing it is the same correction `switchTo`
+    // makes above. Without it, Edit on a mailbox chosen while Add had a draft
+    // on screen opened that draft's empty form instead, and Remove then
+    // targeted the draft rather than the mailbox that was clicked.
+    if (index === indexOfActiveAccount()) {
+      if (activeIndex >= 0) {
+        activeIndex = -1
+        refreshCurrent()
+      }
+      return true
+    }
     if (accounts[index].id !== "") {
       return switchTo(accounts[index].id)
     }
@@ -232,7 +244,12 @@ Item {
   function addAccount(provider) {
     accountList = Accounts.add(accountList, ({
       email: "", clientId: "", clientSecret: "",
-      provider: provider || Provider.DEFAULT_ID
+      provider: provider || Provider.DEFAULT_ID,
+      // Working state for the form, and it says so rather than leaving the
+      // write boundary to guess from a missing id — which is what it used to
+      // do, and what made it delete a mailbox whose address had been corrupted.
+      // `makeAccount` clears this the moment a real address arrives.
+      pending: true
     }))
     // This row is working state for the form, not an account yet. Persisting
     // it here leaves a "New account" behind when Back cancels Add; the first
@@ -247,12 +264,13 @@ Item {
   }
 
   function discardCurrentDraft() {
-    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var index = editingIndex()
     var next = Accounts.discardDraftAt(accountList, index)
-    if (Accounts.count(next) === accountCount) return
+    if (Accounts.count(next) === accountCount) return false
     activeIndex = -1
     accountList = next
     refreshCurrent()
+    return true
   }
 
   function removeAccount(id) {
@@ -279,6 +297,13 @@ Item {
     // provider decides what it is about to be called.
     var named = Accounts.accountId(email, accounts[index].provider)
     if (accounts[index].id === named) return
+    // The other place an address reaches the list, and the other place one that
+    // is not an address can destroy a mailbox: an empty id means `accountId`
+    // could make nothing of what the provider reported, and writing it would
+    // replace a working row's address with a name that addresses nothing. A
+    // rename that cannot produce an id has nothing to offer, so it is refused
+    // rather than stored — the row keeps the address it already answers to.
+    if (named === "") return
 
     // Two rows cannot hold one address. Rebuilding the list would fold them
     // together and take the row being added with it, which read as the add
@@ -370,13 +395,28 @@ Item {
     // path that persists only one — Add waits for configureAccount, and the UI
     // does not remove the final saved account — so refusing this write is the
     // last line of defence against replacing every account with first-run.
-    if (!Accounts.hasSavedAccounts(accountList)) return
+    //
+    // Only the mailboxes, never the form's own working row: a save triggered by
+    // one account used to carry whatever draft happened to be open along with
+    // it, stranding a row on disk that nothing could select or remove. The
+    // guard is applied to that stripped list rather than to what is in memory,
+    // so it is testing the bytes that are about to be written instead of
+    // trusting the two to agree.
+    var writable = Accounts.savedOnly(accountList)
+    if (!Accounts.hasSavedAccounts(writable)) return
+    // And no mailbox the list could name may go missing on the way to the
+    // payload. The guard above is about the list as a whole — one real mailbox
+    // in it is enough to satisfy it, which is exactly why it let a write
+    // through that had dropped a different, working account. This one is per
+    // row. Removal never arrives here as an omission: it goes through
+    // `remove` or `removeAt`, so the row is gone from `accountList` too.
+    if (Accounts.dropsNamedMailbox(accountList, writable)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
       return
     }
     accountsSaveQueued = false
-    accountsWritePayload = Accounts.serialize(accountList)
+    accountsWritePayload = Accounts.serialize(writable)
     accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
     accountsWriter.running = true
   }
@@ -391,14 +431,20 @@ Item {
     // First run, or an install that predates several accounts: one nameless
     // row so the existing credentials file still has somewhere to live.
     if (Accounts.count(loaded) === 0)
-      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "" }))
+      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "", pending: true }))
     // Reading back our own write must change nothing. The list is watched so
     // that an edit from outside is picked up, but every save triggers that
     // watch — and reassigning the list re-derives every account's id, which
     // resets its cache and its session. That is what made adding a mailbox
     // flicker through several states: the window was rebuilding every account
     // each time the file it had just written landed back.
-    if (accountsLoaded && Accounts.serialize(loaded) === Accounts.serialize(accountList))
+    //
+    // Compared on the saved rows alone, because that is all the write contains.
+    // Against the whole in-memory list an open draft would make every read-back
+    // look like an outside edit, and adopting it would destroy the row the user
+    // is typing into.
+    if (accountsLoaded && Accounts.serialize(Accounts.savedOnly(loaded))
+        === Accounts.serialize(Accounts.savedOnly(accountList)))
       return
     // What is on disk is behind what is in memory until the pending write
     // lands, so a reload now would be a straight revert.
@@ -672,7 +718,7 @@ Item {
   }
   readonly property string accountAddress: {
     var accounts = accountList ? accountList.accounts : []
-    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var index = editingIndex()
     return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
   }
   readonly property int inboxUnread: current ? current.inboxUnread : 0
@@ -815,7 +861,7 @@ Item {
   // one on screen. Addressed by index because that is the only handle on a row
   // that has no address yet — which is exactly the row being filled in.
   function configureCurrentAccount(values) {
-    configureAccount(activeIndex >= 0 ? activeIndex : indexOfActiveAccount(), values)
+    configureAccount(editingIndex(), values)
   }
 
   // Saving a new address rebuilds the account host. Wait for that replacement
@@ -840,6 +886,18 @@ Item {
     }
     return -1
   }
+
+  // Which row the setup page is editing. `activeIndex` is the override a row
+  // with no id needs — it cannot be named — and the active account's own
+  // position answers for every other row. One function because three callers
+  // used to spell this out for themselves and a fourth, the Remove button,
+  // spelled it differently: it asked `indexOfActiveAccount()` alone, so on the
+  // page of a freshly added mailbox it named the mailbox that was on screen
+  // before the add, and removing it deleted a working account.
+  function editingIndex() {
+    return activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+  }
+
   function openInBrowser(id) { if (current) current.openInBrowser(id) }
   function openWebInbox() { if (current) current.openWebInbox() }
 

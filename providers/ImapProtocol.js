@@ -109,6 +109,31 @@ var PRESETS = [
     imapHost: "imap.gmx.com", imapPort: 993,
     smtpHost: "mail.gmx.com", smtpPort: 465
   },
+  // Here for the note rather than the servers: imap.163.com and smtp.163.com
+  // on the standard ports are exactly what `imap.<domain>` would have guessed.
+  // What no address can imply is that the mailbox refuses the account
+  // password, and a user who does not know that is told only that they were
+  // rejected — which is the one sentence that stops the next hour.
+  //
+  // 163.com alone, deliberately. NetEase's other consumer domains are the same
+  // service on their own hostnames, so 126.com and yeah.net cannot be added to
+  // this row's `domains` — they would be handed the 163 servers. They need a
+  // row each, and until someone wants one the guess already reaches them.
+  {
+    id: "netease-163",
+    name: "163 Mail",
+    domains: ["163.com"],
+    imapHost: "imap.163.com", imapPort: 993,
+    smtpHost: "smtp.163.com", smtpPort: 465,
+    note: "163 does not accept your account password here. Switch IMAP on in the "
+      + "mailbox's own settings, then paste the authorisation code it hands you — it "
+      + "is a separate string from the password you sign in to the website with.",
+    guide: {
+      url: "https://help.mail.163.com/faqDetail.do?code="
+        + "d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
+      label: "How to get a 163 authorisation code"
+    }
+  },
   {
     id: "proton",
     name: "Proton Mail",
@@ -643,6 +668,26 @@ function capabilityCommand() {
   return "CAPABILITY"
 }
 
+// RFC 2971's client identification, sent to any server that advertises ID.
+// Most servers tolerate its absence, which is why it went missing for so long.
+// Coremail does not: it answers every SELECT with "Unsafe Login" until this has
+// arrived, and that is how the omission was found rather than what it is for.
+//
+// Delivered by the transport's `imap-id` mode, which is the only way to get a
+// command in front of the SELECT curl derives from a URL's path.
+//
+// Sent only to a server that advertised ID: one that has never heard of it
+// answers BAD, and the transport runs curl with --fail-early, so that single
+// BAD would take every command after it.
+//
+// A name and nothing else. This string goes into someone else's server log,
+// and the operating system, the hostname and the user are none of its
+// business — RFC 2971 section 3.3 says as much.
+function idCommand() {
+  return "ID (\"name\" \"omamail\")"
+}
+
+
 // ------------------------------------------------------- search translation
 
 // The criteria a mailbox query carries are already IMAP's own words (UNSEEN,
@@ -876,6 +921,89 @@ function parseList(text) {
   return out
 }
 
+// ------------------------------------------------- mailbox names on the wire
+//
+// A mailbox name is not text. RFC 3501 section 5.1.3 carries it in "modified
+// UTF-7": everything outside printable US-ASCII is shifted into a base64 run
+// introduced by "&" and closed by "-", with "," standing in for base64's "/"
+// because "/" is a hierarchy delimiter, and "&-" spelling a literal "&".
+//
+// So a Chinese mailbox arrives as "&g0l6P3ux-" and a sidebar that prints what
+// the server said prints that. This is the only place it is turned back into
+// the name its owner gave it — and the decoded form is for display and nothing
+// else. Every name that goes back to the server travels as `rawName`, exactly
+// as it arrived, so nothing here has to be re-encoded and no round trip can
+// lose a byte in the process.
+//
+// Anything that does not decode is passed through unchanged rather than
+// rejected: a server that sends a bare "&" is not a reason to hide a folder.
+
+var MODIFIED_BASE64 =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,"
+
+// The base64 run holds UTF-16BE, so it decodes to whole code units — which is
+// what a JavaScript string is made of, surrogate pairs included.
+function decodeShift(chunk) {
+  var bits = 0
+  var width = 0
+  var units = []
+  var pending = -1
+  for (var i = 0; i < chunk.length; i++) {
+    var value = MODIFIED_BASE64.indexOf(chunk.charAt(i))
+    if (value < 0) return null
+    bits = (bits << 6) | value
+    width += 6
+    if (width < 8) continue
+    width -= 8
+    var byte = (bits >> width) & 0xff
+    if (pending < 0) pending = byte
+    else {
+      units.push((pending << 8) | byte)
+      pending = -1
+    }
+  }
+  // A trailing half of a code unit means the run was truncated, and the bits
+  // left over past the last whole byte are the run's padding, which must be
+  // zero. A run that yields no code unit at all is malformed too: the one
+  // legitimately empty run is "&-", and that is an ampersand, handled above.
+  if (pending >= 0) return null
+  if (width > 0 && (bits & ((1 << width) - 1)) !== 0) return null
+  if (units.length === 0) return null
+  var out = ""
+  for (var j = 0; j < units.length; j++) out += String.fromCharCode(units[j])
+  return out
+}
+
+function decodeMailbox(name) {
+  var text = String(name === undefined || name === null ? "" : name)
+  if (text.indexOf("&") < 0) return text
+  var out = ""
+  var at = 0
+  while (at < text.length) {
+    if (text.charAt(at) !== "&") {
+      out += text.charAt(at)
+      at++
+      continue
+    }
+    var close = text.indexOf("-", at + 1)
+    if (close < 0) {
+      // An unterminated run is not a name this can improve on.
+      out += text.substring(at)
+      break
+    }
+    var chunk = text.substring(at + 1, close)
+    if (chunk === "") {
+      // "&-" is how the protocol spells an ampersand.
+      out += "&"
+    } else {
+      var decoded = decodeShift(chunk)
+      out += decoded === null ? text.substring(at, close + 1) : decoded
+    }
+    at = close + 1
+  }
+  return out
+}
+
 // The SPECIAL-USE attributes this plugin cares about, mapped to the folder the
 // server named. A server that advertises none leaves the map empty and
 // `resolveFolder` falls back to the plain word.
@@ -1036,6 +1164,14 @@ function responseError(status, detail, fallback) {
   if (code === 35) return "A secure connection to the mail server could not be established"
   if (code === 60 || code === 51)
     return "The mail server's security certificate could not be verified"
+  // curl gives a refused SELECT the same exit code as a denied login — 67, with
+  // only "Select failed" against "Access denied" to tell them apart — and 21 to
+  // a command the server answered BAD. Reading either as an authentication
+  // failure sends someone off to change a password that was never the problem:
+  // a server that will not open a folder still took the password, and saying
+  // otherwise is the one error message a user cannot act on.
+  if (code === 21 || (code === 67 && /select failed/i.test(text)))
+    return "The mail server refused that command"
   if (code === 67 || /AUTHENTICATIONFAILED|invalid credentials|login failed/i.test(text))
     return "The server rejected that username or password"
   if (/\[ALERT\]/i.test(text)) {
@@ -1049,6 +1185,21 @@ function responseError(status, detail, fallback) {
     return "That folder is no longer on the server"
   if (text !== "") return redact(text)
   return fallback || "The mail server could not complete this request"
+}
+
+// The error for a finished transport call, whichever half of it failed.
+//
+// curl's exit code says that something went wrong; the server's own tagged NO
+// or BAD says what, and it is in the response even when curl exits non-zero.
+// Preferring it is what keeps a refused command reported in the words the
+// server chose rather than as whichever of curl's exit codes it happened to
+// share with an unrelated failure.
+function transportError(status, response, detail, fallback) {
+  if (isFailure(response)) {
+    var served = failureDetail(response)
+    if (trimmed(served) !== "") return responseError(0, served, fallback)
+  }
+  return responseError(status, detail, fallback)
 }
 
 // A password can end up in a curl error line, in a server's echo of a failed

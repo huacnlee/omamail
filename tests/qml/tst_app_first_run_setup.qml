@@ -111,7 +111,7 @@ Item {
       next.push(text)
       log = next
     }
-    function indexOfActiveAccount() { return 0 }
+    function editingIndex() { return 0 }
     function addAccount(provider) {
       lastAddedProvider = String(provider || "")
       record("add:" + lastAddedProvider)

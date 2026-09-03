@@ -99,9 +99,11 @@ test-shell:
 	python3 tests/test_qml_text_format.py
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
+	bash tests/test_config_store.sh
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
+	bash tests/test_imap_ordering.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_image_fetch.sh
 	bash tests/test_attachment_open.sh

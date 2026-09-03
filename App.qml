@@ -929,13 +929,28 @@ Item {
     pushEntry("setup", { provider: provider, draft: false })
   }
 
+  // The row this page is editing, not the mailbox the id happens to name: with
+  // a freshly added draft on screen those are different rows, and asking for
+  // the second one is how Remove came to delete a working account while the
+  // page in front of the user showed an empty form.
   function removeCurrentAccountFromEditor() {
     if (!service || service.accountCount <= 1) return
-    var index = service.indexOfActiveAccount()
+    var index = service.editingIndex()
     if (index < 0) return
     var values = service.accountSummaries || []
     var request = Accounts.removalRequest({ accounts: values }, index)
-    if (request) accountRemovalDialog.openFor(request)
+    if (request) {
+      accountRemovalDialog.openFor(request)
+      return
+    }
+    // No request means there is no mailbox id a confirmation can name. For the
+    // form's pending row that is expected: cancel it and leave the page, the
+    // way Back does. An idless persisted mailbox is different — if its damaged
+    // address could not be repaired it stays here for correction rather than
+    // being silently removed and mistaken for canceled setup state.
+    if (service.discardCurrentDraft() !== true) return
+    navUntouched = false
+    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
   }
 
   function confirmAccountRemoval(request) {

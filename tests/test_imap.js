@@ -17,6 +17,26 @@ assert.strictEqual(imap.presetFor("jane@hotmail.com").id, "outlook", "aliases re
 assert.strictEqual(imap.presetFor("jane@me.com").id, "icloud")
 assert.strictEqual(imap.presetFor("jane@example.org"), null)
 
+// 163 has an entry for its note, not its servers — those are what
+// `imap.<domain>` would have guessed anyway. The note is the part no address
+// can imply: this mailbox refuses the account password.
+assert.strictEqual(imap.presetFor("jane@163.com").id, "netease-163")
+assert.strictEqual(imap.suggestedSettings("jane@163.com").imapHost, "imap.163.com")
+assert.strictEqual(imap.suggestedSettings("jane@163.com").smtpHost, "smtp.163.com")
+assert.ok(/authorisation code/i.test(imap.suggestedSettings("jane@163.com").note),
+  "a mailbox that refuses the account password has to say so")
+assert.ok(/^https:\/\//.test(imap.suggestedSettings("jane@163.com").guideUrl))
+assert.ok(imap.suggestedSettings("jane@163.com").guideLabel !== "")
+
+// And 163 alone: its sibling domains are the same service on their own
+// hostnames, so adding them to that row would hand them the 163 servers. The
+// guess reaches them correctly until someone gives them a row of their own.
+assert.strictEqual(imap.presetFor("jane@126.com"), null)
+assert.strictEqual(imap.presetFor("jane@yeah.net"), null)
+assert.strictEqual(imap.suggestedSettings("jane@126.com").imapHost, "imap.126.com")
+assert.strictEqual(imap.suggestedSettings("jane@yeah.net").smtpHost, "smtp.yeah.net")
+assert.strictEqual(imap.suggestedSettings("jane@126.com").note, "")
+
 // An unknown domain still gets a guess: imap.<domain> is right far more often
 // than an empty field is useful, and a wrong guess is visible and editable.
 const guess = imap.suggestedSettings("jane@example.org")
@@ -355,6 +375,10 @@ assert.strictEqual(imap.moveCommand([4], "Archive"), "UID MOVE 4 \"Archive\"")
 assert.strictEqual(imap.copyCommand([4], "Sent Items"), "UID COPY 4 \"Sent Items\"")
 assert.strictEqual(imap.statusCommand("INBOX"), "STATUS \"INBOX\" (MESSAGES UNSEEN)")
 
+// A name and nothing else: this goes into someone else's server log, and the
+// host and the user are none of its business (RFC 2971 section 3.3).
+assert.strictEqual(imap.idCommand(), 'ID ("name" "omamail")')
+
 // UID EXPUNGE, never plain EXPUNGE: the latter removes every \Deleted message
 // in the folder, including ones another client marked.
 assert.strictEqual(imap.expungeCommand([4, 5]), "UID EXPUNGE 4,5")
@@ -594,6 +618,58 @@ deepEqual(imap.flagPlanForLabels(["STARRED"], ["UNREAD"], {}),
 
 deepEqual(imap.flagPlanForLabels(null, null, null), { add: [], remove: [], move: "" })
 
+// ------------------------------------------------------- mailbox names
+
+// RFC 3501 section 5.1.3. These seven are the folders a real 163.com mailbox
+// lists, verbatim, and what the sidebar printed before this existed.
+assert.strictEqual(imap.decodeMailbox("&g0l6P3ux-"), "\u8349\u7a3f\u7bb1")
+assert.strictEqual(imap.decodeMailbox("&XfJT0ZAB-"), "\u5df2\u53d1\u9001")
+assert.strictEqual(imap.decodeMailbox("&XfJSIJZk-"), "\u5df2\u5220\u9664")
+assert.strictEqual(imap.decodeMailbox("&V4NXPpCuTvY-"), "\u5783\u573e\u90ae\u4ef6")
+assert.strictEqual(imap.decodeMailbox("&dcVr0mWHTvZZOQ-"), "\u75c5\u6bd2\u6587\u4ef6\u5939")
+assert.strictEqual(imap.decodeMailbox("&Xn9USpCuTvY-"), "\u5e7f\u544a\u90ae\u4ef6")
+assert.strictEqual(imap.decodeMailbox("&i6KWBZCuTvY-"), "\u8ba2\u9605\u90ae\u4ef6")
+
+// Plain US-ASCII is already the name, and must come back untouched — it is
+// also what every lookup and every cache key is keyed on.
+assert.strictEqual(imap.decodeMailbox("INBOX"), "INBOX")
+assert.strictEqual(imap.decodeMailbox("[Gmail]/All Mail"), "[Gmail]/All Mail")
+assert.strictEqual(imap.decodeMailbox(""), "")
+assert.strictEqual(imap.decodeMailbox(null), "")
+
+// "&-" is how the protocol spells an ampersand, and a shift run can sit
+// anywhere in a hierarchy or beside another one.
+assert.strictEqual(imap.decodeMailbox("&-"), "&")
+assert.strictEqual(imap.decodeMailbox("Bed &- Breakfast"), "Bed & Breakfast")
+assert.strictEqual(imap.decodeMailbox("Parent/&g0l6P3ux-"), "Parent/\u8349\u7a3f\u7bb1")
+assert.strictEqual(imap.decodeMailbox("&g0l6P3ux-x&XfJT0ZAB-"),
+  "\u8349\u7a3f\u7bb1x\u5df2\u53d1\u9001")
+
+// The run carries UTF-16BE, so a character outside the BMP arrives as a
+// surrogate pair — which is what a JavaScript string is made of anyway.
+assert.strictEqual(imap.decodeMailbox("&2DzfiQ-"), "\ud83c\udf89")
+
+// A name that does not decode is passed through rather than dropped: a server
+// sending something malformed is not a reason to hide a folder, and the
+// undecoded name is still the one that selects it.
+assert.strictEqual(imap.decodeMailbox("&abc"), "&abc", "an unterminated run")
+assert.strictEqual(imap.decodeMailbox("&!!!-"), "&!!!-", "not modified base64")
+assert.strictEqual(imap.decodeMailbox("&A-"), "&A-", "half of a code unit")
+assert.strictEqual(imap.decodeMailbox("&AAEB-"), "&AAEB-", "a run cut mid-unit")
+
+// The decoded name is for reading. The id and the wire name are what a cache
+// key and a SELECT are built from, and decoding either would make every
+// non-ASCII folder unselectable.
+const clientSource = require("fs").readFileSync(
+  require("path").join(__dirname, "..", "providers", "ImapClient.qml"), "utf8")
+const labelShape = clientSource.slice(clientSource.indexOf("function getLabels"))
+  .slice(0, clientSource.slice(clientSource.indexOf("function getLabels")).indexOf("callback(out"))
+assert.ok(/name:\s*Imap\.decodeMailbox\(folder\.name\)/.test(labelShape),
+  "the name the sidebar prints must be decoded")
+assert.ok(/id:\s*folder\.name\b/.test(labelShape), "the id must stay as the server said it")
+assert.ok(/rawName:\s*folder\.name\b/.test(labelShape),
+  "the name that goes back in a SELECT must stay as the server said it")
+
 // ------------------------------------------------------------------ errors
 
 assert.strictEqual(imap.responseError(7, "", ""),
@@ -610,6 +686,31 @@ assert.ok(/certificate/i.test(imap.responseError(60, "", "")))
 assert.strictEqual(imap.responseError(0, "", "fallback text"), "fallback text")
 assert.ok(/over its storage quota/i.test(imap.responseError(0, "A1 NO [OVERQUOTA] mailbox full", "")))
 assert.ok(/no longer on the server/i.test(imap.responseError(0, "A1 NO [NONEXISTENT] no such folder", "")))
+
+// curl spends exit 67 on both a denied login and a refused SELECT, and the only
+// thing separating them is the sentence beside it. Reading the second as the
+// first is what told a NetEase user their password had been rejected: those
+// servers refuse SELECT until the client has sent ID, and the password was
+// right the whole time.
+assert.strictEqual(imap.responseError(67, "curl: (67) Access denied. ", ""),
+  "The server rejected that username or password")
+assert.strictEqual(imap.responseError(67, "curl: (67) Select failed", ""),
+  "The mail server refused that command",
+  "a folder that would not open is not a password that was refused")
+assert.strictEqual(imap.responseError(21, "curl: (21) Quote command returned error", ""),
+  "The mail server refused that command")
+
+// The server said why. curl only said that something failed, and picked an exit
+// code it shares with an unrelated failure — so the server's own words win.
+assert.strictEqual(
+  imap.transportError(67, "A3 NO SELECT Unsafe Login. Please contact kefu@188.com for help",
+    "curl: (67) Select failed", ""),
+  "SELECT Unsafe Login. Please contact kefu@188.com for help")
+assert.strictEqual(
+  imap.transportError(67, "A2 OK LOGIN completed", "curl: (67) Access denied. ", ""),
+  "The server rejected that username or password",
+  "with no tagged failure to read, the exit code is all there is")
+assert.strictEqual(imap.transportError(0, "A1 OK done", "", "fallback text"), "fallback text")
 
 // A server's [ALERT] is written for the user by definition — the RFC says a
 // client must show it — so it is passed through rather than translated.
