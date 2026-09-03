@@ -109,6 +109,31 @@ var PRESETS = [
     imapHost: "imap.gmx.com", imapPort: 993,
     smtpHost: "mail.gmx.com", smtpPort: 465
   },
+  // Here for the note rather than the servers: imap.163.com and smtp.163.com
+  // on the standard ports are exactly what `imap.<domain>` would have guessed.
+  // What no address can imply is that the mailbox refuses the account
+  // password, and a user who does not know that is told only that they were
+  // rejected — which is the one sentence that stops the next hour.
+  //
+  // 163.com alone, deliberately. NetEase's other consumer domains are the same
+  // service on their own hostnames, so 126.com and yeah.net cannot be added to
+  // this row's `domains` — they would be handed the 163 servers. They need a
+  // row each, and until someone wants one the guess already reaches them.
+  {
+    id: "netease-163",
+    name: "163 Mail",
+    domains: ["163.com"],
+    imapHost: "imap.163.com", imapPort: 993,
+    smtpHost: "smtp.163.com", smtpPort: 465,
+    note: "163 does not accept your account password here. Switch IMAP on in the "
+      + "mailbox's own settings, then paste the authorisation code it hands you — it "
+      + "is a separate string from the password you sign in to the website with.",
+    guide: {
+      url: "https://help.mail.163.com/faqDetail.do?code="
+        + "d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
+      label: "How to get a 163 authorisation code"
+    }
+  },
   {
     id: "proton",
     name: "Proton Mail",

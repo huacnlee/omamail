@@ -17,6 +17,26 @@ assert.strictEqual(imap.presetFor("jane@hotmail.com").id, "outlook", "aliases re
 assert.strictEqual(imap.presetFor("jane@me.com").id, "icloud")
 assert.strictEqual(imap.presetFor("jane@example.org"), null)
 
+// 163 has an entry for its note, not its servers — those are what
+// `imap.<domain>` would have guessed anyway. The note is the part no address
+// can imply: this mailbox refuses the account password.
+assert.strictEqual(imap.presetFor("jane@163.com").id, "netease-163")
+assert.strictEqual(imap.suggestedSettings("jane@163.com").imapHost, "imap.163.com")
+assert.strictEqual(imap.suggestedSettings("jane@163.com").smtpHost, "smtp.163.com")
+assert.ok(/authorisation code/i.test(imap.suggestedSettings("jane@163.com").note),
+  "a mailbox that refuses the account password has to say so")
+assert.ok(/^https:\/\//.test(imap.suggestedSettings("jane@163.com").guideUrl))
+assert.ok(imap.suggestedSettings("jane@163.com").guideLabel !== "")
+
+// And 163 alone: its sibling domains are the same service on their own
+// hostnames, so adding them to that row would hand them the 163 servers. The
+// guess reaches them correctly until someone gives them a row of their own.
+assert.strictEqual(imap.presetFor("jane@126.com"), null)
+assert.strictEqual(imap.presetFor("jane@yeah.net"), null)
+assert.strictEqual(imap.suggestedSettings("jane@126.com").imapHost, "imap.126.com")
+assert.strictEqual(imap.suggestedSettings("jane@yeah.net").smtpHost, "smtp.yeah.net")
+assert.strictEqual(imap.suggestedSettings("jane@126.com").note, "")
+
 // An unknown domain still gets a guess: imap.<domain> is right far more often
 // than an empty field is useful, and a wrong guess is visible and editable.
 const guess = imap.suggestedSettings("jane@example.org")
