@@ -45,9 +45,17 @@
       "oauthPort": 9481,
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
-      "openOnClick": "Window"
+      "openOnClick": "Window",
+      "showBarIcon": true
     },
     "schema": [
+      {
+        "key": "showBarIcon",
+        "type": "boolean",
+        "label": "Show the icon in the bar",
+        "defaultValue": true,
+        "description": "Turn this off to keep Omamail without an envelope in the bar. Mail is still checked and still notifies; only the icon goes. Bind a key first or there will be no way to open the window: o.bind(\"SUPER + SHIFT + G\", \"Omamail\", \"omarchy shell shell toggle omamail '{}'\")"
+      },
       {
         "key": "refreshIntervalSec",
         "type": "integer",

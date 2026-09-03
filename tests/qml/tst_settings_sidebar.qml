@@ -247,12 +247,21 @@ Item {
 
     // The rail names the sections in the page's order, and the page reports
     // where each begins, in that same order.
+    // By key rather than by position: these used to be `sections[2]` and
+    // friends, so adding a section renumbered assertions that had nothing to
+    // do with it.
+    function sectionY(page, key) {
+      for (var i = 0; i < page.sections.length; i++)
+        if (page.sections[i].key === key) return page.sections[i].y
+      return -1
+    }
+
     function test_the_rail_lists_the_pages_sections_in_order() {
       var rail = named(app, "settings-sidebar")
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "bar,reading,notifications,writing,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
@@ -267,7 +276,8 @@ Item {
       var view = flick()
       verify(view, "the page scrolls inside a Flickable")
       compare(view.contentY, 0)
-      compare(rail.activeKey, "reading")
+      compare(rail.activeKey, "bar",
+        "the top of the page is the first section, whichever that is")
       compare(app.navKinds.join(","), "list,settings")
 
       // The rail sits against the page, and the pair is centred in the area.
@@ -282,7 +292,7 @@ Item {
 
       var writing = named(rail, "settings-section-writing")
       mouseClick(writing)
-      tryVerify(function() { return Math.abs(view.contentY - page.sections[2].y) < 1 }, 1000,
+      tryVerify(function() { return Math.abs(view.contentY - sectionY(page, "writing")) < 1 }, 1000,
         "the page slid until the Writing heading was at the top")
       compare(app.navKinds.join(","), "list,settings", "still one page in history")
       tryCompare(rail, "activeKey", "writing")
@@ -290,15 +300,15 @@ Item {
       // Every section can be put at the top, the last included: the content
       // is padded under the page for exactly that.
       mouseClick(named(rail, "settings-section-oauth"))
-      tryVerify(function() { return Math.abs(view.contentY - page.sections[5].y) < 1 }, 1000,
+      tryVerify(function() { return Math.abs(view.contentY - sectionY(page, "oauth")) < 1 }, 1000,
         "the last heading reaches the top too")
       tryCompare(rail, "activeKey", "oauth")
 
       // Scrolled by other means — the wheel, say — the highlight still
       // follows the page, because the page is what it describes.
       view.contentY = 0
-      tryCompare(rail, "activeKey", "reading")
-      view.contentY = page.sections[3].y + 5
+      tryCompare(rail, "activeKey", "bar")
+      view.contentY = sectionY(page, "mailboxes") + 5
       tryCompare(rail, "activeKey", "mailboxes")
     }
 

@@ -54,7 +54,8 @@ Item {
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
-    unifiedCalendarView: false
+    unifiedCalendarView: false,
+    showBarIcon: true
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -69,6 +70,13 @@ Item {
     settings ? settings.contentDirection : null)
   readonly property bool unifiedCalendarView: !!settings
     && settings.unifiedCalendarView === true
+
+  // Whether the bar draws an envelope for this.
+  //
+  // Read as "anything but a stored false" rather than as `=== true`, so a
+  // settings file written before this existed keeps the icon it already had
+  // instead of losing it to a field nobody chose.
+  readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -128,6 +136,10 @@ Item {
 
   function setUnifiedCalendarView(value) {
     persistSetting("unifiedCalendarView", value === true)
+  }
+
+  function setShowBarIcon(value) {
+    persistSetting("showBarIcon", value === true)
   }
 
   // ---------------------------------------------------------- the accounts
