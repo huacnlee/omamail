@@ -75,6 +75,56 @@ assert.ok(message.decodeHeaderValue("=?GB2312?B?1eLK1w==?=").length > 0)
 assert.strictEqual(message.decodeHeaderValue(""), "")
 assert.strictEqual(message.decodeHeaderValue(null), "")
 
+// ------------------------------------------- a charset that is not the truth
+
+// A charset header is a claim, and a sender that declares one and sends
+// another is common. Read as one byte each, the UTF-8 for "ń" is "Å" followed
+// by a control character — so the two readings are never both plausible and
+// the bytes decide.
+const polish = "Dzień dobry, zmieniła się wartość wskaźników"
+const polishData = b64url(polish)
+
+;["us-ascii", "iso-8859-1", "iso-8859-2", "windows-1250", "UTF-8"].forEach(function(charset) {
+  assert.strictEqual(message.decodePart({
+    mimeType: "text/plain",
+    headers: [{ name: "Content-Type", value: "text/plain; charset=" + charset }],
+    body: { data: polishData }
+  }), polish, charset + " must not turn UTF-8 into mojibake")
+})
+
+// Genuine single-byte text is left to its declaration. "ç" is 0xE7 in
+// Latin-1, which is a lead byte with no continuation after it — malformed
+// UTF-8, so the header keeps the decision.
+assert.strictEqual(message.decodePart({
+  mimeType: "text/plain",
+  headers: [{ name: "Content-Type", value: "text/plain; charset=iso-8859-1" }],
+  body: { data: Buffer.from([0x46, 0x72, 0x61, 0x6e, 0xe7, 0x61, 0x69, 0x73])
+    .toString("base64") }
+}), "Français")
+
+// The evidence, on its own. Only a well-formed multi-byte sequence counts:
+// everything else is likelier to be single-byte text that happens to begin
+// one than UTF-8 worth trusting over the header.
+assert.strictEqual(message.looksLikeUtf8([0x68, 0x69]), false,
+  "ASCII is both readings, so it is no evidence for either")
+assert.strictEqual(message.looksLikeUtf8([0xc5, 0x84]), true)
+assert.strictEqual(message.looksLikeUtf8([0x41, 0xb3, 0x42]), false,
+  "a continuation byte with no lead is how ISO 8859-2 writes ł")
+assert.strictEqual(message.looksLikeUtf8([0x41, 0xc5]), false, "a truncated tail")
+assert.strictEqual(message.looksLikeUtf8([0xc0, 0xaf]), false, "an overlong form")
+assert.strictEqual(message.looksLikeUtf8([0xed, 0xa0, 0x80]), false, "a surrogate")
+assert.strictEqual(message.looksLikeUtf8([0xf5, 0x80, 0x80, 0x80]), false,
+  "beyond the last code point")
+assert.strictEqual(message.looksLikeUtf8([]), false)
+assert.strictEqual(message.looksLikeUtf8(null), false)
+
+// A subject is decoded through the same door, so a mislabelled encoded word
+// comes out right too.
+assert.strictEqual(
+  message.decodeHeaderValue("=?iso-8859-1?B?"
+    + Buffer.from("wartość", "utf8").toString("base64") + "?="),
+  "wartość")
+
 // ------------------------------------------------------------- addresses
 
 deepEqual(message.parseAddress("Jane Doe <jane@example.com>"),

@@ -182,11 +182,67 @@ function decodeQuotedPrintableWord(text) {
   return bytes
 }
 
+// Whether these bytes are UTF-8 that a single-byte charset could not have
+// produced: at least one well-formed multi-byte sequence, and nothing
+// malformed anywhere.
+//
+// A charset header is a claim, and this is the evidence. Mail that declares
+// `us-ascii` or `iso-8859-1` while carrying UTF-8 is common enough that every
+// other client sniffs for it, and the two readings are never both plausible:
+// read as one byte each, the UTF-8 for "ń" is "Å" followed by a control
+// character, which is not something anybody wrote. Genuine Latin-1 and
+// Latin-2 text does not survive this test — a lone "ł" in ISO 8859-2 is 0xB3,
+// a continuation byte with no lead, which is malformed UTF-8 and hands the
+// decision back to the declaration.
+//
+// Strict on purpose. An overlong form, a surrogate or a truncated tail all
+// count as malformed, because each is likelier to be single-byte text that
+// happens to begin a sequence than UTF-8 worth trusting over the header.
+function looksLikeUtf8(bytes) {
+  var values = bytes || []
+  var multi = 0
+  var i = 0
+  while (i < values.length) {
+    var byte1 = values[i++]
+    if (byte1 < 0x80) continue
+    var needed = 0
+    var codePoint = 0
+    if (byte1 >= 0xc2 && byte1 <= 0xdf) {
+      needed = 1
+      codePoint = byte1 & 0x1f
+    } else if (byte1 >= 0xe0 && byte1 <= 0xef) {
+      needed = 2
+      codePoint = byte1 & 0x0f
+    } else if (byte1 >= 0xf0 && byte1 <= 0xf4) {
+      needed = 3
+      codePoint = byte1 & 0x07
+    } else {
+      // 0x80-0xc1 is a continuation with no lead, or an overlong two-byte
+      // form; 0xf5 and above is past the last code point.
+      return false
+    }
+    if (i + needed > values.length) return false
+    for (var n = 0; n < needed; n++) {
+      var next = values[i + n]
+      if (next < 0x80 || next > 0xbf) return false
+      codePoint = (codePoint << 6) | (next & 0x3f)
+    }
+    i += needed
+    if (needed === 1 && codePoint < 0x80) return false
+    if (needed === 2 && codePoint < 0x800) return false
+    if (needed === 3 && (codePoint < 0x10000 || codePoint > 0x10ffff)) return false
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) return false
+    multi += 1
+  }
+  return multi > 0
+}
+
 function decodeWordBytes(charset, bytes) {
   var name = String(charset || "").toLowerCase()
   if (name.indexOf("utf-8") === 0 || name.indexOf("utf8") === 0) return bytesToUtf8(bytes)
   if (name.indexOf("iso-8859") === 0 || name.indexOf("windows-125") === 0
-    || name.indexOf("us-ascii") === 0 || name === "") return bytesToLatin1(bytes)
+    || name.indexOf("us-ascii") === 0 || name === "")
+    return looksLikeUtf8(bytes) ? bytesToUtf8(bytes) : bytesToLatin1(bytes)
   // GB18030, Shift_JIS and friends need a table this plugin does not carry.
   // UTF-8 decoding degrades to Latin-1 per byte, which at least keeps the
   // ASCII parts of the header readable.
