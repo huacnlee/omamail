@@ -56,6 +56,10 @@ other IMAP server — including one you run yourself.
   offers an address gets a message; one that only offers a page says so before
   it opens your browser. Nothing is ever fetched from a sender's address until
   you ask.
+- **Attachments open or keep.** The filename opens one in whatever handles its
+  type; the arrow beside it saves the file to your download folder and says
+  where it went. Two messages carrying one name are two files: the second is
+  numbered rather than landing on top of the first.
 - **Images stay blocked.** Loading a sender's pictures tells them the mail was
   read, from which address and when. They load when you ask, for that one
   message.
@@ -256,7 +260,6 @@ A signature is set per mailbox on the settings page, under Writing. It is placed
   written in. A browser engine cannot be embedded in a plugin at all:
   `QtWebEngineQuick::initialize()` has to run before the host process builds
   its `QGuiApplication`, and a plugin loads long after that.
-- **No attachment downloads.** Not yet.
 
 Remote images in a message body are blocked until you ask for them, and asking
 covers that one message. Qt really does fetch an `<img src="https://…">`, so

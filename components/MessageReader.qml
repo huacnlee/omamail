@@ -622,6 +622,10 @@ Item {
           if (root.service && root.summary)
             root.service.openAttachment(root.summary.id, attachment)
         }
+        onSaveRequested: function(attachment) {
+          if (root.service && root.summary)
+            root.service.saveAttachment(root.summary.id, attachment)
+        }
       }
     }
 

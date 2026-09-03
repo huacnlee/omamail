@@ -13,6 +13,7 @@ Item {
   required property string panelFontFamily
 
   signal openRequested(var attachment)
+  signal saveRequested(var attachment)
 
   readonly property string filename: root.attachment
     ? String(root.attachment.filename || "attachment") : "attachment"
@@ -49,12 +50,32 @@ Item {
 
   Text {
     id: sizeLabel
-    anchors.right: parent.right
+    anchors.right: saveButton.left
+    anchors.rightMargin: Style.space(4)
     anchors.verticalCenter: parent.verticalCenter
     textFormat: Text.PlainText
     text: Mail.formatSize(root.attachment ? root.attachment.size : 0)
     color: root.dimmerColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
+  }
+
+  // Keeping the file, next to opening it. The name opens — which is what a
+  // filename does everywhere else — and this is the other verb, which needs
+  // its own target rather than a second meaning for the same click.
+  //
+  // No ellipsis: it asks nothing. The file goes to the desktop's download
+  // folder and the notice says where.
+  IconButton {
+    id: saveButton
+    objectName: "attachment-save-button"
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    iconName: "download"
+    iconSize: Style.font.iconSmall
+    tooltipText: "Save to Downloads"
+    foreground: root.dimColor
+    hoverColor: root.textColor
+    onClicked: root.saveRequested(root.attachment)
   }
 }

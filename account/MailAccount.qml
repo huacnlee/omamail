@@ -1663,6 +1663,56 @@ Item {
     })
   }
 
+  // Keeping an attachment rather than opening it once.
+  //
+  // The same shape as `openAttachment` because it is the same journey up to
+  // the last step: sign-in, then the provider's own fetch, then one script.
+  // Only the script differs, and the answer it gives back — a path, which the
+  // notice repeats, because a saved file nobody can find is not saved.
+  function saveAttachment(messageId, attachment) {
+    var source = attachment || ({})
+    if (!ready) {
+      fail("Sign in before saving an attachment")
+      return
+    }
+    if (String(messageId || "") === "" || String(source.attachmentId || "") === "") {
+      fail("That attachment is not available")
+      return
+    }
+    clearNotice()
+    note("Saving " + String(source.filename || "attachment"))
+    loadAttachments(messageId, [source], function(loaded, error) {
+      if (error || !loaded || loaded.length === 0) {
+        root.fail(error || "That attachment could not be loaded")
+        return
+      }
+      var file = loaded[0]
+      var request = attachmentSaveComponent.createObject(root, {
+        command: [pluginDir + "/scripts/save-attachment.py"],
+        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
+          + "\n" + String(file.data || "") + "\n"
+      })
+      if (!request) {
+        root.fail("That attachment could not be saved")
+        return
+      }
+      request.finished.connect(function(exitCode, path, detail) {
+        request.destroy()
+        if (!root) return
+        if (exitCode !== 0) {
+          root.fail(detail || "That attachment could not be saved")
+          return
+        }
+        // The folder rather than the whole path: the name is already on the
+        // row that was clicked, and the part worth reading is where it went.
+        var saved = String(path || "")
+        var at = saved.lastIndexOf("/")
+        root.note(at > 0 ? "Saved to " + saved.substring(0, at) : "Saved")
+      })
+      request.running = true
+    })
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
@@ -2037,6 +2087,32 @@ Item {
           return
         }
         unsubscribeProcess.finished(code, status)
+      }
+    }
+  }
+
+  Component {
+    id: attachmentSaveComponent
+
+    Process {
+      id: attachmentSaveProcess
+
+      property string requestPayload: ""
+      signal finished(int exitCode, string path, string detail)
+
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+
+      onStarted: {
+        write(requestPayload)
+        requestPayload = ""
+      }
+
+      onExited: function(exitCode) {
+        var path = String(attachmentSaveProcess.stdout.text || "").trim()
+        var detail = String(attachmentSaveProcess.stderr.text || "").trim()
+        attachmentSaveProcess.finished(exitCode, path, detail)
       }
     }
   }

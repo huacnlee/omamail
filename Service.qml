@@ -844,6 +844,10 @@ Item {
   function openAttachment(messageId, attachment) {
     if (current) current.openAttachment(messageId, attachment)
   }
+
+  function saveAttachment(messageId, attachment) {
+    if (current) current.saveAttachment(messageId, attachment)
+  }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null
   }
