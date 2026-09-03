@@ -436,6 +436,9 @@ Item {
   // override is a per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
+    // Opening marks it read itself, so a dwell still counting down for the
+    // same message has nothing left to do.
+    markReadDwell.stop()
     pendingComposeMode = ""
     pendingDraftId = ""
     reader.forceRichAnyway = false
@@ -501,9 +504,50 @@ Item {
     if (next === "") return
     cursorId = next
     revealCursorRow()
-    // Moving is not opening. This used to open whatever it landed on while the
-    // reader was up, which made stepping through a list a way to mark half of
-    // it read without having looked at any of it. Enter and "o" open.
+    previewCursor()
+  }
+
+  // Moving is not opening, and this is the difference.
+  //
+  // It used to open whatever it landed on, which made stepping through a list
+  // a way to mark half of it read without having looked at any of it. So the
+  // preview is off unless it was asked for, it pushes no history — Escape and
+  // Back mean what they meant — and it does not mark anything read. A dwell
+  // does that, which is what stops a held arrow key from reading a mailbox.
+  //
+  // Never in a narrow window: there the reader takes the list's place, so
+  // every press would navigate away from the list being moved through and
+  // there would be nothing left to move.
+  function previewCursor() {
+    markReadDwell.stop()
+    if (!service || !service.previewOnCursor || compact) return
+    if (cursorId === "" || showPage || composing || calendarVisible) return
+    // A message already open stays open on its own terms: it was opened, and
+    // re-selecting it as a preview would take back the read mark it earned.
+    if (currentView === "reader" && service.selectedId === cursorId) return
+    service.select(cursorId, true)
+    if (service.markReadDelaySec <= 0) {
+      service.markPreviewRead(cursorId)
+      return
+    }
+    markReadDwell.interval = service.markReadDelaySec * 1000
+    markReadDwell.dwelledOn = cursorId
+    markReadDwell.restart()
+  }
+
+  // A previewed message counts as read once the cursor has stayed on it. The
+  // id is held rather than read back off the cursor when this fires: by then
+  // the cursor may have moved on, and the message that was read is the one to
+  // mark.
+  Timer {
+    id: markReadDwell
+    property string dwelledOn: ""
+    repeat: false
+    onTriggered: {
+      if (!root.service || dwelledOn === "") return
+      if (root.cursorId !== dwelledOn) return
+      root.service.markPreviewRead(dwelledOn)
+    }
   }
 
   // An answer needs the message it is answering, and opening one only starts

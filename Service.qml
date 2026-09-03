@@ -64,7 +64,9 @@ Item {
     oauthPort: 9481,
     undoSendSeconds: 10,
     unifiedCalendarView: false,
-    showBarIcon: true
+    showBarIcon: true,
+    previewOnCursor: false,
+    markReadDelaySec: 2
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -90,6 +92,19 @@ Item {
   // typo rather than an answer given in the interface, and a typo should not
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
+
+  // Whether the cursor reaching a message is enough to show it.
+  readonly property bool previewOnCursor: !!settings
+    && settings.previewOnCursor === true
+
+  // How long the cursor has to stay before a previewed message counts as
+  // read. Clamped rather than trusted: this is a hand-editable file, and a
+  // negative interval on a Timer never fires at all.
+  readonly property int markReadDelaySec: {
+    var value = Math.floor(Number(settings ? settings.markReadDelaySec : 2))
+    if (!isFinite(value) || value < 0) return 2
+    return Math.min(30, value)
+  }
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -153,6 +168,16 @@ Item {
 
   function setShowBarIcon(value) {
     persistSetting("showBarIcon", value === true)
+  }
+
+  function setPreviewOnCursor(value) {
+    persistSetting("previewOnCursor", value === true)
+  }
+
+  function setMarkReadDelaySec(value) {
+    var next = Math.floor(Number(value))
+    if (!isFinite(next) || next < 0) next = 0
+    persistSetting("markReadDelaySec", Math.min(30, next))
   }
 
   // ---------------------------------------------------------- the accounts
@@ -843,7 +868,13 @@ Item {
 
   function refresh() { if (current) current.refresh() }
   function loadMore() { if (current) current.loadMore() }
-  function select(id) { if (current) current.select(id) }
+  function select(id, previewOnly) {
+    if (current) current.select(id, previewOnly)
+  }
+
+  function markPreviewRead(id) {
+    return current ? current.markPreviewRead(id) : false
+  }
   function clearSelection() { if (current) current.clearSelection() }
   // The notice's own button, which is the switch: what it turns on is every
   // message, and it says so.
