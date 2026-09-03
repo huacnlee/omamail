@@ -656,6 +656,16 @@ Item {
     onTriggered: root.draftSavedNotice = ""
   }
 
+  // Opened on the cursor rather than on the selection, the way every other
+  // acting key works: `m` in the list means the row under the cursor, and in
+  // the reader there is only one message it could mean. A provider that cannot
+  // move is not checked for here -- `act` refuses the verb, and says which
+  // provider refused it, which is the one place that answer belongs.
+  function openLabelPicker() {
+    if (!service || cursorId === "") return
+    labelPicker.open()
+  }
+
   // Acting on the open message closes it: it is about to leave this list.
   function actOnCursor(action) {
     if (!service || cursorId === "") return false
@@ -724,6 +734,7 @@ Item {
       if (service && cursorId !== "") service.toggleStar(cursorId)
       return
     }
+    if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
     if (id === "reply") return composeFromCursor("reply")
@@ -1931,6 +1942,21 @@ Item {
         onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()
+        }
+      }
+
+      LabelPicker {
+        id: labelPicker
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        labels: root.service ? root.service.labels : []
+        onLabelChosen: function(labelId) {
+          root.actOnCursor("label:" + labelId)
         }
       }
 

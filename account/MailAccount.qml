@@ -1481,7 +1481,22 @@ Item {
     if (action === "markRead") return "Marked read"
     if (action === "markUnread") return "Marked unread"
     if (action === "spam") return "Reported as spam"
+    // Named, not "Moved": the destination was chosen a keystroke ago from a
+    // list of thirty, and a note that does not say which one leaves the only
+    // question the user has -- did it go where I meant? -- unanswered.
+    var target = Model.labelTarget(action)
+    if (target !== "") return "Moved to " + labelName(target)
     return "Done"
+  }
+
+  // A label id is what the provider wants and what the caches key on; a name
+  // is what the person who pressed `m` picked. Falling back to the id keeps a
+  // note honest when the label list has not arrived rather than printing
+  // nothing where the destination should be -- and on IMAP the two are the
+  // same string anyway, because a folder's id is its name.
+  function labelName(labelId) {
+    var index = Model.indexById(labels, labelId)
+    return index >= 0 ? labels[index].name : labelId
   }
 
   function toggleStar(id) {

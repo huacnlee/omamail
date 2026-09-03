@@ -582,6 +582,16 @@ deepEqual(imap.flagPlanForLabels([], ["STARRED"], {}),
 // same request is a move.
 deepEqual(imap.flagPlanForLabels([], ["INBOX"], { "\\archive": "Archive" }),
   { add: [], remove: [], move: "Archive" })
+// A named destination is the same shape as archive -- out of the inbox -- so
+// it has to win over the archive default rather than be overwritten by it.
+deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX"], { "\\archive": "Archive" }),
+  { add: [], remove: [], move: "Receipts" }, "a chosen folder beats the archive default")
+deepEqual(imap.flagPlanForLabels(["Receipts/2026"], ["INBOX"], {}),
+  { add: [], remove: [], move: "Receipts/2026" }, "a nested folder is a name like any other")
+// Marking read on the way is still a flag, not a move.
+deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX", "UNREAD"], {}),
+  { add: ["\\Seen"], remove: [], move: "Receipts" })
+
 deepEqual(imap.flagPlanForLabels(["INBOX"], [], {}),
   { add: [], remove: [], move: "INBOX" }, "unarchiving is a move back")
 deepEqual(imap.flagPlanForLabels([], ["INBOX"], {}),

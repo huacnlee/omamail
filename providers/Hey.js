@@ -42,6 +42,10 @@ var LOGO = "hey.png"
 var CAPABILITIES = {
   // HEY files a thread under any number of labels, and `hey labels` lists them.
   labels: true,
+  // HEY moves a message to the Imbox, the Feed or the Paper Trail and nowhere
+  // else. Those are not destinations the user names, so the key that asks for
+  // one is refused rather than quietly doing nothing.
+  move: false,
   // A topic id, which is HEY's own conversation.
   threads: true,
   // Deliberately off. HEY has no archive: a thread is moved to another box, or

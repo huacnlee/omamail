@@ -61,9 +61,46 @@ assert.strictEqual(model.survivesAction("inbox", "trash"), false)
 assert.strictEqual(model.survivesAction("trash", "trash"), true)
 assert.strictEqual(model.survivesAction("trash", "untrash"), false)
 
+// A move is archive with a destination, so it leaves the same lists archive
+// leaves. Reading a user label goes through `rawQuery` and keeps this key on
+// "inbox", which is why moving between two labels takes the row away.
+assert.strictEqual(model.survivesAction("inbox", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("unread", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("all", "label:Label_7"), true, "All mail still contains a moved message")
+
 deepEqual(model.labelChangesFor("archive"), { add: [], remove: ["INBOX"] })
 deepEqual(model.labelChangesFor("star"), { add: ["STARRED"], remove: [] })
 assert.strictEqual(model.labelChangesFor("trash"), null, "trash is its own endpoint, not a label change")
+
+// The destination rides inside the verb, so the pipeline that carries one
+// string carries the move too.
+deepEqual(model.labelChangesFor("label:Label_7"), { add: ["Label_7"], remove: ["INBOX"] })
+assert.strictEqual(model.labelTarget("label:Label_7"), "Label_7")
+assert.strictEqual(model.labelTarget("archive"), "", "a verb that is not a move names no label")
+assert.strictEqual(model.labelChangesFor("label:"), null, "a move with no destination is not a change")
+
+// Not the `labels` capability, which is about the strip the reader draws: a
+// mailbox with one folder per message is the case where moving is the plain
+// thing to do. What the guard in `act` asks is whether the destination is the
+// user's to name, which on HEY it is not.
+assert.strictEqual(model.actionCapability("label:Label_7"), "move")
+assert.strictEqual(model.actionUnavailable("label:Label_7", "HEY"), "HEY has no destination you can name")
+
+// ------------------------------------------------------- movable labels
+//
+// The rail draws the system labels, so offering them here would put a second
+// archive in a list whose job is the destinations with no key of their own.
+const labelSet = [
+  { id: "L2", name: "zebra" },
+  { id: "S1", name: "Inbox", system: true },
+  { id: "L1", name: "Archive notes" },
+  { id: "L3", name: "banana" }
+]
+deepEqual(model.movableLabels(labelSet, "").map(l => l.id), ["L1", "L3", "L2"])
+deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3"], "filtering is case-insensitive and matches anywhere")
+deepEqual(model.movableLabels(labelSet, "  ZEB  ").map(l => l.id), ["L2"], "a typed query is trimmed")
+deepEqual(model.movableLabels(labelSet, "inbox").map(l => l.id), [], "a system label is not a destination")
+deepEqual(model.movableLabels(null, ""), [])
 
 // The optimistic update has to move the derived flags too, or a row shows a
 // filled star with `starred: false` underneath it until the next refresh.

@@ -1017,7 +1017,29 @@ function flagPlanForLabels(addLabelIds, removeLabelIds, special) {
   if (has(added, "INBOX")) plan.move = "INBOX"
   if (has(added, "TRASH")) plan.move = map["\\trash"] || ""
   if (has(added, "SPAM")) plan.move = map["\\junk"] || ""
+
+  // A named destination, which is the one case where the request is already
+  // IMAP: `getLabels` reports folder names as label ids, so a move asks for
+  // the folder by the name the server gave it. It is read last because such a
+  // request also removes INBOX -- the archive above is the default for "out of
+  // the inbox", and this is the same message with somewhere better to be.
+  var destination = folderTarget(added)
+  if (destination !== "") plan.move = destination
   return plan
+}
+
+// The added id that is not one of the flags this file speaks for. Gmail's
+// vocabulary reaches here as system label ids in capitals; anything else came
+// from `getLabels`, where an IMAP folder's id is its own name.
+function folderTarget(addLabelIds) {
+  for (var i = 0; i < addLabelIds.length; i++) {
+    var labelId = String(addLabelIds[i])
+    var systemName = labelId.toUpperCase()
+    if (systemName === "UNREAD" || systemName === "STARRED") continue
+    if (systemName === "INBOX" || systemName === "TRASH" || systemName === "SPAM") continue
+    return labelId
+  }
+  return ""
 }
 
 // -------------------------------------------------------------- the errors
