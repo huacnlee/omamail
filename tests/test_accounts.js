@@ -391,6 +391,16 @@ assert.strictEqual(accounts.count(accounts.savedOnly(
   accounts.add(accounts.emptyList(), { email: "", pending: true }))), 0)
 assert.strictEqual(accounts.serialize(accounts.savedOnly(saved)).indexOf("\n"), -1)
 
+// An idless row is not necessarily the setup form's draft. A legacy mailbox
+// whose address cannot be repaired is deliberately kept by `savedOnly`, and
+// cancelling a draft must not become a second path that silently deletes it.
+const damagedDraftLookalike = accounts.add(accounts.emptyList(), {
+  email: "ada", provider: "imap",
+  imap: { imapHost: "imap.example.org", username: "ada" }
+})
+assert.strictEqual(accounts.count(accounts.discardDraftAt(damagedDraftLookalike, 0)), 1,
+  "only a row marked pending may be discarded as a draft")
+
 // ------------------------------------------------------- removing by index
 //
 // A pending account has no id, so nothing can name it — and a sign-in that
@@ -399,7 +409,7 @@ assert.strictEqual(accounts.serialize(accounts.savedOnly(saved)).indexOf("\n"), 
 
 let pendingList = accounts.emptyList()
 pendingList = accounts.add(pendingList, { email: "one@example.com", clientId: "c1" })
-pendingList = accounts.add(pendingList, { email: "", clientId: "c2" })
+pendingList = accounts.add(pendingList, { email: "", clientId: "c2", pending: true })
 pendingList = accounts.add(pendingList, { email: "two@example.com", clientId: "c3" })
 assert.strictEqual(accounts.count(pendingList), 3)
 

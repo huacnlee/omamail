@@ -266,10 +266,11 @@ Item {
   function discardCurrentDraft() {
     var index = editingIndex()
     var next = Accounts.discardDraftAt(accountList, index)
-    if (Accounts.count(next) === accountCount) return
+    if (Accounts.count(next) === accountCount) return false
     activeIndex = -1
     accountList = next
     refreshCurrent()
+    return true
   }
 
   function removeAccount(id) {

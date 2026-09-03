@@ -285,9 +285,9 @@ function remove(list, id) {
 // An id that is not in the list means the caller is acting on a list that has
 // moved on. Leaving the previous account on screen is better than blanking the
 // window, so an unknown id — "" included — changes nothing.
-// An account that never finished signing in has no id, so nothing can name it
-// — and a failed sign-in leaves exactly that. Removing by position is the only
-// handle the window has on one.
+// A row that has no id cannot be removed by name. Removing by position is the
+// only handle the window has on one, so callers must decide separately whether
+// it is pending setup or a persisted mailbox with a damaged address.
 function removeAt(list, index) {
   var source = copyList(list)
   var at = Math.floor(Number(index))
@@ -326,7 +326,10 @@ function discardDraftAt(list, index) {
   var source = copyList(list)
   var at = Math.floor(Number(index))
   if (!isFinite(at) || at < 0 || at >= source.accounts.length) return source
-  if (source.accounts[at].id !== "") return source
+  // A missing id does not make a draft: a persisted mailbox whose damaged
+  // address cannot be repaired has no id either. Only the setup row explicitly
+  // marked as working state may be discarded without confirmation.
+  if (source.accounts[at].pending !== true) return source
   return removeAt(source, at)
 }
 

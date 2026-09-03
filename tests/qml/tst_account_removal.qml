@@ -142,6 +142,22 @@ Item {
       compare(emails(), [ada])
     }
 
+    // A persisted mailbox whose address cannot be repaired has no id too, but
+    // it is not the form's pending draft. Remove must not silently discard it
+    // and leave its editor merely because no confirmation request can name it.
+    function test_remove_does_not_discard_an_unrepairable_mailbox_as_a_draft() {
+      seed([ada, "broken"], adaId)
+      app.editAccount(1)
+      compare(mailService.editingIndex(), 1)
+      verify(app.showSetup, "the damaged mailbox is open for correction")
+
+      app.removeCurrentAccountFromEditor()
+
+      compare(mailService.accountCount, 2, "the persisted mailbox is retained")
+      compare(mailService.accountSummaries[1].email, "broken")
+      verify(app.showSetup, "the editor stays open so its address can be corrected")
+    }
+
     // An address that is not an address derives no account id, which leaves a
     // row that reads as saved and behaves like a draft: unselectable,
     // uneditable and unremovable. `validateSettings` cannot catch it —
