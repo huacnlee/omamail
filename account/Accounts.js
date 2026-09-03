@@ -134,8 +134,45 @@ function makeAccount(account) {
     clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
     label: trimmed(raw.label),
-    signature: trimmed(raw.signature)
+    signature: trimmed(raw.signature),
+    // Whether this row is the setup form's working state rather than a
+    // mailbox. It used to be inferred from the id being empty, and that read
+    // a mailbox whose address had been corrupted as a draft and dropped it at
+    // the write boundary — which is how a working account was deleted by the
+    // act of adding an unrelated one.
+    //
+    // Self-maintaining, so no caller has to remember to clear it: a row that
+    // has a real address is not something being typed into, whatever the flag
+    // says. `configureAccount` copies every key of the row it edits, so a flag
+    // that had to be cleared by hand would have survived setup forever.
+    pending: raw.pending === true && !isValidEmail(email)
   }
+}
+
+// A mailbox whose address was overwritten by something that is not one — a
+// username typed into the address field, which the setup form used to save
+// without checking. Everything else about the row survived: its server
+// settings, its keyring entry, its cache directory. And the address itself
+// survived too, in `imap.username`, because `setupSettings` folds the address
+// into the username when no separate one was given.
+//
+// So the row is repairable, and repairing it is the difference between a
+// mailbox that comes back and one that is silently dropped the next time the
+// list is written.
+//
+// Done here rather than in `makeAccount`, which also builds the row the setup
+// form is being typed into: adopting a username there would drop an address
+// into the field before anyone had typed one.
+function repairedAddress(entry) {
+  var raw = entry || {}
+  if (isValidEmail(raw.email)) return raw
+  if (normalizeProvider(raw.provider) !== "imap") return raw
+  var username = trimmed((raw.imap || {}).username)
+  if (!isValidEmail(username)) return raw
+  var next = {}
+  for (var key in raw) next[key] = raw[key]
+  next.email = username
+  return next
 }
 
 function copyList(list) {
@@ -334,7 +371,7 @@ function load(text) {
   var entries = Array.isArray(raw.accounts) ? raw.accounts : []
   for (var i = 0; i < entries.length; i++) {
     if (!isObject(entries[i])) continue
-    var entry = makeAccount(entries[i])
+    var entry = makeAccount(repairedAddress(entries[i]))
     // The id is recomputed rather than trusted, so a hand-edited file cannot
     // introduce two entries the rest of the code believes are different
     // accounts while Gmail treats them as one.
@@ -352,14 +389,61 @@ function load(text) {
 // a mailbox — the comment on `Service.addAccount` says as much, but nothing
 // enforced it at the write boundary, so any later save carried the draft along
 // and left a "New mailbox" behind that nothing could select and nothing could
-// remove. A row with no id is exactly that draft, and only rows that are
-// mailboxes are written; the drafts live in memory for as long as the form is
-// open, which is all the life they were meant to have.
+// remove. The drafts live in memory for as long as the form is open, which is
+// all the life they were meant to have.
+//
+// A draft says so — `pending` — rather than being inferred from having no id.
+// The two are not the same thing: a mailbox whose address was corrupted also
+// has no id, and reading it as a draft is what deleted a working account here.
+// Whether a row holds anything its owner would miss. An addressable mailbox
+// obviously does. So does one whose address is unusable but whose server
+// settings were typed in and whose password is in the keyring — that is a
+// mailbox with a broken name, not an empty row.
+//
+// A row with none of it is the leftover of an Add that was never filled in.
+// Those did reach the file before drafts were marked as such, and there is
+// nothing in one to preserve.
+function carriesData(entry) {
+  var raw = entry || {}
+  if (trimmed(raw.id) !== "") return true
+  var imap = raw.imap || {}
+  return trimmed(imap.username) !== "" || trimmed(imap.imapHost) !== ""
+    || trimmed(raw.clientId) !== "" || trimmed(raw.clientSecret) !== ""
+}
+
+// Whether a payload would drop a mailbox the list could name. Nothing in the
+// UI removes an account by writing a list that quietly omits it — removal goes
+// through `remove` or `removeAt` first — so a missing id at the write boundary
+// is a bug upstream, and refusing the write is what keeps it off the disk.
+function dropsNamedMailbox(list, payload) {
+  var source = Array.isArray((list || {}).accounts) ? list.accounts : []
+  var kept = Array.isArray((payload || {}).accounts) ? payload.accounts : []
+  for (var i = 0; i < source.length; i++) {
+    var id = trimmed((source[i] || {}).id)
+    if (id !== "" && indexOfId(kept, id) < 0) return true
+  }
+  return false
+}
+
+function draftCount(list) {
+  var values = Array.isArray((list || {}).accounts) ? list.accounts : []
+  var drafts = 0
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].pending === true) drafts++
+  }
+  return drafts
+}
+
 function savedOnly(list) {
   var next = copyList(list)
   var kept = []
   for (var i = 0; i < next.accounts.length; i++) {
-    if (next.accounts[i] && next.accounts[i].id !== "") kept.push(next.accounts[i])
+    // Drafts, and nothing else. A row with no id that is not a draft is a
+    // mailbox whose address `repairedAddress` could not recover — unusable
+    // until someone corrects it, but its settings and its keyring entry are
+    // still there, and deleting it is not this function's decision to make.
+    var entry = next.accounts[i]
+    if (entry && entry.pending !== true && carriesData(entry)) kept.push(entry)
   }
   next.accounts = kept
   if (indexOfId(kept, next.activeId) < 0) next.activeId = nextActiveId(kept, 0)

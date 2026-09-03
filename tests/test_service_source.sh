@@ -65,6 +65,14 @@ if "Accounts.hasSavedAccounts(%s)" % name not in save_block:
     raise SystemExit(
         "test_service_source.sh: first-run state must never overwrite saved accounts"
     )
+# The list-wide guard is satisfied by any one real mailbox in the payload,
+# which is why a freshly added account was enough to let a write through that
+# had dropped a different, working one. The per-row guard is what catches that,
+# and it has to be asked about the payload rather than about what is in memory.
+if "Accounts.dropsNamedMailbox(accountList, %s)" % name not in save_block:
+    raise SystemExit(
+        "test_service_source.sh: a write that drops a named mailbox must be refused"
+    )
 if "Accounts.serialize(%s)" % name not in save_block:
     raise SystemExit(
         "test_service_source.sh: the guarded list must be the one that is written"

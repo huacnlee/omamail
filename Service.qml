@@ -244,7 +244,12 @@ Item {
   function addAccount(provider) {
     accountList = Accounts.add(accountList, ({
       email: "", clientId: "", clientSecret: "",
-      provider: provider || Provider.DEFAULT_ID
+      provider: provider || Provider.DEFAULT_ID,
+      // Working state for the form, and it says so rather than leaving the
+      // write boundary to guess from a missing id — which is what it used to
+      // do, and what made it delete a mailbox whose address had been corrupted.
+      // `makeAccount` clears this the moment a real address arrives.
+      pending: true
     }))
     // This row is working state for the form, not an account yet. Persisting
     // it here leaves a "New account" behind when Back cancels Add; the first
@@ -398,6 +403,13 @@ Item {
     // trusting the two to agree.
     var writable = Accounts.savedOnly(accountList)
     if (!Accounts.hasSavedAccounts(writable)) return
+    // And no mailbox the list could name may go missing on the way to the
+    // payload. The guard above is about the list as a whole — one real mailbox
+    // in it is enough to satisfy it, which is exactly why it let a write
+    // through that had dropped a different, working account. This one is per
+    // row. Removal never arrives here as an omission: it goes through
+    // `remove` or `removeAt`, so the row is gone from `accountList` too.
+    if (Accounts.dropsNamedMailbox(accountList, writable)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
       return
@@ -418,7 +430,7 @@ Item {
     // First run, or an install that predates several accounts: one nameless
     // row so the existing credentials file still has somewhere to live.
     if (Accounts.count(loaded) === 0)
-      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "" }))
+      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "", pending: true }))
     // Reading back our own write must change nothing. The list is watched so
     // that an edit from outside is picked up, but every save triggers that
     // watch — and reassigning the list re-derives every account's id, which
