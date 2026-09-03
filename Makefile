@@ -20,6 +20,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/MessageMenu.qml \
 	components/MenuActionRow.qml components/MenuSeparatorLine.qml \
 	components/KeyRouter.qml \
+	components/WheelScroller.qml \
 	components/ActionIcon.qml \
 	components/IconButton.qml \
 	components/IconTextButton.qml \

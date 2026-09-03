@@ -638,3 +638,41 @@ assert.strictEqual(model.settingsScrollTarget(sections, "mailboxes", 1000, 500),
 assert.strictEqual(model.settingsScrollTarget(sections, "reading", 400, 500), 0, "a page shorter than its viewport does not scroll")
 assert.strictEqual(model.settingsScrollTarget(sections, "nope", 1200, 500), -1)
 assert.strictEqual(model.settingsScrollTarget(null, "reading", 1200, 500), -1)
+
+// ------------------------------------------------------------- the wheel
+
+// A Flickable answers each wheel event with its own flick, so the distance
+// depends on how the turn was reported rather than on how far the wheel went.
+// Rotation is the part that does not change: angleDelta is eighths of a
+// degree, a notch is 15 degrees, and eight fractions of a notch still add up
+// to 15.
+assert.strictEqual(model.wheelDistance(-120), -120, "one notch, at 8px a degree")
+assert.strictEqual(model.wheelDistance(120), 120)
+assert.strictEqual(model.wheelDistance(-360), -360, "three notches")
+
+// The same turn, chopped up the way a high-resolution wheel reports it.
+let fine = 0
+for (let i = 0; i < 8; i++) fine += model.wheelDistance(-15)
+assert.strictEqual(fine, -120, "eight fractions of a notch are still one notch")
+
+assert.strictEqual(model.wheelDistance(0), 0)
+assert.strictEqual(model.wheelDistance(null), 0)
+
+// One event is bounded, not one gesture: a touchpad's flung scroll arrives as
+// a stream of large deltas and a single one of them must not cross a list.
+assert.strictEqual(model.wheelDistance(-4800), -480, "capped at 60 degrees")
+assert.strictEqual(model.wheelDistance(4800), 480)
+
+// Where the view lands, clamped to what it can reach.
+assert.strictEqual(model.wheelScrollTarget(0, -120, 5000, 300), 120)
+assert.strictEqual(model.wheelScrollTarget(500, 120, 5000, 300), 380)
+assert.strictEqual(model.wheelScrollTarget(0, 240, 5000, 300), 0,
+  "there is nothing above the first row")
+assert.strictEqual(model.wheelScrollTarget(4700, -240, 5000, 300), 4700,
+  "4700 is the last position a 300-tall view of 5000 can reach")
+
+// Content shorter than its own view cannot scroll, and a negative limit would
+// let it drift above its first row.
+assert.strictEqual(model.wheelScrollTarget(0, -240, 100, 300), 0)
+assert.strictEqual(model.wheelScrollTarget(0, 240, 100, 300), 0)
+assert.strictEqual(model.wheelScrollTarget(0, -240, 0, 0), 0)

@@ -842,6 +842,50 @@ function settingsContentHeight(sections, pageHeight, viewportHeight) {
   return Math.max(page, known[known.length - 1].y + viewport)
 }
 
+// ------------------------------------------------------------------ the wheel
+//
+// How far a wheel turn moves a Flickable, which the Flickable itself gets
+// wrong on a mouse that reports finely.
+//
+// A Flickable answers a wheel event with a *flick* — a velocity it then
+// decelerates — so the distance depends on how the turn was chopped up rather
+// than on how far the wheel went. One notch arrives as `angleDelta` 120 and
+// moves about 43 pixels; a high-resolution wheel reports the same physical
+// notch as eight deltas of 15, each starting and damping its own little
+// flick, and the same turn of the same wheel moves about 6. Seven times less
+// for the same gesture, which is what "slower than every other app" is.
+//
+// Rotation is the thing that does not change: `angleDelta` is eighths of a
+// degree, a notch is 15 degrees, and eight fractions of a notch still add up
+// to 15. So the distance is computed from rotation and nothing else.
+//
+// 8 pixels per degree puts a notch at 120, which is what three lines of text
+// comes to and what a GTK application moves for the same turn.
+var WHEEL_PIXELS_PER_DEGREE = 8
+
+// A notch is 15 degrees, so this is the ceiling on one *event* rather than on
+// one gesture: a touchpad's flung two-finger scroll arrives as a stream of
+// large deltas, and without a bound a single one of them can cross a long list
+// in a jump nobody asked for.
+var WHEEL_MAX_DEGREES_PER_EVENT = 60
+
+function wheelDistance(angleDelta) {
+  var degrees = (Number(angleDelta) || 0) / 8
+  var limit = WHEEL_MAX_DEGREES_PER_EVENT
+  if (degrees > limit) degrees = limit
+  if (degrees < -limit) degrees = -limit
+  return degrees * WHEEL_PIXELS_PER_DEGREE
+}
+
+// Where the view lands, clamped to what it can reach. A list shorter than its
+// own viewport cannot scroll at all, and answering with a negative limit would
+// let it drift above its first row.
+function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight) {
+  var limit = Math.max(0, (Number(contentHeight) || 0) - (Number(viewportHeight) || 0))
+  var next = (Number(contentY) || 0) - wheelDistance(angleDelta)
+  return Math.max(0, Math.min(limit, next))
+}
+
 // Where a click on a section name scrolls to: its heading, clamped into the
 // range the page can actually reach, so the last section lands at the end of
 // the page rather than asking for a gap under it. -1 for a name the page does
