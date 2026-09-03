@@ -136,6 +136,7 @@ Item {
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
     signal replySent()
+    signal replyFailed()
   }
 
   Omamail.App {
@@ -408,6 +409,57 @@ Item {
       compare(mailService.lastSavedDraft.draftId, "draft-7",
         "closing an edited draft must update the source draft")
       compare(mailService.lastSavedDraft.subject, "Updated subject")
+    }
+
+    // A send that failed leaves the message in the parked draft and nowhere
+    // else — not in Drafts, not in Sent, not in an outbox. The composer coming
+    // back holding it is the only thing between a timeout and a lost message.
+    function test_a_failed_send_puts_the_message_back_in_the_composer() {
+      var compose = composeView()
+      verify(compose)
+      app.startCompose("new")
+      named(compose, "compose-to-field").text = "first@example.com"
+      named(compose, "compose-subject-field").text = "Quarterly plan"
+      named(compose, "compose-body-editor").text = "Keep every word"
+      compose.submit()
+      compare(compose.opened, false, "sending parks the composer")
+
+      mailService.replyFailed()
+
+      compare(compose.opened, true, "a failed send must reopen the composer")
+      compare(named(compose, "compose-to-field").text, "first@example.com")
+      compare(named(compose, "compose-subject-field").text, "Quarterly plan")
+      compare(named(compose, "compose-body-editor").text, "Keep every word")
+
+      wait(350)
+      compare(app.composeRecovery.active, true,
+        "the words are still unsent, so recovery goes on holding them")
+      compare(app.composeRecovery.draft.body, "Keep every word")
+    }
+
+    // The collision undo already has: a draft started during the undo window
+    // is in the composer when the parked one comes back, and saving it is what
+    // keeps the parked one from overwriting it.
+    function test_a_failed_send_saves_a_draft_started_over_it() {
+      var compose = composeView()
+      app.startCompose("new")
+      named(compose, "compose-to-field").text = "first@example.com"
+      named(compose, "compose-body-editor").text = "First message"
+      compose.submit()
+
+      app.startCompose("new")
+      named(compose, "compose-to-field").text = "second@example.com"
+      named(compose, "compose-subject-field").text = "Second subject"
+      named(compose, "compose-body-editor").text = "Second message"
+
+      mailService.replyFailed()
+
+      compare(named(compose, "compose-to-field").text, "first@example.com")
+      compare(named(compose, "compose-body-editor").text, "First message")
+      verify(mailService.lastSavedDraft)
+      compare(mailService.lastSavedDraft.to, "second@example.com")
+      compare(mailService.lastSavedDraft.subject, "Second subject")
+      compare(mailService.lastSavedDraft.body, "Second message")
     }
   }
 }

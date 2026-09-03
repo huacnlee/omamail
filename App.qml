@@ -630,12 +630,19 @@ Item {
     })
   }
 
-  function undoPendingSend() {
-    if (!service || !service.undoSend()) return false
-    if (!compose.resumePendingSend()) return true
+  // Put the parked draft back in front of the writer.
+  //
+  // Undo and a failed send want the same thing and used to be one of them:
+  // the message is in `pendingDraft` and nowhere else, so whatever reopens it
+  // has to also deal with the draft that was started on top of it during the
+  // undo window. `resumePendingSend` moves that newer one to
+  // `interruptedDraft`, and saving it is what keeps reopening the parked one
+  // from overwriting it.
+  function restoreParkedDraft() {
+    if (!compose.resumePendingSend()) return false
     var interrupted = compose.interruptedDraft
     var fields = compose.interruptedFields()
-    if (!interrupted || !fields) return true
+    if (!interrupted || !fields || !service) return true
     service.saveDraft(fields, function(saved, error) {
       if (!root) return
       if (error) {
@@ -646,6 +653,12 @@ Item {
       root.draftSavedNotice = "Draft saved"
       draftSavedTimer.restart()
     })
+    return true
+  }
+
+  function undoPendingSend() {
+    if (!service || !service.undoSend()) return false
+    root.restoreParkedDraft()
     return true
   }
 
@@ -806,6 +819,15 @@ Item {
       if (!compose.completePendingSend()) return
       if (compose.opened) root.scheduleComposeRecovery()
       else root.clearComposeRecovery()
+    }
+    // The send did not happen, so the draft is still the only copy. Reopening
+    // it is the whole answer: the status bar already carries the reason, and a
+    // composer that stays shut leaves the writer with a sentence about a
+    // message they can no longer see. Recovery is scheduled rather than
+    // cleared for the same reason — the words are still unsent.
+    function onReplyFailed() {
+      if (!root.restoreParkedDraft()) return
+      root.scheduleComposeRecovery()
     }
     // Every time the list is replaced — first arrival, a mailbox switch, a
     // search, a refresh that dropped things. A cursor whose message survived

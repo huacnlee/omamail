@@ -1666,17 +1666,29 @@ Item {
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
+  // Every way out of here that is not a delivery emits `replyFailed`, because
+  // by this point `deliverPending` has dropped the queued payload and the
+  // composer is parked: the message exists only in the draft the panel is
+  // holding, and a return that says nothing throws it away. The mailbox can
+  // stop being ready during the undo window — a reload, a sign-out — so the
+  // guards are reachable and not only the transport's own error.
   function deliver(payload) {
     if (!ready) {
       fail("The mailbox is not ready to send")
+      replyFailed()
       return false
     }
-    if (sending) return false
+    if (sending) {
+      fail("Another message is still being sent")
+      replyFailed()
+      return false
+    }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
         root.fail(error)
+        root.replyFailed()
         return
       }
       root.note("Sent")
@@ -1790,6 +1802,10 @@ Item {
   }
 
   signal replySent()
+
+  // A send that did not happen. The panel answers it by putting the parked
+  // draft back in front of the writer, which is the only remaining copy.
+  signal replyFailed()
 
   // ------------------------------------------------------------------ RSVP
 
