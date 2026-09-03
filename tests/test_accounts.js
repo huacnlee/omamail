@@ -28,6 +28,18 @@ assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
 assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
   { id: "", email: "" }
 ] }), false)
+// A non-empty address is not the test. A row holding something that is not an
+// address derives no id, so every lookup here treats it as a draft; counting it
+// as a saved account is what let `Service.saveAccounts` write a list whose only
+// entry was unusable, replacing a working mailbox on disk with a row that could
+// not be selected, edited or removed.
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "", email: "ada" }
+] }), false, "a username in the address field is setup state, not an account")
+assert.strictEqual(accounts.hasSavedAccounts({ accounts: [
+  { id: "", email: "ada" },
+  { id: "ada@example.com", email: "ada@example.com" }
+] }), true, "one real mailbox alongside it is still a saved list")
 assert.strictEqual(accounts.active(accounts.emptyList()), null)
 assert.strictEqual(accounts.find(accounts.emptyList(), "a@example.com"), null)
 
@@ -264,6 +276,37 @@ assert.strictEqual(accounts.count(reloaded), 3)
 const multiline = accounts.serialize(accounts.add(accounts.emptyList(), account("ada@example.com", { label: "a\nb" })))
 assert.strictEqual(multiline.indexOf("\n"), -1)
 assert.strictEqual(accounts.load(multiline).accounts[0].label, "a\nb")
+
+// -------------------------------------------------------------- what is written
+//
+// The row `add` creates before anything has been typed into it is the setup
+// form's working state, not a mailbox. Any save used to carry whichever draft
+// happened to be open along with it, leaving a "New mailbox" on disk that
+// nothing could select and nothing could remove.
+const withDraft = accounts.savedOnly(saved)
+assert.strictEqual(accounts.count(saved), 3, "savedOnly leaves its input alone")
+assert.strictEqual(accounts.count(withDraft), 2, "the draft row is not written")
+deepEqual(withDraft.accounts.map(a => a.id), ["ada@example.com", "bob@example.com"])
+assert.strictEqual(withDraft.activeId, "bob@example.com", "the selection is kept")
+
+// A row that is a draft only because its address is unusable goes the same way.
+let junk = accounts.emptyList()
+junk = accounts.add(junk, account("ada@example.com"))
+junk = accounts.add(junk, account("ada", { provider: "imap" }))
+assert.strictEqual(accounts.count(accounts.savedOnly(junk)), 1)
+
+// The selection follows when the row it named is the one dropped.
+let activeDraft = accounts.add(accounts.emptyList(), account("ada@example.com"))
+activeDraft = accounts.add(activeDraft, account(""))
+activeDraft.activeId = ""
+assert.strictEqual(accounts.savedOnly(activeDraft).activeId, "ada@example.com",
+  "a list written with no selection still names a mailbox")
+
+// Nothing to keep is left empty rather than invented; the write guard in
+// Service.saveAccounts is what stops that reaching disk.
+assert.strictEqual(accounts.count(accounts.savedOnly(
+  accounts.add(accounts.emptyList(), account("")))), 0)
+assert.strictEqual(accounts.serialize(accounts.savedOnly(saved)).indexOf("\n"), -1)
 
 // ------------------------------------------------------- removing by index
 //

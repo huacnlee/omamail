@@ -178,12 +178,20 @@ function count(list) {
 // must not be inferred from whether a host is signed in: sessions are restored
 // asynchronously, and signed-out accounts still exist and must never be
 // overwritten by Add account.
+//
+// An address that is merely non-empty is not enough to call a row saved. A row
+// carrying something that is not an address — a username typed into the address
+// field — gets the empty id from `accountId`, so it is a draft to every lookup
+// here while still reading as a real account to this guard. That combination
+// disarmed the write guard in `Service.saveAccounts` and let a working mailbox
+// be replaced on disk by a row nothing could select or remove. The same
+// predicate that derives the id decides this.
 function hasSavedAccounts(list) {
   var source = list || {}
   var values = Array.isArray(source.accounts) ? source.accounts : []
   for (var i = 0; i < values.length; i++) {
     var entry = values[i] || {}
-    if (trimmed(entry.id) !== "" || trimmed(entry.email) !== "") return true
+    if (trimmed(entry.id) !== "" || isValidEmail(entry.email)) return true
   }
   return false
 }
@@ -336,6 +344,25 @@ function load(text) {
 
   var wanted = trimmed(raw.activeId).toLowerCase()
   next.activeId = indexOfId(next.accounts, wanted) >= 0 ? wanted : nextActiveId(next.accounts, 0)
+  return next
+}
+
+// What belongs in the file. `add` creates a row before the user has typed
+// anything into it, and that row is the setup form's working state rather than
+// a mailbox — the comment on `Service.addAccount` says as much, but nothing
+// enforced it at the write boundary, so any later save carried the draft along
+// and left a "New mailbox" behind that nothing could select and nothing could
+// remove. A row with no id is exactly that draft, and only rows that are
+// mailboxes are written; the drafts live in memory for as long as the form is
+// open, which is all the life they were meant to have.
+function savedOnly(list) {
+  var next = copyList(list)
+  var kept = []
+  for (var i = 0; i < next.accounts.length; i++) {
+    if (next.accounts[i] && next.accounts[i].id !== "") kept.push(next.accounts[i])
+  }
+  next.accounts = kept
+  if (indexOfId(kept, next.activeId) < 0) next.activeId = nextActiveId(kept, 0)
   return next
 }
 

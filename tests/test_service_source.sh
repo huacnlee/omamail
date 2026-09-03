@@ -22,6 +22,7 @@ grep -q 'setAlwaysRenderHeavyMessages' components/SettingsPage.qml \
 grep -q 'shell.updateEntryInline(pluginId, entry)' Service.qml \
   || fail "the undo window must persist in shell settings"
 python3 - <<'PY'
+import re
 from pathlib import Path
 
 text = Path("Service.qml").read_text()
@@ -51,9 +52,22 @@ if "pendingSendHost" not in text:
 save_start = text.index("function saveAccounts()")
 save_end = text.index("function applyAccounts(raw)", save_start)
 save_block = text[save_start:save_end]
-if "Accounts.hasSavedAccounts(accountList)" not in save_block:
+# The guard and the payload must be the same value. Writing the stripped list
+# while testing the one in memory would let the two disagree — and the whole
+# point of the guard is that what reaches disk still names a mailbox.
+written = re.search(r"var (\w+) = Accounts\.savedOnly\(accountList\)", save_block)
+if not written:
+    raise SystemExit(
+        "test_service_source.sh: the form's own draft row must never be written to disk"
+    )
+name = written.group(1)
+if "Accounts.hasSavedAccounts(%s)" % name not in save_block:
     raise SystemExit(
         "test_service_source.sh: first-run state must never overwrite saved accounts"
+    )
+if "Accounts.serialize(%s)" % name not in save_block:
+    raise SystemExit(
+        "test_service_source.sh: the guarded list must be the one that is written"
     )
 
 apply_start = save_end

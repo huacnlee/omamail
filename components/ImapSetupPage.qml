@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/ImapProtocol.js" as Imap
+import "../account/Accounts.js" as Accounts
 import "../account/Aliases.js" as Aliases
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
@@ -88,10 +89,33 @@ Column {
     }
   }
 
+  // The address is this mailbox's identity, not just a label on it:
+  // `Accounts.accountId` derives the account id from it, and anything that is
+  // not an address derives the empty id a pending row carries. That row then
+  // looks saved and behaves like a draft — it cannot be selected, switched to,
+  // signed, or removed, and there is no way back to it from inside the window.
+  // `validateSettings` cannot catch this: `setupSettings` folds the address
+  // into `username` and hands on no address at all. So it is checked here,
+  // against the same predicate that derives the id, while it is still a typo
+  // the user can see.
+  //
+  // Checked before the server settings because the form reads address first,
+  // and an error should name the first field to go back to.
+  function validatedAddress() {
+    var address = addressField.text.trim()
+    if (Accounts.isValidEmail(address)) return address
+    errorText.text = address === ""
+      ? "Add the email address for this mailbox"
+      : "That is not a full email address"
+    return ""
+  }
+
   // Saved before the password is tried, so a mailbox that the server rejects
   // still has its settings to correct rather than an empty form to fill again.
   function save() {
     if (!service) return
+    var address = validatedAddress()
+    if (address === "") return
     var check = Imap.validateSettings(currentSettings())
     if (!check.ok) {
       errorText.text = check.error
@@ -100,13 +124,15 @@ Column {
     errorText.text = ""
     service.configureCurrentAccount({
       provider: "imap",
-      email: addressField.text.trim(),
+      email: address,
       imap: check.settings
     })
   }
 
   function signIn() {
     if (!service) return
+    var address = validatedAddress()
+    if (address === "") return
     var check = Imap.validateSettings(currentSettings())
     if (!check.ok) {
       errorText.text = check.error
@@ -115,7 +141,7 @@ Column {
     errorText.text = ""
     service.configureCurrentAccountAndSignIn({
       provider: "imap",
-      email: addressField.text.trim(),
+      email: address,
       imap: check.settings
     }, passwordField.text)
   }
@@ -284,6 +310,7 @@ Column {
 
     Text {
       id: errorText
+      objectName: "imap-error"
       width: parent.width
       visible: text !== ""
       text: ""

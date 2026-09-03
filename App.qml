@@ -929,13 +929,29 @@ Item {
     pushEntry("setup", { provider: provider, draft: false })
   }
 
+  // The row this page is editing, not the mailbox the id happens to name: with
+  // a freshly added draft on screen those are different rows, and asking for
+  // the second one is how Remove came to delete a working account while the
+  // page in front of the user showed an empty form.
   function removeCurrentAccountFromEditor() {
     if (!service || service.accountCount <= 1) return
-    var index = service.indexOfActiveAccount()
+    var index = service.editingIndex()
     if (index < 0) return
     var values = service.accountSummaries || []
     var request = Accounts.removalRequest({ accounts: values }, index)
-    if (request) accountRemovalDialog.openFor(request)
+    if (request) {
+      accountRemovalDialog.openFor(request)
+      return
+    }
+    // No request means this row is the form's own draft: it has no id, so there
+    // is no mailbox for a confirmation to name — which is exactly why
+    // `removalRequest` refuses it. A draft is canceled rather than removed, so
+    // discard it and leave the page it was being edited on, the way Back does.
+    // Without this the button would simply do nothing on the page of a mailbox
+    // that has just been added.
+    service.discardCurrentDraft()
+    navUntouched = false
+    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
   }
 
   function confirmAccountRemoval(request) {
