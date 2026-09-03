@@ -934,6 +934,25 @@ function mimeBoundary(given) {
   return "=_Omamail_" + (new Date()).getTime().toString(36) + "_" + random
 }
 
+// The domain half of a Message-ID is the sender's own, so the id agrees with the address the message is from.
+function messageIdDomain(from) {
+  var address = headerSafe(from).trim()
+  var at = address.lastIndexOf("@")
+  var domain = at < 0 ? "" : address.substring(at + 1).replace(/[^A-Za-z0-9.-]/g, "")
+  // RFC 2606 reserves .invalid, so a message with no From borrows no domain that belongs to somebody else.
+  return domain === "" ? "omamail.invalid" : domain.substring(0, 128)
+}
+
+// Unique by the rule mimeBoundary already uses, and the caller may state one, which is what lets a test read it.
+function messageIdValue(given, from, nowMs) {
+  var stated = referenceValue(given).replace(/[^A-Za-z0-9<>@._+=-]/g, "")
+  // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
+  if (stated.length <= 250 && /^<[^<>@\s]+@[A-Za-z0-9.-]+>$/.test(stated)) return stated
+  var now = Math.floor(Number(nowMs) || Date.now())
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "<" + now.toString(36) + "." + random + ".omamail@" + messageIdDomain(from) + ">"
+}
+
 // One method name, and nothing that could end the header early: this string
 // arrives from a calendar file somebody else wrote.
 function calendarMethod(value) {
@@ -1027,6 +1046,8 @@ function buildRawMessage(fields) {
     lines.push("In-Reply-To: " + inReplyTo)
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
+  // RFC 5322 asks every message for an id, and a relay told not to add missing headers relays none.
+  lines.push("Message-ID: " + messageIdValue(values.messageId, values.from))
   lines.push("MIME-Version: 1.0")
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""

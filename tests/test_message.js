@@ -579,6 +579,59 @@ assert.strictEqual(message.extractHtml({
     .indexOf("In-Reply-To") < 0)
 }
 
+// ------------------------------------------------------------- Message-ID
+//
+// RFC 5322 asks every message for an id, and a relay told not to add missing
+// headers relays none: Postfix logs `message-id=<>` for a message sent without
+// one, and a reply to it has nothing to thread on.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const idOf = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .filter((line) => line.indexOf("Message-ID: ") === 0)[0]
+    .substring("Message-ID: ".length)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Message-ID").length, 1,
+    "one Message-ID, and only one")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(sent)), idOf(sent))
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+  assert.ok(message.buildRawMessage({ to: "a@b.com", body: "x" }).indexOf("To: a@b.com\r\n") === 0,
+    "a message with no From still opens with To")
+
+  const again = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.notStrictEqual(idOf(sent), idOf(again), "every message gets its own id")
+
+  // No From leaves no domain to take, and .invalid is reserved by RFC 2606 so
+  // the id cannot land in a namespace somebody else's uniqueness depends on.
+  assert.ok(/^<[^<>@\s]+@omamail\.invalid>$/.test(
+    idOf(message.buildRawMessage({ to: "a@b.com", body: "x" }))))
+  assert.strictEqual(message.messageIdDomain('"Jane" <jane@Example.COM>'), "Example.COM")
+  assert.strictEqual(message.messageIdDomain("nobody"), "omamail.invalid")
+  assert.strictEqual(message.messageIdDomain(""), "omamail.invalid")
+
+  // Stated by the caller, which is what lets a test read the message it built.
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<pinned@example.net>"
+  }).indexOf("Message-ID: <pinned@example.net>\r\n") > 0)
+
+  // A stated id is this client's own choice rather than a stranger's, so one
+  // that is not an id is replaced instead of carried through mangled.
+  const forged = message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x",
+    messageId: "<a@b>\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(forged)), "a real id is minted instead")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Message-ID").length, 1)
+}
+
 // ------------------------------------------------------ RFC 822 → payload
 //
 // The adapter that lets an IMAP message drive the same reader a Gmail message
