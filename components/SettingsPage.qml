@@ -22,22 +22,27 @@ Column {
   required property color urgentColor
   required property string panelFontFamily
 
-  signal backRequested()
   signal clientSetupRequested()
   signal addRequested()
   signal editRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
+
+  // The page's sections and where each begins, for the rail beside it. Read
+  // off the headings themselves, so a section that grows moves the ones
+  // below it in the rail's map as well as on screen. The calendars section
+  // is a component with its own heading, so its top stands in.
+  readonly property var sections: [
+    { key: "reading", title: "Reading", y: readingHeading.y },
+    { key: "notifications", title: "Notifications", y: notificationsHeading.y },
+    { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
+    { key: "calendars", title: "Calendars", y: calendarsSection.y },
+    { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
+  ]
   readonly property var auth: service ? service.auth : null
 
   spacing: Style.space(16)
-
-  BackBar {
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
-  }
 
   Text {
     text: "Settings"
@@ -50,6 +55,7 @@ Column {
   // --------------------------------------------------------------- reading
 
   Text {
+    id: readingHeading
     text: "READING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -224,6 +230,7 @@ Column {
   // -------------------------------------------------------- notifications
 
   Text {
+    id: notificationsHeading
     text: "NOTIFICATIONS"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -281,6 +288,7 @@ Column {
   // --------------------------------------------------------------- writing
 
   Text {
+    id: writingHeading
     text: "WRITING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -345,6 +353,7 @@ Column {
   // ------------------------------------------------------------- mailboxes
 
   Text {
+    id: mailboxesHeading
     text: "MAILBOXES"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -445,6 +454,7 @@ Column {
   }
 
   CalendarSettings {
+    id: calendarsSection
     width: parent.width
     service: root.service
     controller: root.calendarController
@@ -463,6 +473,7 @@ Column {
   // ---------------------------------------------------------- oauth client
 
   Text {
+    id: oauthHeading
     text: "GOOGLE OAUTH CLIENT"
     color: root.dimColor
     font.family: root.panelFontFamily

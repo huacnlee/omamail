@@ -26,6 +26,19 @@ assert.strictEqual(guess.imapPort, 993)
 assert.strictEqual(guess.username, "jane@example.org")
 assert.strictEqual(guess.insecure, false)
 
+assert.strictEqual(guess.guideUrl, "", "nothing to read for a server nobody documented")
+
+// Google refuses the account password over IMAP, which a Gmail user finds out
+// only after typing it. The note has to say so before that, name the app
+// password, and point at the page that explains how to make one — and offer
+// the way out, which is the Gmail provider.
+const gmail = imap.suggestedSettings("jane@gmail.com")
+assert.ok(/app password/i.test(gmail.note), "Gmail names the app password")
+assert.ok(/2-Step Verification/.test(gmail.note), "and the setting it depends on")
+assert.ok(/pick Gmail/.test(gmail.note), "and the provider that needs neither")
+assert.ok(/^https:\/\/support\.google\.com\//.test(gmail.guideUrl), "the guide is Google's own")
+assert.ok(/app password/i.test(gmail.guideLabel), "and the link says what it opens")
+
 const icloud = imap.suggestedSettings("jane@icloud.com")
 assert.strictEqual(icloud.imapHost, "imap.mail.me.com")
 assert.strictEqual(icloud.smtpPort, 587)
