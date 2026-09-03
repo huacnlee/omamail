@@ -504,6 +504,37 @@ assert.strictEqual(plainSpecial["\\sent"], "Sent")
 assert.strictEqual(plainSpecial["\\junk"], "Junk")
 assert.strictEqual(plainSpecial["\\archive"], "Archive")
 
+// Exchange Online's IMAP advertises no SPECIAL-USE either, so its folders are
+// found by name or not at all. Four of the five are what the bare-word
+// fallback would have guessed anyway; "Junk Email" is the one that is not, and
+// pointing the Junk mailbox at a folder the server does not have is the fault.
+const exchangeList = imap.parseList(
+  "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Sent Items\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Deleted Items\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Drafts\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Junk Email\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Archive\"\r\n")
+const exchange = imap.specialFolders(exchangeList)
+assert.strictEqual(imap.resolveFolder("\\Sent", exchange), "Sent Items")
+assert.strictEqual(imap.resolveFolder("\\Trash", exchange), "Deleted Items")
+assert.strictEqual(imap.resolveFolder("\\Drafts", exchange), "Drafts")
+assert.strictEqual(imap.resolveFolder("\\Archive", exchange), "Archive")
+assert.strictEqual(imap.resolveFolder("\\Junk", exchange), "Junk Email",
+  "the bare word names a folder Exchange does not have")
+
+// The other spellings of the same folder, and a folder that merely starts
+// with the word and is somebody's own.
+function junkNamed(name) {
+  const listed = imap.parseList("* LIST () \"/\" \"" + name + "\"\r\n")
+  return imap.specialFolders(listed)["\\junk"]
+}
+assert.strictEqual(junkNamed("Junk E-mail"), "Junk E-mail")
+assert.strictEqual(junkNamed("Junk E-Mail"), "Junk E-Mail")
+assert.strictEqual(junkNamed("Spam"), "Spam")
+assert.strictEqual(junkNamed("Junk Drawer"), undefined,
+  "an unrelated folder must not be adopted as Junk")
+
 // Flags win over names: a server that says so is not second-guessed.
 const conflicting = imap.parseList(
   "* LIST (\\Sent) \"/\" \"Verzonden\"\r\n" +
