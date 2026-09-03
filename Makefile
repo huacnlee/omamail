@@ -98,6 +98,7 @@ test-js:
 	node tests/test_conversation.js
 	node tests/test_keymap.js
 	node tests/test_accounts.js
+	node tests/test_unified.js
 	node tests/test_aliases.js
 	node tests/test_menu.js
 	node tests/test_provider.js
