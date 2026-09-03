@@ -945,10 +945,32 @@ Item {
     }
   }
 
+  // Every mailbox at once. The rail it lands on has to be one they all have,
+  // so a row only some of them offered — Gmail's own Archive beside an IMAP
+  // mailbox — does not leave the list asking for something nothing can serve.
+  function chooseUnified() {
+    if (!service) return false
+    var keepCalendar = calendarVisible
+    var mailbox = service.mailboxKey
+    service.setUnifiedMailboxes(true)
+    if (keepCalendar) {
+      showCalendar()
+      return true
+    }
+    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
+    service.selectMailbox(target !== "" ? target : "inbox")
+    backToList()
+    return true
+  }
+
   function switchAccount(index) {
     if (!service) return false
     var keepCalendar = calendarVisible
     var mailbox = service.mailboxKey
+    // Choosing one mailbox is choosing to be in it, so the combined view goes
+    // off. Leaving it on would have named an account in the bar and gone on
+    // showing every one of them.
+    if (service.unifiedMailboxes) service.setUnifiedMailboxes(false)
     if (service.switchToIndex(index) !== true) return false
     if (keepCalendar) {
       showCalendar()
@@ -2008,9 +2030,11 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
+        unifiedActive: !!root.service && root.service.unified
         onAccountChosen: function(index) {
           root.switchAccount(index)
         }
+        onUnifiedChosen: root.chooseUnified()
         onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()

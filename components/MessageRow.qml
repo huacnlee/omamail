@@ -16,6 +16,10 @@ Rectangle {
   required property string panelFontFamily
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
+  // Which mailbox this row came from, present only on a merged summary.
+  readonly property string sourceLabel: root.summary && root.summary.sourceLabel !== undefined
+    ? String(root.summary.sourceLabel) : ""
+
   property bool canArchive: true
   property bool hasCursor: false
   property bool selected: false
@@ -137,15 +141,42 @@ Rectangle {
       }
     }
 
-    Text {
+    // The sender, and — where the list was made of several mailboxes — which
+    // one this arrived in. Only a merged row carries `sourceLabel`, so the
+    // single-mailbox list is unchanged rather than gaining an empty column:
+    // naming the only mailbox there is says nothing.
+    Row {
       width: parent.width
-      textFormat: Text.PlainText
-      text: root.summary.from.display
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      elide: Text.ElideRight
-      horizontalAlignment: root.textAlignment
+      spacing: Style.space(6)
+      layoutDirection: root.textAlignment === Text.AlignRight
+        ? Qt.RightToLeft : Qt.LeftToRight
+
+      Text {
+        id: sender
+        width: Math.max(0, parent.width - source.width
+          - (source.visible ? parent.spacing : 0))
+        textFormat: Text.PlainText
+        text: root.summary.from.display
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+        horizontalAlignment: root.textAlignment
+      }
+
+      // Never colour alone: the mailbox is named in words, because a theme
+      // can put the accent close enough to the foreground that a tint says
+      // nothing at all.
+      Text {
+        id: source
+        visible: root.sourceLabel !== ""
+        textFormat: Text.PlainText
+        text: root.sourceLabel
+        color: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
     }
 
     Text {

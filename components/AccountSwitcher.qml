@@ -38,7 +38,19 @@ Item {
   // the cursor back to whatever the pointer happened to rest on.
   property int cursorIndex: 0
 
+  // Whether the mailbox on screen is the merge of all of them, drawn the way
+  // an active account is drawn because it is the same kind of choice.
+  property bool unifiedActive: false
+
+  // One mailbox has nothing to combine, so the row is not offered: choosing it
+  // would land on the same list under a different name.
+  readonly property int accountRowCount: root.accounts ? root.accounts.length : 0
+  readonly property bool unifiedOffered: accountRowCount > 1
+  readonly property int rowOffset: unifiedOffered ? 1 : 0
+  readonly property int rowCount: accountRowCount + rowOffset
+
   signal accountChosen(int index)
+  signal unifiedChosen()
   signal addAccountRequested()
   signal manageRequested()
 
@@ -84,24 +96,32 @@ Item {
   function close() { menu.close() }
 
   function moveCursor(delta) {
-    var count = root.accounts ? root.accounts.length : 0
-    if (count === 0) return
-    cursorIndex = Model.wrappedIndex(cursorIndex, delta, count)
+    if (root.rowCount === 0) return
+    cursorIndex = Model.wrappedIndex(cursorIndex, delta, root.rowCount)
   }
 
+  // The combined row is first, so the accounts sit one further down than their
+  // own indices. Everything above this component still counts accounts.
   function chooseCursor() {
-    var count = root.accounts ? root.accounts.length : 0
-    if (cursorIndex < 0 || cursorIndex >= count) return
+    if (cursorIndex < 0 || cursorIndex >= root.rowCount) return
     menu.close()
-    root.accountChosen(cursorIndex)
+    if (root.unifiedOffered && cursorIndex === 0) {
+      root.unifiedChosen()
+      return
+    }
+    root.accountChosen(cursorIndex - root.rowOffset)
   }
 
   // Opening puts the keyboard on the mailbox you are already in, so the first
   // `j` is one step away from it rather than back at the top of the list.
   function restCursorOnActive() {
+    if (root.unifiedActive && root.unifiedOffered) {
+      cursorIndex = 0
+      return
+    }
     var accounts = root.accounts || []
     for (var i = 0; i < accounts.length; i++) {
-      if (accounts[i].active) { cursorIndex = i; return }
+      if (accounts[i].active) { cursorIndex = i + root.rowOffset; return }
     }
     cursorIndex = 0
   }
@@ -156,6 +176,83 @@ Item {
         // mechanism that closes it, and a second would be one too many.
       }
 
+      // Every mailbox at once, above the mailboxes it is made of: it is the
+      // widest of the choices here, and a list is read from the top.
+      Rectangle {
+        id: unifiedRow
+        visible: root.unifiedOffered
+
+        readonly property bool hasCursor: root.cursorIndex === 0
+
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        implicitHeight: visible ? Style.space(40) : 0
+        radius: Style.cornerRadius
+        color: root.unifiedActive
+          ? Style.selectedFillFor(root.textColor, root.accentColor)
+          : (unifiedHover.hovered || hasCursor
+            ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+        border.width: hasCursor ? Style.normalBorderWidth : 0
+        border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+
+        Rectangle {
+          id: unifiedAvatar
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(22)
+          height: width
+          radius: width / 2
+          color: Style.selectedFillFor(root.textColor, root.accentColor)
+
+          // Not a letter: this row stands for no address, and an initial
+          // taken from one of them would claim it belonged to that mailbox.
+          ActionIcon {
+            anchors.centerIn: parent
+            name: "inbox"
+            color: root.textColor
+            iconSize: Style.font.caption
+          }
+        }
+
+        Column {
+          anchors.left: unifiedAvatar.right
+          anchors.leftMargin: Style.space(9)
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: "All mailboxes"
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: root.unifiedActive
+            elide: Text.ElideRight
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: root.accountRowCount + " mailboxes in one list"
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        HoverHandler { id: unifiedHover }
+        TapHandler {
+          onTapped: {
+            menu.close()
+            root.unifiedChosen()
+          }
+        }
+      }
+
       Repeater {
         model: root.accounts
 
@@ -165,7 +262,7 @@ Item {
           required property var modelData
           required property int index
 
-          readonly property bool hasCursor: root.cursorIndex === row.index
+          readonly property bool hasCursor: root.cursorIndex === row.index + root.rowOffset
 
           // Whether this mailbox was given a name, which decides what the two
           // lines hold. `label` cannot answer it: it falls through to the
