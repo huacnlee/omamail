@@ -13,6 +13,7 @@ import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Accounts.js" as Accounts
+import "RenderCache.js" as RenderCache
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -68,6 +69,9 @@ Item {
 
   // The window drives this; the unread poll keeps running while it is false.
   property bool windowOpen: false
+  // The representation currently on screen. Reader mode needs its rebuild on
+  // the first paint; the other modes let that work finish on the next turn.
+  property string bodyMode: "reader"
   // Keyed by attachmentId, holding only the saves that are in flight.
   property var savingAttachmentIds: ({})
 
@@ -219,6 +223,12 @@ Item {
   // do — those clear themselves after a few seconds, and this is the answer to
   // a question the user may look back at the message to ask.
   property string unsubscribeDone: ""
+
+  // Parsed trees are expensive and immutable after sanitize returns. Keep only
+  // the recent working set in memory; the durable cache remains the sender's
+  // source HTML so sanitizer fixes still apply after a restart.
+  property var renderCache: RenderCache.create(12)
+  onAccountIdChanged: renderCache = RenderCache.create(12)
 
   // Which of this account's own addresses this message arrived at.
   //
@@ -1096,14 +1106,22 @@ Item {
   // know about this body comes back from the same call — how heavy it is, and
   // its plain-text reading — because each of those asked separately is another
   // parse of the whole message to work out what was just worked out.
-  function renderSource(source, withPlainText) {
+  function renderSource(source, withPlainText, completeReader) {
     sourceHtml = String(source || "")
-    var ready = Html.sanitize(sourceHtml, ({
-      allowRemoteImages: remoteImagesAllowed,
-      remoteImageData: remoteImagesAllowed ? remoteImageData : null,
-      withPlainText: withPlainText === true,
-      withReader: true
-    }))
+    withPlainText = withPlainText === true
+    var eagerReader = completeReader === true || bodyMode === "reader" || remoteImagesAllowed
+    var ready = remoteImagesAllowed ? null
+      : RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)
+    if (!ready) {
+      ready = Html.sanitize(sourceHtml, ({
+        allowRemoteImages: remoteImagesAllowed,
+        remoteImageData: remoteImagesAllowed ? remoteImageData : null,
+        withPlainText: withPlainText,
+        withReader: eagerReader
+      }))
+      if (!remoteImagesAllowed && eagerReader)
+        RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)
+    }
     selectedHtml = ready.html
     selectedDocument = ready.document
     selectedReaderDocument = ready.reader ? ready.reader.document : null
@@ -1118,6 +1136,16 @@ Item {
       && Object.keys(remoteImageData).length === 0
       && selectedRemoteImageSources.length > 0)
       Qt.callLater(root.prepareRemoteImages)
+    if (!ready.reader && !remoteImagesAllowed && !eagerReader) {
+      var deferredId = selectedId
+      var deferredSource = sourceHtml
+      var deferredSerial = detailSerial
+      Qt.callLater(function() {
+        if (root.detailSerial !== deferredSerial || root.selectedId !== deferredId
+          || root.sourceHtml !== deferredSource) return
+        root.renderSource(deferredSource, withPlainText, true)
+      })
+    }
     return ready
   }
 

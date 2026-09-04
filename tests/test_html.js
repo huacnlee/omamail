@@ -43,6 +43,13 @@ const html = load("message/Html.js")
   assert.strictEqual(html.stripColors("<img src=a.png width=600>"),
     "<img src=\"a.png\" width=\"600\">")
   assert.strictEqual(html.stripColors("<input disabled>"), "<input disabled>")
+  const closing = { end: 0, terminated: false }
+  const closingToken = html.readTag("</p>", 0, closing)
+  assert.strictEqual(closingToken.type, "end")
+  assert.strictEqual(closingToken.name, "p")
+  assert.strictEqual(closingToken.attrs, undefined,
+    "an ordinary closing tag does not allocate an attribute list")
+  assert.strictEqual(closing.end, 4)
   // A single-quoted value is re-quoted, so the quote inside it has to go.
   assert.strictEqual(html.stripColors("<a title='say \"hi\"'>t</a>"),
     "<a title=\"say &quot;hi&quot;\">t</a>")
@@ -82,6 +89,19 @@ const html = load("message/Html.js")
   // A title is not body text either, and nearly every marketing mail ships one.
   assert.strictEqual(html.sanitize("<head><title>Newsletter</title></head><p>real</p>").html,
     "<head></head><p>real</p>")
+}
+
+// The sanitised and reading documents ask the same source element about its
+// style. Parsing that declaration list once per phase made style-heavy mail do
+// the same character scan repeatedly.
+{
+  const node = html.parse('<p style="color:red; padding: 4px">x</p>').children[0]
+  const first = html.sourceDeclarations(node)
+  const second = html.sourceDeclarations(node)
+  assert.strictEqual(first, second, "source declarations are cached on their node")
+  assert.strictEqual(first.length, 2)
+  assert.strictEqual(first[1].name, "padding")
+  assert.strictEqual(html.sourceDeclarations(html.parse("<p>x</p>").children[0]), null)
 }
 
 // A tree is walked by recursion everywhere downstream, so a message nested a
