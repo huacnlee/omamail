@@ -38,6 +38,7 @@ Column {
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
   readonly property var sections: [
+    { key: "bar", title: "Bar", y: barHeading.y },
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
@@ -98,6 +99,83 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.heading
     font.bold: true
+  }
+
+  // ------------------------------------------------------------------- bar
+
+  Text {
+    id: barHeading
+    text: "BAR"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: barIconText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: barIconSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Show the icon in the bar"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      // Says what turning it off costs, and what it does not: mail is still
+      // checked and still notifies. The keybinding is the part worth naming,
+      // because without one the window is only reachable from a terminal —
+      // which is true, and is why this does not claim there is no way back.
+      Text {
+        width: parent.width
+        text: "Mail is still checked and still notifies; only the envelope goes. "
+          + "With it off the window opens from a keybinding or a terminal and "
+          + "nowhere else, so bind a key before turning this off:"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "o.bind(\"SUPER + SHIFT + G\", \"Omamail\", "
+          + "\"omarchy shell shell toggle omamail '\{}'\")"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WrapAnywhere
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: barIconSwitch
+      objectName: "showBarIconSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.showBarIcon !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
   }
 
   // --------------------------------------------------------------- reading

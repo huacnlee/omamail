@@ -54,7 +54,8 @@ Item {
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
-    unifiedCalendarView: false
+    unifiedCalendarView: false,
+    showBarIcon: true
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -69,6 +70,17 @@ Item {
     settings ? settings.contentDirection : null)
   readonly property bool unifiedCalendarView: !!settings
     && settings.unifiedCalendarView === true
+
+  // Whether the bar draws an envelope for this.
+  //
+  // A settings file written before this existed keeps its icon because
+  // `applySettings` lays every default down first, so a missing key is
+  // already the manifest's `true` — the same way `unifiedCalendarView` gets
+  // its `false`. What "anything but a stored false" buys instead is the
+  // hand-edited `shell.json`: a `"false"` or a `0` in there is somebody's
+  // typo rather than an answer given in the interface, and a typo should not
+  // be what takes the icon away.
+  readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -128,6 +140,10 @@ Item {
 
   function setUnifiedCalendarView(value) {
     persistSetting("unifiedCalendarView", value === true)
+  }
+
+  function setShowBarIcon(value) {
+    persistSetting("showBarIcon", value === true)
   }
 
   // ---------------------------------------------------------- the accounts
