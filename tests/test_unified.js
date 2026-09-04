@@ -169,6 +169,11 @@ assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "spam"), false,
 assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "archive"), true)
 assert.strictEqual(unified.sharedCapability(["gmail", "hey"], "star"), false)
 assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "search"), true)
+// Opening a message on the web is a capability like any other. An IMAP
+// mailbox has no address this plugin could know, so a list holding one of
+// its rows must not draw the button beside every row in it.
+assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "web"), false)
+assert.strictEqual(unified.sharedCapability(["gmail", "hey"], "web"), true)
 assert.strictEqual(unified.sharedCapability([], "search"), false,
   "no mailboxes can honour nothing")
 

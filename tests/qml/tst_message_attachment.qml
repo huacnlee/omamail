@@ -11,6 +11,12 @@ Item {
 
     property string openedMessageId: ""
     property var openedAttachment: null
+    property string starredId: ""
+    property string browsedId: ""
+    // What the service answers to. It is the summary's own id in a single
+    // mailbox and the mailbox plus that id in a list made of several, and the
+    // reader has to hand back this one rather than the one on the summary.
+    property string selectedId: "message-4"
     property var selectedMessage: ({
       id: "message-4",
       subject: "Forwarded report",
@@ -48,6 +54,9 @@ Item {
       openedMessageId = messageId
       openedAttachment = attachment
     }
+
+    function toggleStar(id) { starredId = String(id) }
+    function openInBrowser(id) { browsedId = String(id) }
   }
 
   Omamail.MessageReader {
@@ -91,6 +100,27 @@ Item {
       link.activated()
       compare(mailService.openedMessageId, "message-4")
       compare(mailService.openedAttachment.attachmentId, "att-7")
+    }
+
+    // A row in a list made of several mailboxes is addressed by mailbox and
+    // id. The account that owns the message knows only its own half of that,
+    // so a reader that called back with `selectedMessage.id` named no mailbox
+    // and the star, the attachment and the browser link all did nothing.
+    function test_the_reader_answers_with_the_id_the_service_gave_it() {
+      mailService.selectedId = "b@example.net message-4"
+
+      mailService.openedMessageId = ""
+      var link = named(reader, "attachment-open-link")
+      verify(link)
+      link.activated()
+      compare(mailService.openedMessageId, "b@example.net message-4")
+
+      var web = named(reader, "openWebButton")
+      verify(web, "the browser link has to be there to be pressed")
+      web.clicked()
+      compare(mailService.browsedId, "b@example.net message-4")
+
+      mailService.selectedId = "message-4"
     }
   }
 }
