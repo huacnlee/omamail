@@ -882,7 +882,7 @@ function listMailboxes(account) {
   const folders = Array.isArray(server.folders) ? server.folders : []
   for (let j = 0; j < folders.length; j++) {
     const folder = folders[j]
-    if (!folder || folder.selectable === false) continue
+    if (!folder || folder.selectable === false || Imap.isSpecialFolder(folder, server.special)) continue
     const key = String(folder.name || "")
     if (key === "" || known[key]) continue
     boxes.push({ key: key, label: key, query: Registry.labelQuery("imap", key) })
