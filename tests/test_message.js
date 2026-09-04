@@ -631,6 +631,14 @@ assert.strictEqual(message.extractHtml({
     from: "work@example.net", to: "a@b.com", body: "x", messageId: "<pinned@example.net>"
   }).indexOf("Message-ID: <pinned@example.net>\r\n") > 0)
 
+  // Dot-atom permits every RFC 5322 `atext` punctuation character on either
+  // side of the separator. A legal caller-stated id is preserved byte for byte.
+  const fullAtext = "<AZaz09!#$%&'*+-/=?^_`{|}~.next@AZaz09!#$%&'*+-/=?^_`{|}~.next>"
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: fullAtext
+  }).indexOf("Message-ID: " + fullAtext + "\r\n") > 0,
+    "every legal atext character survives in a stated id")
+
   // Validation judges the caller's original value. Removing a space first
   // would silently turn this into a different, apparently valid id, while an
   // empty dot-atom segment is not a legal id at all.
@@ -700,6 +708,21 @@ assert.strictEqual(message.extractHtml({
   assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(nonRfc),
     nonRfc)
   assert.strictEqual(new Date(nonRfc).getTime(), clock, "the replacement uses the stated build clock")
+
+  // JavaScript normalizes an impossible calendar date and ignores a weekday
+  // that disagrees with the date. Neither can be emitted as the caller stated
+  // it: RFC 5322 requires the written date to exist and the weekday to agree.
+  const impossible = "Tue, 31 Feb 2026 10:04:31 +0000"
+  const replacedImpossible = message.sentDate(impossible, clock)
+  assert.notStrictEqual(replacedImpossible, impossible,
+    "an impossible day in a real month is replaced rather than normalized")
+  assert.strictEqual(new Date(replacedImpossible).getTime(), clock)
+
+  const mismatchedWeekday = "Fri, 03 Sep 2026 10:04:31 +0000"
+  const replacedWeekday = message.sentDate(mismatchedWeekday, clock)
+  assert.notStrictEqual(replacedWeekday, mismatchedWeekday,
+    "a weekday that disagrees with its date is replaced")
+  assert.strictEqual(new Date(replacedWeekday).getTime(), clock)
 
   // A stated value that is not a date is replaced, and a line break in one can
   // become neither a second header nor a mangled first one.

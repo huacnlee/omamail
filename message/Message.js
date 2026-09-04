@@ -948,7 +948,7 @@ function messageIdValue(given, from, nowMs) {
   var stated = String(given === undefined || given === null ? "" : given)
   // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
   if (stated.length <= 250
-      && /^<[A-Za-z0-9_+=-]+(?:\.[A-Za-z0-9_+=-]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*>$/.test(stated))
+      && /^<[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*@[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*>$/.test(stated))
     return stated
   var now = Math.floor(Number(nowMs) || Date.now())
   var random = Math.floor(Math.random() * 0x100000000).toString(36)
@@ -961,8 +961,17 @@ function sentDate(given, nowMs) {
   // JavaScript also parses ISO dates and shorthand spellings that are not
   // legal header values, so a stated date needs this client's canonical shape
   // as well as an instant the engine recognises.
-  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-]([01][0-9]|2[0-3])[0-5][0-9]$/
-  if (canonical.test(stated) && !isNaN((new Date(stated)).getTime())) return stated
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-]([01][0-9]|2[0-3])[0-5][0-9]$/
+  var parts = stated.match(canonical)
+  if (parts) {
+    var day = Number(parts[2])
+    var month = MONTHS.indexOf(parts[3])
+    var year = Number(parts[4])
+    var calendar = new Date(Date.UTC(year, month, day))
+    if (calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
+        && calendar.getUTCDate() === day && WEEKDAYS[calendar.getUTCDay()] === parts[1])
+      return stated
+  }
   var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
   if (isNaN(date.getTime())) date = new Date()
   var offset = -date.getTimezoneOffset()
