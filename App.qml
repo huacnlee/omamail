@@ -1959,6 +1959,7 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         labels: root.service ? root.service.labels : []
+        currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId)
         }

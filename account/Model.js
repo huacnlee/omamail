@@ -191,15 +191,20 @@ function labelChangesFor(action, sourceLabelId) {
 // System labels are left out: INBOX, SENT, SPAM and the rest are the mailboxes
 // the rail already draws, and offering them here would put two ways of saying
 // "archive" in a list whose whole job is the destinations that have no key of
-// their own. Sorted by name rather than by the order the provider returned,
-// which on Gmail is neither alphabetical nor stable between accounts.
-function movableLabels(labels, query) {
+// their own. The label or folder already on screen is not a destination: on
+// Gmail it would leave the source label attached while optimistically removing
+// its row, and IMAP would be asked to UID MOVE a message into the same folder.
+// Sorted by name rather than by the order the provider returned, which on
+// Gmail is neither alphabetical nor stable between accounts.
+function movableLabels(labels, query, currentLabelId) {
   var candidates = Array.isArray(labels) ? labels : []
   var typed = String(query || "").trim().toLowerCase()
+  var current = String(currentLabelId || "")
   var destinations = []
   for (var i = 0; i < candidates.length; i++) {
     var label = candidates[i]
     if (!label || label.system === true) continue
+    if (String(label.id || "") === current) continue
     var labelName = String(label.name || "")
     if (typed !== "" && labelName.toLowerCase().indexOf(typed) < 0) continue
     destinations.push(label)

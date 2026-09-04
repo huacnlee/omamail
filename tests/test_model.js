@@ -105,6 +105,8 @@ deepEqual(model.movableLabels(labelSet, "").map(l => l.id), ["L1", "L3", "L2"])
 deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3"], "filtering is case-insensitive and matches anywhere")
 deepEqual(model.movableLabels(labelSet, "  ZEB  ").map(l => l.id), ["L2"], "a typed query is trimmed")
 deepEqual(model.movableLabels(labelSet, "inbox").map(l => l.id), [], "a system label is not a destination")
+deepEqual(model.movableLabels(labelSet, "", "L3").map(l => l.id), ["L1", "L2"],
+  "the current Gmail label or IMAP folder is not a move destination")
 deepEqual(model.movableLabels(null, ""), [])
 
 // The optimistic update has to move the derived flags too, or a row shows a

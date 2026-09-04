@@ -696,6 +696,7 @@ Item {
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
+  readonly property string rawLabelId: current ? current.rawLabelId : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading

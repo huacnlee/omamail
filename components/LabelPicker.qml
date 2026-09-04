@@ -23,11 +23,15 @@ Item {
 
   // [{ id, name, system, unread, total }], as the provider reported them.
   property var labels: []
+  // The raw label or folder view already on screen, which cannot be its own
+  // move destination.
+  property string currentLabelId: ""
 
   property string searchQuery: ""
 
   readonly property bool opened: menu.opened
-  readonly property var matchingLabels: Model.movableLabels(root.labels, root.searchQuery)
+  readonly property var matchingLabels: Model.movableLabels(
+    root.labels, root.searchQuery, root.currentLabelId)
 
   // Where the keyboard is standing. Reset to the top on every keystroke
   // because the list underneath it has changed: holding an index still would
