@@ -156,13 +156,29 @@ assert.strictEqual(parsed[0].sourceId, "work")
 assert.strictEqual(parsed[0].href, "/cal/a.ics")
 assert.strictEqual(parsed[1].start.allDay, true)
 
-const cdataXml = '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
-  + '<d:response><d:href>/cal/cdata.ics</d:href><d:propstat><d:prop>'
-  + '<c:calendar-data><![CDATA[BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:cdata\r\nSUMMARY:iCloud Event\r\nDTSTART:20260824T080000Z\r\nDTEND:20260824T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR]]></c:calendar-data>'
-  + '</d:prop></d:propstat></d:response></d:multistatus>'
+// A server may send the calendar object in a CDATA section instead of escaping
+// it, which RFC 4791 allows and DAViCal and iCloud do. Unwrapped, its first
+// line reads `<![CDATA[BEGIN:VCALENDAR` and the collection parses to nothing.
+const cdataXml = '<?xml version="1.0" encoding="UTF-8"?>'
+  + '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+  + '<d:response><d:href>/cal/cdata.ics</d:href><d:propstat>'
+  + '<d:prop><d:getetag>"C=1@U=cdata"</d:getetag>'
+  + '<c:calendar-data><![CDATA[BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:cdata\r\nSUMMARY:R&D sync &amp; Q&A\r\nDTSTART:20260824T080000Z\r\nDTEND:20260824T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR]]></c:calendar-data>'
+  + '</d:prop><d:status>HTTP/1.1 200 OK</d:status>'
+  + '</d:propstat></d:response></d:multistatus>'
 const cdataParsed = feed.eventsFromCaldav(cdataXml, "work")
 assert.strictEqual(cdataParsed.length, 1)
-assert.strictEqual(cdataParsed[0].summary, "iCloud Event")
+assert.strictEqual(cdataParsed[0].href, "/cal/cdata.ics")
+// Nothing inside a CDATA section is escaped, so the entity pass must not touch
+// it: "&amp;" there is those five characters and a summary keeps them.
+assert.strictEqual(cdataParsed[0].summary, "R&D sync &amp; Q&A")
+
+// Both encodings can appear in one element. The entities outside the section
+// are decoded; the section's own content is handed over exactly as it arrived.
+assert.strictEqual(
+  feed.tagText('<c:calendar-data>A &amp; B&#13;<![CDATA[C &amp; D]]>'
+    + ' &lt;end&gt;</c:calendar-data>', "calendar-data"),
+  "A & B\rC &amp; D <end>")
 
 const recurringXml = [
   '<?xml version="1.0"?>',
