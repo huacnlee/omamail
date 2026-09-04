@@ -2453,6 +2453,15 @@ Item {
       : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
   }
 
+  Connections {
+    target: root.api
+    ignoreUnknownSignals: true
+
+    function onSentCopyWarning(warning) {
+      root.note(String(warning || ""))
+    }
+  }
+
   Component {
     id: gmailAuthComponent
 

@@ -818,6 +818,14 @@ assert.strictEqual(imap.hasCapability(caps, "MOVE"), true)
 assert.strictEqual(imap.hasCapability(caps, "move"), true)
 assert.strictEqual(imap.hasCapability(caps, "IDLE"), false)
 assert.strictEqual(imap.hasCapability(null, "MOVE"), false)
+assert.strictEqual(imap.listCommand(), 'LIST "" "*"')
+assert.strictEqual(imap.listCommand(true), 'LIST "" "*" RETURN (SPECIAL-USE)')
+
+assert.strictEqual(imap.serverFilesSentCopy({ smtpHost: "smtp.gmail.com" }), true)
+assert.strictEqual(imap.serverFilesSentCopy({ smtpHost: "SMTP-MAIL.OUTLOOK.COM" }), true)
+assert.strictEqual(imap.serverFilesSentCopy({ smtpHost: "smtp.office365.com" }), true)
+assert.strictEqual(imap.serverFilesSentCopy({ smtpHost: "smtp.fastmail.com" }), false)
+assert.strictEqual(imap.serverFilesSentCopy({ smtpHost: "smtp.gmail.com.example.org" }), false)
 
 // ------------------------------------------------------- decoding the wire
 //

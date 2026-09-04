@@ -43,6 +43,8 @@ Item {
   property bool foldersLoading: false
   property var folderWaiters: []
 
+  signal sentCopyWarning(string warning)
+
   // What the server said it can do, asked for alongside the folder listing so
   // it costs nothing extra. Only one answer is acted on: a server with MOVE
   // archives in one command, and one without it needs three.
@@ -188,15 +190,28 @@ Item {
 
     // No folder in the URL: both of these are asked of the server rather than
     // of a mailbox, and they share the one connection.
-    run("", [Imap.capabilityCommand(), Imap.listCommand()], function(text, error) {
+    function finish(error) {
       root.foldersLoading = false
-      if (!error) {
-        root.adoptServerAnswer(text)
-        root.foldersLoaded = true
-      }
+      if (!error) root.foldersLoaded = true
       var waiting = root.folderWaiters.slice()
       root.folderWaiters = []
       for (var i = 0; i < waiting.length; i++) waiting[i](error)
+    }
+
+    run("", [Imap.capabilityCommand(), Imap.listCommand()], function(text, error) {
+      if (error) {
+        finish(error)
+        return
+      }
+      root.adoptServerAnswer(text)
+      if (!Imap.hasCapability(root.serverCapabilities, "SPECIAL-USE")) {
+        finish("")
+        return
+      }
+      root.run("", [Imap.listCommand(true)], function(specialText, specialError) {
+        if (!specialError) root.adoptServerAnswer(specialText)
+        finish(specialError)
+      })
     })
   }
 
@@ -864,9 +879,34 @@ Item {
           callback(null, Imap.responseError(status, detail, "The message could not be sent"))
           return
         }
-        var sentFolder = root.special["\\sent"] || ""
-        if (sentFolder === "") {
-          callback({ warning: "Sent, but this server did not report a Sent folder" }, "")
+        callback({}, "")
+        root.saveSentCopy(message, handle)
+      })
+      process.running = true
+    })
+    return handle
+  }
+
+  // SMTP acceptance cannot be undone. The UI finishes delivery at that point;
+  // filing a copy is a separate best-effort operation and may only warn.
+  function saveSentCopy(message, handle) {
+    if (Imap.serverFilesSentCopy(auth ? auth.settings : null)) return
+    ensureFolders(function(folderError) {
+      if (!root || (handle && handle.aborted)) return
+      if (folderError) {
+        root.sentCopyWarning("Sent, but the Sent folder could not be found: " + folderError)
+        return
+      }
+      var sentFolder = root.special["\\sent"] || ""
+      if (sentFolder === "") {
+        root.sentCopyWarning("Sent, but this server did not report a Sent folder")
+        return
+      }
+      auth.withCredentials(function(credentials, credentialError) {
+        if (!root || (handle && handle.aborted)) return
+        if (!credentials) {
+          root.sentCopyWarning("Sent, but the Sent copy could not be saved: "
+            + (credentialError || "Not signed in"))
           return
         }
         var sentUrl = Imap.imapUrl(auth.settings, sentFolder)
@@ -879,31 +919,24 @@ Item {
         })
         if (!appendProcess) {
           root.inFlight = Math.max(0, root.inFlight - 1)
-          callback({ warning: "Sent, but the Sent copy could not be saved" }, "")
+          root.sentCopyWarning("Sent, but the Sent copy could not be saved")
           return
         }
-        handle.process = appendProcess
+        if (handle) handle.process = appendProcess
         appendProcess.finished.connect(function(appendStatus, appendOut, appendErr) {
           if (!root) return
-          if (handle.process === appendProcess) handle.process = null
+          if (handle && handle.process === appendProcess) handle.process = null
           appendProcess.destroy()
           root.inFlight = Math.max(0, root.inFlight - 1)
-          if (handle.aborted || typeof callback !== "function") return
-          if (appendStatus !== 0) {
-            var appendDetail = Imap.decodeResponse(appendErr,
-              Mail.base64ToBytes, Mail.bytesToLatin1)
-            var warning = Imap.responseError(appendStatus, appendDetail,
-              "the Sent copy could not be saved")
-            callback({ warning: "Sent, but " + warning }, "")
-            return
-          }
-          callback({}, "")
+          if ((handle && handle.aborted) || appendStatus === 0) return
+          var appendDetail = Imap.decodeResponse(appendErr,
+            Mail.base64ToBytes, Mail.bytesToLatin1)
+          root.sentCopyWarning("Sent, but " + Imap.responseError(appendStatus,
+            appendDetail, "the Sent copy could not be saved"))
         })
         appendProcess.running = true
       })
-      process.running = true
     })
-    return handle
   }
 
   // Verifies a password by using it: a mailbox that answers a folder listing is
@@ -945,6 +978,7 @@ Item {
       // asking again.
       root.adoptServerAnswer(text)
       root.foldersLoaded = root.folders.length > 0
+        && !Imap.hasCapability(root.serverCapabilities, "SPECIAL-USE")
       callback(true, "")
     })
     process.running = true
