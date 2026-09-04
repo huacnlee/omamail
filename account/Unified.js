@@ -58,21 +58,32 @@ function compareRows(left, right) {
 // `Service.qml` takes it apart again on the way down to an account. The
 // account never sees this shape.
 //
-// The separator is a space, which an address cannot contain: an unquoted
-// local part forbids it and no provider issues a quoted one. The id that
-// follows may contain anything, including spaces, so the split is on the
-// first one only.
+// The separator is a unit separator, U+001F, because it has to be a character
+// no id can contain — otherwise a bare id reads as a composed one.
+//
+// A space was the first attempt and was wrong. An address cannot hold one, but
+// the *id* can: an IMAP message is `<uid>:<folder>` and a folder is called
+// things like "Sent Items", so `"42:Sent Items"` split at its first space into
+// the account `"42:Sent"` and the id `"Items"`. That failed safe only because
+// no account happens to be named that, which is luck rather than structure.
+//
+// A control character is structure. Gmail issues hex, HEY issues
+// `<posting>:<topic>`, and an IMAP folder cannot carry one — the protocol
+// forbids control characters in a mailbox name and `ImapProtocol.quote` drops
+// the two that would end a command. So an id containing U+001F is composed and
+// one without it is not, with nothing left to guess.
+var ID_SEPARATOR = "\u001f"
 
 function unifiedId(accountId, messageId) {
   var account = String(accountId === undefined || accountId === null ? "" : accountId)
   var id = String(messageId === undefined || messageId === null ? "" : messageId)
   if (account === "" || id === "") return ""
-  return account + " " + id
+  return account + ID_SEPARATOR + id
 }
 
 function splitUnifiedId(value) {
   var text = String(value === undefined || value === null ? "" : value)
-  var at = text.indexOf(" ")
+  var at = text.indexOf(ID_SEPARATOR)
   if (at <= 0) return { accountId: "", id: "" }
   return { accountId: text.substring(0, at), id: text.substring(at + 1) }
 }
@@ -86,6 +97,34 @@ function splitUnifiedId(value) {
 // unified view addresses exactly one message. `sourceId` keeps what the
 // account calls it, `accountId` says whose it is, and `sourceLabel` is what
 // the row draws to name the mailbox it came from.
+// The oldest row the merge can show without a hole in the middle of it.
+//
+// Every source is asked for its own page, and the pages do not end at the same
+// date. Drawing all of them puts the gap on screen rather than avoiding it: the
+// tail of the list is the deepest mailbox's mail with the shallowest one's
+// missing from among it, and the row that would have sat there arrives only
+// when somebody scrolls further.
+//
+// So the merge stops at the newest of the sources' own last rows — the
+// shallowest watermark. Everything above it is complete, because every source
+// has reported down to at least that date. A source that has run out entirely
+// sets no watermark: there is nothing more of it to come, so it cannot leave a
+// hole.
+function pageWatermark(sources) {
+  var values = Array.isArray(sources) ? sources : []
+  var watermark = 0
+  for (var i = 0; i < values.length; i++) {
+    var source = values[i] || ({})
+    var messages = Array.isArray(source.messages) ? source.messages : []
+    if (messages.length === 0) continue
+    // Complete sources cannot leave a gap, so they do not hold the list back.
+    if (source.hasMore !== true) continue
+    var oldest = messageTime(messages[messages.length - 1])
+    if (oldest > watermark) watermark = oldest
+  }
+  return watermark
+}
+
 function mergeMessages(sources) {
   var values = Array.isArray(sources) ? sources : []
   var out = []
@@ -114,7 +153,17 @@ function mergeMessages(sources) {
     }
   }
   out.sort(compareRows)
-  return out
+  // Truncated at the shallowest watermark, so the list has no hole in the
+  // middle of it. A merge of one source, or of sources that have all run out,
+  // keeps everything.
+  var floor = pageWatermark(values)
+  if (floor <= 0) return out
+  var complete = []
+  for (var k = 0; k < out.length; k++) {
+    if (messageTime(out[k]) < floor) break
+    complete.push(out[k])
+  }
+  return complete
 }
 
 // Which account a row belongs to. Read out of the id rather than looked up:
@@ -253,11 +302,24 @@ function anyLoading(states) {
 
 // Loaded only once all of them are: "nothing here" is a claim about every
 // mailbox, and one that has not answered is enough to make it wrong.
+// Whether the list is done, which is what decides between a skeleton, an
+// empty placeholder and neither.
+//
+// A mailbox that has stopped on an error has finished as far as the list is
+// concerned: it will never set `loaded`, and requiring it to held the panel on
+// a blank slot indefinitely — no skeleton, no "Nothing here", nothing — for as
+// long as one account stayed signed out. What went wrong is `firstError`'s to
+// say; this only answers whether anything is still on its way. A mailbox that
+// is loading *and* holding an earlier error is still on its way.
 function allLoaded(states) {
   var values = Array.isArray(states) ? states : []
   if (values.length === 0) return false
   for (var i = 0; i < values.length; i++) {
-    if (!values[i] || values[i].loaded !== true) return false
+    var state = values[i]
+    if (!state) return false
+    if (state.loaded === true) continue
+    if (state.loading !== true && String(state.error || "").trim() !== "") continue
+    return false
   }
   return true
 }

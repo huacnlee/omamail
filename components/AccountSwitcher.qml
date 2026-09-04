@@ -290,10 +290,16 @@ Item {
             return row.named ? String(modelData.email || "") : ""
           }
 
+          // Whether this is the mailbox being read, which is not the same as
+          // being the active account: the combined view leaves one active
+          // underneath because compose still needs an address to send from.
+          // Drawing both as in use said the window was in two places.
+          readonly property bool inUse: modelData.active && !root.unifiedActive
+
           width: menu.width - menu.leftPadding - menu.rightPadding
           implicitHeight: Style.space(40)
           radius: Style.cornerRadius
-          color: modelData.active
+          color: row.inUse
             ? Style.selectedFillFor(root.textColor, root.accentColor)
             : (rowHover.hovered || hasCursor
               ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
@@ -351,7 +357,7 @@ Item {
               color: root.textColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.bodySmall
-              font.bold: row.modelData.active
+              font.bold: row.inUse
               elide: Text.ElideMiddle
             }
 

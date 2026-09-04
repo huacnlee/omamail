@@ -426,8 +426,13 @@ Item {
     actionStatus = ""
   }
 
+  // When it was said, so a merged view can show the most recent of several
+  // mailboxes' notices rather than whichever host it happened to ask first.
+  property double actionStatusAt: 0
+
   function note(text) {
     actionStatus = String(text || "")
+    actionStatusAt = actionStatus === "" ? 0 : Date.now()
     if (actionStatus !== "") noticeTimer.restart()
   }
 

@@ -676,7 +676,19 @@ Item {
   // checks the final action before its optimistic update.
   function openLabelPicker() {
     if (!service || cursorId === "") return false
-    if (service.refuseUnavailableAction("label:destination")) return false
+    // A merged list draws no labels, so there is nothing to offer and the
+    // picker would open empty on a destination list it cannot fill — and a
+    // chosen id would belong to whichever mailbox happened to be active
+    // rather than to the row. Refused where it cannot be honoured, which is
+    // the same rule every other unavailable action follows.
+    // Only the merged-list refusal belongs here. A single mailbox whose
+    // provider has no move verb is the provider guard's answer, and saying
+    // "needs one mailbox on screen" over it would name the wrong reason.
+    if (service.unified) {
+      service.fail("Moving to a label needs one mailbox on screen")
+      return false
+    }
+    if (service.refuseUnavailableAction("label:destination", cursorId)) return false
     labelPicker.open()
     return true
   }
@@ -953,12 +965,16 @@ Item {
     var keepCalendar = calendarVisible
     var mailbox = service.mailboxKey
     service.setUnifiedMailboxes(true)
+    // The rail row is chosen either way. Returning early with the calendar up
+    // left every mailbox on whatever it had been showing while the rail
+    // claimed one, so coming back from the calendar landed on a list that was
+    // not the row highlighted beside it.
+    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
+    service.selectMailbox(target !== "" ? target : "inbox")
     if (keepCalendar) {
       showCalendar()
       return true
     }
-    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
-    service.selectMailbox(target !== "" ? target : "inbox")
     backToList()
     return true
   }

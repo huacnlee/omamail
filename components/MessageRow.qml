@@ -170,6 +170,12 @@ Rectangle {
       Text {
         id: source
         visible: root.sourceLabel !== ""
+        // A ceiling, because `elide` on its own never fires: with only an
+        // implicit width the label is as wide as the name a user typed, and
+        // `sender` subtracts that — so a long one squeezed the sender to
+        // nothing and pushed the row past its own width. A third is enough to
+        // tell three mailboxes apart and leaves the sender the rest.
+        width: Math.min(implicitWidth, Math.floor(parent.width / 3))
         textFormat: Text.PlainText
         text: root.sourceLabel
         color: root.accentColor

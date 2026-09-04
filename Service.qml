@@ -731,7 +731,11 @@ Item {
       out.push({
         id: accounts[i].id,
         label: Accounts.label(accounts[i]),
-        messages: host ? host.messages : []
+        messages: host ? host.messages : [],
+        // Whether this mailbox has more to come, which is what decides where
+        // the merge has to stop: a source still holding mail below its last
+        // row would leave a hole in the middle of the list.
+        hasMore: !!(host && host.hasMore)
       })
     }
     return out
@@ -874,11 +878,24 @@ Item {
     ? Unified.totalUnread(accountSummaries) : (current ? current.inboxUnread : 0)
   readonly property var messages: unified
     ? unifiedMessages : (current ? current.messages : [])
+  // A label belongs to one service and one mailbox within it, so a merged list
+  // has none to draw and #83's picker has nothing to offer: `v` is refused
+  // rather than opening an empty list, which is what `canMoveToLabel` says.
   readonly property var labels: unified ? [] : (current ? current.labels : [])
+  // #83's move needs a label list and a mailbox to take one from, so a merged
+  // view cannot offer it: the picker would open on an empty list, and a chosen
+  // id would belong to whichever mailbox happened to be active.
+  readonly property bool canMoveToLabel: !unified
+    && Provider.can(providerId, "move")
 
   // Which service the mailbox on screen is, what mailboxes it has, and what it
   // can be asked to do. Forwarded like everything else so a view never has to
   // reach past `service` to find out.
+  //
+  // `providerId` stays the *visible* mailbox's even in a merged view: it
+  // decides what a query string means and what a setup page offers, both of
+  // which belong to one account. What a merged list may *do* comes from
+  // `Unified.sharedCapability` rather than from here.
   readonly property string providerId: current ? current.providerId : Provider.DEFAULT_ID
   readonly property var mailboxes: unified
     ? Unified.sharedMailboxes(unifiedProviders)
@@ -928,20 +945,37 @@ Item {
     }
     return out
   }
+  // Whether a message can be written at all, which is a question about the
+  // mailbox it would be sent from — and compose picks that from the From
+  // address rather than from the list. Intersecting it would hide the compose
+  // button because one mailbox in the merge cannot send.
   readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: unified
     ? unifiedMailboxKey : (current ? current.mailboxKey : "inbox")
+  // The typed search and the query behind it. A merged search asks every
+  // mailbox the same words, so one account's copy is every account's — and
+  // reading it from the visible one keeps the box showing what was typed.
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
   // A unified view draws no labels, so it can never be showing one.
   readonly property string rawLabelId: unified || !current ? "" : current.rawLabelId
   readonly property bool listLoading: unified
     ? Unified.anyLoading(unifiedStates) : (!!current && current.listLoading)
+  // A mailbox that cannot load is not a mailbox still loading, which is the
+  // distinction `Unified.allLoaded` draws: requiring every one of them left a
+  // signed-out account holding the placeholder blank indefinitely.
   readonly property bool listLoaded: unified
     ? Unified.allLoaded(unifiedStates) : (!!current && current.listLoaded)
+  // Still coming from the server. Not intersected, because it drives a
+  // spinner beside the search box rather than the list's own state — which
+  // `listLoading` answers for every mailbox.
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
   readonly property bool hasMore: unified
     ? Unified.anyHasMore(unifiedStates) : (!!current && current.hasMore)
+  // "12 results" for the visible mailbox. Left alone deliberately rather than
+  // summed: a merged count would have to wait for every mailbox to finish
+  // searching, and a number that keeps growing while it is read is worse than
+  // one that is honest about being one mailbox's.
   readonly property string resultSummary: current ? current.resultSummary : ""
   // ------------------------------------------------------- the open message
   //
@@ -1011,8 +1045,29 @@ Item {
     ? pendingSendHost.sendSecondsRemaining : 0
   readonly property string lastError: unified
     ? Unified.firstError(unifiedStates) : (current ? current.lastError : "")
-  readonly property string actionStatus: current ? current.actionStatus : ""
+  // The last thing a mailbox said it did, and the undo that goes with it. Read
+  // from `current` alone, archiving a row from a non-active mailbox in a merged
+  // list produced no confirmation and no undo affordance at all — so the most
+  // recent of them wins, which is the one the press just produced.
+  readonly property string actionStatus: {
+    if (!unified) return current ? current.actionStatus : ""
+    var _epoch = listEpoch
+    var newest = ""
+    var at = -1
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (!host || String(host.actionStatus || "") === "") continue
+      if (host.actionStatusAt > at) {
+        at = host.actionStatusAt
+        newest = String(host.actionStatus)
+      }
+    }
+    return newest
+  }
   readonly property string signInProgress: current ? current.signInProgress : ""
+  // How long ago the visible mailbox was checked. The status line does not
+  // draw this in a merged view — `Model.readingStatusLine` omits it, because
+  // an age from one mailbox is not a claim about all of them.
   readonly property string syncedLabel: current ? current.syncedLabel : ""
 
   function refresh() {
@@ -1173,7 +1228,9 @@ Item {
   function undoSend() {
     var host = pendingSendHost
     if (!host) return false
-    if (host !== current) {
+    // Same reason as `forwardReplyFailure`: the draft names its mailbox, so a
+    // merged view has no need to change what is on screen to undo a send.
+    if (host !== current && !unified) {
       for (var i = 0; i < accountHosts.count; i++) {
         if (accountHosts.objectAt(i) === host) {
           switchToIndex(i)
@@ -1197,8 +1254,22 @@ Item {
   function saveAttachment(messageId, attachment) {
     if (current) current.saveAttachment(messageId, attachment)
   }
+  // Asked of the mailbox the message arrived in rather than of the visible
+  // one. Replying from a merged list otherwise composed from whichever
+  // account was active underneath, with nothing on screen saying so — which
+  // is the failure a unified inbox most has to avoid.
   function preferredSendAs(recipients) {
-    return current ? current.preferredSendAs(recipients) : null
+    var host = reading || current
+    return host ? host.preferredSendAs(recipients) : null
+  }
+
+  // Which mailbox a draft raised from the current selection belongs to. The
+  // window seeds `ComposeView.accountId` from this rather than from
+  // `activeAccountId`, so a reply to a message that arrived in mailbox B is
+  // written and sent from B.
+  readonly property string composeAccountId: {
+    var host = reading || current
+    return host ? String(host.accountId || "") : ""
   }
   function signIn() { if (current) current.signIn() }
   function cancelSignIn() { if (current) current.cancelSignIn() }
@@ -1312,7 +1383,13 @@ Item {
   // a retry cannot be addressed to whichever mailbox happened to be visible.
   function forwardReplyFailure(index) {
     var host = accountAt(index)
-    if (host && host !== current) switchToIndex(index)
+    // Not in a merged list. The switch exists so a retry cannot be addressed
+    // to whichever mailbox happened to be visible, and in a merged view the
+    // draft already names its own — `composeAccountId` seeded it from the
+    // message it answers. Switching there would also drop the reader out of
+    // the combined view to report a failure, which is not what was asked for,
+    // and it would do it behind `App.switchAccount`'s back.
+    if (host && host !== current && !unified) switchToIndex(index)
     replyFailed()
   }
 
