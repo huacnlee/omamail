@@ -111,6 +111,20 @@ function readTag(text, from, out) {
   var name = text.substring(nameStart, at)
   if (upper) name = name.toLowerCase()
 
+  // Closing tags carry no attributes. Nearly every one ends here, so do not
+  // allocate an empty list or enter the start-tag attribute scanner for the
+  // common half of a document's tags. Odd malformed closings still take the
+  // tolerant path below and keep its existing behaviour.
+  if (closing) {
+    var closeAt = at
+    while (closeAt < length && isSpaceCode(text.charCodeAt(closeAt))) closeAt++
+    if (text.charCodeAt(closeAt) === 62) {
+      out.end = closeAt + 1
+      out.terminated = true
+      return { type: "end", name: name }
+    }
+  }
+
   var attributes = []
   var selfClosing = false
   while (at < length) {
@@ -330,8 +344,10 @@ function parse(html) {
     var top = stack[stack.length - 1]
 
     if (token.type === "text") {
-      if (token.text !== "")
-        top.children.push({ type: "text", text: token.text, raw: token.raw === true })
+      // This token already is the tree node's exact shape and is never reused
+      // by the streaming tokenizer. Keep it instead of allocating and copying
+      // every text run in the message.
+      if (token.text !== "") top.children.push(token)
       return
     }
     // A comment or a doctype has nothing a reader needs, and Qt would lay the
@@ -735,6 +751,20 @@ function splitDeclarations(style) {
   return declarations
 }
 
+// Reader mode, image discovery and the formatted cleaner all inspect the
+// sender's original style before `clean` rewrites it. Keep that one parse on
+// the source node so style-heavy mail does not rescan the same string in every
+// walk. The cache is deliberately source-only: fitting later reads the cleaned
+// style from attrs and calls splitDeclarations directly.
+function sourceDeclarations(node) {
+  if (node._sourceDeclarationsRead === true) return node._sourceDeclarations
+  var style = attributeOf(node, "style")
+  node._sourceDeclarationsRead = true
+  node._sourceDeclarations = style !== null && style.value !== null
+    && style.value !== undefined ? splitDeclarations(style.value) : null
+  return node._sourceDeclarations
+}
+
 function joinDeclarations(declarations) {
   var parts = []
   for (var i = 0; i < declarations.length; i++) {
@@ -851,7 +881,7 @@ function isTrackingPixel(node) {
   var height = Number(attributeValue(node, "height"))
   if (isFinite(width) && attributeValue(node, "width") !== "" && width <= 2) return true
   if (isFinite(height) && attributeValue(node, "height") !== "" && height <= 2) return true
-  var declarations = splitDeclarations(attributeValue(node, "style"))
+  var declarations = sourceDeclarations(node) || []
   for (var i = 0; i < declarations.length; i++) {
     if (declarations[i].name !== "width" && declarations[i].name !== "height") continue
     if (/^[012](\.\d+)?px/i.test(declarations[i].value)) return true
@@ -964,39 +994,6 @@ var MAX_TABLE_DEPTH = 4
 // then handlers, then hrefs, then styles — rebuilt the array four times for
 // every element in the document, which on a large message is most of the work.
 var HANDLER_ATTRIBUTE = /^on[a-z]+$/
-
-// The addresses a caller may prepare before Qt receives the document. Taken
-// from the parsed tree so asking for them costs no second parse, with the same
-// tracker, host and count rules the renderer uses.
-function readerRemoteImageSources(root, limit) {
-  var out = []
-  var seen = {}
-
-  function walk(node) {
-    for (var i = 0; i < node.children.length && out.length < limit; i++) {
-      var child = node.children[i]
-      if (child.type === "text") continue
-      if (DROPPED_ELEMENTS[child.name] === true) continue
-      var style = attributeOf(child, "style")
-      var declarations = style !== null && style.value !== null && style.value !== undefined
-        ? splitDeclarations(style.value) : null
-      if (declarations !== null && VOID_ELEMENTS[child.name] !== true
-        && isHiddenBy(declarations)) continue
-      if (child.name === "img") {
-        var source = attributeValue(child, "src")
-        if (imageSourceKind(source) === "remote" && !isTrackingPixel(child)
-          && seen[source] !== true) {
-          seen[source] = true
-          out.push(source)
-        }
-      }
-      walk(child)
-    }
-  }
-
-  walk(root)
-  return out
-}
 
 // The sender centres a 600px card in the middle of a wide window. This reader
 // is a panel of left-aligned text beside a left-aligned list, and the same
@@ -1211,6 +1208,8 @@ function sanitize(html, options) {
   var blocked = 0
   var kept = 0
   var loadable = 0
+  var remoteSources = []
+  var seenRemoteSources = {}
 
   function preparedImage(source) {
     if (imageData === null || !Object.prototype.hasOwnProperty.call(imageData, source)) return ""
@@ -1267,12 +1266,22 @@ function sanitize(html, options) {
       // survives of its declarations are two questions about the same list.
       // Most elements in real mail carry one, so asking twice was most of a
       // second pass over the document.
-      var style = attributeOf(child, "style")
-      var declarations = style !== null && style.value !== null && style.value !== undefined
-        ? splitDeclarations(style.value)
-        : null
+      var declarations = sourceDeclarations(child)
       if (declarations !== null && VOID_ELEMENTS[child.name] !== true
         && isHiddenBy(declarations)) continue
+
+      // Collect fetch candidates while this walk already has the sender's
+      // unmodified attributes in hand. Keeping this before promotion and
+      // cleaning preserves the tracker and source rules without traversing
+      // the complete tree a second time.
+      if (child.name === "img" && remoteSources.length < limit) {
+        var remoteSource = attributeValue(child, "src")
+        if (imageSourceKind(remoteSource) === "remote" && !isTrackingPixel(child)
+          && seenRemoteSources[remoteSource] !== true) {
+          seenRemoteSources[remoteSource] = true
+          remoteSources.push(remoteSource)
+        }
+      }
 
       promoteImageDimensions(child, declarations)
       promoteDirection(child, declarations)
@@ -1288,7 +1297,6 @@ function sanitize(html, options) {
   }
 
   var root = parse(source)
-  var remoteSources = readerRemoteImageSources(root, limit)
 
   // Read as text before anything is dropped, and only when a caller asked: the
   // reader wants both of these for a message with no text/plain part of its
@@ -1978,7 +1986,7 @@ function readerHidden(node) {
   for (var i = 0; i < node.children.length; i++) {
     if (node.children[i].type !== "text") { leaf = false; break }
   }
-  return readerHiddenBy(splitDeclarations(style), leaf)
+  return readerHiddenBy(sourceDeclarations(node) || [], leaf)
 }
 
 // ------------------------------------------------------------- what it points at
@@ -2020,7 +2028,7 @@ function readerImageDimension(node, name) {
   var raw = attributeValue(node, name)
   var value = /^\s*\d+(?:\.\d+)?\s*$/.test(raw) ? Number(raw) : 0
   if (!(value > 0)) {
-    var declarations = splitDeclarations(attributeValue(node, "style"))
+    var declarations = sourceDeclarations(node) || []
     for (var i = 0; i < declarations.length; i++) {
       if (declarations[i].name !== name) continue
       var match = String(declarations[i].value).match(/^\s*(\d+(?:\.\d+)?)px\s*$/i)
@@ -2120,7 +2128,7 @@ function readerHeadingOf(node) {
   var style = attributeValue(node, "style")
   if (style === "") return ""
   if (style.toLowerCase().indexOf("font-size") < 0) return ""
-  var declarations = splitDeclarations(style)
+  var declarations = sourceDeclarations(node) || []
   var level = ""
   for (var i = 0; i < declarations.length; i++) {
     if (declarations[i].name !== "font-size") continue

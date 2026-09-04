@@ -111,14 +111,24 @@ grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
 if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
   fail "the reader view must not sanitise a body; the account renders it once"
 fi
-grep -q 'withReader: true' account/MailAccount.qml \
-  || fail "the reading document must come off the same parse as the formatted one"
+grep -q 'withReader: eagerReader' account/MailAccount.qml \
+  || fail "the current reading mode must decide whether reader rebuilding is on the paint path"
+grep -q 'Qt.callLater(function()' account/MailAccount.qml \
+  || fail "a deferred reading document must be completed outside the first paint"
+grep -q 'RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)' account/MailAccount.qml \
+  || fail "reopening a cached body must reuse its process-local parsed documents"
+grep -q 'RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)' account/MailAccount.qml \
+  || fail "a parsed body must enter the bounded process-local render cache"
+grep -q 'onAccountIdChanged: renderCache = RenderCache.create(12)' account/MailAccount.qml \
+  || fail "the render cache must not cross account identities"
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
 grep -q 'max-redirs = 0' scripts/image-fetch.sh \
   || fail "the image fetcher must not follow an unchecked redirect"
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
+grep -q 'bodyMode: root.bodyMode' Service.qml \
+  || fail "each account must know which body representation is on the paint path"
 # Choosing between three readings that were all built when the body arrived is a
 # preference and nothing else. A mode switch that re-rendered would re-run the
 # image policy, and one that re-fetched would tell the sender the mail was

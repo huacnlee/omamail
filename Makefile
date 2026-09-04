@@ -83,6 +83,7 @@ test-js:
 	node tests/test_html.js
 	node tests/test_direction.js
 	node tests/test_cache.js
+	node tests/test_render_cache.js
 	node tests/test_model.js
 	node tests/test_icons.js
 	node tests/test_navigation.js
