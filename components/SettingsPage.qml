@@ -139,12 +139,13 @@ Column {
 
       // Says what turning it off costs, and what it does not: mail is still
       // checked and still notifies. The keybinding is the part worth naming,
-      // because without one there is nothing left to open the window with.
+      // because without one the window is only reachable from a terminal —
+      // which is true, and is why this does not claim there is no way back.
       Text {
         width: parent.width
         text: "Mail is still checked and still notifies; only the envelope goes. "
-          + "Bind a key before turning this off, or there is no way left to open "
-          + "the window:"
+          + "With it off the window opens from a keybinding or a terminal and "
+          + "nowhere else, so bind a key before turning this off:"
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

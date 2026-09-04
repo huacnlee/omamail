@@ -27,9 +27,10 @@ Item {
   TestCase {
     name: "ServiceSettings"
 
-    // On unless something stored says otherwise, which is what keeps a
-    // settings file written before this existed from losing its icon to a
-    // field nobody chose.
+    // On unless a stored `false` says otherwise. Settings written before this
+    // existed name no key at all and so keep their icon, and a value of some
+    // other shape — a hand-edited `shell.json`, say — is not an answer
+    // anybody gave in the interface.
     function test_the_bar_icon_is_shown_unless_it_was_turned_off() {
       mailService.applySettings({})
       compare(mailService.showBarIcon, true)

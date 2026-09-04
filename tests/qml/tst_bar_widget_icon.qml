@@ -42,6 +42,15 @@ Item {
     function summon(_id, _payload) {}
   }
 
+  // The shell before it has built the service. `Shell.serviceFor` is a lookup
+  // in a map the shell fills in as it constructs services — it never creates
+  // one — so a bar widget really can be asked to draw with nothing to ask.
+  QtObject {
+    id: startingShell
+    function serviceFor(_id) { return null }
+    function summon(_id, _payload) {}
+  }
+
   QtObject {
     id: fakeBar
     property var shell: fakeShell
@@ -60,6 +69,7 @@ Item {
     when: windowShown
 
     function init() {
+      fakeBar.shell = fakeShell
       fakeService.showBarIcon = true
       fakeService.applyCount = 0
     }
@@ -96,8 +106,16 @@ Item {
 
     // With no service to ask, the icon is drawn: a widget that vanished while
     // the service was starting would flicker out of the bar on every login.
+    //
+    // The shell is swapped for one holding no service, because a fake that
+    // always answers with one leaves this branch unmeasured: `drawsIcon` is
+    // true there whether the missing service means "draw" or "do not".
     function test_no_service_yet_still_draws() {
+      fakeBar.shell = startingShell
+      compare(widget.gmail, null, "the shell has no service to hand over yet")
       compare(widget.drawsIcon, true)
+      compare(widget.visible, true)
+      verify(widget.implicitWidth > 0)
     }
   }
 }

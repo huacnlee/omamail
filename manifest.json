@@ -54,7 +54,7 @@
         "type": "boolean",
         "label": "Show the icon in the bar",
         "defaultValue": true,
-        "description": "Turn this off to keep Omamail without an envelope in the bar. Mail is still checked and still notifies; only the icon goes. Bind a key first or there will be no way to open the window: o.bind(\"SUPER + SHIFT + G\", \"Omamail\", \"omarchy shell shell toggle omamail '{}'\")"
+        "description": "Turn this off to run Omamail with no envelope in the bar. Mail is still checked and still notifies; only the icon goes. With it off the window opens from a keybinding or a terminal and nowhere else, so bind a key first: o.bind(\"SUPER + SHIFT + G\", \"Omamail\", \"omarchy shell shell toggle omamail '{}'\")"
       },
       {
         "key": "refreshIntervalSec",
