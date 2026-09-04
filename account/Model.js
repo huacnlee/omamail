@@ -144,8 +144,9 @@ var MOVE_PREFIX = "label:"
 
 // Gmail's own labels are upper case with no `Label_` prefix; a user's carry one
 // or are a folder name on IMAP. Only the second kind is a place a message is
-// filed under and can be taken out of, and `survivesAction` asks the same
-// question of the same fact so the two cannot disagree about a row.
+// filed under and can be taken out of. `survivesAction` does not read that
+// rule a second time — it asks `labelChangesFor` whether the label actually
+// comes off — so the two cannot disagree about a row.
 var SYSTEM_LABEL_IDS = ["INBOX", "UNREAD", "STARRED", "IMPORTANT", "SENT",
   "DRAFT", "TRASH", "SPAM", "CHAT"]
 
@@ -165,7 +166,7 @@ function labelTarget(action) {
 // is the one thing this cannot infer and the one thing `unarchive` turns on: a
 // folder provider answers it with a UID MOVE, so the message leaves the list
 // with a new id and a surviving row would point at nothing.
-function survivesAction(mailboxKey, action, rawQuery, labels) {
+function survivesAction(mailboxKey, action, rawQuery, labels, sourceLabelId) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   if (verb === "trash") return key === "trash"
@@ -176,9 +177,20 @@ function survivesAction(mailboxKey, action, rawQuery, labels) {
     // message that is no longer there — opening it says so, a star succeeds
     // against nothing, and no reload corrects it.
     if (labels !== true) return false
-    // On a label provider the row leaves a label's list, because the label
-    // came off, and stays in a mailbox or a search, which still contain it.
-    return String(rawQuery || "") === ""
+    // On a label provider the row stays in a mailbox or a search, which still
+    // contain it, and leaves a label's list because the label came off. Which
+    // of those a label view is, is `labelChangesFor`'s answer rather than a
+    // second reading of the same rule here: a system label is not a place a
+    // message is filed under, so it stays on the message and the row stays in
+    // its list.
+    if (String(rawQuery || "") === "") return true
+    var filed = String(sourceLabelId || "")
+    // A label view with nothing naming its label cannot say the label stayed,
+    // so the row goes: a row that leaves and should not have comes back on the
+    // reload `invalidatesPage` asks for, and one that stays and should not
+    // have is stale until something else reloads the list.
+    if (filed === "") return false
+    return labelChangesFor("unarchive", filed).remove.length === 0
   }
   // A move takes INBOX away exactly as archive does, so it leaves exactly the
   // lists archive leaves. Said once, because two branches with the same answer
@@ -311,6 +323,14 @@ function applyLabelChange(summary, action, sourceLabelId) {
   next.unread = labels.indexOf("UNREAD") >= 0
   next.starred = labels.indexOf("STARRED") >= 0
   next.inInbox = labels.indexOf("INBOX") >= 0
+  // Every flag that mirrors a label, rather than the three that used to be the
+  // only ones read. `spam` moves a row between two of these, and a menu asking
+  // a stale `inSpam` offers "Move to Inbox" on a message just reported as
+  // spam — which would add INBOX and keep SPAM.
+  next.inTrash = labels.indexOf("TRASH") >= 0
+  next.inSpam = labels.indexOf("SPAM") >= 0
+  next.isSent = labels.indexOf("SENT") >= 0
+  next.isDraft = labels.indexOf("DRAFT") >= 0
   return next
 }
 

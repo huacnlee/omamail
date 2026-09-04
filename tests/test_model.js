@@ -729,7 +729,8 @@ deepEqual(model.labelChangesFor("unarchive", ""), { add: ["INBOX"], remove: [] }
 
 // Never a system label: INBOX would undo the move it is part of, and UNREAD,
 // STARRED or a CATEGORY_ are states rather than places a message is filed
-// under. The same fact `survivesAction` asks, so the two cannot disagree.
+// under. `survivesAction` asks this function rather than reading the rule
+// again, which is asserted below rather than assumed here.
 deepEqual(model.labelChangesFor("unarchive", "INBOX"), { add: ["INBOX"], remove: [] })
 deepEqual(model.labelChangesFor("unarchive", "CATEGORY_PERSONAL"),
   { add: ["INBOX"], remove: [] })
@@ -747,7 +748,21 @@ assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", false)
 // A label provider keeps the message in a mailbox or a search, and takes it
 // out of the label whose list it was found in.
 assert.strictEqual(model.survivesAction("all", "unarchive", "", true), true)
-assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", true), false)
+assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", true), false,
+  "a label view with nothing naming its label cannot say the label stayed")
+
+// The two answering together, which is the whole of it: a system label's list
+// is not a place a message is filed under, so the label stays on the message
+// and the row stays in the list. Paired against `labelChangesFor` rather than
+// against a constant, because a constant would let the two drift apart again.
+deepEqual(model.labelChangesFor("unarchive", "IMPORTANT").remove, [])
+assert.strictEqual(
+  model.survivesAction("all", "unarchive", "label:important", true, "IMPORTANT"), true,
+  "the label stays, so the row stays")
+deepEqual(model.labelChangesFor("unarchive", "Label_17").remove, ["Label_17"])
+assert.strictEqual(
+  model.survivesAction("all", "unarchive", "label:todo", true, "Label_17"), false,
+  "the label comes off, so the row goes")
 
 // The third argument is still main's query string, not a boolean. Passing a
 // boolean here would have read every non-empty query as "in a label view" at
@@ -764,3 +779,20 @@ const moved = model.applyLabelChange(filed, "unarchive", "Label_17")
 deepEqual(moved.labelIds, ["IMPORTANT", "INBOX"])
 assert.strictEqual(moved.inInbox, true)
 assert.strictEqual(filed.labelIds.indexOf("Label_17"), 0)
+
+// Every flag that mirrors a label follows the labels, not the three that used
+// to be read. Reporting spam is the press that moves a row between two of
+// them, and a menu asking a stale `inSpam` offers "Move to Inbox" on the
+// message just reported — a press that would add INBOX, keep SPAM, and leave
+// it sitting in Spam.
+const reported = model.applyLabelChange(
+  { id: "m2", labelIds: ["UNREAD", "INBOX"], inInbox: true, inSpam: false }, "spam")
+deepEqual(reported.labelIds, ["UNREAD", "SPAM"])
+assert.strictEqual(reported.inInbox, false)
+assert.strictEqual(reported.inSpam, true, "the row is in Spam the moment it is reported")
+const binned = model.applyLabelChange(
+  { id: "m3", labelIds: ["Label_17"], isSent: true, isDraft: true, inTrash: true },
+  "unarchive", "Label_17")
+assert.strictEqual(binned.isSent, false)
+assert.strictEqual(binned.isDraft, false)
+assert.strictEqual(binned.inTrash, false)

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../account/Model.js" as Model
 
 // "Move to Inbox", where it appears and what it says.
 //
@@ -23,18 +24,6 @@ Item {
     property bool hasLabels: true
     property string rawLabelId: ""
     property var messages: []
-    property var unavailableActions: []
-
-    // What was asked of it.
-    property string ranAction: ""
-    property string ranId: ""
-
-    function act(id, action) {
-      ranId = String(id || "")
-      ranAction = String(action || "")
-      return true
-    }
-    function toggleStar(_id) {}
   }
 
   Omamail.MessageMenu {
@@ -59,14 +48,6 @@ Item {
     name: "MessageMenuInbox"
     when: windowShown
 
-    function rowFor(name) {
-      for (var i = 0; i < menu.menuRows.length; i++) {
-        var row = menu.menuRows[i]
-        if (row && String(row.objectName || "") === name) return row
-      }
-      return null
-    }
-
     // The rows have no objectName, so they are found by position in the array
     // the cursor itself indexes — which is also the thing that has to contain
     // the new row at all.
@@ -77,8 +58,6 @@ Item {
     // visibility is readable before that.
     function show(summary) {
       fakeService.messages = [summary]
-      fakeService.ranAction = ""
-      fakeService.ranId = ""
       fakeService.rawLabelId = ""
       menu.close()
       actionSpy.clear()
@@ -178,12 +157,42 @@ Item {
 
     // The cursor is an index into `menuRows`, so a row drawn but unlisted is
     // mouse-only: j and k step over it and Enter can never reach it.
+    //
+    // Walked rather than looked up. Searching `menuRows` for `menuRows[4]` is
+    // true of whatever that array holds, which is how the first version of
+    // this passed with the row unlisted.
     function test_the_keyboard_can_reach_it() {
       show(archivedMessage())
-      var listed = false
-      for (var i = 0; i < menu.menuRows.length; i++)
-        if (menu.menuRows[i] === unarchiveRow()) listed = true
-      verify(listed, "the row has to be in the array the cursor indexes")
+      var steps = 0
+      while (steps < menu.menuRows.length
+        && (menu.cursorIndex < 0
+          || menu.menuRows[menu.cursorIndex].text !== "Move to Inbox")) {
+        menu.moveCursor(1)
+        steps++
+      }
+      compare(menu.menuRows[menu.cursorIndex].text, "Move to Inbox",
+        "j steps onto the row rather than over it")
+
+      menu.runCursor()
+      compare(actionSpy.count, 1)
+      compare(actionSpy.signalArguments[0][0], "unarchive",
+        "and Enter on it asks for the action")
+    }
+
+    // The two halves composed, which is where this went wrong: the row the
+    // menu reads after a press is the one `applyLabelChange` wrote, and that
+    // used to carry a stale `inSpam`. Reporting spam from the inbox left
+    // "Move to Inbox" on offer — a press that adds INBOX, keeps SPAM, and
+    // leaves the message sitting in Spam.
+    function test_a_message_just_reported_as_spam_is_not_offered_it() {
+      var summary = archivedMessage()
+      summary.inInbox = true
+      summary.labelIds = ["INBOX"]
+      show(Model.applyLabelChange(summary, "spam"))
+
+      compare(menu.summary.inSpam, true, "the row is in Spam the moment it is reported")
+      compare(menu.archived, false)
+      compare(unarchiveRow().visible, false)
     }
   }
 }

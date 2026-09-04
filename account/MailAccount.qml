@@ -1370,7 +1370,8 @@ Item {
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var sourceLabelId = hasLabels ? rawLabelId : ""
     var updated = Model.applyLabelChange(before, action, sourceLabelId)
-    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels)
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
+      sourceLabelId)
 
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
