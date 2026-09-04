@@ -30,6 +30,17 @@ Item {
   // above it is the part that carries information.
   readonly property bool showLegend: height > Style.space(300) && width > Style.space(320)
 
+  readonly property string versionText: !!service && service.version
+    ? String(service.pluginName || "Omamail") + " " + String(service.version)
+    : ""
+  // The column above is centred, so what is left under it is half the leftover
+  // height — and that has to hold the label, its margin, and a gap wide enough
+  // that the two do not read as one block. A constant threshold cannot do this:
+  // the column is more than twice as tall with the shortcut legend as without.
+  readonly property bool showVersion: versionText !== ""
+    && (height - centeredColumn.height) / 2
+       >= versionLabel.implicitHeight + Style.space(12) + Style.space(12)
+
   readonly property var keys: [
     { key: "j / k", action: "Move through the list" },
     { key: "Enter or o", action: "Open the selected message" },
@@ -40,6 +51,7 @@ Item {
   ]
 
   Column {
+    id: centeredColumn
     anchors.centerIn: parent
     width: Math.min(parent.width - Style.space(48), Style.space(340))
     spacing: Style.space(10)
@@ -144,5 +156,24 @@ Item {
         font.pixelSize: Style.font.caption
       }
     }
+  }
+
+  // Not part of the column above: the legend hides itself on a narrow pane and
+  // the version has no reason to move when it does. Quietest thing on screen —
+  // it is there to be found, not read.
+  Text {
+    id: versionLabel
+    objectName: "reader-version"
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: Style.space(12)
+    anchors.horizontalCenter: parent.horizontalCenter
+    width: Math.min(parent.width - Style.space(48), Style.space(340))
+    horizontalAlignment: Text.AlignHCenter
+    visible: root.showVersion
+    text: root.versionText
+    color: root.dimmerColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    elide: Text.ElideRight
   }
 }
