@@ -960,8 +960,8 @@ function sentDate(given, nowMs) {
   var stated = headerSafe(given).trim()
   // JavaScript also parses ISO dates and shorthand spellings that are not
   // legal header values, so a stated date needs this client's canonical shape
-  // as well as an instant the engine recognises.
-  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-]([01][0-9]|2[0-3])[0-5][0-9]$/
+  // and RFC 5322's semantic calendar constraints.
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-][0-9]{2}[0-5][0-9]$/
   var parts = stated.match(canonical)
   if (parts) {
     var day = Number(parts[2])

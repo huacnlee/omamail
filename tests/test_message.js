@@ -724,8 +724,8 @@ assert.strictEqual(message.extractHtml({
     "a weekday that disagrees with its date is replaced")
   assert.strictEqual(new Date(replacedWeekday).getTime(), clock)
 
-  // RFC 5322 permits years from 1900 onward. Its numeric zone has a
-  // two-digit hour and minute, so 23:59 is its last meaningful boundary.
+  // RFC 5322 permits years from 1900 onward. A numeric zone has two digits
+  // each for hours and minutes, but only the minute pair is bounded to 00–59.
   const obsoleteYear = "Mon, 04 Sep 1899 10:04:31 +0000"
   const replacedObsoleteYear = message.sentDate(obsoleteYear, clock)
   assert.notStrictEqual(replacedObsoleteYear, obsoleteYear,
@@ -733,10 +733,13 @@ assert.strictEqual(message.extractHtml({
   assert.strictEqual(new Date(replacedObsoleteYear).getTime(), clock)
   assert.strictEqual(message.sentDate("Tue, 04 Sep 1900 10:04:31 +0000", clock),
     "Tue, 04 Sep 1900 10:04:31 +0000", "the first RFC 5322 year is preserved")
-  assert.strictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +2359", clock),
-    "Thu, 03 Sep 2026 10:04:31 +2359", "the greatest numeric zone is preserved")
-  assert.notStrictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +2360", clock),
-    "Thu, 03 Sep 2026 10:04:31 +2360", "a numeric zone minute cannot reach 60")
+  for (const zone of ["+2400", "+9959", "-9959"]) {
+    const zoned = "Thu, 03 Sep 2026 10:04:31 " + zone
+    assert.strictEqual(message.sentDate(zoned, clock), zoned,
+      "a numeric zone may use any two-digit hour: " + zone)
+  }
+  assert.notStrictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +9960", clock),
+    "Thu, 03 Sep 2026 10:04:31 +9960", "a numeric zone minute cannot reach 60")
 
   // A stated value that is not a date is replaced, and a line break in one can
   // become neither a second header nor a mangled first one.
