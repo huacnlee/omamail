@@ -653,6 +653,37 @@ function draftSaveResult(replaceError) {
   }
 }
 
+// The folder a sent copy is filed in: the server's own Sent, learned from
+// LIST like every folder name is. An empty answer means the server named
+// none, and names are never guessed — a client that made one up would create
+// folders rather than find them.
+function sentFolder(special) {
+  return (special || {})["\\sent"] || ""
+}
+
+// curl's upload-flags names flags as bare words rather than as the
+// parenthesised list IMAP puts on the APPEND line. A draft keeps its \Draft
+// marker; a sent copy arrives seen, because its author has read it.
+function appendFlagWords(sent) {
+  return sent === true ? "seen" : "draft"
+}
+
+// What a finished send reports about the copy the mailbox keeps. The message
+// itself is out either way, so a copy that did not land is a warning carried
+// on a success, never a failure of the send. An empty folder name stands for
+// every reason no folder was known — the server listed none, or the listing
+// could not be asked — because what the user does about them is the same:
+// nothing.
+function sentCopyResult(folder, filed) {
+  if (String(folder || "") === "")
+    return { sent: true, warning: "Sent, but no Sent folder was found to file a copy in" }
+  return {
+    sent: true,
+    warning: filed === true ? ""
+      : "Sent, but the copy for the Sent folder could not be saved"
+  }
+}
+
 function statusCommand(folder) {
   return "STATUS " + quote(folder) + " (MESSAGES UNSEEN)"
 }

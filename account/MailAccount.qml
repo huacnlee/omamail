@@ -1816,8 +1816,12 @@ Item {
     })
   }
 
-  function reportSendSuccess() {
-    note("Sent")
+  function reportSendSuccess(result) {
+    // The sent copy is filed after the send has answered, so how the filing
+    // went is a footnote on a success rather than a failure of one: the note
+    // says what happened to the copy, and the reply still counts as sent.
+    var warning = result && result.warning ? String(result.warning) : ""
+    note(warning !== "" ? warning : "Sent")
     // Success has the same ordering requirement as failure: a provider may
     // finish locally, but the composer owns parking after send() returns.
     Qt.callLater(function() {
@@ -1841,7 +1845,7 @@ Item {
         root.reportSendFailure(error)
         return
       }
-      root.reportSendSuccess()
+      root.reportSendSuccess(sentPayload)
     })
     return true
   }
