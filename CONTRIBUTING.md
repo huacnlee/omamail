@@ -39,6 +39,18 @@ it, described in terms of what it protects rather than what it opens.
   [docs/KEYS.md](docs/KEYS.md) the key design — read that one before touching a
   binding.
 
+## Project boundary
+
+Omamail is a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell]. Changes should extend that plugin's service or interface, not turn this repository into a second application.
+
+Helper scripts that let the plugin perform its own work belong here. A standalone CLI, agent skill, daemon, SDK, or other independently consumed interface does not. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
+
+Programmatic access to mail may be useful, but it needs an integration boundary designed independently from the Quickshell plugin. Omarchy defines [IPC as the standard boundary for commands that communicate with the running shell][shell-ipc]; proposals that need a different lifecycle or ownership model should begin with a design discussion.
+
+[omarchy-shell]: https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md
+[plugin-installation]: https://github.com/omacom/omarchy/blob/quattro/manual/32-shell-plugins.md#adding-a-plugin-from-git
+[shell-ipc]: https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md#ipc
+
 ```bash
 make install     # symlink this checkout into ~/.config/omarchy/plugins
 make validate    # node tests, source regressions, QML tests, qmllint, manifest
