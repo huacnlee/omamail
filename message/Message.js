@@ -838,6 +838,8 @@ function summarize(message, now) {
     important: hasLabel(message, "IMPORTANT"),
     inInbox: hasLabel(message, "INBOX"),
     inTrash: hasLabel(message, "TRASH"),
+    inSpam: hasLabel(message, "SPAM"),
+    isSent: hasLabel(message, "SENT"),
     isDraft: hasLabel(message, "DRAFT"),
     labelIds: labelIds(message).slice(),
     sizeEstimate: Math.max(0, Math.floor(Number(message && message.sizeEstimate) || 0))

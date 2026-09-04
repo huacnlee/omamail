@@ -1370,7 +1370,8 @@ Item {
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var sourceLabelId = hasLabels ? rawLabelId : ""
     var updated = Model.applyLabelChange(before, action, sourceLabelId)
-    var survives = Model.survivesAction(mailboxKey, action, rawQuery)
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
+      sourceLabelId)
 
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
@@ -1518,6 +1519,7 @@ Item {
     if (action === "unstar") return "Unstarred"
     if (action === "markRead") return "Marked read"
     if (action === "markUnread") return "Marked unread"
+    if (action === "unarchive") return "Moved to Inbox"
     if (action === "spam") return "Reported as spam"
     // Named, not "Moved": the destination was chosen a keystroke ago from a
     // list of thirty, and a note that does not say which one leaves the only
