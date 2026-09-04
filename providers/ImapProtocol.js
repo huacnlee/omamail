@@ -1055,7 +1055,10 @@ function specialFolders(folders) {
     if (!map["\\sent"] && /^sent( mail| items| messages)?$/.test(leaf)) map["\\sent"] = name
     if (!map["\\trash"] && /^(trash|deleted( items| messages)?)$/.test(leaf)) map["\\trash"] = name
     if (!map["\\drafts"] && /^drafts?$/.test(leaf)) map["\\drafts"] = name
-    if (!map["\\junk"] && /^(junk|spam|bulk mail)$/.test(leaf)) map["\\junk"] = name
+    // Exchange calls it "Junk Email", which is the one name in this list that
+    // the bare word cannot stand in for: every other fallback below happens to
+    // be what Exchange calls the folder anyway.
+    if (!map["\\junk"] && /^(junk([ -]?e-?mail)?|spam|bulk mail)$/.test(leaf)) map["\\junk"] = name
     if (!map["\\archive"] && /^(archive|all mail)$/.test(leaf)) map["\\archive"] = name
   }
   return map
