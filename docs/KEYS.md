@@ -37,7 +37,7 @@ readonly property string keyContext:
 | Context | What it is | What it binds |
 |---|---|---|
 | `list` | The message list | The mailbox keys |
-| `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor without opening; `o` or `Enter` opens what they landed on |
+| `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor; `o` or `Enter` opens what they landed on. With *Preview as the cursor moves* on, moving also shows the message, and it counts as read once the cursor has stayed on it |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |

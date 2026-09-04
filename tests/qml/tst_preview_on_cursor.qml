@@ -24,6 +24,7 @@ Item {
     property bool ready: true
     property bool anyAccountReady: true
     property bool previewOnCursor: true
+    property bool selectionIsPreview: false
     property int markReadDelaySec: 2
     property bool sendPending: false
     property bool sending: false
@@ -95,6 +96,9 @@ Item {
     function select(id, previewOnly) {
       selectedId = String(id || "")
       selectCount += 1
+      // What `MailAccount.select` records, because two decisions in the window
+      // now turn on it.
+      selectionIsPreview = previewOnly === true
       if (previewOnly === true) previewSelects += 1
       else openSelects += 1
     }
@@ -115,7 +119,10 @@ Item {
       return messages[next].id
     }
 
-    function clearSelection() { selectedId = "" }
+    function clearSelection() {
+      selectedId = ""
+      selectionIsPreview = false
+    }
     function refreshRecipientContacts() {}
     function preferredSendAs(_r) { return null }
     function loadAttachments(_i, _a, cb) { cb([], "") }
@@ -178,16 +185,32 @@ Item {
     function test_moving_the_cursor_shows_the_message() {
       app.moveCursor(1)
       compare(app.cursorId, "m1")
-      compare(mailService.selectedId, "m1", "the reader is given the message at once")
+      compare(mailService.selectCount, 0,
+        "nothing is asked for until the cursor has settled")
+      tryCompare(mailService, "selectedId", "m1", 1000)
       compare(mailService.previewSelects, 1)
       compare(mailService.openSelects, 0, "and it was a preview, not an open")
     }
 
+    // The settle is the point: a held key crosses rows without asking for any
+    // of them, which on IMAP is a curl process, a TLS handshake and a LOGIN
+    // per row.
+    function test_a_held_key_asks_for_one_message_not_thirty() {
+      for (var i = 0; i < 3; i++) app.moveCursor(1)
+      compare(app.cursorId, "m3")
+      compare(mailService.selectCount, 0)
+
+      tryCompare(mailService, "selectedId", "m3", 1000)
+      compare(mailService.selectCount, 1,
+        "one request for the row it stopped on, not one per row crossed")
+    }
+
     function test_moving_again_previews_the_next_one() {
       app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m1", 1000)
       app.moveCursor(1)
       compare(app.cursorId, "m2")
-      compare(mailService.selectedId, "m2")
+      tryCompare(mailService, "selectedId", "m2", 1000)
       compare(mailService.previewSelects, 2)
     }
 
@@ -257,7 +280,8 @@ Item {
     function test_a_zero_delay_reads_it_at_once() {
       mailService.markReadDelaySec = 0
       app.moveCursor(1)
-      compare(mailService.markedRead.indexOf("m1") >= 0, true)
+      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 1000,
+        "at once meaning with the preview, not before it")
     }
 
     // Opening marks it read itself, so a dwell still counting has nothing to
@@ -314,11 +338,73 @@ Item {
     function test_a_dropped_selection_stops_the_dwell() {
       mailService.markReadDelaySec = 1
       app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m1", 1000)
       mailService.clearSelection()
       wait(1400)
       compare(mailService.markedRead.length, 0,
         "nothing is on screen to be read")
     }
+
+    // ------------------------------------- a preview is not an open, part two
+
+    // A previewed message satisfies "is this the selected one" without being
+    // open. Reading that as open made `e` on a previewed row archive it and
+    // then call `openMessage` on the *next* one — an archive that reads a
+    // message, which is the fault this feature exists to avoid.
+    function test_archiving_a_previewed_row_does_not_open_its_neighbour() {
+      app.openMessage("m1")
+      compare(app.currentView, "reader")
+      compare(mailService.openSelects, 1)
+
+      app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m2", 1000)
+      compare(mailService.selectionIsPreview, true)
+      var opensBefore = mailService.openSelects
+
+      app.actOnCursor("archive")
+
+      compare(mailService.openSelects, opensBefore,
+        "archiving a previewed row opens nothing")
+    }
+
+    // The mirror of it: a preview satisfies the id test while pushing no
+    // `reader` entry, so `r` answered a message that was never opened —
+    // nothing marked it read, and closing the draft landed on the list.
+    function test_replying_to_a_previewed_row_opens_it_first() {
+      app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m1", 1000)
+      compare(app.currentView, "list", "a preview is not a place")
+      compare(mailService.openSelects, 0)
+
+      app.composeFromCursor("reply")
+
+      compare(mailService.openSelects, 1, "answering a message opens it")
+      compare(mailService.selectionIsPreview, false,
+        "so it is no longer a preview")
+      compare(app.currentView, "reader",
+        "and the reader entry is on the stack, so closing the draft comes back to it")
+    }
+
+    // #83's label picker is an overlay rather than a nav entry, so none of the
+    // other guards notice it: `v` during a dwell let the timer mark read a
+    // message that was about to be moved.
+    function test_the_label_picker_stops_a_preview() {
+      var picker = having(app, function(it) {
+        return String(it.objectName || "") === "label-picker"
+      })
+      verify(picker, "the picker has to be there to be guarded against")
+      compare(app.canPreview, true)
+
+      picker.open()
+      wait(20)
+      compare(picker.opened, true)
+      compare(app.canPreview, false,
+        "an overlay that is not a nav entry still covers the window")
+
+      // It exposes no `close()` — the popup owns its own dismissal — so the
+      // assertion that matters is the one on the way in.
+    }
+
 
     // --------------------------------------------- what the reader carries
 
