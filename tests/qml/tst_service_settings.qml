@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "../../account/Unified.js" as Unified
 
 Item {
   width: 400
@@ -102,11 +103,18 @@ Item {
     }
 
     // Composed ids are the service's own vocabulary, so an action naming one
-    // reaches no mailbox rather than the wrong one.
+    // reaches no mailbox rather than the wrong one, and reaching none is a
+    // refusal rather than a throw.
+    //
+    // That a *bare* id is not mistaken for a composed one is the separator's
+    // own property and is measured in tests/test_unified.js, against the id
+    // shapes the three providers actually issue — there is no account here for
+    // a wrong split to land on, so this file could not tell the difference.
     function test_an_action_for_a_mailbox_that_is_not_here_reaches_nothing() {
       mailService.applySettings({ unifiedMailboxes: true })
-      compare(mailService.act("gone@example.org 42", "archive"), false)
-      compare(mailService.hostForId("gone@example.org 42"), null)
+      var absent = Unified.unifiedId("gone@example.org", "42")
+      compare(mailService.act(absent, "archive"), false)
+      compare(mailService.hostForId(absent), null)
     }
   }
 }

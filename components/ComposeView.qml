@@ -120,9 +120,13 @@ DropArea {
     return root.service.sendAsAliases
   }
 
+  // Filtered against the mailbox this draft belongs to rather than the visible
+  // one, so a reply raised from a merged list offers the aliases of the
+  // mailbox it arrived in.
   readonly property var fromIdentities: Senders.visible(
     root.service ? root.service.sendIdentities : [],
-    root.service ? String(root.service.activeAccountId || "") : "",
+    root.accountId !== "" ? root.accountId
+      : (root.service ? String(root.service.activeAccountId || "") : ""),
     root.mode)
 
   readonly property bool canChooseFrom: fromIdentities.length > 1
@@ -428,7 +432,12 @@ DropArea {
   function begin(nextMode, summary, bodyText, attachments) {
     clearCurrentDraft(true)
     mode = String(nextMode || "new")
-    accountId = root.service ? String(root.service.activeAccountId || "") : ""
+    // The mailbox the message being answered arrived in, not the one that
+    // happens to be active. In a merged list those differ, and a reply sent
+    // from the wrong mailbox with nothing on screen saying so is the failure
+    // this view most has to avoid. `composeAccountId` is the active account
+    // whenever there is no selection, so a new message is unchanged.
+    accountId = root.service ? String(root.service.composeAccountId || "") : ""
     opened = true
     var quoted = ""
 

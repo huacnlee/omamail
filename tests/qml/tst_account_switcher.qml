@@ -57,6 +57,19 @@ Item {
     name: "AccountSwitcher"
     when: windowShown
 
+    // The rows live inside the popup's content, which is built only once the
+    // menu has been opened.
+    function accountRows(item) {
+      var found = []
+      var node = item === undefined ? switcher.menuRows : item
+      if (!node) return found
+      if (node.objectName === "account-row") found.push(node)
+      var children = node.children || []
+      for (var i = 0; i < children.length; i++)
+        found = found.concat(accountRows(children[i]))
+      return found
+    }
+
     function init() {
       switcher.accounts = threeMailboxes
       switcher.unifiedActive = false
@@ -167,6 +180,25 @@ Item {
       switcher.chooseCursor()
       compare(chosenSpy.count, 0)
       compare(unifiedSpy.count, 0)
+    }
+
+    // -------------------------------------------------------- what is in use
+
+    // The combined view leaves an account active underneath, because compose
+    // still needs an address to send from. Drawing both as in use said the
+    // window was in two places at once.
+    function test_only_one_row_is_drawn_as_the_one_in_use() {
+      switcher.openCentered()
+      var rows = accountRows()
+      compare(rows.length, 3)
+      compare(rows[0].inUse, true, "the active account is in use on its own")
+      compare(rows[1].inUse, false)
+
+      switcher.unifiedActive = true
+      compare(rows[0].inUse, false,
+        "the account stays active underneath but is no longer what is read")
+      compare(rows[1].inUse, false)
+      compare(rows[2].inUse, false)
     }
 
     // ------------------------------------------------------------- the keys

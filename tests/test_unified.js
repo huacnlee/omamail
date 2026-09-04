@@ -7,27 +7,47 @@ const unified = load("account/Unified.js")
 
 // A merged row is addressed by account and id together, because an id is
 // unique inside the thing that issued it and nowhere else.
-assert.strictEqual(unified.unifiedId("me@example.org", "42"), "me@example.org 42")
+// The separator is U+001F, named here so the tests read as intent rather than
+// as a control character nobody can see in a diff.
+const SEP = "\u001f"
+
+assert.strictEqual(unified.unifiedId("me@example.org", "42"), "me@example.org" + SEP + "42")
 assert.strictEqual(unified.unifiedId("", "42"), "", "an id with no account addresses nothing")
 assert.strictEqual(unified.unifiedId("me@example.org", ""), "")
 
-deepEqual(unified.splitUnifiedId("me@example.org 42"),
+deepEqual(unified.splitUnifiedId("me@example.org" + SEP + "42"),
   { accountId: "me@example.org", id: "42" })
 
-// An IMAP id is "<uid>:<folder>" and a folder name may contain spaces, so the
-// split is on the first space only.
-deepEqual(unified.splitUnifiedId("me@fastmail.com 42:Sent Items"),
-  { accountId: "me@fastmail.com", id: "42:Sent Items" })
+// It has to be a character no id can hold. An IMAP folder cannot carry a
+// control character — the protocol forbids it — and Gmail issues hex.
+assert.strictEqual(unified.unifiedId("a@b.com", "42:Sent Items").indexOf(SEP), 7,
+  "the only separator in a composed id is the one that was put there")
+assert.strictEqual(
+  unified.unifiedId("a@b.com", "42:Sent Items").split(SEP).length, 2)
 
 // Anything that is not a composed id addresses nothing rather than being
 // guessed at.
 deepEqual(unified.splitUnifiedId("42"), { accountId: "", id: "" })
 deepEqual(unified.splitUnifiedId(""), { accountId: "", id: "" })
-deepEqual(unified.splitUnifiedId(" 42"), { accountId: "", id: "" },
-  "an empty account is not an account")
+deepEqual(unified.splitUnifiedId(unified.unifiedId("", "42")),
+  { accountId: "", id: "" }, "an empty account is not an account")
 
-assert.strictEqual(unified.accountOf("me@example.org 42"), "me@example.org")
-assert.strictEqual(unified.sourceIdOf("me@example.org 42"), "42")
+// The case that made the separator a control character. "42:Sent Items" is a
+// whole IMAP id, and a space separator read it as the account "42:Sent" — safe
+// only because nothing is named that.
+deepEqual(unified.splitUnifiedId("42:Sent Items"), { accountId: "", id: "" },
+  "a bare IMAP id is not a composed one")
+assert.strictEqual(unified.accountOf("42:Sent Items"), "")
+assert.strictEqual(unified.sourceIdOf("42:Sent Items"), "")
+deepEqual(unified.splitUnifiedId("1a0682969660774e"), { accountId: "", id: "" },
+  "nor is a bare Gmail id")
+
+// And a folder with a space in it survives being carried.
+deepEqual(unified.splitUnifiedId(unified.unifiedId("me@fastmail.com", "42:Sent Items")),
+  { accountId: "me@fastmail.com", id: "42:Sent Items" })
+
+assert.strictEqual(unified.accountOf("me@example.org" + SEP + "42"), "me@example.org")
+assert.strictEqual(unified.sourceIdOf("me@example.org" + SEP + "42"), "42")
 assert.strictEqual(unified.accountOf("42"), "")
 
 // ---------------------------------------------------------------- merging
@@ -50,7 +70,7 @@ deepEqual(merged.map(function(row) { return row.subject }),
 // Two accounts numbering their own messages from 1 is the collision this
 // addressing exists for: three rows, three distinct ids.
 deepEqual(merged.map(function(row) { return row.id }),
-  ["a@example.org 1", "b@example.net 1", "a@example.org 2"])
+  [unified.unifiedId("a@example.org", "1"), unified.unifiedId("b@example.net", "1"), unified.unifiedId("a@example.org", "2")])
 deepEqual(merged.map(function(row) { return row.sourceId }), ["1", "1", "2"])
 
 // The row says which mailbox it came from, and keeps everything the provider
@@ -97,35 +117,35 @@ const tied = unified.mergeMessages([
   { id: "b@example.net", messages: [{ id: "x", date: 1000 }] },
   { id: "a@example.org", messages: [{ id: "x", date: 1000 }] }
 ])
-deepEqual(tied.map(function(row) { return row.id }), ["a@example.org x", "b@example.net x"])
+deepEqual(tied.map(function(row) { return row.id }), [unified.unifiedId("a@example.org", "x"), unified.unifiedId("b@example.net", "x")])
 deepEqual(unified.mergeMessages([
   { id: "a@example.org", messages: [{ id: "x", date: 1000 }] },
   { id: "b@example.net", messages: [{ id: "x", date: 1000 }] }
-]).map(function(row) { return row.id }), ["a@example.org x", "b@example.net x"],
+]).map(function(row) { return row.id }), [unified.unifiedId("a@example.org", "x"), unified.unifiedId("b@example.net", "x")],
   "the same rows in the other order merge to the same order")
 
 // ----------------------------------------------------------------- cursor
 
 // Over the merged order, which neither account can answer for: neither knows
 // what sits between its own rows.
-assert.strictEqual(unified.cursorOffset(merged, "a@example.org 1", 1), "b@example.net 1")
-assert.strictEqual(unified.cursorOffset(merged, "b@example.net 1", 1), "a@example.org 2")
-assert.strictEqual(unified.cursorOffset(merged, "b@example.net 1", -1), "a@example.org 1")
+assert.strictEqual(unified.cursorOffset(merged, unified.unifiedId("a@example.org", "1"), 1), unified.unifiedId("b@example.net", "1"))
+assert.strictEqual(unified.cursorOffset(merged, unified.unifiedId("b@example.net", "1"), 1), unified.unifiedId("a@example.org", "2"))
+assert.strictEqual(unified.cursorOffset(merged, unified.unifiedId("b@example.net", "1"), -1), unified.unifiedId("a@example.org", "1"))
 
 // Off either end is nowhere, rather than wrapping.
-assert.strictEqual(unified.cursorOffset(merged, "a@example.org 1", -1), "")
-assert.strictEqual(unified.cursorOffset(merged, "a@example.org 2", 1), "")
+assert.strictEqual(unified.cursorOffset(merged, unified.unifiedId("a@example.org", "1"), -1), "")
+assert.strictEqual(unified.cursorOffset(merged, unified.unifiedId("a@example.org", "2"), 1), "")
 
 // No cursor yet lands on an end rather than nowhere, so the first press moves.
-assert.strictEqual(unified.cursorOffset(merged, "", 1), "a@example.org 1")
-assert.strictEqual(unified.cursorOffset(merged, "", -1), "a@example.org 2")
+assert.strictEqual(unified.cursorOffset(merged, "", 1), unified.unifiedId("a@example.org", "1"))
+assert.strictEqual(unified.cursorOffset(merged, "", -1), unified.unifiedId("a@example.org", "2"))
 assert.strictEqual(unified.cursorOffset([], "anything", 1), "")
 
 // A row that has gone — archived, or dropped by a refresh — is not a cursor,
 // and the next press starts over rather than doing nothing.
-assert.strictEqual(unified.cursorOffset(merged, "gone@example.org 9", 1), "a@example.org 1")
+assert.strictEqual(unified.cursorOffset(merged, "gone@example.org 9", 1), unified.unifiedId("a@example.org", "1"))
 
-deepEqual(unified.rowOf(merged, "b@example.net 1").subject, "middle")
+deepEqual(unified.rowOf(merged, unified.unifiedId("b@example.net", "1")).subject, "middle")
 assert.strictEqual(unified.rowOf(merged, "nothing"), null)
 assert.strictEqual(unified.rowOf(merged, ""), null)
 
@@ -195,6 +215,23 @@ assert.strictEqual(unified.allLoaded([{ loaded: true }, { loaded: true }]), true
 assert.strictEqual(unified.allLoaded([{ loaded: true }, { loaded: false }]), false)
 assert.strictEqual(unified.allLoaded([]), false, "no mailboxes have not loaded")
 
+// A signed-out mailbox never loads, and holding the list open for it left the
+// panel on nothing: no skeleton, because loading had stopped, and no "Nothing
+// here", because nothing had loaded. An error is a finished mailbox.
+assert.strictEqual(
+  unified.allLoaded([{ loaded: true }, { loaded: false, error: "Not signed in" }]),
+  true,
+  "a mailbox that cannot load is not a mailbox still loading")
+
+// Retrying is not settled, even holding the error from the last attempt.
+assert.strictEqual(
+  unified.allLoaded([{ loaded: true }, { loading: true, error: "Not signed in" }]),
+  false)
+
+// And a blank error is no error, or a mailbox that has simply not started
+// would count as done.
+assert.strictEqual(unified.allLoaded([{ loaded: false, error: "   " }]), false)
+
 assert.strictEqual(unified.anyHasMore([{ hasMore: false }, { hasMore: true }]), true)
 assert.strictEqual(unified.anyHasMore([{ hasMore: false }]), false)
 
@@ -209,3 +246,49 @@ assert.strictEqual(unified.firstError([{ error: "" }]), "")
 assert.strictEqual(unified.firstError([]), "")
 
 console.log("Unified.js ok")
+
+// ------------------------------------------------------------- paging
+
+// Every source is asked for its own page and the pages do not end at the same
+// date, so drawing all of them puts the gap on screen rather than avoiding it:
+// the tail is the deepest mailbox's mail with the shallowest one's missing
+// from among it.
+const deepAndShallow = [
+  { id: "a@example.org", hasMore: true, messages: [
+    { id: "1", date: 900 }, { id: "2", date: 800 },
+    { id: "3", date: 300 }, { id: "4", date: 200 } ] },
+  { id: "b@example.net", hasMore: true, messages: [
+    { id: "1", date: 850 }, { id: "2", date: 700 } ] }
+]
+
+// The newest of the sources' own last rows. Above it every source has
+// reported, so the list is complete.
+assert.strictEqual(unified.pageWatermark(deepAndShallow), 700)
+deepEqual(unified.mergeMessages(deepAndShallow).map(function(row) { return row.date }),
+  [900, 850, 800, 700],
+  "everything at or above the watermark, and nothing that would have a hole under it")
+
+// A source that has run out cannot leave a hole, so it does not hold the list
+// back — otherwise one finished mailbox would truncate every other.
+const oneFinished = [
+  { id: "a@example.org", hasMore: false, messages: [
+    { id: "1", date: 900 }, { id: "2", date: 200 } ] },
+  { id: "b@example.net", hasMore: false, messages: [{ id: "1", date: 500 }] }
+]
+assert.strictEqual(unified.pageWatermark(oneFinished), 0)
+deepEqual(unified.mergeMessages(oneFinished).map(function(row) { return row.date }),
+  [900, 500, 200], "nothing is withheld once every source is complete")
+
+// A finished source beside one that is not: only the unfinished one sets the
+// floor.
+assert.strictEqual(unified.pageWatermark([
+  { id: "a@example.org", hasMore: false, messages: [{ id: "1", date: 100 }] },
+  { id: "b@example.net", hasMore: true, messages: [{ id: "1", date: 600 }] }
+]), 600)
+
+// An empty source sets no floor, so a mailbox that has not answered yet does
+// not empty the list.
+assert.strictEqual(unified.pageWatermark([
+  { id: "a@example.org", hasMore: true, messages: [] },
+  { id: "b@example.net", hasMore: true, messages: [{ id: "1", date: 600 }] }
+]), 600)
