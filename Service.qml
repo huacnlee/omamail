@@ -775,7 +775,17 @@ Item {
   readonly property bool unsubscribing: !!current && current.unsubscribing
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool detailPainted: !!current && current.detailPainted
-  readonly property bool sending: !!current && current.sending
+  // ComposeView owns one parked draft for the whole service, so an in-flight
+  // send is global even though the request belongs to one account host. This
+  // also keeps the visible Send button honest after switching accounts.
+  readonly property var sendingHost: {
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host && host.sending) return host
+    }
+    return null
+  }
+  readonly property bool sending: !!sendingHost
   readonly property var pendingSendHost: {
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
@@ -811,7 +821,20 @@ Item {
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
-  function send(fields) { return current ? current.send(fields) : false }
+  function send(fields) {
+    // The button has the same guard, but Ctrl+Return reaches this function
+    // directly. Enforce the one-global-parked-draft invariant at the action
+    // boundary so another account cannot overwrite it.
+    if (pendingSendHost) {
+      if (current) current.fail("Another message is waiting to be sent")
+      return false
+    }
+    if (sendingHost) {
+      if (current) current.fail("Another message is still being sent")
+      return false
+    }
+    return current ? current.send(fields) : false
+  }
   function saveDraft(fields, callback) {
     var values = fields || ({})
     var target = String(values.accountId || "")
@@ -950,6 +973,16 @@ Item {
   }
 
   signal replySent()
+  signal replyFailed()
+
+  // A queued send keeps running on its own account when the visible mailbox
+  // changes. Put that account back in front before App restores the draft, so
+  // a retry cannot be addressed to whichever mailbox happened to be visible.
+  function forwardReplyFailure(index) {
+    var host = accountAt(index)
+    if (host && host !== current) switchToIndex(index)
+    replyFailed()
+  }
 
   // ------------------------------------------------------------- instances
 
@@ -1017,6 +1050,7 @@ Item {
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
+      onReplyFailed: root.forwardReplyFailure(index)
 
       Component.onCompleted: Qt.callLater(root.refreshCurrent)
       Component.onDestruction: Qt.callLater(root.refreshCurrent)

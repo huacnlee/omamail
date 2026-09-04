@@ -1746,21 +1746,49 @@ Item {
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
+  // Every way out of here that is not a delivery emits `replyFailed`, because
+  // by this point `deliverPending` has dropped the queued payload and the
+  // composer is parked: the message exists only in the draft the panel is
+  // holding, and a return that says nothing throws it away. The mailbox can
+  // stop being ready during the undo window — a reload, a sign-out — so the
+  // guards are reachable and not only the transport's own error.
+  function reportSendFailure(error) {
+    fail(error)
+    // A zero-delay send can be rejected synchronously by a provider before
+    // ComposeView has returned from service.send() and parked its accepted
+    // draft. Cross the event-loop boundary so every terminal signal observes
+    // the same state as an ordinary network reply.
+    Qt.callLater(function() {
+      if (root) root.replyFailed()
+    })
+  }
+
+  function reportSendSuccess() {
+    note("Sent")
+    // Success has the same ordering requirement as failure: a provider may
+    // finish locally, but the composer owns parking after send() returns.
+    Qt.callLater(function() {
+      if (root) root.replySent()
+    })
+  }
+
   function deliver(payload) {
     if (!ready) {
-      fail("The mailbox is not ready to send")
+      reportSendFailure("The mailbox is not ready to send")
       return false
     }
-    if (sending) return false
+    if (sending) {
+      reportSendFailure("Another message is still being sent")
+      return false
+    }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
-        root.fail(error)
+        root.reportSendFailure(error)
         return
       }
-      root.note("Sent")
-      root.replySent()
+      root.reportSendSuccess()
     })
     return true
   }
@@ -1870,6 +1898,10 @@ Item {
   }
 
   signal replySent()
+
+  // A send that did not happen. The panel answers it by putting the parked
+  // draft back in front of the writer, which is the only remaining copy.
+  signal replyFailed()
 
   // ------------------------------------------------------------------ RSVP
 
