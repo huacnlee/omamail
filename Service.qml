@@ -100,8 +100,15 @@ Item {
   // How long the cursor has to stay before a previewed message counts as
   // read. Clamped rather than trusted: this is a hand-editable file, and a
   // negative interval on a Timer never fires at all.
+  //
+  // A number or nothing, because `Number` reads `null`, `false` and `""` as
+  // zero and zero is a real answer here — "mark it read the moment it is
+  // previewed". A settings file that lost the key, or holds a word where a
+  // count should be, must not be read as somebody having asked for that.
   readonly property int markReadDelaySec: {
-    var value = Math.floor(Number(settings ? settings.markReadDelaySec : 2))
+    var raw = settings ? settings.markReadDelaySec : 2
+    if (typeof raw !== "number") return 2
+    var value = Math.floor(raw)
     if (!isFinite(value) || value < 0) return 2
     return Math.min(30, value)
   }
@@ -174,9 +181,11 @@ Item {
     persistSetting("previewOnCursor", value === true)
   }
 
+  // The same rule on the way in: what cannot be read as a count is written as
+  // the default rather than as the shortest dwell there is.
   function setMarkReadDelaySec(value) {
     var next = Math.floor(Number(value))
-    if (!isFinite(next) || next < 0) next = 0
+    if (!isFinite(next) || next < 0) next = 2
     persistSetting("markReadDelaySec", Math.min(30, next))
   }
 
