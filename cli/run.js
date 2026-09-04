@@ -115,7 +115,7 @@ function succeed(text) {
 function resultExit(result, fallback) {
   if (result && Number(result.exit) > 0) return Math.floor(Number(result.exit))
   const error = String(result && result.error || "")
-  if (/not signed in|sign in again|authentication failed|invalid credentials|unauthorized/i.test(error))
+  if (/not signed in|sign in again|not authenticated|authentication failed|invalid credentials|unauthorized/i.test(error))
     return Cli.EXIT_AUTH
   return fallback || Cli.EXIT_ERROR
 }
@@ -361,7 +361,8 @@ function runSmtp(settings, credentials, from, message, recipients) {
     maxBuffer: 32 * 1024 * 1024
   })
   const lines = String(result.stdout || "").split("\n")
-  if (result.status === null || result.status !== 0 || lines.length < 3)
+  if (result.status === null || result.status !== 0 || lines.length < 3
+      || !/^\d+$/.test(lines[0]))
     return { ok: false, error: "Could not start the mail transport" }
   const status = Math.floor(Number(lines[0]))
   const err = lines.length > 2 ? lines[2] : ""
