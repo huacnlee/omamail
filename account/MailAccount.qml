@@ -1672,27 +1672,43 @@ Item {
   // holding, and a return that says nothing throws it away. The mailbox can
   // stop being ready during the undo window — a reload, a sign-out — so the
   // guards are reachable and not only the transport's own error.
+  function reportSendFailure(error) {
+    fail(error)
+    // A zero-delay send can be rejected synchronously by a provider before
+    // ComposeView has returned from service.send() and parked its accepted
+    // draft. Cross the event-loop boundary so every terminal signal observes
+    // the same state as an ordinary network reply.
+    Qt.callLater(function() {
+      if (root) root.replyFailed()
+    })
+  }
+
+  function reportSendSuccess() {
+    note("Sent")
+    // Success has the same ordering requirement as failure: a provider may
+    // finish locally, but the composer owns parking after send() returns.
+    Qt.callLater(function() {
+      if (root) root.replySent()
+    })
+  }
+
   function deliver(payload) {
     if (!ready) {
-      fail("The mailbox is not ready to send")
-      replyFailed()
+      reportSendFailure("The mailbox is not ready to send")
       return false
     }
     if (sending) {
-      fail("Another message is still being sent")
-      replyFailed()
+      reportSendFailure("Another message is still being sent")
       return false
     }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
-        root.fail(error)
-        root.replyFailed()
+        root.reportSendFailure(error)
         return
       }
-      root.note("Sent")
-      root.replySent()
+      root.reportSendSuccess()
     })
     return true
   }
