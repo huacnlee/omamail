@@ -583,3 +583,34 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
 }
 
 console.log("test_accounts.js ok")
+
+// ------------------------------------------------------------- the name
+
+// Two mailboxes can differ only in their domain and elide to the same handful
+// of characters in a list, so a name is the one thing that tells them apart.
+const named = accounts.setLabel(
+  accounts.add(accounts.emptyList(), { email: "me@gmail.com", provider: "gmail" }),
+  "me@gmail.com", "  Private  ")
+assert.strictEqual(named.accounts[0].label, "Private", "trimmed on the way in")
+assert.strictEqual(accounts.label(named.accounts[0]), "Private")
+
+// Empty is not a name and clears it, which puts the address back: `label`
+// falls through to the local part, so a mailbox is never left unnamed.
+const cleared = accounts.setLabel(named, "me@gmail.com", "   ")
+assert.strictEqual(cleared.accounts[0].label, "")
+assert.strictEqual(accounts.label(cleared.accounts[0]), "me")
+
+// Naming a mailbox that is not in the list changes nothing rather than adding
+// one, the way every other edit here behaves.
+assert.strictEqual(
+  accounts.serialize(accounts.setLabel(named, "nobody@example.org", "Ghost")),
+  accounts.serialize(named))
+
+// The rest of the entry survives, because the row is rebuilt rather than
+// patched and a field added later must not drop one added earlier.
+const withBoth = accounts.setSignature(named, "me@gmail.com", "Best, me")
+assert.strictEqual(withBoth.accounts[0].label, "Private")
+assert.strictEqual(withBoth.accounts[0].signature, "Best, me")
+assert.strictEqual(
+  accounts.setLabel(withBoth, "me@gmail.com", "Personal").accounts[0].signature,
+  "Best, me", "naming a mailbox does not forget its signature")

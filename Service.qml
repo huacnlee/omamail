@@ -407,6 +407,13 @@ Item {
   // rather than on every keystroke, but it is also rebuilt by the write it
   // causes — so the value it hands back on the way out is routinely the one
   // already on disk, and a file round trip for it would be pure cost.
+  function setAccountLabel(id, text) {
+    var next = Accounts.setLabel(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
   function setAccountSignature(id, text) {
     var next = Accounts.setSignature(accountList, id, text)
     if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
@@ -647,6 +654,9 @@ Item {
       out.push({
         id: accounts[i].id,
         email: accounts[i].email,
+        // The name as it was typed, empty when none was, so a field editing
+        // it shows what is there rather than the address standing in for it.
+        label: String(accounts[i].label || ""),
         signature: String(accounts[i].signature || "")
       })
     }
@@ -663,6 +673,10 @@ Item {
         email: accounts[i].email,
         provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
+        // The name that was chosen, if one was. `label` always answers —
+        // falling through to the local part — so it cannot say whether
+        // anything was named, and the switcher has to know the difference.
+        name: String(accounts[i].label || ""),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
         signedIn: host ? host.ready : false,
