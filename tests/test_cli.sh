@@ -98,7 +98,7 @@ EOF
 cat > "$runtime_bin/curl" <<'EOF'
 #!/bin/sh
 cat >/dev/null
-printf '* CAPABILITY IMAP4rev1 MOVE\r\n* LIST (\\HasNoChildren) "/" "INBOX"\r\n* LIST (\\Sent) "/" "Sent Items"\r\n* LIST (\\HasNoChildren) "/" "Sent"\r\nA1 OK done\r\n'
+printf '* CAPABILITY IMAP4rev1 MOVE\r\n* LIST (\\HasNoChildren) "/" "INBOX"\r\n* LIST (\\Sent) "/" "SENT"\r\n* LIST (\\HasNoChildren) "/" "Sent"\r\nA1 OK done\r\n'
 EOF
 cat > "$runtime_bin/mktemp" <<'EOF'
 #!/bin/sh
@@ -145,7 +145,7 @@ printf '%s\n' "$case_mailboxes" | grep -q '"key":"Sent"' \
   || fail "mailbox list dropped a server folder that case-collides with a built-in key: $case_mailboxes"
 printf '%s\n' "$case_mailboxes" | grep -q '"key":"INBOX"' \
   && fail "mailbox list duplicated the built-in Inbox with the actual INBOX folder: $case_mailboxes"
-printf '%s\n' "$case_mailboxes" | grep -q '"key":"Sent Items"' \
+printf '%s\n' "$case_mailboxes" | grep -q '"key":"SENT"' \
   && fail "mailbox list duplicated the built-in Sent key with its SPECIAL-USE folder: $case_mailboxes"
 set +e
 invalid_ids=$(PATH="$runtime_ok_bin:$PATH" scripts/omamail star 42:Sent Items 2>&1)

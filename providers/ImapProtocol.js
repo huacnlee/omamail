@@ -902,7 +902,7 @@ var SPECIAL_USE = ["\\sent", "\\drafts", "\\trash", "\\junk", "\\archive", "\\al
 // "system" hides the whole folder tree.
 function isSpecialFolder(folder, special) {
   var entry = folder || {}
-  var name = trimmed(entry.name)
+  var name = entry.name === undefined || entry.name === null ? "" : String(entry.name)
   if (name.toLowerCase() === "inbox") return true
 
   var flags = Array.isArray(entry.flags) ? entry.flags : []
@@ -912,9 +912,10 @@ function isSpecialFolder(folder, special) {
 
   // A server with no SPECIAL-USE at all still had its folders matched by name
   // in `specialFolders`, and those are the same ones the mailbox row shows.
+  // INBOX is the only case-insensitive mailbox name; every other name is exact.
   var map = special || {}
   for (var key in map) {
-    if (map[key] && map[key].toLowerCase() === name.toLowerCase()) return true
+    if (map[key] && String(map[key]) === name) return true
   }
   return false
 }

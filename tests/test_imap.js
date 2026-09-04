@@ -479,6 +479,8 @@ const plainSpecial = imap.specialFolders(plainList)
 assert.strictEqual(plainSpecial["\\sent"], "Sent")
 assert.strictEqual(plainSpecial["\\junk"], "Junk")
 assert.strictEqual(plainSpecial["\\archive"], "Archive")
+assert.strictEqual(imap.isSpecialFolder(plainList[1], plainSpecial), true,
+  "an exact name fallback remains a system folder when SPECIAL-USE is absent")
 
 // Flags win over names: a server that says so is not second-guessed.
 const conflicting = imap.parseList(
@@ -510,6 +512,20 @@ assert.strictEqual(imap.specialFolders(conflicting)["\\sent"], "Verzonden",
   assert.strictEqual(imap.isSpecialFolder({ name: "inbox" }, {}), true,
     "INBOX is case-insensitive, which the RFC declares outright")
   assert.strictEqual(imap.isSpecialFolder(null, {}), false)
+}
+
+// INBOX alone is case-insensitive. Other mailbox names remain exact even when
+// one is a case-collision with the folder a SPECIAL-USE attribute identified.
+{
+  const listed = imap.parseList(
+    "* LIST (\\Sent) \"/\" \"SENT\"\r\n" +
+    "* LIST () \"/\" \"Sent\"\r\n")
+  const map = imap.specialFolders(listed)
+
+  assert.strictEqual(imap.isSpecialFolder(listed[0], map), true,
+    "the folder carrying \\Sent is a system folder")
+  assert.strictEqual(imap.isSpecialFolder(listed[1], map), false,
+    "an ordinary case-colliding folder remains user selectable")
 }
 
 // ------------------------------------------------------------ flags ↔ labels
