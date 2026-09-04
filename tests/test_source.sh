@@ -6,21 +6,32 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
-# Found rather than globbed: the layout groups by module, and a module with no
-# QML in it (message/, today) turns a literal glob into a grep error that hides
-# whatever the check was meant to say.
+# Enumerated rather than globbed: the layout groups by module, and a module
+# with no QML in it (message/, today) turns a literal glob into a grep error
+# that hides whatever the check was meant to say.
+#
+# git does the enumerating rather than `find`. `--cached --others
+# --exclude-standard` is the tracked files plus the ones not committed yet —
+# this checkout's source, so a file you are still writing is checked — and
+# nothing that is ignored. `find` walks ignored paths too, and a linked
+# worktree under .claude/ is a second checkout of this same repository whose
+# copies of these files would be reported here as if they were ours.
 #
 # A read loop rather than `mapfile`, which is bash 4 and absent from the bash
 # 3.2 that macOS still ships — a check that only runs on the deployment target
 # is a check nobody runs while writing the code. NUL-separated either way, so a
 # path with a space in it stays one path.
 QML_FILES=()
-while IFS= read -r -d '' found; do QML_FILES+=("$found"); done \
-  < <(find . -name '*.qml' -not -path './.git/*' -print0)
+while IFS= read -r -d '' found; do
+  [ ! -f "$found" ] || QML_FILES+=("$found")
+done \
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.qml')
 
 JS_FILES=()
-while IFS= read -r -d '' found; do JS_FILES+=("$found"); done \
-  < <(find . -name '*.js' -not -path './.git/*' -not -path './tests/*' -print0)
+while IFS= read -r -d '' found; do
+  [ ! -f "$found" ] || JS_FILES+=("$found")
+done \
+  < <(git ls-files -z --cached --others --exclude-standard -- '*.js' ':!tests/*')
 
 # A developer machine may point /bin/sh at bash while the release runner points
 # it at dash. Bash's global parameter replacement then passes locally and dies
@@ -121,6 +132,46 @@ if awk '
   fail "changing how a message is read must not re-render or re-fetch it"
 fi
 
+# 3c. Which way a message runs is decided in one place, and the two questions it
+#     answers stay separate.
+#
+# Qt resolves a paragraph's direction from its own first strong character and is
+# good at it. Two things it cannot do are what Direction.js is for, and both are
+# easy to undo by "simplifying" the code that uses it.
+grep -q 'promoteDirection' message/Html.js \
+  || fail "a CSS direction must be promoted to the dir attribute Qt actually reads"
+# The sheet's physical sides and the body's `dir` are one statement. Qt places a
+# list marker on the side the block runs from, so a sheet that indents a list
+# from the right while the block is still left-to-right does not move the bullet
+# — it drops it. Splitting these was tried; the bullets went missing.
+grep -q 'function baseDirectionAttribute' message/Html.js \
+  || fail "the body direction and the stylesheet's sides must be written together"
+if grep -n 'palette.pinned' message/Html.js; then
+  fail "a document has one direction, not a direction and a flag saying whether to mean it"
+fi
+
+# A reply prefix is Latin whatever the thread is written in, so a subject asked
+# with `resolve` rather than `resolveSubject` puts every message in a thread
+# after the first against the wrong edge — which is the bug the module exists
+# for, and the one a refactor is most likely to reintroduce.
+for file in components/MessageRow.qml components/MessageReader.qml bar/BarPreview.qml; do
+  grep -q 'Direction.resolveSubject' "$file" \
+    || fail "$file must strip the reply prefix before asking which way a subject runs"
+done
+
+# The same mistake on the body side. The plain reading of an HTML message
+# carries this client's own `[image N]` markers in front of the sender's first
+# word, so `resolve` on it answers about a Latin "i" that omamail wrote.
+grep -q 'Direction.resolveBody' components/MessageReader.qml \
+  || fail "the reader must look past its own image markers before asking which way a body runs"
+
+# The interface is not mirrored: this setting is a fact about the mail, not
+# about the window around it. A LayoutMirroring here would be a different
+# feature wearing this one's name.
+if grep -rn 'LayoutMirroring' -- "${QML_FILES[@]}"; then
+  fail "message direction must not mirror the interface; it applies to content only"
+fi
+
 # 4. The bar switches `barForeground` when transparent mode needs contrast.
 #    `foreground` is the fixed theme value and does not follow that switch.
 grep -q 'bar ? bar\.barForeground' BarWidget.qml \
@@ -149,8 +200,22 @@ done
 if grep -n 'modelData\.unread' components/AccountSwitcher.qml; then
   fail "the account switcher must identify mailboxes without count badges"
 fi
-grep -q 'mapToGlobal(0, 0)' components/UserBar.qml \
-  || fail "the account switcher must anchor to the user bar, not the click position"
+if [ -e components/UserBar.qml ] || grep -q 'UserBar {' components/MailboxSidebar.qml; then
+  fail "the account control belongs in the status bar, not the sidebar"
+fi
+grep -q 'objectName: "status-account-button"' App.qml \
+  || fail "the status address must be the account switcher trigger"
+grep -q 'selected: accountSwitcher.opened' App.qml \
+  || fail "the status account trigger must stay selected while its popup is open"
+grep -q 'accountSwitcher.openAt(scene.x, scene.y)' App.qml \
+  || fail "the account switcher must anchor to the status address"
+awk '
+  /id: accountBackground/ { in_background = 1 }
+  in_background && /anchors.margins: Style.space\(2\)/ { found = 1 }
+  in_background && /^            }/ { exit !found }
+  END { exit !found }
+' App.qml \
+  || fail "the status account hover must use the same visual inset as the sidebar toggle"
 awk '
   /id: footer$/ { in_footer = 1 }
   in_footer && /anchors.leftMargin: Style.space\(8\)/ { left = 1 }
@@ -238,10 +303,12 @@ grep -q 'setUndoSendSeconds' components/SettingsPage.qml \
   || fail "the in-app settings page must save the undo window"
 
 # The IMAP server disclosure always reserves an icon slot. Both names selected
-# by its state must have a drawing, or the slot is blank in one or both states.
+# by its state must have a glyph, or the slot is blank in one or both states.
+# (tests/test_icons.js checks every name the views use; this is the pair a
+# state machine selects at runtime, which a literal scan cannot see.)
 for icon in chevronLeft chevronRight chevronDown mail; do
-  if ! grep -q "root.name === \"$icon\"" components/ActionIcon.qml; then
-    fail "ActionIcon does not draw the $icon icon"
+  if ! grep -qE "^  $icon: 0x" components/Icons.js; then
+    fail "Icons.js does not define the $icon icon"
   fi
 done
 grep -q 'text: "Week"' components/CalendarView.qml \
@@ -258,7 +325,9 @@ right = text.index('anchors.right: parent.right')
 if today > right:
     raise SystemExit("test_source.sh: Go to today must sit with the date on the left")
 today_block = text[today:text.index('}', today)]
-if 'bordered: false' not in today_block:
+# A ghost: no box at rest. `ghost: true` is the icon buttons' look; a plain
+# `bordered: false` is the older text-only form and still counts.
+if 'ghost: true' not in today_block and 'bordered: false' not in today_block:
     raise SystemExit("test_source.sh: Go to today must be a text-only action")
 if 'iconName: "refresh"' in text:
     raise SystemExit("test_source.sh: calendar refresh belongs in the window header")
@@ -292,24 +361,56 @@ if "onAccountChosen" not in text or "root.switchAccount(index)" not in text:
     raise SystemExit("test_source.sh: the account picker must use view-preserving switching")
 service = Path("Service.qml").read_text()
 if "accountId: root.calendarAccountId" not in service:
-    raise SystemExit("test_source.sh: the visible Calendar must follow the displayed account")
+    raise SystemExit("test_source.sh: the visible Calendar must be told which account is displayed")
+# What the calendar depends on is what its cache is keyed by, and under the
+# unified view that is not the mailbox: the same calendars are shown whichever
+# one is open. Keying by the account there stored a copy of the same events per
+# account and turned every mailbox switch into a cache miss and a full refetch.
+controller = Path("calendar/CalendarController.qml").read_text()
+if "eventCache.get(refreshScope" not in controller or "eventCache.put(refreshScope" not in controller:
+    raise SystemExit("test_source.sh: the event cache must be keyed by the calendar scope, not the mailbox")
+# The reload watches the scope rather than the two things that go into it. A
+# mailbox switch under the unified view changes nothing on screen, and neither
+# does the setting for a controller that had no mailbox to follow — watching the
+# inputs separately got those two wrong in opposite directions.
+if "onCalendarScopeChanged: reloadVisibleRange()" not in controller:
+    raise SystemExit("test_source.sh: the visible range must reload on a change of scope, not of mailbox")
+if "onAccountIdChanged" in controller or "onUnifiedCalendarViewChanged" in controller:
+    raise SystemExit("test_source.sh: reloading on either input separately is what the scope replaced")
+composer_default = Path("components/CalendarEventComposer.qml").read_text()
+if "preferredCalendarId()" not in composer_default:
+    raise SystemExit("test_source.sh: a new event must open on the mailbox being read, not the first account")
 composer = Path("components/CalendarEventComposer.qml").read_text()
 if "controller.writableSourceGroups" not in composer:
-    raise SystemExit("test_source.sh: event creation must offer only writable calendars of the current account")
+    raise SystemExit("test_source.sh: event creation must offer writable calendars from the selected calendar view")
 PY
-grep -q 'text: "Create event\.\.\."' App.qml \
-  || fail "calendar mode needs a Create event... header action"
+python3 - <<'PY'
+from pathlib import Path
+
+text = Path("App.qml").read_text()
+header = text[text.index("id: headerRight"):text.index("PanelSeparator {", text.index("id: headerRight"))]
+if "spacing: Style.space(8)" not in header:
+    raise SystemExit("test_source.sh: refresh needs breathing room before the header action")
+for name in ("create-event-button", "compose-button"):
+    marker = 'objectName: "' + name + '"'
+    start = text.index(marker)
+    opening = text.rfind("\n          Button {", 0, start)
+    if opening < 0:
+        raise SystemExit("test_source.sh: " + name + " must use a normal text button")
+    block = text[opening:text.index("\n          }", start)]
+    if "iconName:" in block:
+        raise SystemExit("test_source.sh: " + name + " must not carry an icon")
+PY
 python3 - <<'PY'
 from pathlib import Path
 
 sidebar = Path("components/MailboxSidebar.qml").read_text()
 footer = sidebar[sidebar.index("id: footer"):sidebar.index("component Entry:")]
 if 'label: "Calendar"' not in footer or "calendarRequested" not in footer:
-    raise SystemExit("test_source.sh: Calendar must be fixed above the sidebar account row")
+    raise SystemExit("test_source.sh: Calendar must stay fixed at the foot of the sidebar")
 calendar = footer.index('label: "Calendar"')
-separator = footer.index("PanelSeparator", calendar)
-if "Style.space(6)" not in footer[calendar:separator]:
-    raise SystemExit("test_source.sh: Calendar must keep a gap above the account separator")
+if "Style.space(6)" not in footer[calendar:]:
+    raise SystemExit("test_source.sh: Calendar must keep breathing room at the sidebar foot")
 
 app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
@@ -433,7 +534,10 @@ if awk '
 ' components/CalendarView.qml; then
   fail "activating a calendar event must not jump to its provider"
 fi
-grep -q 'calendarView.detailOpen' App.qml \
+# The overview is an entry on the navigation stack, so Back reaches it before
+# the calendar under it; `back()` asks the view to close it and the view's own
+# change pops the entry.
+grep -q 'leaving.kind === "calendarDetail"' App.qml \
   || fail "Escape must close the native calendar event overview first"
 if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml; then
   fail "event creation must use the central Escape route, not an ambiguous duplicate"
@@ -452,7 +556,7 @@ grep -q 'placeholderText: "Password or app password"' components/CalendarSetting
   || fail "calendar setup needs its own password field"
 grep -q 'text: "Set password"' components/CalendarSettings.qml \
   || fail "existing CalDAV calendars need a password action"
-grep -q 'credentials.json|accounts.json|window.json|calendars.json' scripts/config-store.sh \
+grep -q 'credentials.json|accounts.json|window.json|calendars.json|compose.json' scripts/config-store.sh \
   || fail "the config writer must accept calendar source records"
 if grep -q 'Five Nextcloud calendars\|imported from Thunderbird\|Nextcloud password' components/CalendarSettings.qml; then
   fail "calendar settings must not describe one user's imported setup"
@@ -720,7 +824,7 @@ grep -q 'accountId = Accounts.accountId(accountEmail, providerId)' account/MailA
 # for actual links such as URLs inside the message reader.
 for file in components/IconButton.qml components/IconTextButton.qml components/AppMenu.qml \
   components/MessageMenu.qml components/AccountSwitcher.qml components/ProviderPicker.qml \
-  components/MailboxSidebar.qml components/UserBar.qml; do
+  components/MailboxSidebar.qml; do
   if grep -n 'PointingHandCursor' "$file"; then
     fail "$file uses a web-link cursor for a native control"
   fi
@@ -739,8 +843,22 @@ grep -q 'text: "Add a mailbox\.\.\."' components/SettingsPage.qml \
   || fail "Add a mailbox opens a workflow and needs an ellipsis"
 grep -q 'tooltipText: "Add another mail account"' components/SettingsPage.qml \
   || fail "the add-account tooltip must be provider-neutral"
+python3 - <<'PY'
+from pathlib import Path
+
+menu = Path("components/AppMenu.qml").read_text()
+calendar = menu.index("id: calendarRow")
+settings = menu.index("id: settingsRow")
+switch = menu.index("id: switchRow")
+separator = menu.index("MenuSeparatorLine {", switch)
+if not calendar < switch < settings < separator:
+    raise SystemExit("test_source.sh: Settings must stay with the account actions below Calendar")
+settings_block = menu[settings:menu.index("}", settings)]
+if 'text: "Settings..."' not in settings_block:
+    raise SystemExit("test_source.sh: Settings opens an extra page and needs an ellipsis")
+PY
 if awk '
-  /id: accountLine/ { in_status = 1 }
+  /id: accountControl/ { in_status = 1 }
   in_status && /resultSummary/ { exit 0 }
   in_status && /^        }/ { exit 1 }
   END { exit 1 }
@@ -874,6 +992,7 @@ limit=$((128 * 1024))
 preview_limit=$((384 * 1024))
 oversized=$(git ls-files -z \
   | xargs -0 -I{} sh -c '
+      [ -f "{}" ] || exit 0
       case "{}" in
         preview.png) ceiling='"$preview_limit"' ;;
         *) ceiling='"$limit"' ;;
@@ -900,8 +1019,8 @@ grep -q 'function beginDraft' components/ComposeView.qml \
   || fail "ComposeView must fill a new draft from a mailto"
 grep -q 'omarchy-shell shell summon' scripts/mailto.sh \
   || fail "the mailto handler must summon Omamail, not toggle it"
-grep -q 'install-mailto.sh' install.sh \
-  || fail "install.sh must register the mailto desktop handler"
+grep -q 'register-mailto.sh' scripts/link-plugin.sh \
+  || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
 grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \

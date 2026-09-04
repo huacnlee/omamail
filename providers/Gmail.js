@@ -29,6 +29,8 @@ var MARK = "gmail.png"
 
 var CAPABILITIES = {
   labels: true,
+  // Adding a label and taking INBOX away, which is archive with a destination.
+  move: true,
   threads: true,
   archive: true,
   spam: true,
@@ -72,12 +74,16 @@ var MAILBOXES = [
   { key: "unread", label: "Unread", icon: "unread",
     query: "in:inbox is:unread -category:promotions -category:social -category:forums" },
   { key: "starred", label: "Starred", icon: "star", query: "is:starred" },
-  { key: "sent", label: "Sent", icon: "send", query: "in:sent" },
+  { key: "sent", label: "Sent", icon: "sent", query: "in:sent" },
   { key: "drafts", label: "Drafts", icon: "compose", query: "in:drafts" },
   // Optional: the first to go when the row cannot hold every mailbox. Neither
   // is somewhere anyone works from — they are places you go looking for
   // something specific, and search reaches both.
   { key: "all", label: "All mail", icon: "archive", query: "in:anywhere -in:spam -in:trash", optional: true },
+  // Where a message nobody can find has usually gone. Gmail keeps it out of an
+  // ordinary search on purpose, so without a mailbox the only way in is knowing
+  // to type `in:spam` — which is knowing the answer already.
+  { key: "spam", label: "Spam", icon: "spam", query: "in:spam", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "in:trash", optional: true }
 ]
 

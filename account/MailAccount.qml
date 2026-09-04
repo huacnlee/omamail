@@ -68,6 +68,8 @@ Item {
 
   // The window drives this; the unread poll keeps running while it is false.
   property bool windowOpen: false
+  // Keyed by attachmentId, holding only the saves that are in flight.
+  property var savingAttachmentIds: ({})
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -128,6 +130,10 @@ Item {
   // search — an IMAP folder wrapped in a TEXT search would go looking for the
   // folder's own name inside the inbox.
   property string rawQuery: ""
+  // The label id behind that raw query. Gmail needs it to make "Move to"
+  // remove the label supplying the current view; IMAP moves out of its source
+  // folder inherently and therefore never passes this into a label change.
+  property string rawLabelId: ""
   property var messages: []
   property var previewMessages: []
   property var labels: []
@@ -319,6 +325,10 @@ Item {
   // what was already there.
   property var seenIds: ({})
   property bool notificationsPrimed: false
+  // The mailbox's own newest timestamp at the moment notifications were
+  // primed. Set once, from the server's clock rather than this machine's, and
+  // never raised — see `Model.newArrivals`.
+  property double arrivalFloor: 0
   // The unread count needs a baseline of its own, separate from the message
   // cache: a mailbox that has never been opened has no cached page to prime
   // from, and would otherwise never be allowed to announce anything.
@@ -579,6 +589,7 @@ Item {
     seenIds = seen
     // The cache is also a record of what was on screen last time, so a live
     // load on top of it can tell genuinely new mail from a first look.
+    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(restored)
     notificationsPrimed = true
     listRefreshed()
     return true
@@ -885,7 +896,7 @@ Item {
     // never held. That is a result, not newly arrived mail, so it must not turn
     // into a desktop notification.
     var arrivals = append || suppressArrivals === true ? []
-      : Model.newArrivals(summaries, seenIds, notificationsPrimed)
+      : Model.newArrivals(summaries, seenIds, notificationsPrimed, arrivalFloor)
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
@@ -893,6 +904,7 @@ Item {
     // does not get announced again when it comes back.
     for (var key in seenIds) seen[key] = true
     seenIds = seen
+    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(merged)
     notificationsPrimed = true
 
     messages = merged
@@ -1279,6 +1291,13 @@ Item {
   // Every action moves the list immediately and reconciles afterwards. Waiting
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
+  function refuseUnavailableAction(action) {
+    var needs = Model.actionCapability(action)
+    if (needs === "" || Provider.can(providerId, needs)) return false
+    note(Model.actionUnavailable(action, Provider.badge(providerId)))
+    return true
+  }
+
   function act(id, action, quiet) {
     var messageId = String(id || "")
     if (!ready || messageId === "") return false
@@ -1287,11 +1306,7 @@ Item {
     // honour reaches here even though the panel drew no button for it — and the
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
-    var needs = Model.actionCapability(action)
-    if (needs !== "" && !Provider.can(providerId, needs)) {
-      note(Model.actionUnavailable(action, Provider.badge(providerId)))
-      return false
-    }
+    if (refuseUnavailableAction(action)) return false
     if (pendingAction !== "") {
       if (quiet === true) {
         queueQuietAction(messageId, action, cacheKey)
@@ -1325,8 +1340,9 @@ Item {
       actionToken = ""
     }
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
-    var updated = Model.applyLabelChange(before, action)
-    var survives = Model.survivesAction(mailboxKey, action)
+    var sourceLabelId = hasLabels ? rawLabelId : ""
+    var updated = Model.applyLabelChange(before, action, sourceLabelId)
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery)
 
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
@@ -1438,7 +1454,7 @@ Item {
     if (action === "trash") api.trashMessage(messageId, done)
     else if (action === "untrash") api.untrashMessage(messageId, done)
     else {
-      var change = Model.labelChangesFor(action)
+      var change = Model.labelChangesFor(action, sourceLabelId)
       if (!change) {
         pendingAction = ""
         pendingActionQuery = ""
@@ -1475,7 +1491,22 @@ Item {
     if (action === "markRead") return "Marked read"
     if (action === "markUnread") return "Marked unread"
     if (action === "spam") return "Reported as spam"
+    // Named, not "Moved": the destination was chosen a keystroke ago from a
+    // list of thirty, and a note that does not say which one leaves the only
+    // question the user has -- did it go where I meant? -- unanswered.
+    var target = Model.labelTarget(action)
+    if (target !== "") return "Moved to " + labelName(target)
     return "Done"
+  }
+
+  // A label id is what the provider wants and what the caches key on; a name
+  // is what the person who pressed `v` picked. Falling back to the id keeps a
+  // note honest when the label list has not arrived rather than printing
+  // nothing where the destination should be -- and on IMAP the two are the
+  // same string anyway, because a folder's id is its name.
+  function labelName(labelId) {
+    var index = Model.indexById(labels, labelId)
+    return index >= 0 ? labels[index].name : labelId
   }
 
   function toggleStar(id) {
@@ -1657,25 +1688,130 @@ Item {
     })
   }
 
+  // Keeping an attachment rather than opening it once.
+  //
+  // The same shape as `openAttachment` because it is the same journey up to
+  // the last step: sign-in, then the provider's own fetch, then one script.
+  // Only the script differs, and the answer it gives back — a path, which the
+  // notice repeats, because a saved file nobody can find is not saved.
+  function saveAttachment(messageId, attachment) {
+    var source = attachment || ({})
+    if (!ready) {
+      fail("Sign in before saving an attachment")
+      return
+    }
+    if (String(messageId || "") === "" || String(source.attachmentId || "") === "") {
+      fail("That attachment is not available")
+      return
+    }
+    // One save at a time for one attachment. A download arrow is a single
+    // click, and a double one used to start a second fetch that the script
+    // then dutifully numbered: two identical files in Downloads, and a notice
+    // that read the same both times, so nothing said it had happened.
+    var key = String(source.attachmentId)
+    if (savingAttachmentIds[key]) return
+    markSavingAttachment(key, true)
+    clearNotice()
+    note("Saving " + String(source.filename || "attachment"))
+    loadAttachments(messageId, [source], function(loaded, error) {
+      if (error || !loaded || loaded.length === 0) {
+        root.markSavingAttachment(key, false)
+        root.fail(error || "That attachment could not be loaded")
+        return
+      }
+      var file = loaded[0]
+      var request = attachmentSaveComponent.createObject(root, {
+        command: [pluginDir + "/scripts/save-attachment.py"],
+        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
+          + "\n" + String(file.data || "") + "\n"
+      })
+      if (!request) {
+        root.markSavingAttachment(key, false)
+        root.fail("That attachment could not be saved")
+        return
+      }
+      request.finished.connect(function(exitCode, path, detail) {
+        request.destroy()
+        if (!root) return
+        root.markSavingAttachment(key, false)
+        if (exitCode !== 0) {
+          root.fail(detail || "That attachment could not be saved")
+          return
+        }
+        // The name first, then the folder. `unique_path` numbers a name that
+        // is already taken, so the file on disk is not always the one the row
+        // shows — and reporting only the folder left the reader opening last
+        // month's `invoice.pdf` believing it was the one just saved. The
+        // notice elides from the right, so the part that can differ from what
+        // was clicked has to come before the part that cannot.
+        var saved = String(path || "")
+        var at = saved.lastIndexOf("/")
+        root.note(at > 0
+          ? "Saved " + saved.substring(at + 1) + " to " + saved.substring(0, at)
+          : "Saved")
+      })
+      request.running = true
+    })
+  }
+
+  // Which attachments are being saved right now, so the row that asked can
+  // show it and refuse a second click. Re-assigned rather than written into: a
+  // binding on a `var` does not notice a key appearing inside the object it is
+  // already holding.
+  function markSavingAttachment(key, saving) {
+    var next = ({})
+    for (var id in savingAttachmentIds)
+      if (id !== key) next[id] = true
+    if (saving) next[key] = true
+    savingAttachmentIds = next
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
+  // Every way out of here that is not a delivery emits `replyFailed`, because
+  // by this point `deliverPending` has dropped the queued payload and the
+  // composer is parked: the message exists only in the draft the panel is
+  // holding, and a return that says nothing throws it away. The mailbox can
+  // stop being ready during the undo window — a reload, a sign-out — so the
+  // guards are reachable and not only the transport's own error.
+  function reportSendFailure(error) {
+    fail(error)
+    // A zero-delay send can be rejected synchronously by a provider before
+    // ComposeView has returned from service.send() and parked its accepted
+    // draft. Cross the event-loop boundary so every terminal signal observes
+    // the same state as an ordinary network reply.
+    Qt.callLater(function() {
+      if (root) root.replyFailed()
+    })
+  }
+
+  function reportSendSuccess() {
+    note("Sent")
+    // Success has the same ordering requirement as failure: a provider may
+    // finish locally, but the composer owns parking after send() returns.
+    Qt.callLater(function() {
+      if (root) root.replySent()
+    })
+  }
+
   function deliver(payload) {
     if (!ready) {
-      fail("The mailbox is not ready to send")
+      reportSendFailure("The mailbox is not ready to send")
       return false
     }
-    if (sending) return false
+    if (sending) {
+      reportSendFailure("Another message is still being sent")
+      return false
+    }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
-        root.fail(error)
+        root.reportSendFailure(error)
         return
       }
-      var warning = sentPayload ? String(sentPayload.warning || "") : ""
-      root.note(warning || "Sent")
-      root.replySent()
+      root.reportSendSuccess()
     })
     return true
   }
@@ -1725,6 +1861,7 @@ Item {
       inReplyTo: values.inReplyTo,
       references: values.references
     })
+    payload.draftId = String(values.draftId || "")
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
     })
@@ -1784,6 +1921,10 @@ Item {
   }
 
   signal replySent()
+
+  // A send that did not happen. The panel answers it by putting the parked
+  // draft back in front of the writer, which is the only remaining copy.
+  signal replyFailed()
 
   // ------------------------------------------------------------------ RSVP
 
@@ -2036,6 +2177,50 @@ Item {
   }
 
   Component {
+    id: attachmentSaveComponent
+
+    Process {
+      id: attachmentSaveProcess
+
+      property string requestPayload: ""
+      // Exactly one answer reaches the caller, whichever way this ends.
+      property bool reported: false
+      signal finished(int exitCode, string path, string detail)
+
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+
+      function report(exitCode, path, detail) {
+        if (reported) return
+        reported = true
+        finished(exitCode, path, detail)
+      }
+
+      onStarted: {
+        write(requestPayload)
+        requestPayload = ""
+      }
+
+      onExited: function(exitCode) {
+        var path = String(attachmentSaveProcess.stdout.text || "").trim()
+        var detail = String(attachmentSaveProcess.stderr.text || "").trim()
+        attachmentSaveProcess.report(exitCode, path, detail)
+      }
+
+      // A program that could not be started never exits, so `onExited` never
+      // arrives. Without this the caller waits for an answer that is not
+      // coming, and the save it is holding open would keep the row's button
+      // turning for as long as the window stays open. Deferred by a turn so a
+      // real exit, which clears `running` as well, always reports first.
+      onRunningChanged: if (!running) Qt.callLater(function() {
+        if (attachmentSaveProcess)
+          attachmentSaveProcess.report(1, "", "That attachment could not be saved")
+      })
+    }
+  }
+
+  Component {
     id: attachmentOpenComponent
 
     Process {
@@ -2088,6 +2273,7 @@ Item {
     mailboxKey = String(key || "inbox")
     searchQuery = ""
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     previewMessages = []
@@ -2101,6 +2287,7 @@ Item {
     searchQuery = query
     // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     listLoaded = false
@@ -2109,11 +2296,13 @@ Item {
 
   // A label on Gmail, a folder on IMAP. One entry point either way, because the
   // sidebar draws one kind of row.
-  function selectLabel(name) {
+  function selectLabel(name, labelId) {
     var query = Provider.labelQuery(providerId, name)
-    if (query === "" || query === rawQuery) return
+    var id = String(labelId || "")
+    if (query === "" || (query === rawQuery && id === rawLabelId)) return
     searchQuery = ""
     rawQuery = query
+    rawLabelId = id
     clearSelection()
     messages = []
     listLoaded = false
@@ -2185,6 +2374,7 @@ Item {
     inboxUnread = 0
     listLoaded = false
     seenIds = ({})
+    arrivalFloor = 0
     notificationsPrimed = false
     countPrimed = false
     cacheStore.clear()

@@ -33,6 +33,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/ReaderSkeleton.qml \
 	components/ComposeView.qml \
 	components/RecipientSuggestions.qml \
+	components/ContactsPicker.qml \
+	components/LabelPicker.qml \
 	components/UndoSendToast.qml \
 	components/DraftSavedToast.qml \
 	components/SearchBar.qml \
@@ -40,8 +42,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/AccountSwitcher.qml \
 	components/AccountRemovalDialog.qml \
 	components/BackBar.qml \
-	components/UserBar.qml \
 	components/SettingsPage.qml \
+	components/SettingsSidebar.qml \
 	components/CalendarSettings.qml \
 	components/CalendarEventComposer.qml \
 	components/CalendarEventDetail.qml \
@@ -54,18 +56,20 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
 
-.PHONY: test test-js test-shell test-qml qml-check validate bench
+.PHONY: test test-js test-shell test-qml qml-check validate bench install
 
 test: test-js test-shell test-qml
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node tests/test_compose_recovery.js
 	node tests/test_outbox.js
 	node tests/test_recipients.js
 	node tests/test_senders.js
 	node tests/test_oauth.js
 	node tests/test_credentials.js
+	node tests/test_secrets.js
 	node tests/test_gmail_api.js
 	node tests/test_message.js
 	node tests/test_calendar.js
@@ -77,10 +81,14 @@ test-js:
 	node tests/test_unsubscribe.js
 	node tests/test_mailto.js
 	node tests/test_html.js
+	node tests/test_direction.js
 	node tests/test_cache.js
 	node tests/test_model.js
+	node tests/test_icons.js
+	node tests/test_navigation.js
 	node tests/test_keymap.js
 	node tests/test_accounts.js
+	node tests/test_aliases.js
 	node tests/test_menu.js
 	node tests/test_provider.js
 	node tests/test_imap.js
@@ -92,12 +100,15 @@ test-shell:
 	python3 tests/test_qml_text_format.py
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
-	bash tests/test_install.sh
+	bash tests/test_config_store.sh
+	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
+	bash tests/test_imap_ordering.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_image_fetch.sh
 	bash tests/test_attachment_open.sh
+	bash tests/test_attachment_save.sh
 	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
@@ -140,3 +151,8 @@ qml-check:
 validate: test qml-check
 	omarchy plugin validate .
 	git diff --check
+
+# Symlinks this checkout into ~/.config/omarchy/plugins so QML edits are read
+# live. Development only — the marketplace installs the plugin itself.
+install:
+	bash scripts/link-plugin.sh

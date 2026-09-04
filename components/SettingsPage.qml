@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 
 // Where mailboxes are managed.
 //
@@ -21,22 +22,76 @@ Column {
   required property color urgentColor
   required property string panelFontFamily
 
-  signal backRequested()
   signal clientSetupRequested()
   signal addRequested()
   signal editRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
+  // A separate list on purpose: accountSummaries carries live mailbox state and
+  // is replaced on a poll, which would rebuild the field being typed in.
+  readonly property var signatureAccounts: service
+    && Array.isArray(service.accountSignatures) ? service.accountSignatures : []
+  property string selectedSignatureAccountId: ""
+
+  // The page's sections and where each begins, for the rail beside it. Read
+  // off the headings themselves, so a section that grows moves the ones
+  // below it in the rail's map as well as on screen. The calendars section
+  // is a component with its own heading, so its top stands in.
+  readonly property var sections: [
+    { key: "bar", title: "Bar", y: barHeading.y },
+    { key: "reading", title: "Reading", y: readingHeading.y },
+    { key: "notifications", title: "Notifications", y: notificationsHeading.y },
+    { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
+    { key: "calendars", title: "Calendars", y: calendarsSection.y },
+    { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
+  ]
   readonly property var auth: service ? service.auth : null
 
-  spacing: Style.space(16)
-
-  BackBar {
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
+  function signatureAccount(id) {
+    for (var i = 0; i < signatureAccounts.length; i++)
+      if (String(signatureAccounts[i].id || "") === String(id || ""))
+        return signatureAccounts[i]
+    return null
   }
+
+  function signatureOptions() {
+    var out = []
+    for (var i = 0; i < signatureAccounts.length; i++)
+      out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
+    return out
+  }
+
+  function saveSignature() {
+    if (service && selectedSignatureAccountId !== "")
+      service.setAccountSignature(selectedSignatureAccountId, signatureEdit.text)
+  }
+
+  function selectSignatureAccount(id) {
+    var next = signatureAccount(id)
+    if (!next || String(next.id || "") === selectedSignatureAccountId) return
+    saveSignature()
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  function ensureSignatureAccount() {
+    if (signatureAccounts.length === 0) {
+      selectedSignatureAccountId = ""
+      signatureEdit.text = ""
+      return
+    }
+    if (signatureAccount(selectedSignatureAccountId)) return
+    var activeId = service ? String(service.activeAccountId || "") : ""
+    var next = signatureAccount(activeId) || signatureAccounts[0]
+    selectedSignatureAccountId = String(next.id || "")
+    signatureEdit.text = String(next.signature || "")
+  }
+
+  onSignatureAccountsChanged: ensureSignatureAccount()
+  Component.onCompleted: ensureSignatureAccount()
+
+  spacing: Style.space(16)
 
   Text {
     text: "Settings"
@@ -46,9 +101,87 @@ Column {
     font.bold: true
   }
 
+  // ------------------------------------------------------------------- bar
+
+  Text {
+    id: barHeading
+    text: "BAR"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: barIconText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: barIconSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Show the icon in the bar"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      // Says what turning it off costs, and what it does not: mail is still
+      // checked and still notifies. The keybinding is the part worth naming,
+      // because without one the window is only reachable from a terminal —
+      // which is true, and is why this does not claim there is no way back.
+      Text {
+        width: parent.width
+        text: "Mail is still checked and still notifies; only the envelope goes. "
+          + "With it off the window opens from a keybinding or a terminal and "
+          + "nowhere else, so bind a key before turning this off:"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "o.bind(\"SUPER + SHIFT + G\", \"Omamail\", "
+          + "\"omarchy shell shell toggle omamail '\{}'\")"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WrapAnywhere
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: barIconSwitch
+      objectName: "showBarIconSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.showBarIcon !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
+  }
+
   // --------------------------------------------------------------- reading
 
   Text {
+    id: readingHeading
     text: "READING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -152,9 +285,136 @@ Column {
     }
   }
 
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(directionText.implicitHeight, directionTrack.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: directionText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: directionTrack.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Message direction"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        // Says what Auto does rather than only naming it: a reader whose mail
+        // is already laid out correctly has no way to tell whether that is the
+        // setting working or the setting being unnecessary.
+        text: "Auto reads it from the message's own text. The interface is unaffected."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    // Three names for one setting, sharing a track and the seams between them,
+    // the way the reader's own view modes do.
+    Rectangle {
+      id: directionTrack
+      objectName: "contentDirectionTrack"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      width: directionSegments.implicitWidth
+      height: directionSegments.implicitHeight
+      radius: Style.cornerRadius
+      color: "transparent"
+      border.width: 1
+      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+
+      Row {
+        id: directionSegments
+        spacing: 0
+
+        // The labels are the stored values: the shell hands a plugin the words
+        // the schema lists rather than a key behind them, so spelling them
+        // anywhere but Direction.js would be a second place to keep them right.
+        DirectionButton {
+          text: Direction.AUTO; mode: Direction.AUTO; firstSegment: true
+        }
+        DirectionButton { text: Direction.LEFT_TO_RIGHT; mode: Direction.LEFT_TO_RIGHT }
+        DirectionButton { text: Direction.RIGHT_TO_LEFT; mode: Direction.RIGHT_TO_LEFT }
+      }
+    }
+  }
+
+  // -------------------------------------------------------- notifications
+
+  Text {
+    id: notificationsHeading
+    text: "NOTIFICATIONS"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(notifyText.implicitHeight, notifySwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: notifyText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: notifySwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "New mail notifications"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Send a desktop notification when new mail arrives in your inbox"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: notifySwitch
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.notifyNewMail
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setNotifyNewMail(!root.service.notifyNewMail)
+    }
+  }
+
   // --------------------------------------------------------------- writing
 
   Text {
+    id: writingHeading
     text: "WRITING"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -216,9 +476,103 @@ Column {
     }
   }
 
+  // A signature signs a mailbox, not a window. Only the selected mailbox is
+  // expanded here: a long account list should not turn Writing into a stack of
+  // editors, and switching is an explicit answer to which identity is edited.
+  Column {
+    objectName: "settings-signature-section"
+    width: parent.width
+    spacing: Style.space(2)
+    // The heading and the note below belong to the fields. With no mailbox
+    // signed in there are none, and first run would otherwise show an
+    // explanation with nothing between it and the heading.
+    visible: root.signatureAccounts.length > 0
+
+    Text {
+      text: "Signature"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      bottomPadding: Style.space(4)
+    }
+
+    Dropdown {
+      objectName: "settings-signature-account-picker"
+      visible: root.signatureAccounts.length > 1
+      width: parent.width
+      showLabel: false
+      value: root.selectedSignatureAccountId
+      options: root.signatureOptions()
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { root.selectSignatureAccount(next) }
+    }
+
+    Rectangle {
+      width: parent.width
+      implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
+        + Style.space(20)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+
+      // The padding is part of the field visually, so it is part of its click
+      // target too. Kept behind the editor so clicks on text still place the
+      // cursor normally.
+      MouseArea {
+        anchors.fill: parent
+        onClicked: signatureEdit.forceActiveFocus()
+      }
+
+      TextEdit {
+        id: signatureEdit
+        objectName: "settings-signature-editor"
+        anchors.fill: parent
+        anchors.margins: Style.space(10)
+        activeFocusOnTab: true
+        selectByMouse: true
+        wrapMode: TextEdit.Wrap
+        textFormat: TextEdit.PlainText
+        color: root.textColor
+        selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+        selectedTextColor: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+
+        // The editor survives account-list updates and routine mailbox polls.
+        // Its text changes only when the selected identity changes.
+        onActiveFocusChanged: if (!activeFocus) root.saveSignature()
+      }
+
+      Text {
+        anchors.left: signatureEdit.left
+        anchors.top: signatureEdit.top
+        enabled: false
+        visible: signatureEdit.text === ""
+        text: "No signature"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    Text {
+      width: parent.width
+      text: "Sits under a new message, and above the quoted text in a reply. "
+        + "Sent as written — no separator line is added in front of it."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Component.onDestruction: root.saveSignature()
+  }
+
   // ------------------------------------------------------------- mailboxes
 
   Text {
+    id: mailboxesHeading
     text: "MAILBOXES"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -319,7 +673,9 @@ Column {
   }
 
   CalendarSettings {
+    id: calendarsSection
     width: parent.width
+    service: root.service
     controller: root.calendarController
     textColor: root.textColor
     dimColor: root.dimColor
@@ -336,6 +692,7 @@ Column {
   // ---------------------------------------------------------- oauth client
 
   Text {
+    id: oauthHeading
     text: "GOOGLE OAUTH CLIENT"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -385,6 +742,28 @@ Column {
       foreground: root.dimColor
       fontFamily: root.panelFontFamily
       onClicked: root.clientSetupRequested()
+    }
+  }
+
+  // One of the three ways a message's direction is arrived at.
+  component DirectionButton: Button {
+    required property string mode
+    property bool firstSegment: false
+    selected: !!root.service && root.service.contentDirection === mode
+    bordered: false
+    foreground: selected ? root.textColor : root.dimColor
+    accent: root.accentColor
+    fontFamily: root.panelFontFamily
+    fontSize: Style.font.caption
+    horizontalPadding: Style.space(7)
+    verticalPadding: Style.space(3)
+    onClicked: if (root.service) root.service.setContentDirection(mode)
+
+    Rectangle {
+      visible: !parent.firstSegment
+      width: 1
+      height: parent.height
+      color: directionTrack.border.color
     }
   }
 }

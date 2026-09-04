@@ -2,6 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/ImapProtocol.js" as Imap
+import "../account/Accounts.js" as Accounts
+import "../account/Aliases.js" as Aliases
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
 // guess was wrong — the servers.
@@ -20,12 +22,10 @@ Column {
   required property color dangerColor
   required property color accentColor
   required property string panelFontFamily
-  property bool canLeave: false
   property int accountCount: 1
   property bool passwordVisible: false
   property bool serversVisible: false
 
-  signal backRequested()
   signal removeRequested()
 
   readonly property var auth: service ? service.auth : null
@@ -46,7 +46,8 @@ Column {
       imapPort: imapPortField.text,
       smtpHost: smtpHostField.text.trim(),
       smtpPort: smtpPortField.text,
-      username: usernameField.text
+      username: usernameField.text,
+      aliases: aliasesField.text
     })
   }
 
@@ -74,6 +75,9 @@ Column {
     if (settings.username !== "") {
       usernameField.text = settings.username
     }
+    if (settings.aliases) {
+      aliasesField.text = Aliases.format(settings.aliases)
+    }
     if (settings.imapHost !== "") {
       imapHostField.text = settings.imapHost
       imapPortField.text = String(settings.imapPort)
@@ -85,10 +89,33 @@ Column {
     }
   }
 
+  // The address is this mailbox's identity, not just a label on it:
+  // `Accounts.accountId` derives the account id from it, and anything that is
+  // not an address derives the empty id a pending row carries. That row then
+  // looks saved and behaves like a draft — it cannot be selected, switched to,
+  // signed, or removed, and there is no way back to it from inside the window.
+  // `validateSettings` cannot catch this: `setupSettings` folds the address
+  // into `username` and hands on no address at all. So it is checked here,
+  // against the same predicate that derives the id, while it is still a typo
+  // the user can see.
+  //
+  // Checked before the server settings because the form reads address first,
+  // and an error should name the first field to go back to.
+  function validatedAddress() {
+    var address = addressField.text.trim()
+    if (Accounts.isValidEmail(address)) return address
+    errorText.text = address === ""
+      ? "Add the email address for this mailbox"
+      : "That is not a full email address"
+    return ""
+  }
+
   // Saved before the password is tried, so a mailbox that the server rejects
   // still has its settings to correct rather than an empty form to fill again.
   function save() {
     if (!service) return
+    var address = validatedAddress()
+    if (address === "") return
     var check = Imap.validateSettings(currentSettings())
     if (!check.ok) {
       errorText.text = check.error
@@ -97,13 +124,15 @@ Column {
     errorText.text = ""
     service.configureCurrentAccount({
       provider: "imap",
-      email: addressField.text.trim(),
+      email: address,
       imap: check.settings
     })
   }
 
   function signIn() {
     if (!service) return
+    var address = validatedAddress()
+    if (address === "") return
     var check = Imap.validateSettings(currentSettings())
     if (!check.ok) {
       errorText.text = check.error
@@ -112,7 +141,7 @@ Column {
     errorText.text = ""
     service.configureCurrentAccountAndSignIn({
       provider: "imap",
-      email: addressField.text.trim(),
+      email: address,
       imap: check.settings
     }, passwordField.text)
   }
@@ -125,14 +154,6 @@ Column {
     function onLastErrorChanged() {
       if (root.auth && root.auth.lastError !== "") errorText.text = root.auth.lastError
     }
-  }
-
-  BackBar {
-    visible: root.canLeave
-    textColor: root.textColor
-    dimColor: root.dimColor
-    panelFontFamily: root.panelFontFamily
-    onActivated: root.backRequested()
   }
 
   // ------------------------------------------------------------------ hero
@@ -194,6 +215,7 @@ Column {
 
     TextField {
       id: addressField
+      objectName: "imap-address-field"
       width: parent.width
       foreground: root.textColor
       font.family: root.panelFontFamily
@@ -205,15 +227,49 @@ Column {
 
     // What a provider wants instead of the website password. Shown as soon as
     // the address names one, because someone typing their everyday password
-    // into this box will otherwise be told only that it was rejected.
-    Text {
+    // into this box will otherwise be told only that it was rejected. A box
+    // rather than a line of caption: a Gmail user who has just been refused by
+    // Google is about to be refused again, and this is the sentence that
+    // stops it — so it is drawn in body text, with the page that explains the
+    // app password one tap away.
+    Rectangle {
       width: parent.width
       visible: root.suggestion.note !== ""
-      text: root.suggestion.note
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
+      implicitHeight: noteColumn.implicitHeight + Style.space(20)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+      border.width: 1
+      border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+
+      Column {
+        id: noteColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(12)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(6)
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: root.suggestion.note
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        LinkLabel {
+          objectName: "imap-password-guide"
+          visible: root.suggestion.guideUrl !== ""
+          text: root.suggestion.guideLabel + "..."
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          tooltipText: root.suggestion.guideUrl
+          onActivated: Qt.openUrlExternally(root.suggestion.guideUrl)
+        }
+      }
     }
 
     Item {
@@ -254,6 +310,7 @@ Column {
 
     Text {
       id: errorText
+      objectName: "imap-error"
       width: parent.width
       visible: text !== ""
       text: ""
@@ -348,12 +405,22 @@ Column {
         font.pixelSize: Style.font.bodySmall
         placeholderText: "Username — only if it is not the address"
       }
+
+      TextField {
+        id: aliasesField
+        objectName: "imap-aliases-field"
+        width: parent.width
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Send-as aliases — comma-separated (e.g. alias@icloud.com (default))"
+      }
     }
 
     Text {
       width: parent.width
       visible: root.serversVisible
-      text: "Connections are TLS on the port given. Plain text is refused unless the server is on this machine."
+      text: "TLS on connect, or a required STARTTLS upgrade on ports 143, 25 and 587. Plain text is refused unless the server is on this machine."
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption

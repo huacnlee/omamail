@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
+import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
@@ -30,6 +31,9 @@ Item {
   property string bodyMode: "reader"
   property real zoom: 1.0
   property bool alwaysRenderHeavyMessages: false
+  // How the direction of a message's own text is arrived at: read off the text,
+  // or fixed by the reader. Not the direction itself — that is per message.
+  property string contentDirection: Direction.MODE_DEFAULT
   // A way back only means something when something is behind it. At desktop
   // width the list is on screen and clicking another row is the navigation;
   // in a single column the reader has replaced the list, so it needs one.
@@ -55,6 +59,43 @@ Item {
   }
 
   readonly property var summary: service ? service.selectedMessage : null
+
+  // Which way this message runs.
+  //
+  // The subject is asked separately from the body, and not as an optimisation:
+  // they can disagree honestly. A reply prefix is Latin whatever the thread is
+  // written in, so `Re: مرحبا` needs the prefix set aside before the question
+  // is asked, while the body has no such wrapper around it.
+  //
+  // The body is read from the message's plain text rather than from its markup.
+  // That is the same text in all three view modes, so switching between them
+  // never changes which way the message reads — and it is the message's own
+  // words rather than a template's, which is what the direction is a fact
+  // about.
+  //
+  // What comes back is the document's base direction, which a sender's own
+  // `dir` still overrides element by element. It is a default for the parts of
+  // the message that state nothing, not a ruling over the parts that do.
+  readonly property string subjectDirection: Direction.resolveSubject(
+    root.summary ? root.summary.subject : "", root.contentDirection)
+  readonly property string bodyDirection: Direction.resolveBody(
+    root.service && root.service.selectedBody ? root.service.selectedBody.text : "",
+    root.contentDirection)
+  // The header lines below the subject carry a name, an address and a date, all
+  // of which Qt lays out correctly from their own first strong character. There
+  // is nothing to add on Auto, and a chosen direction still has to reach them.
+  readonly property string headerDirection: Direction.forced(root.contentDirection)
+
+  // `undefined` rather than a default: a `Text` whose alignment is never set
+  // follows the direction of its own text, and that is the behaviour to leave
+  // in place wherever there is no answer to give it. Assigning Qt's own default
+  // back would render the same and would be one more thing to keep true.
+  readonly property var subjectAlignment: Direction.hasAnswer(root.subjectDirection)
+    ? (Direction.isRightToLeft(root.subjectDirection) ? Text.AlignRight : Text.AlignLeft)
+    : undefined
+  readonly property var headerAlignment: Direction.hasAnswer(root.headerDirection)
+    ? (Direction.isRightToLeft(root.headerDirection) ? Text.AlignRight : Text.AlignLeft)
+    : undefined
   // Already sanitised by the service, remote images and all removed. Qt's rich
   // text engine fetches an <img src="https://..."> for real, so leaving them in
   // would fire every tracking pixel in the message the instant it opened, and
@@ -252,6 +293,7 @@ Item {
         font.pixelSize: Style.font.subtitle
         font.bold: true
         wrapMode: Text.WordWrap
+        horizontalAlignment: root.subjectAlignment
       }
 
       Text {
@@ -264,6 +306,7 @@ Item {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideRight
+        horizontalAlignment: root.headerAlignment
       }
 
       Text {
@@ -276,6 +319,7 @@ Item {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
+        horizontalAlignment: root.headerAlignment
       }
     }
   }
@@ -458,7 +502,8 @@ Item {
             link: root.linkColor,
             quote: root.dimColor,
             fontSize: root.bodyFontSize,
-            maxImageWidth: root.imageWidth
+            maxImageWidth: root.imageWidth,
+            direction: root.bodyDirection
           }))
         : (root.shownMode === "original"
           ? Html.documentFor(root.bodyDocument ? root.bodyDocument : root.rawHtml, ({
@@ -468,13 +513,15 @@ Item {
               quote: root.dimColor,
               padding: 0,
               maxImageWidth: root.imageWidth,
-              compact: root.narrowBody
+              compact: root.narrowBody,
+              direction: root.bodyDirection
             }))
           : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
               ({
                 foreground: root.textColor,
                 background: root.backgroundColor,
-                link: root.linkColor
+                link: root.linkColor,
+                direction: root.bodyDirection
               }), root.bodySource === "html"))
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
@@ -567,6 +614,8 @@ Item {
         required property var modelData
         width: parent.width
         attachment: modelData
+        saving: !!root.service && !!root.service.savingAttachmentIds[
+          String(modelData && modelData.attachmentId ? modelData.attachmentId : "")]
         textColor: root.textColor
         dimColor: root.dimColor
         dimmerColor: root.dimmerColor
@@ -574,6 +623,10 @@ Item {
         onOpenRequested: function(attachment) {
           if (root.service && root.summary)
             root.service.openAttachment(root.summary.id, attachment)
+        }
+        onSaveRequested: function(attachment) {
+          if (root.service && root.summary)
+            root.service.saveAttachment(root.summary.id, attachment)
         }
       }
     }

@@ -9,11 +9,15 @@ runs inside the `omarchy-shell` process you already have, follows your active
 theme, and puts an unread count in the bar.
 
 
-<img width="800" alt="Omamail preview" src="https://github.com/user-attachments/assets/9da73cf7-9b08-421f-b818-bf4fe0e99c00" />
+<img width="800" alt="Omamail - Reading a message in the three-column window" src="docs/images/full-mail.webp" />
+
+The calendar, a new message, and the question every new mailbox starts with:
+
+<img width="265" alt="Omamail - The calendar in month view" src="docs/images/full-calendar.webp" /> <img width="265" alt="Omamail - Writing a new message" src="docs/images/full-compose.webp" /> <img width="265" alt="Omamail - Adding a mailbox: Gmail, HEY or IMAP" src="docs/images/full-add-mailbox.webp" />
 
 And with mini size mode:
 
-<img width="330" alt="image" src="https://github.com/user-attachments/assets/670e2df9-d113-4e94-b4e7-f1787e3a8bc6" /> <img width="330" alt="image" src="https://github.com/user-attachments/assets/23e9dad0-d3f7-49a1-a47b-2227698e1a4d" />
+<img width="265" alt="Omamail - Mini size: the message list" src="docs/images/mini-list.webp" /> <img width="265" alt="Omamail - Mini size: one message open" src="docs/images/mini-message.webp" /> <img width="265" alt="Omamail - Mini size: writing a new message" src="docs/images/mini-compose.webp" />
 
 Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**,
 **Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any
@@ -29,7 +33,7 @@ other IMAP server — including one you run yourself.
   through the HEY CLI that 37signals publish, or add any IMAP mailbox with an
   address and an app password. Several accounts at once, each with its own
   inbox, cache and unread count.
-- **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
+- **Keyboard-first.** `j`/`k` to move, `e` to archive, `v` to file, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
   A key the mailbox has no verb for says so instead of pretending: HEY has
@@ -52,9 +56,21 @@ other IMAP server — including one you run yourself.
   offers an address gets a message; one that only offers a page says so before
   it opens your browser. Nothing is ever fetched from a sender's address until
   you ask.
+- **Attachments open or keep.** The filename opens one in whatever handles its
+  type; the arrow beside it saves the file to your download folder and says
+  where it went. Two messages carrying one name are two files: the second is
+  numbered rather than landing on top of the first.
 - **Images stay blocked.** Loading a sender's pictures tells them the mail was
   read, from which address and when. They load when you ask, for that one
   message.
+- **Right-to-left mail reads right to left.** An Arabic, Hebrew or Persian
+  message lays out from the right — subject, list row, bar preview and body —
+  and an English one alongside it does not. A reply keeps its direction where
+  most clients lose it: `Re:` is Latin whatever the thread is written in, and
+  the prefix is set aside before the question is asked rather than answering it.
+  A sender who states direction only in CSS is understood too, which Qt's own
+  renderer does not do. Set **Message direction** to a fixed direction to have
+  every message read that way instead. The interface itself is unaffected.
 - **Your theme.** Every colour comes from the active Omarchy theme, so the
   mailbox changes the moment the desktop does.
 - **Keyring-backed.** The Gmail refresh token and every IMAP password live in
@@ -117,14 +133,15 @@ it lives in are all `hey`'s, and Omamail never asks for your HEY password.
 Install it once:
 
 ```bash
-curl -fsSL https://hey.com/install-cli | bash
+omarchy-mise-install github:basecamp/hey-cli hey
 ```
 
-Recent versions of Omarchy install it for you as a lazy mise tool, and
-`omarchy-mise-install github:basecamp/hey-cli hey` does the same thing by hand.
-Either way it lands in `~/.local/bin`, which is where Omamail looks when it is
-not already on `PATH`. Then choose **HEY** on the setup page and press **Sign in
-to HEY** — that opens HEY in your browser, and nothing else is asked of you.
+Recent versions of Omarchy install it for you as a lazy mise tool, so that line
+is only for doing it by hand; [37signals' own installer][hey-cli] is the other
+route. Either way it lands in `~/.local/bin`, which is where Omamail looks when
+it is not already on `PATH`. Then choose **HEY** on the setup page and press
+**Sign in to HEY** — that opens HEY in your browser, and nothing else is asked
+of you.
 
 The rail is HEY's own: Imbox, New for you, Reply Later, Set Aside, The Feed and
 Paper Trail. **No Sent** — HEY's API has one, but `hey` does not serve it yet:
@@ -196,7 +213,7 @@ issued refresh tokens that expire after seven days, so the app would sign you
 out every week. Publishing shows an "unverified app" warning once — expected
 for a client you made yourself, since you are the developer and the only user.
 
-If you have the `gcloud` CLI, `scripts/google-cloud-setup.sh` does the two
+If you have the `gcloud` CLI, `scripts/google-cloud-project.sh` does the two
 steps that have an API — creating the project and enabling Gmail — and opens
 the console on the rest with the project already selected. The consent screen
 and the client itself are console-only; there is no CLI for them.
@@ -218,18 +235,21 @@ and the client itself are console-only; there is no CLI for them.
 | `e` | Archive |
 | `d` | Move to trash |
 | `s` | Star or unstar |
+| `v` | Move to a label or folder |
 | `Shift+I` / `Shift+U` | Mark read / unread |
 | `r` / `a` / `f` | Reply, reply all, forward |
 | `c` | Compose |
 | `Ctrl+Enter` | Send |
-| `/` or `Ctrl+K` | Search |
+| `/` | Search |
 | `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
-| `Ctrl+?` | Every shortcut |
+| `?` | Every shortcut |
 
 Search paints matching cached rows first and adds server results as they arrive. It takes Gmail's own operator syntax straight through — `from:jane`, `has:attachment`, `older_than:7d`. The Unread mailbox leaves Promotions, Social and Forums out rather than asking for Primary: Gmail's categories do not remove the `INBOX` label, so an unread filter without that exclusion comes back as the whole promotional backlog rather than the mail you have not read — while one that asks for Primary comes back empty on any account where Gmail is not applying the category labels, which is unread mail with nothing left to say so. Updates stays in, because receipts, deliveries and notifications land there. Right-click any row in the list for archive, trash, spam, star and read/unread without leaving the keyboard cursor behind.
+
+A signature is set per mailbox on the settings page, under Writing. It is placed under a new message and above the quoted text in a reply, so a sign-off stays next to the words it signs rather than stranded below a screen of somebody else's message. It is sent exactly as typed — no `-- ` line is added in front of it, because a client that adds one turns a signature into two decisions, and the line is one keystroke away for anybody who wants it. Each mailbox keeps its own: two addresses are two identities, and one sign-off under both is wrong for whichever it was not written for. A saved draft is reopened as it was written, so resuming one never signs it twice.
 
 ## What it does not do
 
@@ -241,7 +261,6 @@ Search paints matching cached rows first and adds server results as they arrive.
   written in. A browser engine cannot be embedded in a plugin at all:
   `QtWebEngineQuick::initialize()` has to run before the host process builds
   its `QGuiApplication`, and a plugin loads long after that.
-- **No attachment downloads.** Not yet.
 
 Remote images in a message body are blocked until you ask for them, and asking
 covers that one message. Qt really does fetch an `<img src="https://…">`, so
@@ -289,12 +308,13 @@ calendars and writes events.
 ## Development
 
 ```bash
-./install.sh          # symlink this checkout into ~/.config/omarchy/plugins
+make install          # symlink this checkout into ~/.config/omarchy/plugins
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
-Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
-[docs/SPEC.md](docs/SPEC.md).
+How to send a change — there is no issue tracker — is in
+[CONTRIBUTING.md](CONTRIBUTING.md). Working agreements are in
+[AGENTS.md](AGENTS.md) and the specification is in [docs/SPEC.md](docs/SPEC.md).
 
 Omamail is an independent project and is not affiliated with Google or
 37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals,

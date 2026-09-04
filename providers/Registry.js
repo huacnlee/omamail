@@ -34,6 +34,10 @@ function capabilities(values) {
   return {
     // Several labels on one message, rather than one folder holding it.
     labels: raw.labels === true,
+    // A destination the user names. A different question from `labels`: a
+    // mailbox with one folder per message cannot label anything and can still
+    // be told where to put it, which is IMAP exactly.
+    move: raw.move === true,
     // A server-side conversation id.
     threads: raw.threads === true,
     // "Archive" means something.

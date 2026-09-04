@@ -2,10 +2,11 @@
 # Writes one line from stdin to $XDG_CONFIG_HOME/omamail/<name> with
 # owner-only permissions.
 #
-# Neither file it writes is world-readable: a desktop client's secret is only
+# No file it writes is world-readable: a desktop client's secret is only
 # "not treated as confidential" by Google, which is not the same as public, and
-# the account list names every mailbox on this machine. Plugin settings would
-# have been the obvious home for both, but shell.json is world-readable.
+# the account list names every mailbox on this machine. Compose recovery also
+# contains message text. Plugin settings would have been the obvious home for
+# these files, but shell.json is world-readable.
 #
 # One line, read with `read` rather than `cat`: Quickshell's Process.write()
 # never closes stdin, so anything waiting for EOF hangs forever.
@@ -13,9 +14,9 @@ set -eu
 
 name=${1:-}
 case "$name" in
-  credentials.json|accounts.json|window.json|calendars.json) ;;
+  credentials.json|accounts.json|window.json|calendars.json|compose.json) ;;
   *)
-    printf '%s\n' 'usage: config-store.sh credentials.json|accounts.json|window.json|calendars.json' >&2
+    printf '%s\n' 'usage: config-store.sh credentials.json|accounts.json|window.json|calendars.json|compose.json' >&2
     exit 2
     ;;
 esac
@@ -37,10 +38,19 @@ fi
 # with first-run state. A saved account always has a validated email address;
 # a draft has an empty one. Keep this invariant at the final write boundary so
 # it also protects an old service instance during an upgrade.
+#
+# A merely non-empty address is not the test. A row holding something that is
+# not an address — a username typed into the address field — derives no account
+# id, so it is setup state too, and treating it as a saved account is what let
+# a working mailbox be overwritten by a row nothing could select or remove.
+# This is a coarse stand-in for Accounts.js's EMAIL_PATTERN rather than a mirror
+# of it: it only has to tell an address from setup state, and the QML guard has
+# already refused anything looser by the time a payload reaches here.
+saved_account='"email"[[:space:]]*:[[:space:]]*"[^"@]+@[^"@.]+(\.[^"@.]+)+"'
+
 if [ "$name" = accounts.json ] && [ -s "$target" ] \
-  && grep -Eq '"email"[[:space:]]*:[[:space:]]*"[^"]+"' "$target" \
-  && ! printf '%s\n' "$payload" \
-    | grep -Eq '"email"[[:space:]]*:[[:space:]]*"[^"]+"'; then
+  && grep -Eq "$saved_account" "$target" \
+  && ! printf '%s\n' "$payload" | grep -Eq "$saved_account"; then
   printf '%s\n' 'refusing to replace saved accounts with setup state' >&2
   exit 4
 fi

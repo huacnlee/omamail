@@ -40,11 +40,6 @@ assert.ok(model.setupActionLabel("no_credentials").endsWith("..."))
 assert.strictEqual(model.setupActionLabel("signing_in"), "Cancel")
 assert.ok(model.setupActionLabel("no_credentials", "IMAP", "password").endsWith("..."))
 
-// Rebuilding an account briefly leaves the service with no current host. The
-// edit page keeps the provider it opened for instead of following the
-// service's temporary Gmail fallback.
-assert.strictEqual(model.setupProvider("imap", "gmail"), "imap")
-assert.strictEqual(model.setupProvider("", "imap"), "imap")
 // An IMAP sign-in never opens a browser, so it must not say it will.
 assert.ok(model.setupDetail("signing_in", [], "", "IMAP", "password").indexOf("browser") < 0)
 assert.ok(model.setupDetail("signing_in", [], "", "Gmail", "oauth").indexOf("browser") > 0)
@@ -66,9 +61,53 @@ assert.strictEqual(model.survivesAction("inbox", "trash"), false)
 assert.strictEqual(model.survivesAction("trash", "trash"), true)
 assert.strictEqual(model.survivesAction("trash", "untrash"), false)
 
+// A move is archive with a destination, so it leaves the same lists archive
+// leaves. Reading a user label goes through `rawQuery` and keeps this key on
+// "inbox", which is why moving between two labels takes the row away.
+assert.strictEqual(model.survivesAction("inbox", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("unread", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("all", "label:Label_7"), true, "All mail still contains a moved message")
+assert.strictEqual(model.survivesAction("starred", "label:Label_7", "folder:Receipts"), false,
+  "a selected folder leaves even when the previous mailbox key was Starred")
+
 deepEqual(model.labelChangesFor("archive"), { add: [], remove: ["INBOX"] })
 deepEqual(model.labelChangesFor("star"), { add: ["STARRED"], remove: [] })
 assert.strictEqual(model.labelChangesFor("trash"), null, "trash is its own endpoint, not a label change")
+
+// The destination rides inside the verb, so the pipeline that carries one
+// string carries the move too.
+deepEqual(model.labelChangesFor("label:Label_7"), { add: ["Label_7"], remove: ["INBOX"] })
+deepEqual(model.labelChangesFor("label:Label_7", "Label_3"),
+  { add: ["Label_7"], remove: ["INBOX", "Label_3"] },
+  "moving from a Gmail label removes the label that supplied the current view")
+assert.strictEqual(model.labelTarget("label:Label_7"), "Label_7")
+assert.strictEqual(model.labelTarget("archive"), "", "a verb that is not a move names no label")
+assert.strictEqual(model.labelChangesFor("label:"), null, "a move with no destination is not a change")
+
+// Not the `labels` capability, which is about the strip the reader draws: a
+// mailbox with one folder per message is the case where moving is the plain
+// thing to do. What the guard in `act` asks is whether the destination is the
+// user's to name, which on HEY it is not.
+assert.strictEqual(model.actionCapability("label:Label_7"), "move")
+assert.strictEqual(model.actionUnavailable("label:Label_7", "HEY"), "HEY has no destination you can name")
+
+// ------------------------------------------------------- movable labels
+//
+// The rail draws the system labels, so offering them here would put a second
+// archive in a list whose job is the destinations with no key of their own.
+const labelSet = [
+  { id: "L2", name: "zebra" },
+  { id: "S1", name: "Inbox", system: true },
+  { id: "L1", name: "Archive notes" },
+  { id: "L3", name: "banana" }
+]
+deepEqual(model.movableLabels(labelSet, "").map(l => l.id), ["L1", "L3", "L2"])
+deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3"], "filtering is case-insensitive and matches anywhere")
+deepEqual(model.movableLabels(labelSet, "  ZEB  ").map(l => l.id), ["L2"], "a typed query is trimmed")
+deepEqual(model.movableLabels(labelSet, "inbox").map(l => l.id), [], "a system label is not a destination")
+deepEqual(model.movableLabels(labelSet, "", "L3").map(l => l.id), ["L1", "L2"],
+  "the current Gmail label or IMAP folder is not a move destination")
+deepEqual(model.movableLabels(null, ""), [])
 
 // The optimistic update has to move the derived flags too, or a row shows a
 // filled star with `starred: false` underneath it until the next refresh.
@@ -182,6 +221,37 @@ deepEqual(model.newArrivals(inbox, { a: true }, true).map(entry => entry.id), ["
 deepEqual(model.newArrivals(inbox, { a: true, c: true }, true), [])
 deepEqual(model.newArrivals([], {}, true), [])
 
+// The floor keeps an old unread message that was never on the cached page from
+// being announced as an arrival the first time a fetch returns it.
+const floor = Date.parse("2026-08-01T00:00:00Z")
+const timeInbox = [
+  { id: "old", unread: true, inInbox: true, date: new Date(floor - 1000000) },
+  { id: "new", unread: true, inInbox: true, date: new Date(floor + 1000) },
+  { id: "nodate", unread: true, inInbox: true, date: null }
+]
+deepEqual(model.newArrivals(timeInbox, {}, true, floor).map(entry => entry.id),
+  ["new", "nodate"],
+  "an older message is not an arrival, and one with no date is still announced")
+
+// The floor is the mailbox's own newest timestamp, not this machine's clock.
+// Taken from `Date.now()` on a machine running fast, every arrival is older
+// than a "now" the server has not reached and notifications stop for the whole
+// session — so what seeds it is the page, and it has to come out of the page.
+assert.strictEqual(model.newestDate(timeInbox), floor + 1000)
+assert.strictEqual(model.newestDate([{ id: "x", date: null }]), 0)
+assert.strictEqual(model.newestDate([]), 0)
+assert.strictEqual(model.newestDate(null), 0)
+
+// A clock an hour ahead of the server used to silence the mailbox entirely.
+const skewed = model.newestDate(timeInbox)
+deepEqual(model.newArrivals(timeInbox, {}, true, skewed).map(entry => entry.id),
+  ["new", "nodate"],
+  "the newest row is itself never below the floor it set")
+
+// No floor at all is the shape every caller had before one existed.
+deepEqual(model.newArrivals(timeInbox, {}, true, 0).map(entry => entry.id),
+  ["old", "new", "nodate"])
+
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "Due Friday" }), "Invoice\nDue Friday")
 assert.strictEqual(model.notificationBody({ subject: "Invoice", snippet: "" }), "Invoice")
 assert.strictEqual(model.notificationBody(null), "")
@@ -200,9 +270,16 @@ assert.strictEqual(model.resultSummary([{}, {}], 87, true), "2 of about 87")
 assert.strictEqual(model.resultSummary([{}, {}, {}], 1, true), "3 messages so far")
 assert.strictEqual(model.resultSummary([{}, {}, {}], 3, true), "3 messages so far")
 
-assert.strictEqual(model.statusSummary("Checking for mail"), "Checking for mail")
-assert.strictEqual(model.statusSummary("Synced just now"), "Synced just now")
-assert.strictEqual(model.statusSummary(""), "")
+// The foot of the window names the account and then its sync age, in a
+// form short enough to sit after an address.
+assert.strictEqual(model.syncedShort("Synced 1m ago"), "1m ago")
+assert.strictEqual(model.syncedShort("Synced just now"), "just now")
+assert.strictEqual(model.syncedShort("Checking for mail"), "checking")
+assert.strictEqual(model.syncedShort(""), "")
+assert.strictEqual(model.accountStatusLine("me@example.com", "Synced 1m ago"), "me@example.com · 1m ago")
+assert.strictEqual(model.accountStatusLine("me@example.com", ""), "me@example.com",
+  "nothing synced yet is just the address, not a dangling dot")
+assert.strictEqual(model.accountStatusLine("", "Synced 1m ago"), "Not connected")
 
 assert.strictEqual(model.truncate("short", 20), "short")
 assert.strictEqual(model.truncate("a much longer string", 10), "a much lo…")
@@ -513,11 +590,6 @@ assert.ok(model.setupDetail("no_credentials", [], "", "HEY", "cli").indexOf("nev
 assert.strictEqual(model.setupActionLabel("tools_missing", "HEY", "cli"), "Check again")
 assert.strictEqual(model.setupActionLabel("no_credentials", "HEY", "cli"), "Sign in to HEY...")
 
-// The setup page is chosen by the provider being edited, falling back to the
-// one on screen.
-assert.strictEqual(model.setupProvider("hey", "gmail"), "hey")
-assert.strictEqual(model.setupProvider("", "hey"), "hey")
-
 // Switching accounts keeps the mailbox the person was using when the target
 // provider offers the same one. Provider-specific mailboxes do not get
 // invented on a provider that has no such destination.
@@ -527,3 +599,42 @@ assert.strictEqual(model.mailboxAfterAccountSwitch("unread", [
 assert.strictEqual(model.mailboxAfterAccountSwitch("starred", [
   { key: "inbox" }, { key: "unread" }
 ]), "")
+
+// ------------------------------------------------------- settings sidebar
+
+// The sidebar names the section the reader is looking at: the last heading
+// scrolled past the top of the viewport. Above the first heading it is the
+// first section.
+const sections = [
+  { key: "reading", title: "Reading", y: 40 },
+  { key: "writing", title: "Writing", y: 300 },
+  { key: "mailboxes", title: "Mailboxes", y: 700 }
+]
+assert.strictEqual(model.activeSettingsSection(sections, 0), "reading")
+assert.strictEqual(model.activeSettingsSection(sections, 299), "reading")
+assert.strictEqual(model.activeSettingsSection(sections, 300), "writing")
+assert.strictEqual(model.activeSettingsSection(sections, 699), "writing")
+assert.strictEqual(model.activeSettingsSection(sections, 700), "mailboxes")
+assert.strictEqual(model.activeSettingsSection(sections, 5000), "mailboxes")
+assert.strictEqual(model.activeSettingsSection([], 100), "", "no sections, no answer")
+// Order on screen, not order given: a page whose sections are listed out of
+// order still highlights the one that is actually at the top.
+assert.strictEqual(model.activeSettingsSection([sections[2], sections[0], sections[1]], 300), "writing")
+
+// The content is padded so the last heading can reach the top: a 900px page
+// in a 500px viewport scrolls to 1200, not 400, when its last heading is at
+// 700. A page already taller than that needs no padding.
+assert.strictEqual(model.settingsContentHeight(sections, 900, 500), 1200)
+assert.strictEqual(model.settingsContentHeight(sections, 1500, 500), 1500)
+assert.strictEqual(model.settingsContentHeight([], 900, 500), 900, "nothing to reach, nothing to pad")
+
+// Where a click scrolls to: the heading's y, clamped into what the content can
+// actually scroll to — a no-op once the content is padded, and the guard that
+// keeps a stale geometry from asking for a gap under the page. An unknown key
+// scrolls nowhere.
+assert.strictEqual(model.settingsScrollTarget(sections, "writing", 1200, 500), 300)
+assert.strictEqual(model.settingsScrollTarget(sections, "mailboxes", 1200, 500), 700)
+assert.strictEqual(model.settingsScrollTarget(sections, "mailboxes", 1000, 500), 500, "clamped to the end")
+assert.strictEqual(model.settingsScrollTarget(sections, "reading", 400, 500), 0, "a page shorter than its viewport does not scroll")
+assert.strictEqual(model.settingsScrollTarget(sections, "nope", 1200, 500), -1)
+assert.strictEqual(model.settingsScrollTarget(null, "reading", 1200, 500), -1)

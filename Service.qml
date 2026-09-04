@@ -12,6 +12,7 @@ import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
+import "message/Direction.js" as Direction
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -48,16 +49,38 @@ Item {
     refreshIntervalSec: 120,
     maxMessages: 25,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
+    contentDirection: Direction.MODE_DEFAULT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
-    undoSendSeconds: 10
+    undoSendSeconds: 10,
+    unifiedCalendarView: false,
+    showBarIcon: true
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
+  readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  // Which way a message's own text is read: worked out from the text, or fixed
+  // by the reader. The window's chrome is not affected either way — this is a
+  // fact about the mail, not about the interface around it.
+  readonly property string contentDirection: Direction.normalizeMode(
+    settings ? settings.contentDirection : null)
+  readonly property bool unifiedCalendarView: !!settings
+    && settings.unifiedCalendarView === true
+
+  // Whether the bar draws an envelope for this.
+  //
+  // A settings file written before this existed keeps its icon because
+  // `applySettings` lays every default down first, so a missing key is
+  // already the manifest's `true` — the same way `unifiedCalendarView` gets
+  // its `false`. What "anything but a stored false" buys instead is the
+  // hand-edited `shell.json`: a `"false"` or a `0` in there is somebody's
+  // typo rather than an answer given in the interface, and a typo should not
+  // be what takes the icon away.
+  readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -72,7 +95,7 @@ Item {
 
   function registerMailtoHandler() {
     if (pluginDir === "" || mailtoInstaller.running) return
-    mailtoInstaller.command = [pluginDir + "/scripts/install-mailto.sh", pluginDir]
+    mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
     mailtoInstaller.running = true
   }
 
@@ -107,6 +130,22 @@ Item {
     persistSetting("heavyMessageRendering", Html.heavyMessageRendering(value))
   }
 
+  function setNotifyNewMail(value) {
+    persistSetting("notifyNewMail", value ? "On" : "Off")
+  }
+
+  function setContentDirection(value) {
+    persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setUnifiedCalendarView(value) {
+    persistSetting("unifiedCalendarView", value === true)
+  }
+
+  function setShowBarIcon(value) {
+    persistSetting("showBarIcon", value === true)
+  }
+
   // ---------------------------------------------------------- the accounts
 
   property var accountList: Accounts.emptyList()
@@ -116,6 +155,13 @@ Item {
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
   readonly property string activeAccountId: accountList ? accountList.activeId : ""
+  // Read here rather than in the compose view, so the window never reaches into
+  // the account list itself. A pending account has no id and so no signature,
+  // which is the same answer as having set none.
+  readonly property string activeSignature: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? String(entry.signature || "") : ""
+  }
   readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
     ? String(current.accountId) : "__no_google_account__"
 
@@ -187,7 +233,19 @@ Item {
   function switchToIndex(index) {
     var accounts = accountList ? accountList.accounts : []
     if (index < 0 || index >= accounts.length) return false
-    if (index === indexOfActiveAccount()) return true
+    // Already the row the id names — but `activeIndex` can still be holding a
+    // draft opened before this call, and it outranks the id everywhere the
+    // editing row is worked out. Clearing it is the same correction `switchTo`
+    // makes above. Without it, Edit on a mailbox chosen while Add had a draft
+    // on screen opened that draft's empty form instead, and Remove then
+    // targeted the draft rather than the mailbox that was clicked.
+    if (index === indexOfActiveAccount()) {
+      if (activeIndex >= 0) {
+        activeIndex = -1
+        refreshCurrent()
+      }
+      return true
+    }
     if (accounts[index].id !== "") {
       return switchTo(accounts[index].id)
     }
@@ -202,7 +260,12 @@ Item {
   function addAccount(provider) {
     accountList = Accounts.add(accountList, ({
       email: "", clientId: "", clientSecret: "",
-      provider: provider || Provider.DEFAULT_ID
+      provider: provider || Provider.DEFAULT_ID,
+      // Working state for the form, and it says so rather than leaving the
+      // write boundary to guess from a missing id — which is what it used to
+      // do, and what made it delete a mailbox whose address had been corrupted.
+      // `makeAccount` clears this the moment a real address arrives.
+      pending: true
     }))
     // This row is working state for the form, not an account yet. Persisting
     // it here leaves a "New account" behind when Back cancels Add; the first
@@ -217,12 +280,13 @@ Item {
   }
 
   function discardCurrentDraft() {
-    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var index = editingIndex()
     var next = Accounts.discardDraftAt(accountList, index)
-    if (Accounts.count(next) === accountCount) return
+    if (Accounts.count(next) === accountCount) return false
     activeIndex = -1
     accountList = next
     refreshCurrent()
+    return true
   }
 
   function removeAccount(id) {
@@ -249,6 +313,13 @@ Item {
     // provider decides what it is about to be called.
     var named = Accounts.accountId(email, accounts[index].provider)
     if (accounts[index].id === named) return
+    // The other place an address reaches the list, and the other place one that
+    // is not an address can destroy a mailbox: an empty id means `accountId`
+    // could make nothing of what the provider reported, and writing it would
+    // replace a working row's address with a name that addresses nothing. A
+    // rename that cannot produce an id has nothing to offer, so it is refused
+    // rather than stored — the row keeps the address it already answers to.
+    if (named === "") return
 
     // Two rows cannot hold one address. Rebuilding the list would fold them
     // together and take the row being added with it, which read as the add
@@ -323,19 +394,45 @@ Item {
   // never written, and the watcher then read the older file back over it.
   property bool accountsSaveQueued: false
 
+  // Identical text is not a write. The editor saves when it is done with
+  // rather than on every keystroke, but it is also rebuilt by the write it
+  // causes — so the value it hands back on the way out is routinely the one
+  // already on disk, and a file round trip for it would be pure cost.
+  function setAccountSignature(id, text) {
+    var next = Accounts.setSignature(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
   function saveAccounts() {
     if (!accountsLoaded) return
     // A nameless row is setup state, never a mailbox. There is no legitimate
     // path that persists only one — Add waits for configureAccount, and the UI
     // does not remove the final saved account — so refusing this write is the
     // last line of defence against replacing every account with first-run.
-    if (!Accounts.hasSavedAccounts(accountList)) return
+    //
+    // Only the mailboxes, never the form's own working row: a save triggered by
+    // one account used to carry whatever draft happened to be open along with
+    // it, stranding a row on disk that nothing could select or remove. The
+    // guard is applied to that stripped list rather than to what is in memory,
+    // so it is testing the bytes that are about to be written instead of
+    // trusting the two to agree.
+    var writable = Accounts.savedOnly(accountList)
+    if (!Accounts.hasSavedAccounts(writable)) return
+    // And no mailbox the list could name may go missing on the way to the
+    // payload. The guard above is about the list as a whole — one real mailbox
+    // in it is enough to satisfy it, which is exactly why it let a write
+    // through that had dropped a different, working account. This one is per
+    // row. Removal never arrives here as an omission: it goes through
+    // `remove` or `removeAt`, so the row is gone from `accountList` too.
+    if (Accounts.dropsNamedMailbox(accountList, writable)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
       return
     }
     accountsSaveQueued = false
-    accountsWritePayload = Accounts.serialize(accountList)
+    accountsWritePayload = Accounts.serialize(writable)
     accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
     accountsWriter.running = true
   }
@@ -350,14 +447,20 @@ Item {
     // First run, or an install that predates several accounts: one nameless
     // row so the existing credentials file still has somewhere to live.
     if (Accounts.count(loaded) === 0)
-      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "" }))
+      loaded = Accounts.add(loaded, ({ email: "", clientId: "", clientSecret: "", pending: true }))
     // Reading back our own write must change nothing. The list is watched so
     // that an edit from outside is picked up, but every save triggers that
     // watch — and reassigning the list re-derives every account's id, which
     // resets its cache and its session. That is what made adding a mailbox
     // flicker through several states: the window was rebuilding every account
     // each time the file it had just written landed back.
-    if (accountsLoaded && Accounts.serialize(loaded) === Accounts.serialize(accountList))
+    //
+    // Compared on the saved rows alone, because that is all the write contains.
+    // Against the whole in-memory list an open draft would make every read-back
+    // look like an outside edit, and adopting it would destroy the row the user
+    // is typing into.
+    if (accountsLoaded && Accounts.serialize(Accounts.savedOnly(loaded))
+        === Accounts.serialize(Accounts.savedOnly(accountList)))
       return
     // What is on disk is behind what is in memory until the pending write
     // lands, so a reload now would be a straight revert.
@@ -521,6 +624,26 @@ Item {
   }
 
   // The switcher's model: every mailbox, its count, and why it is not usable.
+  // Deliberately not part of accountSummaries. That array is rebuilt from
+  // `unread`, `active`, `signedIn`, `busy` and `error`, so a poll replaces it
+  // twice a cycle with no account having changed — and a settings field built
+  // over it is destroyed and refilled under whoever is typing in it. This
+  // changes only when the account list does.
+  readonly property var accountSignatures: {
+    var out = []
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      // A mailbox part-way through being added has no id to save against.
+      if (!accounts[i].id) continue
+      out.push({
+        id: accounts[i].id,
+        email: accounts[i].email,
+        signature: String(accounts[i].signature || "")
+      })
+    }
+    return out
+  }
+
   readonly property var accountSummaries: {
     var out = []
     var accounts = accountList ? accountList.accounts : []
@@ -581,6 +704,13 @@ Item {
   readonly property var auth: current ? current.auth : null
   readonly property bool ready: !!current && current.ready
   readonly property string accountEmail: current ? current.accountEmail : ""
+  // The short name the switcher shows for the account on screen — the label
+  // the user gave it, or the local part of its address. The sidebar's user
+  // bar shows this; the full address is on the status line.
+  readonly property string accountLabel: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? Accounts.label(entry) : ""
+  }
   readonly property var sendAsAliases: current ? current.availableSendAsAliases : []
   // Every address a new message may be sent as, across signed-in mailboxes.
   // Compose reads this and hides the ones that do not belong on a reply.
@@ -604,7 +734,7 @@ Item {
   }
   readonly property string accountAddress: {
     var accounts = accountList ? accountList.accounts : []
-    var index = activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+    var index = editingIndex()
     return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
   }
   readonly property int inboxUnread: current ? current.inboxUnread : 0
@@ -624,10 +754,12 @@ Item {
   readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
   readonly property bool canOpenWebInbox: !!current && current.canOpenWebInbox
   readonly property var unavailableActions: current ? current.unavailableActions : []
+  readonly property var savingAttachmentIds: current ? current.savingAttachmentIds : ({})
   readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
+  readonly property string rawLabelId: current ? current.rawLabelId : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
@@ -660,7 +792,17 @@ Item {
   readonly property bool unsubscribing: !!current && current.unsubscribing
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool detailPainted: !!current && current.detailPainted
-  readonly property bool sending: !!current && current.sending
+  // ComposeView owns one parked draft for the whole service, so an in-flight
+  // send is global even though the request belongs to one account host. This
+  // also keeps the visible Send button honest after switching accounts.
+  readonly property var sendingHost: {
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host && host.sending) return host
+    }
+    return null
+  }
+  readonly property bool sending: !!sendingHost
   readonly property var pendingSendHost: {
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
@@ -690,13 +832,31 @@ Item {
   }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
-  function selectLabel(name) { if (current) current.selectLabel(name) }
+  function selectLabel(name, labelId) {
+    if (current) current.selectLabel(name, labelId)
+  }
+  function refuseUnavailableAction(action) {
+    return current ? current.refuseUnavailableAction(action) : true
+  }
   function act(id, action, quiet) {
     return current ? current.act(id, action, quiet) : false
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
-  function send(fields) { return current ? current.send(fields) : false }
+  function send(fields) {
+    // The button has the same guard, but Ctrl+Return reaches this function
+    // directly. Enforce the one-global-parked-draft invariant at the action
+    // boundary so another account cannot overwrite it.
+    if (pendingSendHost) {
+      if (current) current.fail("Another message is waiting to be sent")
+      return false
+    }
+    if (sendingHost) {
+      if (current) current.fail("Another message is still being sent")
+      return false
+    }
+    return current ? current.send(fields) : false
+  }
   function saveDraft(fields, callback) {
     var values = fields || ({})
     var target = String(values.accountId || "")
@@ -730,6 +890,10 @@ Item {
   function openAttachment(messageId, attachment) {
     if (current) current.openAttachment(messageId, attachment)
   }
+
+  function saveAttachment(messageId, attachment) {
+    if (current) current.saveAttachment(messageId, attachment)
+  }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null
   }
@@ -747,7 +911,7 @@ Item {
   // one on screen. Addressed by index because that is the only handle on a row
   // that has no address yet — which is exactly the row being filled in.
   function configureCurrentAccount(values) {
-    configureAccount(activeIndex >= 0 ? activeIndex : indexOfActiveAccount(), values)
+    configureAccount(editingIndex(), values)
   }
 
   // Saving a new address rebuilds the account host. Wait for that replacement
@@ -772,6 +936,18 @@ Item {
     }
     return -1
   }
+
+  // Which row the setup page is editing. `activeIndex` is the override a row
+  // with no id needs — it cannot be named — and the active account's own
+  // position answers for every other row. One function because three callers
+  // used to spell this out for themselves and a fourth, the Remove button,
+  // spelled it differently: it asked `indexOfActiveAccount()` alone, so on the
+  // page of a freshly added mailbox it named the mailbox that was on screen
+  // before the add, and removing it deleted a working account.
+  function editingIndex() {
+    return activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
+  }
+
   function openInBrowser(id) { if (current) current.openInBrowser(id) }
   function openWebInbox() { if (current) current.openWebInbox() }
 
@@ -819,6 +995,16 @@ Item {
   }
 
   signal replySent()
+  signal replyFailed()
+
+  // A queued send keeps running on its own account when the visible mailbox
+  // changes. Put that account back in front before App restores the draft, so
+  // a retry cannot be addressed to whichever mailbox happened to be visible.
+  function forwardReplyFailure(index) {
+    var host = accountAt(index)
+    if (host && host !== current) switchToIndex(index)
+    replyFailed()
+  }
 
   // ------------------------------------------------------------- instances
 
@@ -886,6 +1072,7 @@ Item {
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
+      onReplyFailed: root.forwardReplyFailure(index)
 
       Component.onCompleted: Qt.callLater(root.refreshCurrent)
       Component.onDestruction: Qt.callLater(root.refreshCurrent)

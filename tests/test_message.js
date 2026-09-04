@@ -75,6 +75,56 @@ assert.ok(message.decodeHeaderValue("=?GB2312?B?1eLK1w==?=").length > 0)
 assert.strictEqual(message.decodeHeaderValue(""), "")
 assert.strictEqual(message.decodeHeaderValue(null), "")
 
+// ------------------------------------------- a charset that is not the truth
+
+// A charset header is a claim, and a sender that declares one and sends
+// another is common. Read as one byte each, the UTF-8 for "ń" is "Å" followed
+// by a control character — so the two readings are never both plausible and
+// the bytes decide.
+const polish = "Dzień dobry, zmieniła się wartość wskaźników"
+const polishData = b64url(polish)
+
+;["us-ascii", "iso-8859-1", "iso-8859-2", "windows-1250", "UTF-8"].forEach(function(charset) {
+  assert.strictEqual(message.decodePart({
+    mimeType: "text/plain",
+    headers: [{ name: "Content-Type", value: "text/plain; charset=" + charset }],
+    body: { data: polishData }
+  }), polish, charset + " must not turn UTF-8 into mojibake")
+})
+
+// Genuine single-byte text is left to its declaration. "ç" is 0xE7 in
+// Latin-1, which is a lead byte with no continuation after it — malformed
+// UTF-8, so the header keeps the decision.
+assert.strictEqual(message.decodePart({
+  mimeType: "text/plain",
+  headers: [{ name: "Content-Type", value: "text/plain; charset=iso-8859-1" }],
+  body: { data: Buffer.from([0x46, 0x72, 0x61, 0x6e, 0xe7, 0x61, 0x69, 0x73])
+    .toString("base64") }
+}), "Français")
+
+// The evidence, on its own. Only a well-formed multi-byte sequence counts:
+// everything else is likelier to be single-byte text that happens to begin
+// one than UTF-8 worth trusting over the header.
+assert.strictEqual(message.looksLikeUtf8([0x68, 0x69]), false,
+  "ASCII is both readings, so it is no evidence for either")
+assert.strictEqual(message.looksLikeUtf8([0xc5, 0x84]), true)
+assert.strictEqual(message.looksLikeUtf8([0x41, 0xb3, 0x42]), false,
+  "a continuation byte with no lead is how ISO 8859-2 writes ł")
+assert.strictEqual(message.looksLikeUtf8([0x41, 0xc5]), false, "a truncated tail")
+assert.strictEqual(message.looksLikeUtf8([0xc0, 0xaf]), false, "an overlong form")
+assert.strictEqual(message.looksLikeUtf8([0xed, 0xa0, 0x80]), false, "a surrogate")
+assert.strictEqual(message.looksLikeUtf8([0xf5, 0x80, 0x80, 0x80]), false,
+  "beyond the last code point")
+assert.strictEqual(message.looksLikeUtf8([]), false)
+assert.strictEqual(message.looksLikeUtf8(null), false)
+
+// A subject is decoded through the same door, so a mislabelled encoded word
+// comes out right too.
+assert.strictEqual(
+  message.decodeHeaderValue("=?iso-8859-1?B?"
+    + Buffer.from("wartość", "utf8").toString("base64") + "?="),
+  "wartość")
+
 // ------------------------------------------------------------- addresses
 
 deepEqual(message.parseAddress("Jane Doe <jane@example.com>"),
@@ -362,6 +412,87 @@ assert.strictEqual(
   Buffer.from(payload.raw, "base64url").toString("utf8").indexOf("To: a@b.com"), 0)
 assert.strictEqual(message.buildSendPayload({ to: "a@b.com" }).threadId, undefined)
 
+// ------------------------------------------- the direction a message states
+//
+// The compose field is resolved by Qt from the text in it, so the writer sees
+// their own paragraph the right way round. None of that leaves with the
+// message: a `text/plain` part states no direction, and a client with nothing
+// to read assumes left-to-right. An HTML twin beside the plain text is the
+// only thing every client honours, so a right-to-left message grows one.
+{
+  const persian = "سلام، عرض ادب\n\nبا تشکر"
+  const raw = message.buildRawMessage({
+    to: "you@example.com", subject: "سلام", body: persian, boundary: "FABOUND"
+  })
+
+  const parsed = message.parseRfc822(raw)
+  assert.strictEqual(parsed.mimeType, "multipart/alternative")
+  assert.strictEqual(parsed.parts.length, 2)
+  // Least preferred first: a client showing one alternative shows the last it
+  // understands, and the twin is the part carrying the direction.
+  assert.strictEqual(parsed.parts[0].mimeType, "text/plain")
+  assert.strictEqual(message.decodePart(parsed.parts[0]), persian,
+    "the plain part is the message as written, unchanged")
+  assert.strictEqual(parsed.parts[1].mimeType, "text/html")
+  assert.ok(message.decodePart(parsed.parts[1]).indexOf('<body dir="rtl">') > 0)
+
+  // Line breaks are what a plain body says with, so they have to survive the
+  // crossing into markup.
+  assert.ok(message.decodePart(parsed.parts[1]).indexOf("<br>") > 0)
+
+  // The body is a person's typing, not markup, and may not become markup on
+  // the way out.
+  const escaped = message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "سلام <b>&x</b>", boundary: "ESCB"
+  }))
+  assert.strictEqual(message.decodePart(escaped.parts[1]),
+    '<html><body dir="rtl">سلام &lt;b&gt;&amp;x&lt;/b&gt;</body></html>')
+
+  // Left-to-right is what a bare text/plain already means, so saying it would
+  // make every message ever sent multipart in order to repeat the default.
+  const latin = message.buildRawMessage({ to: "a@b.com", body: "Hi Jane,\n\nThanks!" })
+  assert.ok(latin.indexOf("Content-Type: text/plain; charset=UTF-8") > 0)
+  assert.ok(latin.indexOf("multipart") < 0,
+    "a left-to-right message keeps the shape it has always had")
+
+  // A forced setting is not consulted here: the direction is read off the body
+  // by the same rule the reader uses, so what arrives matches what was typed.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "Hello سلام"
+  }).indexOf("multipart") < 0, "first strong character decides, as it does everywhere")
+
+  // An Arabic-Indic number is not a strong character, so an English message
+  // that opens with a price or a date pasted out of one does not become a
+  // right-to-left message on the way out. It did: the digits sit inside the
+  // Arabic block, and the scan asked which block before it asked which class.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "١٢٣ Smith Street\nThe report is attached."
+  }).indexOf("multipart") < 0,
+    "an English body opening with an Arabic-Indic number stays plain text")
+
+  // With an attachment the pair moves one level in. The inner boundary may not
+  // begin with the outer one: `splitMultipart` finds a delimiter by searching
+  // for "--" + boundary anywhere in the body, so a suffixed inner boundary
+  // would be found by the outer scan too and the message would come apart at
+  // the wrong line.
+  const attached = message.buildRawMessage({
+    to: "a@b.com", body: "سلام دوست من", boundary: "OUTER",
+    attachments: [{ filename: "f.txt", mimeType: "text/plain", data: "aGk=" }]
+  })
+  const withFile = message.parseRfc822(attached)
+  assert.strictEqual(withFile.mimeType, "multipart/mixed")
+  assert.strictEqual(withFile.parts.length, 2)
+  assert.strictEqual(withFile.parts[0].mimeType, "multipart/alternative")
+  assert.strictEqual(withFile.parts[0].parts.length, 2)
+  assert.strictEqual(withFile.parts[0].parts[0].mimeType, "text/plain")
+  assert.strictEqual(withFile.parts[0].parts[1].mimeType, "text/html")
+  assert.strictEqual(message.decodePart(withFile.parts[1]), "hi",
+    "the attachment survives the extra nesting")
+  const inner = attached.match(/boundary="(alt_[^"]+)"/)[1]
+  assert.ok(("--" + inner).indexOf("--OUTER") < 0,
+    "the inner delimiter cannot be read as the outer one")
+}
+
 // ------------------------------------------------------------- a calendar
 //
 // An RSVP is an ordinary mail with a `text/calendar` part beside the sentence
@@ -496,6 +627,183 @@ assert.strictEqual(message.extractHtml({
   // altogether rather than emitting an empty one.
   assert.ok(message.buildRawMessage({ to: "a@b.com", inReplyTo: "\r\n", body: "x" })
     .indexOf("In-Reply-To") < 0)
+}
+
+// ------------------------------------------------------------- Message-ID
+//
+// RFC 5322 asks every message for an id, and a relay told not to add missing
+// headers relays none: Postfix logs `message-id=<>` for a message sent without
+// one, and a reply to it has nothing to thread on.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const idOf = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .filter((line) => line.indexOf("Message-ID: ") === 0)[0]
+    .substring("Message-ID: ".length)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Message-ID").length, 1,
+    "one Message-ID, and only one")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(sent)), idOf(sent))
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+  assert.ok(message.buildRawMessage({ to: "a@b.com", body: "x" }).indexOf("To: a@b.com\r\n") === 0,
+    "a message with no From still opens with To")
+
+  const again = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.notStrictEqual(idOf(sent), idOf(again), "every message gets its own id")
+
+  // No From leaves no domain to take, and .invalid is reserved by RFC 2606 so
+  // the id cannot land in a namespace somebody else's uniqueness depends on.
+  assert.ok(/^<[^<>@\s]+@omamail\.invalid>$/.test(
+    idOf(message.buildRawMessage({ to: "a@b.com", body: "x" }))))
+  assert.strictEqual(message.messageIdDomain('"Jane" <jane@Example.COM>'), "Example.COM")
+  assert.strictEqual(message.messageIdDomain("nobody"), "omamail.invalid")
+  assert.strictEqual(message.messageIdDomain(""), "omamail.invalid")
+
+  // Every label in this domain is legal, and the separator between its first
+  // two 63-character labels lands at the old arbitrary length ceiling. Cutting
+  // there would leave the id's domain ending in a dot.
+  const longDomain = "a".repeat(63) + "." + "b".repeat(63) + "."
+    + "c".repeat(63) + ".com"
+  const longDomainId = idOf(message.buildRawMessage({
+    from: "work@" + longDomain, to: "a@b.com", body: "x"
+  }))
+  assert.ok(longDomainId.endsWith("@" + longDomain + ">"),
+    "a valid sender domain survives whole in the generated id")
+
+  // Stated by the caller, which is what lets a test read the message it built.
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<pinned@example.net>"
+  }).indexOf("Message-ID: <pinned@example.net>\r\n") > 0)
+
+  // Dot-atom permits every RFC 5322 `atext` punctuation character on either
+  // side of the separator. A legal caller-stated id is preserved byte for byte.
+  const fullAtext = "<AZaz09!#$%&'*+-/=?^_`{|}~.next@AZaz09!#$%&'*+-/=?^_`{|}~.next>"
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: fullAtext
+  }).indexOf("Message-ID: " + fullAtext + "\r\n") > 0,
+    "every legal atext character survives in a stated id")
+
+  // Validation judges the caller's original value. Removing a space first
+  // would silently turn this into a different, apparently valid id, while an
+  // empty dot-atom segment is not a legal id at all.
+  const repaired = idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a @example.com>"
+  }))
+  assert.notStrictEqual(repaired, "<a@example.com>",
+    "a malformed stated id is replaced rather than repaired")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(repaired), "the replacement is a generated id")
+  assert.notStrictEqual(idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a..b@example.com>"
+  })), "<a..b@example.com>", "an empty dot-atom segment is replaced")
+
+  // A stated id is this client's own choice rather than a stranger's, so one
+  // that is not an id is replaced instead of carried through mangled.
+  const forged = message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x",
+    messageId: "<a@b>\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(forged)), "a real id is minted instead")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Message-ID").length, 1)
+}
+
+// ------------------------------------------------------------------- Date
+//
+// RFC 5322 requires a Date on a message this client originates. Without one a
+// reader falls back to the time the message was delivered or stored, which is
+// not the time it was written — this client delays a send behind an undo
+// window, so those are not the same moment.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const clock = Date.UTC(2026, 8, 3, 10, 4, 31)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Date").length, 1,
+    "one Date, and only one")
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+
+  // The shape RFC 5322 §3.3 states, with a numeric zone rather than the
+  // obsolete GMT that toUTCString would give.
+  const stamped = message.sentDate("", clock)
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(stamped),
+    stamped)
+  assert.strictEqual(new Date(stamped).getTime(), clock,
+    "a local-offset Date names the instant it was made from")
+  assert.strictEqual(
+    message.messageDate({ payload: { headers: [{ name: "Date", value: stamped }] } }).getTime(), clock,
+    "this file's own reader gets the instant back out of it")
+
+  // Stated by the caller, the way the id and the boundary already are.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "Thu, 03 Sep 2026 12:04:31 +0200"
+  }).indexOf("Date: Thu, 03 Sep 2026 12:04:31 +0200\r\n") > 0)
+  assert.strictEqual(new Date(message.sentDate("Thu, 03 Sep 2026 10:04:31 +0000")).getTime(), clock,
+    "a caller who wants no offset says so through the same field")
+
+  // JavaScript parses ISO dates and several shorthand spellings that are not
+  // RFC 5322 date-time values. A parseable but non-header-shaped override is
+  // replaced with this client's canonical form.
+  const nonRfc = message.sentDate("2026-09-03", clock)
+  assert.notStrictEqual(nonRfc, "2026-09-03", "an ISO-only override is not emitted verbatim")
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(nonRfc),
+    nonRfc)
+  assert.strictEqual(new Date(nonRfc).getTime(), clock, "the replacement uses the stated build clock")
+
+  // JavaScript normalizes an impossible calendar date and ignores a weekday
+  // that disagrees with the date. Neither can be emitted as the caller stated
+  // it: RFC 5322 requires the written date to exist and the weekday to agree.
+  const impossible = "Tue, 31 Feb 2026 10:04:31 +0000"
+  const replacedImpossible = message.sentDate(impossible, clock)
+  assert.notStrictEqual(replacedImpossible, impossible,
+    "an impossible day in a real month is replaced rather than normalized")
+  assert.strictEqual(new Date(replacedImpossible).getTime(), clock)
+
+  const mismatchedWeekday = "Fri, 03 Sep 2026 10:04:31 +0000"
+  const replacedWeekday = message.sentDate(mismatchedWeekday, clock)
+  assert.notStrictEqual(replacedWeekday, mismatchedWeekday,
+    "a weekday that disagrees with its date is replaced")
+  assert.strictEqual(new Date(replacedWeekday).getTime(), clock)
+
+  // RFC 5322 permits years from 1900 onward. A numeric zone has two digits
+  // each for hours and minutes, but only the minute pair is bounded to 00–59.
+  const obsoleteYear = "Mon, 04 Sep 1899 10:04:31 +0000"
+  const replacedObsoleteYear = message.sentDate(obsoleteYear, clock)
+  assert.notStrictEqual(replacedObsoleteYear, obsoleteYear,
+    "a year below RFC 5322's lower bound is replaced")
+  assert.strictEqual(new Date(replacedObsoleteYear).getTime(), clock)
+  assert.strictEqual(message.sentDate("Tue, 04 Sep 1900 10:04:31 +0000", clock),
+    "Tue, 04 Sep 1900 10:04:31 +0000", "the first RFC 5322 year is preserved")
+  for (const zone of ["+2400", "+9959", "-9959"]) {
+    const zoned = "Thu, 03 Sep 2026 10:04:31 " + zone
+    assert.strictEqual(message.sentDate(zoned, clock), zoned,
+      "a numeric zone may use any two-digit hour: " + zone)
+  }
+  assert.notStrictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +9960", clock),
+    "Thu, 03 Sep 2026 10:04:31 +9960", "a numeric zone minute cannot reach 60")
+
+  // A stated value that is not a date is replaced, and a line break in one can
+  // become neither a second header nor a mangled first one.
+  const forged = message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "not a date\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Date").length, 1)
+
+  // The header survives a round trip through this file's own parser.
+  assert.strictEqual(message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: stamped
+  })).headers.filter((header) => header.name === "Date").length, 1)
 }
 
 // ------------------------------------------------------ RFC 822 → payload
@@ -730,5 +1038,32 @@ assert.strictEqual(message.fromHeader("jane@example.com", "Jane Roe"),
   'From: "Jane Roe" <jane@example.com>')
 assert.strictEqual(message.parseAddress(message.addressHeader("jane@example.com", "Jane Roe")).name,
   "Jane Roe", "what is written comes back")
+
+// ---------------------------------------------------------------- compose
+
+// With nothing to place, the body a compose window opens with is what it was
+// before signatures existed: empty for a new message, two blank lines above
+// the quote for a reply. That equivalence is what makes the field optional.
+assert.strictEqual(message.composeBody("", ""), "")
+assert.strictEqual(message.composeBody("", "> quoted"), "\n\n> quoted")
+assert.strictEqual(message.composeBody(null, undefined), "")
+
+// The signature goes under the cursor and above the quote, so a reply reads as
+// the reply, the sign-off, then the thread being answered.
+assert.strictEqual(message.composeBody("Maarten", ""), "\n\nMaarten")
+assert.strictEqual(message.composeBody("Maarten", "> quoted"),
+  "\n\nMaarten\n\n> quoted")
+
+// A multi-line signature is placed as written. Only the ends are trimmed:
+// blank lines around it are this function's to decide, and the ones inside it
+// are the user's.
+assert.strictEqual(message.composeBody("\n  Maarten\nmadra.nl  \n", "> quoted"),
+  "\n\nMaarten\nmadra.nl\n\n> quoted")
+
+// Whitespace is not a signature. A field holding only spaces or newlines must
+// produce the same body as an empty one, or every reply gains a blank gap the
+// user cannot see the cause of.
+assert.strictEqual(message.composeBody("   \n  ", "> quoted"), "\n\n> quoted")
+assert.strictEqual(message.composeBody("\n\n", ""), "")
 
 console.log("test_message.js ok")

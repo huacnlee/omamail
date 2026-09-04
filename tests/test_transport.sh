@@ -15,6 +15,7 @@ trap 'rm -rf "$work"' EXIT INT TERM HUP
 mkdir -p "$work/bin"
 cat > "$work/bin/curl" <<'STUB'
 #!/bin/sh
+[ -z "${CURL_STUB_COUNT:-}" ] || printf 'x\n' >> "$CURL_STUB_COUNT"
 header_file=
 saw_fail_early=0
 while [ "$#" -gt 0 ]; do
@@ -262,6 +263,45 @@ else
   printf '  FAIL expected 3 lines of output, got %s\n' "$lines"
   failures=$(( failures + 1 ))
 fi
+
+# ------------------------------------------------------------- retrying
+
+# Retrying is safe only before anything has been sent. curl's own --retry-all-
+# errors cannot tell a handshake that never opened a session from a transfer
+# the server already took, so an SMTP send it retried would deliver the message
+# twice. The retry is the script's own, on the pre-transfer exit codes.
+attempts_for() {
+  count="$work/attempts"
+  rm -f "$count"
+  printf '%s\n' "$1" \
+    | CURL_STUB_COUNT="$count" CURL_STUB_EXIT="$2" PATH="$work/bin:$PATH" sh "$script" \
+      >/dev/null 2>&1
+  if [ -f "$count" ]; then wc -l < "$count" | tr -d ' '; else printf '0'; fi
+}
+
+send_request="smtp $(b64 'smtp://smtp.example.org:587') $(b64 'j:p') $(b64 'j@example.org') $(b64 'Subject: x
+
+body') $(b64 'her@example.org')"
+read_request="imap $(b64 'imaps://a.example.org/INBOX') $(b64 'j:p') $(b64 'NOOP')"
+
+expect_attempts() {
+  got=$(attempts_for "$2" "$3")
+  if [ "$got" = "$4" ]; then
+    printf '  ok   %s\n' "$1"
+  else
+    printf '  FAIL %s: expected %s attempt(s), got %s\n' "$1" "$4" "$got"
+    failures=$(( failures + 1 ))
+  fi
+}
+
+expect_attempts "a dropped TLS handshake is tried again" "$read_request" 35 3
+expect_attempts "a name that does not resolve is tried again" "$read_request" 6 3
+expect_attempts "a rejected password is not tried again" "$read_request" 67 1
+# The one that matters: 56 is a receive error, which happens after the message
+# has been handed over. Sending it a second time is a second copy delivered.
+expect_attempts "a send that failed mid-transfer is not repeated" "$send_request" 56 1
+expect_attempts "a send that timed out is not repeated" "$send_request" 28 1
+expect_attempts "a send is still retried before it has left" "$send_request" 7 3
 
 # A malformed request must fail rather than run curl with something guessed.
 if printf 'not-base64-at-all\n' | PATH="$work/bin:$PATH" sh "$script" >/dev/null 2>&1; then

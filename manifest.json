@@ -2,10 +2,11 @@
   "schemaVersion": 1,
   "id": "omamail",
   "name": "Omamail",
-  "version": "0.6.0",
-  "author": "Jason Lee <huacnlee@gmail.com>",
+  "version": "0.7.0",
+  "author": "huacnlee",
   "license": "MIT",
-  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, or your own server.",
+  "homepage": "https://huacnlee.github.io/omamail/",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, Proton Bridge, or your own server — several accounts at once, each with its own inbox and unread count. Keyboard-first, three columns when there is room and one when there is not, and it follows your theme. Meeting invitations are drawn as meetings you can answer, newsletters unsubscribe in one click, and remote images stay blocked until you ask.",
   "kinds": [
     "service",
     "bar-widget",
@@ -38,13 +39,23 @@
       "refreshIntervalSec": 120,
       "maxMessages": 25,
       "heavyMessageRendering": "Show plain text first",
+      "contentDirection": "Auto",
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
       "oauthPort": 9481,
       "undoSendSeconds": 10,
-      "openOnClick": "Window"
+      "unifiedCalendarView": false,
+      "openOnClick": "Window",
+      "showBarIcon": true
     },
     "schema": [
+      {
+        "key": "showBarIcon",
+        "type": "boolean",
+        "label": "Show the icon in the bar",
+        "defaultValue": true,
+        "description": "Turn this off to run Omamail with no envelope in the bar. Mail is still checked and still notifies; only the icon goes. With it off the window opens from a keybinding or a terminal and nowhere else, so bind a key first: o.bind(\"SUPER + SHIFT + G\", \"Omamail\", \"omarchy shell shell toggle omamail '{}'\")"
+      },
       {
         "key": "refreshIntervalSec",
         "type": "integer",
@@ -74,6 +85,18 @@
         ],
         "defaultValue": "Show plain text first",
         "description": "Choose whether potentially expensive rich text falls back to plain text with a Show anyway action."
+      },
+      {
+        "key": "contentDirection",
+        "type": "enum",
+        "label": "Message direction",
+        "options": [
+          "Auto",
+          "Left to right",
+          "Right to left"
+        ],
+        "defaultValue": "Auto",
+        "description": "Which way a message's own text runs. Auto reads it from the text itself, so an Arabic, Hebrew or Persian message lays out right-to-left and an English one does not. Set a direction to use that one for every message. The interface itself is unaffected."
       },
       {
         "key": "defaultQuery",
@@ -112,6 +135,13 @@
         "step": 1,
         "defaultValue": 10,
         "description": "Delays outgoing mail so you can cancel it. Set this to 0 to send immediately."
+      },
+      {
+        "key": "unifiedCalendarView",
+        "type": "boolean",
+        "label": "Unified calendar view",
+        "defaultValue": false,
+        "description": "Show calendars from every connected account instead of following the current mailbox."
       },
       {
         "key": "openOnClick",

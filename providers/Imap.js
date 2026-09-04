@@ -18,6 +18,10 @@ var CAPABILITIES = {
   // No labels: a message is in one folder. The reader hides the label strip
   // rather than showing an empty one.
   labels: false,
+  // One folder per message is what makes a move the plain thing to do here:
+  // `labels: false` is about the strip the reader draws, not about whether a
+  // message can be put somewhere else.
+  move: true,
   // No server-side conversation id. Threading falls back to References, which
   // is what every other IMAP client does.
   threads: false,
@@ -47,9 +51,10 @@ var MAILBOXES = [
   { key: "inbox", label: "Inbox", icon: "inbox", query: "folder:INBOX" },
   { key: "unread", label: "Unread", icon: "unread", query: "folder:INBOX UNSEEN" },
   { key: "starred", label: "Flagged", icon: "star", query: "folder:INBOX FLAGGED" },
-  { key: "sent", label: "Sent", icon: "send", query: "folder:\\Sent" },
+  { key: "sent", label: "Sent", icon: "sent", query: "folder:\\Sent" },
   { key: "drafts", label: "Drafts", icon: "compose", query: "folder:\\Drafts" },
   { key: "archive", label: "Archive", icon: "archive", query: "folder:\\Archive", optional: true },
+  { key: "spam", label: "Junk", icon: "spam", query: "folder:\\Junk", optional: true },
   { key: "trash", label: "Trash", icon: "trash", query: "folder:\\Trash", optional: true }
 ]
 

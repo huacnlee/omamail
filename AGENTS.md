@@ -76,6 +76,74 @@ three directories away from the client that calls it.
   accuracy: "Mark these read" acts on the messages that are loaded, so it does
   not claim to mark all of them.
 
+## Direction
+
+Which way a message runs is a fact about the mail, not about the window. The
+interface is not mirrored and there is no `LayoutMirroring` anywhere;
+`tests/test_source.sh` enforces that, because "RTL support" is the name of two
+different features and only one of them is here.
+
+- Qt already resolves each paragraph and each `Text` from its own first strong
+  character, and it is good at it. Leave it alone wherever it is right. It
+  elides the *logical* end of a right-to-left string under `Text.ElideRight`,
+  resolves each `<br>`-separated line of a plain body separately, and needs no
+  help with an Arabic subject or an Arabic paragraph.
+- `message/Direction.js` exists for the three places it is wrong or absent, and
+  for nothing else. Adding a fourth caller is a decision, not a formality.
+- **A subject is asked with `resolveSubject`, never `resolve`.** A reply prefix
+  is Latin whatever the thread is written in, so `Re: مرحبا` reads left-to-right
+  to anything taking the first strong character at face value — which is every
+  message in a thread after the first, and most of a mailbox.
+- **Qt honours the `dir` attribute and ignores the CSS `direction` property.**
+  `promoteDirection` translates one into the other next to
+  `promoteImageDimensions`, which is there for the same reason on `width`. A
+  template written for a browser states direction only in CSS.
+- **The body's `dir` and the stylesheet's physical sides are one statement.**
+  Qt reads `margin-left` and has never heard of `margin-inline-start`, so a side
+  is chosen when the sheet is built; and Qt places a list marker on the side the
+  block runs from, so a sheet that indents a list from the right while the block
+  is still left-to-right does not move the bullet, it **drops** it. Writing one
+  without the other was tried and looked exactly like that.
+  `baseDirectionAttribute` keeps them together and `tests/test_source.sh` keeps
+  them that way.
+- A base direction is a **default, not an override**: a sender's own `dir` — or
+  a `direction` in their CSS, which `promoteDirection` turns into the same thing
+  — still wins element by element inside it. That is what makes supplying one
+  safe on a message nobody has inspected.
+- A `Text` with no answer to give is left alone rather than assigned Qt's own
+  default back. `undefined` on `horizontalAlignment` restores natural alignment;
+  it does not warn.
+- **A message being sent states its direction or loses it.** This is the fourth
+  caller, and it was a decision. Qt resolves a compose field from the text in
+  it, so a writer sees their own paragraph against the right edge as they type
+  — but none of that travels with the message. A `text/plain` part states no
+  direction at all, and a client with nothing to read falls back to
+  left-to-right, which is what a Persian mail written here looked like in
+  someone else's inbox. `buildRawMessage` asks `outgoingDirection`, which reads
+  the body by the same rule the reader uses, so a message arrives looking the
+  way it looked while it was written.
+- **A right-to-left body grows a `text/html` twin; a left-to-right one grows
+  nothing.** The plain part stays exactly as it was and stays listed first, and
+  the twin is the least markup that can carry a direction — the text escaped,
+  its line breaks kept, `dir` on the `<body>`, and no styling of any kind. It is
+  not a rendering of the message, it is a statement about it. Left-to-right is
+  already what a bare `text/plain` means to every client, so stating it would
+  make every message ever sent `multipart` in order to repeat the default —
+  the same reason `Html.js` gives a document no `dir` when nothing chose one.
+- **A nested MIME boundary is a prefix, never a suffix.** `splitMultipart` finds
+  a delimiter by searching for `--` and the boundary anywhere in the body, so an
+  inner boundary that began with the outer one would be found by the outer scan
+  as well and the message would come apart at the wrong line. `nestedBoundary`
+  puts its tag in front for that reason, and `tests/test_message.js` asserts the
+  inner delimiter cannot be read as the outer one.
+- The calendar reply keeps its two parts and gains no twin. An RSVP's sentence
+  is generated rather than composed, so there is no writer's direction to carry,
+  and `multipart/alternative` holding exactly `text/plain` and `text/calendar`
+  is the shape every calendar server recognises a reply in.
+- Qt ignores `dir` on a `<td>` — on a wrapping `<div>` inside one, too. Nothing
+  is done about it: text inside a cell still resolves from its own first strong
+  character, which covers the case that actually arrives.
+
 ## Popups and their triggers
 
 - A control that opens a popup holds a selected style for as long as that popup

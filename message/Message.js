@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Direction.js" as Direction
+
 // Everything that turns a Gmail API message resource into something a row or a
 // reader can show. Two things force real work here rather than a few property
 // reads:
@@ -95,21 +97,20 @@ function bytesToLatin1(bytes) {
   return out
 }
 
-// Qt.atob is native C++ and skips the per-character base64 loop entirely; it
-// hands back a string of raw bytes, which still needs UTF-8 decoding. The pure
-// JS path stays for the node tests, and as the fallback anywhere Qt is absent.
-function binaryStringToUtf8(binary) {
-  var bytes = []
-  for (var i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff)
-  return bytesToUtf8(bytes)
-}
-
+// Qt.atob is native C++ and skips the per-character base64 loop entirely. It
+// does not hand back raw bytes: Qt's implementation is QString::fromUtf8 over
+// the decoded bytes, so the result is already text. Measured on Qt 6.11 —
+// "Alex à l'école" comes back 14 characters with U+00E0 in it, not 16 bytes
+// with C3 A0. Decoding that text a second time as UTF-8 bytes is what turned
+// every accented calendar title and 8-bit mail body into CJK mojibake. The
+// pure JS path stays for the node tests, and as the fallback anywhere Qt is
+// absent.
 function decodeBase64Url(text) {
   var input = String(text || "")
   if (input === "") return ""
   if (typeof Qt !== "undefined" && typeof Qt.atob === "function") {
     try {
-      return binaryStringToUtf8(Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/")))
+      return Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/"))
     } catch (e) {
       // Fall through to the portable path rather than losing the message.
     }
@@ -180,11 +181,67 @@ function decodeQuotedPrintableWord(text) {
   return bytes
 }
 
+// Whether these bytes are UTF-8 that a single-byte charset could not have
+// produced: at least one well-formed multi-byte sequence, and nothing
+// malformed anywhere.
+//
+// A charset header is a claim, and this is the evidence. Mail that declares
+// `us-ascii` or `iso-8859-1` while carrying UTF-8 is common enough that every
+// other client sniffs for it, and the two readings are never both plausible:
+// read as one byte each, the UTF-8 for "ń" is "Å" followed by a control
+// character, which is not something anybody wrote. Genuine Latin-1 and
+// Latin-2 text does not survive this test — a lone "ł" in ISO 8859-2 is 0xB3,
+// a continuation byte with no lead, which is malformed UTF-8 and hands the
+// decision back to the declaration.
+//
+// Strict on purpose. An overlong form, a surrogate or a truncated tail all
+// count as malformed, because each is likelier to be single-byte text that
+// happens to begin a sequence than UTF-8 worth trusting over the header.
+function looksLikeUtf8(bytes) {
+  var values = bytes || []
+  var multi = 0
+  var i = 0
+  while (i < values.length) {
+    var byte1 = values[i++]
+    if (byte1 < 0x80) continue
+    var needed = 0
+    var codePoint = 0
+    if (byte1 >= 0xc2 && byte1 <= 0xdf) {
+      needed = 1
+      codePoint = byte1 & 0x1f
+    } else if (byte1 >= 0xe0 && byte1 <= 0xef) {
+      needed = 2
+      codePoint = byte1 & 0x0f
+    } else if (byte1 >= 0xf0 && byte1 <= 0xf4) {
+      needed = 3
+      codePoint = byte1 & 0x07
+    } else {
+      // 0x80-0xc1 is a continuation with no lead, or an overlong two-byte
+      // form; 0xf5 and above is past the last code point.
+      return false
+    }
+    if (i + needed > values.length) return false
+    for (var n = 0; n < needed; n++) {
+      var next = values[i + n]
+      if (next < 0x80 || next > 0xbf) return false
+      codePoint = (codePoint << 6) | (next & 0x3f)
+    }
+    i += needed
+    if (needed === 1 && codePoint < 0x80) return false
+    if (needed === 2 && codePoint < 0x800) return false
+    if (needed === 3 && (codePoint < 0x10000 || codePoint > 0x10ffff)) return false
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) return false
+    multi += 1
+  }
+  return multi > 0
+}
+
 function decodeWordBytes(charset, bytes) {
   var name = String(charset || "").toLowerCase()
   if (name.indexOf("utf-8") === 0 || name.indexOf("utf8") === 0) return bytesToUtf8(bytes)
   if (name.indexOf("iso-8859") === 0 || name.indexOf("windows-125") === 0
-    || name.indexOf("us-ascii") === 0 || name === "") return bytesToLatin1(bytes)
+    || name.indexOf("us-ascii") === 0 || name === "")
+    return looksLikeUtf8(bytes) ? bytesToUtf8(bytes) : bytesToLatin1(bytes)
   // GB18030, Shift_JIS and friends need a table this plugin does not carry.
   // UTF-8 decoding degrades to Latin-1 per byte, which at least keeps the
   // ASCII parts of the header readable.
@@ -886,6 +943,28 @@ function quoteBody(summary, body) {
   return (header ? header + "\n" : "") + quoted.join("\n")
 }
 
+// The body a compose window opens with. Two blank lines to type into, then
+// whatever the user did not type but must be able to edit.
+//
+// A signature and a quote are the same kind of thing here — text placed under
+// the cursor rather than by it — so they are joined the same way instead of
+// being special-cased against each other. That is what keeps the signature
+// next to the words it signs: below the reply, above the quoted thread, rather
+// than stranded under a screen of somebody else's message.
+//
+// With no signature set this returns exactly what the caller used to build by
+// hand, which is what makes the field optional rather than a new shape of
+// draft.
+function composeBody(signature, quoted) {
+  var parts = []
+  var sign = String(signature === undefined || signature === null ? "" : signature).trim()
+  var quote = String(quoted === undefined || quoted === null ? "" : quoted)
+  if (sign !== "") parts.push(sign)
+  if (quote !== "") parts.push(quote)
+  if (parts.length === 0) return ""
+  return "\n\n" + parts.join("\n\n")
+}
+
 function replySubject(subject) {
   var text = String(subject || "").trim()
   if (/^re:/i.test(text)) return text
@@ -932,11 +1011,132 @@ function mimeBoundary(given) {
   return "=_Omamail_" + (new Date()).getTime().toString(36) + "_" + random
 }
 
+// The domain half of a Message-ID is the sender's own, so the id agrees with the address the message is from.
+function messageIdDomain(from) {
+  var address = headerSafe(from).trim()
+  var at = address.lastIndexOf("@")
+  var domain = at < 0 ? "" : address.substring(at + 1).replace(/[^A-Za-z0-9.-]/g, "")
+  // RFC 2606 reserves .invalid, so a message with no From borrows no domain that belongs to somebody else.
+  return domain === "" ? "omamail.invalid" : domain
+}
+
+// Unique by the rule mimeBoundary already uses, and the caller may state one, which is what lets a test read it.
+function messageIdValue(given, from, nowMs) {
+  var stated = String(given === undefined || given === null ? "" : given)
+  // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
+  if (stated.length <= 250
+      && /^<[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*@[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*>$/.test(stated))
+    return stated
+  var now = Math.floor(Number(nowMs) || Date.now())
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "<" + now.toString(36) + "." + random + ".omamail@" + messageIdDomain(from) + ">"
+}
+
+// The date a message states, in RFC 5322's own shape: a numeric zone rather than toUTCString's obsolete GMT.
+function sentDate(given, nowMs) {
+  var stated = headerSafe(given).trim()
+  // JavaScript also parses ISO dates and shorthand spellings that are not
+  // legal header values, so a stated date needs this client's canonical shape
+  // and RFC 5322's semantic calendar constraints.
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-][0-9]{2}[0-5][0-9]$/
+  var parts = stated.match(canonical)
+  if (parts) {
+    var day = Number(parts[2])
+    var month = MONTHS.indexOf(parts[3])
+    var year = Number(parts[4])
+    var calendar = new Date(Date.UTC(year, month, day))
+    if (year >= 1900 && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
+        && calendar.getUTCDate() === day && WEEKDAYS[calendar.getUTCDay()] === parts[1])
+      return stated
+  }
+  var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
+  if (isNaN(date.getTime())) date = new Date()
+  var offset = -date.getTimezoneOffset()
+  var minutes = Math.abs(offset)
+  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " " + MONTHS[date.getMonth()]
+    + " " + date.getFullYear() + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    + ":" + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
+    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
+}
+
 // One method name, and nothing that could end the header early: this string
 // arrives from a calendar file somebody else wrote.
 function calendarMethod(value) {
   var text = String(value || "").toUpperCase().replace(/[^A-Z]/g, "")
   return text === "" ? "REPLY" : text.substring(0, 20)
+}
+
+// Which way a message being sent runs.
+//
+// Qt resolves a compose field from the text already in it, so a writer sees
+// their own paragraph against the right edge as they type it — but none of
+// that travels with the message. A `text/plain` part states no direction at
+// all, and a client with nothing to read falls back to left-to-right, which is
+// why a Persian mail written here arrives in Gmail against the wrong edge.
+//
+// Read off the body by the same rule the reader uses, so a message arrives
+// looking the way it looked while it was written.
+function outgoingDirection(body) {
+  return Direction.resolve(body, Direction.AUTO)
+}
+
+// The body again as the least markup that can carry a direction: the text
+// escaped, its line breaks kept, and `dir` on the element every client reads
+// it from. Not a rendering of the message — a statement about it, which is why
+// nothing here styles anything. A recipient who prefers plain text still has
+// the plain part, unchanged and listed first.
+function directionalHtmlBody(text, direction) {
+  var body = String(text === undefined || text === null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n/g, "<br>\n")
+  return "<html><body dir=\"" + direction + "\">" + body + "</body></html>"
+}
+
+// A nested boundary the enclosing one cannot be mistaken for. `splitMultipart`
+// finds a delimiter by searching for "--" + boundary anywhere in the body, so
+// an inner boundary that began with the outer one would be found by the outer
+// scan too and the message would come apart at the wrong line. A prefix cannot
+// collide that way; a suffix can.
+function nestedBoundary(outer) {
+  return mimeBoundary("alt_" + String(outer || ""))
+}
+
+// The body as a part of its own: the plain text alone, or the plain text and
+// an HTML twin stating the direction when there is one worth stating. Written
+// once because the shape has to be the same whether the body stands as the
+// whole message or as the first part of a `multipart/mixed`.
+//
+// Stated only when the message runs right to left. Left to right is what a
+// bare `text/plain` already means to every client, so saying it would add an
+// HTML part to every message ever sent in order to repeat the default — the
+// same reason `Html.js` gives a document no `dir` when nothing chose one.
+function pushBodyPart(lines, body, direction, boundary) {
+  if (!Direction.isRightToLeft(direction)) {
+    lines.push("Content-Type: text/plain; charset=UTF-8")
+    lines.push("Content-Transfer-Encoding: base64")
+    lines.push("")
+    lines.push(base64Body(body))
+    return
+  }
+  // Least preferred first: a client that shows only one alternative should
+  // show the last it understands, and the HTML twin is the one that carries
+  // the direction.
+  lines.push("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"")
+  lines.push("")
+  lines.push("--" + boundary)
+  lines.push("Content-Type: text/plain; charset=UTF-8")
+  lines.push("Content-Transfer-Encoding: base64")
+  lines.push("")
+  lines.push(base64Body(body))
+  lines.push("--" + boundary)
+  lines.push("Content-Type: text/html; charset=UTF-8")
+  lines.push("Content-Transfer-Encoding: base64")
+  lines.push("")
+  lines.push(base64Body(directionalHtmlBody(body, direction)))
+  lines.push("--" + boundary + "--")
 }
 
 function buildRawMessage(fields) {
@@ -952,6 +1152,10 @@ function buildRawMessage(fields) {
     lines.push("In-Reply-To: " + inReplyTo)
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
+  // RFC 5322 requires a Date on a message this client originates, and the writer's clock is the one it means.
+  lines.push("Date: " + sentDate(values.date))
+  // RFC 5322 asks every message for an id, and a relay told not to add missing headers relays none.
+  lines.push("Message-ID: " + messageIdValue(values.messageId, values.from))
   lines.push("MIME-Version: 1.0")
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""
@@ -963,11 +1167,14 @@ function buildRawMessage(fields) {
     if (attachment.data === undefined || attachment.data === null) continue
     included.push(attachment)
   }
+
+  // Resolved once, here, so a message and the draft it was saved as cannot
+  // disagree about which way the same words run.
+  var direction = outgoingDirection(values.body)
+
   if (!calendar && included.length === 0) {
-    lines.push("Content-Type: text/plain; charset=UTF-8")
-    lines.push("Content-Transfer-Encoding: base64")
-    lines.push("")
-    return lines.join("\r\n") + "\r\n" + base64Body(values.body) + "\r\n"
+    pushBodyPart(lines, values.body, direction, mimeBoundary(values.boundary))
+    return lines.join("\r\n") + "\r\n"
   }
 
   if (included.length > 0) {
@@ -975,10 +1182,7 @@ function buildRawMessage(fields) {
     lines.push("Content-Type: multipart/mixed; boundary=\"" + mixedBoundary + "\"")
     lines.push("")
     lines.push("--" + mixedBoundary)
-    lines.push("Content-Type: text/plain; charset=UTF-8")
-    lines.push("Content-Transfer-Encoding: base64")
-    lines.push("")
-    lines.push(base64Body(values.body))
+    pushBodyPart(lines, values.body, direction, nestedBoundary(mixedBoundary))
     for (var includedIndex = 0; includedIndex < included.length; includedIndex++) {
       var file = included[includedIndex]
       var filename = String(file.filename || "attachment")
@@ -997,7 +1201,11 @@ function buildRawMessage(fields) {
   // `multipart/alternative`, not `mixed`: the calendar part and the sentence
   // beside it are two readings of one answer, and a client that understands
   // the first should not also show the second as a file to open. It is also
-  // the shape every calendar server recognises a reply in.
+  // the shape every calendar server recognises a reply in — and the reason no
+  // HTML twin joins it the way one joins an ordinary body. An RSVP's sentence
+  // is generated rather than composed, so there is no writer's direction to
+  // carry, and a third alternative is a shape some of those servers do not
+  // expect.
   var boundary = mimeBoundary(values.boundary)
   lines.push("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"")
   lines.push("")

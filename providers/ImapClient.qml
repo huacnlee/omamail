@@ -4,6 +4,7 @@ import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
 import "../message/Message.js" as Mail
+import "../account/Aliases.js" as Aliases
 
 // An IMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //
@@ -104,15 +105,32 @@ Item {
         return
       }
 
+      // Some servers refuse every SELECT until the client has identified itself
+      // — see `Imap.idCommand` — and curl derives its SELECT from the URL's
+      // path before the first command it was handed. `imap-id` is the way past
+      // that: the opening command runs against the server itself, the rest
+      // against the mailbox, all on the one connection.
+      //
+      // Only where a mailbox is actually opened, and only to a server that
+      // advertised ID — one that has not heard of it answers BAD, and
+      // --fail-early would discard the whole invocation with it. Every folder
+      // request runs behind `ensureFolders`, so the capabilities are known by
+      // the time this asks.
+      var opening = folder !== "" && Imap.hasCapability(root.serverCapabilities, "ID")
+        ? Imap.idCommand() : ""
+
       // Every field crosses base64-encoded, so a password containing a quote,
       // a space or a backslash needs no escaping anywhere along the way — and
       // none of it reaches the process table.
-      var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials)]
+      var fields = opening === ""
+        ? [Mail.encodeBase64(url), Mail.encodeBase64(credentials)]
+        : [Mail.encodeBase64(Imap.imapUrl(auth.settings, "")), Mail.encodeBase64(url),
+           Mail.encodeBase64(credentials), Mail.encodeBase64(opening)]
       for (var j = 0; j < wanted.length; j++) fields.push(Mail.encodeBase64(wanted[j]))
 
       var process = transportComponent.createObject(root, {
         command: [root.transport],
-        requestLine: "imap " + fields.join(" ")
+        requestLine: (opening === "" ? "imap " : "imap-id ") + fields.join(" ")
       })
       if (!process) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -134,7 +152,7 @@ Item {
         var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
         var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
         if (status !== 0) {
-          callback("", Imap.responseError(status, detail, ""))
+          callback("", Imap.transportError(status, text, detail, ""))
           return
         }
         // curl exits 0 for a command the server refused, so the tagged
@@ -504,8 +522,12 @@ Item {
         var folder = root.folders[i]
         if (!folder.selectable) continue
         out.push({
+          // The id and the wire name stay exactly as the server said them:
+          // one is a cache key, the other is what goes back in a SELECT. Only
+          // the name the sidebar prints is decoded, which is why nothing here
+          // has to be encoded again on the way out.
           id: folder.name,
-          name: folder.name,
+          name: Imap.decodeMailbox(folder.name),
           rawName: folder.name,
           // "system" means the mailbox row already offers it, so the sidebar
           // lists only the rest below. Judged on SPECIAL-USE rather than on the
@@ -561,20 +583,18 @@ Item {
     return newHandle()
   }
 
-  // IMAP has no send-as settings endpoint. Its one sender is the mailbox
-  // address the user configured, returned in the same shape as Gmail aliases
-  // so everything above the provider boundary can stay provider-neutral.
+  // IMAP has no send-as settings endpoint. Its senders are the mailbox address
+  // and whatever aliases the user configured, returned in the same shape as
+  // Gmail's so everything above the provider boundary stays provider-neutral.
+  // Which of them is the default is `Aliases.sendAsList`'s decision, where the
+  // node tests can reach it.
   function getSendAs(callback) {
     if (typeof callback !== "function") return newHandle()
     var address = String(root.email || "")
+    var configured = auth && auth.settings ? auth.settings.aliases : null
     Qt.callLater(function() {
       if (!root) return
-      callback(address === "" ? [] : [{
-        email: address,
-        displayName: "",
-        isPrimary: true,
-        isDefault: true
-      }], "")
+      callback(Aliases.sendAsList(address, configured), "")
     })
     return newHandle()
   }
@@ -748,7 +768,20 @@ Item {
             callback(null, Imap.responseError(status, detail, "The draft could not be saved"))
             return
           }
-          callback({}, "")
+          var sourceId = payload ? String(payload.draftId || "") : ""
+          if (sourceId === "") {
+            callback({}, "")
+            return
+          }
+          var replacement = Imap.draftReplacementPlan(sourceId, folder)
+          if (replacement.commands.length === 0) {
+            callback({ saved: true, warning: replacement.warning }, "")
+            return
+          }
+          root.run(folder, replacement.commands, function(text, replaceError) {
+            if (handle.aborted || typeof callback !== "function") return
+            callback(Imap.draftSaveResult(replaceError), "")
+          }, handle)
         })
         process.running = true
       })
@@ -802,7 +835,10 @@ Item {
         if (typeof callback === "function") callback(null, credentialError || "Not signed in")
         return
       }
-      var sender = settings ? String(settings.username || "") : ""
+      var fromAddresses = Mail.parseAddressList(Mail.headerFrom(parsed.headers, "From"))
+      var sender = (fromAddresses.length > 0 && fromAddresses[0].email)
+        ? fromAddresses[0].email
+        : (settings ? String(settings.username || "") : "") || root.email
       var fields = [Mail.encodeBase64(smtp), Mail.encodeBase64(credentials),
         Mail.encodeBase64(sender), Mail.encodeBase64(message)]
       for (var k = 0; k < recipients.length; k++) fields.push(Mail.encodeBase64(recipients[k]))
@@ -897,7 +933,7 @@ Item {
       var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
       var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
       if (status !== 0) {
-        callback(false, Imap.responseError(status, detail, ""))
+        callback(false, Imap.transportError(status, text, detail, ""))
         return
       }
       if (Imap.isFailure(text)) {

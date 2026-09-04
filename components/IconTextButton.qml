@@ -17,6 +17,17 @@ Rectangle {
   property color foreground: Color.foreground
   property color accent: Color.accent
   property bool bordered: true
+  // The look of the icon buttons it may stand beside: no fill and no border
+  // at rest, a fill on hover, and the icon and label brightening to
+  // `hoverColor` — so a labelled action in a row of icon buttons reads as
+  // one of them. `bordered: false` alone keeps its own hover border, which
+  // the tab bars rely on.
+  property bool ghost: false
+  property color hoverColor: foreground
+  // A ghost stands in a row of IconButtons, so it takes their glyph size
+  // and their height; a bordered button is a form control and keeps the
+  // kit's control height and the smaller glyph that fits beside a label.
+  property real iconSize: ghost ? Style.font.icon : Style.font.iconSmall
   // Held while this button is the chosen one of a set — the RSVP row, where
   // three buttons stand for three answers and one of them is the answer given.
   // Never the only sign of it: the caller shows a check glyph too, because a
@@ -31,14 +42,16 @@ Rectangle {
   readonly property bool hot: mouse.containsMouse && enabled
 
   implicitWidth: row.implicitWidth + Style.spacing.controlPaddingX * 2
-  implicitHeight: Style.spacing.controlHeight
+  implicitHeight: ghost
+    ? Math.max(Style.space(24), iconSize + Style.spacing.sm * 2)
+    : Style.spacing.controlHeight
   radius: Style.cornerRadius
   opacity: enabled ? 1.0 : 0.4
   color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
     : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
       : (hot ? Style.hoverFillFor(root.foreground, root.accent)
-        : (bordered ? Style.normalFillFor(root.foreground, root.accent) : "transparent")))
-  border.width: bordered || hot || root.selected ? Style.normalBorderWidth : 0
+        : (bordered && !ghost ? Style.normalFillFor(root.foreground, root.accent) : "transparent")))
+  border.width: (ghost ? root.selected : (bordered || hot || root.selected)) ? Style.normalBorderWidth : 0
   border.color: hot || root.selected
     ? Style.hoverBorderFor(root.foreground, root.accent)
     : Style.normalBorderFor(root.foreground, root.accent)
@@ -52,15 +65,15 @@ Rectangle {
       anchors.verticalCenter: parent.verticalCenter
       visible: root.iconName !== ""
       name: root.iconName
-      iconSize: Style.font.iconSmall
-      color: root.foreground
+      iconSize: root.iconSize
+      color: root.ghost && (root.hot || root.selected) ? root.hoverColor : root.foreground
     }
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
       visible: root.text !== ""
       text: root.text
-      color: root.foreground
+      color: root.ghost && (root.hot || root.selected) ? root.hoverColor : root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.fontSize
     }

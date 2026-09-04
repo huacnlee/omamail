@@ -12,6 +12,7 @@
 # One line, fields separated by spaces:
 #
 #   imap <b64 url> <b64 user:password> <b64 command> [<b64 command> ...]
+#   imap-id <b64 root url> <b64 url> <b64 user:password> <b64 preamble> <b64 command> ...
 #   imap-append <b64 url> <b64 user:password> <b64 flags> <b64 message>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
 #
@@ -72,13 +73,32 @@ set -- $line
 [ $# -ge 4 ] || fail 'mail-transport.sh: usage: <mode> <url> <credentials> <arg>...'
 
 mode=$1
-url=$(decode "$2")
-credentials=$(decode "$3")
-shift 3
+# `imap-id` carries two URLs. The first section has to reach the server without
+# naming a mailbox: curl opens a URL's path before the first command it was
+# given, so a path there is a SELECT that nothing can be placed in front of,
+# and some servers refuse SELECT until the client has sent RFC 2971's ID. The
+# connection is reused across the sections, so a command sent by the first one
+# still applies to the mailbox the next one opens.
+if [ "$mode" = imap-id ]; then
+  [ $# -ge 6 ] || fail 'mail-transport.sh: imap-id needs a root url, a url, credentials, a preamble and a command'
+  root_url=$(decode "$2")
+  url=$(decode "$3")
+  credentials=$(decode "$4")
+  shift 4
+  case "$root_url" in
+    imaps://*|imap://*) ;;
+    *) fail 'mail-transport.sh: refusing a root URL that is not imap(s)' ;;
+  esac
+  escaped_root_url=$(escape "$root_url")
+else
+  url=$(decode "$2")
+  credentials=$(decode "$3")
+  shift 3
+fi
 
 case "$mode" in
-  imap|imap-append|smtp) ;;
-  *) fail 'mail-transport.sh: mode must be imap, imap-append or smtp' ;;
+  imap|imap-id|imap-append|smtp) ;;
+  *) fail 'mail-transport.sh: mode must be imap, imap-id, imap-append or smtp' ;;
 esac
 
 # The URL is built and validated by Imap.js, which has already refused anything
@@ -113,6 +133,10 @@ if [ "$mode" = "smtp" ]; then
   printf 'user = "%s"\n' "$escaped_credentials"
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
+  case "$url" in
+    smtp://127.0.0.1:*|smtp://localhost:*) ;;
+    smtp://*) printf 'ssl-reqd\n' ;;
+  esac
   printf 'mail-from = "%s"\n' "$(escape "$sender")"
   for recipient in "$@"; do
     printf 'mail-rcpt = "%s"\n' "$(escape "$(decode "$recipient")")"
@@ -128,6 +152,10 @@ elif [ "$mode" = "imap-append" ]; then
   printf 'user = "%s"\n' "$escaped_credentials"
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
+  case "$url" in
+    imap://127.0.0.1:*|imap://localhost:*) ;;
+    imap://*) printf 'ssl-reqd\n' ;;
+  esac
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
 else
   # IMAP: one section per command, so a sequence — search a folder, then fetch
@@ -139,8 +167,22 @@ else
   first=1
   for argument in "$@"; do
     [ "$first" = "1" ] || printf 'next\n'
+    # In imap-id the opening command runs against the server rather than a
+    # mailbox, so that it lands in front of the SELECT curl derives from the
+    # path. Every later section names the mailbox as usual.
+    if [ "$mode" = imap-id ] && [ "$first" = "1" ]; then
+      printf 'url = "%s"\n' "$escaped_root_url"
+      # The opening command's own reply is of no interest, and leaving it on
+      # stdout would be worse than useless: the test below reads a non-empty
+      # stdout as "the answer is here", and a single-UID BODY FETCH is the one
+      # request whose answer really does arrive there. One stray line from this
+      # section is enough to make a message body look like an empty one.
+      # `output` is per-section, so only this reply is discarded.
+      printf 'output = "%s"\n' "/dev/null"
+    else
+      printf 'url = "%s"\n' "$escaped_url"
+    fi
     first=0
-    printf 'url = "%s"\n' "$escaped_url"
     # Desktop HTTP/SOCKS proxy settings are for web traffic. In particular,
     # Omarchy's local SOCKS proxy accepts the IMAPS socket and then drops its
     # TLS handshake, which curl reports as error 35. Direct mail transport also
@@ -152,6 +194,10 @@ else
     # every command give up eventually, rather than only the final one.
     printf 'max-time = 60\n'
     printf 'connect-timeout = 20\n'
+    case "$url" in
+      imap://127.0.0.1:*|imap://localhost:*) ;;
+      imap://*) printf 'ssl-reqd\n' ;;
+    esac
     printf 'request = "%s"\n' "$(escape "$(decode "$argument")")"
   done
 fi
@@ -174,19 +220,49 @@ fi
 
 # curl is the last stage, so `$?` is curl's own exit code rather than the
 # config builder's.
-set +e
-build_config "$@" | curl \
-  --fail-early \
-  --config - \
-  --silent \
-  --show-error \
-  --dump-header "$work/headers" \
-  > "$work/out" 2> "$work/err"
-status=$?
-set -e
+attempt_curl() {
+  build_config "$@" | curl \
+    --fail-early \
+    --config - \
+    --silent \
+    --show-error \
+    --dump-header "$work/headers" \
+    > "$work/out" 2> "$work/err"
+}
+
+# A dropped TLS handshake is worth a second go; a delivered message is not.
+#
+# curl's own `--retry` covers neither on its own: its idea of a transient error
+# is a timeout or an HTTP status, so a handshake that died mid-negotiation is
+# not retried without `--retry-all-errors`. That flag then retries everything —
+# including a transfer that failed *after* the server took it, which for SMTP
+# is the message delivered twice and for APPEND a second copy in the folder.
+# curl cannot tell those apart because by then it has already sent them.
+#
+# So the retry is here, on the three exit codes that mean the command never
+# reached the server at all: the name did not resolve (6), the socket never
+# connected (7), and TLS failed before the session existed (35). Every one of
+# those is safe to repeat whatever the mode is. A rejected password (67) is
+# not retried, because three LOGIN attempts per operation is what iCloud and
+# Gmail lock an app password for.
+attempt=0
+while :; do
+  set +e
+  attempt_curl "$@"
+  status=$?
+  set -e
+  case "$status" in
+    6|7|35) ;;
+    *) break ;;
+  esac
+  attempt=$((attempt + 1))
+  [ "$attempt" -le 2 ] || break
+  sleep 1
+done
 
 printf '%s\n' "$status"
-if [ "$mode" = "imap" ] && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
+if { [ "$mode" = "imap" ] || [ "$mode" = "imap-id" ]; } \
+  && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
   # libcurl recognises only a single numeric UID as a BODY FETCH. A legal IMAP
   # sequence-set is treated as a generic custom request, whose response is
   # delivered through curl's protocol-header callback instead of stdout.

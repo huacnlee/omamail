@@ -18,7 +18,7 @@ open_browser=true
 
 usage() {
   cat <<'USAGE'
-Usage: google-cloud-setup.sh [--project ID] [--no-open]
+Usage: google-cloud-project.sh [--project ID] [--no-open]
 
   --project ID   Cloud project to create or reuse. Default: omamail-<random>
   --no-open      Print the console URLs instead of opening them.

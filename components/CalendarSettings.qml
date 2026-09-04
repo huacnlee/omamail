@@ -5,6 +5,7 @@ import qs.Ui
 Column {
   id: root
 
+  required property var service
   required property var controller
   required property color textColor
   required property color dimColor
@@ -33,6 +34,55 @@ Column {
     font.pixelSize: Style.font.caption
     wrapMode: Text.WordWrap
     textFormat: Text.PlainText
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(unifiedText.implicitHeight, unifiedSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: unifiedText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: unifiedSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Unified calendar view"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Show calendars from every connected account instead of following the current mailbox"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: unifiedSwitch
+      objectName: "unifiedCalendarSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.unifiedCalendarView === true
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setUnifiedCalendarView(!root.service.unifiedCalendarView)
+    }
   }
 
   Repeater {

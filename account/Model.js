@@ -15,15 +15,6 @@
 
 // ------------------------------------------------------------ setup state
 
-// A setup page opened for a known provider must not change type while saving
-// rebuilds the service's current account. During that one frame the service
-// reports its compatibility fallback (Gmail), not a user choice.
-function setupProvider(chosen, live) {
-  var stable = String(chosen === undefined || chosen === null ? "" : chosen).trim()
-  if (stable !== "") return stable
-  return String(live === undefined || live === null ? "" : live).trim() || "gmail"
-}
-
 function mailboxAfterAccountSwitch(currentKey, targetMailboxes) {
   var key = String(currentKey || "")
   var mailboxes = Array.isArray(targetMailboxes) ? targetMailboxes : []
@@ -143,18 +134,37 @@ function setupActionLabel(state, provider, authKind) {
 // viewed. Archiving from Inbox removes the row; archiving from All mail does
 // not. Getting this wrong either strands a row that is gone or hides one that
 // is still there.
-function survivesAction(mailboxKey, action) {
+// The label a move is aimed at, or "" for every other verb.
+//
+// The destination travels inside the action string rather than beside it
+// because `act` threads one verb through the capability guard, the optimistic
+// edit, the cache repair and the restore on failure. A second argument would
+// have had to be carried, and correctly put back, by all four.
+var MOVE_PREFIX = "label:"
+
+function labelTarget(action) {
+  var verb = String(action || "")
+  if (verb.indexOf(MOVE_PREFIX) !== 0) return ""
+  return verb.slice(MOVE_PREFIX.length)
+}
+
+function survivesAction(mailboxKey, action, rawQuery) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   if (verb === "trash") return key === "trash"
   if (verb === "untrash") return key !== "trash"
-  if (verb === "archive") return key !== "inbox" && key !== "unread"
+  // A move takes INBOX away exactly as archive does, so it leaves exactly the
+  // lists archive leaves. Said once, because two branches with the same answer
+  // are two places for it to drift.
+  if (labelTarget(verb) !== "" && String(rawQuery || "") !== "") return false
+  if (verb === "archive" || labelTarget(verb) !== "")
+    return key !== "inbox" && key !== "unread"
   if (verb === "markRead") return key !== "unread"
   if (verb === "unstar") return key !== "starred"
   return true
 }
 
-function labelChangesFor(action) {
+function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }
   if (action === "star") return { add: ["STARRED"], remove: [] }
@@ -162,7 +172,49 @@ function labelChangesFor(action) {
   if (action === "archive") return { add: [], remove: ["INBOX"] }
   if (action === "unarchive") return { add: ["INBOX"], remove: [] }
   if (action === "spam") return { add: ["SPAM"], remove: ["INBOX"] }
+  // A move is archive with somewhere to go. Where a folder is a label, putting
+  // a message in one is adding that label and taking INBOX away -- the same
+  // pair archive already writes, with the destination filled in.
+  var target = labelTarget(action)
+  if (target !== "") {
+    var remove = ["INBOX"]
+    var source = String(sourceLabelId || "")
+    if (source !== "" && source !== target && remove.indexOf(source) < 0)
+      remove.push(source)
+    return { add: [target], remove: remove }
+  }
   return null
+}
+
+// The labels a message can be moved into, filtered by what has been typed.
+//
+// System labels are left out: INBOX, SENT, SPAM and the rest are the mailboxes
+// the rail already draws, and offering them here would put two ways of saying
+// "archive" in a list whose whole job is the destinations that have no key of
+// their own. The label or folder already on screen is not a destination: on
+// Gmail it would leave the source label attached while optimistically removing
+// its row, and IMAP would be asked to UID MOVE a message into the same folder.
+// Sorted by name rather than by the order the provider returned, which on
+// Gmail is neither alphabetical nor stable between accounts.
+function movableLabels(labels, query, currentLabelId) {
+  var candidates = Array.isArray(labels) ? labels : []
+  var typed = String(query || "").trim().toLowerCase()
+  var current = String(currentLabelId || "")
+  var destinations = []
+  for (var i = 0; i < candidates.length; i++) {
+    var label = candidates[i]
+    if (!label || label.system === true) continue
+    if (String(label.id || "") === current) continue
+    var labelName = String(label.name || "")
+    if (typed !== "" && labelName.toLowerCase().indexOf(typed) < 0) continue
+    destinations.push(label)
+  }
+  destinations.sort(function(left, right) {
+    var leftName = String(left.name || "").toLowerCase()
+    var rightName = String(right.name || "").toLowerCase()
+    return leftName < rightName ? -1 : (leftName > rightName ? 1 : 0)
+  })
+  return destinations
 }
 
 // Which capability an action needs, or "" for the ones every provider has.
@@ -177,6 +229,7 @@ function actionCapability(action) {
   if (verb === "archive" || verb === "unarchive") return "archive"
   if (verb === "star" || verb === "unstar") return "star"
   if (verb === "spam") return "spam"
+  if (labelTarget(verb) !== "") return "move"
   return ""
 }
 
@@ -189,6 +242,7 @@ function actionUnavailable(action, provider) {
   if (needs === "archive") return name + " has no archive"
   if (needs === "star") return name + " has no star"
   if (needs === "spam") return name + " has no junk verb to report to"
+  if (needs === "move") return name + " has no destination you can name"
   return ""
 }
 
@@ -203,9 +257,9 @@ function unavailableActions(capabilities) {
   return out
 }
 
-function applyLabelChange(summary, action) {
+function applyLabelChange(summary, action, sourceLabelId) {
   if (!summary) return summary
-  var change = labelChangesFor(action)
+  var change = labelChangesFor(action, sourceLabelId)
   if (!change) return summary
   var next = {}
   for (var key in summary) next[key] = summary[key]
@@ -586,18 +640,55 @@ function barTooltip(state, email, unread, provider, authKind) {
 
 // ------------------------------------------------------------ new mail
 
+// The newest timestamp in a page of rows, in milliseconds, or zero if none of
+// them carry one. This is the mailbox's own clock rather than this machine's,
+// which is the whole point of it below.
+function newestDate(summaries) {
+  var list = Array.isArray(summaries) ? summaries : []
+  var newest = 0
+  for (var i = 0; i < list.length; i++) {
+    var summary = list[i]
+    if (!summary || !summary.date || typeof summary.date.getTime !== "function") continue
+    var time = summary.date.getTime()
+    if (isFinite(time) && time > newest) newest = time
+  }
+  return newest
+}
+
 // Only messages the panel has not seen before, and only ones that are actually
 // new rather than merely newly fetched: the first load after start must not
 // fire a notification for every message already sitting in the inbox.
-function newArrivals(summaries, seenIds, primed) {
+//
+// `seenIds` answers that for everything the first page held, and `floorMs`
+// answers it for the rest — an unread message from last year that was never on
+// the cached page is not an arrival just because this is the fetch that first
+// returned it. The floor is the newest timestamp the mailbox itself reported
+// when notifications were primed, so the comparison is the server's clock
+// against the server's clock. Taking it from `Date.now()` instead is what made
+// a machine whose clock ran fast stop notifying altogether, silently and for
+// the whole session: every arrival was older than a "now" that had not
+// happened yet on the server.
+//
+// It is set once and never raised, so a message that arrives out of order —
+// which a mailing list does routinely — is still announced.
+//
+// A row with no usable date is announced rather than dropped. `seenIds` is the
+// guard that matters, and a provider that does not date a summary would
+// otherwise never notify at all.
+function newArrivals(summaries, seenIds, primed, floorMs) {
   if (!primed) return []
   var list = Array.isArray(summaries) ? summaries : []
   var seen = seenIds || {}
   var arrivals = []
+  var floor = typeof floorMs === "number" && isFinite(floorMs) && floorMs > 0 ? floorMs : 0
   for (var i = 0; i < list.length; i++) {
     var summary = list[i]
     if (!summary || !summary.unread || !summary.inInbox) continue
     if (seen[summary.id]) continue
+    if (floor > 0 && summary.date && typeof summary.date.getTime === "function") {
+      var time = summary.date.getTime()
+      if (isFinite(time) && time < floor) continue
+    }
     arrivals.push(summary)
   }
   return arrivals
@@ -653,8 +744,27 @@ function resultSummary(list, estimate, hasMore) {
   return shown + " of about " + total
 }
 
-function statusSummary(syncLabel) {
-  return String(syncLabel || "")
+// The status line at the foot of the window: the account, then how current
+// its list is. The address is the long part and goes first, where it is
+// read; the sync age is short and follows, because "huacnlee@gmail.com ·
+// 1m ago" is one fact about one mailbox, and the mailbox is the subject.
+//
+// The account's own label ("Synced 1m ago") is a sentence for a place with
+// room for one. After an address it is a clause, so the verb goes: the
+// address is what was synced.
+function syncedShort(syncLabel) {
+  var label = String(syncLabel || "")
+  if (label === "") return ""
+  if (label === "Checking for mail") return "checking"
+  var match = /^Synced (.+)$/.exec(label)
+  return match ? match[1] : label
+}
+
+function accountStatusLine(email, syncLabel) {
+  var address = String(email || "")
+  if (address === "") return "Not connected"
+  var age = syncedShort(syncLabel)
+  return age === "" ? address : address + " · " + age
 }
 
 // A title cut around the one word in it that is a link.
@@ -681,4 +791,70 @@ function truncate(text, limit) {
   var value = String(text || "")
   var max = Math.max(4, Math.floor(Number(limit) || 80))
   return value.length <= max ? value : value.substring(0, max - 1) + "…"
+}
+
+// ------------------------------------------------------- settings sidebar
+
+// The settings page is one long scroll with a rail of its section names
+// beside it. The rail is for getting about, not for splitting the page into
+// several: a click scrolls, and the highlight follows the scroll. Both of
+// those are decisions about numbers, so they are made here.
+
+function sortedSections(sections) {
+  var values = Array.isArray(sections) ? sections.slice() : []
+  var known = []
+  for (var i = 0; i < values.length; i++) {
+    var entry = values[i] || {}
+    var y = Number(entry.y)
+    if (!isFinite(y) || String(entry.key || "") === "") continue
+    known.push({ key: String(entry.key), y: y })
+  }
+  known.sort(function(a, b) { return a.y - b.y })
+  return known
+}
+
+// The section the reader is looking at: the last heading at or above the top
+// of the viewport, or the first section while the page is above them all.
+// This only works because the page is padded so that every heading can reach
+// the top (`settingsContentHeight`); without that the last sections could
+// never be the answer, and a click on one would highlight its neighbour —
+// the one annoyance everyone knows from anchor links.
+function activeSettingsSection(sections, contentY) {
+  var known = sortedSections(sections)
+  if (known.length === 0) return ""
+  var top = Number(contentY) || 0
+  var active = known[0].key
+  for (var i = 0; i < known.length; i++) {
+    if (known[i].y <= top) active = known[i].key
+  }
+  return active
+}
+
+// How tall the scrollable content is: the page, or enough more of it that the
+// last heading can be scrolled to the top of the viewport. The extra is empty
+// space under the page, which is what lets "scroll to Calendars" mean
+// Calendars at the top rather than Calendars somewhere in the bottom half.
+function settingsContentHeight(sections, pageHeight, viewportHeight) {
+  var known = sortedSections(sections)
+  var page = Math.max(0, Number(pageHeight) || 0)
+  var viewport = Math.max(0, Number(viewportHeight) || 0)
+  if (known.length === 0) return page
+  return Math.max(page, known[known.length - 1].y + viewport)
+}
+
+// Where a click on a section name scrolls to: its heading, clamped into the
+// range the page can actually reach, so the last section lands at the end of
+// the page rather than asking for a gap under it. -1 for a name the page does
+// not have, which the caller ignores.
+function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
+  var known = sortedSections(sections)
+  var wanted = String(key || "")
+  for (var i = 0; i < known.length; i++) {
+    if (known[i].key !== wanted) continue
+    var content = Number(contentHeight) || 0
+    var viewport = Number(viewportHeight) || 0
+    var limit = Math.max(0, content - viewport)
+    return Math.max(0, Math.min(known[i].y, limit))
+  }
+  return -1
 }

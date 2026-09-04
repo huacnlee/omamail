@@ -94,10 +94,10 @@ const help = byId("help")
 assert.strictEqual(keymap.isEnabled(help, "list", true), true,
   "the sheet's own key has to close the sheet")
 
-// The key sheet remains reachable while a field owns ordinary typing.
-assert.strictEqual(keymap.isSequenceEnabled(help, "Ctrl+K", "compose", false), true)
+// A bare question mark belongs to mailbox navigation, never text entry.
+deepEqual(help.keys, ["?"])
 assert.strictEqual(keymap.isSequenceEnabled(help, "?", "compose", false), false,
-  "the old bare help key remains mailbox-only")
+  "a question mark remains text inside a draft")
 assert.strictEqual(keymap.isSequenceEnabled(help, "?", "list", false), true)
 assert.strictEqual(byId("helpAnywhere"), undefined,
   "one help action must render as one row")
@@ -135,8 +135,7 @@ groups.forEach(function (group) {
 assert.strictEqual(keymap.displayFor(byId("cursorUp")), "k, Up",
   "the sheet names every key that works")
 assert.strictEqual(keymap.displayFor(byId("cursorDown")), "j, Down")
-assert.strictEqual(keymap.displayFor(byId("help")), "Ctrl+K, ?, Ctrl+/, Ctrl+?",
-  "a slash inside a sequence must not read as the separator")
+assert.strictEqual(keymap.displayFor(byId("help")), "?")
 
 // Qt's sequence syntax is not the UI's.
 assert.strictEqual(keymap.readableSequence("g,i"), "g then i",
@@ -252,11 +251,8 @@ listSequences.forEach(function (row) {
     "each entry carries its id, its sequence, and the row it came from")
 })
 assert.strictEqual(keymap.sequencesFor("compose").filter(function (row) {
-  return row.id === "help" && row.sequence === "Ctrl+K"
-}).length, 1, "the universal sequence reaches text-entry contexts")
-assert.strictEqual(keymap.sequencesFor("compose").filter(function (row) {
-  return row.id === "help" && row.sequence === "?"
-}).length, 0, "the mailbox-only sequence stays out of text-entry contexts")
+  return row.id === "help"
+}).length, 0, "Help stays out of text-entry contexts")
 
 // -------------------------------------------------- the doc cannot drift
 
@@ -332,6 +328,22 @@ for (const count of [1, 2, 3, 4]) {
   assert.ok(heaviest <= Math.ceil(totalWeight / count) + 6,
     count + ": no column runs away with the sheet (" + heaviest + ")")
 }
+
+// `v` is Gmail's own move key, which is what issue #58 asks these to match.
+// `m` mutes there, so a move on `m` would be the one binding somebody arriving
+// from Gmail has to unlearn -- pinned here because "it was free" is exactly the
+// reasoning that would put it back.
+const move = keymap.BINDINGS.filter(b => b.id === "moveToLabel")
+assert.strictEqual(move.length, 1, "one move row")
+deepEqual(move[0].keys, ["v"], "Gmail moves with v")
+assert.ok(keymap.BINDINGS.every(b => b.keys.indexOf("m") < 0 || b.contexts.indexOf("calendar") >= 0),
+  "m stays out of the mailbox, where Gmail means mute by it")
+
+// Bound where a message is, and nowhere else: the calendar has no message to
+// move, and a row added to the wrong context list would bind it there silently.
+deepEqual(keymap.bindingsFor("list").filter(b => b.id === "moveToLabel").length, 1)
+deepEqual(keymap.bindingsFor("reader").filter(b => b.id === "moveToLabel").length, 1)
+deepEqual(keymap.bindingsFor("calendar").filter(b => b.id === "moveToLabel").length, 0)
 
 // A count that is not a count still has to draw something.
 deepEqual(keymap.helpColumns(0), [keymap.helpGroups()])

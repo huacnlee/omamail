@@ -51,6 +51,15 @@ var BINDINGS = [
     hint: { reader: "trash" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
+  // `v` because that is the key Gmail moves a message with, and issue #58 asks
+  // for those shortcuts one for one. Not `m`: free here, but Gmail's `m` mutes
+  // a conversation, and taking it for a move would be the one binding somebody
+  // arriving from Gmail has to unlearn.
+  //
+  // "Move to" rather than "Move to a label" because the destination is a label
+  // on Gmail and a folder on IMAP, and the sheet has no provider to ask.
+  { id: "moveToLabel", keys: ["v"], contexts: MAIL,
+    group: "Acting", label: "Move to" },
   { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
@@ -66,7 +75,7 @@ var BINDINGS = [
   { id: "forward", keys: ["f"], contexts: MAIL,
     group: "Writing", label: "Forward" },
   { id: "compose", keys: ["c"], contexts: MAIL,
-    group: "Writing", label: "Compose", hint: { list: "compose" } },
+    group: "Writing", label: "Compose or edit a draft", hint: { list: "compose" } },
   { id: "createEvent", keys: ["c"], contexts: ["calendar"],
     group: "Writing", label: "Create an event", hint: { calendar: "create" } },
   { id: "calendarNext", keys: ["j", "Down"], contexts: ["calendar"],
@@ -150,10 +159,9 @@ var BINDINGS = [
     group: "Mailbox", label: "Check for mail" },
   { id: "settings", keys: ["Ctrl+,"], contexts: ANY,
     group: "Mailbox", label: "Open settings" },
-  // One action and one help row. The old keys remain mailbox-only. Ctrl+K
-  // reaches the same action from fields, forms, drafts, and the calendar.
-  { id: "help", keys: ["Ctrl+K", "?", "Ctrl+/", "Ctrl+?"], contexts: MAIL,
-    sequenceContexts: { "Ctrl+K": ANY },
+  // A question mark asks for the key reference while the keyboard belongs to
+  // mail. Text-entry contexts keep it as text instead.
+  { id: "help", keys: ["?"], contexts: MAIL,
     survivesOverlay: true,
     group: "Mailbox", label: "Toggle all keybindings" },
   { id: "back", keys: ["Escape"], contexts: ANY,
@@ -235,8 +243,7 @@ function bindingsFor(context) {
 
 // One entry per sequence rather than per row, because that is the shape a
 // Shortcut needs: each sequence is its own object, and each decides its own
-// `enabled` — a row holding both `/` and Ctrl+K has them disagree while the
-// user is typing.
+// `enabled` — each sequence still carries the context that owns it.
 function sequencesFor(context) {
   var out = []
   var rows = BINDINGS
