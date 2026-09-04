@@ -49,6 +49,8 @@ Rectangle {
 
   ListView {
     id: suggestions
+
+    WheelScroller { view: suggestions }
     anchors.fill: parent
     anchors.margins: Style.space(2)
     clip: true

@@ -638,3 +638,82 @@ assert.strictEqual(model.settingsScrollTarget(sections, "mailboxes", 1000, 500),
 assert.strictEqual(model.settingsScrollTarget(sections, "reading", 400, 500), 0, "a page shorter than its viewport does not scroll")
 assert.strictEqual(model.settingsScrollTarget(sections, "nope", 1200, 500), -1)
 assert.strictEqual(model.settingsScrollTarget(null, "reading", 1200, 500), -1)
+
+// --------------------------------------------- what a scroller can reach
+
+// `contentY` does not run from 0 to `contentHeight - height`, which is what
+// three clamps in this repository assumed.
+
+// A plain view is the range that assumption described.
+deepEqual(model.contentYBounds(0, 5000, 300, 0, 0), { min: 0, max: 4700 })
+
+// Margins extend both ends. A view resting at the top of its own top margin
+// sits at a negative contentY, and a floor of 0 answers a scroll *up* there by
+// moving *down*, after which the margin can never be seen again.
+deepEqual(model.contentYBounds(0, 5000, 300, 50, 70), { min: -50, max: 4770 })
+
+// `originY` moves the start. A ListView with a 200-tall header reports -200,
+// and a floor of 0 makes the header unreachable — measured against a real
+// ListView, which settles at exactly these two values.
+deepEqual(model.contentYBounds(-200, 4200, 300, 0, 0), { min: -200, max: 3700 })
+
+// Content shorter than its own view has one position rather than a negative
+// range, and that position is the top of it.
+deepEqual(model.contentYBounds(0, 100, 300, 0, 0), { min: 0, max: 0 })
+deepEqual(model.contentYBounds(0, 100, 300, 50, 70), { min: -50, max: -50 })
+
+assert.strictEqual(model.clampContentY(9999, { min: -50, max: 4770 }), 4770)
+assert.strictEqual(model.clampContentY(-9999, { min: -50, max: 4770 }), -50)
+assert.strictEqual(model.clampContentY(100, { min: -50, max: 4770 }), 100)
+
+// ------------------------------------------------------------- the wheel
+
+// A Flickable answers each wheel event with its own flick, so the distance
+// depends on how the turn was reported rather than on how far the wheel went.
+// Rotation is the part that does not change: a notch is 120 units of
+// angleDelta, and eight fractions of a notch still add up to one notch.
+const NOTCH = 120
+assert.strictEqual(model.wheelDistance(-NOTCH), -model.WHEEL_PIXELS_PER_NOTCH,
+  "a notch moves a notch's worth, whatever that is set to")
+assert.strictEqual(model.WHEEL_PIXELS_PER_NOTCH, 120,
+  "and it is three lines of text, which is what a GTK application moves")
+
+// The same turn, chopped up the way a high-resolution wheel reports it.
+let fine = 0
+for (let i = 0; i < 8; i++) fine += model.wheelDistance(-NOTCH / 8)
+assert.strictEqual(fine, -120, "eight fractions of a notch are still one notch")
+
+assert.strictEqual(model.wheelDistance(-3 * NOTCH), -360, "three notches")
+assert.strictEqual(model.wheelDistance(0), 0)
+assert.strictEqual(model.wheelDistance(null), 0)
+
+// Nothing is capped. A cap on one event would put the chunking dependence
+// straight back at the coarse end: a free-spinning wheel delivers ten notches
+// as one event, and a bound would have moved it a notch and a half while the
+// same ten notches arriving as ten events moved ten.
+assert.strictEqual(model.wheelDistance(-10 * NOTCH), -1200)
+let asTen = 0
+for (let i = 0; i < 10; i++) asTen += model.wheelDistance(-NOTCH)
+assert.strictEqual(asTen, model.wheelDistance(-10 * NOTCH),
+  "ten notches move the same distance however they arrive")
+
+// Where the view lands, inside what it can actually reach.
+assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300), 120)
+assert.strictEqual(model.wheelScrollTarget(500, NOTCH, 5000, 300), 380)
+assert.strictEqual(model.wheelScrollTarget(0, 2 * NOTCH, 5000, 300), 0,
+  "there is nothing above the first row")
+assert.strictEqual(model.wheelScrollTarget(4700, -2 * NOTCH, 5000, 300), 4700)
+assert.strictEqual(model.wheelScrollTarget(0, -2 * NOTCH, 100, 300), 0,
+  "content shorter than its view cannot scroll")
+
+// A margined view scrolled up at the top stays in its margin. With a floor of
+// 0 this moved *down* to 0 in answer to a scroll up.
+assert.strictEqual(model.wheelScrollTarget(-50, NOTCH, 5000, 300, 0, 50, 70), -50)
+assert.strictEqual(model.wheelScrollTarget(-50, -NOTCH, 5000, 300, 0, 50, 70), 70)
+assert.strictEqual(model.wheelScrollTarget(4770, -NOTCH, 5000, 300, 0, 50, 70), 4770,
+  "and the bottom margin is reachable rather than cut off")
+
+// A ListView with a header: one notch is one notch, not a jump to 0.
+assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), -80)
+assert.strictEqual(model.wheelScrollTarget(-200, NOTCH, 4200, 300, -200, 0, 0), -200,
+  "and the header stays reachable")

@@ -167,6 +167,8 @@ Item {
 
   Flickable {
     id: timeline
+
+    WheelScroller { view: timeline }
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: root.allDayCount > 0 ? allDayLane.bottom : dayHeaders.bottom
