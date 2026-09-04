@@ -657,8 +657,19 @@ function statusCommand(folder) {
   return "STATUS " + quote(folder) + " (MESSAGES UNSEEN)"
 }
 
-function listCommand() {
-  return "LIST \"\" \"*\""
+function listCommand(withSpecialUse) {
+  return withSpecialUse === true
+    ? "LIST \"\" \"*\" RETURN (SPECIAL-USE)"
+    : "LIST \"\" \"*\""
+}
+
+// Gmail and Outlook file SMTP submissions themselves. Appending the same
+// message would at best upload it twice and at worst show a duplicate.
+function serverFilesSentCopy(rawSettings) {
+  var host = normalizeSettings(rawSettings).smtpHost
+  return host === "smtp.gmail.com"
+    || host === "smtp-mail.outlook.com"
+    || host === "smtp.office365.com"
 }
 
 // Asked alongside the folder listing rather than on its own: it costs nothing

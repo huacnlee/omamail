@@ -226,7 +226,7 @@ check "SMTP keeps its connection deadline" "$config" 'connect-timeout = 20'
 
 # --------------------------------------------------------- IMAP draft upload
 
-append="imap-append $(b64 'imaps://imap.example.org:993/Drafts') $(b64 'jane:pw') $(b64 'Subject: saved draft
+append="imap-append $(b64 'imaps://imap.example.org:993/Drafts') $(b64 'jane:pw') $(b64 'draft') $(b64 'Subject: saved draft
 
 body')"
 config=$(config_for "$append")
@@ -234,6 +234,12 @@ check "a draft is appended to its resolved mailbox" "$config" 'url = "imaps://im
 check "a draft upload uses the RFC 5322 message file" "$config" 'upload-file = "'
 check "an IMAP upload carries the draft flag" "$config" 'upload-flags = "draft"'
 check_absent "an IMAP draft is not sent as a custom request" "$config" 'request = '
+
+sent_append="imap-append $(b64 'imaps://imap.example.org:993/Sent') $(b64 'jane:pw') $(b64 'seen') $(b64 'Subject: sent copy
+
+body')"
+config=$(config_for "$sent_append")
+check "a Sent copy carries the seen flag" "$config" 'upload-flags = "seen"'
 
 # ------------------------------------------------------------- the framing
 

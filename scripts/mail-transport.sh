@@ -13,7 +13,7 @@
 #
 #   imap <b64 url> <b64 user:password> <b64 command> [<b64 command> ...]
 #   imap-id <b64 root url> <b64 url> <b64 user:password> <b64 preamble> <b64 command> ...
-#   imap-append <b64 url> <b64 user:password> <b64 message>
+#   imap-append <b64 url> <b64 user:password> <b64 flags> <b64 message>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
 #
 # base64 rather than the values themselves, for three reasons that each bite
@@ -146,6 +146,7 @@ if [ "$mode" = "smtp" ]; then
   # config. It lands in the 0700 directory the trap removes on any exit.
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
 elif [ "$mode" = "imap-append" ]; then
+  printf 'upload-flags = "%s"\n' "$append_flags"
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
   printf 'user = "%s"\n' "$escaped_credentials"
@@ -156,7 +157,6 @@ elif [ "$mode" = "imap-append" ]; then
     imap://*) printf 'ssl-reqd\n' ;;
   esac
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
-  printf 'upload-flags = "draft"\n'
 else
   # IMAP: one section per command, so a sequence — search a folder, then fetch
   # what came back — runs on a single connection. curl reuses the connection
@@ -209,8 +209,13 @@ if [ "$mode" = "smtp" ]; then
   [ $# -ge 3 ] || fail 'mail-transport.sh: smtp needs a sender, a message and a recipient'
   decode "$2" > "$work/message"
 elif [ "$mode" = "imap-append" ]; then
-  [ $# -eq 1 ] || fail 'mail-transport.sh: imap-append needs one message'
-  decode "$1" > "$work/message"
+  [ $# -eq 2 ] || fail 'mail-transport.sh: imap-append needs flags and one message'
+  append_flags=$(decode "$1")
+  case "$append_flags" in
+    draft|seen) ;;
+    *) fail 'mail-transport.sh: imap-append flags must be draft or seen' ;;
+  esac
+  decode "$2" > "$work/message"
 fi
 
 # curl is the last stage, so `$?` is curl's own exit code rather than the
