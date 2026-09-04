@@ -1703,11 +1703,17 @@ Item {
           root.fail(detail || "That attachment could not be saved")
           return
         }
-        // The folder rather than the whole path: the name is already on the
-        // row that was clicked, and the part worth reading is where it went.
+        // The name first, then the folder. `unique_path` numbers a name that
+        // is already taken, so the file on disk is not always the one the row
+        // shows — and reporting only the folder left the reader opening last
+        // month's `invoice.pdf` believing it was the one just saved. The
+        // notice elides from the right, so the part that can differ from what
+        // was clicked has to come before the part that cannot.
         var saved = String(path || "")
         var at = saved.lastIndexOf("/")
-        root.note(at > 0 ? "Saved to " + saved.substring(0, at) : "Saved")
+        root.note(at > 0
+          ? "Saved " + saved.substring(at + 1) + " to " + saved.substring(0, at)
+          : "Saved")
       })
       request.running = true
     })
