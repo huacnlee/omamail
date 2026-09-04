@@ -51,6 +51,15 @@ var BINDINGS = [
     hint: { reader: "trash" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
+  // `v` because that is the key Gmail moves a message with, and issue #58 asks
+  // for those shortcuts one for one. Not `m`: free here, but Gmail's `m` mutes
+  // a conversation, and taking it for a move would be the one binding somebody
+  // arriving from Gmail has to unlearn.
+  //
+  // "Move to" rather than "Move to a label" because the destination is a label
+  // on Gmail and a folder on IMAP, and the sheet has no provider to ask.
+  { id: "moveToLabel", keys: ["v"], contexts: MAIL,
+    group: "Acting", label: "Move to" },
   { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,

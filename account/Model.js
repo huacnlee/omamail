@@ -134,18 +134,37 @@ function setupActionLabel(state, provider, authKind) {
 // viewed. Archiving from Inbox removes the row; archiving from All mail does
 // not. Getting this wrong either strands a row that is gone or hides one that
 // is still there.
-function survivesAction(mailboxKey, action) {
+// The label a move is aimed at, or "" for every other verb.
+//
+// The destination travels inside the action string rather than beside it
+// because `act` threads one verb through the capability guard, the optimistic
+// edit, the cache repair and the restore on failure. A second argument would
+// have had to be carried, and correctly put back, by all four.
+var MOVE_PREFIX = "label:"
+
+function labelTarget(action) {
+  var verb = String(action || "")
+  if (verb.indexOf(MOVE_PREFIX) !== 0) return ""
+  return verb.slice(MOVE_PREFIX.length)
+}
+
+function survivesAction(mailboxKey, action, rawQuery) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   if (verb === "trash") return key === "trash"
   if (verb === "untrash") return key !== "trash"
-  if (verb === "archive") return key !== "inbox" && key !== "unread"
+  // A move takes INBOX away exactly as archive does, so it leaves exactly the
+  // lists archive leaves. Said once, because two branches with the same answer
+  // are two places for it to drift.
+  if (labelTarget(verb) !== "" && String(rawQuery || "") !== "") return false
+  if (verb === "archive" || labelTarget(verb) !== "")
+    return key !== "inbox" && key !== "unread"
   if (verb === "markRead") return key !== "unread"
   if (verb === "unstar") return key !== "starred"
   return true
 }
 
-function labelChangesFor(action) {
+function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }
   if (action === "star") return { add: ["STARRED"], remove: [] }
@@ -153,7 +172,49 @@ function labelChangesFor(action) {
   if (action === "archive") return { add: [], remove: ["INBOX"] }
   if (action === "unarchive") return { add: ["INBOX"], remove: [] }
   if (action === "spam") return { add: ["SPAM"], remove: ["INBOX"] }
+  // A move is archive with somewhere to go. Where a folder is a label, putting
+  // a message in one is adding that label and taking INBOX away -- the same
+  // pair archive already writes, with the destination filled in.
+  var target = labelTarget(action)
+  if (target !== "") {
+    var remove = ["INBOX"]
+    var source = String(sourceLabelId || "")
+    if (source !== "" && source !== target && remove.indexOf(source) < 0)
+      remove.push(source)
+    return { add: [target], remove: remove }
+  }
   return null
+}
+
+// The labels a message can be moved into, filtered by what has been typed.
+//
+// System labels are left out: INBOX, SENT, SPAM and the rest are the mailboxes
+// the rail already draws, and offering them here would put two ways of saying
+// "archive" in a list whose whole job is the destinations that have no key of
+// their own. The label or folder already on screen is not a destination: on
+// Gmail it would leave the source label attached while optimistically removing
+// its row, and IMAP would be asked to UID MOVE a message into the same folder.
+// Sorted by name rather than by the order the provider returned, which on
+// Gmail is neither alphabetical nor stable between accounts.
+function movableLabels(labels, query, currentLabelId) {
+  var candidates = Array.isArray(labels) ? labels : []
+  var typed = String(query || "").trim().toLowerCase()
+  var current = String(currentLabelId || "")
+  var destinations = []
+  for (var i = 0; i < candidates.length; i++) {
+    var label = candidates[i]
+    if (!label || label.system === true) continue
+    if (String(label.id || "") === current) continue
+    var labelName = String(label.name || "")
+    if (typed !== "" && labelName.toLowerCase().indexOf(typed) < 0) continue
+    destinations.push(label)
+  }
+  destinations.sort(function(left, right) {
+    var leftName = String(left.name || "").toLowerCase()
+    var rightName = String(right.name || "").toLowerCase()
+    return leftName < rightName ? -1 : (leftName > rightName ? 1 : 0)
+  })
+  return destinations
 }
 
 // Which capability an action needs, or "" for the ones every provider has.
@@ -168,6 +229,7 @@ function actionCapability(action) {
   if (verb === "archive" || verb === "unarchive") return "archive"
   if (verb === "star" || verb === "unstar") return "star"
   if (verb === "spam") return "spam"
+  if (labelTarget(verb) !== "") return "move"
   return ""
 }
 
@@ -180,6 +242,7 @@ function actionUnavailable(action, provider) {
   if (needs === "archive") return name + " has no archive"
   if (needs === "star") return name + " has no star"
   if (needs === "spam") return name + " has no junk verb to report to"
+  if (needs === "move") return name + " has no destination you can name"
   return ""
 }
 
@@ -194,9 +257,9 @@ function unavailableActions(capabilities) {
   return out
 }
 
-function applyLabelChange(summary, action) {
+function applyLabelChange(summary, action, sourceLabelId) {
   if (!summary) return summary
-  var change = labelChangesFor(action)
+  var change = labelChangesFor(action, sourceLabelId)
   if (!change) return summary
   var next = {}
   for (var key in summary) next[key] = summary[key]

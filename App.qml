@@ -669,6 +669,18 @@ Item {
     onTriggered: root.draftSavedNotice = ""
   }
 
+  // Opened on the cursor rather than on the selection, the way every other
+  // acting key works: `v` in the list means the row under the cursor, and in
+  // the reader there is only one message it could mean. Refuse an unavailable
+  // move before asking for a destination, through the same provider guard that
+  // checks the final action before its optimistic update.
+  function openLabelPicker() {
+    if (!service || cursorId === "") return false
+    if (service.refuseUnavailableAction("label:destination")) return false
+    labelPicker.open()
+    return true
+  }
+
   // Acting on the open message closes it: it is about to leave this list.
   function actOnCursor(action) {
     if (!service || cursorId === "") return false
@@ -676,7 +688,8 @@ Item {
     var wasOpen = currentView === "reader" && service.selectedId === acted
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(service.messages, acted)
-    var leaves = !Model.survivesAction(service.mailboxKey, action)
+    var leaves = !Model.survivesAction(service.mailboxKey, action,
+      service.rawQuery)
     if (!service.act(acted, action)) return false
     if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a
@@ -710,7 +723,7 @@ Item {
     if (slot.kind === "mailbox") return goMailbox(slot.key)
     // Not a search: the provider decides what selecting a label means, and on
     // IMAP it is a folder rather than a term to look for.
-    service.selectLabel(slot.name)
+    service.selectLabel(slot.name, slot.id)
     backToList()
   }
 
@@ -737,6 +750,7 @@ Item {
       if (service && cursorId !== "") service.toggleStar(cursorId)
       return
     }
+    if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
     if (id === "reply") return composeFromCursor("reply")
@@ -1303,7 +1317,7 @@ Item {
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
-            root.service.selectLabel(name)
+            root.service.selectLabel(name, labelId)
             root.backToList()
           }
         }
@@ -1968,6 +1982,23 @@ Item {
         onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()
+        }
+      }
+
+      LabelPicker {
+        id: labelPicker
+        objectName: "label-picker"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        labels: root.service ? root.service.labels : []
+        currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        onLabelChosen: function(labelId) {
+          root.actOnCursor("label:" + labelId)
         }
       }
 

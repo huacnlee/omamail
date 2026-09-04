@@ -33,7 +33,7 @@ other IMAP server — including one you run yourself.
   through the HEY CLI that 37signals publish, or add any IMAP mailbox with an
   address and an app password. Several accounts at once, each with its own
   inbox, cache and unread count.
-- **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
+- **Keyboard-first.** `j`/`k` to move, `e` to archive, `v` to file, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
   A key the mailbox has no verb for says so instead of pretending: HEY has
@@ -235,6 +235,7 @@ and the client itself are console-only; there is no CLI for them.
 | `e` | Archive |
 | `d` | Move to trash |
 | `s` | Star or unstar |
+| `v` | Move to a label or folder |
 | `Shift+I` / `Shift+U` | Mark read / unread |
 | `r` / `a` / `f` | Reply, reply all, forward |
 | `c` | Compose |

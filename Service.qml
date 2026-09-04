@@ -743,6 +743,7 @@ Item {
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
+  readonly property string rawLabelId: current ? current.rawLabelId : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
@@ -815,7 +816,12 @@ Item {
   }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
-  function selectLabel(name) { if (current) current.selectLabel(name) }
+  function selectLabel(name, labelId) {
+    if (current) current.selectLabel(name, labelId)
+  }
+  function refuseUnavailableAction(action) {
+    return current ? current.refuseUnavailableAction(action) : true
+  }
   function act(id, action, quiet) {
     return current ? current.act(id, action, quiet) : false
   }

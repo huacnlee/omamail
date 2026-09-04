@@ -31,6 +31,13 @@ assert.strictEqual(provider.exists("imap"), true)
 
 assert.strictEqual(provider.can("gmail", "labels"), true)
 assert.strictEqual(provider.can("imap", "labels"), false)
+// Separate questions. `labels` is whether a message can carry several at once,
+// which is what the reader's strip draws; `move` is whether the user gets to
+// say where it goes. IMAP answers no and yes -- one folder per message is the
+// very thing that makes a move the plain operation there.
+assert.strictEqual(provider.can("gmail", "move"), true)
+assert.strictEqual(provider.can("imap", "move"), true)
+assert.strictEqual(provider.can("hey", "move"), false, "HEY's destinations are its own")
 assert.strictEqual(provider.can("gmail", "spam"), true)
 assert.strictEqual(provider.can("imap", "spam"), false, "IMAP has no junk verb worth offering")
 assert.strictEqual(provider.can("gmail", "threads"), true)
