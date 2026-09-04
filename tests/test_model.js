@@ -67,6 +67,8 @@ assert.strictEqual(model.survivesAction("trash", "untrash"), false)
 assert.strictEqual(model.survivesAction("inbox", "label:Label_7"), false)
 assert.strictEqual(model.survivesAction("unread", "label:Label_7"), false)
 assert.strictEqual(model.survivesAction("all", "label:Label_7"), true, "All mail still contains a moved message")
+assert.strictEqual(model.survivesAction("starred", "label:Label_7", "folder:Receipts"), false,
+  "a selected folder leaves even when the previous mailbox key was Starred")
 
 deepEqual(model.labelChangesFor("archive"), { add: [], remove: ["INBOX"] })
 deepEqual(model.labelChangesFor("star"), { add: ["STARRED"], remove: [] })
@@ -75,6 +77,9 @@ assert.strictEqual(model.labelChangesFor("trash"), null, "trash is its own endpo
 // The destination rides inside the verb, so the pipeline that carries one
 // string carries the move too.
 deepEqual(model.labelChangesFor("label:Label_7"), { add: ["Label_7"], remove: ["INBOX"] })
+deepEqual(model.labelChangesFor("label:Label_7", "Label_3"),
+  { add: ["Label_7"], remove: ["INBOX", "Label_3"] },
+  "moving from a Gmail label removes the label that supplied the current view")
 assert.strictEqual(model.labelTarget("label:Label_7"), "Label_7")
 assert.strictEqual(model.labelTarget("archive"), "", "a verb that is not a move names no label")
 assert.strictEqual(model.labelChangesFor("label:"), null, "a move with no destination is not a change")

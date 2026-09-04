@@ -26,6 +26,7 @@ Item {
 
   property string searchQuery: ""
 
+  readonly property bool opened: menu.opened
   readonly property var matchingLabels: Model.movableLabels(root.labels, root.searchQuery)
 
   // Where the keyboard is standing. Reset to the top on every keystroke

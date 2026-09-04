@@ -108,6 +108,7 @@ Item {
 
     property var log: []
     property var lastSavedDraft: null
+    property bool refuseMove: false
 
     signal accountAdded()
     signal replySent()
@@ -187,6 +188,12 @@ Item {
     function refresh() {}
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
+    function refuseUnavailableAction(action) {
+      record("guard:" + String(action || ""))
+      if (!refuseMove) return false
+      note("HEY has no destination you can name")
+      return true
+    }
   }
 
   Omamail.App {
@@ -239,6 +246,7 @@ Item {
     function init() {
       mailService.log = []
       mailService.lastSavedDraft = null
+      mailService.refuseMove = false
       mailService.accountCount = 1
       mailService.providerId = "imap"
       mailService.hasSavedAccounts = true
@@ -459,6 +467,18 @@ Item {
       app.back()
       compare(kinds(), "list,settings")
       compare(mailService.count("discard"), 0)
+    }
+
+    function test_an_unavailable_move_is_refused_before_the_picker_opens() {
+      mailService.refuseMove = true
+      app.cursorId = "message-1"
+
+      app.runShortcut("moveToLabel", "v")
+
+      compare(mailService.count("guard:label:destination"), 1,
+        "the provider guard answers the key before a destination is requested")
+      compare(named(app, "label-picker").opened, false)
+      compare(mailService.actionStatus, "HEY has no destination you can name")
     }
   }
 }

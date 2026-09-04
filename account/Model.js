@@ -148,7 +148,7 @@ function labelTarget(action) {
   return verb.slice(MOVE_PREFIX.length)
 }
 
-function survivesAction(mailboxKey, action) {
+function survivesAction(mailboxKey, action, rawQuery) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   if (verb === "trash") return key === "trash"
@@ -156,6 +156,7 @@ function survivesAction(mailboxKey, action) {
   // A move takes INBOX away exactly as archive does, so it leaves exactly the
   // lists archive leaves. Said once, because two branches with the same answer
   // are two places for it to drift.
+  if (labelTarget(verb) !== "" && String(rawQuery || "") !== "") return false
   if (verb === "archive" || labelTarget(verb) !== "")
     return key !== "inbox" && key !== "unread"
   if (verb === "markRead") return key !== "unread"
@@ -163,7 +164,7 @@ function survivesAction(mailboxKey, action) {
   return true
 }
 
-function labelChangesFor(action) {
+function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }
   if (action === "star") return { add: ["STARRED"], remove: [] }
@@ -175,7 +176,13 @@ function labelChangesFor(action) {
   // a message in one is adding that label and taking INBOX away -- the same
   // pair archive already writes, with the destination filled in.
   var target = labelTarget(action)
-  if (target !== "") return { add: [target], remove: ["INBOX"] }
+  if (target !== "") {
+    var remove = ["INBOX"]
+    var source = String(sourceLabelId || "")
+    if (source !== "" && source !== target && remove.indexOf(source) < 0)
+      remove.push(source)
+    return { add: [target], remove: remove }
+  }
   return null
 }
 
@@ -245,9 +252,9 @@ function unavailableActions(capabilities) {
   return out
 }
 
-function applyLabelChange(summary, action) {
+function applyLabelChange(summary, action, sourceLabelId) {
   if (!summary) return summary
-  var change = labelChangesFor(action)
+  var change = labelChangesFor(action, sourceLabelId)
   if (!change) return summary
   var next = {}
   for (var key in summary) next[key] = summary[key]

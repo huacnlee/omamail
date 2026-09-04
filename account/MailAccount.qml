@@ -128,6 +128,10 @@ Item {
   // search — an IMAP folder wrapped in a TEXT search would go looking for the
   // folder's own name inside the inbox.
   property string rawQuery: ""
+  // The label id behind that raw query. Gmail needs it to make "Move to"
+  // remove the label supplying the current view; IMAP moves out of its source
+  // folder inherently and therefore never passes this into a label change.
+  property string rawLabelId: ""
   property var messages: []
   property var previewMessages: []
   property var labels: []
@@ -1285,6 +1289,13 @@ Item {
   // Every action moves the list immediately and reconciles afterwards. Waiting
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
+  function refuseUnavailableAction(action) {
+    var needs = Model.actionCapability(action)
+    if (needs === "" || Provider.can(providerId, needs)) return false
+    note(Model.actionUnavailable(action, Provider.badge(providerId)))
+    return true
+  }
+
   function act(id, action, quiet) {
     var messageId = String(id || "")
     if (!ready || messageId === "") return false
@@ -1293,11 +1304,7 @@ Item {
     // honour reaches here even though the panel drew no button for it — and the
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
-    var needs = Model.actionCapability(action)
-    if (needs !== "" && !Provider.can(providerId, needs)) {
-      note(Model.actionUnavailable(action, Provider.badge(providerId)))
-      return false
-    }
+    if (refuseUnavailableAction(action)) return false
     if (pendingAction !== "") {
       if (quiet === true) {
         queueQuietAction(messageId, action, cacheKey)
@@ -1331,8 +1338,9 @@ Item {
       actionToken = ""
     }
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
-    var updated = Model.applyLabelChange(before, action)
-    var survives = Model.survivesAction(mailboxKey, action)
+    var sourceLabelId = hasLabels ? rawLabelId : ""
+    var updated = Model.applyLabelChange(before, action, sourceLabelId)
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery)
 
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
@@ -1444,7 +1452,7 @@ Item {
     if (action === "trash") api.trashMessage(messageId, done)
     else if (action === "untrash") api.untrashMessage(messageId, done)
     else {
-      var change = Model.labelChangesFor(action)
+      var change = Model.labelChangesFor(action, sourceLabelId)
       if (!change) {
         pendingAction = ""
         pendingActionQuery = ""
@@ -1490,7 +1498,7 @@ Item {
   }
 
   // A label id is what the provider wants and what the caches key on; a name
-  // is what the person who pressed `m` picked. Falling back to the id keeps a
+  // is what the person who pressed `v` picked. Falling back to the id keeps a
   // note honest when the label list has not arrived rather than printing
   // nothing where the destination should be -- and on IMAP the two are the
   // same string anyway, because a folder's id is its name.
@@ -2109,6 +2117,7 @@ Item {
     mailboxKey = String(key || "inbox")
     searchQuery = ""
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     previewMessages = []
@@ -2122,6 +2131,7 @@ Item {
     searchQuery = query
     // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     listLoaded = false
@@ -2130,11 +2140,13 @@ Item {
 
   // A label on Gmail, a folder on IMAP. One entry point either way, because the
   // sidebar draws one kind of row.
-  function selectLabel(name) {
+  function selectLabel(name, labelId) {
     var query = Provider.labelQuery(providerId, name)
-    if (query === "" || query === rawQuery) return
+    var id = String(labelId || "")
+    if (query === "" || (query === rawQuery && id === rawLabelId)) return
     searchQuery = ""
     rawQuery = query
+    rawLabelId = id
     clearSelection()
     messages = []
     listLoaded = false

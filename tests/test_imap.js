@@ -588,6 +588,18 @@ deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX"], { "\\archive": "Archiv
   { add: [], remove: [], move: "Receipts" }, "a chosen folder beats the archive default")
 deepEqual(imap.flagPlanForLabels(["Receipts/2026"], ["INBOX"], {}),
   { add: [], remove: [], move: "Receipts/2026" }, "a nested folder is a name like any other")
+deepEqual(imap.flagPlanForLabels(["Starred"], ["INBOX"], { "\\archive": "Archive" }),
+  { add: [], remove: [], move: "Starred" },
+  "a named folder does not become the Gmail flag with the same spelling")
+deepEqual(imap.flagPlanForLabels(["Unread"], ["INBOX"], {}),
+  { add: [], remove: [], move: "Unread" },
+  "a named folder does not become Gmail's unread state")
+deepEqual(imap.flagPlanForLabels(["Trash"], ["INBOX"], { "\\trash": "Deleted Items" }),
+  { add: [], remove: [], move: "Trash" },
+  "a regular folder does not become the server's special Trash folder")
+deepEqual(imap.flagPlanForLabels(["Spam"], ["INBOX"], { "\\junk": "Junk Mail" }),
+  { add: [], remove: [], move: "Spam" },
+  "a regular folder does not become the server's special Spam folder")
 // Marking read on the way is still a flag, not a move.
 deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX", "UNREAD"], {}),
   { add: ["\\Seen"], remove: [], move: "Receipts" })
