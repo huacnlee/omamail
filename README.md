@@ -311,8 +311,9 @@ make install          # symlink this checkout into ~/.config/omarchy/plugins
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
-Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
-[docs/SPEC.md](docs/SPEC.md).
+How to send a change — there is no issue tracker — is in
+[CONTRIBUTING.md](CONTRIBUTING.md). Working agreements are in
+[AGENTS.md](AGENTS.md) and the specification is in [docs/SPEC.md](docs/SPEC.md).
 
 Omamail is an independent project and is not affiliated with Google or
 37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals,
