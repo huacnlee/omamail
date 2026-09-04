@@ -968,7 +968,7 @@ function sentDate(given, nowMs) {
     var month = MONTHS.indexOf(parts[3])
     var year = Number(parts[4])
     var calendar = new Date(Date.UTC(year, month, day))
-    if (calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
+    if (year >= 1900 && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
         && calendar.getUTCDate() === day && WEEKDAYS[calendar.getUTCDay()] === parts[1])
       return stated
   }

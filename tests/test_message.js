@@ -724,6 +724,20 @@ assert.strictEqual(message.extractHtml({
     "a weekday that disagrees with its date is replaced")
   assert.strictEqual(new Date(replacedWeekday).getTime(), clock)
 
+  // RFC 5322 permits years from 1900 onward. Its numeric zone has a
+  // two-digit hour and minute, so 23:59 is its last meaningful boundary.
+  const obsoleteYear = "Mon, 04 Sep 1899 10:04:31 +0000"
+  const replacedObsoleteYear = message.sentDate(obsoleteYear, clock)
+  assert.notStrictEqual(replacedObsoleteYear, obsoleteYear,
+    "a year below RFC 5322's lower bound is replaced")
+  assert.strictEqual(new Date(replacedObsoleteYear).getTime(), clock)
+  assert.strictEqual(message.sentDate("Tue, 04 Sep 1900 10:04:31 +0000", clock),
+    "Tue, 04 Sep 1900 10:04:31 +0000", "the first RFC 5322 year is preserved")
+  assert.strictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +2359", clock),
+    "Thu, 03 Sep 2026 10:04:31 +2359", "the greatest numeric zone is preserved")
+  assert.notStrictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +2360", clock),
+    "Thu, 03 Sep 2026 10:04:31 +2360", "a numeric zone minute cannot reach 60")
+
   // A stated value that is not a date is replaced, and a line break in one can
   // become neither a second header nor a mangled first one.
   const forged = message.buildRawMessage({
