@@ -156,6 +156,14 @@ assert.strictEqual(parsed[0].sourceId, "work")
 assert.strictEqual(parsed[0].href, "/cal/a.ics")
 assert.strictEqual(parsed[1].start.allDay, true)
 
+const cdataXml = '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+  + '<d:response><d:href>/cal/cdata.ics</d:href><d:propstat><d:prop>'
+  + '<c:calendar-data><![CDATA[BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:cdata\r\nSUMMARY:iCloud Event\r\nDTSTART:20260824T080000Z\r\nDTEND:20260824T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR]]></c:calendar-data>'
+  + '</d:prop></d:propstat></d:response></d:multistatus>'
+const cdataParsed = feed.eventsFromCaldav(cdataXml, "work")
+assert.strictEqual(cdataParsed.length, 1)
+assert.strictEqual(cdataParsed[0].summary, "iCloud Event")
+
 const recurringXml = [
   '<?xml version="1.0"?>',
   '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',

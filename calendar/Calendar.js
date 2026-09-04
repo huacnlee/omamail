@@ -78,7 +78,11 @@ function tagText(block, localName) {
   var pattern = new RegExp("<(?:[A-Za-z0-9_-]+:)?" + name
     + "(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[A-Za-z0-9_-]+:)?" + name + ">", "i")
   var match = pattern.exec(String(block || ""))
-  return match ? decodeXml(match[1]) : ""
+  if (!match) return ""
+  var text = match[1]
+  if (/<!\[CDATA\[/i.test(text))
+    return text.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, "$1")
+  return decodeXml(text)
 }
 
 function caldavResponses(xml) {
