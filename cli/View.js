@@ -9,6 +9,15 @@ function trimmed(value) {
   return String(value === undefined || value === null ? "" : value).trim()
 }
 
+function terminalText(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "")
+}
+
+function terminalInline(value) {
+  return terminalText(value).replace(/[\n\t]+/g, " ")
+}
+
 function isoDate(value) {
   if (value === undefined || value === null || value === "") return ""
   if (typeof value === "number" && isFinite(value) && value > 0)
@@ -159,10 +168,10 @@ function formatList(messages, meta, json, pretty, account) {
   for (var j = 0; j < rows.length; j++) {
     var row = rows[j]
     lines.push(pad(flagsOf(list[j]), 6)
-      + pad(fromLabel(list[j]), 22)
-      + pad(row.subject, 40)
-      + pad(row.time || row.date, 16)
-      + row.id)
+      + pad(terminalInline(fromLabel(list[j])), 22)
+      + pad(terminalInline(row.subject), 40)
+      + pad(terminalInline(row.time || row.date), 16)
+      + terminalInline(row.id))
   }
   var next = trimmed(info.nextPageToken)
   if (next !== "") lines.push("\nNext page: --page-token " + next)
@@ -175,19 +184,19 @@ function formatRead(summary, body, json, pretty, account) {
   if (summary && Array.isArray(summary.to) === false) row.to = addressList(summary.to)
   if (json) return encodeJson(wrapPayload(account, { message: row }), pretty)
   var lines = []
-  lines.push("From: " + fromLabel(summary))
+  lines.push("From: " + terminalInline(fromLabel(summary)))
   var to = addressList(summary && summary.to)
   if (to.length > 0) {
     var names = []
-    for (var i = 0; i < to.length; i++) names.push(to[i].display)
+    for (var i = 0; i < to.length; i++) names.push(terminalInline(to[i].display))
     lines.push("To: " + names.join(", "))
   }
-  lines.push("Subject: " + row.subject)
-  if (row.date) lines.push("Date: " + row.date)
-  lines.push("Id: " + row.id)
-  if (row.threadId) lines.push("Thread: " + row.threadId)
+  lines.push("Subject: " + terminalInline(row.subject))
+  if (row.date) lines.push("Date: " + terminalInline(row.date))
+  lines.push("Id: " + terminalInline(row.id))
+  if (row.threadId) lines.push("Thread: " + terminalInline(row.threadId))
   lines.push("")
-  lines.push(row.body)
+  lines.push(terminalText(row.body))
   if (row.body !== "" && row.body.charAt(row.body.length - 1) !== "\n")
     return lines.join("\n") + "\n"
   return lines.join("\n")

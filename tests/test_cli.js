@@ -43,6 +43,9 @@ parsed = ok(["message", "list", "--mailbox", "sent", "--json"])
 assert.strictEqual(parsed.flags.mailbox, "sent")
 assert.strictEqual(parsed.flags.json, true)
 
+parsed = ok(["message", "list", "--mailbox", "Project Alpha"])
+assert.strictEqual(parsed.flags.mailbox, "Project Alpha")
+
 parsed = ok(["-ja", "me@example.com", "status"])
 assert.strictEqual(parsed.group, "status")
 assert.strictEqual(parsed.flags.json, true)
@@ -255,6 +258,21 @@ assert.ok(table.indexOf("abc") >= 0)
 const read = View.formatRead(row, "Hi there", false, false, null)
 assert.ok(read.indexOf("From: Jane") >= 0)
 assert.ok(read.indexOf("Hi there") >= 0)
+
+const hostile = Object.assign({}, row, {
+  from: { name: "\u001b]0;owned\u0007Jane", email: "jane@x.com" },
+  subject: "\u001b[2JQuarterly report"
+})
+const hostileTable = View.formatList([hostile], { mailbox: "inbox" }, false, false, null)
+const hostileRead = View.formatRead(hostile, "hello\u001b]52;c;Zm9v\u0007world", false, false, null)
+assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(hostileTable),
+  "terminal list output must not contain control sequences from a message")
+assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(hostileRead),
+  "terminal read output must not contain control sequences from a message")
+const hostileJson = JSON.parse(View.formatRead(hostile, "hello\u001bworld", true, false, null))
+assert.strictEqual(hostileJson.message.subject, hostile.subject,
+  "structured output retains the sender's exact data")
+assert.strictEqual(hostileJson.message.body, "hello\u001bworld")
 
 const err = JSON.parse(View.formatError("Nope", true, false, "auth"))
 assert.strictEqual(err.ok, false)

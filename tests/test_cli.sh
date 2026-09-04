@@ -86,4 +86,165 @@ HOME="$work" XDG_BIN_HOME="$bin_home" sh scripts/register-cli.sh "$(pwd)" 2>/dev
 [ "$(cat "$bin_home/omamail")" = other ] \
   || fail "register-cli.sh must not replace a regular file named omamail"
 
+# A transport that dies before printing its three-line response did not send
+# anything. Empty stdout must not be parsed as curl status zero and reported as
+# a successful delivery.
+runtime_bin="$work/runtime-bin"
+mkdir -p "$runtime_bin"
+cat > "$runtime_bin/secret-tool" <<'EOF'
+#!/bin/sh
+printf '%s' 'password'
+EOF
+cat > "$runtime_bin/curl" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+printf '* CAPABILITY IMAP4rev1 MOVE\r\n* LIST (\\HasNoChildren) "/" "INBOX"\r\nA1 OK done\r\n'
+EOF
+cat > "$runtime_bin/mktemp" <<'EOF'
+#!/bin/sh
+count=0
+[ ! -f "$OMAMAIL_TEST_MKTEMP_COUNT" ] || count=$(cat "$OMAMAIL_TEST_MKTEMP_COUNT")
+count=$((count + 1))
+printf '%s\n' "$count" > "$OMAMAIL_TEST_MKTEMP_COUNT"
+[ "$count" -ne 1 ] || exec /usr/bin/mktemp "$@"
+exit 1
+EOF
+chmod +x "$runtime_bin/secret-tool" "$runtime_bin/curl" "$runtime_bin/mktemp"
+printf '%s\n' '{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com","provider":"imap","imap":{"imapHost":"imap.example.com","imapPort":993,"smtpHost":"smtp.example.com","smtpPort":465,"username":"me@example.com","aliases":[],"insecure":false}}],"activeId":"imap:me@example.com"}' \
+  > "$work/config/omamail/accounts.json"
+set +e
+smtp_failure=$(PATH="$runtime_bin:$PATH" OMAMAIL_TEST_MKTEMP_COUNT="$work/mktemp-count" \
+  scripts/omamail send --to you@example.com --body hello 2>&1)
+status=$?
+set -e
+[ "$status" -ne 0 ] \
+  || fail "an SMTP transport that exits before a response must not be reported as sent: $smtp_failure"
+runtime_ok_bin="$work/runtime-ok-bin"
+mkdir -p "$runtime_ok_bin"
+cp "$runtime_bin/secret-tool" "$runtime_ok_bin/secret-tool"
+cp "$runtime_bin/curl" "$runtime_ok_bin/curl"
+
+# IMAP send-as addresses are the mailbox address and its configured aliases,
+# exactly as they are in the window. An arbitrary --from must be refused before
+# it reaches SMTP.
+set +e
+from_failure=$(PATH="$runtime_ok_bin:$PATH" \
+  scripts/omamail send --to you@example.com --from impostor@example.com --body hello 2>&1)
+status=$?
+set -e
+[ "$status" -ne 0 ] \
+  || fail "IMAP accepted a From address the mailbox does not own: $from_failure"
+printf '%s\n' "$from_failure" | grep -q 'valid From address' \
+  || fail "IMAP must explain that an unauthorized From address is invalid"
+set +e
+invalid_ids=$(PATH="$runtime_ok_bin:$PATH" scripts/omamail star 42:Sent Items 2>&1)
+status=$?
+set -e
+[ "$status" -eq 2 ] \
+  || fail "an unquoted IMAP folder must refuse the whole action as invalid input: $invalid_ids (exit $status)"
+
+# A draft id names a draft, not a HEY topic. Reading one must use `draft show`
+# and retain the draft's headers and body in the CLI response.
+cat > "$runtime_ok_bin/hey" <<'EOF'
+#!/bin/sh
+if [ "$*" = "draft show 123 --json" ]; then
+  printf '%s\n' '{"ok":true,"data":{"id":123,"subject":"Draft subject","body":"Draft body","to":["you@example.com"],"cc":[],"bcc":[],"updated_at":"2026-09-04T01:02:03Z"}}'
+  exit 0
+fi
+printf '%s\n' '{"ok":false,"error":"wrong HEY resource"}'
+exit 1
+EOF
+chmod +x "$runtime_ok_bin/hey"
+printf '%s\n' '{"version":1,"accounts":[{"id":"hey:me@hey.com","email":"me@hey.com","provider":"hey"}],"activeId":"hey:me@hey.com"}' \
+  > "$work/config/omamail/accounts.json"
+set +e
+draft_read=$(PATH="$runtime_ok_bin:$PATH" scripts/omamail --json read draft:123 2>&1)
+status=$?
+set -e
+[ "$status" -eq 0 ] \
+  || fail "a HEY draft id must be read as a draft: $draft_read"
+printf '%s\n' "$draft_read" | grep -q '"subject":"Draft subject"' \
+  || fail "a HEY draft read must retain its subject"
+printf '%s\n' "$draft_read" | grep -q '"body":"Draft body"' \
+  || fail "a HEY draft read must retain its body"
+
+# Dynamic mailbox discovery is a live operation. If IMAP authentication fails,
+# returning only the built-in fallback folders makes a broken account look
+# healthy and hides every server-defined folder.
+printf '%s\n' '{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com","provider":"imap","imap":{"imapHost":"imap.example.com","imapPort":993,"smtpHost":"smtp.example.com","smtpPort":465,"username":"me@example.com","aliases":[],"insecure":false}}],"activeId":"imap:me@example.com"}' \
+  > "$work/config/omamail/accounts.json"
+auth_fail_bin="$work/auth-fail-bin"
+mkdir -p "$auth_fail_bin"
+cat > "$auth_fail_bin/secret-tool" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$auth_fail_bin/secret-tool"
+set +e
+mailbox_failure=$(PATH="$auth_fail_bin:$PATH" scripts/omamail mailbox list 2>&1)
+status=$?
+set -e
+[ "$status" -eq 3 ] \
+  || fail "mailbox list must classify a missing IMAP credential as auth: $mailbox_failure (exit $status)"
+set +e
+read_auth_failure=$(PATH="$auth_fail_bin:$PATH" scripts/omamail --json read 42:INBOX 2>&1)
+status=$?
+set -e
+[ "$status" -eq 3 ] \
+  || fail "read must classify a missing IMAP credential as auth: $read_auth_failure (exit $status)"
+printf '%s\n' "$read_auth_failure" | grep -q '"code":"auth"' \
+  || fail "JSON auth failures must carry the documented auth code: $read_auth_failure"
+
+# A transport timeout is an operational failure, not proof that a message does
+# not exist. `read` reserves exit 4 for an authoritative not-found answer.
+network_fail_bin="$work/network-fail-bin"
+mkdir -p "$network_fail_bin"
+cp "$runtime_bin/secret-tool" "$network_fail_bin/secret-tool"
+cat > "$network_fail_bin/curl" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+printf '%s\n' 'operation timed out' >&2
+exit 28
+EOF
+chmod +x "$network_fail_bin/curl"
+set +e
+network_read=$(PATH="$network_fail_bin:$PATH" scripts/omamail --json read 42:INBOX 2>&1)
+status=$?
+set -e
+[ "$status" -eq 1 ] \
+  || fail "read must classify a transport timeout as an operational error: $network_read (exit $status)"
+printf '%s\n' "$network_read" | grep -q '"code":"error"' \
+  || fail "JSON transport failures must carry the documented error code: $network_read"
+
+# The status command promises the unread number used by the panel badge. Gmail
+# defines that with the provider's unread query, not with INBOX label metadata.
+gmail_bin="$work/gmail-bin"
+mkdir -p "$gmail_bin"
+cat > "$gmail_bin/secret-tool" <<'EOF'
+#!/bin/sh
+printf '%s' 'refresh-token'
+EOF
+cat > "$gmail_bin/curl" <<'EOF'
+#!/bin/sh
+IFS= read -r config
+case "$config" in
+  *oauth2.googleapis.com/token*) printf '%s\n200' '{"access_token":"access-token","expires_in":3600}' ;;
+  *labels/INBOX*) printf '%s\n200' '{"messagesUnread":99}' ;;
+  *messages*) printf '%s\n200' '{"messages":[],"resultSizeEstimate":7}' ;;
+  *) printf '%s\n500' '{"error":{"message":"unexpected request"}}' ;;
+esac
+EOF
+chmod +x "$gmail_bin/secret-tool" "$gmail_bin/curl"
+printf '%s\n' '{"version":1,"accounts":[{"id":"me@gmail.com","email":"me@gmail.com","provider":"gmail"}],"activeId":"me@gmail.com"}' \
+  > "$work/config/omamail/accounts.json"
+printf '%s\n' '{"version":2,"accounts":[{"id":"me@gmail.com","clientId":"1234-test.apps.googleusercontent.com","clientSecret":"GOCSPX-secret","projectId":"test"}]}' \
+  > "$work/config/omamail/credentials.json"
+set +e
+gmail_status=$(PATH="$gmail_bin:$PATH" scripts/omamail --json status 2>&1)
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "Gmail status failed: $gmail_status"
+printf '%s\n' "$gmail_status" | grep -q '"unread":7' \
+  || fail "Gmail status did not use the badge's unread query: $gmail_status"
+
 printf 'test_cli.sh ok\n'

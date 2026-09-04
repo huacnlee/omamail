@@ -363,8 +363,9 @@ function resolveFolder(name, folders) {
 
 function messageId(uid, folder) {
   var number = Math.floor(Number(uid))
-  if (!isFinite(number) || number < 1) return ""
-  return String(number) + ":" + trimmed(folder)
+  var mailbox = trimmed(folder)
+  if (!isFinite(number) || number < 1 || mailbox === "") return ""
+  return String(number) + ":" + mailbox
 }
 
 function parseMessageId(id) {
@@ -373,11 +374,22 @@ function parseMessageId(id) {
   return { uid: Math.floor(Number(match[1])), folder: match[2] }
 }
 
+function validMessageIds(ids) {
+  var list = Array.isArray(ids) ? ids : []
+  if (list.length === 0) return false
+  for (var i = 0; i < list.length; i++) {
+    var parsed = parseMessageId(list[i])
+    if (parsed.uid < 1 || trimmed(parsed.folder) === "") return false
+  }
+  return true
+}
+
 // Grouped by folder, because every command this client sends operates on the
 // folder the connection has selected: one round trip per folder rather than
 // one per message, and a batch spanning two folders is two conversations.
 function groupByFolder(ids, maxPerGroup) {
   var list = Array.isArray(ids) ? ids : []
+  if (list.length > 0 && !validMessageIds(list)) return []
   var order = []
   var groups = {}
   for (var i = 0; i < list.length; i++) {

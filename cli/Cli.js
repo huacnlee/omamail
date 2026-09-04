@@ -169,7 +169,7 @@ function applyFlag(flags, name, argv, index) {
   if (name === "mailbox" || name === "m") {
     taken = takeValue(argv, index, "--mailbox")
     if (taken.error) return taken
-    flags.mailbox = trimmed(taken.value).toLowerCase()
+    flags.mailbox = trimmed(taken.value)
     return { next: taken.next }
   }
   if (name === "query") {

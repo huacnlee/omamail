@@ -227,8 +227,8 @@ deepEqual(imap.groupByFolder(["3:INBOX", "5:Archive", "4:INBOX"]), [
   { folder: "INBOX", uids: [3, 4] },
   { folder: "Archive", uids: [5] }
 ])
-deepEqual(imap.groupByFolder(["bad", "3:INBOX"]), [{ folder: "INBOX", uids: [3] }],
-  "an unparseable id is dropped rather than aimed at some default folder")
+deepEqual(imap.groupByFolder(["bad", "3:INBOX"]), [],
+  "one unparseable id refuses the whole action rather than partially applying it")
 deepEqual(imap.groupByFolder([
   "8:INBOX", "7:INBOX", "6:INBOX", "2:Archive"
 ], 2), [

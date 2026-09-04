@@ -37,6 +37,7 @@ function load(relativePath) {
 const Cli = load("cli/Cli.js")
 const View = load("cli/View.js")
 const Accounts = load("account/Accounts.js")
+const Aliases = load("account/Aliases.js")
 const Credentials = load("providers/Credentials.js")
 const Secrets = load("providers/Secrets.js")
 const OAuth = load("providers/OAuth.js")
@@ -111,6 +112,14 @@ function succeed(text) {
   process.exit(Cli.EXIT_OK)
 }
 
+function resultExit(result, fallback) {
+  if (result && Number(result.exit) > 0) return Math.floor(Number(result.exit))
+  const error = String(result && result.error || "")
+  if (/not signed in|sign in again|authentication failed|invalid credentials|unauthorized/i.test(error))
+    return Cli.EXIT_AUTH
+  return fallback || Cli.EXIT_ERROR
+}
+
 function helpFor(parsed) {
   const topic = parsed.group === "help" ? parsed.verb : parsed.group
   if (parsed.group === "message" && parsed.verb && parsed.verb !== "message")
@@ -147,7 +156,7 @@ function curlConfig(lines) {
     maxBuffer: 32 * 1024 * 1024
   })
   const stderr = String(result.stderr || "")
-  if (result.error)
+  if (result.error && result.status === null)
     return { error: "Could not start curl", status: 0, body: "" }
   return {
     error: result.status === 0 ? "" : (stderr.trim() || "curl failed"),
@@ -231,7 +240,8 @@ function gmailSession(account) {
   }
   const refresh = gmailRefreshToken(credentials.clientId, account.id)
   if (!refresh) {
-    return { ok: false, error: "Not signed in. Open Omamail and sign in to this mailbox" }
+    return { ok: false, exit: Cli.EXIT_AUTH,
+      error: "Not signed in. Open Omamail and sign in to this mailbox" }
   }
   const token = refreshAccessToken(credentials, refresh)
   if (!token.ok) return token
@@ -250,7 +260,7 @@ function gmailCall(session, method, apiPath, query, body) {
     session.accessToken = refreshed.accessToken
     answer = gmailHttp(method, url, session.accessToken, body, true)
   }
-  if (!answer.ok) return { ok: false, error: answer.error }
+  if (!answer.ok) return { ok: false, status: answer.status, error: answer.error }
   return { ok: true, payload: answer.payload }
 }
 
@@ -268,11 +278,13 @@ function gmailGetMessages(session, ids, full) {
   const list = Array.isArray(ids) ? ids : []
   const results = new Array(list.length)
   let firstError = ""
+  let firstStatus = 0
   const query = full ? Api.fullQuery() : Api.metadataQuery()
   for (let i = 0; i < list.length; i++) {
     const answer = gmailCall(session, "GET", Api.messagePath(list[i]), query, null)
     if (!answer.ok) {
       if (!firstError) firstError = answer.error
+      if (!firstStatus) firstStatus = answer.status
       continue
     }
     results[i] = answer.payload
@@ -281,7 +293,8 @@ function gmailGetMessages(session, ids, full) {
   for (let j = 0; j < results.length; j++) {
     if (results[j]) ordered.push(results[j])
   }
-  if (firstError) return { ok: false, error: firstError, messages: ordered }
+  if (firstError) return { ok: false, error: firstError, messages: ordered,
+    exit: firstStatus === 404 ? Cli.EXIT_NOT_FOUND : Cli.EXIT_ERROR }
   return { ok: true, messages: ordered }
 }
 
@@ -291,7 +304,8 @@ function imapPassword(accountId) {
 
 function imapCredentials(account) {
   const password = imapPassword(account.id)
-  if (!password) return { ok: false, error: "Not signed in. Open Omamail and add this IMAP mailbox again" }
+  if (!password) return { ok: false, exit: Cli.EXIT_AUTH,
+    error: "Not signed in. Open Omamail and add this IMAP mailbox again" }
   const settings = Imap.normalizeSettings(account.imap)
   const username = settings.username || account.email
   if (!username) return { ok: false, error: "This mailbox has no username" }
@@ -347,6 +361,8 @@ function runSmtp(settings, credentials, from, message, recipients) {
     maxBuffer: 32 * 1024 * 1024
   })
   const lines = String(result.stdout || "").split("\n")
+  if (result.status === null || result.status !== 0 || lines.length < 3)
+    return { ok: false, error: "Could not start the mail transport" }
   const status = Math.floor(Number(lines[0]))
   const err = lines.length > 2 ? lines[2] : ""
   const detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
@@ -390,11 +406,16 @@ function heyToMessage(id, row, body) {
   const from = known.from || { name: "", email: "" }
   if (from.name !== "" || from.email !== "")
     headers.push({ name: "From", value: Mail.addressHeader(from.email, from.name) })
-  const recipients = Array.isArray(known.to) ? known.to : []
-  const addressed = []
-  for (let i = 0; i < recipients.length; i++)
-    addressed.push(Mail.addressHeader(recipients[i].email, recipients[i].name))
-  if (addressed.length > 0) headers.push({ name: "To", value: addressed.join(", ") })
+  const recipientHeaders = [{ name: "To", values: known.to },
+    { name: "Cc", values: known.cc }, { name: "Bcc", values: known.bcc }]
+  for (let i = 0; i < recipientHeaders.length; i++) {
+    const recipients = Array.isArray(recipientHeaders[i].values) ? recipientHeaders[i].values : []
+    const addressed = []
+    for (let j = 0; j < recipients.length; j++)
+      addressed.push(Mail.addressHeader(recipients[j].email, recipients[j].name))
+    if (addressed.length > 0)
+      headers.push({ name: recipientHeaders[i].name, value: addressed.join(", ") })
+  }
   if (String(known.subject || "") !== "")
     headers.push({ name: "Subject", value: String(known.subject) })
   if (String(known.date || "") !== "")
@@ -413,11 +434,14 @@ function heyToMessage(id, row, body) {
   const labels = []
   if (!known.seen) labels.push("UNREAD")
   if (String(known.box || "") === "imbox") labels.push("INBOX")
+  if (known.isDraft === true) labels.push("DRAFT")
+  const date = String(known.date || "")
+  const stamp = date === "" ? 0 : Date.parse(date)
   return {
     id: String(id || ""),
-    threadId: Hey.topicIdOf(id),
+    threadId: known.isDraft === true ? "" : Hey.topicIdOf(id),
     labelIds: labels,
-    internalDate: "",
+    internalDate: isFinite(stamp) && stamp > 0 ? String(stamp) : "",
     sizeEstimate: payload.body.size,
     payload: payload,
     snippet: String(known.snippet || "")
@@ -508,7 +532,8 @@ function readGmail(session, id) {
   const fetched = gmailGetMessages(session, [id], true)
   if (!fetched.ok) return fetched
   if (fetched.messages.length === 0)
-    return { ok: false, error: "That message is no longer in the mailbox" }
+    return { ok: false, exit: Cli.EXIT_NOT_FOUND,
+      error: "That message is no longer in the mailbox" }
   return { ok: true, message: fetched.messages[0] }
 }
 
@@ -587,13 +612,15 @@ function listImap(server, query, flags) {
 
 function readImap(server, id) {
   const parsed = Imap.parseMessageId(id)
-  if (parsed.uid < 1) return { ok: false, error: "That is not an IMAP message id" }
+  if (parsed.uid < 1 || String(parsed.folder || "").trim() === "")
+    return { ok: false, exit: Cli.EXIT_NOT_FOUND, error: "That is not an IMAP message id" }
   const command = Imap.fullFetchCommand([parsed.uid])
   const answer = runImap(server.settings, server.credentials, parsed.folder, [command])
   if (!answer.ok) return answer
   const entries = Imap.parseFetch(answer.text)
   if (entries.length === 0)
-    return { ok: false, error: "That message is no longer in the mailbox" }
+    return { ok: false, exit: Cli.EXIT_NOT_FOUND,
+      error: "That message is no longer in the mailbox" }
   return { ok: true, message: imapToMessage(entries[0], parsed.folder, server.special, true) }
 }
 
@@ -621,6 +648,9 @@ function sendImap(server, fields, accountEmail) {
 }
 
 function actImap(server, ids, verb) {
+  if (!Imap.validMessageIds(ids))
+    return { ok: false, exit: Cli.EXIT_USAGE,
+      error: "Every message must have an IMAP id such as 42:INBOX" }
   const action = Cli.actionFor(verb)
   let plan
   if (action === "trash") {
@@ -685,10 +715,18 @@ function listHey(query, flags) {
 }
 
 function readHey(id) {
-  const command = Hey.threadCommand(id)
-  if (command.length === 0) return { ok: false, error: "That is not a HEY message id" }
+  const draftId = Hey.draftIdOf(id)
+  const command = draftId !== "" ? Hey.draftShowCommand(id) : Hey.threadCommand(id)
+  if (command.length === 0)
+    return { ok: false, exit: Cli.EXIT_NOT_FOUND, error: "That is not a HEY message id" }
   const answer = runHey(command, "")
   if (!answer.ok) return answer
+  if (draftId !== "") {
+    const draft = Hey.parseDraft(answer.data)
+    if (draft.id === "") return { ok: false, exit: Cli.EXIT_NOT_FOUND,
+      error: "That draft is no longer in the mailbox" }
+    return { ok: true, message: heyToMessage(id, draft, { text: draft.body, html: "" }) }
+  }
   const body = Hey.parseThread(answer.text)
   if (body.error) return { ok: false, error: body.error }
   const row = { id: id, subject: "", from: { name: "", email: "" }, to: [], snippet: "", seen: true, box: "" }
@@ -773,6 +811,9 @@ function sendMessage(parsed, account, fields) {
     return sendGmail(session, Object.assign({ from: fields.from || account.email }, fields))
   }
   if (account.provider === "imap") {
+    if (fields.from && !Api.isSendAsAllowed(
+      Aliases.sendAsList(account.email, account.imap && account.imap.aliases), fields.from))
+      return { ok: false, error: "Choose a valid From address" }
     const server = imapServer(account)
     if (!server.ok) return server
     return sendImap(server, Object.assign({ from: fields.from || account.email }, fields), account.email)
@@ -801,9 +842,10 @@ function unreadCount(account) {
     const session = gmailSession(account)
     if (!session.ok) return session
     session.accountId = account.id
-    const answer = gmailCall(session, "GET", Api.labelPath("INBOX"), null, null)
-    if (!answer.ok) return answer
-    return { ok: true, unread: Api.parseLabelCounts(answer.payload).unread }
+    const listed = gmailCall(session, "GET", Api.messagesPath(),
+      Api.listQuery(Registry.unreadQuery("gmail"), 1, ""), null)
+    if (!listed.ok) return listed
+    return { ok: true, unread: Api.parseMessageList(listed.payload).estimate }
   }
   if (account.provider === "imap") {
     const server = imapServer(account)
@@ -826,7 +868,7 @@ function listMailboxes(account) {
   if (account.provider !== "imap")
     return { ok: true, mailboxes: Registry.mailboxes(account.provider) }
   const server = imapServer(account)
-  if (!server.ok) return { ok: true, mailboxes: Registry.mailboxes("imap") }
+  if (!server.ok) return server
   const boxes = Registry.mailboxes("imap").slice()
   const known = {}
   for (let i = 0; i < boxes.length; i++) known[boxes[i].key] = true
@@ -849,14 +891,14 @@ function composeAndSend(parsed, account, extra) {
   if (Cli.trimmed(fields.body) === "" && parsed.verb === "send")
     fail(parsed, "Write something before sending", Cli.EXIT_USAGE)
   const sent = sendMessage(parsed, account, fields)
-  if (!sent.ok) fail(parsed, sent.error, Cli.EXIT_ERROR)
+  if (!sent.ok) fail(parsed, sent.error, resultExit(sent, Cli.EXIT_ERROR))
   succeed(View.formatSend(sent, parsed.flags.json, parsed.flags.pretty, account))
 }
 
 function replyTo(parsed, account) {
   const id = parsed.flags.ids[0]
   const opened = readMessage(parsed, account, id)
-  if (!opened.ok) fail(parsed, opened.error, opened.error && /no longer|not an/.test(opened.error) ? Cli.EXIT_NOT_FOUND : Cli.EXIT_ERROR)
+  if (!opened.ok) fail(parsed, opened.error, resultExit(opened, Cli.EXIT_ERROR))
   const body = readBody(parsed)
   if (Cli.trimmed(body) === "")
     fail(parsed, "Write something before sending", Cli.EXIT_USAGE)
@@ -878,21 +920,21 @@ function replyTo(parsed, account) {
   if (account.provider === "hey")
     fields.threadId = Hey.topicIdOf(id) || summary.threadId
   const sent = sendMessage(parsed, account, fields)
-  if (!sent.ok) fail(parsed, sent.error, Cli.EXIT_ERROR)
+  if (!sent.ok) fail(parsed, sent.error, resultExit(sent, Cli.EXIT_ERROR))
   succeed(View.formatSend(sent, parsed.flags.json, parsed.flags.pretty, account))
 }
 
 function forwardMessage(parsed, account) {
   const id = parsed.flags.ids[0]
   const opened = readMessage(parsed, account, id)
-  if (!opened.ok) fail(parsed, opened.error, Cli.EXIT_NOT_FOUND)
+  if (!opened.ok) fail(parsed, opened.error, resultExit(opened, Cli.EXIT_ERROR))
   const extra = readBody(parsed)
   const quoted = Mail.quoteBody(opened.summary, opened.body)
   const fields = Cli.sendFields(parsed.flags, extra ? extra + "\n\n" + quoted : quoted)
   fields.from = parsed.flags.from || account.email
   fields.subject = fields.subject || Cli.forwardSubject(opened.summary.subject)
   const sent = sendMessage(parsed, account, fields)
-  if (!sent.ok) fail(parsed, sent.error, Cli.EXIT_ERROR)
+  if (!sent.ok) fail(parsed, sent.error, resultExit(sent, Cli.EXIT_ERROR))
   succeed(View.formatSend(sent, parsed.flags.json, parsed.flags.pretty, account))
 }
 
@@ -916,13 +958,13 @@ function main(argv) {
 
   if (parsed.group === "mailbox") {
     const boxes = listMailboxes(account)
-    if (!boxes.ok) fail(parsed, boxes.error, Cli.EXIT_ERROR)
+    if (!boxes.ok) fail(parsed, boxes.error, resultExit(boxes, Cli.EXIT_ERROR))
     succeed(View.formatMailboxes(boxes.mailboxes, parsed.flags.json, parsed.flags.pretty, account))
   }
 
   if (parsed.group === "status") {
     const count = unreadCount(account)
-    if (!count.ok) fail(parsed, count.error, Cli.EXIT_ERROR)
+    if (!count.ok) fail(parsed, count.error, resultExit(count, Cli.EXIT_ERROR))
     succeed(View.formatStatus({
       account: account,
       unread: count.unread,
@@ -932,13 +974,13 @@ function main(argv) {
 
   if (parsed.group === "search" || (parsed.group === "message" && parsed.verb === "list")) {
     const listed = listMessages(parsed, account)
-    if (!listed.ok) fail(parsed, listed.error, Cli.EXIT_ERROR)
+    if (!listed.ok) fail(parsed, listed.error, resultExit(listed, Cli.EXIT_ERROR))
     succeed(View.formatList(listed.messages, listed, parsed.flags.json, parsed.flags.pretty, account))
   }
 
   if (parsed.group === "message" && parsed.verb === "read") {
     const opened = readMessage(parsed, account, parsed.flags.ids[0])
-    if (!opened.ok) fail(parsed, opened.error, Cli.EXIT_NOT_FOUND)
+    if (!opened.ok) fail(parsed, opened.error, resultExit(opened, Cli.EXIT_ERROR))
     succeed(View.formatRead(opened.summary, opened.body, parsed.flags.json, parsed.flags.pretty, account))
   }
 
@@ -952,7 +994,7 @@ function main(argv) {
   if (parsed.group === "message") {
     const ids = parsed.flags.ids
     const acted = actMessages(parsed, account, parsed.verb, ids)
-    if (!acted.ok) fail(parsed, acted.error, Cli.EXIT_ERROR)
+    if (!acted.ok) fail(parsed, acted.error, resultExit(acted, Cli.EXIT_ERROR))
     succeed(View.formatAction(parsed.verb, ids, parsed.flags.json, parsed.flags.pretty, account))
   }
 

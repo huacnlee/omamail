@@ -171,9 +171,9 @@ function mailboxes(id) {
 
 function mailboxIndex(id, key) {
   var list = get(id).mailboxes
-  var wanted = String(key === undefined || key === null ? "" : key)
+  var wanted = String(key === undefined || key === null ? "" : key).toLowerCase()
   for (var i = 0; i < list.length; i++) {
-    if (list[i].key === wanted) return i
+    if (list[i].key.toLowerCase() === wanted) return i
   }
   return 0
 }
@@ -189,9 +189,9 @@ function mailboxFor(id, key) {
 
 function hasMailbox(id, key) {
   var list = get(id).mailboxes
-  var wanted = String(key === undefined || key === null ? "" : key)
+  var wanted = String(key === undefined || key === null ? "" : key).toLowerCase()
   for (var i = 0; i < list.length; i++) {
-    if (list[i].key === wanted) return true
+    if (list[i].key.toLowerCase() === wanted) return true
   }
   return false
 }
@@ -215,6 +215,9 @@ function query(id, mailboxKey, searchText, defaultQuery) {
   // provider's own Inbox query.
   if (provider.id !== "gmail" && custom === "in:inbox") custom = ""
   if (custom !== "" && String(mailboxKey) === "inbox") return custom
+
+  if (provider.id === "imap" && !hasMailbox(id, mailboxKey))
+    return provider.labelQuery(mailboxKey)
 
   return mailboxFor(id, mailboxKey).query
 }
