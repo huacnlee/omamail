@@ -171,9 +171,9 @@ function mailboxes(id) {
 
 function mailboxIndex(id, key) {
   var list = get(id).mailboxes
-  var wanted = String(key === undefined || key === null ? "" : key).toLowerCase()
+  var wanted = String(key === undefined || key === null ? "" : key)
   for (var i = 0; i < list.length; i++) {
-    if (list[i].key.toLowerCase() === wanted) return i
+    if (list[i].key === wanted) return i
   }
   return 0
 }
@@ -189,9 +189,9 @@ function mailboxFor(id, key) {
 
 function hasMailbox(id, key) {
   var list = get(id).mailboxes
-  var wanted = String(key === undefined || key === null ? "" : key).toLowerCase()
+  var wanted = String(key === undefined || key === null ? "" : key)
   for (var i = 0; i < list.length; i++) {
-    if (list[i].key.toLowerCase() === wanted) return true
+    if (list[i].key === wanted) return true
   }
   return false
 }

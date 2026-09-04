@@ -334,7 +334,8 @@ function runImap(settings, credentials, folder, commands) {
     maxBuffer: 32 * 1024 * 1024
   })
   const lines = String(result.stdout || "").split("\n")
-  if (result.status !== 0 && lines.length < 3)
+  if (result.status === null || result.status !== 0 || lines.length < 3
+      || !/^\d+$/.test(lines[0]))
     return { ok: false, error: "Could not start the mail transport" }
   const status = Math.floor(Number(lines[0]))
   const out = lines.length > 1 ? lines[1] : ""
@@ -787,6 +788,8 @@ function readMessage(parsed, account, id) {
     session.accountId = account.id
     result = readGmail(session, id)
   } else if (account.provider === "imap") {
+    if (!Imap.validMessageIds([id]))
+      return { ok: false, exit: Cli.EXIT_NOT_FOUND, error: "That is not an IMAP message id" }
     const server = imapServer(account)
     if (!server.ok) return server
     result = readImap(server, id)
@@ -824,6 +827,9 @@ function sendMessage(parsed, account, fields) {
 
 function actMessages(parsed, account, verb, ids) {
   refuseAction(parsed, account, verb)
+  if (account.provider === "imap" && !Imap.validMessageIds(ids))
+    return { ok: false, exit: Cli.EXIT_USAGE,
+      error: "Every message must have an IMAP id such as 42:INBOX" }
   if (account.provider === "gmail") {
     const session = gmailSession(account)
     if (!session.ok) return session
@@ -878,7 +884,7 @@ function listMailboxes(account) {
     const folder = folders[j]
     if (!folder || folder.selectable === false) continue
     const key = String(folder.name || "")
-    if (key === "" || known[key.toLowerCase()]) continue
+    if (key === "" || known[key]) continue
     boxes.push({ key: key, label: key, query: Registry.labelQuery("imap", key) })
   }
   return { ok: true, mailboxes: boxes }

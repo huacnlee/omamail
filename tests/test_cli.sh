@@ -98,7 +98,7 @@ EOF
 cat > "$runtime_bin/curl" <<'EOF'
 #!/bin/sh
 cat >/dev/null
-printf '* CAPABILITY IMAP4rev1 MOVE\r\n* LIST (\\HasNoChildren) "/" "INBOX"\r\nA1 OK done\r\n'
+printf '* CAPABILITY IMAP4rev1 MOVE\r\n* LIST (\\HasNoChildren) "/" "INBOX"\r\n* LIST (\\HasNoChildren) "/" "Sent"\r\nA1 OK done\r\n'
 EOF
 cat > "$runtime_bin/mktemp" <<'EOF'
 #!/bin/sh
@@ -110,7 +110,7 @@ printf '%s\n' "$count" > "$OMAMAIL_TEST_MKTEMP_COUNT"
 exit 1
 EOF
 chmod +x "$runtime_bin/secret-tool" "$runtime_bin/curl" "$runtime_bin/mktemp"
-printf '%s\n' '{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com","provider":"imap","imap":{"imapHost":"imap.example.com","imapPort":993,"smtpHost":"smtp.example.com","smtpPort":465,"username":"me@example.com","aliases":[],"insecure":false}}],"activeId":"imap:me@example.com"}' \
+printf '%s\n' '{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com","provider":"imap","imap":{"imapHost":"imap.example.com","imapPort":993,"smtpHost":"smtp.example.com","smtpPort":465,"username":"me@example.com","aliases":[{"email":"alias@example.com","displayName":"Alias","isDefault":false}],"insecure":false}}],"activeId":"imap:me@example.com"}' \
   > "$work/config/omamail/accounts.json"
 set +e
 smtp_failure=$(PATH="$runtime_bin:$PATH" OMAMAIL_TEST_MKTEMP_COUNT="$work/mktemp-count" \
@@ -136,6 +136,13 @@ set -e
   || fail "IMAP accepted a From address the mailbox does not own: $from_failure"
 printf '%s\n' "$from_failure" | grep -q 'valid From address' \
   || fail "IMAP must explain that an unauthorized From address is invalid"
+alias_send=$(PATH="$runtime_ok_bin:$PATH" \
+  scripts/omamail send --to you@example.com --from alias@example.com --body hello)
+[ "$alias_send" = "Sent" ] \
+  || fail "a configured IMAP alias did not reach a successful SMTP delivery: $alias_send"
+case_mailboxes=$(PATH="$runtime_ok_bin:$PATH" scripts/omamail --json mailbox list)
+printf '%s\n' "$case_mailboxes" | grep -q '"key":"Sent"' \
+  || fail "mailbox list dropped a server folder that case-collides with a built-in key: $case_mailboxes"
 set +e
 invalid_ids=$(PATH="$runtime_ok_bin:$PATH" scripts/omamail star 42:Sent Items 2>&1)
 status=$?
@@ -173,6 +180,30 @@ printf '%s\n' "$draft_read" | grep -q '"body":"Draft body"' \
 # healthy and hides every server-defined folder.
 printf '%s\n' '{"version":1,"accounts":[{"id":"imap:me@example.com","email":"me@example.com","provider":"imap","imap":{"imapHost":"imap.example.com","imapPort":993,"smtpHost":"smtp.example.com","smtpPort":465,"username":"me@example.com","aliases":[],"insecure":false}}],"activeId":"imap:me@example.com"}' \
   > "$work/config/omamail/accounts.json"
+
+# A shell can exit zero without completing the transport's three-line protocol.
+# Blank or truncated stdout is not an empty successful IMAP response.
+malformed_root="$work/malformed-root"
+mkdir -p "$malformed_root/scripts"
+ln -s "$(pwd)/account" "$malformed_root/account"
+ln -s "$(pwd)/cli" "$malformed_root/cli"
+ln -s "$(pwd)/message" "$malformed_root/message"
+ln -s "$(pwd)/providers" "$malformed_root/providers"
+ln -s "$(pwd)/manifest.json" "$malformed_root/manifest.json"
+cat > "$malformed_root/scripts/mail-transport.sh" <<'EOF'
+#!/bin/sh
+printf '\n\n'
+exit 0
+EOF
+chmod +x "$malformed_root/scripts/mail-transport.sh"
+set +e
+malformed_imap=$(OMAMAIL_ROOT="$malformed_root" PATH="$runtime_ok_bin:$PATH" \
+  node cli/run.js mailbox list 2>&1)
+status=$?
+set -e
+[ "$status" -ne 0 ] \
+  || fail "IMAP accepted an incomplete transport response: $malformed_imap"
+
 auth_fail_bin="$work/auth-fail-bin"
 mkdir -p "$auth_fail_bin"
 cat > "$auth_fail_bin/secret-tool" <<'EOF'
@@ -180,6 +211,18 @@ cat > "$auth_fail_bin/secret-tool" <<'EOF'
 exit 1
 EOF
 chmod +x "$auth_fail_bin/secret-tool"
+set +e
+invalid_before_auth=$(PATH="$auth_fail_bin:$PATH" scripts/omamail star 42:Sent Items 2>&1)
+status=$?
+set -e
+[ "$status" -eq 2 ] \
+  || fail "invalid IMAP action ids must be refused before authentication: $invalid_before_auth (exit $status)"
+set +e
+invalid_read_before_auth=$(PATH="$auth_fail_bin:$PATH" scripts/omamail read not-an-id 2>&1)
+status=$?
+set -e
+[ "$status" -eq 4 ] \
+  || fail "an invalid IMAP read id must be refused before authentication: $invalid_read_before_auth (exit $status)"
 set +e
 mailbox_failure=$(PATH="$auth_fail_bin:$PATH" scripts/omamail mailbox list 2>&1)
 status=$?

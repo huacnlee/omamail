@@ -274,6 +274,30 @@ assert.strictEqual(hostileJson.message.subject, hostile.subject,
   "structured output retains the sender's exact data")
 assert.strictEqual(hostileJson.message.body, "hello\u001bworld")
 
+const terminalControl = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/
+const hostileValue = "safe\u001b]52;c;Zm9v\u0007text"
+const humanOutputs = [
+  View.formatAccounts([{ id: hostileValue, email: hostileValue, provider: hostileValue,
+    label: hostileValue }], hostileValue, false, false),
+  View.formatMailboxes([{ key: hostileValue, label: hostileValue, query: hostileValue }],
+    false, false, null),
+  View.formatList([row], { mailbox: "inbox", nextPageToken: hostileValue }, false, false, null),
+  View.formatStatus({ account: { id: hostileValue, email: hostileValue,
+    provider: hostileValue }, unread: 1 }, false, false),
+  View.formatSend({ id: hostileValue, threadId: hostileValue }, false, false, null),
+  View.formatAction("star", [hostileValue], false, false, null),
+  View.formatError(hostileValue, false, false, "error")
+]
+for (const output of humanOutputs)
+  assert.ok(!terminalControl.test(output), "every human formatter strips terminal control sequences")
+const mailboxJson = JSON.parse(View.formatMailboxes([
+  { key: hostileValue, label: hostileValue, query: hostileValue }
+], true, false, null))
+assert.strictEqual(mailboxJson.mailboxes[0].key, hostileValue,
+  "JSON mailbox output preserves exact server data")
+const errorJson = JSON.parse(View.formatError(hostileValue, true, false, "error"))
+assert.strictEqual(errorJson.error, hostileValue, "JSON errors preserve exact diagnostic data")
+
 const err = JSON.parse(View.formatError("Nope", true, false, "auth"))
 assert.strictEqual(err.ok, false)
 assert.strictEqual(err.code, "auth")

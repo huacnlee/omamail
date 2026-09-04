@@ -130,8 +130,8 @@ function formatAccounts(accounts, activeId, json, pretty) {
   var lines = [pad("ACTIVE", 8) + pad("PROVIDER", 10) + pad("ADDRESS", 32) + "ID"]
   for (var j = 0; j < rows.length; j++) {
     var mark = rows[j].active ? "*" : ""
-    lines.push(pad(mark, 8) + pad(rows[j].provider, 10)
-      + pad(rows[j].email, 32) + rows[j].id)
+    lines.push(pad(mark, 8) + pad(terminalInline(rows[j].provider), 10)
+      + pad(terminalInline(rows[j].email), 32) + terminalInline(rows[j].id))
   }
   return lines.join("\n")
 }
@@ -144,7 +144,7 @@ function formatMailboxes(mailboxes, json, pretty, account) {
   if (rows.length === 0) return "This account has no mailboxes."
   var lines = [pad("KEY", 12) + "LABEL"]
   for (var j = 0; j < rows.length; j++)
-    lines.push(pad(rows[j].key, 12) + rows[j].label)
+    lines.push(pad(terminalInline(rows[j].key), 12) + terminalInline(rows[j].label))
   return lines.join("\n")
 }
 
@@ -174,7 +174,7 @@ function formatList(messages, meta, json, pretty, account) {
       + terminalInline(row.id))
   }
   var next = trimmed(info.nextPageToken)
-  if (next !== "") lines.push("\nNext page: --page-token " + next)
+  if (next !== "") lines.push("\nNext page: --page-token " + terminalInline(next))
   return lines.join("\n")
 }
 
@@ -210,8 +210,8 @@ function formatStatus(info, json, pretty) {
     mailbox: trimmed(source.mailbox) || "inbox"
   }
   if (json) return encodeJson(payload, pretty)
-  var label = payload.account.email || payload.account.id || "(none)"
-  return payload.account.provider + "  " + label + "  unread " + payload.unread
+  var label = terminalInline(payload.account.email || payload.account.id || "(none)")
+  return terminalInline(payload.account.provider) + "  " + label + "  unread " + payload.unread
 }
 
 function formatSend(result, json, pretty, account) {
@@ -221,7 +221,7 @@ function formatSend(result, json, pretty, account) {
     threadId: trimmed(source.threadId)
   }
   if (json) return encodeJson(wrapPayload(account, payload), pretty)
-  if (payload.id !== "") return "Sent " + payload.id
+  if (payload.id !== "") return "Sent " + terminalInline(payload.id)
   return "Sent"
 }
 
@@ -234,11 +234,11 @@ function formatAction(verb, ids, json, pretty, account) {
   }
   if (json) return encodeJson(wrapPayload(account, { action: verb, ids: names }), pretty)
   var noun = names.length === 1 ? "message" : "messages"
-  return Cli.canonicalVerb(verb) + " " + names.length + " " + noun
+  return terminalInline(Cli.canonicalVerb(verb)) + " " + names.length + " " + noun
 }
 
 function formatError(error, json, pretty, code) {
   var message = trimmed(error) || "Something went wrong"
   if (json) return encodeJson({ ok: false, error: message, code: trimmed(code) }, pretty)
-  return "omamail: " + message
+  return "omamail: " + terminalInline(message)
 }
