@@ -141,6 +141,12 @@ Item {
       return having(app, function(it) { return it.title === "Omamail" })
     }
 
+    // The reader panel, found by the one property only it has. It draws no
+    // objectName and `children[0]` is not reliably anything.
+    function readerView() {
+      return having(app, function(it) { return it.forceRichAnyway !== undefined })
+    }
+
     function having(item, accept) {
       if (!item) return null
       if (accept(item)) return item
@@ -264,6 +270,69 @@ Item {
       wait(1400)
       compare(mailService.markedRead.length, 0,
         "the open path marks it read, not the dwell")
+    }
+
+    // ------------------------------------- the dwell against a gone preview
+    //
+    // The dwell is a claim about a message somebody is looking at. Everything
+    // that takes the message off the screen between the cursor arriving and
+    // the timer firing has to withdraw the claim, because by then nobody has
+    // looked at anything.
+
+    function test_a_page_over_the_list_stops_the_dwell() {
+      mailService.markReadDelaySec = 1
+      app.moveCursor(1)
+      app.openSettings()
+      wait(1400)
+      compare(mailService.markedRead.length, 0,
+        "a message behind Settings is not being read")
+    }
+
+    function test_narrowing_the_window_stops_the_dwell() {
+      mailService.markReadDelaySec = 1
+      app.moveCursor(1)
+      window().width = 700
+      waitForRendering(app)
+      compare(app.compact, true)
+      wait(1400)
+      compare(mailService.markedRead.length, 0,
+        "one column shows the list, so the preview is gone")
+    }
+
+    function test_closing_the_window_stops_the_dwell() {
+      mailService.markReadDelaySec = 1
+      app.moveCursor(1)
+      app.close()
+      wait(1400)
+      compare(mailService.markedRead.length, 0,
+        "a shut window shows nothing to have stayed on")
+    }
+
+    // The selection can be dropped without the cursor moving — a search and a
+    // mailbox switch both do it — and then the row under the cursor is no
+    // longer what the reader has.
+    function test_a_dropped_selection_stops_the_dwell() {
+      mailService.markReadDelaySec = 1
+      app.moveCursor(1)
+      mailService.clearSelection()
+      wait(1400)
+      compare(mailService.markedRead.length, 0,
+        "nothing is on screen to be read")
+    }
+
+    // --------------------------------------------- what the reader carries
+
+    // Insisting on a document the bounds refused is an answer about the
+    // message it was given for. Opening one clears it; so does previewing one,
+    // or the next row inherits a heavy layout nobody asked for.
+    function test_a_preview_does_not_inherit_the_heavy_override() {
+      var view = readerView()
+      verify(view, "the reader panel is there")
+      app.moveCursor(1)
+      view.forceRichAnyway = true
+      app.moveCursor(1)
+      compare(view.forceRichAnyway, false,
+        "the override belonged to the message before it")
     }
   }
 }

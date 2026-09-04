@@ -959,7 +959,13 @@ Item {
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
     sourceHtml = ""
-    remoteImagesAllowed = alwaysShowImages
+    // The standing "always show images" answer is an answer about a message
+    // somebody chose to read. Fetching one still tells its host that this
+    // address opened this mail at this moment — which is what the notice in
+    // the reader says out loud — and a cursor passing over a row has opened
+    // nothing. So a preview keeps the pictures blocked however that answer
+    // stands, and opening the message, or asking for them here, loads them.
+    remoteImagesAllowed = alwaysShowImages && !selectionIsPreview
     remoteImagesLoading = false
     remoteImageData = ({})
     selectedRemoteImageSources = []

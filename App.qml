@@ -421,6 +421,9 @@ Item {
 
   function close() {
     closingFromHost = true
+    // A window that is gone shows nothing, so a dwell counting down in it has
+    // nothing left to be counting for.
+    markReadDwell.stop()
     if (compose.opened || compose.parkedForSend) saveComposeRecovery()
     opened = false
     if (service) service.windowOpen = false
@@ -507,6 +510,21 @@ Item {
     previewCursor()
   }
 
+  // Whether there is a preview on screen to be talking about.
+  //
+  // Never in a narrow window: there the reader takes the list's place, so
+  // every press would navigate away from the list being moved through and
+  // there would be nothing left to move. Never over a page, a draft or the
+  // calendar either, for the same reason — the list is not what is on screen.
+  //
+  // Asked twice, when the cursor moves and again when the dwell fires, because
+  // every part of it can change in between: a page opens, a draft is started,
+  // the window is dragged across the breakpoint. A message that is no longer
+  // being shown is not a message being read, however long the cursor has sat
+  // on its row.
+  readonly property bool canPreview: !!service && service.previewOnCursor
+    && !compact && !showPage && !composing && !calendarVisible
+
   // Moving is not opening, and this is the difference.
   //
   // It used to open whatever it landed on, which made stepping through a list
@@ -514,17 +532,16 @@ Item {
   // preview is off unless it was asked for, it pushes no history — Escape and
   // Back mean what they meant — and it does not mark anything read. A dwell
   // does that, which is what stops a held arrow key from reading a mailbox.
-  //
-  // Never in a narrow window: there the reader takes the list's place, so
-  // every press would navigate away from the list being moved through and
-  // there would be nothing left to move.
   function previewCursor() {
     markReadDwell.stop()
-    if (!service || !service.previewOnCursor || compact) return
-    if (cursorId === "" || showPage || composing || calendarVisible) return
+    if (!canPreview || cursorId === "") return
     // A message already open stays open on its own terms: it was opened, and
     // re-selecting it as a preview would take back the read mark it earned.
     if (currentView === "reader" && service.selectedId === cursorId) return
+    // Per message, the same as opening one. Insisting on a document the bounds
+    // refused is an answer about the message it was given for, and the row the
+    // cursor moved to is a different message.
+    reader.forceRichAnyway = false
     service.select(cursorId, true)
     if (service.markReadDelaySec <= 0) {
       service.markPreviewRead(cursorId)
@@ -545,7 +562,11 @@ Item {
     repeat: false
     onTriggered: {
       if (!root.service || dwelledOn === "") return
+      if (!root.canPreview) return
       if (root.cursorId !== dwelledOn) return
+      // And it has to still be the message on screen: a search and a mailbox
+      // switch both drop the selection without moving the cursor off the row.
+      if (root.service.selectedId !== dwelledOn) return
       root.service.markPreviewRead(dwelledOn)
     }
   }

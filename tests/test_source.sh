@@ -128,6 +128,14 @@ grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/
 grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
   || fail "one-click unsubscribe must use the public-IP-checked Python transport"
 # Redirect and DNS policy require behavioral tests, not a matching config line.
+
+# The standing "always show images" answer is an answer about a message
+# somebody chose to read. A preview is the cursor passing over a row, and
+# fetching a picture for one would tell the sender's host that this address
+# opened this mail at this moment — the very thing the reader's own notice
+# says out loud, and the reason the read mark waits for a dwell.
+grep -q 'remoteImagesAllowed = alwaysShowImages && !selectionIsPreview' account/MailAccount.qml \
+  || fail "a message the cursor merely previewed must not fetch the sender's images"
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
 grep -q 'bodyMode: root.bodyMode' Service.qml \
