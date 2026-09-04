@@ -15,6 +15,11 @@ Item {
   signal openRequested(var attachment)
   signal saveRequested(var attachment)
 
+  // This attachment's own save is in flight. Not the panel's: two attachments
+  // on one message save independently, and one of them working is no reason
+  // for the other's button to say it is.
+  property bool saving: false
+
   readonly property string filename: root.attachment
     ? String(root.attachment.filename || "attachment") : "attachment"
 
@@ -78,9 +83,13 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     iconName: "download"
     iconSize: Style.font.iconSmall
-    tooltipText: "Save to Downloads"
+    tooltipText: root.saving ? "Saving\u2026" : "Save to Downloads"
     foreground: root.dimColor
     hoverColor: root.textColor
-    onClicked: root.saveRequested(root.attachment)
+    busy: root.saving
+    // Refused rather than queued. The second click of a double-click asked for
+    // the same file again, and the save script — which will not overwrite —
+    // numbered it, so the folder quietly gained a second identical copy.
+    onClicked: if (!root.saving) root.saveRequested(root.attachment)
   }
 }

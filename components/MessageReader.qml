@@ -614,6 +614,8 @@ Item {
         required property var modelData
         width: parent.width
         attachment: modelData
+        saving: !!root.service && !!root.service.savingAttachmentIds[
+          String(modelData && modelData.attachmentId ? modelData.attachmentId : "")]
         textColor: root.textColor
         dimColor: root.dimColor
         dimmerColor: root.dimmerColor

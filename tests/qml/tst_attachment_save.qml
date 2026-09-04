@@ -53,6 +53,7 @@ Item {
     function init() {
       openSpy.clear()
       saveSpy.clear()
+      row.saving = false
     }
 
     function test_the_row_offers_both_verbs() {
@@ -88,6 +89,36 @@ Item {
       verify(saveLeft > 0)
       verify(saveLeft + save.width <= row.width + 1,
         "the button stays inside the row horizontally")
+    }
+
+    // A save already running is not started again. The script refuses to
+    // overwrite and numbers the name instead, so a second fetch of the same
+    // attachment does not fail loudly — it succeeds quietly, and the folder
+    // gains an identical "statement (2).pdf" that nothing told the reader
+    // about. The button is the only place that can refuse it.
+    function test_a_second_click_while_saving_is_refused() {
+      var save = find("attachment-save-button")
+      mouseClick(save, save.width / 2, save.height / 2)
+      compare(saveSpy.count, 1)
+
+      row.saving = true
+      mouseClick(save, save.width / 2, save.height / 2)
+      compare(saveSpy.count, 1, "the same attachment is not fetched twice")
+
+      row.saving = false
+      mouseClick(save, save.width / 2, save.height / 2)
+      compare(saveSpy.count, 2, "and it can be saved again once that one is done")
+    }
+
+    // Dim would have said "you cannot"; the truth is "already doing it", which
+    // is what the shared button's busy state is for.
+    function test_the_button_says_the_save_is_running() {
+      var save = find("attachment-save-button")
+      compare(save.busy, false)
+      row.saving = true
+      compare(save.busy, true, "the glyph turns while the save is in flight")
+      verify(save.enabled, "and it stays at full strength rather than looking disabled")
+      row.saving = false
     }
 
     // And vertically, which is the half that was missing. A 24px control in a

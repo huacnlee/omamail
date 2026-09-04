@@ -68,6 +68,8 @@ Item {
 
   // The window drives this; the unread poll keeps running while it is false.
   property bool windowOpen: false
+  // Keyed by attachmentId, holding only the saves that are in flight.
+  property var savingAttachmentIds: ({})
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -1679,10 +1681,18 @@ Item {
       fail("That attachment is not available")
       return
     }
+    // One save at a time for one attachment. A download arrow is a single
+    // click, and a double one used to start a second fetch that the script
+    // then dutifully numbered: two identical files in Downloads, and a notice
+    // that read the same both times, so nothing said it had happened.
+    var key = String(source.attachmentId)
+    if (savingAttachmentIds[key]) return
+    markSavingAttachment(key, true)
     clearNotice()
     note("Saving " + String(source.filename || "attachment"))
     loadAttachments(messageId, [source], function(loaded, error) {
       if (error || !loaded || loaded.length === 0) {
+        root.markSavingAttachment(key, false)
         root.fail(error || "That attachment could not be loaded")
         return
       }
@@ -1693,12 +1703,14 @@ Item {
           + "\n" + String(file.data || "") + "\n"
       })
       if (!request) {
+        root.markSavingAttachment(key, false)
         root.fail("That attachment could not be saved")
         return
       }
       request.finished.connect(function(exitCode, path, detail) {
         request.destroy()
         if (!root) return
+        root.markSavingAttachment(key, false)
         if (exitCode !== 0) {
           root.fail(detail || "That attachment could not be saved")
           return
@@ -1717,6 +1729,18 @@ Item {
       })
       request.running = true
     })
+  }
+
+  // Which attachments are being saved right now, so the row that asked can
+  // show it and refuse a second click. Re-assigned rather than written into: a
+  // binding on a `var` does not notice a key appearing inside the object it is
+  // already holding.
+  function markSavingAttachment(key, saving) {
+    var next = ({})
+    for (var id in savingAttachmentIds)
+      if (id !== key) next[id] = true
+    if (saving) next[key] = true
+    savingAttachmentIds = next
   }
 
   // One entry point for every kind of outgoing message. Reply, reply-all and
@@ -2104,11 +2128,19 @@ Item {
       id: attachmentSaveProcess
 
       property string requestPayload: ""
+      // Exactly one answer reaches the caller, whichever way this ends.
+      property bool reported: false
       signal finished(int exitCode, string path, string detail)
 
       stdinEnabled: true
       stdout: StdioCollector { waitForEnd: true }
       stderr: StdioCollector { waitForEnd: true }
+
+      function report(exitCode, path, detail) {
+        if (reported) return
+        reported = true
+        finished(exitCode, path, detail)
+      }
 
       onStarted: {
         write(requestPayload)
@@ -2118,8 +2150,18 @@ Item {
       onExited: function(exitCode) {
         var path = String(attachmentSaveProcess.stdout.text || "").trim()
         var detail = String(attachmentSaveProcess.stderr.text || "").trim()
-        attachmentSaveProcess.finished(exitCode, path, detail)
+        attachmentSaveProcess.report(exitCode, path, detail)
       }
+
+      // A program that could not be started never exits, so `onExited` never
+      // arrives. Without this the caller waits for an answer that is not
+      // coming, and the save it is holding open would keep the row's button
+      // turning for as long as the window stays open. Deferred by a turn so a
+      // real exit, which clears `running` as well, always reports first.
+      onRunningChanged: if (!running) Qt.callLater(function() {
+        if (attachmentSaveProcess)
+          attachmentSaveProcess.report(1, "", "That attachment could not be saved")
+      })
     }
   }
 
