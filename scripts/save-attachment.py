@@ -20,28 +20,8 @@ from pathlib import Path
 import re
 import sys
 
-
-def decode(value: bytes) -> bytes:
-    compact = b"".join(value.split())
-    compact += b"=" * (-len(compact) % 4)
-    return base64.b64decode(compact, altchars=b"-_", validate=True)
-
-
-def safe_filename(value: bytes) -> str:
-    """The sender's name, with everything that could leave the folder removed.
-
-    Both separators, because a name written on Windows carries backslashes and
-    a path is not what a filename may be. Control characters go too: a newline
-    in a filename is unreadable in every listing that shows it.
-    """
-    name = value.decode("utf-8", errors="replace").replace("\\", "/").split("/")[-1]
-    name = "".join("_" if ord(character) < 32 or ord(character) == 127 else character
-                   for character in name).strip()
-    if name in ("", ".", ".."):
-        name = "attachment"
-    while len(os.fsencode(name)) > 240:
-        name = name[:-1]
-    return name or "attachment"
+# Beside this file, and the one place the sender's own filename is made safe.
+from attachment_common import decode, safe_filename
 
 
 def download_directory() -> Path:

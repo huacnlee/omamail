@@ -8,22 +8,9 @@ import subprocess
 import sys
 import tempfile
 
-
-def decode(value: bytes) -> bytes:
-    compact = b"".join(value.split())
-    compact += b"=" * (-len(compact) % 4)
-    return base64.b64decode(compact, altchars=b"-_", validate=True)
-
-
-def safe_filename(value: bytes) -> str:
-    name = value.decode("utf-8", errors="replace").replace("\\", "/").split("/")[-1]
-    name = "".join("_" if ord(character) < 32 or ord(character) == 127 else character
-                   for character in name).strip()
-    if name in ("", ".", ".."):
-        name = "attachment"
-    while len(os.fsencode(name)) > 240:
-        name = name[:-1]
-    return name or "attachment"
+# Beside this file, and shared with save-attachment.py so the name the
+# sender chose is made safe by one implementation rather than two.
+from attachment_common import decode, safe_filename
 
 
 def runtime_directory() -> str | None:

@@ -68,6 +68,23 @@ fi
 # opening in what opens a PDF.
 check "the extension stays last" "${second##*.}" "pdf"
 
+# A name too long for the filesystem is shortened by giving up characters of
+# the stem, never the extension: a name trimmed from the end takes the ".pdf"
+# with it, and the file it names then opens in nothing. The limit counts bytes,
+# so the accented name has to be checked as well as the plain one.
+long_stem=$(printf 'A%.0s' $(seq 1 250))
+long_saved=$(save "$downloads" "$long_stem.pdf" "$work/bytes")
+long_name=${long_saved##*/}
+check "a very long name keeps its extension" "${long_name##*.}" "pdf"
+check "and is short enough to write" "$(printf '%s' "$long_name" | wc -c)" "240"
+
+accented_stem=$(printf '\303\251%.0s' $(seq 1 200))
+accented_saved=$(save "$downloads" "$accented_stem.pdf" "$work/bytes")
+accented_name=${accented_saved##*/}
+check "a long name of multi-byte characters keeps it too" "${accented_name##*.}" "pdf"
+check "and is measured in bytes, not characters" \
+  "$(printf '%s' "$accented_name" | wc -c)" "240"
+
 # ------------------------------------------------- a name from a stranger
 
 escape=$(save "$downloads" '../../etc/passwd' "$work/bytes")
