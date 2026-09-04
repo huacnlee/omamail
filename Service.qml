@@ -895,10 +895,39 @@ Item {
   readonly property bool hasLabels: unified
     ? Unified.sharedCapability(unifiedProviders, "labels")
     : (!current || current.hasLabels)
-  readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
+  // Intersected like every other capability: a merged list holds rows from
+  // mailboxes whose provider has no web UI at all, and "Open in browser" on
+  // one of those is a button that cannot be honoured.
+  readonly property bool canOpenOnWeb: unified
+    ? Unified.sharedCapability(unifiedProviders, "web")
+    : (!current || current.canOpenOnWeb)
   readonly property bool canOpenWebInbox: !unified && !!current && current.canOpenWebInbox
-  readonly property var unavailableActions: current ? current.unavailableActions : []
-  readonly property var savingAttachmentIds: current ? current.savingAttachmentIds : ({})
+  // A key is not a button: `e` and `s` are bound whatever mailbox is open, so
+  // the status row's hints are filtered by this. In a merged list the answer
+  // has to come from the same intersection the buttons use — one account's
+  // own list would offer an archive the mailbox the cursor is on refuses.
+  readonly property var unavailableActions: unified
+    ? Model.unavailableActions({
+        archive: canArchive, star: canStar, spam: canReportSpam })
+    : (current ? current.unavailableActions : [])
+
+  // #91's set of attachments being saved, keyed the way the panel addresses a
+  // row: an account keys its own by the id it issued, so in a merged list the
+  // sets are joined and re-keyed rather than read off whichever mailbox is
+  // active — which would have shown a spinner on the wrong row, or none.
+  readonly property var savingAttachmentIds: {
+    if (!unified) return current ? current.savingAttachmentIds : ({})
+    var _epoch = listEpoch
+    var out = ({})
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      if (!accounts[i].id) continue
+      var host = accountHosts.objectAt(i)
+      var own = host ? host.savingAttachmentIds : ({})
+      for (var key in own) out[Unified.unifiedId(accounts[i].id, key)] = own[key]
+    }
+    return out
+  }
   readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: unified
     ? unifiedMailboxKey : (current ? current.mailboxKey : "inbox")
@@ -1222,7 +1251,14 @@ Item {
     return activeIndex >= 0 ? activeIndex : indexOfActiveAccount()
   }
 
-  function openInBrowser(id) { if (current) current.openInBrowser(id) }
+  // Routed and taken apart like every other action on a row: the composed id
+  // names the mailbox, and the account builds the address out of its own
+  // half of it. Sent to `current` it built one Gmail URL out of another
+  // mailbox's id.
+  function openInBrowser(id) {
+    var host = hostForId(id)
+    if (host) host.openInBrowser(sourceIdFor(id))
+  }
   function openWebInbox() { if (current) current.openWebInbox() }
 
   // The service's own website, from the setup page's hero — where everything
