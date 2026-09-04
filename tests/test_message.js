@@ -615,10 +615,34 @@ assert.strictEqual(message.extractHtml({
   assert.strictEqual(message.messageIdDomain("nobody"), "omamail.invalid")
   assert.strictEqual(message.messageIdDomain(""), "omamail.invalid")
 
+  // Every label in this domain is legal, and the separator between its first
+  // two 63-character labels lands at the old arbitrary length ceiling. Cutting
+  // there would leave the id's domain ending in a dot.
+  const longDomain = "a".repeat(63) + "." + "b".repeat(63) + "."
+    + "c".repeat(63) + ".com"
+  const longDomainId = idOf(message.buildRawMessage({
+    from: "work@" + longDomain, to: "a@b.com", body: "x"
+  }))
+  assert.ok(longDomainId.endsWith("@" + longDomain + ">"),
+    "a valid sender domain survives whole in the generated id")
+
   // Stated by the caller, which is what lets a test read the message it built.
   assert.ok(message.buildRawMessage({
     from: "work@example.net", to: "a@b.com", body: "x", messageId: "<pinned@example.net>"
   }).indexOf("Message-ID: <pinned@example.net>\r\n") > 0)
+
+  // Validation judges the caller's original value. Removing a space first
+  // would silently turn this into a different, apparently valid id, while an
+  // empty dot-atom segment is not a legal id at all.
+  const repaired = idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a @example.com>"
+  }))
+  assert.notStrictEqual(repaired, "<a@example.com>",
+    "a malformed stated id is replaced rather than repaired")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(repaired), "the replacement is a generated id")
+  assert.notStrictEqual(idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a..b@example.com>"
+  })), "<a..b@example.com>", "an empty dot-atom segment is replaced")
 
   // A stated id is this client's own choice rather than a stranger's, so one
   // that is not an id is replaced instead of carried through mangled.
@@ -667,6 +691,15 @@ assert.strictEqual(message.extractHtml({
   }).indexOf("Date: Thu, 03 Sep 2026 12:04:31 +0200\r\n") > 0)
   assert.strictEqual(new Date(message.sentDate("Thu, 03 Sep 2026 10:04:31 +0000")).getTime(), clock,
     "a caller who wants no offset says so through the same field")
+
+  // JavaScript parses ISO dates and several shorthand spellings that are not
+  // RFC 5322 date-time values. A parseable but non-header-shaped override is
+  // replaced with this client's canonical form.
+  const nonRfc = message.sentDate("2026-09-03", clock)
+  assert.notStrictEqual(nonRfc, "2026-09-03", "an ISO-only override is not emitted verbatim")
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(nonRfc),
+    nonRfc)
+  assert.strictEqual(new Date(nonRfc).getTime(), clock, "the replacement uses the stated build clock")
 
   // A stated value that is not a date is replaced, and a line break in one can
   // become neither a second header nor a mangled first one.

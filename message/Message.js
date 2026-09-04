@@ -940,14 +940,16 @@ function messageIdDomain(from) {
   var at = address.lastIndexOf("@")
   var domain = at < 0 ? "" : address.substring(at + 1).replace(/[^A-Za-z0-9.-]/g, "")
   // RFC 2606 reserves .invalid, so a message with no From borrows no domain that belongs to somebody else.
-  return domain === "" ? "omamail.invalid" : domain.substring(0, 128)
+  return domain === "" ? "omamail.invalid" : domain
 }
 
 // Unique by the rule mimeBoundary already uses, and the caller may state one, which is what lets a test read it.
 function messageIdValue(given, from, nowMs) {
-  var stated = referenceValue(given).replace(/[^A-Za-z0-9<>@._+=-]/g, "")
+  var stated = String(given === undefined || given === null ? "" : given)
   // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
-  if (stated.length <= 250 && /^<[^<>@\s]+@[A-Za-z0-9.-]+>$/.test(stated)) return stated
+  if (stated.length <= 250
+      && /^<[A-Za-z0-9_+=-]+(?:\.[A-Za-z0-9_+=-]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*>$/.test(stated))
+    return stated
   var now = Math.floor(Number(nowMs) || Date.now())
   var random = Math.floor(Math.random() * 0x100000000).toString(36)
   return "<" + now.toString(36) + "." + random + ".omamail@" + messageIdDomain(from) + ">"
@@ -956,8 +958,11 @@ function messageIdValue(given, from, nowMs) {
 // The date a message states, in RFC 5322's own shape: a numeric zone rather than toUTCString's obsolete GMT.
 function sentDate(given, nowMs) {
   var stated = headerSafe(given).trim()
-  // A stated date has to parse back as one, or it is not a date.
-  if (stated !== "" && !isNaN((new Date(stated)).getTime())) return stated
+  // JavaScript also parses ISO dates and shorthand spellings that are not
+  // legal header values, so a stated date needs this client's canonical shape
+  // as well as an instant the engine recognises.
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-]([01][0-9]|2[0-3])[0-5][0-9]$/
+  if (canonical.test(stated) && !isNaN((new Date(stated)).getTime())) return stated
   var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
   if (isNaN(date.getTime())) date = new Date()
   var offset = -date.getTimezoneOffset()
