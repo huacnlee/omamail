@@ -1448,6 +1448,8 @@ DropArea {
 
     contentItem: ListView {
       id: fromRows
+
+      WheelScroller { view: fromRows }
       implicitHeight: contentHeight
       clip: true
       model: root.fromIdentities
@@ -1534,6 +1536,8 @@ DropArea {
   // window ground; the rows above already carry the structure.
   Flickable {
     id: bodyFlick
+
+    WheelScroller { view: bodyFlick }
     objectName: "compose-body"
     anchors.top: fields.bottom
     anchors.left: parent.left
@@ -1594,6 +1598,8 @@ DropArea {
 
     Flickable {
       id: attachFlick
+
+      WheelScroller { view: attachFlick }
       anchors.fill: parent
       anchors.leftMargin: Style.space(18)
       anchors.rightMargin: Style.space(18)

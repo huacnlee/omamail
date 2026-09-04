@@ -256,6 +256,23 @@ Item {
       return -1
     }
 
+    // The wheel, at a real call site rather than against a Flickable a test
+    // built. `WheelScroller` is dropped into a dozen scrollers now and nothing
+    // covered any of them; this is the one with a fixture already.
+    function test_the_settings_page_scrolls_a_notch_at_a_time() {
+      app.openSettings()
+      wait(50)
+      var view = flick()
+      verify(view, "the page scrolls inside a Flickable")
+      view.contentY = 0
+
+      mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
+      compare(view.contentY, 120, "one notch, in the real hierarchy")
+
+      mouseWheel(view, view.width / 2, view.height / 2, 0, 120)
+      compare(view.contentY, 0)
+    }
+
     function test_the_rail_lists_the_pages_sections_in_order() {
       var rail = named(app, "settings-sidebar")
       verify(rail && rail.visible, "a wide window has a rail")

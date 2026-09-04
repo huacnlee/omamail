@@ -171,8 +171,6 @@ Rectangle {
   Flickable {
     id: composerFlick
 
-    // The Flickable's own wheel handling is a flick per event, which a
-    // high-resolution wheel turns into a seventh of the distance.
     WheelScroller { view: composerFlick }
 
     anchors.fill: parent

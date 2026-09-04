@@ -435,6 +435,8 @@ Item {
 
   Flickable {
     id: bodyFlick
+
+    WheelScroller { view: bodyFlick }
     anchors.top: notices.bottom
     anchors.left: parent.left
     anchors.right: parent.right

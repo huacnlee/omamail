@@ -6,9 +6,9 @@ import "../account/Model.js" as Model
 //
 // A Flickable answers each wheel event with a flick it then decelerates, so
 // the distance depends on how the turn was chopped up rather than on how far
-// the wheel went: one notch as a single delta moves about 43 pixels, and the
+// the wheel went: one notch as a single delta moves about 72 pixels, and the
 // same notch reported as eight fractions by a high-resolution wheel moves
-// about 6. `Model.wheelScrollTarget` reads the rotation instead, which is the
+// about 9. `Model.wheelScrollTarget` reads the rotation instead, which is the
 // part that does not change.
 //
 // A handler rather than an Item wrapping one. A Flickable reparents its
@@ -21,15 +21,30 @@ WheelHandler {
 
   required property Flickable view
 
-  // Vertical only. A horizontal wheel and a touchpad's side-scroll both report
-  // `y === 0`, and reading either as a scroll down is how a sideways gesture
-  // ends up moving the list.
+  // A mouse only, said out loud rather than left to the default.
+  //
+  // A touchpad reports `pixelDelta` and its own momentum, and a Flickable
+  // tracks fingers with it properly. Driving one from a derived `angleDelta`
+  // at a fixed distance per notch would replace a gesture that follows the
+  // hand with a series of jumps, so where Qt can tell a touchpad apart this
+  // stays out of the way and the native behaviour survives.
+  acceptedDevices: PointerDevice.Mouse
+
+  // Vertical only, which is also why there is no `angleDelta.y === 0` guard in
+  // here: Qt filters a horizontal-only wheel before the signal fires, so such
+  // a guard is unreachable and a test for it passes with this whole component
+  // removed.
+  orientation: Qt.Vertical
+
   onWheel: function(event) {
-    if (!root.view || event.angleDelta.y === 0) return
+    if (!root.view) return
     root.view.contentY = Model.wheelScrollTarget(root.view.contentY,
-      event.angleDelta.y, root.view.contentHeight, root.view.height)
-    // A flick still in flight would go on decelerating from where it started
-    // and fight every turn after this one.
+      event.angleDelta.y, root.view.contentHeight, root.view.height,
+      root.view.originY, root.view.topMargin, root.view.bottomMargin)
+    // Not dead despite `blocking` defaulting true, which stops the Flickable
+    // starting a flick from *this* event: a flick already in flight from a
+    // drag goes on decelerating from where it was and fights every turn
+    // after this one.
     root.view.cancelFlick()
   }
 }

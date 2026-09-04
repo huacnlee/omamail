@@ -1368,8 +1368,6 @@ Item {
           Flickable {
             id: listFlick
 
-            // The Flickable's own wheel handling is a flick per event, which a
-            // high-resolution wheel turns into a seventh of the distance.
             WheelScroller { view: listFlick }
             anchors.fill: parent
             contentWidth: width
@@ -1603,8 +1601,6 @@ Item {
         Flickable {
           id: setupFlick
 
-          // The Flickable's own wheel handling is a flick per event, which a
-          // high-resolution wheel turns into a seventh of the distance.
           WheelScroller { view: setupFlick }
           anchors.fill: parent
           anchors.margins: Style.space(18)
@@ -1708,8 +1704,6 @@ Item {
         Flickable {
           id: settingsFlick
 
-          // The Flickable's own wheel handling is a flick per event, which a
-          // high-resolution wheel turns into a seventh of the distance.
           WheelScroller { view: settingsFlick }
           // The whole width, rail included: the wheel scrolls the page from
           // anywhere in the block, and the scrollbar keeps the window's edge.

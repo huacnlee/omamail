@@ -591,22 +591,22 @@ function cursorAfterReload(list, cursorId) {
 // Unchanged while the row is already visible. Recentring on every press would
 // drag the list under someone who is only stepping one row down it.
 function contentYToReveal(contentY, viewportHeight, itemY, itemHeight,
-                          contentHeight, margin) {
+                          contentHeight, margin, originY, topMargin, bottomMargin) {
   var top = Number(contentY) || 0
   var view = Number(viewportHeight) || 0
   var y = Number(itemY) || 0
   var height = Number(itemHeight) || 0
   var pad = Number(margin) || 0
-  var furthest = Math.max(0, (Number(contentHeight) || 0) - view)
   var next = top
   // A row that cannot fit shows its beginning. Aligning its bottom, which is
   // what the off-the-bottom rule would do, pushes the part being read away.
   if (height + pad + pad > view) next = y - pad
   else if (y - pad < top) next = y - pad
   else if (y + height + pad > top + view) next = y + height + pad - view
-  if (next < 0) next = 0
-  if (next > furthest) next = furthest
-  return next
+  // The same range the wheel is held to. Callers that scroll a plain
+  // Flickable pass no origin or margins and get the range they had.
+  return clampContentY(next, contentYBounds(originY, contentHeight, view,
+    topMargin, bottomMargin))
 }
 
 function unreadCount(list) {
@@ -842,6 +842,41 @@ function settingsContentHeight(sections, pageHeight, viewportHeight) {
   return Math.max(page, known[known.length - 1].y + viewport)
 }
 
+// --------------------------------------------------- what a scroller can reach
+//
+// `contentY` does not run from 0 to `contentHeight - height`, which is what
+// three separate clamps in this repository assumed.
+//
+// `originY` moves the start: a `ListView` with a 200-tall header reports
+// `originY == -200`, and a clamp with a floor of 0 makes the header
+// unreachable and turns the first notch into a 200-pixel jump. Measured, not
+// inferred — that view settles at exactly `originY` and at
+// `originY + contentHeight - height`.
+//
+// Margins extend both ends: a `Flickable` with a `topMargin` rests at
+// `-topMargin` with its content below the gap, and a clamp with a floor of 0
+// answers a scroll *up* at the top by moving *down* to 0, after which the
+// margin can never be seen again. (`StopAtBounds` does not correct a
+// programmatic assignment, so this end comes from Qt's documented semantics
+// rather than from a probe like the `originY` one.)
+function contentYBounds(originY, contentHeight, viewportHeight, topMargin, bottomMargin) {
+  var origin = Number(originY) || 0
+  var content = Number(contentHeight) || 0
+  var view = Number(viewportHeight) || 0
+  var top = Number(topMargin) || 0
+  var bottom = Number(bottomMargin) || 0
+  var min = origin - top
+  // Content shorter than its own view has one position rather than a negative
+  // range, and that position is the top of it.
+  var max = Math.max(min, origin + content + bottom - view)
+  return { min: min, max: max }
+}
+
+function clampContentY(value, bounds) {
+  var limits = bounds || { min: 0, max: 0 }
+  return Math.max(limits.min, Math.min(limits.max, Number(value) || 0))
+}
+
 // ------------------------------------------------------------------ the wheel
 //
 // How far a wheel turn moves a Flickable, which the Flickable itself gets
@@ -850,40 +885,39 @@ function settingsContentHeight(sections, pageHeight, viewportHeight) {
 // A Flickable answers a wheel event with a *flick* — a velocity it then
 // decelerates — so the distance depends on how the turn was chopped up rather
 // than on how far the wheel went. One notch arrives as `angleDelta` 120 and
-// moves about 43 pixels; a high-resolution wheel reports the same physical
+// moves about 72 pixels; a high-resolution wheel reports the same physical
 // notch as eight deltas of 15, each starting and damping its own little
-// flick, and the same turn of the same wheel moves about 6. Seven times less
+// flick, and the same turn of the same wheel moves about 9. Eight times less
 // for the same gesture, which is what "slower than every other app" is.
 //
 // Rotation is the thing that does not change: `angleDelta` is eighths of a
 // degree, a notch is 15 degrees, and eight fractions of a notch still add up
-// to 15. So the distance is computed from rotation and nothing else.
+// to 15. So the distance is computed from rotation and nothing else, in
+// notches rather than in degrees — a notch is the unit a hand turns and 120
+// pixels is three lines of text, which is what a GTK application moves for it.
 //
-// 8 pixels per degree puts a notch at 120, which is what three lines of text
-// comes to and what a GTK application moves for the same turn.
-var WHEEL_PIXELS_PER_DEGREE = 8
+// Nothing is capped. A cap on one *event* would put the chunking dependence
+// straight back at the coarse end: an MX Master in free spin delivers ten
+// notches as one event, and a bound would move it a notch and a half while
+// the same ten notches arriving as ten events moved ten. A bound worth having
+// would be per unit time, and no bound at all is honest — the wheel was
+// turned that far.
+var WHEEL_UNITS_PER_NOTCH = 120
+var WHEEL_PIXELS_PER_NOTCH = 120
 
-// A notch is 15 degrees, so this is the ceiling on one *event* rather than on
-// one gesture: a touchpad's flung two-finger scroll arrives as a stream of
-// large deltas, and without a bound a single one of them can cross a long list
-// in a jump nobody asked for.
-var WHEEL_MAX_DEGREES_PER_EVENT = 60
-
+// Numerically the identity at these two values, and written as a ratio anyway:
+// the constant that matters is "a notch moves 120 pixels", and it is the one a
+// reader changes.
 function wheelDistance(angleDelta) {
-  var degrees = (Number(angleDelta) || 0) / 8
-  var limit = WHEEL_MAX_DEGREES_PER_EVENT
-  if (degrees > limit) degrees = limit
-  if (degrees < -limit) degrees = -limit
-  return degrees * WHEEL_PIXELS_PER_DEGREE
+  return (Number(angleDelta) || 0) / WHEEL_UNITS_PER_NOTCH * WHEEL_PIXELS_PER_NOTCH
 }
 
-// Where the view lands, clamped to what it can reach. A list shorter than its
-// own viewport cannot scroll at all, and answering with a negative limit would
-// let it drift above its first row.
-function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight) {
-  var limit = Math.max(0, (Number(contentHeight) || 0) - (Number(viewportHeight) || 0))
-  var next = (Number(contentY) || 0) - wheelDistance(angleDelta)
-  return Math.max(0, Math.min(limit, next))
+// Where the view lands, inside what it can actually reach.
+function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight,
+                           originY, topMargin, bottomMargin) {
+  var bounds = contentYBounds(originY, contentHeight, viewportHeight,
+    topMargin, bottomMargin)
+  return clampContentY((Number(contentY) || 0) - wheelDistance(angleDelta), bounds)
 }
 
 // Where a click on a section name scrolls to: its heading, clamped into the
