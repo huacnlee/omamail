@@ -44,6 +44,15 @@ Item {
     ? String(manifest.id) : "omamail"
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
+  // Shown in the empty reader, so a screenshot in a bug report says which build
+  // it came from. The shell's manifest validation requires both fields, so a
+  // loaded plugin always has them; the fallbacks are for a harness that
+  // constructs the service with a stub manifest, and an empty version makes the
+  // interface say nothing rather than guess a number.
+  readonly property string pluginName: manifest && manifest.name
+    ? String(manifest.name) : "Omamail"
+  readonly property string version: manifest && manifest.version
+    ? String(manifest.version) : ""
 
   readonly property var defaultSettingValues: ({
     refreshIntervalSec: 120,
