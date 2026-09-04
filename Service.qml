@@ -738,6 +738,7 @@ Item {
   readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
   readonly property bool canOpenWebInbox: !!current && current.canOpenWebInbox
   readonly property var unavailableActions: current ? current.unavailableActions : []
+  readonly property var savingAttachmentIds: current ? current.savingAttachmentIds : ({})
   readonly property bool canSend: !current || current.canSend
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
@@ -843,6 +844,10 @@ Item {
   }
   function openAttachment(messageId, attachment) {
     if (current) current.openAttachment(messageId, attachment)
+  }
+
+  function saveAttachment(messageId, attachment) {
+    if (current) current.saveAttachment(messageId, attachment)
   }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null

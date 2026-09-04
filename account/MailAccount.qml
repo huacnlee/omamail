@@ -68,6 +68,8 @@ Item {
 
   // The window drives this; the unread poll keeps running while it is false.
   property bool windowOpen: false
+  // Keyed by attachmentId, holding only the saves that are in flight.
+  property var savingAttachmentIds: ({})
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -1663,6 +1665,84 @@ Item {
     })
   }
 
+  // Keeping an attachment rather than opening it once.
+  //
+  // The same shape as `openAttachment` because it is the same journey up to
+  // the last step: sign-in, then the provider's own fetch, then one script.
+  // Only the script differs, and the answer it gives back — a path, which the
+  // notice repeats, because a saved file nobody can find is not saved.
+  function saveAttachment(messageId, attachment) {
+    var source = attachment || ({})
+    if (!ready) {
+      fail("Sign in before saving an attachment")
+      return
+    }
+    if (String(messageId || "") === "" || String(source.attachmentId || "") === "") {
+      fail("That attachment is not available")
+      return
+    }
+    // One save at a time for one attachment. A download arrow is a single
+    // click, and a double one used to start a second fetch that the script
+    // then dutifully numbered: two identical files in Downloads, and a notice
+    // that read the same both times, so nothing said it had happened.
+    var key = String(source.attachmentId)
+    if (savingAttachmentIds[key]) return
+    markSavingAttachment(key, true)
+    clearNotice()
+    note("Saving " + String(source.filename || "attachment"))
+    loadAttachments(messageId, [source], function(loaded, error) {
+      if (error || !loaded || loaded.length === 0) {
+        root.markSavingAttachment(key, false)
+        root.fail(error || "That attachment could not be loaded")
+        return
+      }
+      var file = loaded[0]
+      var request = attachmentSaveComponent.createObject(root, {
+        command: [pluginDir + "/scripts/save-attachment.py"],
+        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
+          + "\n" + String(file.data || "") + "\n"
+      })
+      if (!request) {
+        root.markSavingAttachment(key, false)
+        root.fail("That attachment could not be saved")
+        return
+      }
+      request.finished.connect(function(exitCode, path, detail) {
+        request.destroy()
+        if (!root) return
+        root.markSavingAttachment(key, false)
+        if (exitCode !== 0) {
+          root.fail(detail || "That attachment could not be saved")
+          return
+        }
+        // The name first, then the folder. `unique_path` numbers a name that
+        // is already taken, so the file on disk is not always the one the row
+        // shows — and reporting only the folder left the reader opening last
+        // month's `invoice.pdf` believing it was the one just saved. The
+        // notice elides from the right, so the part that can differ from what
+        // was clicked has to come before the part that cannot.
+        var saved = String(path || "")
+        var at = saved.lastIndexOf("/")
+        root.note(at > 0
+          ? "Saved " + saved.substring(at + 1) + " to " + saved.substring(0, at)
+          : "Saved")
+      })
+      request.running = true
+    })
+  }
+
+  // Which attachments are being saved right now, so the row that asked can
+  // show it and refuse a second click. Re-assigned rather than written into: a
+  // binding on a `var` does not notice a key appearing inside the object it is
+  // already holding.
+  function markSavingAttachment(key, saving) {
+    var next = ({})
+    for (var id in savingAttachmentIds)
+      if (id !== key) next[id] = true
+    if (saving) next[key] = true
+    savingAttachmentIds = next
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
@@ -2038,6 +2118,50 @@ Item {
         }
         unsubscribeProcess.finished(code, status)
       }
+    }
+  }
+
+  Component {
+    id: attachmentSaveComponent
+
+    Process {
+      id: attachmentSaveProcess
+
+      property string requestPayload: ""
+      // Exactly one answer reaches the caller, whichever way this ends.
+      property bool reported: false
+      signal finished(int exitCode, string path, string detail)
+
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+
+      function report(exitCode, path, detail) {
+        if (reported) return
+        reported = true
+        finished(exitCode, path, detail)
+      }
+
+      onStarted: {
+        write(requestPayload)
+        requestPayload = ""
+      }
+
+      onExited: function(exitCode) {
+        var path = String(attachmentSaveProcess.stdout.text || "").trim()
+        var detail = String(attachmentSaveProcess.stderr.text || "").trim()
+        attachmentSaveProcess.report(exitCode, path, detail)
+      }
+
+      // A program that could not be started never exits, so `onExited` never
+      // arrives. Without this the caller waits for an answer that is not
+      // coming, and the save it is holding open would keep the row's button
+      // turning for as long as the window stays open. Deferred by a turn so a
+      // real exit, which clears `running` as well, always reports first.
+      onRunningChanged: if (!running) Qt.callLater(function() {
+        if (attachmentSaveProcess)
+          attachmentSaveProcess.report(1, "", "That attachment could not be saved")
+      })
     }
   }
 
