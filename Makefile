@@ -56,7 +56,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/WeekCalendarView.qml \
 	bar/BarPreview.qml
 
-.PHONY: test test-js test-shell test-qml qml-check validate bench install
+.PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
+	test-qml qml-check validate bench install
 
 test: test-js test-shell test-qml
 
@@ -95,7 +96,11 @@ test-js:
 	node tests/test_imap.js
 	node tests/test_hey.js
 
-test-shell:
+test-shell: test-shell-portable test-shell-libcurl
+
+# Everything here drives one of our own scripts against a fake server and
+# asserts what the script did with the answer, so any libcurl can run it.
+test-shell-portable:
 	python3 tests/test_contacts.py
 	python3 tests/test_qml_names.py
 	python3 tests/test_qml_text_format.py
@@ -105,7 +110,6 @@ test-shell:
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
-	bash tests/test_imap_ordering.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_image_fetch.sh
 	bash tests/test_attachment_open.sh
@@ -115,6 +119,16 @@ test-shell:
 	bash tests/test_calendar_write.sh
 	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh
+
+# This one asserts libcurl's own behaviour rather than ours: which of its two
+# output channels a single-UID BODY.PEEK fetch arrives on. That is a property
+# of the installed libcurl and it differs by version — Omarchy's 8.21 puts the
+# message on stdout, and the libcurl on a GitHub runner delivers neither the
+# body there nor a complete one through the header callback. Running it on a
+# runner reports on a library nobody here runs, which is why the release
+# workflow does not, and why `make test` still does.
+test-shell-libcurl:
+	bash tests/test_imap_ordering.sh
 
 # Focus ownership and key routing cannot be tested without a focus scope, and a
 # focus scope needs the QML engine. Offscreen, so it needs no compositor: the
