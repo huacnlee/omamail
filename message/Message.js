@@ -97,21 +97,20 @@ function bytesToLatin1(bytes) {
   return out
 }
 
-// Qt.atob is native C++ and skips the per-character base64 loop entirely; it
-// hands back a string of raw bytes, which still needs UTF-8 decoding. The pure
-// JS path stays for the node tests, and as the fallback anywhere Qt is absent.
-function binaryStringToUtf8(binary) {
-  var bytes = []
-  for (var i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff)
-  return bytesToUtf8(bytes)
-}
-
+// Qt.atob is native C++ and skips the per-character base64 loop entirely. It
+// does not hand back raw bytes: Qt's implementation is QString::fromUtf8 over
+// the decoded bytes, so the result is already text. Measured on Qt 6.11 —
+// "Alex à l'école" comes back 14 characters with U+00E0 in it, not 16 bytes
+// with C3 A0. Decoding that text a second time as UTF-8 bytes is what turned
+// every accented calendar title and 8-bit mail body into CJK mojibake. The
+// pure JS path stays for the node tests, and as the fallback anywhere Qt is
+// absent.
 function decodeBase64Url(text) {
   var input = String(text || "")
   if (input === "") return ""
   if (typeof Qt !== "undefined" && typeof Qt.atob === "function") {
     try {
-      return binaryStringToUtf8(Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/")))
+      return Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/"))
     } catch (e) {
       // Fall through to the portable path rather than losing the message.
     }
