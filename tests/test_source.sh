@@ -892,6 +892,27 @@ for file in components/AppMenu.qml components/MessageMenu.qml; do
   fi
 done
 
+# A row that is drawn but left out of `menuRows` is mouse-only: the cursor is an
+# index into that array, so j and k step over the row, Enter can never reach it,
+# and `MenuActionRow.selected` never matches. "Move to Inbox" was added to the
+# column and left out of the array.
+python3 - <<'MENUROWS'
+import re
+from pathlib import Path
+
+for name in ("components/AppMenu.qml", "components/MessageMenu.qml"):
+    source = Path(name).read_text()
+    listed = re.search(r"property var menuRows: \[(.*?)\]", source, re.S)
+    if not listed:
+        raise SystemExit("test_source.sh: %s must list its rows in menuRows" % name)
+    known = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", listed.group(1)))
+    drawn = re.findall(r"MenuRow \{\s*id: ([A-Za-z_][A-Za-z0-9_]*)", source)
+    missing = [row for row in drawn if row not in known]
+    if missing:
+        raise SystemExit("test_source.sh: %s draws %s without listing it in menuRows"
+                         % (name, ", ".join(missing)))
+MENUROWS
+
 # Feature views receive semantic colours from App. Reading theme roles locally
 # makes the same concept drift between pages and prevents App from naming it.
 for file in components/AppMenu.qml components/MessageMenu.qml components/AccountSwitcher.qml \

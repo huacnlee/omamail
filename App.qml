@@ -688,8 +688,12 @@ Item {
     var wasOpen = currentView === "reader" && service.selectedId === acted
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(service.messages, acted)
+    // The same four facts `MailAccount.act` decides with. Asking with three of
+    // them made the cursor repair disagree with the list it repairs: moving a
+    // message back to the inbox removes the row on a provider that moves, and
+    // this read it as staying.
     var leaves = !Model.survivesAction(service.mailboxKey, action,
-      service.rawQuery)
+      service.rawQuery, service.hasLabels)
     if (!service.act(acted, action)) return false
     if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a

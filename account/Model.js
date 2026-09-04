@@ -142,17 +142,44 @@ function setupActionLabel(state, provider, authKind) {
 // have had to be carried, and correctly put back, by all four.
 var MOVE_PREFIX = "label:"
 
+// Gmail's own labels are upper case with no `Label_` prefix; a user's carry one
+// or are a folder name on IMAP. Only the second kind is a place a message is
+// filed under and can be taken out of, and `survivesAction` asks the same
+// question of the same fact so the two cannot disagree about a row.
+var SYSTEM_LABEL_IDS = ["INBOX", "UNREAD", "STARRED", "IMPORTANT", "SENT",
+  "DRAFT", "TRASH", "SPAM", "CHAT"]
+
+function isSystemLabelId(id) {
+  var value = String(id || "")
+  if (SYSTEM_LABEL_IDS.indexOf(value) >= 0) return true
+  return value.indexOf("CATEGORY_") === 0
+}
+
 function labelTarget(action) {
   var verb = String(action || "")
   if (verb.indexOf(MOVE_PREFIX) !== 0) return ""
   return verb.slice(MOVE_PREFIX.length)
 }
 
-function survivesAction(mailboxKey, action, rawQuery) {
+// `labels` is whether the provider files by label rather than by folder, which
+// is the one thing this cannot infer and the one thing `unarchive` turns on: a
+// folder provider answers it with a UID MOVE, so the message leaves the list
+// with a new id and a surviving row would point at nothing.
+function survivesAction(mailboxKey, action, rawQuery, labels) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   if (verb === "trash") return key === "trash"
   if (verb === "untrash") return key !== "trash"
+  if (verb === "unarchive") {
+    // Moving relocates on a folder provider: the message is given a new UID in
+    // INBOX, nothing parses COPYUID, and the row it left would point at a
+    // message that is no longer there — opening it says so, a star succeeds
+    // against nothing, and no reload corrects it.
+    if (labels !== true) return false
+    // On a label provider the row leaves a label's list, because the label
+    // came off, and stays in a mailbox or a search, which still contain it.
+    return String(rawQuery || "") === ""
+  }
   // A move takes INBOX away exactly as archive does, so it leaves exactly the
   // lists archive leaves. Said once, because two branches with the same answer
   // are two places for it to drift.
@@ -170,7 +197,16 @@ function labelChangesFor(action, sourceLabelId) {
   if (action === "star") return { add: ["STARRED"], remove: [] }
   if (action === "unstar") return { add: [], remove: ["STARRED"] }
   if (action === "archive") return { add: [], remove: ["INBOX"] }
-  if (action === "unarchive") return { add: ["INBOX"], remove: [] }
+  // Moving back to the inbox takes the message out of the label whose list it
+  // was found in, the same way a move does and for the same reason: a label
+  // somebody files things under is a queue, and one that keeps everything ever
+  // put in it only grows. `sourceLabelId` is already "" on a provider whose
+  // labels are folders, so a folder name never reaches a Gmail remove list.
+  if (action === "unarchive") {
+    var filed = String(sourceLabelId || "")
+    if (filed === "" || isSystemLabelId(filed)) return { add: ["INBOX"], remove: [] }
+    return { add: ["INBOX"], remove: [filed] }
+  }
   if (action === "spam") return { add: ["SPAM"], remove: ["INBOX"] }
   // A move is archive with somewhere to go. Where a folder is a label, putting
   // a message in one is adding that label and taking INBOX away -- the same

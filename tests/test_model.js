@@ -717,3 +717,50 @@ assert.strictEqual(model.wheelScrollTarget(4770, -NOTCH, 5000, 300, 0, 50, 70), 
 assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), -80)
 assert.strictEqual(model.wheelScrollTarget(-200, NOTCH, 4200, 300, -200, 0, 0), -200,
   "and the header stays reachable")
+// ------------------------------------------- moving back into the inbox
+
+// The same pattern a `label:` move already writes: a message filed under a
+// label and pulled back into the inbox has been dealt with, and leaving the
+// label on it means it is still waiting in a list it is no longer in.
+deepEqual(model.labelChangesFor("unarchive", "Label_17"),
+  { add: ["INBOX"], remove: ["Label_17"] })
+deepEqual(model.labelChangesFor("unarchive"), { add: ["INBOX"], remove: [] })
+deepEqual(model.labelChangesFor("unarchive", ""), { add: ["INBOX"], remove: [] })
+
+// Never a system label: INBOX would undo the move it is part of, and UNREAD,
+// STARRED or a CATEGORY_ are states rather than places a message is filed
+// under. The same fact `survivesAction` asks, so the two cannot disagree.
+deepEqual(model.labelChangesFor("unarchive", "INBOX"), { add: ["INBOX"], remove: [] })
+deepEqual(model.labelChangesFor("unarchive", "CATEGORY_PERSONAL"),
+  { add: ["INBOX"], remove: [] })
+assert.strictEqual(model.isSystemLabelId("Label_17"), false)
+assert.strictEqual(model.isSystemLabelId("IMPORTANT"), true)
+assert.strictEqual(model.isSystemLabelId("CATEGORY_UPDATES"), true)
+
+// A provider that files by folder answers this with a UID MOVE: the message is
+// given a new id in INBOX, nothing parses COPYUID, and a surviving row would
+// point at a message that is no longer there.
+assert.strictEqual(model.survivesAction("archive", "unarchive", "", false), false,
+  "a folder provider relocates, so the row cannot stay")
+assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", false), false)
+
+// A label provider keeps the message in a mailbox or a search, and takes it
+// out of the label whose list it was found in.
+assert.strictEqual(model.survivesAction("all", "unarchive", "", true), true)
+assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", true), false)
+
+// The third argument is still main's query string, not a boolean. Passing a
+// boolean here would have read every non-empty query as "in a label view" at
+// every existing call site.
+assert.strictEqual(model.survivesAction("inbox", "archive", ""), false,
+  "archive still leaves the inbox")
+assert.strictEqual(model.survivesAction("all", "archive", ""), true)
+
+// End to end on a summary: the label goes, INBOX arrives, the derived flags
+// follow, and the original is untouched.
+const filed = { id: "m1", labelIds: ["Label_17", "IMPORTANT"], unread: false,
+  starred: false, inInbox: false }
+const moved = model.applyLabelChange(filed, "unarchive", "Label_17")
+deepEqual(moved.labelIds, ["IMPORTANT", "INBOX"])
+assert.strictEqual(moved.inInbox, true)
+assert.strictEqual(filed.labelIds.indexOf("Label_17"), 0)
