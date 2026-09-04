@@ -1137,3 +1137,21 @@ if "FileDialog" in block or "execDetached" in block:
 PY
 
 printf 'test_source.sh ok\n'
+
+# A preview is drawn the same as an open and must be marked read differently.
+# The gate is one condition in the detail callback and it has no unit test that
+# can reach it — the panel-level test asserts only that a flag was passed.
+python3 - <<'PREVIEWREAD'
+import re
+from pathlib import Path
+
+source = Path("account/MailAccount.qml").read_text()
+
+# The read mark on arrival must ask whether this was a preview.
+mark = re.search(r"if \(summary\.unread[^)]*\)\s*\n?\s*root\.act\([^)]*markRead", source)
+if not mark:
+    raise SystemExit("test_source.sh: MailAccount must mark an opened message read")
+if "selectionIsPreview" not in mark.group(0):
+    raise SystemExit("test_source.sh: the read mark on arrival must skip a preview "
+                     "(`!root.selectionIsPreview`), or stepping a list reads it")
+PREVIEWREAD

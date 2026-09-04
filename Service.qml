@@ -817,6 +817,15 @@ Item {
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
   readonly property string rawLabelId: current ? current.rawLabelId : ""
+
+  // Whether the message on screen got there because the cursor passed over it
+  // rather than because somebody opened it.
+  //
+  // Above `MailAccount` because two decisions in the window turn on it and
+  // neither can be made from `selectedId` alone: a previewed message satisfies
+  // "is this the selected one" while not being open, which made an archive
+  // open its neighbour and a reply skip the open it needs.
+  readonly property bool selectionIsPreview: !!current && current.selectionIsPreview
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
