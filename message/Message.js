@@ -1011,6 +1011,54 @@ function mimeBoundary(given) {
   return "=_Omamail_" + (new Date()).getTime().toString(36) + "_" + random
 }
 
+// The domain half of a Message-ID is the sender's own, so the id agrees with the address the message is from.
+function messageIdDomain(from) {
+  var address = headerSafe(from).trim()
+  var at = address.lastIndexOf("@")
+  var domain = at < 0 ? "" : address.substring(at + 1).replace(/[^A-Za-z0-9.-]/g, "")
+  // RFC 2606 reserves .invalid, so a message with no From borrows no domain that belongs to somebody else.
+  return domain === "" ? "omamail.invalid" : domain
+}
+
+// Unique by the rule mimeBoundary already uses, and the caller may state one, which is what lets a test read it.
+function messageIdValue(given, from, nowMs) {
+  var stated = String(given === undefined || given === null ? "" : given)
+  // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
+  if (stated.length <= 250
+      && /^<[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*@[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*>$/.test(stated))
+    return stated
+  var now = Math.floor(Number(nowMs) || Date.now())
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "<" + now.toString(36) + "." + random + ".omamail@" + messageIdDomain(from) + ">"
+}
+
+// The date a message states, in RFC 5322's own shape: a numeric zone rather than toUTCString's obsolete GMT.
+function sentDate(given, nowMs) {
+  var stated = headerSafe(given).trim()
+  // JavaScript also parses ISO dates and shorthand spellings that are not
+  // legal header values, so a stated date needs this client's canonical shape
+  // and RFC 5322's semantic calendar constraints.
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-][0-9]{2}[0-5][0-9]$/
+  var parts = stated.match(canonical)
+  if (parts) {
+    var day = Number(parts[2])
+    var month = MONTHS.indexOf(parts[3])
+    var year = Number(parts[4])
+    var calendar = new Date(Date.UTC(year, month, day))
+    if (year >= 1900 && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
+        && calendar.getUTCDate() === day && WEEKDAYS[calendar.getUTCDay()] === parts[1])
+      return stated
+  }
+  var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
+  if (isNaN(date.getTime())) date = new Date()
+  var offset = -date.getTimezoneOffset()
+  var minutes = Math.abs(offset)
+  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " " + MONTHS[date.getMonth()]
+    + " " + date.getFullYear() + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    + ":" + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
+    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
+}
+
 // One method name, and nothing that could end the header early: this string
 // arrives from a calendar file somebody else wrote.
 function calendarMethod(value) {
@@ -1104,6 +1152,10 @@ function buildRawMessage(fields) {
     lines.push("In-Reply-To: " + inReplyTo)
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
+  // RFC 5322 requires a Date on a message this client originates, and the writer's clock is the one it means.
+  lines.push("Date: " + sentDate(values.date))
+  // RFC 5322 asks every message for an id, and a relay told not to add missing headers relays none.
+  lines.push("Message-ID: " + messageIdValue(values.messageId, values.from))
   lines.push("MIME-Version: 1.0")
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""

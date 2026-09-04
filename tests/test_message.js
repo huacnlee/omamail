@@ -629,6 +629,183 @@ assert.strictEqual(message.extractHtml({
     .indexOf("In-Reply-To") < 0)
 }
 
+// ------------------------------------------------------------- Message-ID
+//
+// RFC 5322 asks every message for an id, and a relay told not to add missing
+// headers relays none: Postfix logs `message-id=<>` for a message sent without
+// one, and a reply to it has nothing to thread on.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const idOf = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .filter((line) => line.indexOf("Message-ID: ") === 0)[0]
+    .substring("Message-ID: ".length)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Message-ID").length, 1,
+    "one Message-ID, and only one")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(sent)), idOf(sent))
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+  assert.ok(message.buildRawMessage({ to: "a@b.com", body: "x" }).indexOf("To: a@b.com\r\n") === 0,
+    "a message with no From still opens with To")
+
+  const again = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.notStrictEqual(idOf(sent), idOf(again), "every message gets its own id")
+
+  // No From leaves no domain to take, and .invalid is reserved by RFC 2606 so
+  // the id cannot land in a namespace somebody else's uniqueness depends on.
+  assert.ok(/^<[^<>@\s]+@omamail\.invalid>$/.test(
+    idOf(message.buildRawMessage({ to: "a@b.com", body: "x" }))))
+  assert.strictEqual(message.messageIdDomain('"Jane" <jane@Example.COM>'), "Example.COM")
+  assert.strictEqual(message.messageIdDomain("nobody"), "omamail.invalid")
+  assert.strictEqual(message.messageIdDomain(""), "omamail.invalid")
+
+  // Every label in this domain is legal, and the separator between its first
+  // two 63-character labels lands at the old arbitrary length ceiling. Cutting
+  // there would leave the id's domain ending in a dot.
+  const longDomain = "a".repeat(63) + "." + "b".repeat(63) + "."
+    + "c".repeat(63) + ".com"
+  const longDomainId = idOf(message.buildRawMessage({
+    from: "work@" + longDomain, to: "a@b.com", body: "x"
+  }))
+  assert.ok(longDomainId.endsWith("@" + longDomain + ">"),
+    "a valid sender domain survives whole in the generated id")
+
+  // Stated by the caller, which is what lets a test read the message it built.
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<pinned@example.net>"
+  }).indexOf("Message-ID: <pinned@example.net>\r\n") > 0)
+
+  // Dot-atom permits every RFC 5322 `atext` punctuation character on either
+  // side of the separator. A legal caller-stated id is preserved byte for byte.
+  const fullAtext = "<AZaz09!#$%&'*+-/=?^_`{|}~.next@AZaz09!#$%&'*+-/=?^_`{|}~.next>"
+  assert.ok(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: fullAtext
+  }).indexOf("Message-ID: " + fullAtext + "\r\n") > 0,
+    "every legal atext character survives in a stated id")
+
+  // Validation judges the caller's original value. Removing a space first
+  // would silently turn this into a different, apparently valid id, while an
+  // empty dot-atom segment is not a legal id at all.
+  const repaired = idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a @example.com>"
+  }))
+  assert.notStrictEqual(repaired, "<a@example.com>",
+    "a malformed stated id is replaced rather than repaired")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(repaired), "the replacement is a generated id")
+  assert.notStrictEqual(idOf(message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x", messageId: "<a..b@example.com>"
+  })), "<a..b@example.com>", "an empty dot-atom segment is replaced")
+
+  // A stated id is this client's own choice rather than a stranger's, so one
+  // that is not an id is replaced instead of carried through mangled.
+  const forged = message.buildRawMessage({
+    from: "work@example.net", to: "a@b.com", body: "x",
+    messageId: "<a@b>\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.ok(/^<[^<>@\s]+@example\.net>$/.test(idOf(forged)), "a real id is minted instead")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Message-ID").length, 1)
+}
+
+// ------------------------------------------------------------------- Date
+//
+// RFC 5322 requires a Date on a message this client originates. Without one a
+// reader falls back to the time the message was delivered or stored, which is
+// not the time it was written — this client delays a send behind an undo
+// window, so those are not the same moment.
+{
+  const headerNames = (text) => text.split("\r\n\r\n")[0].split("\r\n")
+    .map((line) => line.split(":")[0])
+  const clock = Date.UTC(2026, 8, 3, 10, 4, 31)
+
+  const sent = message.buildRawMessage({
+    from: "work@example.net", to: "jane@example.com", subject: "s", body: "hi"
+  })
+  assert.strictEqual(headerNames(sent).filter((name) => name === "Date").length, 1,
+    "one Date, and only one")
+  assert.ok(sent.indexOf("From: work@example.net\r\n") === 0, "From still opens the message")
+
+  // The shape RFC 5322 §3.3 states, with a numeric zone rather than the
+  // obsolete GMT that toUTCString would give.
+  const stamped = message.sentDate("", clock)
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(stamped),
+    stamped)
+  assert.strictEqual(new Date(stamped).getTime(), clock,
+    "a local-offset Date names the instant it was made from")
+  assert.strictEqual(
+    message.messageDate({ payload: { headers: [{ name: "Date", value: stamped }] } }).getTime(), clock,
+    "this file's own reader gets the instant back out of it")
+
+  // Stated by the caller, the way the id and the boundary already are.
+  assert.ok(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "Thu, 03 Sep 2026 12:04:31 +0200"
+  }).indexOf("Date: Thu, 03 Sep 2026 12:04:31 +0200\r\n") > 0)
+  assert.strictEqual(new Date(message.sentDate("Thu, 03 Sep 2026 10:04:31 +0000")).getTime(), clock,
+    "a caller who wants no offset says so through the same field")
+
+  // JavaScript parses ISO dates and several shorthand spellings that are not
+  // RFC 5322 date-time values. A parseable but non-header-shaped override is
+  // replaced with this client's canonical form.
+  const nonRfc = message.sentDate("2026-09-03", clock)
+  assert.notStrictEqual(nonRfc, "2026-09-03", "an ISO-only override is not emitted verbatim")
+  assert.ok(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/.test(nonRfc),
+    nonRfc)
+  assert.strictEqual(new Date(nonRfc).getTime(), clock, "the replacement uses the stated build clock")
+
+  // JavaScript normalizes an impossible calendar date and ignores a weekday
+  // that disagrees with the date. Neither can be emitted as the caller stated
+  // it: RFC 5322 requires the written date to exist and the weekday to agree.
+  const impossible = "Tue, 31 Feb 2026 10:04:31 +0000"
+  const replacedImpossible = message.sentDate(impossible, clock)
+  assert.notStrictEqual(replacedImpossible, impossible,
+    "an impossible day in a real month is replaced rather than normalized")
+  assert.strictEqual(new Date(replacedImpossible).getTime(), clock)
+
+  const mismatchedWeekday = "Fri, 03 Sep 2026 10:04:31 +0000"
+  const replacedWeekday = message.sentDate(mismatchedWeekday, clock)
+  assert.notStrictEqual(replacedWeekday, mismatchedWeekday,
+    "a weekday that disagrees with its date is replaced")
+  assert.strictEqual(new Date(replacedWeekday).getTime(), clock)
+
+  // RFC 5322 permits years from 1900 onward. A numeric zone has two digits
+  // each for hours and minutes, but only the minute pair is bounded to 00–59.
+  const obsoleteYear = "Mon, 04 Sep 1899 10:04:31 +0000"
+  const replacedObsoleteYear = message.sentDate(obsoleteYear, clock)
+  assert.notStrictEqual(replacedObsoleteYear, obsoleteYear,
+    "a year below RFC 5322's lower bound is replaced")
+  assert.strictEqual(new Date(replacedObsoleteYear).getTime(), clock)
+  assert.strictEqual(message.sentDate("Tue, 04 Sep 1900 10:04:31 +0000", clock),
+    "Tue, 04 Sep 1900 10:04:31 +0000", "the first RFC 5322 year is preserved")
+  for (const zone of ["+2400", "+9959", "-9959"]) {
+    const zoned = "Thu, 03 Sep 2026 10:04:31 " + zone
+    assert.strictEqual(message.sentDate(zoned, clock), zoned,
+      "a numeric zone may use any two-digit hour: " + zone)
+  }
+  assert.notStrictEqual(message.sentDate("Thu, 03 Sep 2026 10:04:31 +9960", clock),
+    "Thu, 03 Sep 2026 10:04:31 +9960", "a numeric zone minute cannot reach 60")
+
+  // A stated value that is not a date is replaced, and a line break in one can
+  // become neither a second header nor a mangled first one.
+  const forged = message.buildRawMessage({
+    to: "a@b.com", body: "x", date: "not a date\r\nBcc: attacker@example.net"
+  })
+  assert.ok(headerNames(forged).indexOf("Bcc") < 0)
+  assert.ok(forged.indexOf("attacker@example.net") < 0, "nothing of the forged value survives")
+  assert.strictEqual(headerNames(forged).filter((name) => name === "Date").length, 1)
+
+  // The header survives a round trip through this file's own parser.
+  assert.strictEqual(message.parseRfc822(message.buildRawMessage({
+    to: "a@b.com", body: "x", date: stamped
+  })).headers.filter((header) => header.name === "Date").length, 1)
+}
+
 // ------------------------------------------------------ RFC 822 → payload
 //
 // The adapter that lets an IMAP message drive the same reader a Gmail message
