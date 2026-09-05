@@ -37,7 +37,7 @@ Beside a message's own button there is a pane — the third root of the window a
 
 ## Presets
 
-Settings offers a harness list beside the command: Claude Code (`claude -p --allowedTools "Bash(himalaya:*)"`), Codex (`codex exec --full-auto`), Gemini CLI (`gemini --yolo -p …`), OpenCode (`opencode run "$(cat)"`), and Custom. Choosing one writes its line into the field, which stays editable; an edited line reads back as Custom rather than pretending to be the preset. `Agent.PRESETS` is the list, and the service marks the ones whose binary is not on PATH. Every preset grants the agent its tools up front, because a job has no terminal to answer a permission prompt on — a harness that stops to ask never finishes.
+Settings offers a harness list beside the command: Claude Code (`claude -p --allowedTools "Bash(himalaya:*)"`), Codex (`codex exec --full-auto`), Gemini CLI (`gemini --yolo -p …`), Grok Build (`grok --always-approve -p "$(cat)"`), OpenCode (`opencode run "$(cat)"`), and Custom. Choosing one writes its line into the field, which stays editable; an edited line reads back as Custom rather than pretending to be the preset. `Agent.PRESETS` is the list, and the service marks the ones whose binary is not on PATH. Every preset grants the agent its tools up front, because a job has no terminal to answer a permission prompt on — a harness that stops to ask never finishes.
 
 ## How the surfaces meet
 

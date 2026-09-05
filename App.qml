@@ -212,7 +212,13 @@ Item {
   // the list under it changes. Only the list acts on it: in the reader there
   // is one message and it is the one open.
   property var checkedIds: []
-  readonly property bool selectionActive: checkedIds.length > 0 && currentView === "list"
+  // Ticked rows mean the selection whenever the list is on screen: alone, or
+  // beside the reader in a wide window. A plain click opens a message and
+  // puts the window in the reader view, so a click, a Shift+click and `d`
+  // used to trash only the open message — the ticks were there and ignored.
+  readonly property bool listOnScreen: currentView === "list"
+    || (currentView === "reader" && !compact)
+  readonly property bool selectionActive: checkedIds.length > 0 && listOnScreen
 
   function toggleCheck(id) {
     var key = String(id || "")
@@ -250,12 +256,19 @@ Item {
     var leaves = !Model.survivesAction(service.mailboxKey, action,
       service.rawQuery, service.hasLabels, service.rawLabelId)
     var next = leaves ? Model.cursorAfterRemovals(service.messages, ids, cursorId) : cursorId
+    // The open message going with the selection closes the reader, the way
+    // acting on it alone does: it is about to leave this list.
+    var wasOpen = currentView === "reader" && ids.indexOf(service.selectedId) >= 0
     if (!service.actMany(ids, action)) return false
     checkedIds = []
-    if (leaves) {
-      cursorId = next
-      revealCursorRow()
+    if (!leaves) return true
+    if (wasOpen) {
+      if (next !== "") openMessage(next)
+      else backToList()
+      return true
     }
+    cursorId = next
+    revealCursorRow()
     return true
   }
 
@@ -1462,6 +1475,26 @@ Item {
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
+          // The agent pane, from the header as well as from the rail's foot:
+          // the rail is gone in a narrow window and folded in a collapsed one,
+          // and this is the one place that is always there. Lit while the
+          // pane is up, in the accent while a job is running.
+          IconButton {
+            objectName: "header-agent-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && !!root.service && root.service.hasAgent
+            iconName: "agent"
+            tooltipText: root.agentVisible ? "Back to mail · Ctrl+Shift+M" : "Agent pane · Ctrl+Shift+G"
+            foreground: !!root.service && root.service.agentBusy ? root.accent : root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            selected: root.agentVisible
+            onClicked: {
+              if (root.agentVisible) root.backToList()
+              else root.showAgent()
+            }
+          }
+
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
@@ -1781,8 +1814,12 @@ Item {
               root.openAgentAt(root.service.selectedId, scene.x, scene.y)
               return
             }
+            // The reader's own buttons mean the open message — unless it is
+            // one of the ticked rows, in which case they mean all of them,
+            // by the same rule as a row's buttons.
+            var outside = root.checkedIds.indexOf(root.service.selectedId) < 0
             root.cursorId = root.service.selectedId
-            root.actOnCursor(action)
+            root.actOnCursor(action, outside)
           }
         }
 
