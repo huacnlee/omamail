@@ -106,10 +106,13 @@ Item {
   signal sessionUnavailable(string reason)
   signal credentialsSaved()
 
-  // What sign-in learned, for the page that has to write it down: the session
-  // URL that answered, the scheme that worked, and the account id every later
-  // request names. Emitted before `loginSucceeded`, so the settings are on the
-  // account by the time anything asks the client to fetch with them.
+  // What sign-in learned, for the account to write down: the session URL that
+  // answered, the scheme that worked, and the account id every later request
+  // names. `MailAccount` carries it up to the account list, which is the one
+  // owner of the entry this object's `settings` are read from — nothing here
+  // writes to itself, and the page only shows the URL. Emitted before
+  // `loginSucceeded`, so the settings are on the account by the time anything
+  // asks the client to fetch with them.
   signal sessionVerified(var result)
 
   function safeError(value) {
@@ -249,10 +252,10 @@ Item {
     sessionVerified(result || {})
     storeSecret()
     // A tick later than the rest of this, and deliberately: `sessionVerified`
-    // is what has the page write the session URL, the scheme and the account
-    // id onto the account, and only then is this object `configured`. Emitting
-    // in the same turn would have `MailAccount` start fetching against
-    // settings that had not landed yet.
+    // is what has the account list write the session URL, the scheme and the
+    // account id onto the entry, and only then is this object `configured`.
+    // Emitting in the same turn would have `MailAccount` start fetching
+    // against settings that had not landed yet.
     Qt.callLater(function() { if (root) root.loginSucceeded() })
   }
 

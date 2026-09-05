@@ -484,6 +484,18 @@ function typedSessionUrl(server) {
 // caller runs `scripts/jmap-srv.sh` for `domain`, hands what it printed to
 // `parseSrv`, and GETs the URL that comes back; a record that names no service
 // simply leaves that step with nothing to try.
+// Which server, and as whom: the two settings that decide what a session is
+// worth. A different URL is a different server and a different username is a
+// different account on it, so a session read under one pair says nothing
+// under another. The scheme and the account id are what sign-in *learns* from
+// that pair, so a change to them alone — which is exactly what sign-in writes
+// onto the account — is the same mailbox, and the session it just fetched
+// still describes it.
+function serverIdentity(settings) {
+  var values = settings || {}
+  return trimmed(values.sessionUrl) + "\n" + trimmed(values.username)
+}
+
 function discoveryPlan(address, server) {
   var domain = addressDomain(address)
   if (trimmed(server) !== "") {

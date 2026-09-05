@@ -67,6 +67,9 @@ Item {
   // last read returned. Everything below is a binding over these two, so
   // replacing either is what moves the rail, the buttons and the key hints.
   property var session: null
+  // The server and username the session above was read under, so a rewritten
+  // settings object can be told from a different server. See `onSettingsChanged`.
+  property string serverIdentity: ""
   property var mailboxList: []
 
   // The id every method call names. The session's own primary wins: it is the
@@ -382,6 +385,10 @@ Item {
         var boxes = first && first[1] && Array.isArray(first[1].list) ? first[1].list : []
 
         root.session = Jmap.parseJson(sessionText)
+        // Under the settings the account is about to be given — the URL that
+        // answered and the username as typed — so the write that follows
+        // sign-in reads as the same mailbox rather than a new one.
+        root.serverIdentity = Jmap.serverIdentity({ sessionUrl: url, username: values.username })
         root.mailboxList = boxes
         // A sign-in that came back with mailboxes has already done the read
         // every query gates on. An empty answer is left unloaded so the first
@@ -459,6 +466,7 @@ Item {
   // `absentMailboxes` answering null means.
   function forgetServer() {
     session = null
+    serverIdentity = ""
     mailboxList = []
     mailboxesLoaded = false
     knownStates = ({})
@@ -490,7 +498,16 @@ Item {
     }
     // A mailbox pointed at a different server is a different mailbox: the
     // session, the folders and every state read off them belong to the old one.
+    //
+    // Judged on the server and the username rather than on the object, because
+    // the object is rebuilt whenever the account list is saved for any reason
+    // — another mailbox named, one added — and sign-in itself rewrites it with
+    // the account id and scheme it learned. Forgetting on every one of those
+    // threw away the session sign-in had just read and every mailbox with it,
+    // to be fetched again before the first list could be drawn.
     function onSettingsChanged() {
+      var next = Jmap.serverIdentity(root.auth ? root.auth.settings : null)
+      if (next === root.serverIdentity) return
       root.forgetServer()
     }
     // A deliberate sign-out is not a refused credential. Left standing, the
@@ -596,6 +613,7 @@ Item {
       var entry = cache.getSession(url)
       if (entry && entry.session && Jmap.verifySession(entry.session).error === "") {
         root.session = entry.session
+        root.serverIdentity = Jmap.serverIdentity(auth.settings)
         callback("")
         return
       }
@@ -629,6 +647,7 @@ Item {
           return
         }
         root.session = Jmap.parseJson(reply.body)
+        root.serverIdentity = Jmap.serverIdentity(auth.settings)
         root.credentialsRejected = false
         root.rememberSession(url, reply.body)
         root.finishSessionWaiters("")

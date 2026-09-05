@@ -398,4 +398,25 @@ deepEqual(jmap.patchPlan([], [], ["UNREAD"], roles, {}), [])
 assert.strictEqual(jmap.patchPlan(["m1", "m2"], [], ["INBOX"], roles, {}),
   "This account has no Archive mailbox")
 
+// Which server, and as whom. The client forgets its session when this
+// changes and keeps it when it does not: the settings object is rebuilt on
+// every save of the account list, and sign-in itself rewrites the scheme and
+// the account id, neither of which makes it a different mailbox.
+assert.strictEqual(
+  protocol.serverIdentity({ sessionUrl: " https://a.example/jmap/session ", username: "me",
+    authScheme: "basic", accountId: "" }),
+  protocol.serverIdentity({ sessionUrl: "https://a.example/jmap/session", username: "me",
+    authScheme: "bearer", accountId: "t" }),
+  "the scheme and the account id sign-in learns do not make a new server")
+assert.notStrictEqual(
+  protocol.serverIdentity({ sessionUrl: "https://a.example/jmap/session", username: "me" }),
+  protocol.serverIdentity({ sessionUrl: "https://b.example/jmap/session", username: "me" }),
+  "a different URL is a different server")
+assert.notStrictEqual(
+  protocol.serverIdentity({ sessionUrl: "https://a.example/jmap/session", username: "me" }),
+  protocol.serverIdentity({ sessionUrl: "https://a.example/jmap/session", username: "you" }),
+  "a different username is a different account on it")
+assert.strictEqual(protocol.serverIdentity(null), protocol.serverIdentity({}),
+  "no settings at all is one identity, not an error")
+
 console.log("jmap threads ok")

@@ -142,6 +142,25 @@ function makeJmapSettings(raw) {
   }
 }
 
+// The settings after a sign-in, which is the one event that changes three of
+// the four. Sign-in *learns* the URL that answered, the scheme the server
+// accepted and the account id its session named, and none of those is
+// anything the page could have written down before it ran: a typed host
+// becomes the URL discovery ended on, and an account id was never typed at
+// all. The username is the one typed field and is kept as it was. Whatever
+// the check did not report is kept too, so a result that is short a field
+// cannot blank a value that was already right.
+function jmapSettingsAfterSignIn(settings, result) {
+  var current = makeJmapSettings(settings)
+  var learned = result || {}
+  return makeJmapSettings({
+    sessionUrl: trimmed(learned.sessionUrl) !== "" ? learned.sessionUrl : current.sessionUrl,
+    username: current.username,
+    authScheme: trimmed(learned.authScheme) !== "" ? learned.authScheme : current.authScheme,
+    accountId: trimmed(learned.accountId) !== "" ? learned.accountId : current.accountId
+  })
+}
+
 // Basic or Bearer, and nothing else reaches an account: `none` is discovery's
 // unauthenticated well-known GET, which is not a way of signing in to
 // anything. Anything unrecognised — an empty field on an account that has not

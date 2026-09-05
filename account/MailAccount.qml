@@ -2821,6 +2821,15 @@ Item {
 
   signal accountIdentified(string email)
 
+  // The server settings a sign-in learned, for the account list to write onto
+  // this account's entry. The same shape as `accountIdentified`: a fact the
+  // sign-in found out that belongs on the entry, which only the list owns.
+  // This object is built *from* the entry — its `jmapSettings` come down from
+  // it — so writing here would be writing to a copy that the next read of the
+  // file replaces, and a mailbox that had signed in perfectly well would open
+  // on its setup page again after every restart.
+  signal serverSettingsLearned(var jmap)
+
   // Which pair of objects this account actually runs on. Both loaders build the
   // same two shapes — something that signs in, and something that fetches — and
   // everything above this point calls them without knowing which it holds.
@@ -2898,6 +2907,13 @@ Item {
       address: root.configuredEmail
       settings: Accounts.makeJmapSettings(root.jmapSettings)
 
+      // The URL that answered, the scheme that worked and the account id, over
+      // the settings this object was given. Up to the list rather than onto
+      // this object: `configured` reads `settings`, and `settings` is bound to
+      // the entry, so the entry is the only place the answer can land and stay.
+      onSessionVerified: function(result) {
+        root.serverSettingsLearned(Accounts.jmapSettingsAfterSignIn(settings, result))
+      }
       onLoginSucceeded: {
         root.lastError = lastError
         root.afterSignIn()

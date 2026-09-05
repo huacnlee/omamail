@@ -600,6 +600,29 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(accounts.find(list, "imap:ada@example.org").provider, "imap")
 }
 
+// What sign-in learned, over what the page saved. The page can only write the
+// typed host and the username; the URL that answered, the scheme and the
+// account id exist only once the check has run, and an account that never
+// receives them can never be configured — which is the defect this covers.
+{
+  const typed = { sessionUrl: "mail.example.org", username: "jane", authScheme: "", accountId: "" }
+  const learned = accounts.jmapSettingsAfterSignIn(typed, {
+    sessionUrl: "https://mx.example.org/jmap/session", authScheme: "bearer",
+    accountId: "a1", canSend: true, mailboxCount: 5
+  })
+  deepEqual(learned, {
+    sessionUrl: "https://mx.example.org/jmap/session", username: "jane",
+    authScheme: "bearer", accountId: "a1"
+  }, "the three learned fields land and the typed username stays")
+  deepEqual(accounts.jmapSettingsAfterSignIn(learned, { sessionUrl: "", accountId: "" }),
+    learned, "a result short a field keeps the value already there")
+  deepEqual(accounts.jmapSettingsAfterSignIn(null, null),
+    { sessionUrl: "", username: "", authScheme: "basic", accountId: "" },
+    "nothing learned over nothing saved is the empty, Basic default")
+  deepEqual(accounts.jmapSettingsAfterSignIn(typed, { authScheme: "digest" }).authScheme,
+    "basic", "an unknown scheme is normalised the way the file's own is")
+}
+
 // ------------------------------------------------------------- signatures
 
 {

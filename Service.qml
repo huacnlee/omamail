@@ -1113,6 +1113,10 @@ Item {
       alwaysShowImages: root.alwaysShowImages
 
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
+      // What a JMAP sign-in learned about its server, written onto the entry
+      // the same way the setup form's own save is: the row keeps everything
+      // else it had, and the file follows.
+      onServerSettingsLearned: function(jmap) { root.configureAccount(index, { jmap: jmap }) }
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
