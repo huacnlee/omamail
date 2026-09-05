@@ -84,8 +84,9 @@ var PRESETS = [
     domains: ["outlook.com", "hotmail.com", "live.com", "msn.com"],
     imapHost: "outlook.office365.com", imapPort: 993,
     smtpHost: "smtp-mail.outlook.com", smtpPort: 587,
-    note: "Microsoft has withdrawn password sign-in for personal accounts; "
-      + "a work or school account may still allow it."
+    note: "Microsoft has withdrawn password sign-in for personal accounts. "
+      + "A work or school tenant that refuses the password needs OAuth (XOAUTH2), "
+      + "not an app password."
   },
   {
     id: "yahoo",
@@ -149,6 +150,34 @@ var PRESETS = [
 
 function trimmed(value) {
   return String(value === undefined || value === null ? "" : value).trim()
+}
+
+// IMAP password vs Microsoft 365 XOAUTH2. Empty/missing is password: that is
+// what every mailbox already on disk is. `tokenAccount` is the ortie account
+// name (`ortie token show -a <name>`), not a secret.
+function usesXoauth2(raw) {
+  return trimmed((raw || {}).auth).toLowerCase() === "xoauth2"
+}
+
+function tokenAccountOf(raw) {
+  return trimmed((raw || {}).tokenAccount)
+}
+
+function normalizeAuth(value) {
+  return trimmed(value).toLowerCase() === "xoauth2" ? "xoauth2" : ""
+}
+
+// The string `mail-transport.sh` decodes as curl credentials. Password IMAP is
+// `user:password`; XOAUTH2 is `oauth2-bearer:<user>:<token>` so the transport
+// can emit curl's `user` + `oauth2-bearer` options. A tab is a control
+// character and is refused before curl starts, so the separator is a colon
+// (the token may contain further colons; only the first two fields are split).
+function imapCredentials(raw, secret) {
+  var settings = normalizeSettings(raw)
+  var value = String(secret === undefined || secret === null ? "" : secret)
+  if (usesXoauth2(settings))
+    return "oauth2-bearer:" + settings.username + ":" + value
+  return settings.username + ":" + value
 }
 
 function domainOf(address) {
@@ -241,7 +270,9 @@ function normalizeSettings(raw) {
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
-    insecure: values.insecure === true && isLoopback(values.imapHost)
+    insecure: values.insecure === true && isLoopback(values.imapHost),
+    auth: normalizeAuth(values.auth),
+    tokenAccount: tokenAccountOf(values)
   }
 }
 
@@ -263,7 +294,9 @@ function setupSettings(raw) {
     smtpPort: values.smtpPort,
     username: trimmed(values.username) || trimmed(values.address),
     aliases: values.aliases,
-    insecure: isLoopback(values.imapHost)
+    insecure: isLoopback(values.imapHost),
+    auth: values.auth,
+    tokenAccount: values.tokenAccount
   })
 }
 
@@ -276,6 +309,8 @@ function validateSettings(raw) {
   if (!isValidHost(settings.imapHost)) return { ok: false, error: "That is not a valid IMAP server address" }
   if (settings.smtpHost !== "" && !isValidHost(settings.smtpHost))
     return { ok: false, error: "That is not a valid SMTP server address" }
+  if (usesXoauth2(settings) && settings.tokenAccount === "")
+    return { ok: false, error: "XOAUTH2 mailboxes need a token helper account name" }
   return { ok: true, error: "", settings: settings }
 }
 
@@ -1259,6 +1294,11 @@ function transportError(status, response, detail, fallback) {
     if (trimmed(served) !== "") return responseError(0, served, fallback)
   }
   return responseError(status, detail, fallback)
+}
+
+function isRejectedCredentials(status, response, detail) {
+  var message = transportError(status || 0, response || "", detail || "", "")
+  return /rejected that username or password/i.test(message)
 }
 
 // A password can end up in a curl error line, in a server's echo of a failed

@@ -106,6 +106,7 @@ function portOr(value, fallback) {
 
 function makeImapSettings(raw) {
   var values = raw || {}
+  var auth = trimmed(values.auth).toLowerCase()
   return {
     imapHost: trimmed(values.imapHost),
     imapPort: portOr(values.imapPort, 993),
@@ -113,7 +114,9 @@ function makeImapSettings(raw) {
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
     aliases: Aliases.parse(values.aliases),
-    insecure: values.insecure === true
+    insecure: values.insecure === true,
+    auth: auth === "xoauth2" ? "xoauth2" : "",
+    tokenAccount: trimmed(values.tokenAccount)
   }
 }
 

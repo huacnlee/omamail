@@ -6,17 +6,19 @@ import "ImapProtocol.js" as Imap
 import "Credentials.js" as Credentials
 import "Secrets.js" as Secrets
 
-// An IMAP account's sign-in, which is a server address and a password.
+// An IMAP account's sign-in, which is a server address and a password — or,
+// for Microsoft 365 XOAUTH2, an access token from `ortie`.
 //
 // It is the counterpart to `AuthManager`, and deliberately the same shape from
 // outside: `MailAccount` asks either of them whether it is `loggedIn`, and asks
 // for a credential with one call whose callback takes `(value, error)`. What
-// differs is everything inside — there is no browser, no token to refresh and
-// nothing that expires.
+// differs is everything inside. Password IMAP has no browser and nothing that
+// expires. XOAUTH2 still has no browser here: `ortie` already holds the
+// refresh token, and `ortie token show` is what refreshes.
 //
-// Where the secret lives follows the same rule as the refresh token: GNOME
-// Keyring, written over stdin so it never reaches the process table, and keyed
-// by account so two mailboxes cannot overwrite each other.
+// Where the secret lives follows the same rule as the Gmail refresh token:
+// GNOME Keyring, never the process table, keyed by account. XOAUTH2 tokens
+// live under ortie's own keyring entry, not the IMAP password slot.
 Item {
   id: root
 
@@ -25,6 +27,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  readonly property string home: Quickshell.env("HOME") || ""
 
   // Which mailbox this signs in. Unlike Gmail's, an IMAP account knows its own
   // address from the moment it is created — the user typed it — so this is set
@@ -34,6 +37,8 @@ Item {
   // Server settings, pushed down from the account entry. Held as the validated
   // shape rather than as whatever was in the file.
   property var settings: Imap.normalizeSettings(null)
+  readonly property bool usesXoauth2: Imap.usesXoauth2(settings)
+  readonly property string tokenAccount: Imap.tokenAccountOf(settings)
 
   readonly property bool configured: Imap.validateSettings(settings).ok
 
@@ -52,12 +57,27 @@ Item {
   readonly property bool sessionBusy: secretLookup.running || keyringStore.running
   property string lastError: ""
 
-  // Nothing here needs a browser or a helper that Omarchy might not ship —
-  // secret-tool is the only tool, and curl is checked by the client.
-  readonly property var requiredTools: ["secret-tool", "curl"]
+  // Password IMAP needs secret-tool. XOAUTH2 also needs ortie on PATH or in
+  // ~/.local/bin. curl is checked by the client either way.
+  readonly property var requiredTools: usesXoauth2
+    ? ["secret-tool", "curl", "ortie"]
+    : ["secret-tool", "curl"]
+  property var probedMissing: []
   property var missingTools: []
   property bool toolsChecked: false
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
+
+  function applyMissingTools() {
+    var found = []
+    for (var i = 0; i < probedMissing.length; i++) {
+      var name = probedMissing[i]
+      if (name === "ortie" && !usesXoauth2) continue
+      found.push(name)
+    }
+    missingTools = found
+  }
+
+  onUsesXoauth2Changed: applyMissingTools()
 
   property var credentialWaiters: []
   property bool lookupHandled: false
@@ -81,9 +101,9 @@ Item {
     }
   }
 
-  // The one entry point the transport uses. Hands back "user:password" — the
-  // single field curl wants — rather than the two halves, so nothing
-  // downstream has to know how they are joined.
+  // The one entry point the transport uses. Hands back curl credentials —
+  // `user:password`, or `oauth2-bearer:<user>:<token>` for XOAUTH2 — so
+  // nothing downstream has to know how they are joined.
   function withCredentials(callback) {
     if (typeof callback !== "function") return
     if (!configured) {
@@ -91,11 +111,13 @@ Item {
       return
     }
     if (password !== "") {
-      callback(settings.username + ":" + password, "")
+      callback(Imap.imapCredentials(settings, password), "")
       return
     }
     if (passwordChecked) {
-      callback("", "No password saved for this mailbox. Sign in again")
+      callback("", usesXoauth2
+        ? "No OAuth token for this mailbox. Run the Microsoft OAuth setup (ortie)"
+        : "No password saved for this mailbox. Sign in again")
       return
     }
 
@@ -116,12 +138,22 @@ Item {
   }
 
   function startSecretLookup() {
+    lookupHandled = false
+    if (usesXoauth2) {
+      if (tokenAccount === "") {
+        handleSecretLookup("")
+        return
+      }
+      var bin = home !== "" ? (home + "/.local/bin/ortie") : "ortie"
+      secretLookup.command = [bin, "token", "show", "-a", tokenAccount]
+      secretLookup.running = true
+      return
+    }
     var attributes = Credentials.imapKeyringAttributes(accountId)
     if (attributes.length === 0) {
       handleSecretLookup("")
       return
     }
-    lookupHandled = false
     secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
     secretLookup.running = true
   }
@@ -130,24 +162,44 @@ Item {
     if (lookupHandled) return
     lookupHandled = true
     passwordChecked = true
+    loginBusy = false
     var value = String(line || "")
     if (value === "") {
-      finishWaiters("", "No password saved for this mailbox. Sign in again")
+      var missing = usesXoauth2
+        ? "No OAuth token for this mailbox. Run the Microsoft OAuth setup (ortie)"
+        : "No password saved for this mailbox. Sign in again"
+      finishWaiters("", missing)
       // Only a mailbox that is otherwise ready to go is worth complaining
       // about: an account still being typed into has no password by design.
-      if (configured) sessionUnavailable("Sign in to this mailbox")
+      if (configured)
+        sessionUnavailable(usesXoauth2
+          ? "Sign in with Microsoft OAuth"
+          : "Sign in to this mailbox")
       return
     }
     password = value
-    finishWaiters(settings.username + ":" + password, "")
+    finishWaiters(Imap.imapCredentials(settings, password), "")
     loginSucceeded()
   }
 
   // Called by the setup page once the user has filled the form in. The password
   // is verified by using it — a mailbox that answers a NOOP is a mailbox that
   // will answer everything else — rather than by being written down first and
-  // failing silently later.
+  // failing silently later. XOAUTH2 has no password to paste: the token helper
+  // already signed in, so this just asks it for a token.
   function signIn(secret) {
+    if (usesXoauth2) {
+      var oauthCheck = Imap.validateSettings(settings)
+      if (!oauthCheck.ok) {
+        lastError = oauthCheck.error
+        return false
+      }
+      lastError = ""
+      loginBusy = true
+      pendingPassword = ""
+      startSecretLookup()
+      return true
+    }
     var value = String(secret || "")
     if (value === "") {
       lastError = "Enter the password for this mailbox"
@@ -184,6 +236,7 @@ Item {
   }
 
   function storePassword() {
+    if (usesXoauth2) return
     var attributes = Credentials.imapKeyringAttributes(accountId)
     if (attributes.length === 0 || password === "") return
     keyringWriteSecret = password
@@ -231,7 +284,8 @@ Item {
 
   Component.onCompleted: {
     toolProbe.command = ["sh", "-c",
-      "for tool in secret-tool curl; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
+      "for tool in secret-tool curl; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done; "
+        + "command -v ortie >/dev/null 2>&1 || test -x \"$HOME/.local/bin/ortie\" || echo ortie"]
     toolProbe.running = true
   }
 
@@ -246,7 +300,8 @@ Item {
           var name = missing[i].trim()
           if (name) found.push(name)
         }
-        root.missingTools = found
+        root.probedMissing = found
+        root.applyMissingTools()
         root.toolsChecked = true
       }
     }

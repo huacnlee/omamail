@@ -548,6 +548,21 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(reloaded.imap.aliases[1].isDefault, false)
   assert.strictEqual(reloaded.imap.insecure, false)
 
+  const oauthSaved = accounts.serialize(accounts.add(accounts.emptyList(), {
+    email: "ada@contoso.com",
+    provider: "imap",
+    imap: {
+      imapHost: "outlook.office365.com", imapPort: 993,
+      smtpHost: "smtp.office365.com", smtpPort: 587,
+      username: "ada@contoso.com",
+      auth: "xoauth2",
+      tokenAccount: "sfl"
+    }
+  }))
+  const oauthReloaded = accounts.find(accounts.load(oauthSaved), "imap:ada@contoso.com")
+  assert.strictEqual(oauthReloaded.imap.auth, "xoauth2")
+  assert.strictEqual(oauthReloaded.imap.tokenAccount, "sfl")
+
   // Ports out of range fall back rather than reaching a URL.
   const clamped = accounts.makeAccount({
     email: "j@x.com", provider: "imap",

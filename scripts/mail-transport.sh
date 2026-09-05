@@ -126,6 +126,25 @@ esac
 escaped_url=$(escape "$url")
 escaped_credentials=$(escape "$credentials")
 
+# Password IMAP: curl `user = user:password`.
+# Microsoft 365 XOAUTH2: credentials are `oauth2-bearer:<user>:<token>` and
+# become curl `user` + `oauth2-bearer` (see --oauth2-bearer). A colon rather
+# than a tab: tabs are control characters and are refused before curl starts.
+print_curl_auth() {
+  case "$credentials" in
+    oauth2-bearer:*)
+      oauth_rest=${credentials#oauth2-bearer:}
+      oauth_user=${oauth_rest%%:*}
+      oauth_token=${oauth_rest#*:}
+      printf 'user = "%s"\n' "$(escape "$oauth_user")"
+      printf 'oauth2-bearer = "%s"\n' "$(escape "$oauth_token")"
+      ;;
+    *)
+      printf 'user = "%s"\n' "$escaped_credentials"
+      ;;
+  esac
+}
+
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/omamail.XXXXXX") || fail 'mail-transport.sh: no temporary directory'
 trap 'rm -rf "$work"' EXIT INT TERM HUP
@@ -142,7 +161,7 @@ if [ "$mode" = "smtp" ]; then
 
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  print_curl_auth
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -160,7 +179,7 @@ if [ "$mode" = "smtp" ]; then
 elif [ "$mode" = "imap-append" ]; then
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  print_curl_auth
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -207,7 +226,7 @@ else
     # keeps account credentials from being offered through an unrelated proxy.
     # Repeated because `next` resets this curl option with the rest.
     printf 'noproxy = "*"\n'
-    printf 'user = "%s"\n' "$escaped_credentials"
+    print_curl_auth
     # These are per-transfer options too. Keeping them in every section makes
     # every command give up eventually, rather than only the final one.
     printf 'max-time = 60\n'
