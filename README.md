@@ -179,6 +179,8 @@ could not keep. Archive appears only when the server has an archive folder to
 move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
 server is set.
 
+The sent copy is filed by Omamail rather than left to the server: a message handed to SMTP submission lands nowhere on its own. It goes to the server's own Sent folder, named by the server rather than guessed, and arrives already marked read; a server that reports no Sent folder holds no copy, and the status row says so. One thing worth knowing: a Gmail account read over IMAP has Google file its own copy of anything sent through Gmail's SMTP, so those accounts hold two.
+
 To remove it:
 
 ```bash

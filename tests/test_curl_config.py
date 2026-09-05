@@ -3,6 +3,7 @@ import base64
 import os
 from pathlib import Path
 import subprocess
+import socket
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +29,8 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
         ("mail-transport.sh", ["imap"], [b"imaps://example.com/INBOX", b"user:secret", b"NOOP", b"UID SEARCH ALL"], [0, 1, 2, 3]),
         ("mail-transport.sh", ["imap-id"], [b"imaps://example.com/", b"imaps://example.com/INBOX", b"user:secret", b"ID NIL", b"NOOP"], [0, 1, 2, 3, 4]),
         ("mail-transport.sh", ["smtp"], [b"smtps://example.com/", b"user:secret", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com", b"next@example.com"], [0, 1, 2, 4, 5]),
-        ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Drafts", b"user:secret", b"Subject: Draft\r\n\r\nBody\r\n"], [0, 1]),
+        ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Drafts", b"user:secret", b"Subject: Draft\r\n\r\nBody\r\n", b"draft"], [0, 1, 3]),
+        ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Sent", b"user:secret", b"Subject: Sent\r\n\r\nBody\r\n", b"seen"], [0, 1, 3]),
     ]
     count = 0
     for script, prefix, fields, protected in cases:
@@ -57,3 +59,32 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
                 assert "user:secret" not in result.stdout + result.stderr
                 count += 1
     print(f"curl config: {count} hostile fields rejected before curl starts")
+
+    # Exercise the real transport environment too. Refusal must happen before
+    # any connection, or an injected output option can create a local file.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(0.05)
+        output = work / "injected-output"
+        url = f"imap://127.0.0.1:{listener.getsockname()[1]}/Sent".encode()
+        hostile_flags = [encoded(flags) for flags in [
+            b"seen\noutput = " + str(output).encode() + b"\n#",
+            b"seen\r\n", b"seen\r", b"seen\n", b"seen\x00", b"seen\t", b"seen\x7f"]]
+        hostile_flags += ["%%%", "c2Vlbh=="]  # malformed and noncanonical base64
+        for flags in hostile_flags:
+            fields = [url, b"synthetic:secret", b"Subject: Test\r\n\r\nBody\r\n"]
+            result = subprocess.run(["sh", str(ROOT / "scripts/mail-transport.sh")],
+                                    input="imap-append " + " ".join(encoded(f) for f in fields) + " " + flags + "\n",
+                                    text=True, capture_output=True, timeout=5)
+            assert result.returncode != 0, (flags, "accepted")
+            assert not output.exists(), (flags, "created injected output")
+            assert "synthetic:secret" not in result.stdout + result.stderr
+            try:
+                connection, _ = listener.accept()
+            except socket.timeout:
+                pass
+            else:
+                connection.close()
+                raise AssertionError((flags, "connected before rejecting flags"))
+    print("append flags: no connection or injected file on refusal")

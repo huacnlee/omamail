@@ -13,7 +13,7 @@
 #
 #   imap <b64 url> <b64 user:password> <b64 command> [<b64 command> ...]
 #   imap-id <b64 root url> <b64 url> <b64 user:password> <b64 preamble> <b64 command> ...
-#   imap-append <b64 url> <b64 user:password> <b64 message>
+#   imap-append <b64 url> <b64 user:password> <b64 message> <b64 flags>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
 #
 # base64 rather than the values themselves, for three reasons that each bite
@@ -76,6 +76,7 @@ set -- $line
 mode=$1
 # Validate ALL config fields before curl can see even the first command. Only
 # message bodies bypass this check: they are uploaded as files, never config.
+# APPEND flags (field 5) remain protected, just like URLs and credentials.
 field_number=0
 for field in "$@"; do
   field_number=$((field_number + 1))
@@ -167,7 +168,11 @@ elif [ "$mode" = "imap-append" ]; then
     imap://*) printf 'ssl-reqd\n' ;;
   esac
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
-  printf 'upload-flags = "draft"\n'
+  # Which flags the copy arrives under is the caller's decision — `Imap.js`
+  # spells them in curl's dialect, one word per flag — because a draft and a
+  # sent copy want different ones and this script is not the place a message
+  # becomes either.
+  printf 'upload-flags = "%s"\n' "$(escape "$(decode "$2")")"
 else
   # IMAP: one section per command, so a sequence — search a folder, then fetch
   # what came back — runs on a single connection. curl reuses the connection
@@ -222,7 +227,7 @@ if [ "$mode" = "smtp" ]; then
   [ $# -ge 3 ] || fail 'mail-transport.sh: smtp needs a sender, a message and a recipient'
   decode "$2" > "$work/message"
 elif [ "$mode" = "imap-append" ]; then
-  [ $# -eq 1 ] || fail 'mail-transport.sh: imap-append needs one message'
+  [ $# -eq 2 ] || fail 'mail-transport.sh: imap-append needs one message and its flags'
   decode "$1" > "$work/message"
 fi
 

@@ -366,6 +366,31 @@ deepEqual(imap.draftSaveResult("server refused UID EXPUNGE"), {
   warning: "The updated draft was saved, but the old copy could not be removed: server refused UID EXPUNGE"
 }, "a cleanup failure must not invite another APPEND of the saved draft")
 deepEqual(imap.draftSaveResult(""), { saved: true, warning: "" })
+
+// A sent copy is filed in the server's own Sent, learned from LIST like every
+// folder name. A server that named none is answered with an empty string and
+// never a guess, because a made-up name creates a folder rather than finds one.
+deepEqual(imap.sentFolder({ "\\sent": "Sent Items", "\\drafts": "Drafts" }), "Sent Items")
+deepEqual(imap.sentFolder({ "\\drafts": "Drafts" }), "",
+  "a server that named no Sent folder must not be answered with a guess")
+deepEqual(imap.sentFolder(undefined), "")
+
+// curl spells APPEND flags as words. A draft keeps its marker; a sent copy
+// arrives seen, because its author has read it.
+assert.strictEqual(imap.appendFlagWords(true), "seen")
+assert.strictEqual(imap.appendFlagWords(false), "draft")
+
+// The message is out either way, so a copy that did not land is a warning
+// carried on a success, never a failure of the send.
+deepEqual(imap.sentCopyResult("Sent Items", true), { sent: true, warning: "" })
+deepEqual(imap.sentCopyResult("Sent Items", false), {
+  sent: true,
+  warning: "Sent, but the copy for the Sent folder could not be saved"
+})
+deepEqual(imap.sentCopyResult("", false), {
+  sent: true,
+  warning: "Sent, but no Sent folder was found to file a copy in"
+}, "a server that named no Sent folder is told to the user plainly")
 deepEqual(imap.storeCommand([4, 5], ["\\Seen"], ["\\Flagged"]), [
   "UID STORE 4,5 +FLAGS.SILENT (\\Seen)",
   "UID STORE 4,5 -FLAGS.SILENT (\\Flagged)"

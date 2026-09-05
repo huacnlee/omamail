@@ -710,6 +710,56 @@ Item {
 
   // ----------------------------------------------------------------- send
 
+  // One APPEND: the message goes up whole, so it is its own transport mode
+  // rather than a command in `run`. The flags travel with it, spelled in
+  // curl's dialect by `Imap.appendFlagWords`, because what a copy of each
+  // kind arrives under is the protocol's decision and not this one.
+  function appendMessage(folder, message, flagWords, failureLabel, callback,
+      existingHandle) {
+    var handle = existingHandle || newHandle()
+    root.inFlight++
+    auth.withCredentials(function(credentials, credentialError) {
+      if (!root) return
+      if (handle.aborted) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        return
+      }
+      if (!credentials) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (typeof callback === "function") callback(null, credentialError || "Not signed in")
+        return
+      }
+      var url = Imap.imapUrl(auth.settings, folder)
+      var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
+        Mail.encodeBase64(message), Mail.encodeBase64(flagWords)]
+      var process = transportComponent.createObject(root, {
+        command: [root.transport],
+        requestLine: "imap-append " + fields.join(" ")
+      })
+      if (!process) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (typeof callback === "function") callback(null, "Could not start the mail transport")
+        return
+      }
+      handle.process = process
+      process.finished.connect(function(status, out, err) {
+        if (!root) return
+        if (handle.process === process) handle.process = null
+        process.destroy()
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (handle.aborted || typeof callback !== "function") return
+        if (status !== 0) {
+          var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
+          callback(null, Imap.responseError(status, detail, failureLabel))
+          return
+        }
+        callback({}, "")
+      })
+      process.running = true
+    })
+    return handle
+  }
+
   function saveDraft(payload, callback) {
     var handle = newHandle()
     var raw = payload && payload.raw ? String(payload.raw) : ""
@@ -731,60 +781,28 @@ Item {
         return
       }
 
-      root.inFlight++
-      auth.withCredentials(function(credentials, credentialError) {
-        if (!root) return
-        if (handle.aborted) {
-          root.inFlight = Math.max(0, root.inFlight - 1)
+      appendMessage(folder, Mail.decodeBase64Url(raw), Imap.appendFlagWords(false),
+        "The draft could not be saved", function(saved, appendError) {
+        if (!root || handle.aborted || typeof callback !== "function") return
+        if (appendError) {
+          callback(null, appendError)
           return
         }
-        if (!credentials) {
-          root.inFlight = Math.max(0, root.inFlight - 1)
-          if (typeof callback === "function") callback(null, credentialError || "Not signed in")
+        var sourceId = payload ? String(payload.draftId || "") : ""
+        if (sourceId === "") {
+          callback({}, "")
           return
         }
-        var url = Imap.imapUrl(auth.settings, folder)
-        var message = Mail.decodeBase64Url(raw)
-        var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
-          Mail.encodeBase64(message)]
-        var process = transportComponent.createObject(root, {
-          command: [root.transport],
-          requestLine: "imap-append " + fields.join(" ")
-        })
-        if (!process) {
-          root.inFlight = Math.max(0, root.inFlight - 1)
-          if (typeof callback === "function") callback(null, "Could not start the mail transport")
+        var replacement = Imap.draftReplacementPlan(sourceId, folder)
+        if (replacement.commands.length === 0) {
+          callback({ saved: true, warning: replacement.warning }, "")
           return
         }
-        handle.process = process
-        process.finished.connect(function(status, out, err) {
-          if (!root) return
-          if (handle.process === process) handle.process = null
-          process.destroy()
-          root.inFlight = Math.max(0, root.inFlight - 1)
+        root.run(folder, replacement.commands, function(text, replaceError) {
           if (handle.aborted || typeof callback !== "function") return
-          if (status !== 0) {
-            var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
-            callback(null, Imap.responseError(status, detail, "The draft could not be saved"))
-            return
-          }
-          var sourceId = payload ? String(payload.draftId || "") : ""
-          if (sourceId === "") {
-            callback({}, "")
-            return
-          }
-          var replacement = Imap.draftReplacementPlan(sourceId, folder)
-          if (replacement.commands.length === 0) {
-            callback({ saved: true, warning: replacement.warning }, "")
-            return
-          }
-          root.run(folder, replacement.commands, function(text, replaceError) {
-            if (handle.aborted || typeof callback !== "function") return
-            callback(Imap.draftSaveResult(replaceError), "")
-          }, handle)
-        })
-        process.running = true
-      })
+          callback(Imap.draftSaveResult(replaceError), "")
+        }, handle)
+      }, handle)
     })
     return handle
   }
@@ -864,11 +882,40 @@ Item {
           callback(null, Imap.responseError(status, detail, "The message could not be sent"))
           return
         }
-        callback({}, "")
+        // The copy the mailbox keeps is filed by the client, not the server:
+        // a message handed to SMTP submission lands nowhere on its own. The
+        // send has answered by the time the copy is asked for, so whatever
+        // becomes of the copy, a sent message is what comes back from here —
+        // the filing is a footnote on the success, never a failure of it.
+        fileSentCopy(message, callback, handle)
       })
       process.running = true
     })
     return handle
+  }
+
+  // Where the sent copy goes is what the server said in LIST, resolved the
+  // way every folder name is. A server that named no Sent folder holds no
+  // copy: making a folder up would create one rather than find one, and the
+  // callback's warning is where the caller says so.
+  function fileSentCopy(message, callback, handle) {
+    ensureFolders(function(folderError) {
+      if (!root) return
+      if (handle.aborted) return
+      var folder = folderError ? "" : Imap.sentFolder(root.special)
+      if (folder === "") {
+        callback(Imap.sentCopyResult("", false), "")
+        return
+      }
+      appendMessage(folder, message, Imap.appendFlagWords(true),
+        "The message was sent, but the copy for the Sent folder could not be saved",
+        function(filed, appendError) {
+        if (!root) return
+        if (appendError)
+          console.warn("omamail: the sent copy could not be filed:", appendError)
+        callback(Imap.sentCopyResult(folder, !appendError), "")
+      }, handle)
+    })
   }
 
   // Verifies a password by using it: a mailbox that answers a folder listing is
