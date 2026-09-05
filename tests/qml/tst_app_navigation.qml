@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import qs.Commons
 import "../.." as Omamail
 
 // Where the window is, is a history. Every page is an entry on it, every Back
@@ -244,6 +245,9 @@ Item {
     function kinds() { return app.navKinds.join(",") }
 
     function init() {
+      // A test that failed part way through its scales must not leave the next
+      // one measuring at somebody else's.
+      Style.spacingScale = 1
       mailService.log = []
       mailService.lastSavedDraft = null
       mailService.refuseMove = false
@@ -375,6 +379,31 @@ Item {
       tryCompare(switcher, "opened", true)
       compare(trigger.selected, true, "the trigger stays selected while its popup is open")
       switcher.close()
+    }
+
+    // The box around the address pads it by one number and measures itself by
+    // another, and `Style.space` rounds each on its own. At the shell's
+    // `base-size 14` the two disagree by a pixel, and a Text a pixel short of
+    // its own content is elided however wide the window is — which is what put
+    // "just n..." on the line and made it look like a fixed width.
+    function test_the_status_address_is_not_a_pixel_short_of_its_box() {
+      var label = named(app, "status-account-label")
+      verify(label)
+      mailService.syncedLabel = "Synced just now"
+
+      // Every scale a rounded 4 and a rounded 8 can fall out of step on, and a
+      // couple where they agree, because the assertion is the same either way.
+      var scales = [1, 0.9, 7 / 6, 1.25, 1.375, 1.4, 1.5, 1.9]
+      for (var i = 0; i < scales.length; i++) {
+        Style.spacingScale = scales[i]
+        waitForRendering(app)
+        verify(!label.truncated,
+          "the address fits its own box at spacing scale " + scales[i])
+      }
+
+      Style.spacingScale = 1
+      mailService.syncedLabel = ""
+      waitForRendering(app)
     }
 
     function test_header_creation_actions_keep_their_labels() {

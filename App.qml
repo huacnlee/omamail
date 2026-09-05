@@ -1848,7 +1848,16 @@ Item {
             id: accountControl
             objectName: "status-account-button"
             property bool selected: accountSwitcher.opened
-            width: Math.min(parent.width, accountText.implicitWidth + Style.space(8))
+            // One inset, counted twice, rather than asked for again as its own
+            // double. `Style.space` rounds, and a theme whose spacing follows
+            // the font does not round the two the same way: at `base-size 14`
+            // the scale is 7/6, which makes `space(4)` 5 a side while
+            // `space(8)` is 9 — a box a pixel narrower than the text it holds.
+            // The text was then elided at every window width, which is what put
+            // "just n..." on the line and why it looked like a fixed width: the
+            // cut had nothing to do with how much room there was.
+            readonly property real inset: Style.space(4)
+            width: Math.min(parent.width, accountText.implicitWidth + inset * 2)
             height: parent.height
 
             Rectangle {
@@ -1866,10 +1875,11 @@ Item {
 
             Text {
               id: accountText
+              objectName: "status-account-label"
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(4)
+              anchors.leftMargin: accountControl.inset
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(4)
+              anchors.rightMargin: accountControl.inset
               anchors.verticalCenter: parent.verticalCenter
               // The full address lives here at every window width; the sync
               // age follows it, and the line opens the account controls.
