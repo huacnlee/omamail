@@ -46,7 +46,9 @@
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
       "openOnClick": "Window",
-      "showBarIcon": true
+      "showBarIcon": true,
+      "previewOnCursor": false,
+      "markReadDelaySec": 2
     },
     "schema": [
       {
@@ -74,6 +76,23 @@
         "max": 100,
         "step": 5,
         "defaultValue": 25
+      },
+      {
+        "key": "previewOnCursor",
+        "type": "boolean",
+        "label": "Preview as the cursor moves",
+        "defaultValue": false,
+        "description": "Show a message as soon as the cursor reaches it, instead of waiting for Enter. Off by default because stepping through a list would otherwise mark every message it passed read; with this on, a previewed message is marked read only once the cursor has stayed on it. Not applied in a narrow window, where the reader takes the list's place."
+      },
+      {
+        "key": "markReadDelaySec",
+        "type": "integer",
+        "label": "Mark a previewed message read after (seconds)",
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 2,
+        "description": "How long the cursor has to stay on a message before it counts as read. 0 marks it read as soon as it is previewed. Only applies while Preview as the cursor moves is on; Enter always marks it read."
       },
       {
         "key": "heavyMessageRendering",

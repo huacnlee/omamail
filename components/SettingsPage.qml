@@ -279,6 +279,120 @@ Column {
     }
   }
 
+  // Showing a message as the cursor reaches it, and the dwell that keeps that
+  // from reading a mailbox by holding an arrow key down.
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(previewText.implicitHeight, previewSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: previewText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: previewSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Preview as the cursor moves"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Show a message as soon as j, k or an arrow reaches it, instead of "
+          + "waiting for Enter. A previewed message is marked read only once the "
+          + "cursor has stayed on it, so stepping through a list does not read it. "
+          + "Not applied in a narrow window, where the reader takes the list's place."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: previewSwitch
+      objectName: "previewOnCursorSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.previewOnCursor
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setPreviewOnCursor(!root.service.previewOnCursor)
+    }
+  }
+
+  Rectangle {
+    width: parent.width
+    visible: !!root.service && root.service.previewOnCursor
+    implicitHeight: Math.max(dwellText.implicitHeight, dwellSeconds.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: dwellText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: dwellSeconds.left
+      anchors.rightMargin: Style.space(16)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Mark a previewed message read after"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "How long the cursor has to stay before it counts as read. "
+          + "Set 0 to mark it read as soon as it is previewed. Enter always does."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    NumberField {
+      id: dwellSeconds
+      objectName: "markReadDelayField"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      label: "Seconds"
+      from: 0
+      to: 30
+      stepSize: 1
+      value: root.service ? root.service.markReadDelaySec : 2
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      fontSize: Style.font.bodySmall
+      onModified: function(next) {
+        if (root.service) root.service.setMarkReadDelaySec(next)
+      }
+    }
+  }
+
   Rectangle {
     width: parent.width
     implicitHeight: Math.max(heavyText.implicitHeight, heavySwitch.implicitHeight)

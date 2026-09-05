@@ -64,7 +64,9 @@ Item {
     oauthPort: 9481,
     undoSendSeconds: 10,
     unifiedCalendarView: false,
-    showBarIcon: true
+    showBarIcon: true,
+    previewOnCursor: false,
+    markReadDelaySec: 2
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -90,6 +92,26 @@ Item {
   // typo rather than an answer given in the interface, and a typo should not
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
+
+  // Whether the cursor reaching a message is enough to show it.
+  readonly property bool previewOnCursor: !!settings
+    && settings.previewOnCursor === true
+
+  // How long the cursor has to stay before a previewed message counts as
+  // read. Clamped rather than trusted: this is a hand-editable file, and a
+  // negative interval on a Timer never fires at all.
+  //
+  // A number or nothing, because `Number` reads `null`, `false` and `""` as
+  // zero and zero is a real answer here — "mark it read the moment it is
+  // previewed". A settings file that lost the key, or holds a word where a
+  // count should be, must not be read as somebody having asked for that.
+  readonly property int markReadDelaySec: {
+    var raw = settings ? settings.markReadDelaySec : 2
+    if (typeof raw !== "number") return 2
+    var value = Math.floor(raw)
+    if (!isFinite(value) || value < 0) return 2
+    return Math.min(30, value)
+  }
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -153,6 +175,18 @@ Item {
 
   function setShowBarIcon(value) {
     persistSetting("showBarIcon", value === true)
+  }
+
+  function setPreviewOnCursor(value) {
+    persistSetting("previewOnCursor", value === true)
+  }
+
+  // The same rule on the way in: what cannot be read as a count is written as
+  // the default rather than as the shortest dwell there is.
+  function setMarkReadDelaySec(value) {
+    var next = Math.floor(Number(value))
+    if (!isFinite(next) || next < 0) next = 2
+    persistSetting("markReadDelaySec", Math.min(30, next))
   }
 
   // ---------------------------------------------------------- the accounts
@@ -783,6 +817,15 @@ Item {
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
   readonly property string rawLabelId: current ? current.rawLabelId : ""
+
+  // Whether the message on screen got there because the cursor passed over it
+  // rather than because somebody opened it.
+  //
+  // Above `MailAccount` because two decisions in the window turn on it and
+  // neither can be made from `selectedId` alone: a previewed message satisfies
+  // "is this the selected one" while not being open, which made an archive
+  // open its neighbour and a reply skip the open it needs.
+  readonly property bool selectionIsPreview: !!current && current.selectionIsPreview
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
@@ -843,7 +886,13 @@ Item {
 
   function refresh() { if (current) current.refresh() }
   function loadMore() { if (current) current.loadMore() }
-  function select(id) { if (current) current.select(id) }
+  function select(id, previewOnly) {
+    if (current) current.select(id, previewOnly)
+  }
+
+  function markPreviewRead(id) {
+    return current ? current.markPreviewRead(id) : false
+  }
   function clearSelection() { if (current) current.clearSelection() }
   // The notice's own button, which is the switch: what it turns on is every
   // message, and it says so.

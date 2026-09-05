@@ -933,12 +933,18 @@ Item {
 
   // --------------------------------------------------------------- detail
 
-  function select(id) {
+  // Whether the message on screen got there because the cursor passed over it
+  // rather than because somebody opened it. A preview is drawn the same and
+  // marked read differently, and the detail callback is where that is decided.
+  property bool selectionIsPreview: false
+
+  function select(id, previewOnly) {
     var messageId = String(id || "")
     if (messageId === "") {
       clearSelection()
       return
     }
+    selectionIsPreview = previewOnly === true
     selectedId = messageId
     var serial = ++detailSerial
     abortRequest(detailHandle)
@@ -953,7 +959,13 @@ Item {
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
     sourceHtml = ""
-    remoteImagesAllowed = alwaysShowImages
+    // The standing "always show images" answer is an answer about a message
+    // somebody chose to read. Fetching one still tells its host that this
+    // address opened this mail at this moment — which is what the notice in
+    // the reader says out loud — and a cursor passing over a row has opened
+    // nothing. So a preview keeps the pictures blocked however that answer
+    // stands, and opening the message, or asking for them here, loads them.
+    remoteImagesAllowed = alwaysShowImages && !selectionIsPreview
     remoteImagesLoading = false
     remoteImageData = ({})
     selectedRemoteImageSources = []
@@ -1078,8 +1090,27 @@ Item {
       root.previewMessages = Model.replaceById(root.previewMessages, summary)
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
-      if (summary.unread) root.act(messageId, "markRead", true)
+      //
+      // A preview is not opening. Stepping down a list would otherwise mark
+      // every message it passed read without any of them having been looked
+      // at, which is the reason moving stopped opening in the first place —
+      // so the panel marks a previewed message read once the cursor has
+      // stayed on it, and this leaves it alone.
+      if (summary.unread && !root.selectionIsPreview)
+        root.act(messageId, "markRead", true)
     })
+  }
+
+  // What a dwell on a previewed message comes to. Asked of the message rather
+  // than of the selection, because the cursor may have moved on by the time
+  // the panel's timer fires and the one that was read is the one to mark.
+  function markPreviewRead(id) {
+    var messageId = String(id || "")
+    if (messageId === "") return false
+    var index = Model.indexById(messages, messageId)
+    if (index < 0 || !messages[index].unread) return false
+    act(messageId, "markRead", true)
+    return true
   }
 
   // The invitation the message pointed at. Nothing happens for the messages

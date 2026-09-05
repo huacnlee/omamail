@@ -128,6 +128,14 @@ grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/
 grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
   || fail "one-click unsubscribe must use the public-IP-checked Python transport"
 # Redirect and DNS policy require behavioral tests, not a matching config line.
+
+# The standing "always show images" answer is an answer about a message
+# somebody chose to read. A preview is the cursor passing over a row, and
+# fetching a picture for one would tell the sender's host that this address
+# opened this mail at this moment — the very thing the reader's own notice
+# says out loud, and the reason the read mark waits for a dwell.
+grep -q 'remoteImagesAllowed = alwaysShowImages && !selectionIsPreview' account/MailAccount.qml \
+  || fail "a message the cursor merely previewed must not fetch the sender's images"
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
 grep -q 'bodyMode: root.bodyMode' Service.qml \
@@ -1129,3 +1137,21 @@ if "FileDialog" in block or "execDetached" in block:
 PY
 
 printf 'test_source.sh ok\n'
+
+# A preview is drawn the same as an open and must be marked read differently.
+# The gate is one condition in the detail callback and it has no unit test that
+# can reach it — the panel-level test asserts only that a flag was passed.
+python3 - <<'PREVIEWREAD'
+import re
+from pathlib import Path
+
+source = Path("account/MailAccount.qml").read_text()
+
+# The read mark on arrival must ask whether this was a preview.
+mark = re.search(r"if \(summary\.unread[^)]*\)\s*\n?\s*root\.act\([^)]*markRead", source)
+if not mark:
+    raise SystemExit("test_source.sh: MailAccount must mark an opened message read")
+if "selectionIsPreview" not in mark.group(0):
+    raise SystemExit("test_source.sh: the read mark on arrival must skip a preview "
+                     "(`!root.selectionIsPreview`), or stepping a list reads it")
+PREVIEWREAD
