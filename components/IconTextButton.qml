@@ -72,6 +72,9 @@ Rectangle {
     Text {
       anchors.verticalCenter: parent.verticalCenter
       visible: root.text !== ""
+      // A label is words, never markup — and one of them carries a server's
+      // host name, which a stranger chose.
+      textFormat: Text.PlainText
       text: root.text
       color: root.ghost && (root.hot || root.selected) ? root.hoverColor : root.foreground
       font.family: root.fontFamily
