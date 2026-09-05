@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
+import "../agent/Agent.js" as Agent
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
@@ -20,10 +21,20 @@ Column {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  required property color urgentColor
   required property string panelFontFamily
   property string cursorId: ""
+  // The rows ticked for a bulk action, by id. Held above the list, like the
+  // cursor, because a reload rebuilds every row.
+  property var checkedIds: []
 
   signal messageActivated(string id)
+  signal checkToggled(string id)
+  signal checkRangeRequested(string id)
+  signal agentRequested(string id, real sceneX, real sceneY)
+  // A row's own star, archive and trash buttons. Routed up rather than
+  // straight to the service so a ticked row's button means the selection.
+  signal rowActionRequested(string id, string action)
   signal menuRequested(string id, real sceneX, real sceneY)
 
   width: parent ? parent.width : 0
@@ -52,15 +63,23 @@ Column {
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
+      urgentColor: root.urgentColor
       panelFontFamily: root.panelFontFamily
+      agentState: Agent.glyphState(root.service.agentJobs[modelData.id])
+      agentProgress: Agent.progressText(root.service.agentJobs[modelData.id])
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
+      checked: root.checkedIds.indexOf(modelData.id) >= 0
+      selectionActive: root.checkedIds.length > 0
       canArchive: root.service.canArchive
       contentDirection: root.service.contentDirection
       onActivated: root.messageActivated(modelData.id)
-      onStarToggled: root.service.toggleStar(modelData.id)
-      onArchiveRequested: root.service.act(modelData.id, "archive")
-      onTrashRequested: root.service.act(modelData.id, "trash")
+      onCheckToggled: root.checkToggled(modelData.id)
+      onCheckRangeRequested: root.checkRangeRequested(modelData.id)
+      onAgentRequested: function(sceneX, sceneY) { root.agentRequested(modelData.id, sceneX, sceneY) }
+      onStarToggled: root.rowActionRequested(modelData.id, "star")
+      onArchiveRequested: root.rowActionRequested(modelData.id, "archive")
+      onTrashRequested: root.rowActionRequested(modelData.id, "trash")
       onMenuRequested: function(sceneX, sceneY) {
         root.menuRequested(modelData.id, sceneX, sceneY)
       }

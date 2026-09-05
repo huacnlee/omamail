@@ -511,6 +511,17 @@ Item {
     return act(verb, ids, callback)
   }
 
+  // HEY's labels are HEY's own. The capability is off, so no button reaches
+  // these; they exist so every client answers the same calls.
+  function createLabel(name, callback) { return refuseLabelChange(callback) }
+  function renameLabel(id, name, callback) { return refuseLabelChange(callback) }
+  function deleteLabel(id, callback) { return refuseLabelChange(callback) }
+  function refuseLabelChange(callback) {
+    if (typeof callback === "function")
+      Qt.callLater(function() { if (root) callback(null, "HEY labels are managed on HEY") })
+    return newHandle()
+  }
+
   function trashMessage(id, callback) {
     return act("trash", [id], callback)
   }

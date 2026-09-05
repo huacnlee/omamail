@@ -472,6 +472,49 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(accounts.count(list), 2)
   assert.strictEqual(accounts.find(list, "imap:jane@gmail.com").label, "Work")
 
+  // Saving Proton's address onto the iCloud row, when Proton already exists,
+  // used to rebuild the list with `add` and silently drop iCloud: the new id
+  // collided and replaced the Proton row, and the original slot was gone.
+  // `replaceAt` must refuse that collision so a re-auth cannot delete a
+  // mailbox that was not being edited.
+  let icloud = {
+    email: "ada@icloud.com", provider: "imap", label: "iCloud",
+    imap: { imapHost: "imap.mail.me.com", username: "ada" }
+  }
+  let proton = {
+    email: "ada@proton.me", provider: "imap", label: "Proton",
+    imap: { imapHost: "127.0.0.1", imapPort: 1143, smtpPort: 1025, insecure: true }
+  }
+  let mailboxes = accounts.emptyList()
+  mailboxes = accounts.add(mailboxes, icloud)
+  mailboxes = accounts.add(mailboxes, proton)
+  mailboxes = accounts.add(mailboxes, { email: "ada@gmail.com", provider: "imap", label: "Gmail" })
+  assert.strictEqual(accounts.collidingId(mailboxes, 0, proton), "imap:ada@proton.me")
+  const refused = accounts.replaceAt(mailboxes, 0, proton)
+  assert.strictEqual(accounts.count(refused), 3, "a colliding save must not drop a row")
+  assert.strictEqual(accounts.find(refused, "imap:ada@icloud.com").label, "iCloud")
+  assert.strictEqual(accounts.find(refused, "imap:ada@proton.me").label, "Proton")
+
+  // Filling a new draft with an address that is not already in the list is
+  // not a collision — that is Add account.
+  let adding = accounts.emptyList()
+  adding = accounts.add(adding, icloud)
+  adding = accounts.add(adding, { email: "ada@gmail.com", provider: "imap", label: "Gmail" })
+  adding = accounts.add(adding, { email: "", provider: "imap", pending: true })
+  assert.strictEqual(accounts.collidingId(adding, 2, proton), "")
+  const filled = accounts.replaceAt(adding, 2, proton)
+  assert.strictEqual(accounts.count(filled), 3)
+  assert.strictEqual(accounts.find(filled, "imap:ada@icloud.com").label, "iCloud")
+  assert.strictEqual(filled.accounts[2].id, "imap:ada@proton.me")
+
+  // A write that omits an id that was already persisted is the disk form of
+  // the same bug. Removal goes through `remove`, so save must refuse this.
+  const persisted = accounts.namedIds(mailboxes)
+  const withoutIcloud = accounts.savedOnly(accounts.remove(mailboxes, "imap:ada@icloud.com"))
+  assert.ok(accounts.dropsAnyId(persisted, withoutIcloud),
+    "a payload missing a persisted id is a drop")
+  assert.strictEqual(accounts.dropsAnyId(persisted, accounts.savedOnly(mailboxes)), false)
+
   // Removing one leaves the other.
   list = accounts.remove(list, "imap:jane@gmail.com")
   assert.strictEqual(accounts.count(list), 1)
@@ -504,6 +547,21 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(reloaded.imap.aliases[0].isDefault, true)
   assert.strictEqual(reloaded.imap.aliases[1].isDefault, false)
   assert.strictEqual(reloaded.imap.insecure, false)
+
+  const oauthSaved = accounts.serialize(accounts.add(accounts.emptyList(), {
+    email: "ada@contoso.com",
+    provider: "imap",
+    imap: {
+      imapHost: "outlook.office365.com", imapPort: 993,
+      smtpHost: "smtp.office365.com", smtpPort: 587,
+      username: "ada@contoso.com",
+      auth: "xoauth2",
+      tokenAccount: "sfl"
+    }
+  }))
+  const oauthReloaded = accounts.find(accounts.load(oauthSaved), "imap:ada@contoso.com")
+  assert.strictEqual(oauthReloaded.imap.auth, "xoauth2")
+  assert.strictEqual(oauthReloaded.imap.tokenAccount, "sfl")
 
   // Ports out of range fall back rather than reaching a URL.
   const clamped = accounts.makeAccount({
@@ -614,3 +672,20 @@ assert.strictEqual(withBoth.accounts[0].signature, "Best, me")
 assert.strictEqual(
   accounts.setLabel(withBoth, "me@gmail.com", "Personal").accounts[0].signature,
   "Best, me", "naming a mailbox does not forget its signature")
+
+
+// Monitored labels ride with the mailbox and survive its other edits.
+{
+  const watched = accounts.toggleMonitored(named, "me@gmail.com", "Label_7")
+  deepEqual(watched.accounts[0].monitored, ["Label_7"])
+  deepEqual(accounts.toggleMonitored(watched, "me@gmail.com", "Label_7").accounts[0].monitored, [],
+    "toggling again stops watching")
+  const two = accounts.toggleMonitored(watched, "me@gmail.com", "Label_9")
+  deepEqual(two.accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.setLabel(two, "me@gmail.com", "Work").accounts[0].monitored, ["Label_7", "Label_9"],
+    "naming the mailbox keeps what it watches")
+  deepEqual(accounts.toggleMonitored(two, "nobody@example.org", "x").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.toggleMonitored(two, "me@gmail.com", "  ").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.load(accounts.serialize(two)).accounts[0].monitored, ["Label_7", "Label_9"],
+    "and it is written to disk and read back")
+}

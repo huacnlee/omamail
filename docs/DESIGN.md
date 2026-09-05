@@ -51,7 +51,7 @@ QML components should express those contracts in QML terms: properties, signals,
 
 The window has a fixed hierarchy:
 
-1. Header: identity, global search, refresh, and compose.
+1. Header: identity, global search, refresh, and compose. Identity is the scope line — the account, then the mailbox or label open in it — and each half is the control that changes it, so the window says what it is looking at whether or not the sidebar is expanded.
 2. Body: navigation, collection, and content.
 3. Status bar: sidebar control, synchronization/account state, notice, and contextual key hints.
 4. Overlay layer: menus, account switcher, shortcut sheet, and other transient surfaces.

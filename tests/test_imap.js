@@ -125,6 +125,63 @@ assert.strictEqual(imap.validateSettings({ username: "jane", imapHost: "" }).ok,
 assert.ok(/valid IMAP server/i.test(
   imap.validateSettings({ username: "jane", imapHost: "a b c" }).error))
 
+// ------------------------------------------------------------- XOAUTH2
+//
+// Microsoft 365 that has disabled basic auth. The token never lives in
+// accounts.json; only the helper account name does. Saving the setup form
+// must not drop those fields, or a round-trip through Edit would fall back
+// to a password the tenant will refuse.
+
+assert.strictEqual(imap.usesXoauth2({ auth: "xoauth2" }), true)
+assert.strictEqual(imap.usesXoauth2({ auth: "password" }), false)
+assert.strictEqual(imap.usesXoauth2({}), false)
+assert.strictEqual(imap.tokenAccountOf({ tokenAccount: "sfl" }), "sfl")
+assert.strictEqual(imap.tokenAccountOf({}), "")
+
+const oauthSettings = imap.normalizeSettings({
+  imapHost: "outlook.office365.com",
+  smtpHost: "smtp.office365.com",
+  smtpPort: 587,
+  username: "ada@contoso.com",
+  auth: "xoauth2",
+  tokenAccount: "sfl"
+})
+assert.strictEqual(oauthSettings.auth, "xoauth2")
+assert.strictEqual(oauthSettings.tokenAccount, "sfl")
+assert.strictEqual(
+  imap.imapCredentials(oauthSettings, "the-token"),
+  "oauth2-bearer:ada@contoso.com:the-token")
+assert.strictEqual(
+  imap.imapCredentials(oauthSettings, "aaa.bbb.ccc"),
+  "oauth2-bearer:ada@contoso.com:aaa.bbb.ccc")
+assert.strictEqual(
+  imap.imapCredentials({ username: "ada@example.org" }, "hunter2"),
+  "ada@example.org:hunter2")
+
+const kept = imap.setupSettings({
+  address: "ada@contoso.com",
+  imapHost: "outlook.office365.com",
+  smtpHost: "smtp.office365.com",
+  smtpPort: 587,
+  username: "ada@contoso.com",
+  auth: "xoauth2",
+  tokenAccount: "sfl"
+})
+assert.strictEqual(kept.auth, "xoauth2")
+assert.strictEqual(kept.tokenAccount, "sfl")
+assert.strictEqual(imap.validateSettings(kept).ok, true)
+assert.strictEqual(
+  imap.validateSettings({
+    username: "ada@contoso.com", imapHost: "outlook.office365.com", auth: "xoauth2"
+  }).ok, false,
+  "XOAUTH2 without a token account name is not connectable")
+
+assert.strictEqual(
+  imap.isRejectedCredentials(67, "", "Access denied"), true)
+assert.strictEqual(
+  imap.isRejectedCredentials(67, "", "Select failed"), false,
+  "a refused SELECT is not a bad password")
+
 // ------------------------------------------------------------------ aliases
 //
 // The alias format itself is `account/Aliases.js` and is tested there. What
@@ -866,5 +923,19 @@ assert.strictEqual(
 assert.strictEqual(imap.decodeResponse("", mail.base64ToBytes, mail.bytesToLatin1), "")
 assert.strictEqual(imap.decodeResponse("abc", null, null), "",
   "no decoder is an empty response, not a crash")
+
+// A folder name the user typed goes out in modified UTF-7 and comes back the
+// same: the round trip through `decodeMailbox` is the whole assertion.
+assert.strictEqual(imap.encodeMailbox("Receipts"), "Receipts")
+assert.strictEqual(imap.encodeMailbox("Tom & Jerry"), "Tom &- Jerry")
+assert.strictEqual(imap.encodeMailbox("日本語"), "&ZeVnLIqe-")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("日本語")), "日本語")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("Tom & Jerry/2026")), "Tom & Jerry/2026")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("Café ☕")), "Café ☕")
+assert.strictEqual(imap.encodeMailbox(""), "")
+assert.strictEqual(imap.createCommand("Archive/2026"), "CREATE \"Archive/2026\"")
+assert.strictEqual(imap.renameCommand("Old", "Archive/New"), "RENAME \"Old\" \"Archive/New\"")
+assert.strictEqual(imap.deleteCommand("A \"quoted\" one"), "DELETE \"A \\\"quoted\\\" one\"")
+assert.strictEqual(imap.createCommand("日本語"), "CREATE \"&ZeVnLIqe-\"")
 
 console.log("Imap.js ok")

@@ -49,7 +49,7 @@ if "pendingSendHost" not in text:
         "test_service_source.sh: undo must remain reachable after account switching"
     )
 
-save_start = text.index("function saveAccounts()")
+save_start = text.index("function saveAccounts(")
 save_end = text.index("function applyAccounts(raw)", save_start)
 save_block = text[save_start:save_end]
 # The guard and the payload must be the same value. Writing the stripped list
@@ -72,6 +72,10 @@ if "Accounts.hasSavedAccounts(%s)" % name not in save_block:
 if "Accounts.dropsNamedMailbox(accountList, %s)" % name not in save_block:
     raise SystemExit(
         "test_service_source.sh: a write that drops a named mailbox must be refused"
+    )
+if "Accounts.dropsAnyId(lastPersistedIds, %s)" % name not in save_block:
+    raise SystemExit(
+        "test_service_source.sh: a write must also be refused if it drops an id last persisted to disk"
     )
 if "Accounts.serialize(%s)" % name not in save_block:
     raise SystemExit(

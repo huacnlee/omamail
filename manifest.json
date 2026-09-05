@@ -46,7 +46,8 @@
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
       "openOnClick": "Window",
-      "showBarIcon": true
+      "showBarIcon": true,
+      "agentCommand": ""
     },
     "schema": [
       {
@@ -104,6 +105,13 @@
         "label": "Default search",
         "defaultValue": "in:inbox",
         "description": "Applies to the inbox only, and to Gmail and IMAP accounts. Gmail takes any Gmail search operator, for example `in:inbox -category:promotions`; IMAP takes IMAP SEARCH criteria. HEY accounts always open their Imbox."
+      },
+      {
+        "key": "agentCommand",
+        "type": "string",
+        "label": "Default agent",
+        "defaultValue": "",
+        "description": "A command that reads a prompt on stdin and answers on stdout, for example `claude -p` or `codex exec`. With one set, every message gains an agent button that hands the message and your question to it in the background; mail is read and written through himalaya. Leave empty for no agent."
       },
       {
         "key": "notifyNewMail",

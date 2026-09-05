@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar"]
+var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar", "agent"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -48,7 +48,7 @@ var BINDINGS = [
     hint: { list: "archive", reader: "archive" } },
   { id: "trash", keys: ["d"], contexts: MAIL,
     group: "Acting", label: "Move to trash",
-    hint: { reader: "trash" } },
+    hint: { list: "trash", reader: "trash" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
@@ -64,6 +64,14 @@ var BINDINGS = [
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
     group: "Acting", label: "Mark unread" },
+  // Gmail's `x`: tick the row under the cursor, and the acting keys above
+  // then mean every ticked row rather than the one the cursor is on. List
+  // only — in the reader there is one message and it is the one open.
+  { id: "toggleCheck", keys: ["x"], contexts: ["list"],
+    group: "Acting", label: "Select or deselect the message",
+    hint: { list: "select" } },
+  { id: "checkAll", keys: ["Ctrl+A"], contexts: ["list"],
+    group: "Acting", label: "Select every message loaded, or none" },
 
   // Answering works from the list too, the way the row's own menu does: the
   // message is opened first and the draft waits for it. Binding these to the
@@ -136,13 +144,25 @@ var BINDINGS = [
   // then walks: `j`/`k` to move, `Enter` or `o` to take one.
   { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
+  // The rail as a list, for a window whose rail is collapsed or folded into
+  // tabs. Same rows, same digits: a bare digit inside it is the Ctrl digit.
+  { id: "switchMailbox", keys: ["Alt+M"], contexts: MAIL,
+    group: "Going", label: "Go to a mailbox" },
+  // The message agent, on the cursor row. A popup, so the same shape as the
+  // switchers: opened through the table, then answering its own keys.
+  { id: "askAgent", keys: ["Alt+G"], contexts: MAIL,
+    group: "Acting", label: "Ask the agent about the message" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },
-  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar"],
+  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar", "agent"],
     group: "Going", label: "Go to mail" },
-  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar"],
+  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar", "agent"],
     group: "Going", label: "Go to calendar" },
+  // The agent pane is a text field first, so its context binds no bare key;
+  // this and the two above are how the keyboard gets in and out of it.
+  { id: "agentView", keys: ["Ctrl+Shift+G"], contexts: ["list", "reader", "calendar", "agent"],
+    group: "Going", label: "Go to the agent pane" },
   { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Show or hide the sidebar" },
 
@@ -179,6 +199,7 @@ function contextFor(state) {
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
   if (value.calendarVisible) return "calendar"
+  if (value.agentVisible) return "agent"
   if (value.currentView === "reader") return "reader"
   return "list"
 }

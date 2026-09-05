@@ -99,6 +99,16 @@ config=$(config_for "$request")
 check "the URL reaches curl" "$config" 'url = "imaps://imap.example.org:993/INBOX"'
 check "the credentials reach curl" "$config" 'user = "jane@example.org:hunter2"'
 check "the command reaches curl" "$config" 'request = "UID SEARCH UNSEEN"'
+
+# Microsoft 365 XOAUTH2: the decoded credentials are oauth2-bearer:user:token,
+# and curl wants them as `user` plus `oauth2-bearer`, not as `user:password`.
+oauth_creds='oauth2-bearer:ada@contoso.com:eyJtoken'
+oauth_request="imap $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 "$oauth_creds") $(b64 'NOOP')"
+oauth_config=$(config_for "$oauth_request")
+check "XOAUTH2 sets curl user to the mailbox address" "$oauth_config" 'user = "ada@contoso.com"'
+check "XOAUTH2 sets curl oauth2-bearer to the token" "$oauth_config" 'oauth2-bearer = "eyJtoken"'
+check_absent "XOAUTH2 does not send a user:password pair" "$oauth_config" 'user = "oauth2-bearer'
+check_absent "XOAUTH2 does not put the token in the user field" "$oauth_config" 'user = "ada@contoso.com:eyJtoken"'
 check "mail transport bypasses desktop HTTP/SOCKS proxies" "$config" 'noproxy = "*"'
 
 # libcurl puts a custom multi-UID FETCH in its protocol-header callback rather

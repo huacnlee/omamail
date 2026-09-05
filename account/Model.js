@@ -362,12 +362,34 @@ function clampZoom(value) {
     Math.round(zoom * ZOOM_STEPS_PER_UNIT) / ZOOM_STEPS_PER_UNIT))
 }
 
+// A dragged pane width as stored: a whole number of pixels, or 0 for "never
+// dragged". Anything else — a string, a negative, NaN from an old file — is 0,
+// so a bad value costs a default rather than a pane of no width.
+function paneWidth(value) {
+  var n = Math.floor(Number(value))
+  if (!isFinite(n) || n <= 0) return 0
+  return Math.min(n, 4000)
+}
+
+function stringList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = String(list[i] === undefined || list[i] === null ? "" : list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
 function windowPrefs(raw) {
   var parsed = null
   try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
   if (!parsed || typeof parsed !== "object") {
     return {
       sidebarCollapsed: false,
+      sidebarWidth: 0,
+      listWidth: 0,
+      collapsedFolders: [],
       bodyZoom: 1,
       bodyMode: "reader",
       alwaysShowImages: false,
@@ -379,6 +401,9 @@ function windowPrefs(raw) {
     bodyMode = parsed.plainTextForced === true ? "plain" : "reader"
   return {
     sidebarCollapsed: parsed.sidebarCollapsed === true,
+    sidebarWidth: paneWidth(parsed.sidebarWidth),
+    listWidth: paneWidth(parsed.listWidth),
+    collapsedFolders: stringList(parsed.collapsedFolders),
     bodyZoom: clampZoom(parsed.bodyZoom),
     bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
@@ -558,7 +583,8 @@ function sidebarSlots(mailboxes, labels, limit) {
   var boxes = Array.isArray(mailboxes) ? mailboxes : []
   for (var i = 0; i < boxes.length && out.length < max; i++) {
     if (!boxes[i] || !boxes[i].key) continue
-    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || "") })
+    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || ""),
+      icon: String(boxes[i].icon || "mail") })
   }
   var all = Array.isArray(labels) ? labels : []
   for (var j = 0; j < all.length && out.length < max; j++) {
@@ -991,4 +1017,361 @@ function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
     return Math.max(0, Math.min(known[i].y, limit))
   }
   return -1
+}
+
+// ------------------------------------------------------------ the scope
+
+// What the window is looking at, named the way the rail names it: the mailbox
+// whose key is open, or the label or folder whose query is. A label is matched
+// by the id the rail selected it with first, and by its query second, because
+// a folder restored from the store carries the query and nothing else.
+//
+// The answer is never empty. A key the provider does not list — a cache from an
+// older version, a mailbox removed from the provider's table — still names
+// itself, capitalised, rather than leaving the header with nothing to say.
+function currentScope(mailboxKey, mailboxes, labels, rawQuery, rawLabelId, labelQueryOf) {
+  var query = String(rawQuery || "")
+  var labelId = String(rawLabelId || "")
+  var all = Array.isArray(labels) ? labels : []
+  if (query !== "") {
+    var i
+    for (i = 0; i < all.length; i++) {
+      if (!all[i] || all[i].system) continue
+      if (labelId !== "" && String(all[i].id || "") === labelId)
+        return { kind: "label", id: String(all[i].id || ""),
+          name: String(all[i].name || all[i].rawName || ""), icon: "label" }
+    }
+    for (i = 0; i < all.length; i++) {
+      if (!all[i] || all[i].system) continue
+      var name = String(all[i].rawName || all[i].name || "")
+      if (typeof labelQueryOf === "function" && labelQueryOf(name) === query)
+        return { kind: "label", id: String(all[i].id || ""),
+          name: String(all[i].name || name), icon: "label" }
+    }
+    return { kind: "label", id: labelId, name: query, icon: "label" }
+  }
+  var key = String(mailboxKey || "inbox")
+  var boxes = Array.isArray(mailboxes) ? mailboxes : []
+  for (var j = 0; j < boxes.length; j++) {
+    if (boxes[j] && String(boxes[j].key) === key)
+      return { kind: "mailbox", key: key, name: String(boxes[j].label || key),
+        icon: String(boxes[j].icon || "mail") }
+  }
+  return { kind: "mailbox", key: key,
+    name: key.charAt(0).toUpperCase() + key.slice(1), icon: "mail" }
+}
+
+// The rows the mailbox switcher draws: the rail's own numbered list, each row
+// told whether it is the scope on screen. Same slots as the badges and the
+// Ctrl digits, so the number a row shows here is the key that opens it from
+// the list too.
+function switcherRows(slots, labels, scope) {
+  var list = Array.isArray(slots) ? slots : []
+  var all = Array.isArray(labels) ? labels : []
+  var current = scope || {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var slot = list[i]
+    if (!slot) continue
+    var row = { kind: slot.kind, name: String(slot.name || ""), number: i + 1,
+      count: 0, icon: "mail", selected: false }
+    if (slot.kind === "mailbox") {
+      row.key = String(slot.key || "")
+      row.icon = String(slot.icon || "mail")
+      row.selected = current.kind === "mailbox" && current.key === row.key
+    } else {
+      row.id = String(slot.id || "")
+      row.icon = "label"
+      row.selected = current.kind === "label" && current.id !== "" && current.id === row.id
+      for (var j = 0; j < all.length; j++) {
+        if (all[j] && String(all[j].id || "") === row.id) {
+          row.count = Math.max(0, Math.floor(Number(all[j].unread) || 0))
+          if (!row.selected && current.kind === "label" && current.id === "")
+            row.selected = String(all[j].rawName || all[j].name || "") === current.name
+          break
+        }
+      }
+    }
+    out.push(row)
+  }
+  return out
+}
+
+// ------------------------------------------------------------ selection
+
+// The rows checked for a bulk action. A list of ids rather than a flag on the
+// summaries, because a summary is what the provider said about a message and
+// which rows the user has ticked is not that.
+function toggleId(ids, id) {
+  var list = Array.isArray(ids) ? ids.slice() : []
+  var key = String(id || "")
+  if (key === "") return list
+  var at = list.indexOf(key)
+  if (at >= 0) list.splice(at, 1)
+  else list.push(key)
+  return list
+}
+
+// Every id from one row to another, inclusive, in list order — what a
+// Shift+click means. Either end unknown to the list means just the other.
+function idsBetween(list, fromId, toId) {
+  var source = Array.isArray(list) ? list : []
+  var a = indexById(source, fromId)
+  var b = indexById(source, toId)
+  if (a < 0 && b < 0) return []
+  if (a < 0) a = b
+  if (b < 0) b = a
+  var lo = Math.min(a, b)
+  var hi = Math.max(a, b)
+  var out = []
+  for (var i = lo; i <= hi; i++) out.push(source[i].id)
+  return out
+}
+
+function unionIds(ids, more) {
+  var out = Array.isArray(ids) ? ids.slice() : []
+  var extra = Array.isArray(more) ? more : []
+  for (var i = 0; i < extra.length; i++) {
+    if (out.indexOf(extra[i]) < 0) out.push(extra[i])
+  }
+  return out
+}
+
+// The checked ids that are still listed. A reload, a search or an action can
+// take rows away, and a selection that kept naming them would act on messages
+// the user can no longer see.
+function retainIds(ids, list) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (indexById(source, checked[i]) >= 0) out.push(checked[i])
+  }
+  return out
+}
+
+function allIds(list) {
+  var source = Array.isArray(list) ? list : []
+  var out = []
+  for (var i = 0; i < source.length; i++) out.push(source[i].id)
+  return out
+}
+
+function summariesById(list, ids) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    var index = indexById(source, checked[i])
+    if (index >= 0) out.push(source[index])
+  }
+  return out
+}
+
+// Where the cursor goes when several rows leave at once: the first survivor
+// after it, or the last one before it. Worked out on the list as it still is,
+// like cursorAfterRemoval, and for the same reason.
+function cursorAfterRemovals(list, removedIds, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var gone = Array.isArray(removedIds) ? removedIds : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  var i
+  for (i = index; i < source.length; i++) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  for (i = index - 1; i >= 0; i--) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  return ""
+}
+
+// One star key over several rows: they all go the way the majority has not
+// gone yet. All starred means unstar; anything else means star, so a mixed
+// selection lands in one state rather than swapping every row.
+function starActionFor(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  if (rows.length === 0) return "star"
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !rows[i].starred) return "star"
+  }
+  return "unstar"
+}
+
+// "3 messages archived": the count, then the single-message note with its
+// capital taken off. One rule for every action, so a new action's note only
+// has to be written once.
+function batchNote(count, actionLabel) {
+  var label = String(actionLabel || "")
+  if (label === "") return pluralize(count, "message")
+  return pluralize(count, "message") + " " + label.charAt(0).toLowerCase() + label.slice(1)
+}
+
+function selectionStatus(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  return n === 0 ? "" : n + " selected"
+}
+
+// ------------------------------------------------------------ folder tree
+
+// The rail's labels as a tree: "Archive/2026" sits under "Archive", indented,
+// and a parent can be folded. The delimiter is the server's own where the
+// provider reported one and "/" otherwise, which is what Gmail nests with.
+//
+// An ancestor no label names — a folder the server marked \Noselect, or a
+// Gmail label whose parent was never created — is still a row, because its
+// children have to hang from something; it has no id, opens nothing, and
+// folds like any other parent.
+//
+// Rows come back depth-first, siblings in name order, with the rows under a
+// folded parent left out. `unread` on a folded parent is its subtree's, so
+// folding a queue does not hide that it has mail in it.
+function labelTree(labels, collapsedPaths) {
+  var all = Array.isArray(labels) ? labels : []
+  var folded = Array.isArray(collapsedPaths) ? collapsedPaths : []
+  var root = { children: {}, order: [] }
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var delimiter = String(label.delimiter || "") || "/"
+    var full = String(label.name || label.rawName || "")
+    if (full === "") continue
+    var parts = full.split(delimiter)
+    var node = root
+    var path = ""
+    for (var p = 0; p < parts.length; p++) {
+      var part = parts[p]
+      if (part === "" && p > 0) continue
+      path = path === "" ? part : path + delimiter + part
+      if (!node.children[part]) {
+        node.children[part] = { name: part, path: path, label: null,
+          unread: 0, children: {}, order: [] }
+        node.order.push(part)
+      }
+      node = node.children[part]
+    }
+    node.label = label
+    node.unread = Math.max(0, Math.floor(Number(label.unread) || 0))
+  }
+
+  function subtreeUnread(node) {
+    var sum = node.unread
+    for (var c = 0; c < node.order.length; c++) sum += subtreeUnread(node.children[node.order[c]])
+    return sum
+  }
+
+  var out = []
+  function walk(node, depth) {
+    var names = node.order.slice().sort(function(a, b) {
+      var left = a.toLowerCase(), right = b.toLowerCase()
+      return left < right ? -1 : (left > right ? 1 : 0)
+    })
+    for (var n = 0; n < names.length; n++) {
+      var child = node.children[names[n]]
+      var hasChildren = child.order.length > 0
+      var expanded = !hasChildren || folded.indexOf(child.path) < 0
+      out.push({
+        id: child.label ? String(child.label.id || "") : "",
+        rawName: child.label ? String(child.label.rawName || child.label.name || "") : "",
+        name: child.name,
+        path: child.path,
+        depth: depth,
+        hasChildren: hasChildren,
+        expanded: expanded,
+        selectable: !!child.label,
+        unread: expanded ? child.unread : subtreeUnread(child)
+      })
+      if (expanded) walk(child, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return out
+}
+
+// The labels in the order the rail draws them, folded rows left out — what
+// the Ctrl digits number, so a digit never opens a row that is not on screen.
+function visibleLabels(labels, collapsedPaths) {
+  var rows = labelTree(labels, collapsedPaths)
+  var all = Array.isArray(labels) ? labels : []
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].selectable) continue
+    var index = indexById(all, rows[i].id)
+    if (index >= 0) out.push(all[index])
+  }
+  return out
+}
+
+function togglePath(paths, path) {
+  return toggleId(paths, path)
+}
+
+// ------------------------------------------------------------ label names
+
+// A label's path taken apart and put together with the delimiter its
+// provider nests with: "/" for Gmail, whatever the server said for IMAP.
+function labelDelimiter(label) {
+  return String(label && label.delimiter ? label.delimiter : "") || "/"
+}
+
+function labelLeaf(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter || "") || "/"
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? text : text.slice(at + sep.length)
+}
+
+function labelParent(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter || "") || "/"
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? "" : text.slice(0, at)
+}
+
+function labelPathJoin(parent, leaf, delimiter) {
+  var head = String(parent || "")
+  var tail = String(leaf || "").trim()
+  var sep = String(delimiter || "") || "/"
+  return head === "" ? tail : head + sep + tail
+}
+
+// Whether a name typed for a label is one the provider can take: not empty,
+// and not carrying the delimiter, which would make two labels of one.
+function labelNameProblem(name, delimiter) {
+  var text = String(name || "").trim()
+  var sep = String(delimiter || "") || "/"
+  if (text === "") return "A label needs a name"
+  if (text.indexOf(sep) >= 0) return "A name cannot contain " + sep + "; use New sub-label to nest"
+  return ""
+}
+
+// Where a label may be moved: every other label that is not beneath it, plus
+// the top level. Moving a label under its own descendant would swallow it.
+function labelMoveTargets(labels, movingPath, delimiter) {
+  var all = Array.isArray(labels) ? labels : []
+  var sep = String(delimiter || "") || "/"
+  var moving = String(movingPath || "")
+  var out = [{ id: "", name: "Top level", path: "" }]
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var path = String(label.rawName || label.name || "")
+    if (path === "" || path === moving) continue
+    if (moving !== "" && path.indexOf(moving + sep) === 0) continue
+    if (path === labelParent(moving, sep)) continue
+    out.push({ id: String(label.id || ""), name: path, path: path })
+  }
+  return out
+}
+
+// "3 new in Receipts", or the two labels with the most, for the status line.
+function monitoredNote(grown) {
+  var list = Array.isArray(grown) ? grown.slice() : []
+  if (list.length === 0) return ""
+  list.sort(function(a, b) { return Number(b.delta || 0) - Number(a.delta || 0) })
+  var parts = []
+  for (var i = 0; i < list.length && i < 2; i++)
+    parts.push(Math.max(1, Math.floor(Number(list[i].delta) || 1)) + " new in " + String(list[i].name || ""))
+  var more = list.length - parts.length
+  return parts.join(", ") + (more > 0 ? " and " + more + " more" : "")
 }

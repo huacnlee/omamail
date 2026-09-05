@@ -22,6 +22,7 @@ var CAPABILITIES = {
   // `labels: false` is about the strip the reader draws, not about whether a
   // message can be put somewhere else.
   move: true,
+  manageLabels: true,
   // No server-side conversation id. Threading falls back to References, which
   // is what every other IMAP client does.
   threads: false,
@@ -77,6 +78,14 @@ function cachedSummaryInSearch(sourceQuery, summary) {
 // Selecting a folder in the sidebar. This cannot go through `searchQuery`: a
 // folder wrapped in a TEXT search would look for the folder's own name inside
 // the inbox rather than opening it.
+// Mail from, or to, one address, in the inbox: IMAP's FROM and TO criteria
+// match the header as a substring, which is what an address search wants.
+function addressQuery(field, address) {
+  var value = String(address === undefined || address === null ? "" : address).trim()
+  if (value === "") return ""
+  return "folder:INBOX " + (field === "to" ? "TO " : "FROM ") + JSON.stringify(value)
+}
+
 function labelQuery(name) {
   var value = String(name === undefined || name === null ? "" : name).trim()
   return value === "" ? "" : "folder:" + JSON.stringify(value)

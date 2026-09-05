@@ -30,6 +30,7 @@ readonly property string keyContext:
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
+  : root.agentVisible ? "agent"
   : root.currentView === "reader" ? "reader"
   : "list"
 ```
@@ -42,6 +43,7 @@ readonly property string keyContext:
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `agent` | The agent pane, an ask being typed | `Escape`, and the modified keys |
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
@@ -95,6 +97,8 @@ used to exist, and they had.
 | `moveToLabel` | `v` | mail | Move to |
 | `markRead` | `Shift+I` | mail | Mark read |
 | `markUnread` | `Shift+U` | mail | Mark unread |
+| `toggleCheck` | `x` | list | Select or deselect the message |
+| `checkAll` | `Ctrl+A` | list | Select every message loaded, or none |
 | `reply` | `r` | mail | Reply |
 | `replyAll` | `a` | mail | Reply to all |
 | `forward` | `f` | mail | Forward |
@@ -114,9 +118,12 @@ used to exist, and they had.
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
+| `switchMailbox` | `Alt+M` | mail | Go to a mailbox |
+| `askAgent` | `Alt+G` | mail | Ask the agent about the message |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
-| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
-| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar+agent | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar+agent | Go to calendar |
+| `agentView` | `Ctrl+Shift+G` | mail+calendar+agent | Go to the agent pane |
 | `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
@@ -188,7 +195,9 @@ read with a mouse would be the one screen here that contradicts the rest.
 `focus` true or false, bare key or modified. So `Alt+A` opens it through the
 table like any other key, and from there `j`, `k`, `Enter` and `o` come from a
 `Keys` handler on the popup's own `contentItem`: the one place in this window
-where the rule at the top of this document runs backwards.
+where the rule at the top of this document runs backwards. The mailbox switcher
+(`Alt+M`) is the same popup over the rail's rows, and inside it a bare digit is
+the Ctrl digit: `4` opens the fourth row, `0` the tenth.
 `tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.

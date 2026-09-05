@@ -66,6 +66,12 @@ Item {
     handle.children = []
   }
 
+  function forgetRejectedSecret(status, response, detail) {
+    if (!auth || typeof auth.invalidateAccessToken !== "function") return
+    if (Imap.isRejectedCredentials(status, response, detail))
+      auth.invalidateAccessToken()
+  }
+
   // ------------------------------------------------------------- transport
 
   // One invocation, one connection, however many commands. curl reuses the
@@ -152,6 +158,7 @@ Item {
         var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
         var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
         if (status !== 0) {
+          root.forgetRejectedSecret(status, text, detail)
           callback("", Imap.transportError(status, text, detail, ""))
           return
         }
@@ -159,6 +166,7 @@ Item {
         // completion is checked separately — a NO is a failure the user has to
         // be told about, not an empty result.
         if (Imap.isFailure(text)) {
+          root.forgetRejectedSecret(0, text, detail)
           callback("", Imap.responseError(0, Imap.failureDetail(text), ""))
           return
         }
@@ -529,6 +537,9 @@ Item {
           id: folder.name,
           name: Imap.decodeMailbox(folder.name),
           rawName: folder.name,
+          // What the server separates a hierarchy with, so the sidebar can
+          // fold "Archive/2026" under "Archive" without guessing the slash.
+          delimiter: String(folder.delimiter || ""),
           // "system" means the mailbox row already offers it, so the sidebar
           // lists only the rest below. Judged on SPECIAL-USE rather than on the
           // structural flags every server sends on every folder.
@@ -676,6 +687,28 @@ Item {
     return handle
   }
 
+  // The folder list, changed. No mailbox is selected for these — the URL is
+  // the server alone — and the cached listing is dropped so the next read
+  // sees the server's answer rather than this client's memory of it.
+  function createLabel(name, callback) {
+    return changeFolders([Imap.createCommand(name)], callback)
+  }
+
+  function renameLabel(id, name, callback) {
+    return changeFolders([Imap.renameCommand(id, name)], callback)
+  }
+
+  function deleteLabel(id, callback) {
+    return changeFolders([Imap.deleteCommand(id)], callback)
+  }
+
+  function changeFolders(commands, callback) {
+    return root.run("", commands, function(text, error) {
+      if (!error) root.foldersLoaded = false
+      if (typeof callback === "function") callback(null, error)
+    })
+  }
+
   function trashMessage(id, callback) {
     var handle = newHandle()
     ensureFolders(function(folderError) {
@@ -750,6 +783,7 @@ Item {
         if (handle.aborted || typeof callback !== "function") return
         if (status !== 0) {
           var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
+          root.forgetRejectedSecret(status, "", detail)
           callback(null, Imap.responseError(status, detail, failureLabel))
           return
         }
@@ -879,6 +913,7 @@ Item {
         if (typeof callback !== "function") return
         if (status !== 0) {
           var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
+          root.forgetRejectedSecret(status, "", detail)
           callback(null, Imap.responseError(status, detail, "The message could not be sent"))
           return
         }
@@ -945,10 +980,12 @@ Item {
       var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
       var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
       if (status !== 0) {
+        root.forgetRejectedSecret(status, text, detail)
         callback(false, Imap.transportError(status, text, detail, ""))
         return
       }
       if (Imap.isFailure(text)) {
+        root.forgetRejectedSecret(0, text, detail)
         callback(false, Imap.responseError(0, Imap.failureDetail(text), ""))
         return
       }

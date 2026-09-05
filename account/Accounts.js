@@ -106,6 +106,7 @@ function portOr(value, fallback) {
 
 function makeImapSettings(raw) {
   var values = raw || {}
+  var auth = trimmed(values.auth).toLowerCase()
   return {
     imapHost: trimmed(values.imapHost),
     imapPort: portOr(values.imapPort, 993),
@@ -113,7 +114,9 @@ function makeImapSettings(raw) {
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
     aliases: Aliases.parse(values.aliases),
-    insecure: values.insecure === true
+    insecure: values.insecure === true,
+    auth: auth === "xoauth2" ? "xoauth2" : "",
+    tokenAccount: trimmed(values.tokenAccount)
   }
 }
 
@@ -135,6 +138,9 @@ function makeAccount(account) {
     imap: makeImapSettings(raw.imap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
+    // The labels watched for new mail, by id. A fact about the mailbox, so
+    // it lives beside its name rather than in the window's file.
+    monitored: idList(raw.monitored),
     // Whether this row is the setup form's working state rather than a
     // mailbox. It used to be inferred from the id being empty, and that read
     // a mailbox whose address had been corrupted as a draft and dropped it at
@@ -261,6 +267,58 @@ function add(list, account) {
   return next
 }
 
+// The id `account` would take at `index`, if another row already holds it.
+// Empty means the write is safe: a new address, or the same row keeping its
+// own id. The setup form used to rebuild the list with `add`, which treats a
+// colliding id as "replace that other mailbox" and drops the row being
+// edited — so re-authing Proton while iCloud was on screen deleted iCloud.
+function collidingId(list, index, account) {
+  var entry = makeAccount(account)
+  if (!entry.id) return ""
+  var other = indexOfId((list || {}).accounts || [], entry.id)
+  var at = Math.floor(Number(index))
+  if (other >= 0 && other !== at) return entry.id
+  return ""
+}
+
+// Put `account` at `index` and nowhere else. Unlike `add`, a colliding id is
+// a no-op rather than a silent merge, so a save cannot delete a mailbox that
+// was not the one being edited.
+function replaceAt(list, index, account) {
+  var next = copyList(list)
+  var at = Math.floor(Number(index))
+  if (!isFinite(at) || at < 0 || at >= next.accounts.length) return next
+  if (collidingId(next, at, account)) return next
+  var entry = makeAccount(account)
+  next.accounts[at] = entry
+  if (entry.id && (next.activeId === "" || indexOfId(next.accounts, next.activeId) < 0))
+    next.activeId = entry.id
+  return next
+}
+
+function namedIds(list) {
+  var values = Array.isArray((list || {}).accounts) ? list.accounts : []
+  var ids = []
+  for (var i = 0; i < values.length; i++) {
+    var id = trimmed((values[i] || {}).id)
+    if (id) ids.push(id)
+  }
+  return ids
+}
+
+function dropsAnyId(ids, payload) {
+  var wanted = Array.isArray(ids) ? ids : []
+  var kept = namedIds(payload)
+  for (var i = 0; i < wanted.length; i++) {
+    var found = false
+    for (var j = 0; j < kept.length; j++) {
+      if (kept[j] === wanted[i]) { found = true; break }
+    }
+    if (!found) return true
+  }
+  return false
+}
+
 // The neighbour that slides into the removed row is the least surprising
 // replacement, and the scan wraps so removing the last row falls back up the
 // list. Pending accounts are skipped: the window cannot show one.
@@ -344,6 +402,31 @@ function discardDraftAt(list, index) {
 // Empty is not a name and clears it, which is what puts the address back:
 // `label()` falls through to the local part, so there is no state in which a
 // mailbox has nothing to be called.
+function idList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = trimmed(list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
+// A label watched, or no longer: the id toggled in the account's list.
+function toggleMonitored(list, id, labelId) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  var key = trimmed(labelId)
+  if (key === "") return next
+  var index = entry.monitored.indexOf(key)
+  if (index >= 0) entry.monitored.splice(index, 1)
+  else entry.monitored.push(key)
+  next.accounts[at] = entry
+  return next
+}
+
 function setLabel(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)

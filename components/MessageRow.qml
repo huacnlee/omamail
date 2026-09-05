@@ -13,23 +13,47 @@ Rectangle {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  property color urgentColor: accentColor
   required property string panelFontFamily
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
   property bool canArchive: true
   property bool hasCursor: false
   property bool selected: false
+  // Ticked for a bulk action. Not `selected`: that is the message the reader
+  // shows, and the two are different things for the same reason the cursor is.
+  property bool checked: false
+  // What the agent is doing with this message, if anything: "", "running",
+  // "question", "done", "failed" or "cancelled". State, so it shows whether
+  // or not the row is hot, like the star.
+  property string agentState: ""
+  // The agent's last line while it works on this message, for the tooltip.
+  property string agentProgress: ""
+  // Whether any row in the list is ticked. While one is, every row shows its
+  // box, so the lane the boxes sit in is the same on every row being compared.
+  property bool selectionActive: false
   // How the direction of this message's own text is arrived at. Passed down
   // like every other fact a row draws, because a row decides nothing.
   property string contentDirection: Direction.MODE_DEFAULT
 
   signal activated()
+  signal checkToggled()
+  signal checkRangeRequested()
   signal starToggled()
+  signal agentRequested(real sceneX, real sceneY)
   signal archiveRequested()
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
 
-  readonly property bool hot: mouse.containsMouse || hasCursor
+  // Hovered by a handler rather than by the MouseArea's `containsMouse`: a
+  // button on the row has a MouseArea of its own, and the pointer moving onto
+  // one took the row's hover away — the extra buttons hid, the lane closed,
+  // the button slid out from under the pointer, the row was hovered again,
+  // and the lane flickered open and shut. A HoverHandler is passive and stays
+  // hovered whatever the pointer is over inside the row.
+  readonly property bool hot: rowHover.hovered || hasCursor
+
+  HoverHandler { id: rowHover }
 
   // The subject is asked on its own account: a reply prefix is Latin whatever
   // the thread is written in, so `Re: مرحبا` reads left-to-right to anything
@@ -54,9 +78,13 @@ Rectangle {
   width: parent ? parent.width : 0
   implicitHeight: body.implicitHeight + Style.space(14)
   radius: Style.cornerRadius
+  // A ticked row is filled from the accent, but the tick is what says it is
+  // ticked: some themes put the accent close to the foreground.
   color: selected
     ? Style.selectedFillFor(textColor, accentColor)
-    : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent")
+    : (checked
+      ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, hot ? 0.22 : 0.14)
+      : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent"))
 
   MouseArea {
     id: mouse
@@ -71,6 +99,12 @@ Rectangle {
         // Middle-click archives: the one triage action worth having without
         // moving the pointer to a button.
         root.archiveRequested()
+      } else if (event.modifiers & Qt.ShiftModifier) {
+        // Shift extends the selection from the cursor to here; Ctrl ticks
+        // this row on its own. Both are the file manager's meaning of them.
+        root.checkRangeRequested()
+      } else if (event.modifiers & Qt.ControlModifier) {
+        root.checkToggled()
       } else {
         root.activated()
       }
@@ -85,8 +119,55 @@ Rectangle {
     width: Style.space(5)
     height: width
     radius: width / 2
-    visible: root.summary.unread
+    // The box takes the dot's place while it is shown; unread is still
+    // carried by the weight and the brighter subject.
+    visible: root.summary.unread && !checkBox.visible
     color: root.accentColor
+  }
+
+  // The tick, in the lane the unread dot lives in so the text never moves.
+  // Shown under the pointer or the cursor, and on every row while any row is
+  // ticked, so a selection being built can be read down the column.
+  Rectangle {
+    id: checkBox
+    objectName: "message-check"
+    anchors.left: parent.left
+    anchors.leftMargin: Style.space(1)
+    anchors.top: parent.top
+    anchors.topMargin: Style.space(10)
+    width: Style.space(10)
+    height: width
+    radius: Style.space(2)
+    visible: root.hot || root.checked || root.selectionActive
+    color: root.checked ? Style.selectedFillFor(root.textColor, root.accentColor) : "transparent"
+    border.width: Style.normalBorderWidth
+    border.color: root.checked ? root.accentColor
+      : (checkMouse.containsMouse ? root.textColor : root.dimColor)
+
+    ActionIcon {
+      anchors.centerIn: parent
+      visible: root.checked
+      name: "check"
+      iconSize: Style.space(8)
+      color: root.textColor
+    }
+
+    MouseArea {
+      id: checkMouse
+      anchors.fill: parent
+      anchors.margins: -Style.space(3)
+      hoverEnabled: true
+      onClicked: function(event) {
+        if (event.modifiers & Qt.ShiftModifier) root.checkRangeRequested()
+        else root.checkToggled()
+      }
+    }
+
+    PanelToolTip {
+      visible: checkMouse.containsMouse
+      text: (root.checked ? "Deselect" : "Select") + " · x (Shift+click a range, Ctrl+A all)"
+      fontFamily: root.panelFontFamily
+    }
   }
 
   Column {
@@ -171,7 +252,31 @@ Rectangle {
     anchors.rightMargin: Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(1)
-    visible: root.hot || root.summary.starred
+    visible: root.hot || root.summary.starred || root.agentState !== ""
+
+    // The agent's glyph: a question waiting is the one state that asks for
+    // the eye, so it is the urgent colour; running is the accent; the rest
+    // are quiet. Clicking opens the popup on this message.
+    IconButton {
+      objectName: "row-agent"
+      visible: root.agentState !== ""
+      iconName: "agent"
+      tooltipText: root.agentState === "running"
+        ? (root.agentProgress !== "" ? root.agentProgress : "The agent is working on this")
+        : root.agentState === "question" ? "The agent has a question"
+        : root.agentState === "failed" ? "The agent failed on this"
+        : root.agentState === "cancelled" ? "Agent actions were cancelled" : "The agent finished with this"
+      foreground: root.agentState === "question" ? root.urgentColor
+        : (root.agentState === "running" ? root.accentColor : root.dimColor)
+      hoverColor: root.textColor
+      iconSize: Style.font.iconSmall
+      size: Style.space(24)
+      fontFamily: root.panelFontFamily
+      onClicked: {
+        var scene = mapToGlobal(0, height)
+        root.agentRequested(scene.x, scene.y)
+      }
+    }
 
     IconButton {
       iconName: "star"

@@ -3,6 +3,8 @@ import Quickshell
 import Quickshell.Io
 import "account"
 import "calendar"
+import "agent"
+import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
@@ -60,6 +62,7 @@ Item {
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
     defaultQuery: "in:inbox",
+    agentCommand: "",
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
@@ -72,6 +75,107 @@ Item {
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  // The default agent's command line, or "" for no agent — in which case no
+  // agent button is drawn anywhere. docs/AGENT.md.
+  readonly property string agentCommand: String(settings ? settings.agentCommand || "" : "").trim()
+  readonly property bool hasAgent: Agent.hasAgent(agentCommand)
+  readonly property var agentJobs: agentRunner.byMessage
+  readonly property bool agentBusy: agentRunner.anyActive
+
+  function agentJobFor(messageId) { return agentRunner.jobFor(messageId) }
+
+  // Which harness binaries are on PATH, so Settings can say which presets
+  // will actually run. Looked up once per service; a newly installed CLI
+  // shows up after the next shell restart, which is when PATH changes anyway.
+  property var agentToolsFound: []
+  readonly property var agentPresetOptions: Agent.presetOptions(agentToolsFound)
+
+  function findAgentTools() {
+    if (agentToolFinder.running) return
+    var names = Agent.presetBinaries()
+    var script = ""
+    for (var i = 0; i < names.length; i++) script += "command -v " + names[i] + " 2>/dev/null; "
+    agentToolFinder.command = ["/bin/sh", "-c", script]
+    agentToolFinder.running = true
+  }
+
+  // The message as the list knows it plus the text the reader has, handed to
+  // the runner on one line. The body is only there when the message is the
+  // open one; the agent can read the rest itself.
+  function askAgent(messageId, prompt) {
+    if (!current || !hasAgent) return false
+    var id = String(messageId || "")
+    var index = Model.indexById(current.messages, id)
+    var summary = index >= 0 ? current.messages[index]
+      : (current.selectedId === id ? current.selectedMessage : null)
+    if (!summary) return false
+    var body = current.selectedId === id && current.selectedBody ? String(current.selectedBody.text || "") : ""
+    var line = Agent.payload(summary, body, current.accountEmail,
+      Agent.folderOf(id, current.mailboxKey), agentCommand, prompt)
+    if (!agentRunner.start(line)) return false
+    current.note("Asked the agent")
+    return true
+  }
+
+  // The pane's jobs and the one it is reading, forwarded so a view never
+  // reaches past `service`.
+  readonly property var agentPaneJobs: agentRunner.jobs
+  readonly property string agentShownId: agentRunner.shownId
+  readonly property string agentShownOutput: agentRunner.shownOutput
+
+  function showAgentJob(jobId) { agentRunner.show(jobId) }
+
+  // An ask across the open account, or every account. No message crosses;
+  // the agent is told the addresses and does its own reading.
+  function askAgentScope(prompt, everyAccount) {
+    if (!current || !hasAgent) return false
+    var addresses = []
+    var list = sendIdentities || []
+    for (var i = 0; i < list.length; i++) if (list[i].email) addresses.push(String(list[i].email))
+    var scope = Agent.scopeOf(everyAccount === true, current.accountEmail)
+    var line = Agent.scopePayload(prompt, scope, current.accountEmail, addresses, agentCommand)
+    if (!agentRunner.start(line)) return false
+    return true
+  }
+
+  // The answer to a question, or a follow-up: a new job that continues the
+  // one named, with the runner rebuilding the prompt from it.
+  function answerAgent(jobId, answer) {
+    if (!hasAgent) return false
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || String(answer || "").trim() === "") return false
+    if (!agentRunner.start(Agent.continuationPayload(job, answer, agentCommand))) return false
+    if (current) current.note("Answered the agent")
+    return true
+  }
+
+  // One job over several messages, as the list knows them.
+  function askAgentMany(ids, prompt) {
+    if (!current || !hasAgent) return false
+    var summaries = Model.summariesById(current.messages, ids)
+    if (summaries.length === 0) return false
+    var line = Agent.selectionPayload(summaries, current.accountEmail, current.mailboxKey, agentCommand, prompt)
+    if (!agentRunner.start(line)) return false
+    current.note("Asked the agent about " + Agent.pluralizeMessages(summaries.length))
+    return true
+  }
+
+  function forgetAgentJob(jobId) { return agentRunner.forget(jobId) }
+  function forgetFinishedAgentJobs() { return agentRunner.forgetFinished() }
+
+  function cancelAgentJob(jobId) {
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false
+    return agentRunner.cancelById(jobId)
+  }
+
+  function cancelAgent(messageId) {
+    if (!agentRunner.cancel(messageId)) return false
+    if (current) current.note("Cancelling the agent's actions")
+    return true
+  }
+
+  function refreshAgentJobs() { agentRunner.refresh() }
   // Which way a message's own text is read: worked out from the text, or fixed
   // by the reader. The window's chrome is not affected either way — this is a
   // fact about the mail, not about the interface around it.
@@ -129,6 +233,10 @@ Item {
     for (var field in next) entry[field] = next[field]
     if (shell && typeof shell.updateEntryInline === "function")
       shell.updateEntryInline(pluginId, entry)
+  }
+
+  function setAgentCommand(value) {
+    persistSetting("agentCommand", String(value === undefined || value === null ? "" : value).trim())
   }
 
   function setUndoSendSeconds(value) {
@@ -301,14 +409,14 @@ Item {
   function removeAccount(id) {
     activeIndex = -1
     accountList = Accounts.remove(accountList, id)
-    saveAccounts()
+    saveAccounts({ allowDrop: true })
     refreshCurrent()
   }
 
   function removeAccountAt(index) {
     activeIndex = -1
     accountList = Accounts.removeAt(accountList, index)
-    saveAccounts()
+    saveAccounts({ allowDrop: true })
     refreshCurrent()
   }
 
@@ -384,11 +492,14 @@ Item {
     if (raw.imap !== undefined) entry.imap = raw.imap
     if (raw.label !== undefined) entry.label = raw.label
 
-    var updated = Accounts.emptyList()
-    updated.activeId = accountList.activeId
-    for (var i = 0; i < accounts.length; i++)
-      updated = Accounts.add(updated, i === index ? entry : accounts[i])
+    // Never rebuild through `add`: a colliding id replaces the *other* row
+    // and drops this one, which is how re-authing Proton deleted iCloud.
+    if (Accounts.collidingId(accountList, index, entry)) {
+      duplicateAccount(String(entry.email || ""))
+      return
+    }
 
+    var updated = Accounts.replaceAt(accountList, index, entry)
     var id = Accounts.accountId(entry.email, entry.provider)
     if (id !== "" && (updated.activeId === "" || activeIndex === index))
       updated = Accounts.setActive(updated, id)
@@ -402,11 +513,30 @@ Item {
   // Dropping it is what made adding a mailbox undo itself: the new account was
   // never written, and the watcher then read the older file back over it.
   property bool accountsSaveQueued: false
+  property bool accountsSaveQueuedAllowDrop: false
+  // Ids last successfully loaded or written. `dropsNamedMailbox` only sees
+  // memory, so once a buggy save has already dropped a row in memory it will
+  // not refuse the write. This snapshot is what stops that reaching disk.
+  property var lastPersistedIds: []
 
   // Identical text is not a write. The editor saves when it is done with
   // rather than on every keystroke, but it is also rebuilt by the write it
   // causes — so the value it hands back on the way out is routinely the one
   // already on disk, and a file round trip for it would be pure cost.
+  // The labels the open mailbox watches, and the switch for one of them.
+  readonly property var monitoredLabelIds: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry && Array.isArray(entry.monitored) ? entry.monitored : []
+  }
+
+  function toggleMonitored(labelId) {
+    var next = Accounts.toggleMonitored(accountList, activeAccountId, labelId)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+    if (current) current.refreshMonitored()
+  }
+
   function setAccountLabel(id, text) {
     var next = Accounts.setLabel(accountList, id, text)
     if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
@@ -421,7 +551,7 @@ Item {
     saveAccounts()
   }
 
-  function saveAccounts() {
+  function saveAccounts(opts) {
     if (!accountsLoaded) return
     // A nameless row is setup state, never a mailbox. There is no legitimate
     // path that persists only one — Add waits for configureAccount, and the UI
@@ -443,11 +573,16 @@ Item {
     // row. Removal never arrives here as an omission: it goes through
     // `remove` or `removeAt`, so the row is gone from `accountList` too.
     if (Accounts.dropsNamedMailbox(accountList, writable)) return
+    var allowDrop = !!(opts && opts.allowDrop)
+    if (!allowDrop && Accounts.dropsAnyId(lastPersistedIds, writable)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
+      if (allowDrop) accountsSaveQueuedAllowDrop = true
       return
     }
     accountsSaveQueued = false
+    accountsSaveQueuedAllowDrop = false
+    lastPersistedIds = Accounts.namedIds(writable)
     accountsWritePayload = Accounts.serialize(writable)
     accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
     accountsWriter.running = true
@@ -483,6 +618,7 @@ Item {
     if (accountsWriter.running || accountsSaveQueued) return
     accountList = loaded
     accountsLoaded = true
+    lastPersistedIds = Accounts.namedIds(Accounts.savedOnly(loaded))
   }
 
   signal accountAdded()
@@ -494,6 +630,14 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // How wide the rail and the list were dragged to, in pixels; 0 is "never
+  // dragged", which each pane reads as its own default.
+  property real sidebarWidth: 0
+  property real listWidth: 0
+  // The label paths folded shut in the rail, by path rather than by account:
+  // "Archive" folded is a way of reading the rail, and it reads the same in
+  // every mailbox that has one.
+  property var collapsedFolders: []
   // Somebody who needed the text bigger needs it bigger for their mail, not for
   // the message that made them reach for it. The same goes for `bodyMode`:
   // both of these are ways of reading mail, not ways of reading one message.
@@ -519,6 +663,9 @@ Item {
   function applyWindowPrefs(raw) {
     var prefs = Model.windowPrefs(raw)
     sidebarCollapsed = prefs.sidebarCollapsed
+    sidebarWidth = prefs.sidebarWidth
+    listWidth = prefs.listWidth
+    collapsedFolders = prefs.collapsedFolders
     bodyZoom = prefs.bodyZoom
     bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
@@ -555,6 +702,9 @@ Item {
     windowPrefsSettling.stop()
     windowWritePayload = JSON.stringify({
       sidebarCollapsed: sidebarCollapsed,
+      sidebarWidth: sidebarWidth,
+      listWidth: listWidth,
+      collapsedFolders: collapsedFolders,
       bodyZoom: bodyZoom,
       bodyMode: bodyMode,
       alwaysShowImages: alwaysShowImages,
@@ -563,6 +713,28 @@ Item {
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
     windowWriter.running = true
   }
+
+  // Written when a drag ends, not while it runs: a drag is a hundred values
+  // in a second and the file wants the one settled on.
+  function setPaneWidths(sidebar, list) {
+    var nextSidebar = Model.paneWidth(sidebar)
+    var nextList = Model.paneWidth(list)
+    if (nextSidebar === sidebarWidth && nextList === listWidth) return
+    sidebarWidth = nextSidebar
+    listWidth = nextList
+    saveWindowPrefs()
+  }
+
+  function toggleFolder(path) {
+    var key = String(path || "")
+    if (key === "") return
+    collapsedFolders = Model.togglePath(collapsedFolders, key)
+    saveWindowPrefs()
+  }
+
+  // The rail's labels in the order it draws them, folded rows left out — the
+  // list the Ctrl digits number.
+  readonly property var visibleLabels: Model.visibleLabels(labels, collapsedFolders)
 
   function setSidebarCollapsed(value) {
     var next = value === true
@@ -853,6 +1025,13 @@ Item {
   function cursorOffset(cursorId, delta) {
     return current ? current.cursorOffset(cursorId, delta) : ""
   }
+  readonly property bool canManageLabels: !!current && current.canManageLabels
+  function labelById(id) { return current ? current.labelById(id) : null }
+  function createLabel(parentPath, leaf) { return current ? current.createLabel(parentPath, leaf) : false }
+  function renameLabel(id, leaf) { return current ? current.renameLabel(id, leaf) : false }
+  function moveLabel(id, parentPath) { return current ? current.moveLabel(id, parentPath) : false }
+  function deleteLabel(id) { return current ? current.deleteLabel(id) : false }
+
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
   function selectLabel(name, labelId) {
@@ -866,6 +1045,7 @@ Item {
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
+  function actMany(ids, action) { return current ? current.actMany(ids, action) : false }
   function send(fields) {
     // The button has the same guard, but Ctrl+Return reaches this function
     // directly. Enforce the one-global-parked-draft invariant at the action
@@ -1088,6 +1268,8 @@ Item {
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
       settings: root.settings
       bodyMode: root.bodyMode
+      // The labels this mailbox watches for new mail, off its own entry.
+      monitoredIds: entry ? entry.monitored : []
       // Every mailbox obeys the one answer: it is about what the reader is
       // willing to tell a sender, not about which account the mail came to.
       alwaysShowImages: root.alwaysShowImages
@@ -1132,6 +1314,23 @@ Item {
   }
 
   Process {
+    id: agentToolFinder
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.agentToolsFound = Agent.foundBinaries(String(stdout.text || ""))
+  }
+
+  AgentRunner {
+    id: agentRunner
+    pluginDir: root.pluginDir
+    onJobFinished: function(job) {
+      var text = Agent.finishedNote(job)
+      if (text !== "" && root.current) root.current.note(text)
+    }
+    onFailed: function(text) { if (root.current) root.current.fail(text) }
+  }
+
+  Process {
     id: windowWriter
     stdinEnabled: true
     stdout: StdioCollector { waitForEnd: true }
@@ -1168,7 +1367,10 @@ Item {
     }
     onExited: {
       root.accountsWritePayload = ""
-      if (root.accountsSaveQueued) root.saveAccounts()
+      if (root.accountsSaveQueued) {
+        var drop = root.accountsSaveQueuedAllowDrop
+        root.saveAccounts(drop ? { allowDrop: true } : undefined)
+      }
     }
   }
 
@@ -1191,6 +1393,7 @@ Item {
   }
 
   Component.onCompleted: {
+    Qt.callLater(root.findAgentTools)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
   }

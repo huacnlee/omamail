@@ -441,8 +441,58 @@ Item {
   function refresh() {
     if (!ready) return
     refreshCounts()
+    refreshMonitored()
     if (active && (windowOpen || !listLoaded)) loadMessages(false)
   }
+
+  // The labels watched for new mail, by id: set from the account entry, and
+  // counted on every refresh the way the inbox is. A count that grew says so
+  // on the status line; the rail's row carries the number either way.
+  property var monitoredIds: []
+  property bool monitoredLoading: false
+
+  function refreshMonitored() {
+    var ids = Array.isArray(monitoredIds) ? monitoredIds : []
+    if (!ready || monitoredLoading || ids.length === 0) return
+    monitoredLoading = true
+    var remaining = ids.length
+    var grown = []
+    for (var i = 0; i < ids.length; i++) {
+      (function(labelId) {
+        api.getLabelCounts(labelId, function(counts, error) {
+          if (!root) return
+          remaining--
+          if (!error && counts) {
+            var index = Model.indexById(root.labels, labelId)
+            if (index >= 0) {
+              var before = Math.max(0, Math.floor(Number(root.labels[index].unread) || 0))
+              var after = Math.max(0, Math.floor(Number(counts.unread) || 0))
+              var updated = {}
+              for (var key in root.labels[index]) updated[key] = root.labels[index][key]
+              updated.unread = after
+              updated.total = Math.max(0, Math.floor(Number(counts.total) || 0))
+              root.labels = Model.replaceById(root.labels, updated)
+              if (after > before && root.monitoredSeen[labelId] !== undefined)
+                grown.push({ name: String(updated.name || labelId), delta: after - before })
+              var seen = {}
+              for (var k in root.monitoredSeen) seen[k] = root.monitoredSeen[k]
+              seen[labelId] = after
+              root.monitoredSeen = seen
+            }
+          }
+          if (remaining === 0) {
+            root.monitoredLoading = false
+            if (grown.length > 0) root.note(Model.monitoredNote(grown))
+            root.cacheStore.putLabels(root.labels)
+          }
+        })
+      })(String(ids[i]))
+    }
+  }
+
+  // The last count each watched label was seen at, so a refresh knows growth
+  // from the first read. Not persisted: a restart reads once and says nothing.
+  property var monitoredSeen: ({})
 
   function refreshCounts() {
     if (!ready || countLoading) return
@@ -1552,20 +1602,46 @@ Item {
   }
 
   function markAllRead() {
-    if (!ready || messages.length === 0) return false
-    if (pendingAction !== "") {
-      note("Another action is still finishing")
-      return false
-    }
     var ids = []
     for (var i = 0; i < messages.length; i++) {
       if (messages[i].unread) ids.push(messages[i].id)
     }
-    if (ids.length === 0) return false
+    return actMany(ids, "markRead")
+  }
+
+  // One action over several rows, in one request where the provider takes a
+  // list and one request per message where it does not. The same optimistic
+  // shape as `act`: the rows move first, the note waits for the server, and a
+  // failure puts the list back as it was.
+  //
+  // A move to trash is the one action every client only takes one id at a
+  // time, so it is sent per message and the note waits for the last answer;
+  // the first error is the one reported, and the rows that went are not
+  // restored — the server has them, and a reload shows what stayed.
+  function actMany(ids, action) {
+    var wanted = Array.isArray(ids) ? ids : []
+    if (!ready || wanted.length === 0) return false
+    if (refuseUnavailableAction(action)) return false
+    if (pendingAction !== "") {
+      note("Another action is still finishing")
+      return false
+    }
+    var sourceLabelId = hasLabels ? rawLabelId : ""
+    var change = action === "trash" || action === "untrash"
+      ? { add: [], remove: [] } : Model.labelChangesFor(action, sourceLabelId)
+    if (!change) return false
+    var listed = []
+    for (var w = 0; w < wanted.length; w++) {
+      if (Model.indexById(messages, wanted[w]) >= 0) listed.push(String(wanted[w]))
+    }
+    if (listed.length === 0) return false
+
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
     var before = messages.slice()
+    var beforePreview = previewMessages.slice()
+    var beforeSelected = selectedMessage
     var interrupted = listLoading
     if (interrupted) {
       listSerial++
@@ -1575,20 +1651,47 @@ Item {
       nextPageToken = ""
       actionToken = ""
     }
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
+      sourceLabelId)
     var next = []
-    for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
-    var survives = Model.survivesAction(mailboxKey, "markRead")
+    var nextPreview = previewMessages.slice()
+    var unreadDelta = 0
+    var selectedGone = false
+    for (var j = 0; j < messages.length; j++) {
+      var row = messages[j]
+      if (listed.indexOf(row.id) < 0) {
+        next.push(row)
+        continue
+      }
+      var updated = Model.applyLabelChange(row, action, sourceLabelId)
+      if (action === "markRead" && row.unread) unreadDelta--
+      if (action === "markUnread" && !row.unread) unreadDelta++
+      if (survives) next.push(updated)
+      if (Model.indexById(nextPreview, row.id) >= 0) {
+        nextPreview = updated.unread
+          ? Model.replaceById(nextPreview, updated)
+          : Model.removeById(nextPreview, row.id)
+      }
+      if (selectedId === row.id) {
+        if (survives) selectedMessage = updated
+        else selectedGone = true
+      }
+    }
+    inboxUnread = Math.max(0, inboxUnread + unreadDelta)
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
     var invalidatesPage = !survives || opaqueQuery
-    messages = survives ? next : []
+    messages = next
+    previewMessages = nextPreview
+    if (selectedGone) clearSelection()
     if (invalidatesPage) nextPageToken = ""
     var optimistic = messages.slice()
     var optimisticToken = nextPageToken
     if (!interrupted) rememberList()
     pendingActionQuery = actionQuery
-    pendingAction = "markRead"
-    api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
+    pendingAction = action
+
+    var done = function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
       if (error) {
@@ -1596,6 +1699,10 @@ Item {
             && !root.deferredLoadCleared(actionQuery)) {
           root.nextPageToken = actionToken
           root.messages = before
+          root.previewMessages = beforePreview
+          if (!selectedGone && beforeSelected && beforeSelected.id === root.selectedId)
+            root.selectedMessage = beforeSelected
+          root.inboxUnread = Math.max(0, root.inboxUnread - unreadDelta)
           if (!interrupted) root.rememberList()
         } else if (root.cacheStore.loaded) {
           root.cacheStore.putQuery(actionQuery, ({
@@ -1610,7 +1717,7 @@ Item {
           root.loadMessages(false, true, error)
         return
       }
-      root.note(Model.pluralize(ids.length, "message") + " marked read")
+      root.note(Model.batchNote(listed.length, root.actionLabel(action)))
       root.refreshCounts()
       if (interrupted && root.deferredLoadCleared(actionQuery)
           && root.cacheStore.loaded) {
@@ -1635,7 +1742,23 @@ Item {
       }
       if (root.active && root.cacheKey !== actionQuery)
         root.loadMessages(false, true, "")
-    })
+    }
+
+    if (action === "trash" || action === "untrash") {
+      var remaining = listed.length
+      var firstError = ""
+      var each = function(payload, error) {
+        if (error && firstError === "") firstError = String(error)
+        remaining--
+        if (remaining === 0) done(null, firstError)
+      }
+      for (var t = 0; t < listed.length; t++) {
+        if (action === "trash") api.trashMessage(listed[t], each)
+        else api.untrashMessage(listed[t], each)
+      }
+    } else {
+      api.batchModify(listed, change.add, change.remove, done)
+    }
     return true
   }
 
@@ -2294,6 +2417,109 @@ Item {
     Quickshell.execDetached(["notify-send", "-a", "Omamail", "-i",
       root.pluginDir + "/assets/omamail.svg",
       "--", Model.pluralize(list.length, "new message"), names.join(", ")])
+  }
+
+  // ------------------------------------------------------------ labels
+
+  // Whether the label list can be changed from here, and the four changes:
+  // create beside or beneath a label, rename it, move it under another,
+  // delete it. Every one goes to the provider first and reloads the list
+  // from the server after — a label is the server's fact, not this window's,
+  // and a Gmail label's id is only known once Gmail has made it.
+  readonly property bool canManageLabels: Provider.can(providerId, "manageLabels")
+
+  function labelById(id) {
+    var index = Model.indexById(labels, id)
+    return index >= 0 ? labels[index] : null
+  }
+
+  function labelPathOf(label) {
+    return label ? String(label.rawName || label.name || "") : ""
+  }
+
+  function createLabel(parentPath, leaf) {
+    if (!ready || !canManageLabels) return false
+    var delimiter = Model.labelDelimiter(labels.length > 0 ? labels[0] : null)
+    var problem = Model.labelNameProblem(leaf, delimiter)
+    if (problem !== "") { fail(problem); return false }
+    var name = Model.labelPathJoin(parentPath, leaf, delimiter)
+    api.createLabel(name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not create " + name + ": " + String(error)); return }
+      root.note("Created " + name)
+      root.reloadLabels()
+    })
+    return true
+  }
+
+  function renameLabel(id, leaf) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var delimiter = Model.labelDelimiter(label)
+    var problem = Model.labelNameProblem(leaf, delimiter)
+    if (problem !== "") { fail(problem); return false }
+    var path = labelPathOf(label)
+    var name = Model.labelPathJoin(Model.labelParent(path, delimiter), leaf, delimiter)
+    if (name === path) return false
+    api.renameLabel(String(label.id), name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not rename " + path + ": " + String(error)); return }
+      root.note("Renamed to " + name)
+      root.afterLabelMoved(path, name)
+    })
+    return true
+  }
+
+  function moveLabel(id, newParentPath) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var delimiter = Model.labelDelimiter(label)
+    var path = labelPathOf(label)
+    var name = Model.labelPathJoin(newParentPath, Model.labelLeaf(path, delimiter), delimiter)
+    if (name === path) return false
+    api.renameLabel(String(label.id), name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not move " + path + ": " + String(error)); return }
+      root.note("Moved to " + name)
+      root.afterLabelMoved(path, name)
+    })
+    return true
+  }
+
+  function deleteLabel(id) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var path = labelPathOf(label)
+    api.deleteLabel(String(label.id), function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not delete " + path + ": " + String(error)); return }
+      root.note("Deleted " + path)
+      // The list this window was looking at may have been the label just
+      // deleted; the inbox is the honest place to stand then.
+      if (root.rawLabelId === String(label.id)) root.selectMailbox("inbox")
+      root.reloadLabels()
+    })
+    return true
+  }
+
+  // The label on screen follows its own rename, so a rename does not leave
+  // the window on a query for a name the server no longer has.
+  function afterLabelMoved(oldPath, newPath) {
+    if (rawQuery !== "" && rawQuery === Provider.labelQuery(providerId, oldPath)) {
+      rawQuery = Provider.labelQuery(providerId, newPath)
+      rawLabelId = providerId === "imap" ? newPath : rawLabelId
+      loadMessages(false)
+    }
+    reloadLabels()
+  }
+
+  function reloadLabels() {
+    if (!ready) return
+    api.getLabels(function(result, error) {
+      if (!root || error) return
+      root.labels = result
+      root.cacheStore.putLabels(result)
+    })
   }
 
   // ------------------------------------------------------------ navigation

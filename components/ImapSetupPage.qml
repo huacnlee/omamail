@@ -40,6 +40,7 @@ Column {
   spacing: Style.space(16)
 
   function currentSettings() {
+    var existing = auth && auth.settings ? auth.settings : {}
     return Imap.setupSettings({
       address: addressField.text,
       imapHost: imapHostField.text.trim(),
@@ -47,7 +48,9 @@ Column {
       smtpHost: smtpHostField.text.trim(),
       smtpPort: smtpPortField.text,
       username: usernameField.text,
-      aliases: aliasesField.text
+      aliases: aliasesField.text,
+      auth: existing.auth,
+      tokenAccount: existing.tokenAccount
     })
   }
 

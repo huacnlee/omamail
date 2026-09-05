@@ -31,6 +31,18 @@ assert.strictEqual(provider.exists("imap"), true)
 
 assert.strictEqual(provider.can("gmail", "labels"), true)
 assert.strictEqual(provider.can("imap", "labels"), false)
+assert.strictEqual(provider.can("gmail", "manageLabels"), true)
+assert.strictEqual(provider.can("imap", "manageLabels"), true)
+assert.strictEqual(provider.can("hey", "manageLabels"), false, "HEY's labels are HEY's own")
+
+// Mail from or to an address, in each provider's own words.
+assert.strictEqual(provider.addressQuery("gmail", "from", "ada@example.com"), "from:ada@example.com")
+assert.strictEqual(provider.addressQuery("gmail", "to", " ada@example.com "), "to:ada@example.com")
+assert.strictEqual(provider.addressQuery("gmail", "from", "a b"), "", "a space would end the operator")
+assert.strictEqual(provider.addressQuery("imap", "from", "ada@example.com"), 'folder:INBOX FROM "ada@example.com"')
+assert.strictEqual(provider.addressQuery("imap", "to", 'a"b'), 'folder:INBOX TO "a\\"b"')
+assert.strictEqual(provider.addressQuery("hey", "to", "ada@example.com"), "search:ada@example.com")
+assert.strictEqual(provider.addressQuery("imap", "from", ""), "")
 // Separate questions. `labels` is whether a message can carry several at once,
 // which is what the reader's strip draws; `move` is whether the user gets to
 // say where it goes. IMAP answers no and yes -- one folder per message is the

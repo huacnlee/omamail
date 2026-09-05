@@ -46,6 +46,7 @@ Item {
     { key: "Enter or o", action: "Open the selected message" },
     { key: "e", action: "Archive" },
     { key: "d", action: "Move to trash" },
+    { key: "x", action: "Select; the keys above then act on every selected message" },
     { key: "r", action: "Reply" },
     { key: "c", action: "Compose" }
   ]

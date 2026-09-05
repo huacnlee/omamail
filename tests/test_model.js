@@ -511,7 +511,7 @@ assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
 assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
-  sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
+  sidebarCollapsed: false, sidebarWidth: 0, listWidth: 0, collapsedFolders: [], bodyZoom: 1, bodyMode: "reader",
   alwaysShowImages: false, windowOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
@@ -519,6 +519,13 @@ assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plai
 assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "original")
 assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').sidebarWidth, 180)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').listWidth, 420)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-3,"listWidth":"wide"}').sidebarWidth, 0,
+  "a bad width is a default, not a pane of no width")
+assert.strictEqual(model.paneWidth(99999), 4000)
+assert.strictEqual(model.paneWidth(0), 0)
+deepEqual(model.windowPrefs('{"collapsedFolders":["Archive","",3,"Archive"]}').collapsedFolders, ["Archive", "3"])
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
 
 // ------------------------------------------------- what a detail read carries
@@ -796,3 +803,183 @@ const binned = model.applyLabelChange(
 assert.strictEqual(binned.isSent, false)
 assert.strictEqual(binned.isDraft, false)
 assert.strictEqual(binned.inTrash, false)
+
+// ------------------------------------------------------------ the scope
+//
+// The header names what the window is looking at from the same facts the rail
+// draws: the open mailbox key, or the label whose query is open.
+{
+  const boxes = [
+    { key: "inbox", label: "Inbox", icon: "inbox" },
+    { key: "sent", label: "Sent", icon: "sent" }]
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Label_17", name: "Todo", rawName: "todo", unread: 3 },
+    { id: "Label_9", name: "Receipts", rawName: "Receipts", unread: 0 }]
+  const gmailQuery = function (name) { return "label:" + name }
+
+  deepEqual(model.currentScope("sent", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "sent", name: "Sent", icon: "sent" })
+  deepEqual(model.currentScope("", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "inbox", name: "Inbox", icon: "inbox" },
+    "an empty key is the inbox, as it is everywhere else")
+  deepEqual(model.currentScope("drafts", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "drafts", name: "Drafts", icon: "mail" },
+    "a key the provider does not list still names itself")
+
+  // A label selected from the rail carries its id; one carried by a query
+  // alone is found through the provider's own query rule.
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", gmailQuery),
+    { kind: "label", id: "Label_17", name: "Todo", icon: "label" })
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "", gmailQuery),
+    { kind: "label", id: "Label_17", name: "Todo", icon: "label" },
+    "the query alone still names the label")
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:gone", "", gmailQuery),
+    { kind: "label", id: "", name: "label:gone", icon: "label" },
+    "a query no label answers to is shown as it is rather than as nothing")
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", null).name,
+    "Todo", "matching by id needs no query rule")
+
+  // The switcher's rows are the rail's slots, numbered the way the Ctrl keys
+  // are, with the open scope marked.
+  const slots = model.sidebarSlots(boxes, labels, 10)
+  const rows = model.switcherRows(slots, labels,
+    model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", gmailQuery))
+  assert.strictEqual(rows.length, 4)
+  deepEqual(rows[0], { kind: "mailbox", key: "inbox", name: "Inbox", icon: "inbox",
+    number: 1, count: 0, selected: false })
+  deepEqual(rows[2], { kind: "label", id: "Label_17", name: "todo", icon: "label",
+    number: 3, count: 3, selected: true })
+  assert.strictEqual(rows[3].selected, false)
+  assert.strictEqual(rows[3].number, 4)
+
+  const inInbox = model.switcherRows(slots, labels,
+    model.currentScope("inbox", boxes, labels, "", "", gmailQuery))
+  assert.strictEqual(inInbox[0].selected, true)
+  assert.strictEqual(inInbox[2].selected, false)
+
+  // A folder known only by name — an IMAP label whose id the store did not
+  // keep — is still found on the row that shares the name.
+  const byName = model.switcherRows(slots, labels,
+    { kind: "label", id: "", name: "Receipts", icon: "label" })
+  assert.strictEqual(byName[3].selected, true)
+  assert.strictEqual(byName[2].selected, false)
+
+  assert.strictEqual(model.switcherRows(null, null, null).length, 0)
+}
+
+// ------------------------------------------------------------ selection
+{
+  const list = [{ id: "a", starred: true }, { id: "b" }, { id: "c", starred: true }, { id: "d" }]
+
+  deepEqual(model.toggleId([], "b"), ["b"])
+  deepEqual(model.toggleId(["b", "c"], "b"), ["c"])
+  deepEqual(model.toggleId(["b"], ""), ["b"], "an empty id toggles nothing")
+
+  deepEqual(model.idsBetween(list, "b", "d"), ["b", "c", "d"])
+  deepEqual(model.idsBetween(list, "d", "b"), ["b", "c", "d"], "either direction")
+  deepEqual(model.idsBetween(list, "", "c"), ["c"], "no anchor means the row itself")
+  deepEqual(model.idsBetween(list, "zz", "yy"), [])
+  deepEqual(model.unionIds(["a"], ["a", "c"]), ["a", "c"])
+
+  deepEqual(model.retainIds(["a", "gone", "c"], list), ["a", "c"])
+  deepEqual(model.allIds(list), ["a", "b", "c", "d"])
+  deepEqual(model.summariesById(list, ["c", "nope", "a"]), [list[2], list[0]])
+
+  // The cursor steps over every departing row to the first that stays, and
+  // back up the list only when nothing below survives.
+  assert.strictEqual(model.cursorAfterRemovals(list, ["b", "c"], "b"), "d")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["c", "d"], "c"), "b")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a", "b", "c", "d"], "b"), "")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "b"), "b", "a cursor off the selection stays")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "nope"), "")
+
+  assert.strictEqual(model.starActionFor([list[0], list[2]]), "unstar")
+  assert.strictEqual(model.starActionFor([list[0], list[1]]), "star", "a mixed selection stars")
+  assert.strictEqual(model.starActionFor([]), "star")
+
+  assert.strictEqual(model.batchNote(3, "Archived"), "3 messages archived")
+  assert.strictEqual(model.batchNote(1, "Moved to Todo"), "1 message moved to Todo")
+  assert.strictEqual(model.selectionStatus(0), "")
+  assert.strictEqual(model.selectionStatus(2), "2 selected")
+}
+
+// ------------------------------------------------------------ folder tree
+{
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive/2025", name: "Archive/2025", rawName: "Archive/2025", delimiter: "/", unread: 2 },
+    { id: "Archive", name: "Archive", rawName: "Archive", delimiter: "/", unread: 1 },
+    { id: "Archive/2026/Q1", name: "Archive/2026/Q1", rawName: "Archive/2026/Q1", delimiter: "/", unread: 4 },
+    { id: "Receipts", name: "Receipts", rawName: "Receipts", delimiter: "/", unread: 0 },
+    { id: "Label_3", name: "todo", rawName: "todo", unread: 1 }]
+
+  const open = model.labelTree(labels, [])
+  deepEqual(open.map(function (r) { return [r.path, r.depth, r.selectable, r.hasChildren, r.unread] }), [
+    ["Archive", 0, true, true, 1],
+    ["Archive/2025", 1, true, false, 2],
+    ["Archive/2026", 1, false, true, 0],
+    ["Archive/2026/Q1", 2, true, false, 4],
+    ["Receipts", 0, true, false, 0],
+    ["todo", 0, true, false, 1]],
+    "children hang under parents, a missing ancestor is a row of its own, siblings sort by name")
+  assert.strictEqual(open[0].name, "Archive")
+  assert.strictEqual(open[3].name, "Q1", "a row shows its own segment")
+  assert.strictEqual(open[3].id, "Archive/2026/Q1", "and keeps the whole id")
+
+  const folded = model.labelTree(labels, ["Archive"])
+  deepEqual(folded.map(function (r) { return r.path }), ["Archive", "Receipts", "todo"])
+  assert.strictEqual(folded[0].expanded, false)
+  assert.strictEqual(folded[0].unread, 7, "a folded parent counts its subtree")
+
+  const partly = model.labelTree(labels, ["Archive/2026"])
+  deepEqual(partly.map(function (r) { return r.path }), ["Archive", "Archive/2025", "Archive/2026", "Receipts", "todo"])
+  assert.strictEqual(partly[2].unread, 4)
+
+  // A server delimiter that is not a slash, and a Gmail label with none.
+  const dotted = model.labelTree([
+    { id: "a.b", name: "a.b", delimiter: "." }, { id: "a", name: "a", delimiter: "." },
+    { id: "x/y", name: "x/y" }], [])
+  deepEqual(dotted.map(function (r) { return [r.path, r.depth] }), [["a", 0], ["a.b", 1], ["x", 0], ["x/y", 1]])
+
+  deepEqual(model.visibleLabels(labels, ["Archive"]).map(function (l) { return l.id }),
+    ["Archive", "Receipts", "Label_3"], "the digits follow what is on screen")
+  deepEqual(model.visibleLabels(labels, []).map(function (l) { return l.id }),
+    ["Archive", "Archive/2025", "Archive/2026/Q1", "Receipts", "Label_3"])
+  deepEqual(model.togglePath(["Archive"], "Archive"), [])
+  deepEqual(model.togglePath([], "Archive/2026"), ["Archive/2026"])
+  deepEqual(model.labelTree(null, null), [])
+}
+
+// ------------------------------------------------------------ label names
+{
+  assert.strictEqual(model.labelLeaf("Archive/2026/Q1", "/"), "Q1")
+  assert.strictEqual(model.labelLeaf("Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelParent("Archive/2026/Q1", "/"), "Archive/2026")
+  assert.strictEqual(model.labelParent("Receipts", "/"), "")
+  assert.strictEqual(model.labelPathJoin("Archive", " 2026 ", "/"), "Archive/2026")
+  assert.strictEqual(model.labelPathJoin("", "Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelPathJoin("a", "b", "."), "a.b")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "." }), ".")
+  assert.strictEqual(model.labelDelimiter({}), "/")
+  assert.strictEqual(model.labelNameProblem("  ", "/"), "A label needs a name")
+  assert.strictEqual(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") > 0, true)
+  assert.strictEqual(model.labelNameProblem("Receipts", "/"), "")
+
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive", rawName: "Archive" },
+    { id: "Archive/2026", rawName: "Archive/2026" },
+    { id: "Archive/2026/Q1", rawName: "Archive/2026/Q1" },
+    { id: "Receipts", rawName: "Receipts" }]
+  deepEqual(model.labelMoveTargets(labels, "Archive/2026", "/").map(function (t) { return t.path }),
+    ["", "Receipts"], "not itself, not its children, not its current parent, never a system label")
+  deepEqual(model.labelMoveTargets(labels, "Receipts", "/").map(function (t) { return t.path }),
+    ["", "Archive", "Archive/2026", "Archive/2026/Q1"])
+  assert.strictEqual(model.labelMoveTargets(labels, "Receipts", "/")[0].name, "Top level")
+}
+
+assert.strictEqual(model.monitoredNote([{ name: "Receipts", delta: 3 }]), "3 new in Receipts")
+assert.strictEqual(model.monitoredNote([{ name: "A", delta: 1 }, { name: "B", delta: 4 }, { name: "C", delta: 2 }]),
+  "4 new in B, 2 new in C and 1 more")
+assert.strictEqual(model.monitoredNote([]), "")

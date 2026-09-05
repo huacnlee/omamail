@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../agent/Agent.js" as Agent
 
 // Where mailboxes are managed.
 //
@@ -42,11 +43,18 @@ Column {
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "agent", title: "Agent", y: agentHeading.y },
     { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
     { key: "calendars", title: "Calendars", y: calendarsSection.y },
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+
+  function saveAgentCommand() {
+    if (!root.service) return
+    var next = String(agentEdit.text || "").trim()
+    if (next !== root.service.agentCommand) root.service.setAgentCommand(next)
+  }
 
   function signatureAccount(id) {
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -608,6 +616,105 @@ Column {
     }
 
     Component.onDestruction: root.saveSignature()
+  }
+
+  // ----------------------------------------------------------------- agent
+
+  Text {
+    id: agentHeading
+    text: "AGENT"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  // The default agent: a command line, and nothing else. With it empty there
+  // is no agent button anywhere; docs/AGENT.md says what the command is
+  // handed and what it is expected to do.
+  Column {
+    objectName: "settings-agent-section"
+    width: parent.width
+    spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      text: "Harness"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // A starting line for each harness, and "Custom" for one of your own.
+    // Choosing one writes its command into the field below, which stays
+    // editable; an edited line reads back as Custom, honestly.
+    Dropdown {
+      objectName: "settings-agent-preset"
+      width: parent.width
+      showLabel: false
+      value: Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom"
+      options: root.service ? root.service.agentPresetOptions : Agent.presetOptions([])
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) {
+        var preset = Agent.presetById(next)
+        if (!preset || !root.service) return
+        if (preset.command === "") return
+        agentEdit.text = preset.command
+        root.saveAgentCommand()
+      }
+    }
+
+    Text {
+      id: presetNote
+      width: parent.width
+      readonly property var preset: Agent.presetById(
+        Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom")
+      visible: !!preset && preset.note !== ""
+      textFormat: Text.PlainText
+      text: preset ? preset.note : ""
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Text {
+      width: parent.width
+      text: "Command"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    TextField {
+      id: agentEdit
+      objectName: "settings-agent-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "claude -p"
+      text: root.service ? root.service.agentCommand : ""
+      onActiveFocusChanged: if (!activeFocus) root.saveAgentCommand()
+      onAccepted: root.saveAgentCommand()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "Runs in the background as a systemd user unit with the prompt on "
+        + "stdin, and reads and writes mail through himalaya, so the command "
+        + "must be able to run himalaya without stopping to ask. With one set, "
+        + "every message gains an agent button and Alt+G, and the rail gains the "
+        + "agent pane. Leave it empty for no agent."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
   }
 
   // ------------------------------------------------------------- mailboxes

@@ -11,6 +11,8 @@ import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
+import "providers/Registry.js" as Provider
+import "agent/Agent.js" as Agent
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
@@ -205,6 +207,71 @@ Item {
   readonly property bool compact: window.width < Style.space(760)
 
   property string cursorId: ""
+  // The rows ticked for a bulk action, by id. Like the cursor, a fact about
+  // this window rather than about the mailbox, and pruned the same way when
+  // the list under it changes. Only the list acts on it: in the reader there
+  // is one message and it is the one open.
+  property var checkedIds: []
+  // Ticked rows mean the selection whenever the list is on screen: alone, or
+  // beside the reader in a wide window. A plain click opens a message and
+  // puts the window in the reader view, so a click, a Shift+click and `d`
+  // used to trash only the open message — the ticks were there and ignored.
+  readonly property bool listOnScreen: currentView === "list"
+    || (currentView === "reader" && !compact)
+  readonly property bool selectionActive: checkedIds.length > 0 && listOnScreen
+
+  function toggleCheck(id) {
+    var key = String(id || "")
+    if (key === "") return false
+    checkedIds = Model.toggleId(checkedIds, key)
+    return true
+  }
+
+  // Shift+click: everything from the cursor to here joins the selection, and
+  // the cursor moves here so the next stretch starts where this one ended.
+  function checkRange(id) {
+    if (!service) return false
+    var key = String(id || "")
+    if (key === "") return false
+    checkedIds = Model.unionIds(checkedIds, Model.idsBetween(service.messages, cursorId, key))
+    cursorId = key
+    return true
+  }
+
+  // Every loaded row, or none when every one is already ticked: one key that
+  // means "all of these" has to be able to mean "none of them" as well.
+  function checkAll() {
+    if (!service) return false
+    var all = Model.allIds(service.messages)
+    checkedIds = Model.retainIds(checkedIds, service.messages).length === all.length ? [] : all
+    return true
+  }
+
+  // Acting on the selection acts on every ticked row at once, then drops the
+  // selection: the rows it named have moved or changed, and a selection that
+  // outlived the action would be one keystroke from repeating it.
+  function actOnChecked(action) {
+    if (!service || checkedIds.length === 0) return false
+    var ids = checkedIds.slice()
+    var leaves = !Model.survivesAction(service.mailboxKey, action,
+      service.rawQuery, service.hasLabels, service.rawLabelId)
+    var next = leaves ? Model.cursorAfterRemovals(service.messages, ids, cursorId) : cursorId
+    // The open message going with the selection closes the reader, the way
+    // acting on it alone does: it is about to leave this list.
+    var wasOpen = currentView === "reader" && ids.indexOf(service.selectedId) >= 0
+    if (!service.actMany(ids, action)) return false
+    checkedIds = []
+    if (!leaves) return true
+    if (wasOpen) {
+      if (next !== "") openMessage(next)
+      else backToList()
+      return true
+    }
+    cursorId = next
+    revealCursorRow()
+    return true
+  }
+
   // Kept across messages, and across the window being closed: how somebody
   // reads their mail is a fact about them, not about the message that made them
   // reach for it. The service holds it because that is what writes it to disk.
@@ -215,7 +282,16 @@ Item {
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
   // 0 means "proportional"; anything else is a width somebody dragged to.
+  // Where the two dividers were dragged to, or 0 for each pane's own default.
+  // Seeded from the service's window file and written back when a drag ends.
   property real listWidth: 0
+  property real sidebarWidth: 0
+  readonly property real sidebarMinWidth: Style.space(110)
+  readonly property real sidebarMaxWidth: Style.space(360)
+
+  function persistPaneWidths() {
+    if (service) service.setPaneWidths(sidebarWidth, listWidth)
+  }
 
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
@@ -240,8 +316,10 @@ Item {
   readonly property string page: navPage.kind
   readonly property string overlay: navOverlay ? navOverlay.kind : ""
   readonly property string currentView: page === "reader" ? "reader"
-    : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
+    : ((page === "calendar" || page === "calendarDetail") ? "calendar"
+      : (page === "agent" ? "agent" : "list"))
   readonly property bool calendarVisible: currentView === "calendar"
+  readonly property bool agentVisible: currentView === "agent"
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -416,6 +494,13 @@ Item {
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
     cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
+    // A stub service in the tests carries no widths; a real one always does.
+    if (service && service.sidebarWidth !== undefined) {
+      sidebarWidth = service.sidebarWidth
+      listWidth = service.listWidth
+    }
+    // Jobs finish while the window is shut; the rows say so as soon as it opens.
+    if (service && typeof service.refreshAgentJobs === "function") service.refreshAgentJobs()
     Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
@@ -477,6 +562,14 @@ Item {
   function showCalendar() {
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+  }
+
+  // The agent pane is the third root, beside mail and the calendar.
+  function showAgent() {
+    if (!service || !service.hasAgent) return false
+    navUntouched = false
+    nav = Nav.replaceRoot(nav, "agent")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -675,15 +768,92 @@ Item {
   // move before asking for a destination, through the same provider guard that
   // checks the final action before its optimistic update.
   function openLabelPicker() {
-    if (!service || cursorId === "") return false
+    if (!service || (cursorId === "" && !selectionActive)) return false
     if (service.refuseUnavailableAction("label:destination")) return false
     labelPicker.open()
     return true
   }
 
+  // A row's own button: the selection when the row is ticked, that row alone
+  // when it is not — the rule the row menu follows, so a click and a key on
+  // the same row cannot mean different sets of messages.
+  function actFromRow(id, action) {
+    if (!service) return false
+    var outside = checkedIds.indexOf(id) < 0
+    cursorId = id
+    if (action === "star") {
+      if (selectionActive && !outside)
+        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
+      service.toggleStar(id)
+      return true
+    }
+    return actOnCursor(action, outside)
+  }
+
+  // The agent popup on a message: at a control's edge from a button, centred
+  // from the key. The subject is read off the list row or the open message so
+  // the popup can say which message it is asking about.
+  function agentSubjectFor(id) {
+    if (!service) return ""
+    var index = Model.indexById(service.messages, id)
+    if (index >= 0) return String(service.messages[index].subject || "")
+    if (service.selectedId === id && service.selectedMessage)
+      return String(service.selectedMessage.subject || "")
+    return ""
+  }
+
+  // With rows ticked, the ask is about all of them — one job, one popup
+  // titled with the count — by the rule every other action follows.
+  function openAgentAt(id, sceneX, sceneY) {
+    if (!service || !service.hasAgent) return false
+    if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
+      agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
+      return true
+    }
+    if (String(id || "") === "") return false
+    agentPrompt.openFor(id, agentSubjectFor(id), sceneX, sceneY)
+    return true
+  }
+
+  function openAgentCentered(id) {
+    if (!service || !service.hasAgent) return false
+    if (selectionActive) {
+      var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
+        Math.max(0, root.height / 2 - Style.space(90)))
+      agentPrompt.openForSelection(checkedIds, centre.x, centre.y)
+      return true
+    }
+    if (String(id || "") === "") return false
+    agentPrompt.openCenteredFor(id, agentSubjectFor(id))
+    return true
+  }
+
+  // The pane, opened on one job: from a row's glyph, or the popup's button.
+  function showAgentJob(jobId) {
+    if (!showAgent()) return false
+    agentView.openOn(jobId)
+    return true
+  }
+
+  // A row's glyph means "show me what the agent is doing with this", which
+  // is the pane's card; the popup is for asking, and the reader's button
+  // and Alt+G still open it.
+  function openAgentFromRow(id, sceneX, sceneY) {
+    var job = service ? service.agentJobs[String(id || "")] : null
+    if (job) return showAgentJob(String(job.id))
+    return openAgentAt(id, sceneX, sceneY)
+  }
+
   // Acting on the open message closes it: it is about to leave this list.
-  function actOnCursor(action) {
-    if (!service || cursorId === "") return false
+  //
+  // With rows ticked, the key means all of them rather than the one under the
+  // cursor — the same key, the same guard in `MailAccount`, one more row in
+  // the request. `onlyCursor` is for the row menu opened on a row outside the
+  // selection, which means that row and nothing else.
+  function actOnCursor(action, onlyCursor) {
+    if (!service) return false
+    if (selectionActive && onlyCursor !== true) return actOnChecked(action)
+    if (cursorId === "") return false
     var acted = cursorId
     var wasOpen = currentView === "reader" && service.selectedId === acted
     // Worked out before the action, while the row still has neighbours.
@@ -719,7 +889,18 @@ Item {
   // are drawn from, so the number beside a row and the row a number opens are
   // the same fact rather than two.
   readonly property var sidebarSlots: service
-    ? Model.sidebarSlots(service.mailboxes, service.labels, 10) : []
+    ? Model.sidebarSlots(service.mailboxes, service.visibleLabels, 10) : []
+
+  // What the header names: the mailbox open, or the label. Derived from the
+  // same facts the rail draws its selected row from.
+  readonly property var scope: service
+    ? Model.currentScope(service.mailboxKey, service.mailboxes, service.labels,
+        service.rawQuery, service.rawLabelId,
+        function(name) { return Provider.labelQuery(service.providerId, name) })
+    : Model.currentScope("inbox", [], [], "", "", null)
+
+  readonly property var switcherRows: service
+    ? Model.switcherRows(sidebarSlots, service.visibleLabels, scope) : []
 
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
@@ -751,9 +932,17 @@ Item {
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     if (id === "star") {
+      if (selectionActive)
+        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
       if (service && cursorId !== "") service.toggleStar(cursorId)
       return
     }
+    if (id === "toggleCheck") return toggleCheck(cursorId)
+    if (id === "askAgent") {
+      var target = currentView === "reader" && service ? service.selectedId : cursorId
+      return openAgentCentered(target)
+    }
+    if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
@@ -784,6 +973,7 @@ Item {
       return
     }
     if (id === "switchAccount") return accountSwitcher.openCentered()
+    if (id === "switchMailbox") return mailboxSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
       else {
@@ -793,6 +983,7 @@ Item {
       return
     }
     if (id === "mailView") return backToList()
+    if (id === "agentView") { showAgent(); return }
     if (id === "calendarView") {
       showCalendar()
       calendarView.refresh()
@@ -825,6 +1016,12 @@ Item {
     if (searchBar.fieldFocused) {
       if (searchBar.queryText !== "") searchBar.clear()
       focusScope.parkKeyboard()
+      return
+    }
+    // A selection is the next nearest thing: Escape with rows ticked unticks
+    // them and goes nowhere, which is what every file manager does with it.
+    if (selectionActive) {
+      checkedIds = []
       return
     }
     back()
@@ -872,9 +1069,13 @@ Item {
       root.resumeHeldDraft()
     }) }
 
+    function onSidebarWidthChanged() { root.sidebarWidth = root.service.sidebarWidth }
+    function onListWidthChanged() { root.listWidth = root.service.listWidth }
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
         root.service ? root.service.messages : [], root.cursorId)
+      root.checkedIds = Model.retainIds(root.checkedIds,
+        root.service ? root.service.messages : [])
     }
     function onDuplicateAccount(email) {
       root.notice = email + " is already added"
@@ -1024,6 +1225,49 @@ Item {
       service.calendarController.deleteEvent(request.sourceId, request.event)
       calendarView.closeDetail()
     }
+    if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId)
+  }
+
+  // ------------------------------------------------------------ labels
+
+  function labelDelimiterFor(id) {
+    var label = service ? service.labelById(id) : null
+    return Model.labelDelimiter(label)
+  }
+
+  function labelPathFor(id) {
+    var label = service ? service.labelById(id) : null
+    return label ? String(label.rawName || label.name || "") : ""
+  }
+
+  // A name asked for, then handed to the service with what it was for. The
+  // prompt is one component serving three asks, told apart by `kind`.
+  function askLabelName(kind, subject, title, initial, hint) {
+    namePrompt.openFor(kind, subject, title, initial, hint)
+  }
+
+  function labelNamed(kind, subject, text) {
+    if (!service) return
+    if (kind === "rename") service.renameLabel(subject, text)
+    else if (kind === "create") service.createLabel(subject, text)
+  }
+
+  function copyAddress(address) {
+    var text = String(address || "").trim()
+    // Straight to wl-copy as one argument: no shell, and an address that
+    // starts with a dash is not an address.
+    if (text === "" || text.charAt(0) === "-") return
+    Quickshell.execDetached(["wl-copy", text])
+    notice = "Copied " + text
+    noticeTimer.restart()
+  }
+
+  function searchAddress(field, address) {
+    if (!service) return
+    var query = Provider.addressQuery(service.providerId, field, address)
+    if (query === "") return
+    service.search(query)
+    backToList()
   }
 
   FloatingWindow {
@@ -1073,6 +1317,7 @@ Item {
         composing: root.composing,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
+        agentVisible: root.agentVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
@@ -1092,6 +1337,7 @@ Item {
           else compose.takeFocus()
         }
         else if (keyContext === "search") searchBar.focusField()
+        else if (keyContext === "agent") agentView.takeFocus()
         else parkKeyboard()
       }
 
@@ -1138,13 +1384,61 @@ Item {
             brand: true
           }
 
+          // What this window is looking at, said where the eye lands first:
+          // the account, then the mailbox or label open in it. Each half is
+          // the control that changes it, so the line is the switcher as much
+          // as the title. The rail says the same thing further down and only
+          // when it is expanded; the status line carries the address.
+          ScopeButton {
+            id: accountScope
+            objectName: "scope-account"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing
+            text: root.ready ? root.service.accountLabel : "No account"
+            tooltipText: "Switch account · Alt+A"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: accountSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              accountSwitcher.openAt(scene.x, scene.y)
+            }
+          }
+
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Omamail"
-            color: root.foreground
+            visible: accountScope.visible && mailboxScope.visible
+            text: "\u203A"
+            color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.title
+            font.pixelSize: Style.font.body
+          }
+
+          ScopeButton {
+            id: mailboxScope
+            objectName: "scope-mailbox"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
+            iconName: root.scope.icon
+            text: root.scope.name
+            tooltipText: "Go to a mailbox · Alt+M"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: mailboxSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              mailboxSwitcher.openAt(scene.x, scene.y)
+            }
           }
 
           // Next to the mark: this is the window's own menu, not an action on
@@ -1193,7 +1487,7 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
               && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
@@ -1224,6 +1518,26 @@ Item {
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
+          // The agent pane, from the header as well as from the rail's foot:
+          // the rail is gone in a narrow window and folded in a collapsed one,
+          // and this is the one place that is always there. Lit while the
+          // pane is up, in the accent while a job is running.
+          IconButton {
+            objectName: "header-agent-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && !!root.service && root.service.hasAgent
+            iconName: "agent"
+            tooltipText: root.agentVisible ? "Back to mail · Ctrl+Shift+M" : "Agent pane · Ctrl+Shift+G"
+            foreground: !!root.service && root.service.agentBusy ? root.accent : root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            selected: root.agentVisible
+            onClicked: {
+              if (root.agentVisible) root.backToList()
+              else root.showAgent()
+            }
+          }
+
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
@@ -1267,7 +1581,7 @@ Item {
           Button {
             objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
             text: "Compose"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -1302,10 +1616,15 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
+          width: root.sidebarCollapsed ? Style.space(44)
+            : (root.sidebarWidth > 0
+              ? Math.max(root.sidebarMinWidth, Math.min(root.sidebarMaxWidth, root.sidebarWidth))
+              : Style.space(148))
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          agentSelected: root.agentVisible
+          onAgentRequested: root.showAgent()
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
@@ -1323,6 +1642,12 @@ Item {
           onLabelSelected: function(labelId, name) {
             root.service.selectLabel(name, labelId)
             root.backToList()
+          }
+          onFolderToggled: function(path) { root.service.toggleFolder(path) }
+          onLabelMenuRequested: function(labelId, path, sceneX, sceneY) {
+            labelMenu.canManage = !!root.service && root.service.canManageLabels
+            labelMenu.monitored = !!root.service && root.service.monitoredLabelIds.indexOf(labelId) >= 0
+            labelMenu.openAt(labelId, path, sceneX, sceneY)
           }
         }
 
@@ -1346,9 +1671,46 @@ Item {
           onSelected: function(key) { root.goMailbox(key) }
         }
 
+        // The rail's own divider, the same shape as the list's: a hairline
+        // that meets the rail's edge and a few pixels of drag target beside it.
+        // Only while the rail is open — collapsed, its width is the glyph's.
+        Item {
+          id: sidebarSplitter
+          anchors.left: sidebar.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          visible: sidebar.visible && !root.sidebarCollapsed
+          z: 5
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = sidebar.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.sidebarWidth = Math.max(root.sidebarMinWidth,
+                Math.min(root.sidebarMaxWidth, grabbedWidth + moved))
+            }
+            onReleased: root.persistPaneWidths()
+            onDoubleClicked: {
+              root.sidebarWidth = 0
+              root.persistPaneWidths()
+            }
+          }
+        }
+
         Item {
           id: listColumn
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
@@ -1393,7 +1755,13 @@ Item {
               dimColor: root.dim
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
+              checkedIds: root.checkedIds
+              urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
+              onAgentRequested: function(id, sceneX, sceneY) { root.openAgentFromRow(id, sceneX, sceneY) }
+              onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
+              onCheckToggled: function(id) { root.toggleCheck(id) }
+              onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY) {
                 root.cursorId = id
                 rowMenu.openAt(id, sceneX, sceneY)
@@ -1440,9 +1808,13 @@ Item {
               var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
               root.listWidth = grabbedWidth + moved
             }
+            onReleased: root.persistPaneWidths()
             // Back to the proportional default, which is what most people
             // want after one bad drag.
-            onDoubleClicked: root.listWidth = 0
+            onDoubleClicked: {
+              root.listWidth = 0
+              root.persistPaneWidths()
+            }
           }
         }
 
@@ -1452,7 +1824,7 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showPage && !root.composing && !root.calendarVisible
+          visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
@@ -1480,11 +1852,25 @@ Item {
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
           }
+          agentOpen: agentPrompt.opened && !!root.service && agentPrompt.messageId === root.service.selectedId
+          agentWorking: !!root.service && root.service.selectedId !== ""
+            && Agent.isActive(root.service.agentJobs[root.service.selectedId])
+          onAddressMenuRequested: function(addresses, sceneX, sceneY) {
+            addressMenu.openAt(addresses, sceneX, sceneY)
+          }
           onActionRequested: function(action) {
-            if (root.service && root.service.selectedId !== "") {
-              root.cursorId = root.service.selectedId
-              root.actOnCursor(action)
+            if (!root.service || root.service.selectedId === "") return
+            if (action === "agent") {
+              var scene = reader.mapToGlobal(reader.width / 2, Style.space(48))
+              root.openAgentAt(root.service.selectedId, scene.x, scene.y)
+              return
             }
+            // The reader's own buttons mean the open message — unless it is
+            // one of the ticked rows, in which case they mean all of them,
+            // by the same rule as a row's buttons.
+            var outside = root.checkedIds.indexOf(root.service.selectedId) < 0
+            root.cursorId = root.service.selectedId
+            root.actOnCursor(action, outside)
           }
         }
 
@@ -1540,11 +1926,30 @@ Item {
           panelFontFamily: root.fontFamily
         }
 
+        AgentView {
+          id: agentView
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
+          visible: root.agentVisible && !root.showPage && !root.composing
+          z: 11
+          service: root.service
+          textColor: root.foreground
+          backgroundColor: root.background
+          accentColor: root.accent
+          urgentColor: root.urgent
+          dimColor: root.dim
+          panelFontFamily: root.fontFamily
+        }
+
         Rectangle {
           anchors.top: parent.top
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           visible: root.calendarVisible && !root.showPage && !root.composing
           color: root.background
           z: 10
@@ -1826,9 +2231,27 @@ Item {
           onClicked: root.toggleSidebar()
         }
 
+        // How many rows are ticked, beside the rail toggle. Said here rather
+        // than in the list because the list is where the ticks already are;
+        // this is the count, for a selection longer than the window.
+        Text {
+          id: selectionLabel
+          objectName: "status-selection"
+          anchors.left: railToggle.visible ? railToggle.right : parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.selectionActive && !root.showPage && !root.composing
+          text: Model.selectionStatus(root.checkedIds.length)
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
         Item {
           id: accountSlot
-          anchors.left: railToggle.visible ? railToggle.right : parent.left
+          anchors.left: selectionLabel.visible ? selectionLabel.right
+            : (railToggle.visible ? railToggle.right : parent.left)
           // The rail's labels sit 9 after their glyph; the toggle's box runs
           // past its glyph by half its slack, so the text starts that much
           // less after the box.
@@ -2017,6 +2440,122 @@ Item {
         }
       }
 
+      MailboxSwitcher {
+        id: mailboxSwitcher
+        objectName: "mailbox-switcher"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        rows: root.switcherRows
+        onRowChosen: function(index) { root.goSlot(index) }
+      }
+
+      AgentPrompt {
+        id: agentPrompt
+        objectName: "agent-prompt"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        urgentColor: root.urgent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        // Live while the popup is up: the state and the last line follow the
+        // job as the runner's listing changes under it.
+        job: root.service && messageId !== "" ? (root.service.agentJobs[messageId] || null) : null
+        onAsked: function(id, prompt) { if (root.service) root.service.askAgent(id, prompt) }
+        onAskedMany: function(ids, prompt) {
+          if (root.service && root.service.askAgentMany(ids, prompt)) root.checkedIds = []
+        }
+        onAnswered: function(jobId, answer) { if (root.service) root.service.answerAgent(jobId, answer) }
+        onPaneRequested: function(jobId) { root.showAgentJob(jobId) }
+        onCancelRequested: function(id) { if (root.service) root.service.cancelAgent(id) }
+      }
+
+      LabelMenu {
+        id: labelMenu
+        objectName: "label-menu"
+        anchors.fill: parent
+        textColor: root.foreground
+        urgentColor: root.urgent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onRenameRequested: function(labelId) {
+          var path = root.labelPathFor(labelId)
+          var delimiter = root.labelDelimiterFor(labelId)
+          root.askLabelName("rename", labelId, "Rename " + path,
+            Model.labelLeaf(path, delimiter), "The new name for this label. Labels beneath it move with it.")
+        }
+        onCreateRequested: function(path, beneath) {
+          var delimiter = root.service ? Model.labelDelimiter(root.service.labels.length > 0 ? root.service.labels[0] : null) : "/"
+          var parent = beneath ? path : Model.labelParent(path, delimiter)
+          root.askLabelName("create", parent,
+            parent === "" ? "New label" : "New label under " + parent, "",
+            "Its name at this level; nesting is the parent it goes under.")
+        }
+        onMoveRequested: function(labelId) {
+          var delimiter = root.labelDelimiterFor(labelId)
+          labelMovePicker.openFor(labelId,
+            Model.labelMoveTargets(root.service ? root.service.labels : [], root.labelPathFor(labelId), delimiter))
+        }
+        onMonitorToggled: function(labelId) { if (root.service) root.service.toggleMonitored(labelId) }
+        onDeleteRequested: function(labelId) {
+          var path = root.labelPathFor(labelId)
+          confirmDeleteDialog.openFor({
+            kind: "label", labelId: labelId, name: path,
+            message: "The label and every label beneath it are removed from the server. "
+              + "On Gmail the messages keep their other labels; on IMAP the folder and its mail are deleted."
+          })
+        }
+      }
+
+      NamePrompt {
+        id: namePrompt
+        objectName: "name-prompt"
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onSubmitted: function(kind, subject, text) { root.labelNamed(kind, subject, text) }
+      }
+
+      LabelMovePicker {
+        id: labelMovePicker
+        objectName: "label-move-picker"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onTargetChosen: function(labelId, parentPath) { if (root.service) root.service.moveLabel(labelId, parentPath) }
+      }
+
+      AddressMenu {
+        id: addressMenu
+        objectName: "address-menu"
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        canSearch: !!root.service && Provider.addressQuery(root.service.providerId, "from", "a@b.c") !== ""
+        onCopyRequested: function(address) { root.copyAddress(address) }
+        onSearchRequested: function(field, address) { root.searchAddress(field, address) }
+      }
+
       LabelPicker {
         id: labelPicker
         objectName: "label-picker"
@@ -2073,8 +2612,11 @@ Item {
           root.startCompose(mode)
         }
         onActionRequested: function(action, id) {
+          // On a ticked row the menu means the selection; on any other row it
+          // means that row alone, whatever else is ticked.
+          var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
-          root.actOnCursor(action)
+          root.actOnCursor(action, outside)
         }
       }
 

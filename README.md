@@ -229,6 +229,8 @@ and the client itself are console-only; there is no CLI for them.
 
 ## Using it
 
+Right-click does the rest. On a label in the rail: rename it, make a label beside or beneath it, move it under another, delete it, or watch it for new mail — a watched label counts its unread on every refresh and shows an eye. On the reader's From or To line: copy the address, or search the mailbox for mail from it or to it.
+
 | Key | What it does |
 | --- | --- |
 | `j` / `k` | Move down / up |
@@ -245,6 +247,11 @@ and the client itself are console-only; there is no CLI for them.
 | `/` | Search |
 | `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
+| `Alt+M` | Go to a mailbox or label from a list |
+| `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
+| `Ctrl+A` | Select every message loaded, or none |
+| `Alt+G` | Ask the default agent about the message, when one is set in Settings |
+| `Ctrl+Shift+G` | The agent pane: an ask across this mailbox or every mailbox |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `?` | Every shortcut |

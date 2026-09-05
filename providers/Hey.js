@@ -119,6 +119,14 @@ function cachedSummaryInSearch(sourceQuery, summary) {
 // Selecting a label in the sidebar. HEY addresses a label by id, not by name —
 // `hey label <id>` takes nothing else — so the id is what the sidebar carries
 // as a label's `rawName` and what arrives here.
+// HEY's search takes words, not operators, so an address is searched as a
+// word: from and to cannot be told apart, and that is said by answering the
+// same query for both rather than by pretending.
+function addressQuery(field, address) {
+  var value = String(address === undefined || address === null ? "" : address).trim()
+  return value === "" ? "" : "search:" + value
+}
+
 function labelQuery(name) {
   var value = String(name === undefined || name === null ? "" : name).trim()
   return value === "" ? "" : "label:" + value

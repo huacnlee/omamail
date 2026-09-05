@@ -84,8 +84,9 @@ var PRESETS = [
     domains: ["outlook.com", "hotmail.com", "live.com", "msn.com"],
     imapHost: "outlook.office365.com", imapPort: 993,
     smtpHost: "smtp-mail.outlook.com", smtpPort: 587,
-    note: "Microsoft has withdrawn password sign-in for personal accounts; "
-      + "a work or school account may still allow it."
+    note: "Microsoft has withdrawn password sign-in for personal accounts. "
+      + "A work or school tenant that refuses the password needs OAuth (XOAUTH2), "
+      + "not an app password."
   },
   {
     id: "yahoo",
@@ -149,6 +150,34 @@ var PRESETS = [
 
 function trimmed(value) {
   return String(value === undefined || value === null ? "" : value).trim()
+}
+
+// IMAP password vs Microsoft 365 XOAUTH2. Empty/missing is password: that is
+// what every mailbox already on disk is. `tokenAccount` is the ortie account
+// name (`ortie token show -a <name>`), not a secret.
+function usesXoauth2(raw) {
+  return trimmed((raw || {}).auth).toLowerCase() === "xoauth2"
+}
+
+function tokenAccountOf(raw) {
+  return trimmed((raw || {}).tokenAccount)
+}
+
+function normalizeAuth(value) {
+  return trimmed(value).toLowerCase() === "xoauth2" ? "xoauth2" : ""
+}
+
+// The string `mail-transport.sh` decodes as curl credentials. Password IMAP is
+// `user:password`; XOAUTH2 is `oauth2-bearer:<user>:<token>` so the transport
+// can emit curl's `user` + `oauth2-bearer` options. A tab is a control
+// character and is refused before curl starts, so the separator is a colon
+// (the token may contain further colons; only the first two fields are split).
+function imapCredentials(raw, secret) {
+  var settings = normalizeSettings(raw)
+  var value = String(secret === undefined || secret === null ? "" : secret)
+  if (usesXoauth2(settings))
+    return "oauth2-bearer:" + settings.username + ":" + value
+  return settings.username + ":" + value
 }
 
 function domainOf(address) {
@@ -241,7 +270,9 @@ function normalizeSettings(raw) {
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
-    insecure: values.insecure === true && isLoopback(values.imapHost)
+    insecure: values.insecure === true && isLoopback(values.imapHost),
+    auth: normalizeAuth(values.auth),
+    tokenAccount: tokenAccountOf(values)
   }
 }
 
@@ -263,7 +294,9 @@ function setupSettings(raw) {
     smtpPort: values.smtpPort,
     username: trimmed(values.username) || trimmed(values.address),
     aliases: values.aliases,
-    insecure: isLoopback(values.imapHost)
+    insecure: isLoopback(values.imapHost),
+    auth: values.auth,
+    tokenAccount: values.tokenAccount
   })
 }
 
@@ -276,6 +309,8 @@ function validateSettings(raw) {
   if (!isValidHost(settings.imapHost)) return { ok: false, error: "That is not a valid IMAP server address" }
   if (settings.smtpHost !== "" && !isValidHost(settings.smtpHost))
     return { ok: false, error: "That is not a valid SMTP server address" }
+  if (usesXoauth2(settings) && settings.tokenAccount === "")
+    return { ok: false, error: "XOAUTH2 mailboxes need a token helper account name" }
   return { ok: true, error: "", settings: settings }
 }
 
@@ -1035,6 +1070,64 @@ function decodeMailbox(name) {
   return out
 }
 
+// The other direction, for a name the user typed that is about to be sent in
+// CREATE or RENAME: printable US-ASCII passes through, "&" is spelled "&-",
+// and everything else goes into a base64 run of its UTF-16 code units with
+// "," standing in for "/" and no padding — RFC 3501 section 5.1.3. What comes
+// back from LIST decodes to the same text, and `tests/test_imap.js` holds the
+// round trip.
+function encodeMailbox(name) {
+  var text = String(name === undefined || name === null ? "" : name)
+  var out = ""
+  var run = ""
+  function flush() {
+    if (run === "") return
+    var bytes = []
+    for (var i = 0; i < run.length; i++) {
+      var code = run.charCodeAt(i)
+      bytes.push((code >> 8) & 0xff, code & 0xff)
+    }
+    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,"
+    var encoded = ""
+    for (var b = 0; b < bytes.length; b += 3) {
+      var n = (bytes[b] << 16) | ((b + 1 < bytes.length ? bytes[b + 1] : 0) << 8)
+        | (b + 2 < bytes.length ? bytes[b + 2] : 0)
+      encoded += alphabet.charAt((n >> 18) & 63) + alphabet.charAt((n >> 12) & 63)
+      if (b + 1 < bytes.length) encoded += alphabet.charAt((n >> 6) & 63)
+      if (b + 2 < bytes.length) encoded += alphabet.charAt(n & 63)
+    }
+    out += "&" + encoded + "-"
+    run = ""
+  }
+  for (var at = 0; at < text.length; at++) {
+    var ch = text.charAt(at)
+    var code = text.charCodeAt(at)
+    if (code >= 0x20 && code <= 0x7e) {
+      flush()
+      out += ch === "&" ? "&-" : ch
+    } else {
+      run += ch
+    }
+  }
+  flush()
+  return out
+}
+
+// The three commands that change the folder list. Names travel encoded and
+// quoted; a RENAME carries every folder beneath the old name with it, which
+// is what moving a folder under another parent is.
+function createCommand(name) {
+  return "CREATE " + quote(encodeMailbox(name))
+}
+
+function renameCommand(from, to) {
+  return "RENAME " + quote(encodeMailbox(from)) + " " + quote(encodeMailbox(to))
+}
+
+function deleteCommand(name) {
+  return "DELETE " + quote(encodeMailbox(name))
+}
+
 // The SPECIAL-USE attributes this plugin cares about, mapped to the folder the
 // server named. A server that advertises none leaves the map empty and
 // `resolveFolder` falls back to the plain word.
@@ -1259,6 +1352,11 @@ function transportError(status, response, detail, fallback) {
     if (trimmed(served) !== "") return responseError(0, served, fallback)
   }
   return responseError(status, detail, fallback)
+}
+
+function isRejectedCredentials(status, response, detail) {
+  var message = transportError(status || 0, response || "", detail || "", "")
+  return /rejected that username or password/i.test(message)
 }
 
 // A password can end up in a curl error line, in a server's echo of a failed
