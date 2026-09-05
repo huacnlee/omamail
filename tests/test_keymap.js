@@ -228,7 +228,7 @@ assert.strictEqual(keymap.hintKeyFor(byId("archive")), "e",
 
 const listHints = keymap.hintsFor("list")
 deepEqual(listHints.map(function (h) { return h.key + " " + h.label }),
-  ["j / k move", "o open", "e archive", "x select", "c compose"],
+  ["j / k move", "o open", "e archive", "d trash", "x select", "c compose"],
   "the status bar offers what the list can do, in its short form")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),

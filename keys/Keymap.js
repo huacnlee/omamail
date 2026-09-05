@@ -48,7 +48,7 @@ var BINDINGS = [
     hint: { list: "archive", reader: "archive" } },
   { id: "trash", keys: ["d"], contexts: MAIL,
     group: "Acting", label: "Move to trash",
-    hint: { reader: "trash" } },
+    hint: { list: "trash", reader: "trash" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
