@@ -13,9 +13,9 @@ import "../message/Message.js" as Mail
 //
 // It signs the account in — discovery, the session GET under each scheme in
 // turn, the four-step check — and it reads: the rail, the labels, the list, a
-// page, a search and the counts. The reader, the actions, the push and the
-// send are stubs the following tickets fill, and each answers an empty result
-// rather than pretending to fail.
+// page, a search, the counts, one message whole and the octets of a part. The
+// actions, the push and the send are stubs the following tickets fill, and
+// each answers an empty result rather than pretending to fail.
 //
 // ## Three things every read depends on, in this order
 //
@@ -143,6 +143,11 @@ Item {
   // The callback takes the whole reply: `{ exit, status, redirect, body,
   // stderr }`. Every caller here has its own opinion about what a status
   // means, so none of them is imposed at this level.
+  //
+  // `body` is text for every verb but `download`, whose answer is a blob and
+  // stays base64 — including the problem document a failed one answers with,
+  // which is why `downloadBlob` decodes that itself rather than the transport
+  // decoding every megabyte of every attachment on the chance one failed.
   function request(verb, url, credential, extra, handle, callback) {
     var owner = handle || newHandle()
     var credentials = credential || { scheme: Jmap.AUTH_NONE, username: "", secret: "" }
@@ -152,7 +157,8 @@ Item {
 
     var process = transportComponent.createObject(root, {
       command: [root.transport],
-      requestLine: verb + " " + fields.join(" ")
+      requestLine: verb + " " + fields.join(" "),
+      binaryBody: verb === "download"
     })
     if (!process) {
       if (typeof callback === "function")
@@ -810,9 +816,9 @@ Item {
 
   // The rows behind those ids, in the order they were asked for.
   //
-  // `full` is ignored here: a full read is `bodyStructure` and body values, and
-  // it belongs to the ticket that builds the reader. Every row goes through the
-  // same composer, so a list row and a preview row are the same shape.
+  // `full` is ignored here: a full read is one message, and `getMessage` is
+  // where a body structure and its values are asked for. Every row goes through
+  // the same composer, so a list row and a preview row are the same shape.
   function getMessages(ids, full, callback, existingHandle, progress) {
     var handle = existingHandle || newHandle()
     var wanted = []
@@ -852,11 +858,9 @@ Item {
 
       for (var c = 0; c < chunks.length; c++) {
         (function(chunk) {
-          var child = root.call([["Email/get", {
-            accountId: root.accountId,
-            ids: chunk,
-            properties: Jmap.LIST_PROPERTIES
-          }, "0"]], null, function(responses, failure) {
+          var child = root.call([[
+            "Email/get", Jmap.emailGet(root.accountId, chunk, false), "0"
+          ]], null, function(responses, failure) {
             if (!root || handle.aborted) return
             if (failure && firstError === "") firstError = failure
             var args = Jmap.responseArguments(responses, "Email/get")
@@ -879,12 +883,168 @@ Item {
     return handle
   }
 
+  // One message, whole: the headers, the MIME tree and the text of the parts
+  // that are text.
+  //
+  // A read that is not full is the list row again, through the same composer,
+  // so a preview and a row cannot disagree about the same message. A full read
+  // is one `Email/get` and, only when the server truncated something, one
+  // download per truncated part before the callback fires — the reader is
+  // handed a message that is finished or it is handed an error, never a body
+  // that fills in a moment later underneath it.
   function getMessage(id, full, callback) {
-    return answer(callback, null)
+    var messageId = String(id || "")
+    if (full !== true) {
+      return getMessages([messageId], false, function(messages, error) {
+        if (typeof callback !== "function") return
+        if (error || messages.length === 0)
+          callback(null, error || "That message is no longer in the mailbox")
+        else callback(messages[0], "")
+      })
+    }
+
+    var handle = newHandle()
+    if (messageId === "") {
+      hand(callback, null, "That message is no longer in the mailbox")
+      return handle
+    }
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      var child = root.call([[
+        "Email/get", Jmap.emailGet(root.accountId, [messageId], true), "0"
+      ]], null, function(responses, failure) {
+        if (!root || handle.aborted) return
+        if (failure) {
+          root.hand(callback, null, failure)
+          return
+        }
+        var args = Jmap.responseArguments(responses, "Email/get")
+        var list = args && Array.isArray(args.list) ? args.list : []
+        // `notFound` rather than an error: a message deleted between the list
+        // and the open is the ordinary race, and the sentence the panel shows
+        // for it is the same one every other provider gives.
+        if (list.length === 0) {
+          root.hand(callback, null, "That message is no longer in the mailbox")
+          return
+        }
+        var email = list[0]
+        var message = Jmap.toMessage(email, root.roles, true)
+        root.fillTruncated(message, Jmap.truncatedParts(email), handle, function() {
+          if (!root || handle.aborted) return
+          root.hand(callback, message, "")
+        })
+      })
+      handle.children.push(child)
+    })
+    return handle
   }
 
+  // The parts the server sent short, fetched whole and put back before the
+  // message is delivered.
+  //
+  // A part that could not be fetched keeps the text the server did send. A
+  // truncated body still reads; refusing to open the message over the tail of
+  // one part would lose the whole of it to save the end — and the one failure
+  // that is not a network problem, a part past the blob ceiling, is a part
+  // nothing could have delivered anyway.
+  function fillTruncated(message, parts, handle, done) {
+    var pending = Array.isArray(parts) ? parts : []
+    var wanted = []
+    for (var i = 0; i < pending.length; i++) {
+      if (pending[i].size <= Jmap.MAX_BLOB_BYTES) wanted.push(pending[i])
+    }
+    if (wanted.length === 0) {
+      done()
+      return
+    }
+    var remaining = wanted.length
+    for (var j = 0; j < wanted.length; j++) {
+      (function(part) {
+        var child = root.downloadBlob(part.blobId, null, function(data, error) {
+          if (!root || handle.aborted) return
+          if (!error && data !== "") Jmap.substitutePart(message.payload, part, data)
+          remaining = remaining - 1
+          if (remaining === 0) done()
+        })
+        handle.children.push(child)
+      })(wanted[j])
+    }
+  }
+
+  // The octets of a part the message described but did not carry — the
+  // invitation the calendar card is drawn from, the file the reader opens, the
+  // attachment a forward re-encodes.
+  //
+  // `messageId` goes unused, and that is the shape of the thing rather than an
+  // oversight: a JMAP attachment id is the part's `blobId`, which addresses the
+  // blob on the account without reference to the message it happened to arrive
+  // in. Nothing here re-reads the message to find it.
   function getAttachment(messageId, attachmentId, callback) {
-    return answer(callback, null)
+    return downloadBlob(attachmentId, null, callback)
+  }
+
+  // One GET on the session's own download template, uncapped by the call queue
+  // because a blob is not a method call and a 20 MB download holding one of
+  // four API slots would stall the list behind it.
+  //
+  // The answer is base64 as the transport encoded it, which is what every
+  // consumer of an attachment already accepts: `Message.base64ToBytes` reads
+  // both alphabets, `Message.mimeBase64` re-wraps either for a forward, and
+  // `open-attachment.py` decodes either. Re-encoding 20 MB into the URL-safe
+  // alphabet to say the same thing would be the one expensive step in the path.
+  function downloadBlob(blobId, existingHandle, callback) {
+    var handle = existingHandle || newHandle()
+    var blob = String(blobId || "")
+    if (blob === "") {
+      hand(callback, "", "That attachment is not in the message")
+      return handle
+    }
+    ensureSession(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, "", error)
+        return
+      }
+      // The name and the type are placeholders on purpose: they are the last
+      // two path and query values of somebody else's URL template, the octets
+      // are what is wanted, and the real filename is already on the part.
+      var url = Jmap.downloadUrl(Jmap.downloadTemplate(root.session),
+        root.accountId, blob, "attachment", "application/octet-stream")
+      if (url === "") {
+        root.hand(callback, "", "Sign in to this mailbox again")
+        return
+      }
+      if (!root.auth) {
+        root.hand(callback, "", "Sign in to this mailbox first")
+        return
+      }
+      root.auth.withCredentials(function(credential, failure) {
+        if (!root || handle.aborted) return
+        if (failure || !credential) {
+          root.hand(callback, "", failure || "Sign in to this mailbox first")
+          return
+        }
+        root.request("download", url, credential, null, handle, function(reply) {
+          if (!root || handle.aborted) return
+          if (reply.exit !== 0 || reply.status !== 200) {
+            // curl exit 63 is the 20 MB ceiling the script fixes, and its
+            // sentence is written for somebody who just clicked an attachment.
+            // The body of a download crosses as base64 because it is bytes;
+            // the one answer that is not bytes is the problem document a
+            // failure carries, and it is small enough to read here.
+            root.hand(callback, "", Jmap.transportError(reply.exit, reply.status,
+              Mail.bytesToUtf8(Mail.base64ToBytes(reply.body)), reply.stderr, ""))
+            return
+          }
+          root.hand(callback, String(reply.body || ""), "")
+        })
+      })
+    })
+    return handle
   }
 
   // The server's own folders, in the shape the sidebar reads Gmail's labels in.
@@ -1000,6 +1160,14 @@ Item {
       id: transportProcess
 
       property string requestLine: ""
+      // Whether this verb's answer is bytes rather than text. A blob is the one
+      // that is: decoding it here would run 20 MB through `bytesToUtf8` in the
+      // process that draws the desktop, and — worse — would not survive it,
+      // because a byte sequence that is not valid UTF-8 does not come back out
+      // of a JavaScript string the way it went in. It stays base64 all the way
+      // to the caller, which is the alphabet every consumer of an attachment
+      // already reads.
+      property bool binaryBody: false
       signal finished(int exit, int status, string redirect, string body, string stderr)
 
       stdinEnabled: true
@@ -1031,7 +1199,8 @@ Item {
         transportProcess.finished(isFinite(exit) ? exit : 1,
           isFinite(status) ? status : 0,
           parts.length > 1 ? parts[1] : "",
-          Mail.bytesToUtf8(Mail.base64ToBytes(lines[2])),
+          transportProcess.binaryBody ? String(lines[2] || "")
+            : Mail.bytesToUtf8(Mail.base64ToBytes(lines[2])),
           Mail.bytesToUtf8(Mail.base64ToBytes(lines[3])))
       }
     }

@@ -5,6 +5,7 @@ const jmap = load("providers/JmapProtocol.js")
 const description = load("providers/Jmap.js")
 const registry = load("providers/Registry.js")
 const message = load("message/Message.js")
+const calendar = load("message/Calendar.js")
 
 // --------------------------------------------------------- transport errors
 //
@@ -944,6 +945,385 @@ assert.strictEqual(summary.date.getTime(), Date.parse("2026-08-24T09:00:00Z"),
 
 deepEqual(jmap.toMessage(null, roles).payload.headers, [])
 assert.strictEqual(jmap.toMessage(null, roles).internalDate, "")
+
+// ---------------------------------------------------- what a read asks for
+//
+// The two `Email/get` argument objects, in one place, because the difference
+// between them is the whole difference between a row and a reader.
+
+deepEqual(jmap.emailGet("t", ["2aaaaah"], false), {
+  accountId: "t",
+  ids: ["2aaaaah"],
+  properties: jmap.LIST_PROPERTIES
+})
+
+const fullGet = jmap.emailGet("t", ["iaaaaac"], true)
+deepEqual(fullGet.properties,
+  jmap.LIST_PROPERTIES.concat(["headers", "bodyStructure", "bodyValues"]))
+deepEqual(fullGet.bodyProperties, ["partId", "blobId", "size", "name", "type",
+  "charset", "disposition", "cid", "headers"])
+assert.strictEqual(fullGet.fetchTextBodyValues, true)
+assert.strictEqual(fullGet.fetchHTMLBodyValues, true)
+// Never `fetchAllBodyValues`: it ships every text *attachment* inline too, and
+// the probe measured `notes.txt` arriving whole because of it.
+assert.strictEqual(fullGet.fetchAllBodyValues, undefined)
+// And `maxBodyValueBytes` is left unset, so the server's own default — no
+// truncation — applies rather than a ceiling this client invented.
+assert.strictEqual(fullGet.maxBodyValueBytes, undefined)
+assert.strictEqual(jmap.emailGet("t", ["x"], false).bodyProperties, undefined)
+deepEqual(jmap.emailGet("t", null, true).ids, [])
+
+// ------------------------------------------------- an Email as a full read
+//
+// The reference account's own plain message, read with the full property list.
+// A single-part message has no children at all: its root *is* the text part,
+// which is why the payload carries the data rather than a parts array.
+
+const plainEmail = {
+  id: "eaaaaab",
+  threadId: "b",
+  mailboxIds: { a: true },
+  keywords: { "$seen": true },
+  size: 262,
+  receivedAt: "2026-08-20T09:00:00Z",
+  from: [{ name: "Ari Novak", email: "ari@example.com" }],
+  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  subject: "[omamail-test] Plain text",
+  preview: "A plain-text message, nothing more.\n",
+  messageId: ["plain@omamail-test.invalid"],
+  "header:Date": " Thu, 20 Aug 2026 09:00:00 +0000",
+  headers: [
+    { name: "From", value: " Ari Novak <ari@example.com>" },
+    { name: "To", value: " omamail-test@depodra.com" },
+    { name: "Subject", value: " [omamail-test] Plain text" },
+    { name: "Date", value: " Thu, 20 Aug 2026 09:00:00 +0000" },
+    { name: "Message-ID", value: " <plain@omamail-test.invalid>" },
+    { name: "Reply-To", value: " Ari Novak <replies@example.com>" },
+    { name: "Content-Type", value: " text/plain; charset=utf-8" }
+  ],
+  bodyStructure: {
+    partId: "0", blobId: "cbplain", size: 36, name: null, type: "text/plain",
+    charset: "utf-8", disposition: null, cid: null,
+    headers: [{ name: "Content-Type", value: " text/plain; charset=utf-8" }]
+  },
+  bodyValues: {
+    "0": { isEncodingProblem: false, isTruncated: false,
+      value: "A plain-text message, nothing more.\n" }
+  }
+}
+
+const plainRead = jmap.toMessage(plainEmail, roles, true)
+assert.strictEqual(plainRead.payload.mimeType, "text/plain; charset=utf-8",
+  "a value JMAP handed over has already been decoded, so it is UTF-8 whatever the sender wrote")
+assert.strictEqual(plainRead.payload.partId, "0")
+deepEqual(plainRead.payload.parts, [])
+assert.strictEqual(plainRead.payload.body.data,
+  message.encodeBase64Url("A plain-text message, nothing more.\n"))
+assert.strictEqual(plainRead.payload.body.size, 36)
+assert.strictEqual(plainRead.payload.body.attachmentId, undefined,
+  "a text part that arrived is read in place and never fetched again")
+assert.strictEqual(message.extractBody(plainRead.payload).text,
+  "A plain-text message, nothing more.\n")
+assert.strictEqual(message.extractBody(plainRead.payload).source, "plain")
+
+// The header array a full read carries: the ten composed names first, in the
+// order a message writes them, then everything else the server reported. The
+// composed ten come first because `Message.headerValue` takes the first match
+// and a row and its reader disagreeing about who a message is from is worse
+// than either answer alone — and a name already written is never repeated.
+deepEqual(plainRead.payload.headers, [
+  { name: "From", value: '"Ari Novak" <ari@example.com>' },
+  { name: "To", value: "omamail-test@depodra.com" },
+  { name: "Subject", value: "[omamail-test] Plain text" },
+  { name: "Date", value: "Thu, 20 Aug 2026 09:00:00 +0000" },
+  { name: "Message-ID", value: "<plain@omamail-test.invalid>" },
+  { name: "Reply-To", value: "Ari Novak <replies@example.com>" },
+  { name: "Content-Type", value: "text/plain; charset=utf-8" }
+])
+// Which is the whole point of asking for `headers` at all: JMAP has no parsed
+// field for Reply-To, and a reply is written to it.
+assert.strictEqual(
+  message.summarize(plainRead, new Date()).replyTo.email, "replies@example.com")
+
+// The snippet on a full read is the preview again, escaped, never rebuilt from
+// the body — a reader that recomputed it would show a different snippet from
+// the row it was opened out of.
+assert.strictEqual(plainRead.snippet, "A plain-text message, nothing more.\n")
+
+// A server that answered a full read without a structure still opens as a row.
+assert.strictEqual(jmap.toMessage({ id: "x", preview: "p" }, roles, true).payload.mimeType,
+  "text/plain")
+deepEqual(jmap.toMessage({ id: "x", preview: "p" }, roles, true).payload.parts, [])
+
+// ------------------------------ a multipart with an inline image and a file
+//
+// The seeded HTML message, exactly as the reference server describes it:
+// `multipart/mixed` over a `multipart/related` holding the HTML and its
+// `cid:` PNG, with `notes.txt` beside them. Note `subParts`, which is JMAP's
+// name for children, and the `header:` values Stalwart files without the form.
+
+const htmlEmail = {
+  id: "iaaaaac",
+  threadId: "c",
+  mailboxIds: { a: true },
+  keywords: { "$seen": true },
+  size: 1021,
+  receivedAt: "2026-08-21T10:00:00Z",
+  from: [{ name: "Dana Ridley", email: "dana@example.net" }],
+  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  subject: "[omamail-test] HTML with inline image and attachment",
+  preview: "Hello from HTML. Here is the logo:\nNotes are attached.\n",
+  hasAttachment: true,
+  messageId: ["html@omamail-test.invalid"],
+  "header:Date": " Fri, 21 Aug 2026 10:00:00 +0000",
+  headers: [
+    { name: "From", value: " Dana Ridley <dana@example.net>" },
+    { name: "MIME-Version", value: " 1.0" },
+    { name: "Content-Type", value: ' multipart/mixed; boundary="mixed1"' }
+  ],
+  bodyStructure: {
+    partId: null, blobId: null, size: null, name: null, type: "multipart/mixed",
+    charset: null, disposition: null, cid: null,
+    headers: [{ name: "Content-Type", value: ' multipart/mixed; boundary="mixed1"' }],
+    subParts: [
+      {
+        partId: null, blobId: null, size: null, name: null,
+        type: "multipart/related", charset: null, disposition: null, cid: null,
+        headers: [{ name: "Content-Type", value: ' multipart/related; boundary="rel1"' }],
+        subParts: [
+          {
+            partId: "2", blobId: "cghtml", size: 144, name: null,
+            type: "text/html", charset: "utf-8", disposition: null, cid: null,
+            headers: [{ name: "Content-Type", value: " text/html; charset=utf-8" }]
+          },
+          {
+            partId: "3", blobId: "copng", size: 70, name: "logo.png",
+            type: "image/png", charset: null, disposition: "inline",
+            cid: "logo@omamail-test",
+            headers: [
+              { name: "Content-Type", value: ' image/png; name="logo.png"' },
+              { name: "Content-Transfer-Encoding", value: " base64" },
+              { name: "Content-ID", value: " <logo@omamail-test>" },
+              { name: "Content-Disposition", value: ' inline; filename="logo.png"' }
+            ]
+          }
+        ]
+      },
+      {
+        partId: "4", blobId: "cgnotes", size: 63, name: "notes.txt",
+        type: "text/plain", charset: "utf-8", disposition: "attachment", cid: null,
+        headers: [
+          { name: "Content-Type", value: ' text/plain; charset=utf-8; name="notes.txt"' },
+          { name: "Content-Disposition", value: ' attachment; filename="notes.txt"' }
+        ]
+      }
+    ]
+  },
+  // Only the parts `fetchTextBodyValues` and `fetchHTMLBodyValues` cover. The
+  // text attachment is *absent*, which is the whole reason for asking that way.
+  bodyValues: {
+    "2": {
+      isEncodingProblem: false, isTruncated: false,
+      value: '<html><body><p>Hello from <b>HTML</b>. Here is the logo:</p>'
+        + '<img src="cid:logo@omamail-test" alt="logo"><p>Notes are attached.</p></body></html>'
+    }
+  }
+}
+
+const htmlRead = jmap.toMessage(htmlEmail, roles, true)
+assert.strictEqual(htmlRead.payload.mimeType, "multipart/mixed")
+assert.strictEqual(htmlRead.payload.body.size, 0,
+  "a container carries its children and nothing else")
+assert.strictEqual(htmlRead.payload.body.attachmentId, undefined)
+assert.strictEqual(htmlRead.payload.parts.length, 2)
+
+const related = htmlRead.payload.parts[0]
+assert.strictEqual(related.mimeType, "multipart/related")
+assert.strictEqual(related.parts.length, 2)
+
+const htmlPart = related.parts[0]
+assert.strictEqual(htmlPart.partId, "2")
+assert.strictEqual(htmlPart.mimeType, "text/html; charset=utf-8")
+assert.strictEqual(htmlPart.filename, "")
+assert.strictEqual(htmlPart.body.attachmentId, undefined)
+assert.strictEqual(message.decodeBase64Url(htmlPart.body.data),
+  htmlEmail.bodyValues["2"].value)
+assert.strictEqual(htmlPart.body.size, 144)
+
+// The inline image: no data, its blob as the attachment id, and both halves of
+// the `cid:` link kept — the field and the header — so a JMAP message behaves
+// as an IMAP one does rather than being the one provider that lost the link.
+const png = related.parts[1]
+assert.strictEqual(png.partId, "3")
+assert.strictEqual(png.mimeType, "image/png")
+assert.strictEqual(png.filename, "logo.png")
+assert.strictEqual(png.cid, "logo@omamail-test")
+assert.strictEqual(png.body.attachmentId, "copng")
+assert.strictEqual(png.body.size, 70)
+assert.strictEqual(png.body.data, undefined)
+deepEqual(png.headers, [
+  { name: "Content-Type", value: 'image/png; name="logo.png"' },
+  { name: "Content-Transfer-Encoding", value: "base64" },
+  { name: "Content-ID", value: "<logo@omamail-test>" },
+  { name: "Content-Disposition", value: 'inline; filename="logo.png"' }
+], "part header values are trimmed of the space the server writes after the colon")
+
+// A text attachment must not arrive inline. `notes.txt` is `text/plain` and it
+// still gets a size and an id and no data, because its value was never asked
+// for — the reason the full read names the two body-value flags rather than
+// `fetchAllBodyValues`.
+const notes = htmlRead.payload.parts[1]
+assert.strictEqual(notes.partId, "4")
+assert.strictEqual(notes.mimeType, "text/plain; charset=utf-8",
+  "a part delivered as a blob keeps the charset the sender declared, because "
+  + "those octets are still in it")
+assert.strictEqual(notes.filename, "notes.txt")
+assert.strictEqual(notes.body.attachmentId, "cgnotes")
+assert.strictEqual(notes.body.size, 63)
+assert.strictEqual(notes.body.data, undefined)
+
+// The charset a blob-delivered text part keeps is the sender's own, not the
+// UTF-8 an inlined value would have been decoded to. `notes.txt` happens to
+// declare UTF-8, so the rule is stated on a part that does not — a calendar
+// invitation in Latin-1 is the ordinary case, not the exotic one, and this is
+// the charset `Calendar.fromAttachment` reads its octets through.
+const latinAttachment = jmap.toMessage({
+  bodyStructure: { partId: null, type: "multipart/mixed", subParts: [
+    { partId: "1", blobId: "cbtext", size: 20, name: "notes.txt",
+      type: "text/plain", charset: "iso-8859-1", disposition: "attachment" },
+    { partId: "2", blobId: "cbics", size: 400, name: "invite.ics",
+      type: "text/calendar", disposition: "attachment" }
+  ] },
+  bodyValues: {}
+}, roles, true)
+assert.strictEqual(latinAttachment.payload.parts[0].mimeType, "text/plain; charset=iso-8859-1")
+assert.strictEqual(latinAttachment.payload.parts[0].body.attachmentId, "cbtext")
+// A part that declared no charset states none rather than one this client
+// guessed for it.
+assert.strictEqual(latinAttachment.payload.parts[1].mimeType, "text/calendar")
+// Which is what makes the invitation card a second request rather than nothing:
+// a calendar part the server described but did not send is exactly the shape
+// the reader already asks Gmail for.
+assert.strictEqual(
+  calendar.pendingPart(latinAttachment.payload).body.attachmentId, "cbics")
+
+// And the panel's own readers, which is what the shape is for.
+assert.strictEqual(message.extractHtml(htmlRead.payload), htmlEmail.bodyValues["2"].value,
+  "the body is the HTML part, never the text attachment beside it")
+assert.strictEqual(message.extractBody(htmlRead.payload).source, "html")
+assert.strictEqual(message.extractBody(htmlRead.payload).text.indexOf("These are the attached"), -1)
+deepEqual(message.attachments(htmlRead.payload), [
+  { filename: "logo.png", mimeType: "image/png", size: 70, attachmentId: "copng" },
+  { filename: "notes.txt", mimeType: "text/plain; charset=utf-8", size: 63,
+    attachmentId: "cgnotes" }
+], "the existing attachment rule decides, and it lists a part the sender named — "
+  + "the inline image included, exactly as it does on IMAP")
+assert.strictEqual(message.partForAttachment(htmlRead.payload, "cgnotes").filename, "notes.txt")
+
+// ------------------------------------------------------ a truncated part
+//
+// RFC 8621 lets a server truncate a body value whatever the client asked for,
+// and a reader showing a body that stops mid-sentence is worse than a second
+// request. The part is named, fetched whole through the attachment path, and
+// put back before the message is delivered.
+
+const truncatedEmail = {
+  id: "iaaaaac",
+  preview: "Hello from HTML.",
+  bodyStructure: {
+    partId: null, type: "multipart/mixed",
+    subParts: [
+      { partId: "2", blobId: "cghtml", size: 144, type: "text/html", charset: "utf-8" },
+      { partId: "4", blobId: "cgnotes", size: 63, name: "notes.txt",
+        type: "text/plain", charset: "utf-8", disposition: "attachment" }
+    ]
+  },
+  bodyValues: {
+    "2": { isEncodingProblem: false, isTruncated: true, value: "<html><body><p>Hello from " }
+  }
+}
+
+deepEqual(jmap.truncatedParts(truncatedEmail), [
+  { partId: "2", blobId: "cghtml", size: 144, type: "text/html", charset: "utf-8" }
+], "only a text part the server said it cut, and only one with a blob to fetch")
+// A value that arrived whole is nothing to fetch, and neither is a part whose
+// value was never asked for.
+deepEqual(jmap.truncatedParts(htmlEmail), [])
+deepEqual(jmap.truncatedParts(null), [])
+deepEqual(jmap.truncatedParts({ bodyStructure: { partId: "1", type: "text/html" },
+  bodyValues: { "1": { isTruncated: true } } }), [],
+  "a truncated part with no blob id is not a part anything could fetch")
+
+const truncatedRead = jmap.toMessage(truncatedEmail, roles, true)
+assert.strictEqual(message.extractHtml(truncatedRead.payload), "<html><body><p>Hello from ")
+const whole = '<html><body><p>Hello from <b>HTML</b>.</p></body></html>'
+assert.strictEqual(jmap.substitutePart(truncatedRead.payload,
+  jmap.truncatedParts(truncatedEmail)[0], message.encodeBase64(whole)), true)
+assert.strictEqual(message.extractHtml(truncatedRead.payload), whole,
+  "and the reader is handed the whole body rather than the beginning of one")
+assert.strictEqual(truncatedRead.payload.parts[0].body.size, whole.length)
+
+// The charset moves with the octets. The value that was there had been decoded
+// to UTF-8 by the server; a blob is the sender's own bytes in the sender's own
+// charset, so a part that declared one has to go back to declaring it.
+const latin = jmap.toMessage({
+  bodyStructure: { partId: null, type: "multipart/mixed", subParts: [
+    { partId: "1", blobId: "cb1", size: 6, type: "text/plain", charset: "iso-8859-1" }
+  ] },
+  bodyValues: { "1": { isTruncated: true, value: "Grus" } }
+}, roles, true)
+assert.strictEqual(latin.payload.parts[0].mimeType, "text/plain; charset=utf-8",
+  "while the value is the server's decoding of it")
+jmap.substitutePart(latin.payload,
+  { partId: "1", blobId: "cb1", size: 6, type: "text/plain", charset: "iso-8859-1" },
+  "R3L832Vu")
+assert.strictEqual(latin.payload.parts[0].mimeType, "text/plain; charset=iso-8859-1")
+assert.strictEqual(message.extractBody(latin.payload).text, "Grüßen")
+
+// A substitution that found nothing says so rather than reporting a repair it
+// did not make.
+assert.strictEqual(jmap.substitutePart(truncatedRead.payload,
+  { partId: "9", type: "text/html" }, "AAAA"), false)
+assert.strictEqual(jmap.substitutePart(truncatedRead.payload,
+  { partId: "2", type: "text/html" }, ""), false)
+assert.strictEqual(jmap.substitutePart(null, { partId: "2" }, "AAAA"), false)
+
+// Both alphabets and either padding, because the composer writes unpadded
+// base64url and the transport hands back padded standard base64.
+assert.strictEqual(jmap.base64ByteLength(""), 0)
+assert.strictEqual(jmap.base64ByteLength("QQ=="), 1)
+assert.strictEqual(jmap.base64ByteLength("QUI="), 2)
+assert.strictEqual(jmap.base64ByteLength("QUJD"), 3)
+assert.strictEqual(jmap.base64ByteLength("QQ"), 1)
+assert.strictEqual(jmap.base64ByteLength(message.encodeBase64Url("Grüßen")), 8,
+  "the byte length of the UTF-8 re-encoding, not the character count")
+
+// ----------------------------------------------------------- the blob path
+//
+// An attachment id is the part's `blobId`, and a blob is fetched through the
+// session's own download template — never a re-read of the message and never a
+// URL this client assembled out of a host it guessed.
+
+const withDownload = session({
+  downloadUrl: "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
+})
+assert.strictEqual(jmap.downloadTemplate(withDownload),
+  "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}")
+assert.strictEqual(jmap.downloadTemplate(JSON.stringify(withDownload)),
+  "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+  "a session restored from the cache is still text when it is read")
+assert.strictEqual(jmap.downloadTemplate(session()), "",
+  "and a server that published no template is not one this client invents one for")
+assert.strictEqual(jmap.downloadTemplate(null), "")
+assert.strictEqual(
+  jmap.downloadUrl(jmap.downloadTemplate(withDownload), "t", "cgnotes",
+    "attachment", "application/octet-stream"),
+  "https://mx2.depodra.com/jmap/download/t/cgnotes/attachment?accept=application%2Foctet-stream")
+// The ceiling the transport fixes, and the sentence somebody who just clicked
+// an attachment reads when a blob is past it.
+assert.strictEqual(jmap.MAX_BLOB_BYTES, 20971520)
+assert.strictEqual(jmap.transportError(63, 0, "", ""),
+  "This attachment is larger than 20 MB")
 
 // ------------------------------------------------------------- known states
 //

@@ -714,6 +714,15 @@ function apiUrl(session) {
   return doc ? trimmed(doc.apiUrl) : ""
 }
 
+// The template every blob is fetched through, read from the session for the
+// same reason the API URL is: it is the third of the places a credential may
+// go, and on the reference account it is a different host from the session's
+// own. `downloadUrl` fills it; nothing else builds a download address.
+function downloadTemplate(session) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc.downloadUrl) : ""
+}
+
 // The server's own word for "nothing has changed". A cached session is good
 // for as long as this matches, and a push telling the client the state moved
 // is what makes it refetch — so it is what a cache entry is keyed on.
@@ -1405,8 +1414,18 @@ function receivedMillis(value) {
 // Raw header values arrive from Stalwart with the leading space RFC 5322 puts
 // after the colon, and under a key that drops the form they were asked for
 // with. `rawHeader` handles both; nothing else here reads one.
-function toMessage(email, roles) {
-  var source = email && typeof email === "object" ? email : {}
+//
+// The ten names JMAP splits into parsed fields, in the order a message writes
+// them. A full read appends every *other* header the server reported, so these
+// ten keep the one reading the list row already drew — `Message.headerValue`
+// takes the first match, and a row and its reader disagreeing about who a
+// message is from is worse than either answer alone.
+var COMPOSED_HEADERS = [
+  "From", "To", "Cc", "Subject", "Date", "Message-ID", "In-Reply-To",
+  "References", "List-Unsubscribe", "List-Unsubscribe-Post"
+]
+
+function composedHeaders(source) {
   var headers = []
   function push(name, value) {
     var text = trimmed(value)
@@ -1423,6 +1442,61 @@ function toMessage(email, roles) {
   push("References", angleBracketed(source.references))
   push("List-Unsubscribe", rawHeader(source, "List-Unsubscribe"))
   push("List-Unsubscribe-Post", rawHeader(source, "List-Unsubscribe-Post"))
+  return headers
+}
+
+// Everything else the message carried, which is what `headers` is asked for on
+// a full read and the reason a reply can find a `Reply-To` at all: JMAP has no
+// parsed field for one, and `Message.summarize` reads it out of this array.
+// Values are trimmed for the same reason the raw ones are — Stalwart writes the
+// leading space RFC 5322 puts after the colon into the value.
+//
+// A name the composed list already wrote is dropped rather than repeated: a
+// second `From` would be found by nothing and read by nobody, and a duplicate
+// is how a header array starts disagreeing with itself.
+function extraHeaders(email) {
+  var list = email && Array.isArray(email.headers) ? email.headers : []
+  var written = {}
+  for (var c = 0; c < COMPOSED_HEADERS.length; c++)
+    written[COMPOSED_HEADERS[c].toLowerCase()] = true
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i] || {}
+    var name = trimmed(entry.name)
+    if (name === "" || written[name.toLowerCase()]) continue
+    out.push({ name: name, value: trimmed(entry.value) })
+  }
+  return out
+}
+
+function toMessage(email, roles, full) {
+  var source = email && typeof email === "object" ? email : {}
+  var headers = composedHeaders(source)
+  var payload = {
+    mimeType: "text/plain",
+    headers: headers,
+    body: { size: 0 },
+    parts: []
+  }
+
+  // A full read replaces that placeholder with the message's own MIME tree —
+  // and only when the server actually sent one, so a server that answered a
+  // full read with list properties still opens as a row rather than as
+  // nothing at all.
+  if (full === true && source.bodyStructure) {
+    var built = toPart(source.bodyStructure, source.bodyValues, 0)
+    payload = {
+      partId: built.partId,
+      mimeType: built.mimeType,
+      filename: built.filename,
+      // The structure's root repeats the message's headers verbatim; the
+      // composed ones are used instead so the reader and the row agree, with
+      // the rest appended.
+      headers: headers.concat(extraHeaders(source)),
+      body: built.body,
+      parts: built.parts
+    }
+  }
 
   return {
     // The bare Email id, unique per account and stable across a move, so it
@@ -1432,14 +1506,240 @@ function toMessage(email, roles) {
     labelIds: labelIdsFor(source, roles),
     internalDate: receivedMillis(source.receivedAt),
     sizeEstimate: countOf(source.size),
-    payload: {
-      mimeType: "text/plain",
-      headers: headers,
-      body: { size: 0 },
-      parts: []
-    },
+    payload: payload,
+    // The preview again, never rebuilt from the body: a reader that recomputed
+    // it would show a different snippet from the row it was opened out of.
     snippet: escapedPreview(source.preview)
   }
+}
+
+// ------------------------------------------------------------- a full read
+//
+// What the reader needs on top of a row: the message's own headers, the MIME
+// tree, and the text of the parts that are text. Never `fetchAllBodyValues` —
+// it also ships every text *attachment* inline, which the probe measured
+// (`notes.txt` arrived whole), and a text attachment may be 20 MB of somebody
+// else's log file that nothing on screen would ever show.
+//
+// `maxBodyValueBytes` is left unset. RFC 8621 makes no truncation the default
+// and the reference server honours it; a server that truncates anyway says so
+// on the value, and `truncatedParts` is what the client then fetches whole.
+var FULL_PROPERTIES = LIST_PROPERTIES.concat(["headers", "bodyStructure", "bodyValues"])
+
+// The part fields the composer builds a Gmail part out of. `cid` and `headers`
+// are both asked for: `cid` is the field a `cid:` source would one day be
+// resolved through, and `headers` is where `Content-ID` lives for anything
+// that looks for it there instead — so a JMAP message behaves as an IMAP one
+// does rather than being the one provider that lost the link.
+var BODY_PROPERTIES = [
+  "partId", "blobId", "size", "name", "type", "charset", "disposition", "cid",
+  "headers"
+]
+
+// Deep enough for any message a human wrote and shallow enough that a hostile
+// one cannot walk the stack out. `Message.js` uses the same figure on the
+// parsing side.
+var MAX_PART_DEPTH = 12
+
+// The `Email/get` arguments for a list read or a full one, so the two requests
+// are described in one place and a test can read exactly what crosses.
+function emailGet(accountId, ids, full) {
+  var args = {
+    accountId: trimmed(accountId),
+    ids: Array.isArray(ids) ? ids : [],
+    properties: full === true ? FULL_PROPERTIES : LIST_PROPERTIES
+  }
+  if (full !== true) return args
+  args.bodyProperties = BODY_PROPERTIES
+  args.fetchTextBodyValues = true
+  args.fetchHTMLBodyValues = true
+  return args
+}
+
+function isTextType(type) {
+  return trimmed(type).toLowerCase().indexOf("text/") === 0
+}
+
+// A part's MIME type as a Gmail part states it, charset included, because
+// `Message.decodePart` reads the charset off this string before it reads a
+// header. Which charset that is depends on where the octets came from, and
+// getting it wrong is a body of question marks:
+//
+//   - a body value JMAP handed over has already been decoded, so it is UTF-8
+//     whatever the sender wrote
+//   - a part delivered as a blob is the raw octets after content-transfer
+//     decoding, so it is still in the charset the sender declared
+function partMimeType(type, charset) {
+  var mime = trimmed(type).toLowerCase()
+  if (mime === "") mime = "application/octet-stream"
+  if (!isTextType(mime)) return mime
+  var set = trimmed(charset)
+  return set === "" ? mime : mime + "; charset=" + set
+}
+
+// The part's headers as a Gmail part carries them: names and values, values
+// trimmed of the leading space the server writes after the colon.
+function partHeaders(part) {
+  var list = part && Array.isArray(part.headers) ? part.headers : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i] || {}
+    var name = trimmed(entry.name)
+    if (name === "") continue
+    out.push({ name: name, value: trimmed(entry.value) })
+  }
+  return out
+}
+
+function bodyValueFor(values, partId) {
+  var id = trimmed(partId)
+  if (id === "" || !values || typeof values !== "object") return null
+  var found = values[id]
+  return found && typeof found === "object" ? found : null
+}
+
+// How many bytes a base64 string stands for, without decoding it. The value
+// has just been encoded from the body, and decoding it again to count the
+// bytes would walk the whole message a second time for a number that is
+// arithmetic. Both alphabets and either padding: the transport's answer is
+// padded standard base64 and the composer's own is unpadded base64url.
+function base64ByteLength(text) {
+  var input = String(text === undefined || text === null ? "" : text)
+    .replace(/=+$/, "")
+  var whole = Math.floor(input.length / 4) * 3
+  var rest = input.length % 4
+  if (rest === 2) return whole + 1
+  if (rest === 3) return whole + 2
+  return whole
+}
+
+// One node of `bodyStructure` as a Gmail part.
+//
+// A container keeps its children and nothing else. A leaf is one of two things
+// and never both:
+//
+//   - text whose value arrived, which gets `body.data` as base64url of the
+//     UTF-8 re-encoding and no attachment id — the reader decodes it in place
+//   - everything else, which gets `body.size` and `body.attachmentId` set to
+//     the part's `blobId` and no data at all. That is exactly the shape
+//     `Message.attachments`, `Calendar.pendingPart` and the open-attachment
+//     path already consume from Gmail, so a text attachment the server did not
+//     inline is listed as a file rather than drawn as the body.
+function toPart(part, values, depth) {
+  var source = part && typeof part === "object" ? part : {}
+  var type = trimmed(source.type)
+  var children = Array.isArray(source.subParts) ? source.subParts : []
+  var node = {
+    partId: trimmed(source.partId),
+    mimeType: partMimeType(type, ""),
+    filename: trimmed(source.name),
+    headers: partHeaders(source),
+    body: { size: 0 },
+    parts: []
+  }
+  // Kept for the day a `cid:` source is resolved to bytes. Nothing reads it
+  // today — no provider resolves one, and `Html.imageSourceKind` calls it
+  // inline and keeps the tag — and keeping it here is what makes that a change
+  // above the seam rather than a change to this provider.
+  var cid = trimmed(source.cid)
+  if (cid !== "") node.cid = cid
+
+  if (children.length > 0 && depth < MAX_PART_DEPTH) {
+    for (var i = 0; i < children.length; i++)
+      node.parts.push(toPart(children[i], values, depth + 1))
+    return node
+  }
+
+  var value = isTextType(type) ? bodyValueFor(values, source.partId) : null
+  if (value && typeof value.value === "string") {
+    // `isEncodingProblem` is accepted as it stands: the server has already put
+    // U+FFFD where the sender's octets were not what they claimed to be, and
+    // there is nothing better this end could do with them.
+    var data = Mail.encodeBase64Url(value.value)
+    node.mimeType = partMimeType(type, "utf-8")
+    node.body = { size: base64ByteLength(data), data: data }
+    return node
+  }
+
+  node.mimeType = partMimeType(type, source.charset)
+  node.body = { size: countOf(source.size) }
+  var blob = trimmed(source.blobId)
+  if (blob !== "") node.body.attachmentId = blob
+  return node
+}
+
+// The text parts a server truncated, which RFC 8621 lets it do whatever this
+// client asked for. Each is fetched whole through the same download the
+// attachment path uses and put back before the message is delivered, so the
+// reader never shows a body that stops mid-sentence.
+//
+// A part with no `blobId` is not listed: there would be nothing to fetch.
+function truncatedParts(email) {
+  var source = email && typeof email === "object" ? email : {}
+  var values = source.bodyValues
+  var out = []
+
+  function walk(part, depth) {
+    var entry = part && typeof part === "object" ? part : null
+    if (!entry || depth > MAX_PART_DEPTH) return
+    var children = Array.isArray(entry.subParts) ? entry.subParts : []
+    if (children.length > 0) {
+      for (var i = 0; i < children.length; i++) walk(children[i], depth + 1)
+      return
+    }
+    if (!isTextType(entry.type)) return
+    var value = bodyValueFor(values, entry.partId)
+    if (!value || value.isTruncated !== true) return
+    var blob = trimmed(entry.blobId)
+    if (blob === "") return
+    out.push({
+      partId: trimmed(entry.partId),
+      blobId: blob,
+      size: countOf(entry.size),
+      type: trimmed(entry.type),
+      charset: trimmed(entry.charset)
+    })
+  }
+
+  walk(source.bodyStructure, 0)
+  return out
+}
+
+// The octets of a truncated part, put back where the short value was.
+//
+// The charset moves with them. The value that was there had been decoded to
+// UTF-8 by the server; these are the sender's own octets in the sender's own
+// charset, so a part that declared `iso-8859-1` has to go back to declaring it
+// or the repair would read worse than the truncation.
+//
+// The size is what actually arrived rather than what the structure promised:
+// the number on the part is the one the reader should be able to trust.
+//
+// Returns whether the part was found, so a caller can tell a substitution that
+// happened from one that quietly did not.
+function substitutePart(payload, part, data) {
+  var wanted = trimmed(part && part.partId)
+  var encoded = String(data === undefined || data === null ? "" : data)
+  if (wanted === "" || encoded === "") return false
+  var done = false
+
+  function walk(node, depth) {
+    if (!node || typeof node !== "object" || done || depth > MAX_PART_DEPTH) return
+    var children = Array.isArray(node.parts) ? node.parts : []
+    if (children.length === 0) {
+      if (trimmed(node.partId) !== wanted) return
+      node.mimeType = partMimeType(
+        trimmed(part.type) !== "" ? part.type : node.mimeType,
+        trimmed(part.charset) !== "" ? part.charset : "utf-8")
+      node.body = { size: base64ByteLength(encoded), data: encoded }
+      done = true
+      return
+    }
+    for (var i = 0; i < children.length; i++) walk(children[i], depth + 1)
+  }
+
+  walk(payload, 0)
+  return done
 }
 
 // --------------------------------------------------- per-account refusals
