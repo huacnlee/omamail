@@ -20,7 +20,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 UNTRUSTED = re.compile(
     r"\b(summary\s*\.|\.subject\b|\.snippet\b|\.from\b|\.display\b|\.email\b"
     r"|modelData\s*\.\s*filename\b|formatAddressList\b|lastError\b"
-    r"|root\s*\.\s*requested\b|subjectField\s*\.\s*text\b)")
+    r"|root\s*\.\s*requested\b|subjectField\s*\.\s*text\b"
+    # A row that works out its own two lines and hands them over as strings.
+    # The address goes in there, so the guard has to follow the value: read
+    # from the element, the reference to `.email` is no longer visible and
+    # this check would pass a Text that had stopped saying it was plain.
+    r"|primaryText\b|secondaryText\b)")
 
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
 ELEMENT = re.compile(r"\b(Text|Label)\s*\{")

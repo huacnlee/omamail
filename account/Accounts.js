@@ -333,6 +333,29 @@ function discardDraftAt(list, index) {
   return removeAt(source, at)
 }
 
+// What to call this mailbox.
+//
+// Two of these can differ only in their domain, and be elided to the same
+// handful of characters in a list, so a name is the one thing that reliably
+// tells them apart at a glance. The field has been on an account entry and
+// preferred by `label()` since accounts were a list; nothing ever offered a
+// way to set it.
+//
+// Empty is not a name and clears it, which is what puts the address back:
+// `label()` falls through to the local part, so there is no state in which a
+// mailbox has nothing to be called.
+function setLabel(list, id, text) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  // Rebuilt rather than patched, so an entry that reached the list before a
+  // field existed comes out of a write with the same shape as every other.
+  var entry = makeAccount(next.accounts[at])
+  entry.label = trimmed(text)
+  next.accounts[at] = entry
+  return next
+}
+
 // The sign-off belongs to the mailbox rather than to the window. Two accounts
 // are two identities, and one signature under both is wrong for whichever it
 // was not written for — so it sits beside the label, which is the other thing

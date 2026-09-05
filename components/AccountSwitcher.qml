@@ -27,6 +27,11 @@ Item {
 
   readonly property bool opened: menu.opened
 
+  // A popup builds its contents outside this item's own children, so nothing
+  // walking the tree from here finds a row. This is the handle that does —
+  // the same reason `opened` is exposed rather than reached for.
+  readonly property alias menuRows: rows
+
   // Where the keyboard is standing, which is not where the mouse is: hover is
   // drawn by the row itself and never written here. Qt re-reports hover when
   // content moves under a still pointer, and a hover that moved this would drag
@@ -156,10 +161,36 @@ Item {
 
         Rectangle {
           id: row
+          objectName: "account-row"
           required property var modelData
           required property int index
 
           readonly property bool hasCursor: root.cursorIndex === row.index
+
+          // Whether this mailbox was given a name, which decides what the two
+          // lines hold. `label` cannot answer it: it falls through to the
+          // local part, so it is never empty.
+          readonly property bool named: modelData.name !== undefined
+            && String(modelData.name) !== ""
+
+          // What the two lines hold, decided here rather than inside the
+          // bindings that draw them: it is one choice with two halves, and
+          // splitting it across two `Text` elements hid that.
+          readonly property string primaryText: {
+            if (row.named) return String(modelData.name)
+            return modelData.email !== "" ? modelData.email : "New account"
+          }
+
+          readonly property string secondaryText: {
+            if (modelData.error !== undefined && modelData.error !== "")
+              return String(modelData.error)
+            if (!modelData.signedIn) return "Signed out"
+            if (modelData.busy) return "Checking"
+            // A named mailbox puts its address here, which keeps the name from
+            // hiding which account it stands for. An unnamed one has already
+            // said everything it has to say on the line above.
+            return row.named ? String(modelData.email || "") : ""
+          }
 
           width: menu.width - menu.leftPadding - menu.rightPadding
           implicitHeight: Style.space(40)
@@ -187,8 +218,11 @@ Item {
             Text {
               anchors.centerIn: parent
               textFormat: Text.PlainText
-              text: row.modelData.email === ""
-                ? "+" : row.modelData.email.charAt(0).toUpperCase()
+              text: {
+                if (row.named) return String(row.modelData.name).charAt(0).toUpperCase()
+                return row.modelData.email === ""
+                  ? "+" : row.modelData.email.charAt(0).toUpperCase()
+              }
               color: root.textColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.caption
@@ -204,13 +238,18 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
 
-            // The address, not the name derived from it. This list exists to
-            // tell two mailboxes apart, and two accounts can easily share a
-            // local part across different domains.
+            // A name if one was chosen, and the address otherwise.
+            //
+            // The address used to be the only thing here, because the only
+            // name available was the local part and two mailboxes easily
+            // share one across different domains. A name somebody typed is
+            // the opposite: it exists precisely to tell them apart, and it
+            // wins over an address that elides to `patryk.bartkow…` in a list
+            // this narrow. The address is not lost — it moves below.
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: row.modelData.email !== "" ? row.modelData.email : "New account"
+              text: row.primaryText
               color: root.textColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.bodySmall
@@ -224,15 +263,7 @@ Item {
               width: parent.width
               visible: text !== ""
               textFormat: Text.PlainText
-              text: {
-                if (row.modelData.error !== undefined && row.modelData.error !== "")
-                  return row.modelData.error
-                if (!row.modelData.signedIn) return "Signed out"
-                if (row.modelData.busy) return "Checking"
-                // Only when it says something the address does not.
-                var name = String(row.modelData.label || "")
-                return name !== "" && row.modelData.email.indexOf(name) !== 0 ? name : ""
-              }
+              text: row.secondaryText
               color: row.modelData.error !== undefined && row.modelData.error !== ""
                 ? root.urgentColor : root.dimColor
               font.family: root.panelFontFamily

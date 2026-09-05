@@ -62,6 +62,41 @@ Column {
     return out
   }
 
+  property string selectedNameAccountId: ""
+
+  function nameOptions() {
+    var out = []
+    for (var i = 0; i < signatureAccounts.length; i++)
+      out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
+    return out
+  }
+
+  function saveName() {
+    if (service && selectedNameAccountId !== "")
+      service.setAccountLabel(selectedNameAccountId, nameEdit.text)
+  }
+
+  function selectNameAccount(id) {
+    var next = signatureAccount(id)
+    if (!next || String(next.id || "") === selectedNameAccountId) return
+    saveName()
+    selectedNameAccountId = String(next.id || "")
+    nameEdit.text = String(next.label || "")
+  }
+
+  function ensureNameAccount() {
+    if (signatureAccounts.length === 0) {
+      selectedNameAccountId = ""
+      nameEdit.text = ""
+      return
+    }
+    if (signatureAccount(selectedNameAccountId)) return
+    var activeId = service ? String(service.activeAccountId || "") : ""
+    var next = signatureAccount(activeId) || signatureAccounts[0]
+    selectedNameAccountId = String(next.id || "")
+    nameEdit.text = String(next.label || "")
+  }
+
   function saveSignature() {
     if (service && selectedSignatureAccountId !== "")
       service.setAccountSignature(selectedSignatureAccountId, signatureEdit.text)
@@ -88,8 +123,14 @@ Column {
     signatureEdit.text = String(next.signature || "")
   }
 
-  onSignatureAccountsChanged: ensureSignatureAccount()
-  Component.onCompleted: ensureSignatureAccount()
+  onSignatureAccountsChanged: {
+    ensureSignatureAccount()
+    ensureNameAccount()
+  }
+  Component.onCompleted: {
+    ensureSignatureAccount()
+    ensureNameAccount()
+  }
 
   spacing: Style.space(16)
 
@@ -580,6 +621,94 @@ Column {
     font.letterSpacing: 1
   }
 
+  // What to call a mailbox, which the list below draws and the switcher and
+  // every merged row draw too. Two of these can differ only in their domain
+  // and elide to the same handful of characters, so a name is the one thing
+  // that tells them apart at a glance.
+  //
+  // A picker and one field rather than a field on each row: the rows carry
+  // live mailbox state and are rebuilt whenever a poll changes an unread
+  // count, which would take the field apart while it was being typed into.
+  // This is the same reason the signature editor is shaped this way.
+  Column {
+    width: parent.width
+    spacing: Style.space(6)
+    visible: root.signatureAccounts.length > 0
+
+    // Two questions, one under the other, each with its own label: which
+    // mailbox, and what to call it. They were one block under a single "Name"
+    // heading, which read as though the address in the picker *was* the name
+    // and left nothing that looked like somewhere to type.
+    Text {
+      width: parent.width
+      visible: root.signatureAccounts.length > 1
+      text: "Mailbox"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Dropdown {
+      objectName: "settings-name-account-picker"
+      visible: root.signatureAccounts.length > 1
+      width: parent.width
+      showLabel: false
+      value: root.selectedNameAccountId
+      options: root.nameOptions()
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { root.selectNameAccount(next) }
+    }
+
+    Item {
+      width: parent.width
+      implicitHeight: Style.space(4)
+      visible: root.signatureAccounts.length > 1
+    }
+
+    Text {
+      width: parent.width
+      text: "Name"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // The kit's own single-line input, which is what every other field on
+    // this page is: it carries the focus ring, the selection colours and a
+    // real placeholder, and it takes a click without one being arranged for
+    // it. A hand-built Rectangle around a bare TextInput drew the same box
+    // and could not be typed into.
+    TextField {
+      id: nameEdit
+      objectName: "settings-name-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+
+      // Saved on the way out rather than on every keystroke, so the account
+      // file is written once per edit and the field is never rebuilt from
+      // under the cursor.
+      onActiveFocusChanged: if (!activeFocus) root.saveName()
+      onAccepted: root.saveName()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "What this mailbox is called in Omamail — in the switcher, in this "
+        + "list, and beside every message in a combined view. Leave it empty "
+        + "to use the address. It is not sent to anyone."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+  }
+
   Column {
     width: parent.width
     spacing: Style.space(2)
@@ -615,7 +744,15 @@ Column {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: row.modelData.email !== "" ? row.modelData.email : "New mailbox"
+            // The name if one was given, so this list and the switcher agree
+            // about what each mailbox is called. The address is on the line
+            // below either way, which keeps the row identifiable.
+            text: {
+              var named = row.modelData.name !== undefined
+                && String(row.modelData.name) !== ""
+              if (named) return String(row.modelData.name)
+              return row.modelData.email !== "" ? row.modelData.email : "New mailbox"
+            }
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -624,13 +761,22 @@ Column {
 
           Text {
             width: parent.width
+            // The address and whatever a server had to say are both in here,
+            // and Qt's default would run the rich text engine over either.
+            textFormat: Text.PlainText
             text: {
               if (row.modelData.error !== undefined && row.modelData.error !== "")
                 return row.modelData.error
               if (!row.modelData.signedIn) return "Signed out"
               var count = row.modelData.unread
-              return count === 0 ? "No unread mail"
+              var unread = count === 0 ? "No unread mail"
                 : (count === 1 ? "1 unread message" : count + " unread messages")
+              // A named row has put its name on the line above, so the address
+              // belongs here — otherwise nothing on the row says which mailbox
+              // it is.
+              var named = row.modelData.name !== undefined
+                && String(row.modelData.name) !== ""
+              return named ? String(row.modelData.email) + " · " + unread : unread
             }
             color: row.modelData.error !== undefined && row.modelData.error !== ""
               ? root.urgentColor : root.dimColor
