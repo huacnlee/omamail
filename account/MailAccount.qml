@@ -320,15 +320,15 @@ Item {
   property string pendingAction: ""
   property string pendingActionQuery: ""
   property var deferredListLoad: null
-  property var queuedQuietActions: []
+  property var queuedActions: []
   property bool sending: false
   property var pendingSend: null
   property int sendSecondsRemaining: 0
   readonly property bool sendPending: pendingSend !== null
 
   onPendingActionChanged: {
-    if (pendingAction === "" && queuedQuietActions.length > 0)
-      Qt.callLater(root.runQueuedQuietAction)
+    if (pendingAction === "" && queuedActions.length > 0)
+      Qt.callLater(root.runQueuedAction)
   }
 
   // Notifications only start once the first successful load has established
@@ -1246,20 +1246,24 @@ Item {
 
   // -------------------------------------------------------------- actions
 
-  function queueQuietAction(messageId, action, actionQuery) {
-    var queued = queuedQuietActions.slice()
+  // `quiet` rides along because it decides whether the row may be evicted from
+  // under an open reader. A queued explicit trash that ran as if it were quiet
+  // would leave the message the user deleted still on screen.
+  function queueAction(messageId, action, actionQuery, quiet) {
+    var queued = queuedActions.slice()
     for (var i = 0; i < queued.length; i++) {
       if (queued[i].id === messageId && queued[i].action === action) return
     }
-    queued.push({ id: messageId, action: action, cacheKey: actionQuery })
-    queuedQuietActions = queued
+    queued.push({ id: messageId, action: action, cacheKey: actionQuery,
+      quiet: quiet === true })
+    queuedActions = queued
   }
 
-  function runQueuedQuietAction() {
-    if (pendingAction !== "" || queuedQuietActions.length === 0) return
-    var queued = queuedQuietActions.slice()
+  function runQueuedAction() {
+    if (pendingAction !== "" || queuedActions.length === 0) return
+    var queued = queuedActions.slice()
     var request = queued.shift()
-    queuedQuietActions = queued
+    queuedActions = queued
 
     // Prefer the normal optimistic path while the row is still in either
     // account view. Navigation may have removed it meanwhile; marking a
@@ -1267,13 +1271,13 @@ Item {
     if (cacheKey === request.cacheKey
         && (Model.indexById(messages, request.id) >= 0
         || Model.indexById(previewMessages, request.id) >= 0)) {
-      act(request.id, request.action, true)
+      act(request.id, request.action, request.quiet)
       return
     }
 
     var change = Model.labelChangesFor(request.action)
     if (request.action !== "trash" && request.action !== "untrash" && !change) {
-      if (queuedQuietActions.length > 0) Qt.callLater(root.runQueuedQuietAction)
+      if (queuedActions.length > 0) Qt.callLater(root.runQueuedAction)
       return
     }
     // The prior action may just have resumed this query's deferred list before
@@ -1335,13 +1339,16 @@ Item {
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
     if (refuseUnavailableAction(action)) return false
+    // One mutation is in flight at a time, because the rollback below restores
+    // a row by the index it held when the action was taken. That is a reason to
+    // make the next action wait, not a reason to drop it: a mailbox is cleared
+    // by pressing the same key down a list faster than any server answers, and
+    // refusing the second press lost the keystroke, left the note explaining a
+    // failure the user had not caused, and — because `act` answered false —
+    // stopped the cursor moving on. Queue it and run it when the slot frees.
     if (pendingAction !== "") {
-      if (quiet === true) {
-        queueQuietAction(messageId, action, cacheKey)
-        return true
-      }
-      note("Another action is still finishing")
-      return false
+      queueAction(messageId, action, cacheKey, quiet === true)
+      return true
     }
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
