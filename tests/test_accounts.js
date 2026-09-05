@@ -532,6 +532,74 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(accounts.active(legacy).clientId, "abc")
 }
 
+// ------------------------------------------------------------ JMAP settings
+//
+// Four fields, and only one of them was typed. The rest are what sign-in
+// learned: the URL that finally answered, the scheme that was accepted, and
+// the account id the server's `primaryAccounts` named.
+
+{
+  const saved = accounts.serialize(accounts.add(accounts.emptyList(), {
+    email: "omamail-test@depodra.com",
+    provider: "jmap",
+    jmap: {
+      sessionUrl: "https://mail.depodra.com/jmap/session",
+      username: "omamail-test",
+      authScheme: "basic",
+      accountId: "t"
+    }
+  }))
+  const reloaded = accounts.find(accounts.load(saved), "jmap:omamail-test@depodra.com")
+  assert.strictEqual(reloaded.provider, "jmap")
+  assert.strictEqual(reloaded.id, "jmap:omamail-test@depodra.com",
+    "one address can be an IMAP mailbox and a JMAP one at the same time")
+  assert.strictEqual(reloaded.jmap.sessionUrl, "https://mail.depodra.com/jmap/session")
+  assert.strictEqual(reloaded.jmap.username, "omamail-test")
+  assert.strictEqual(reloaded.jmap.authScheme, "basic")
+  assert.strictEqual(reloaded.jmap.accountId, "t")
+
+  // The secret is not here and never was: it goes to the keyring under
+  // `Credentials.jmapKeyringAttributes`, and accounts.json is world-readable.
+  assert.ok(saved.indexOf("secret") < 0)
+  assert.ok(saved.indexOf("password") < 0)
+
+  // Bearer is recorded when that is what answered.
+  assert.strictEqual(accounts.makeAccount({
+    email: "ada@fastmail.com", provider: "jmap", jmap: { authScheme: " Bearer " }
+  }).jmap.authScheme, "bearer")
+
+  // Anything else is Basic: an account that has not signed in yet has no
+  // scheme at all, and Basic is the one sign-in tries first. `none` is
+  // discovery's unauthenticated GET, which is not a way of signing in.
+  assert.strictEqual(accounts.makeAccount({ email: "ada@x.com", provider: "jmap" })
+    .jmap.authScheme, "basic")
+  assert.strictEqual(accounts.makeAccount({
+    email: "ada@x.com", provider: "jmap", jmap: { authScheme: "none" }
+  }).jmap.authScheme, "basic")
+  assert.strictEqual(accounts.makeAccount({
+    email: "ada@x.com", provider: "jmap", jmap: { authScheme: "digest" }
+  }).jmap.authScheme, "basic")
+
+  // A JMAP block is present on every account, so nothing has to guard an
+  // undefined one, and an account of another provider has an empty one.
+  const gmail = accounts.makeAccount({ email: "j@gmail.com", clientId: "abc" })
+  assert.strictEqual(gmail.jmap.sessionUrl, "")
+  assert.strictEqual(gmail.jmap.accountId, "")
+
+  // `jmap` is a provider a hand-edited or newer file may name, and it survives
+  // the round trip rather than reading as Gmail.
+  assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: "JMAP" }).provider, "jmap")
+  assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: " jmap " }).provider, "jmap")
+
+  // The same address over three providers is three mailboxes.
+  let list = accounts.emptyList()
+  list = accounts.add(list, { email: "ada@example.org", provider: "imap" })
+  list = accounts.add(list, { email: "ada@example.org", provider: "jmap" })
+  assert.strictEqual(accounts.count(list), 2)
+  assert.strictEqual(accounts.find(list, "jmap:ada@example.org").provider, "jmap")
+  assert.strictEqual(accounts.find(list, "imap:ada@example.org").provider, "imap")
+}
+
 // ------------------------------------------------------------- signatures
 
 {

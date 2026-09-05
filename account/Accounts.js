@@ -77,7 +77,7 @@ function accountId(email, provider) {
 // anything written before providers existed — is Gmail: that is what every
 // account in an upgraded install actually is, and defaulting to it is what
 // stops an upgrade from presenting a working mailbox as unconfigured.
-var PROVIDERS = ["gmail", "hey", "imap"]
+var PROVIDERS = ["gmail", "hey", "imap", "jmap"]
 var DEFAULT_PROVIDER = "gmail"
 
 function normalizeProvider(value) {
@@ -117,6 +117,47 @@ function makeImapSettings(raw) {
   }
 }
 
+// The server settings a JMAP account needs, none of them secret either — the
+// app password or API token is the secret, and it lives in the keyring under
+// `Credentials.jmapKeyringAttributes`.
+//
+// Four fields, and every one of them is something sign-in *learned* rather
+// than something a user typed: the session URL is whichever address finally
+// answered with a session object, after discovery and its one redirect hop;
+// the scheme is whichever of Basic and Bearer the server accepted; the account
+// id is `primaryAccounts` for the mail capability, which every later request
+// names. Only the username is typed, and only when it is not the address.
+//
+// Nothing else from the session is kept here. Its URLs, its limits and its
+// state are cached beside the query cache and refetched when the server says
+// its state changed, because they are the server's answer rather than the
+// account's settings.
+function makeJmapSettings(raw) {
+  var values = raw || {}
+  return {
+    sessionUrl: trimmed(values.sessionUrl),
+    username: trimmed(values.username),
+    authScheme: jmapScheme(values.authScheme),
+    accountId: trimmed(values.accountId)
+  }
+}
+
+// Basic or Bearer, and nothing else reaches an account: `none` is discovery's
+// unauthenticated well-known GET, which is not a way of signing in to
+// anything. Anything unrecognised — an empty field on an account that has not
+// signed in yet, a hand edit — is Basic, which is the scheme sign-in tries
+// first anyway.
+//
+// The names are `JmapProtocol.AUTH_BASIC` and `AUTH_BEARER`, written out here
+// rather than imported the way the port fallback above repeats
+// `Imap.normalizedPort`'s rule: the account list does not reach into a provider
+// for a constant. The transport script refuses any other scheme before curl
+// runs, so this is the first of two gates rather than the only one.
+function jmapScheme(value) {
+  var name = trimmed(value).toLowerCase()
+  return name === "bearer" ? "bearer" : "basic"
+}
+
 // The address arrives with the first successful sign-in for Gmail, and is
 // typed by hand for IMAP, so an account exists for a while with no id at all.
 // Such an entry is kept — it holds the OAuth client or the server settings the
@@ -133,6 +174,7 @@ function makeAccount(account) {
     clientId: trimmed(raw.clientId),
     clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
+    jmap: makeJmapSettings(raw.jmap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
     // Whether this row is the setup form's working state rather than a

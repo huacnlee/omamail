@@ -105,6 +105,7 @@ test-shell:
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_jmap_transport.sh
+	bash tests/test_jmap_srv.sh
 	bash tests/test_imap_ordering.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_image_fetch.sh

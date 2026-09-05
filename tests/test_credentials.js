@@ -215,6 +215,39 @@ deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 3),
 deepEqual(credentials.refreshTokenAttributes(sharedClient, "me@example.com", 4),
   credentials.renamedLegacyKeyringAttributes(sharedClient))
 
+// A JMAP account has no OAuth client either. Its secret — an app password or
+// an API token, whichever scheme turned out to work — is keyed on the account
+// alone, under a kind of its own so the same address reached three ways is
+// three entries rather than one overwriting the other two.
+
+deepEqual(credentials.jmapKeyringAttributes("jmap:ada@example.org"), [
+  "service", "omamail",
+  "kind", "jmap-secret",
+  "account", "jmap:ada@example.org"
+])
+deepEqual(credentials.jmapKeyringAttributes("  JMAP:Ada@Example.org  "),
+  credentials.jmapKeyringAttributes("jmap:ada@example.org"),
+  "an id is matched however it was cased or spaced when it was typed")
+
+// The kinds are what keep three mailboxes on one address apart.
+assert.notDeepStrictEqual(
+  JSON.stringify(credentials.jmapKeyringAttributes("ada@example.org")),
+  JSON.stringify(credentials.imapKeyringAttributes("ada@example.org")))
+
+// An account with no name yet gets the literal placeholder: an empty
+// attribute value is a wildcard to secret-tool, and this lookup would hand
+// back some other mailbox's secret.
+deepEqual(credentials.jmapKeyringAttributes(""), [
+  "service", "omamail",
+  "kind", "jmap-secret",
+  "account", "default"
+])
+deepEqual(credentials.jmapKeyringAttributes(null), credentials.jmapKeyringAttributes(""))
+for (const value of credentials.jmapKeyringAttributes(undefined)) {
+  assert.strictEqual(typeof value, "string")
+  assert.ok(value.length > 0, "an empty attribute value is a secret-tool wildcard")
+}
+
 // --------------------------------------------- looking before the leap
 //
 // Why the legacy read counts before it asks is in Credentials.js. What it has

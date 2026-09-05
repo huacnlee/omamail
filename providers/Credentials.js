@@ -391,6 +391,27 @@ function imapKeyringAttributes(accountId) {
     "account", id || UNNAMED_ACCOUNT]
 }
 
+// A JMAP account has no OAuth client either, and its secret is an app password
+// or an API token rather than a password — one credential, whichever of the
+// two schemes turned out to work, so one entry keyed on the account alone.
+//
+// Its own kind, for the reason IMAP's has one: one address can be a Gmail
+// mailbox, an IMAP mailbox and a JMAP mailbox at the same time, and a refresh
+// token, a password and an app password for it are three entries rather than
+// one overwriting the next. The account ids differ as well — this one is
+// prefixed `jmap:` — so the kind is belt and braces, and it is what makes an
+// entry readable as what it is when somebody opens their keyring.
+var JMAP_KEYRING_KIND = "jmap-secret"
+
+function jmapKeyringAttributes(accountId) {
+  var id = accountKey(accountId)
+  // As above: an empty attribute value is a wildcard to secret-tool, which
+  // would hand back some other account's secret. An account with no name yet
+  // gets the literal placeholder, which no address can collide with.
+  return ["service", KEYRING_SERVICE, "kind", JMAP_KEYRING_KIND,
+    "account", id || UNNAMED_ACCOUNT]
+}
+
 // Entries from before the Omamail rename also predate Calendar permission.
 // Their exact old shape lets the upgrade identify them without using them.
 function renamedKeyringAttributes(clientId, accountId) {

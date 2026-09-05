@@ -332,3 +332,302 @@ function fillTemplate(template, key, value) {
   var encoded = encodeURIComponent(String(value === undefined || value === null ? "" : value))
   return template.replace(new RegExp("\\{" + key + "\\}", "g"), function () { return encoded })
 }
+
+// --------------------------------------------------------------- discovery
+//
+// Finding the server is its own problem, and on the reference server it is the
+// one that fails: that Stalwart answers 403 at the well-known path and
+// publishes no `_jmap._tcp` record, so every account on it is reached by a host
+// somebody typed. Fastmail is the other end — nothing typed at all, an SRV
+// record naming `api.fastmail.com`. Both paths are here because both are real.
+
+// The order the setup page tries the two credential schemes in.
+//
+// Basic first: RFC 8620 section 8.2 names an app password as the Basic-auth
+// credential, and a token sent as Basic is a rarer mistake than a password
+// sent as Bearer. A server that takes only a token answers the first attempt
+// with a 401 and the second one succeeds. Two requests with two credentials,
+// from the setup page and nowhere else — it is a detection, not a retry, and a
+// 401 from both is the rejected state.
+var AUTH_SCHEME_ORDER = [AUTH_BASIC, AUTH_BEARER]
+
+// What a discovery step is. `typed` is the URL built from what the user wrote,
+// and it is the only step there is when they wrote something; `srv` is the
+// `_jmap._tcp` record for the address's domain, which has to be looked up
+// before it has a URL; `well-known` is a well-known URL to GET.
+var STEP_TYPED = "typed"
+var STEP_SRV = "srv"
+var STEP_WELL_KNOWN = "well-known"
+
+// RFC 8620 section 2.2. The well-known URL is not the session object: it is
+// expected to redirect to one, which is the hop `redirectHop` allows.
+var WELL_KNOWN_PATH = "/.well-known/jmap"
+
+// What a bare typed host means. Discovery has already failed by the time
+// anybody types a host into that field, so this is a guess — but it is the path
+// the reference Stalwart serves, and that is the server the field exists for.
+var SESSION_PATH = "/jmap/session"
+
+// A hostname, optionally with a port; not a URL and not a path. Everything
+// here ends up in a URL an account password is sent to, so a value carrying a
+// slash, a space, an "@" or a second colon could point the authenticated
+// client somewhere else entirely.
+//
+// Deliberately a second copy of `ImapProtocol.isValidHost` rather than an
+// import of it: one provider's rules are not the other's to change, and the
+// day either grows a case the other must not follow, a shared function is the
+// thing that carries it across.
+function isValidHost(value) {
+  var host = trimmed(value)
+  if (host === "" || host.length > 253) return false
+  if (/[\s/\\@:?#"'<>]/.test(host)) return false
+  // An IP literal is legitimate — a JMAP server on a machine with no name yet.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true
+  return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)
+}
+
+// A trailing dot is a fully qualified name to DNS and noise in a URL, and
+// `dig` writes one on every target it prints.
+function bareHost(value) {
+  return trimmed(value).toLowerCase().replace(/\.+$/, "")
+}
+
+function isValidPort(value) {
+  var port = Math.floor(Number(value))
+  return isFinite(port) && port >= 1 && port <= 65535
+}
+
+// The domain half of an address, which is the whole of what discovery has to
+// go on. An address that is not one has no domain rather than a wrong one:
+// the setup page validates the address before it ever gets here.
+function addressDomain(address) {
+  var text = trimmed(address)
+  var at = text.lastIndexOf("@")
+  if (at < 0) return ""
+  var domain = bareHost(text.substring(at + 1))
+  return isValidHost(domain) ? domain : ""
+}
+
+// The well-known URL on a host the SRV record named. The port is written only
+// when it is not 443: a record saying 443 and a URL saying `:443` are the same
+// address, and the shorter one is what a user is shown afterwards.
+function wellKnownUrl(host, port) {
+  var name = bareHost(host)
+  if (!isValidHost(name)) return ""
+  var suffix = isValidPort(port) && Math.floor(Number(port)) !== 443
+    ? ":" + Math.floor(Number(port)) : ""
+  return "https://" + name + suffix + WELL_KNOWN_PATH
+}
+
+// What the user typed in the "Server settings" field, as a URL — or "" when it
+// is not one this client will send a password to.
+//
+// A full HTTPS URL is used verbatim, because a session object living somewhere
+// this client would never have guessed is exactly why the field exists. A bare
+// host gains the session path. Anything else — `http://`, a scheme that is not
+// HTTP at all, a value with a space in it — is refused rather than repaired.
+function typedSessionUrl(server) {
+  var text = trimmed(server)
+  if (text === "") return ""
+  if (/^https:\/\//i.test(text)) return text
+  if (text.indexOf("://") >= 0) return ""
+  // A host with a path already says where the session is; only a bare host is
+  // guessed at.
+  var slash = text.indexOf("/")
+  if (slash >= 0) {
+    var written = bareHost(text.substring(0, slash))
+    return isValidHost(written) ? "https://" + written + text.substring(slash) : ""
+  }
+  var colon = text.lastIndexOf(":")
+  if (colon >= 0) {
+    var host = bareHost(text.substring(0, colon))
+    var port = text.substring(colon + 1)
+    if (!/^[0-9]{1,5}$/.test(port) || !isValidPort(port) || !isValidHost(host)) return ""
+    return "https://" + host + ":" + Math.floor(Number(port)) + SESSION_PATH
+  }
+  var bare = bareHost(text)
+  return isValidHost(bare) ? "https://" + bare + SESSION_PATH : ""
+}
+
+// Where this address's JMAP server is looked for, and in what order.
+//
+//   { error, domain, steps: [ { kind, url } ] }
+//
+// `error` is the one refusal this can answer, and an errored plan has no
+// steps. A typed server wins outright: somebody who filled that field in is
+// answering a discovery that already failed, and walking the domain again
+// afterwards would only fail again more slowly.
+//
+// The SRV step carries no URL because it has not been looked up yet. The
+// caller runs `scripts/jmap-srv.sh` for `domain`, hands what it printed to
+// `parseSrv`, and GETs the URL that comes back; a record that names no service
+// simply leaves that step with nothing to try.
+function discoveryPlan(address, server) {
+  var domain = addressDomain(address)
+  if (trimmed(server) !== "") {
+    var typed = typedSessionUrl(server)
+    if (typed === "") {
+      return { error: "The server must be reached over HTTPS", domain: domain, steps: [] }
+    }
+    return { error: "", domain: domain, steps: [{ kind: STEP_TYPED, url: typed }] }
+  }
+  // No server and no domain is nothing to look for. The page asks for the
+  // address first and validates it, so this is the empty form rather than a
+  // failure worth a sentence.
+  if (domain === "") return { error: "", domain: "", steps: [] }
+  return {
+    error: "",
+    domain: domain,
+    steps: [
+      { kind: STEP_SRV, url: "" },
+      { kind: STEP_WELL_KNOWN, url: "https://" + domain + WELL_KNOWN_PATH }
+    ]
+  }
+}
+
+// Every step tried and none of them a session. The sentence names no provider,
+// by the same instruction the setup page follows, and says what the server
+// field wants rather than only that something failed.
+function discoveryFailure(domain) {
+  var name = trimmed(domain)
+  return "No JMAP server answered for " + name
+    + ". Enter the server yourself — usually the host you sign in to on the web,"
+    + " such as mail.example.org."
+}
+
+// The one redirect hop discovery follows, taken from the reply's second line.
+//
+// The well-known URL is *expected* to redirect — Stalwart answers 307 to its
+// own session path — and the transport follows nothing, so the decision is
+// made here instead of by curl: exactly one hop, HTTPS only, and nothing at
+// all from a status that is not a redirect. The unauthenticated GET is what
+// makes that safe to follow; the credential goes only to the URL that finally
+// answered with a session.
+function redirectHop(status, redirectUrl) {
+  var code = Number(status)
+  if (!isFinite(code) || code < 300 || code >= 400) return ""
+  var url = trimmed(redirectUrl)
+  return /^https:\/\//i.test(url) ? url : ""
+}
+
+// The `_jmap._tcp` SRV answer, as the one record to try:
+//
+//   { target, port, url }
+//
+// `scripts/jmap-srv.sh` prints whatever `resolvectl` or `dig` said, and the
+// two disagree about everything but the four fields that matter: resolvectl
+// writes `_jmap._tcp.example.org IN SRV 0 1 443 api.example.org  -- link: wlan0`
+// and `dig +short` writes `0 1 443 api.example.org.`. So a record is found by
+// its shape — three small numbers in a row and a name after them — rather than
+// by counting fields from either end, which is what the interface suffix
+// resolvectl appends would break.
+//
+// RFC 2782 picks the lowest priority, then the highest weight. Weight is a
+// share of a random draw among equals; a client fetching one session object
+// has nothing to spread, so the heaviest wins and a tie takes the first.
+function parseSrv(text) {
+  var lines = String(text === undefined || text === null ? "" : text).split("\n")
+  var best = null
+  for (var i = 0; i < lines.length; i++) {
+    var record = srvRecord(lines[i])
+    if (!record) continue
+    if (!best || record.priority < best.priority
+      || (record.priority === best.priority && record.weight > best.weight)) {
+      best = record
+    }
+  }
+  // A target of "." is RFC 2782's way of saying the service is decidedly not
+  // available here, which is a different thing from no record at all — and the
+  // same answer to the one question this client asks.
+  if (!best || best.target === "") return { target: "", port: 0, url: "" }
+  return { target: best.target, port: best.port, url: wellKnownUrl(best.target, best.port) }
+}
+
+function srvRecord(line) {
+  var fields = trimmed(line).split(/\s+/)
+  for (var i = 0; i + 3 < fields.length; i++) {
+    if (!/^[0-9]{1,5}$/.test(fields[i])) continue
+    if (!/^[0-9]{1,5}$/.test(fields[i + 1])) continue
+    if (!/^[0-9]{1,5}$/.test(fields[i + 2]) || !isValidPort(fields[i + 2])) continue
+    var target = bareHost(fields[i + 3])
+    // "." strips to "", and a target that is not a hostname is not a record
+    // this client can act on either.
+    if (target !== "" && !isValidHost(target)) continue
+    return {
+      priority: Number(fields[i]),
+      weight: Number(fields[i + 1]),
+      port: Math.floor(Number(fields[i + 2])),
+      target: target
+    }
+  }
+  return null
+}
+
+// ------------------------------------------------------------ the session
+
+// The two capabilities a mailbox needs the server to have, and the key
+// `primaryAccounts` names the mail account under.
+var CAPABILITY_CORE = "urn:ietf:params:jmap:core"
+var CAPABILITY_MAIL = "urn:ietf:params:jmap:mail"
+
+function hasCapability(capabilities, urn) {
+  if (!capabilities || typeof capabilities !== "object") return false
+  return capabilities[urn] !== undefined && capabilities[urn] !== null
+}
+
+function countKeys(object) {
+  if (!object || typeof object !== "object") return 0
+  var total = 0
+  for (var key in object) total = total + 1
+  return total
+}
+
+function containsValue(list, value) {
+  if (!Array.isArray(list)) return false
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i]) === value) return true
+  }
+  return false
+}
+
+// Whether a 200 from the session URL is a mailbox this client can sign in to:
+//
+//   { error, accountId }
+//
+// A 200 is not "signed in" by itself. Stalwart answers one with an empty
+// `accounts` object when the Authorization header never arrives, so a check
+// that stopped at the status would record an account with nothing in it and
+// fail later, somewhere with no field to correct.
+//
+// Three refusals, each a sentence about what is missing rather than about
+// JMAP. `accountId` on success is `primaryAccounts` for the mail capability,
+// which is the id every later request names.
+function verifySession(session) {
+  var doc = parseJson(session)
+  var notMail = { error: "The server answered, but not as a JMAP mail server", accountId: "" }
+  if (!doc) return notMail
+  var capabilities = doc.capabilities
+  if (!hasCapability(capabilities, CAPABILITY_CORE)) return notMail
+  if (!hasCapability(capabilities, CAPABILITY_MAIL)) return notMail
+
+  var accounts = doc.accounts && typeof doc.accounts === "object" ? doc.accounts : null
+  var primary = doc.primaryAccounts && typeof doc.primaryAccounts === "object"
+    ? trimmed(doc.primaryAccounts[CAPABILITY_MAIL]) : ""
+  var account = accounts && primary !== "" ? accounts[primary] : null
+  var noMailbox = { error: "The server has no mailbox for this account", accountId: "" }
+  if (!accounts || countKeys(accounts) === 0 || !account) return noMailbox
+  if (!hasCapability(account.accountCapabilities, CAPABILITY_MAIL)) return noMailbox
+
+  // Every query this client sends sorts by `receivedAt` descending, so an
+  // account that cannot is one where every list would come back
+  // `unsupportedSort` — refused here, where there is still a field to change,
+  // rather than on the first mailbox anybody opens. RFC 8621 makes the list
+  // mandatory, so an absent one is not a server keeping quiet about a sort it
+  // supports.
+  var mail = account.accountCapabilities[CAPABILITY_MAIL]
+  var sortOptions = mail && typeof mail === "object" ? mail.emailQuerySortOptions : null
+  if (!containsValue(sortOptions, "receivedAt")) {
+    return { error: "The server cannot sort mail by date, which this client needs", accountId: "" }
+  }
+  return { error: "", accountId: primary }
+}
