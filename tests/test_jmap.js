@@ -1921,6 +1921,350 @@ assert.strictEqual(jmap.notUpdatedError({
   notUpdated: { eaaaaab: { type: "notFound" }, iaaaaac: { type: "forbidden" } }
 }, false), "That message is no longer on the server")
 
+// -------------------------------------------------------- sending and drafts
+//
+// Every request below is the one the reference account answered: the probes
+// beside the map ran each of these against Stalwart, and the replies asserted
+// on are its own words rather than invented ones.
+
+const sendSession = session({
+  uploadUrl: "https://mx2.depodra.com/jmap/upload/{accountId}/",
+  capabilities: {
+    "urn:ietf:params:jmap:core": { maxSizeUpload: 50000000, maxConcurrentUpload: 4 },
+    "urn:ietf:params:jmap:mail": {},
+    "urn:ietf:params:jmap:submission": {}
+  }
+})
+
+assert.strictEqual(jmap.uploadTemplate(sendSession),
+  "https://mx2.depodra.com/jmap/upload/{accountId}/")
+assert.strictEqual(jmap.uploadTemplate(JSON.stringify(sendSession)),
+  "https://mx2.depodra.com/jmap/upload/{accountId}/", "the document may still be text")
+assert.strictEqual(jmap.uploadTemplate(session()), "")
+assert.strictEqual(jmap.uploadTemplate(null), "")
+
+assert.strictEqual(jmap.uploadUrl(jmap.uploadTemplate(sendSession), "t"),
+  "https://mx2.depodra.com/jmap/upload/t/")
+// An account id is a server's own string, so it is encoded on the way into
+// somebody else's template exactly as a blob id is.
+assert.strictEqual(jmap.uploadUrl("https://h/upload/{accountId}/", "a/b?c"),
+  "https://h/upload/a%2Fb%3Fc/")
+assert.strictEqual(jmap.uploadUrl("", "t"), "")
+assert.strictEqual(jmap.uploadUrl(null, "t"), "")
+
+// What an upload answers with, and the answer that is not one.
+assert.strictEqual(jmap.uploadedBlobId(
+  '{"accountId":"t","blobId":"edvsg29zokw9x2r71c0","type":"message/rfc822","size":221}'),
+  "edvsg29zokw9x2r71c0")
+assert.strictEqual(jmap.uploadedBlobId("<html>no</html>"), "")
+assert.strictEqual(jmap.uploadedBlobId('{"accountId":"t"}'), "")
+assert.strictEqual(jmap.uploadedBlobId(null), "")
+
+// The session states its own upload concurrency; one is the floor under a
+// server that omitted a mandatory figure.
+assert.strictEqual(jmap.DEFAULT_CONCURRENT_UPLOAD, 1)
+assert.strictEqual(
+  jmap.sessionLimit(sendSession, "maxConcurrentUpload", jmap.DEFAULT_CONCURRENT_UPLOAD), 4)
+assert.strictEqual(
+  jmap.sessionLimit(session(), "maxConcurrentUpload", jmap.DEFAULT_CONCURRENT_UPLOAD), 1)
+
+// ------------------------------------------------------------- three guards
+
+// Nothing is wrong with an ordinary message on the reference account.
+assert.strictEqual(jmap.sendGuard(sendSession, roles, 4096), "")
+assert.strictEqual(jmap.saveGuard(sendSession, roles, 4096), "")
+
+// The ceiling is the server's own figure, and exactly it is allowed.
+assert.strictEqual(jmap.sendGuard(sendSession, roles, 50000000), "")
+assert.strictEqual(jmap.sendGuard(sendSession, roles, 50000001),
+  "This message is larger than the server accepts")
+assert.strictEqual(jmap.saveGuard(sendSession, roles, 50000001),
+  "This message is larger than the server accepts")
+// A server that published no figure refuses nothing for size: RFC 8620 makes
+// it mandatory, so its absence is the server's omission rather than a reason
+// to refuse every message this client is asked to send.
+assert.strictEqual(jmap.sendGuard(session(), roles, 50000001), "")
+
+// The two roles, in the order they are checked. Both exist on both target
+// servers, so these guard an account whose folder was deleted since the last
+// read rather than a server this client expects to meet.
+assert.strictEqual(jmap.sendGuard(sendSession, { sent: "", drafts: "d" }, 10),
+  "This account has no Sent mailbox")
+assert.strictEqual(jmap.sendGuard(sendSession, { sent: "e", drafts: "" }, 10),
+  "This account has no Drafts mailbox")
+assert.strictEqual(jmap.sendGuard(sendSession, null, 10), "This account has no Sent mailbox")
+// A draft never reaches Sent, so a missing Sent mailbox is not its business.
+assert.strictEqual(jmap.saveGuard(sendSession, { sent: "", drafts: "d" }, 10), "")
+assert.strictEqual(jmap.saveGuard(sendSession, { sent: "e", drafts: "" }, 10),
+  "This account has no Drafts mailbox")
+// Size is answered before either, because it is about this message rather
+// than about the account.
+assert.strictEqual(jmap.sendGuard(sendSession, { sent: "", drafts: "" }, 50000001),
+  "This message is larger than the server accepts")
+
+// ------------------------------------------------------ one header, no parse
+
+const outgoing = [
+  "From: \"Test Account\" <omamail-test@depodra.com>",
+  "To: a@b.example,",
+  "\tc@d.example",
+  "Subject: [omamail-test] hello",
+  "MIME-Version: 1.0",
+  "",
+  "From: this line is the body and is not a header"
+].join("\r\n")
+
+assert.strictEqual(jmap.messageHeader(outgoing, "From"),
+  "\"Test Account\" <omamail-test@depodra.com>")
+assert.strictEqual(jmap.messageHeader(outgoing, "from"), jmap.messageHeader(outgoing, "From"),
+  "a header name is not case-sensitive")
+assert.strictEqual(jmap.messageHeader(outgoing, "To"), "a@b.example, c@d.example",
+  "a folded continuation belongs to the header above it")
+assert.strictEqual(jmap.messageHeader(outgoing, "Cc"), "")
+assert.strictEqual(jmap.messageHeader(outgoing, ""), "")
+assert.strictEqual(jmap.messageHeader("", "From"), "")
+assert.strictEqual(jmap.messageHeader(null, "From"), "")
+// The header block ends at the blank line, so an attachment cannot forge one.
+assert.strictEqual(jmap.messageHeader(outgoing, "Subject"), "[omamail-test] hello")
+assert.strictEqual(
+  jmap.messageHeader("Subject: only headers\r\n", "Subject"), "only headers",
+  "a message that never reached its blank line still has the headers it has")
+
+// ------------------------------------------------------------- identities
+
+// `Identity/get` on the reference account, and a second identity to choose
+// between. `mayDelete`, `replyTo` and the signatures are the server's and none
+// of them is read.
+const serverIdentities = [
+  {
+    id: "b", name: "Test Account", email: "omamail-test@depodra.com",
+    replyTo: null, bcc: null, textSignature: "", htmlSignature: "", mayDelete: true
+  },
+  { id: "c", name: "", email: "Alias@depodra.com" }
+]
+
+deepEqual(jmap.identityAliases(serverIdentities, "omamail-test@depodra.com"), [
+  {
+    id: "b", email: "omamail-test@depodra.com", displayName: "Test Account",
+    isPrimary: true, isDefault: true
+  },
+  { id: "c", email: "Alias@depodra.com", displayName: "", isPrimary: false, isDefault: false }
+])
+// The signed-in address is matched without regard to case, on either side.
+assert.strictEqual(jmap.identityAliases(serverIdentities, "OMAMAIL-TEST@Depodra.com")[0].isDefault, true)
+deepEqual(jmap.identityAliases([{ id: "c", email: "ALIAS@depodra.com" }], "alias@depodra.com"), [
+  { id: "c", email: "ALIAS@depodra.com", displayName: "", isPrimary: true, isDefault: true }
+])
+// A row with no id could never be submitted under and a row with no address
+// could never be chosen, so neither is offered.
+deepEqual(jmap.identityAliases([{ name: "nameless" }, { id: "d" }], "x@y"), [])
+deepEqual(jmap.identityAliases([], "x@y"), [])
+deepEqual(jmap.identityAliases(null, "x@y"), [])
+
+const sendAs = jmap.identityAliases(serverIdentities, "omamail-test@depodra.com")
+
+// The address the message states wins.
+assert.strictEqual(jmap.identityFor(sendAs, "Alias@depodra.com"), "c")
+assert.strictEqual(jmap.identityFor(sendAs, "omamail-test@depodra.com"), "b")
+// Case on either side, and the address inside the angle brackets rather than a
+// phrase that happens to contain an `@`.
+assert.strictEqual(jmap.identityFor(sendAs, "\"a@b.example\" <ALIAS@DEPODRA.COM>"), "c")
+assert.strictEqual(jmap.identityFor(sendAs, "Test Account <omamail-test@depodra.com>"), "b")
+// No match is not a refusal: the RSVP and the unsubscribe send from the alias
+// the mail arrived at, and the server forces the envelope sender to the
+// identity while delivering the header as written.
+assert.strictEqual(jmap.identityFor(sendAs, "someone@example.org"), "b")
+assert.strictEqual(jmap.identityFor(sendAs, ""), "b")
+assert.strictEqual(jmap.identityFor(sendAs, null), "b")
+// No identity is the signed-in address, so there is no default and the first
+// is what a send goes out under.
+assert.strictEqual(jmap.identityFor(jmap.identityAliases(serverIdentities, ""),
+  "nowhere@example.org"), "b")
+// An account with no identity at all answers nothing, and the server refuses
+// the submission in its own words.
+assert.strictEqual(jmap.identityFor([], "a@b.example"), "")
+assert.strictEqual(jmap.identityFor(null, "a@b.example"), "")
+
+// ------------------------------------------------------------ the send request
+
+// The creation ids are this client's own labels: `#m` is what the submission's
+// `emailId` names and `#s` is what `onSuccessUpdateEmail` is keyed on — the
+// *submission's* creation id, not the email's.
+assert.strictEqual(jmap.CREATE_EMAIL, "m")
+assert.strictEqual(jmap.CREATE_SUBMISSION, "s")
+
+const importCall = ["Email/import", {
+  accountId: "t",
+  emails: { m: { blobId: "blob1", mailboxIds: { d: true }, keywords: { $draft: true, $seen: true } } }
+}, "0"]
+
+const submitCall = ["EmailSubmission/set", {
+  accountId: "t",
+  create: { s: { emailId: "#m", identityId: "b" } },
+  onSuccessUpdateEmail: {
+    "#s": { "mailboxIds/e": true, "mailboxIds/d": null, "keywords/$draft": null }
+  }
+}, "1"]
+
+deepEqual(jmap.sendRequest("t", "blob1", "b", roles, ""), [importCall, submitCall])
+
+// With a draft behind it, the same request destroys it — after the import and
+// after the submission, which is the order the server applied.
+deepEqual(jmap.sendRequest("t", "blob1", "b", roles, "maaaaad"), [
+  importCall, submitCall, ["Email/set", { accountId: "t", destroy: ["maaaaad"] }, "2"]
+])
+
+// No envelope, ever. The server derives the sender from the identity and the
+// recipients from To, Cc and Bcc, which is the same set the IMAP client reads
+// off the same headers.
+assert.strictEqual(
+  "envelope" in jmap.sendRequest("t", "blob1", "b", roles, "")[1][1].create.s, false)
+// And no `sendAt`: the reference server sets it and refuses it as input.
+assert.strictEqual(
+  "sendAt" in jmap.sendRequest("t", "blob1", "b", roles, "")[1][1].create.s, false)
+
+// A send with no identity to name still builds a request. It is refused by the
+// server rather than by a client that decided the account could not send.
+assert.strictEqual(jmap.sendRequest("t", "blob1", "", roles, "")[1][1].create.s.identityId, "")
+
+// ------------------------------------------------------------ the save request
+
+deepEqual(jmap.saveRequest("t", "blob2", roles, ""), [
+  ["Email/import", {
+    accountId: "t",
+    emails: { m: { blobId: "blob2", mailboxIds: { d: true }, keywords: { $draft: true, $seen: true } } }
+  }, "0"]
+])
+
+deepEqual(jmap.saveRequest("t", "blob2", roles, "buaaaaan"), [
+  ["Email/import", {
+    accountId: "t",
+    emails: { m: { blobId: "blob2", mailboxIds: { d: true }, keywords: { $draft: true, $seen: true } } }
+  }, "0"],
+  ["Email/set", { accountId: "t", destroy: ["buaaaaan"] }, "1"]
+])
+
+// There is no update: an Email is immutable apart from its keywords and its
+// mailboxes, and the reference server refuses a subject patch outright.
+assert.strictEqual(typeof jmap.updateDraft, "undefined")
+
+// --------------------------------------------- what the reply is read for
+
+// The reference server's own answer to an import that worked.
+const importedOk = {
+  accountId: "t", oldState: "sgy", newState: "sg2",
+  created: { m: { id: "dmaaaaa9", threadId: "9", blobId: "caiopsc0fv0q", size: 267 } }
+}
+assert.strictEqual(jmap.createdId(importedOk, jmap.CREATE_EMAIL), "dmaaaaa9")
+assert.strictEqual(jmap.notCreatedEntry(importedOk, jmap.CREATE_EMAIL), null)
+assert.strictEqual(jmap.createdId(importedOk, "somethingelse"), "")
+assert.strictEqual(jmap.createdId(null, "m"), "")
+assert.strictEqual(jmap.notCreatedEntry(null, "s"), null)
+
+// A submission the server refused in the same request as its import. Measured:
+// the import stands, so the imported id is what the follow-up destroys before
+// the error reaches the compose window.
+const refusedSend = [
+  ["Email/import", importedOk, "0"],
+  ["EmailSubmission/set", {
+    accountId: "t",
+    notCreated: { s: { type: "noRecipients", description: "No recipients found in email." } }
+  }, "1"]
+]
+const stranded = jmap.createdId(
+  jmap.responseArguments(refusedSend, "Email/import"), jmap.CREATE_EMAIL)
+assert.strictEqual(stranded, "dmaaaaa9")
+deepEqual(jmap.destroyRequest("t", [stranded]),
+  [["Email/set", { accountId: "t", destroy: ["dmaaaaa9"] }, "0"]])
+assert.strictEqual(jmap.submissionError(jmap.notCreatedEntry(
+  jmap.responseArguments(refusedSend, "EmailSubmission/set"), jmap.CREATE_SUBMISSION)),
+  "Add a recipient first")
+
+// One id or a list, and an id named twice is destroyed once.
+deepEqual(jmap.destroyRequest("t", "x"), [["Email/set", { accountId: "t", destroy: ["x"] }, "0"]])
+deepEqual(jmap.destroyRequest("t", ["x", "x", "", null]),
+  [["Email/set", { accountId: "t", destroy: ["x"] }, "0"]])
+deepEqual(jmap.destroyRequest("t", []), [["Email/set", { accountId: "t", destroy: [] }, "0"]])
+
+// ------------------------------------------------------- submission errors
+
+assert.strictEqual(jmap.submissionError({
+  type: "forbiddenFrom",
+  description: "Envelope mailFrom does not match identity email address."
+}), "This account may not send as that address")
+assert.strictEqual(jmap.submissionError({ type: "noRecipients" }), "Add a recipient first")
+assert.strictEqual(jmap.submissionError({ type: "tooLarge" }),
+  "The message is too large for this server")
+assert.strictEqual(jmap.submissionError({ type: "tooManyRecipients" }),
+  "Too many recipients for this server")
+assert.strictEqual(jmap.submissionError({ type: "forbiddenToSend" }),
+  "This account is not allowed to send mail")
+assert.strictEqual(jmap.submissionError({ type: "rateLimit" }),
+  "The mail server is busy. Try again shortly")
+
+// The import's own refusal, answered here because both failures reach the user
+// through the same call.
+assert.strictEqual(jmap.submissionError({
+  type: "invalidEmail", description: "Blob does not contain a valid RFC 5322 message."
+}), "The server could not read the message")
+
+// Anything else in the server's own words, because a type name is not a
+// sentence — the reference server's answer to a bogus identity and to a bogus
+// email id are both `invalidProperties` with a description worth reading.
+assert.strictEqual(jmap.submissionError({
+  type: "invalidProperties", description: "Identity not found.", properties: ["identityId"]
+}), "Identity not found.")
+assert.strictEqual(jmap.submissionError({
+  type: "invalidProperties", description: "Email not found.", properties: ["emailId"]
+}), "Email not found.")
+// And redacted, because those words are the server's.
+assert.strictEqual(jmap.submissionError({
+  type: "serverFail", description: "upstream said Bearer sk-live-41d2 was rejected"
+}), "upstream said Bearer [redacted] was rejected")
+
+assert.strictEqual(jmap.submissionError({}), "The message could not be sent")
+assert.strictEqual(jmap.submissionError(null), "The message could not be sent")
+assert.strictEqual(jmap.submissionError({ type: "unheardOf" }), "The message could not be sent")
+// A draft that could not be imported did not fail to be sent.
+assert.strictEqual(jmap.submissionError({}, "The draft could not be saved"),
+  "The draft could not be saved")
+assert.strictEqual(jmap.submissionError({ type: "invalidEmail" }, "The draft could not be saved"),
+  "The server could not read the message")
+
+// ------------------------------------------------------ what a save amounts to
+
+// The import is the first call and it succeeded, so the draft is saved
+// whatever became of the copy it replaces.
+deepEqual(jmap.draftSaveResult({ accountId: "t", destroyed: ["buaaaaan"] }),
+  { saved: true, warning: "" })
+deepEqual(jmap.draftSaveResult({ accountId: "t" }), { saved: true, warning: "" })
+deepEqual(jmap.draftSaveResult(null), { saved: true, warning: "" })
+// Somebody else deleted it, which is the outcome that was wanted.
+deepEqual(jmap.draftSaveResult({ notDestroyed: { buaaaaan: { type: "notFound" } } }),
+  { saved: true, warning: "" })
+// Anything else is a warning, not a failure: a leftover shows up as a
+// duplicate draft on the next refresh and the user can remove it.
+deepEqual(jmap.draftSaveResult({ notDestroyed: { buaaaaan: { type: "forbidden" } } }),
+  { saved: true, warning: "Draft saved, but the older copy could not be removed" })
+deepEqual(jmap.draftSaveResult({
+  notDestroyed: { buaaaaan: { type: "forbidden", description: "Mailbox is read-only" } }
+}), { saved: true, warning: "Draft saved, but the older copy could not be removed: Mailbox is read-only" })
+deepEqual(jmap.draftSaveResult({
+  notDestroyed: {
+    gone: { type: "notFound" },
+    buaaaaan: { type: "forbidden" }
+  }
+}), { saved: true, warning: "Draft saved, but the older copy could not be removed" },
+  "the tolerated one is passed over rather than ending the search")
+
+// The send request is the one call that adds the submission capability, and it
+// never adds a vendor URN.
+deepEqual(jmap.USING_SUBMISSION, [
+  "urn:ietf:params:jmap:core",
+  "urn:ietf:params:jmap:mail",
+  "urn:ietf:params:jmap:submission"
+])
+
 // ------------------------------------------------------ per-account refusals
 //
 // The provider's list is a ceiling and an account withdraws from it. Presence

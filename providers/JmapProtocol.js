@@ -2229,6 +2229,367 @@ function notUpdatedError(args, tolerateNotFound) {
   return ""
 }
 
+// -------------------------------------------------------- sending and drafts
+//
+// A message leaves this client the way it arrived: as the raw RFC 5322 bytes
+// `Message.buildRawMessage` produced. They are uploaded as a blob and turned
+// into an Email with `Email/import`, and no Email is ever built from parts —
+// which is what keeps the direction twin, the calendar reply and every nested
+// boundary byte for byte, and lets the server thread the import by its own
+// References header.
+//
+// **A send is one upload and one API request.** The request carries, in order:
+//
+//   0. `Email/import` of the blob into the Drafts role's mailbox, with
+//      `$draft` and `$seen`. `$seen` is what keeps Sent from showing an unread
+//      message.
+//   1. `EmailSubmission/set` creating from the import's *creation id*, with
+//      the chosen identity and an `onSuccessUpdateEmail` that moves the copy
+//      into Sent and clears `$draft`. Nothing appends to Sent by hand.
+//   2. when the compose window was opened from a draft, `Email/set` destroying
+//      it — measured to apply after the two above.
+//
+// No `envelope`. The server derives the sender from the identity and the
+// recipients from To, Cc and Bcc, strips Bcc on delivery and keeps it on the
+// Sent copy — the same recipient set the IMAP client reads off the same
+// headers, and one this client cannot disagree with.
+//
+// A refused submission leaves the import standing, so the client destroys the
+// imported id itself before reporting the error. A leftover would show up as a
+// duplicate draft on the next refresh.
+
+// How many uploads may be in flight at once when the session did not say. RFC
+// 8620 makes `maxConcurrentUpload` mandatory and requires at least one, so one
+// is the floor under a server that omitted it rather than a guess about one
+// that stated it. The reference server says four.
+var DEFAULT_CONCURRENT_UPLOAD = 1
+
+// The two creation ids the send request uses. They are this client's own
+// labels, referenced as `#m` by the submission's `emailId` and as `#s` by the
+// `onSuccessUpdateEmail` key — which is keyed on the *submission's* creation
+// id, not the email's.
+var CREATE_EMAIL = "m"
+var CREATE_SUBMISSION = "s"
+
+// The session's upload endpoint, read from the session for the same reason the
+// API URL is: it is a fourth place a credential may go, and on the reference
+// account it is a different host from the session's own.
+function uploadTemplate(session) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc.uploadUrl) : ""
+}
+
+// The template filled, with the account id percent-encoded on the way in — the
+// same rule `downloadUrl` follows, for the same reason.
+function uploadUrl(template, accountId) {
+  var filled = String(template === undefined || template === null ? "" : template)
+  if (filled === "") return ""
+  return fillTemplate(filled, "accountId", accountId)
+}
+
+// What an upload answers with: a small JSON object naming the blob the import
+// then names. Anything else is an answer this client cannot use.
+function uploadedBlobId(body) {
+  var doc = parseJson(body)
+  return doc ? trimmed(doc.blobId) : ""
+}
+
+// The server's own ceiling on an upload, or 0 for a server that did not say.
+// RFC 8620 makes the figure mandatory, so 0 means "no ceiling was published"
+// rather than "nothing may be sent" — refusing every message because a server
+// omitted a number would be this client's failure, not the server's.
+function uploadCeiling(session) {
+  var doc = parseJson(session)
+  var core = doc && doc.capabilities && typeof doc.capabilities === "object"
+    ? doc.capabilities[CAPABILITY_CORE] : null
+  var value = core && typeof core === "object"
+    ? Math.floor(Number(core.maxSizeUpload)) : NaN
+  return isFinite(value) && value > 0 ? value : 0
+}
+
+// The three refusals that happen before any request, so a message too large or
+// an account with nowhere to put the copy costs no round trip and leaves
+// nothing behind. "" means nothing is wrong.
+//
+// Both roles exist on both target servers, so the mailbox pair guards
+// misconfiguration — an account whose Sent folder was deleted since the last
+// read — rather than a server this client expects to meet.
+function sizeGuard(session, byteLength) {
+  var ceiling = uploadCeiling(session)
+  if (ceiling <= 0) return ""
+  var bytes = Math.floor(Number(byteLength))
+  if (!isFinite(bytes) || bytes <= ceiling) return ""
+  return "This message is larger than the server accepts"
+}
+
+function sendGuard(session, roles, byteLength) {
+  var refusal = sizeGuard(session, byteLength)
+  if (refusal !== "") return refusal
+  var map = roles && typeof roles === "object" ? roles : {}
+  if (trimmed(map.sent) === "") return missingMailboxError("sent")
+  if (trimmed(map.drafts) === "") return missingMailboxError("drafts")
+  return ""
+}
+
+// A draft never reaches Sent, so the Sent role is not its business.
+function saveGuard(session, roles, byteLength) {
+  var refusal = sizeGuard(session, byteLength)
+  if (refusal !== "") return refusal
+  var map = roles && typeof roles === "object" ? roles : {}
+  if (trimmed(map.drafts) === "") return missingMailboxError("drafts")
+  return ""
+}
+
+// One header off a message this client just built, read without parsing it.
+//
+// The header block ends at the first blank line and an attachment is
+// everything after that, so a full MIME parse to read one address would walk
+// tens of megabytes for a value that is in the first few hundred bytes.
+// Folded continuations are joined, because a long From list is folded.
+function messageHeader(message, name) {
+  var text = String(message === undefined || message === null ? "" : message)
+  var wanted = trimmed(name).toLowerCase()
+  if (wanted === "") return ""
+  var end = text.search(/\r?\n\r?\n/)
+  var lines = (end < 0 ? text : text.substring(0, end)).split(/\r?\n/)
+  var value = ""
+  var found = false
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (found) {
+      if (/^[ \t]/.test(line)) {
+        value = trimmed(value + " " + trimmed(line))
+        continue
+      }
+      break
+    }
+    var colon = line.indexOf(":")
+    if (colon < 0) continue
+    if (trimmed(line.substring(0, colon)).toLowerCase() !== wanted) continue
+    found = true
+    value = trimmed(line.substring(colon + 1))
+  }
+  return value
+}
+
+// The address inside a From header, lower-cased for comparison. `Name <a@b>`
+// and a bare `a@b` are both written by `Mail.addressHeader`, and the phrase it
+// quotes may itself contain an `@`, so the angle brackets win where there are
+// any.
+function headerAddress(header) {
+  var text = trimmed(header)
+  if (text === "") return ""
+  var angled = /<([^<>]*)>/.exec(text)
+  if (angled) return trimmed(angled[1]).toLowerCase()
+  var comma = text.indexOf(",")
+  if (comma >= 0) text = trimmed(text.substring(0, comma))
+  return text.toLowerCase()
+}
+
+// The server's identities as the send-as list every composer already reads —
+// Gmail's alias shape, so nothing above the provider boundary learns the word
+// "identity". The one this account is signed in as is both primary and
+// default; on Fastmail the list is every alias and the same code serves it.
+//
+// The rows keep the identity's `id`, which is the field `identityFor` chooses
+// on and the only value `EmailSubmission/set` will take. Nothing above the
+// seam reads it — the composer wants an address and a name — but a send that
+// had to look the id up again would need a second copy of this decision.
+function identityAliases(identities, address) {
+  var list = Array.isArray(identities) ? identities : []
+  var own = trimmed(address).toLowerCase()
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] && typeof list[i] === "object" ? list[i] : {}
+    var id = trimmed(row.id)
+    var email = trimmed(row.email)
+    if (id === "" || email === "") continue
+    var mine = own !== "" && email.toLowerCase() === own
+    out.push({
+      id: id,
+      email: email,
+      displayName: trimmed(row.name),
+      isPrimary: mine,
+      isDefault: mine
+    })
+  }
+  return out
+}
+
+// Which identity a message goes out under: the one whose address the From
+// header names, else the default, else the first there is.
+//
+// **A send never refuses for want of a match.** The RSVP and the unsubscribe
+// both send from the address the mail arrived at, which may be an alias this
+// server has no identity for; the server forces the envelope sender to the
+// identity and delivers the header as written, which is what those two paths
+// need. An empty list answers "" and the server refuses the submission with a
+// sentence of its own, which is the honest answer for an account with no
+// identity at all.
+function identityFor(identities, fromHeader) {
+  var list = Array.isArray(identities) ? identities : []
+  var wanted = headerAddress(fromHeader)
+  var first = ""
+  var fallback = ""
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] && typeof list[i] === "object" ? list[i] : {}
+    var id = trimmed(row.id)
+    if (id === "") continue
+    if (first === "") first = id
+    if (wanted !== "" && trimmed(row.email).toLowerCase() === wanted) return id
+    if (fallback === "" && row.isDefault === true) fallback = id
+  }
+  return fallback !== "" ? fallback : first
+}
+
+// The import every outgoing message begins as: the blob, the Drafts mailbox,
+// and the two keywords. A draft stops here; a send has the submission move it.
+function importCall(accountId, blobId, draftsId, callId) {
+  var mailboxes = {}
+  var drafts = trimmed(draftsId)
+  if (drafts !== "") mailboxes[drafts] = true
+  var keywords = {}
+  keywords["$draft"] = true
+  keywords["$seen"] = true
+  var emails = {}
+  emails[CREATE_EMAIL] = {
+    blobId: trimmed(blobId),
+    mailboxIds: mailboxes,
+    keywords: keywords
+  }
+  return ["Email/import", { accountId: trimmed(accountId), emails: emails }, callId]
+}
+
+// The whole send, in the order the server applies it.
+function sendRequest(accountId, blobId, identityId, roles, draftId) {
+  var map = roles && typeof roles === "object" ? roles : {}
+  var account = trimmed(accountId)
+  var drafts = trimmed(map.drafts)
+  var sent = trimmed(map.sent)
+
+  // Where the copy ends up once the submission has been accepted: in Sent,
+  // out of Drafts and no longer a draft. Written as a patch rather than a
+  // whole `mailboxIds`, because the import put it in exactly one mailbox and
+  // this is the pair of memberships that changes.
+  var moved = {}
+  moved["mailboxIds/" + sent] = true
+  moved["mailboxIds/" + drafts] = KEYWORD_OFF
+  moved["keywords/$draft"] = KEYWORD_OFF
+
+  var success = {}
+  success["#" + CREATE_SUBMISSION] = moved
+  var create = {}
+  create[CREATE_SUBMISSION] = {
+    emailId: "#" + CREATE_EMAIL,
+    identityId: trimmed(identityId)
+  }
+
+  var calls = [
+    importCall(account, blobId, drafts, "0"),
+    ["EmailSubmission/set", {
+      accountId: account,
+      create: create,
+      onSuccessUpdateEmail: success
+    }, "1"]
+  ]
+  var stale = trimmed(draftId)
+  if (stale !== "") calls.push(["Email/set", { accountId: account, destroy: [stale] }, "2"])
+  return calls
+}
+
+// A draft save: the same import, and the copy it replaces destroyed after it.
+//
+// An Email is immutable apart from its keywords and its mailboxes — a subject
+// patch is refused `invalidProperties` — so a saved draft is always a new id,
+// as it is on IMAP. There is no `updateDraft`.
+function saveRequest(accountId, blobId, roles, draftId) {
+  var map = roles && typeof roles === "object" ? roles : {}
+  var account = trimmed(accountId)
+  var calls = [importCall(account, blobId, trimmed(map.drafts), "0")]
+  var stale = trimmed(draftId)
+  if (stale !== "") calls.push(["Email/set", { accountId: account, destroy: [stale] }, "1"])
+  return calls
+}
+
+// The follow-up a refused submission needs: the import stands, and nothing
+// else will remove it.
+function destroyRequest(accountId, ids) {
+  var source = Array.isArray(ids) ? ids : [ids]
+  var list = []
+  for (var i = 0; i < source.length; i++) {
+    var id = trimmed(source[i])
+    if (id !== "" && list.indexOf(id) < 0) list.push(id)
+  }
+  return [["Email/set", { accountId: trimmed(accountId), destroy: list }, "0"]]
+}
+
+// What a `create` map answered for one creation id: the new object's id, or
+// the entry saying why there is none. Null rather than an empty object for the
+// second, so "was it refused" is a question with an answer.
+function createdId(args, creationId) {
+  var source = args && typeof args === "object" ? args.created : null
+  var entry = source && typeof source === "object" ? source[trimmed(creationId)] : null
+  return entry && typeof entry === "object" ? trimmed(entry.id) : ""
+}
+
+function notCreatedEntry(args, creationId) {
+  var source = args && typeof args === "object" ? args.notCreated : null
+  var entry = source && typeof source === "object" ? source[trimmed(creationId)] : null
+  return entry && typeof entry === "object" ? entry : null
+}
+
+// One refused `create` as a sentence, in `setError`'s style: the server's own
+// words are written for whoever reads its logs, and these are the ones a user
+// can act on.
+//
+// `invalidEmail` is the import's refusal rather than the submission's — the
+// blob was not a message the server could read — and it is answered here
+// because both failures reach the user through the same call. `fallback` is
+// what a draft save says instead of "could not be sent", which is not what
+// happened to a draft.
+var SEND_FAILED = "The message could not be sent"
+
+function submissionError(entry, fallback) {
+  var source = entry && typeof entry === "object" ? entry : {}
+  var type = errorType(source.type)
+  if (type === "forbiddenFrom") return "This account may not send as that address"
+  // Also the server's answer to a malformed recipient address when the request
+  // carries no envelope, which is every request this client sends.
+  if (type === "noRecipients") return "Add a recipient first"
+  if (type === "tooLarge") return "The message is too large for this server"
+  if (type === "tooManyRecipients") return "Too many recipients for this server"
+  if (type === "forbiddenToSend") return "This account is not allowed to send mail"
+  if (type === "rateLimit") return "The mail server is busy. Try again shortly"
+  if (type === "invalidEmail") return "The server could not read the message"
+  var described = describedBy(source)
+  if (described !== "") return redact(described)
+  var last = trimmed(fallback)
+  return last !== "" ? last : SEND_FAILED
+}
+
+// What a save's reply amounts to, in `ImapProtocol.draftSaveResult`'s shape.
+//
+// The draft was saved either way — the import is the first call and it
+// succeeded — so an old copy that would not go is a warning rather than a
+// failure. `notFound` is not even that: somebody else deleted it, which is the
+// outcome that was wanted.
+var DRAFT_COPY_WARNING = "Draft saved, but the older copy could not be removed"
+
+function draftSaveResult(args) {
+  var source = args && typeof args === "object" ? args.notDestroyed : null
+  if (!source || typeof source !== "object") return { saved: true, warning: "" }
+  for (var id in source) {
+    var entry = source[id] && typeof source[id] === "object" ? source[id] : {}
+    if (errorType(entry.type) === "notFound") continue
+    var described = describedBy(entry)
+    return {
+      saved: true,
+      warning: described !== "" ? DRAFT_COPY_WARNING + ": " + redact(described) : DRAFT_COPY_WARNING
+    }
+  }
+  return { saved: true, warning: "" }
+}
+
 // --------------------------------------------------- per-account refusals
 //
 // The provider's capability list is a ceiling and an account may withdraw from

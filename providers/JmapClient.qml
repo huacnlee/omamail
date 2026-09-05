@@ -16,9 +16,9 @@ import "../message/Message.js" as Mail
 // page, a search, the counts, one message whole and the octets of a part. It
 // writes, too: read, star, archive, trash, junk and their reverses, each one
 // `Email/set` patch per message. It holds an event stream open for as long as
-// the account is signed in, and reports what changes on it. The send is the
-// stub the following ticket fills, and it answers an empty result rather than
-// pretending to fail.
+// the account is signed in, and reports what changes on it. And it sends: one
+// upload of the raw message and one request that imports it, submits it under
+// the chosen identity and destroys the draft it came from.
 //
 // ## Three things every read depends on, in this order
 //
@@ -127,8 +127,12 @@ Item {
     // A request still waiting for a slot has no process to stop and must not
     // take one: withdrawing it is what stops an abandoned page from holding the
     // queue open behind the page that replaced it.
-    if (handle.queueEntry && callQueue) {
-      if (callQueue.withdraw(handle.queueEntry)) handle.queueEntry = null
+    // Either FIFO. A call and an upload wait in queues of their own, under
+    // limits the session states separately, and a handle knows only that it
+    // was waiting in one of them.
+    if (handle.queueEntry) {
+      if (callQueue && callQueue.withdraw(handle.queueEntry)) handle.queueEntry = null
+      else if (uploadQueue && uploadQueue.withdraw(handle.queueEntry)) handle.queueEntry = null
     }
     if (handle.process) {
       handle.process.running = false
@@ -456,6 +460,12 @@ Item {
     mailboxList = []
     mailboxesLoaded = false
     knownStates = ({})
+    // Identities belong to the account on the server that answered, so they go
+    // with it: a send under another server's identity id is one the new server
+    // refuses, and the send-as menu would be offering addresses this mailbox
+    // has never had.
+    sendAsIdentities = []
+    identitiesLoaded = false
   }
 
   // Beside the query cache, keyed on the URL it came from and the state the
@@ -518,6 +528,28 @@ Item {
   function releaseSlot() {
     if (!callQueue) return
     var next = callQueue.release()
+    if (next) next.start()
+  }
+
+  // The second FIFO, for the one verb that sends a body rather than receiving
+  // one. Its own limit because the session states its own: a 40 MB message on
+  // a slow link would otherwise hold a `maxConcurrentRequests` slot for the
+  // length of the upload while the rail, the counts and the list queued behind
+  // it. Built at the first upload and never torn down, for the same reason the
+  // call queue is not.
+  property var uploadQueue: null
+
+  function uploads() {
+    if (!uploadQueue) {
+      uploadQueue = Jmap.makeQueue(
+        Jmap.sessionLimit(session, "maxConcurrentUpload", Jmap.DEFAULT_CONCURRENT_UPLOAD))
+    }
+    return uploadQueue
+  }
+
+  function releaseUploadSlot() {
+    if (!uploadQueue) return
+    var next = uploadQueue.release()
     if (next) next.start()
   }
 
@@ -611,7 +643,11 @@ Item {
   // sentence because `methodError` returning "" cannot be told from "no error",
   // and because one caller — the paging retry — has a branch for a particular
   // one.
-  function call(methodCalls, handle, callback) {
+  // `using` is the capability list this particular request needs, and it
+  // defaults to core and mail because reading mail is what nearly every call
+  // here is. The send request is the exception and passes `USING_SUBMISSION`;
+  // a vendor URN never appears in either.
+  function call(methodCalls, handle, callback, using) {
     var owner = handle || newHandle()
     var entry = { owner: owner }
 
@@ -641,7 +677,10 @@ Item {
           root.hand(callback, null, error || "Sign in to this mailbox first")
           return
         }
-        var body = JSON.stringify({ using: Jmap.USING_MAIL, methodCalls: methodCalls })
+        var body = JSON.stringify({
+          using: Array.isArray(using) ? using : Jmap.USING_MAIL,
+          methodCalls: methodCalls
+        })
         root.request("call", root.apiUrl, credential, body, owner, function(reply) {
           if (!root) return
           root.releaseSlot()
@@ -1237,33 +1276,330 @@ Item {
     return batchModify(Array.isArray(id) ? id : [id], [], ["TRASH"], callback)
   }
 
-  // ------------------------------------------------------------- to follow
+  // ------------------------------------------------------------------ send
   //
-  // The rest of the interface, answering the empty result rather than an
-  // error: an account that has just signed in has a working session and
-  // nothing written yet, and "this failed" is not what that is. Each of these
-  // is filled in by the ticket that owns it — the send — and none of them is a
-  // button the panel draws until it is.
+  // Compose, reply, reply-all, forward, the RSVP and the unsubscribe mail all
+  // arrive here as the same payload every provider takes: `raw`, base64url of
+  // the bytes `Message.buildRawMessage` produced, and `draftId`, the draft the
+  // compose window was opened from or "".
+  //
+  // The bytes are never re-made. They go to the upload endpoint as they are
+  // and come back as a blob id, and `Email/import` turns that into the Email
+  // the submission sends — which is what keeps the direction twin, the
+  // calendar reply and every nested boundary exactly as the composer wrote
+  // them, and lets the server thread a reply by its own References header.
+  //
+  // Undo send is not here. `message/Outbox.js` holds the payload for up to a
+  // minute and nothing reaches the wire before that timer fires; the server's
+  // own hold is a submission extension one of the two target servers offers,
+  // and moving undo into the provider seam for one of them would be a worse
+  // trade than the timer already made.
 
-  function answer(callback, value) {
-    if (typeof callback !== "function") return newHandle()
-    Qt.callLater(function() {
+  // The identities this account may write from, read once and kept. They are
+  // the send-as menu and they are also where a send finds the `identityId`
+  // `EmailSubmission/set` will not go without, which is why one read serves
+  // both rather than the menu being a thing the send hopes somebody loaded.
+  // Dropped with the session: another server's identities are another
+  // mailbox's.
+  property var sendAsIdentities: []
+  property bool identitiesLoaded: false
+  property bool identityLoading: false
+  property var identityWaiters: []
+
+  function finishIdentityWaiters(error) {
+    identityLoading = false
+    var pending = identityWaiters.slice()
+    identityWaiters = []
+    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
+  }
+
+  // `Identity/get` for every id, under the submission capability — `Identity`
+  // is that capability's object, and asking for it under core and mail alone
+  // is `unknownMethod` on a server that has it.
+  function ensureIdentities(callback) {
+    if (identitiesLoaded) {
+      callback("")
+      return
+    }
+    var waiting = identityWaiters.slice()
+    waiting.push(callback)
+    identityWaiters = waiting
+    if (identityLoading) return
+    identityLoading = true
+
+    ensureSession(function(error) {
       if (!root) return
-      callback(value, "")
+      if (error) {
+        root.finishIdentityWaiters(error)
+        return
+      }
+      // An account the session says cannot submit has no identities to read,
+      // and asking for them under a capability the server does not publish is
+      // `unknownCapability` every time. An empty list is the whole truth about
+      // such a mailbox rather than a failure to report: `refusals` has already
+      // taken the compose button away, and the account falls back to its own
+      // address for the From line it still has to draw somewhere.
+      if (!Jmap.hasSubmission(root.session, root.accountId)) {
+        root.sendAsIdentities = []
+        root.identitiesLoaded = true
+        root.finishIdentityWaiters("")
+        return
+      }
+      root.call([["Identity/get", { accountId: root.accountId, ids: null }, "0"]], null,
+        function(responses, failure) {
+          if (!root) return
+          if (failure) {
+            root.finishIdentityWaiters(failure)
+            return
+          }
+          var args = Jmap.responseArguments(responses, "Identity/get")
+          var list = args && Array.isArray(args.list) ? args.list : []
+          root.sendAsIdentities = Jmap.identityAliases(list, root.email)
+          root.identitiesLoaded = true
+          root.finishIdentityWaiters("")
+        }, Jmap.USING_SUBMISSION)
     })
-    return newHandle()
   }
 
+  // The server's identities in the alias shape every composer reads. Identities
+  // are never created here: the reference server refuses an address the account
+  // is not configured for, and inventing one would be this client claiming an
+  // address on the user's behalf.
   function getSendAs(callback) {
-    return answer(callback, [])
+    var handle = newHandle()
+    ensureIdentities(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, [], error)
+        return
+      }
+      root.hand(callback, root.sendAsIdentities, "")
+    })
+    return handle
   }
 
+  // The raw message to the session's own upload endpoint, through the upload
+  // queue and the credential. `callback(blobId, error)`.
+  //
+  // The bytes go to the transport as a base64 field and reach curl from a file
+  // in its own private directory, so a fifty-megabyte message never passes
+  // through the process table and never sits on disk unprotected.
+  function uploadMessage(message, handle, callback) {
+    var owner = handle || newHandle()
+    var entry = { owner: owner }
+
+    entry.start = function() {
+      if (!root || owner.aborted) {
+        if (root) root.releaseUploadSlot()
+        return
+      }
+      var url = Jmap.uploadUrl(Jmap.uploadTemplate(root.session), root.accountId)
+      if (url === "") {
+        root.releaseUploadSlot()
+        root.hand(callback, "", "Sign in to this mailbox again")
+        return
+      }
+      if (!root.auth) {
+        root.releaseUploadSlot()
+        root.hand(callback, "", "Sign in to this mailbox first")
+        return
+      }
+      root.auth.withCredentials(function(credential, error) {
+        if (!root) return
+        if (owner.aborted) {
+          root.releaseUploadSlot()
+          return
+        }
+        if (error || !credential) {
+          root.releaseUploadSlot()
+          root.hand(callback, "", error || "Sign in to this mailbox first")
+          return
+        }
+        root.request("upload", url, credential, message, owner, function(reply) {
+          if (!root) return
+          root.releaseUploadSlot()
+          if (owner.aborted) return
+          // RFC 8620 answers an upload with 201; a server that says 200 has
+          // still taken it, and the blob id is what either answer is read for.
+          if (reply.exit !== 0 || (reply.status !== 200 && reply.status !== 201)) {
+            root.hand(callback, "",
+              Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+            return
+          }
+          var blobId = Jmap.uploadedBlobId(reply.body)
+          if (blobId === "") {
+            root.hand(callback, "", "The server sent an answer this client could not read")
+            return
+          }
+          root.hand(callback, blobId, "")
+        })
+      })
+    }
+
+    owner.queueEntry = entry
+    if (uploads().admit(entry)) entry.start()
+    return owner
+  }
+
+  // One upload and one API request. The callback is `({}, "")` on success and
+  // `(null, <sentence>)` otherwise, which is the contract the other three
+  // clients keep, so the account's "Sent" notice needs no branch for this
+  // provider.
   function sendMessage(payload, callback) {
-    return answer(callback, null)
+    var handle = newHandle()
+    var raw = payload && payload.raw ? String(payload.raw) : ""
+    if (raw === "") {
+      hand(callback, null, "There is nothing to send")
+      return handle
+    }
+    var draftId = payload ? String(payload.draftId || "") : ""
+
+    // The role map is what Sent and Drafts mean on this account, so a send
+    // gates on the mailbox list exactly as a query does.
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      // Before any request: a message the server would refuse for size, and an
+      // account with nowhere to put the copy. The size is arithmetic on the
+      // base64, not a second decode of the whole message.
+      var refusal = Jmap.sendGuard(root.session, root.roles, Jmap.base64ByteLength(raw))
+      if (refusal !== "") {
+        root.hand(callback, null, refusal)
+        return
+      }
+      root.ensureIdentities(function(identityError) {
+        if (!root || handle.aborted) return
+        if (identityError) {
+          root.hand(callback, null, identityError)
+          return
+        }
+        var message = Mail.decodeBase64Url(raw)
+        // The From this message was actually written with, read off the
+        // header block rather than by parsing the whole message: an
+        // attachment is megabytes and the address is in the first few
+        // hundred bytes.
+        var identityId = Jmap.identityFor(root.sendAsIdentities,
+          Jmap.messageHeader(message, "From"))
+        root.uploadMessage(message, handle, function(blobId, uploadError) {
+          if (!root || handle.aborted) return
+          if (uploadError) {
+            root.hand(callback, null, uploadError)
+            return
+          }
+          root.submitMessage(blobId, identityId, draftId, handle, callback)
+        })
+      })
+    })
+    return handle
   }
 
+  // Import, submit and destroy the stale draft, in one request under the
+  // submission capability.
+  function submitMessage(blobId, identityId, draftId, handle, callback) {
+    var child = call(Jmap.sendRequest(accountId, blobId, identityId, roles, draftId), null,
+      function(responses, failure) {
+        if (!root || handle.aborted) return
+        // The import is read first, even when the call reported an error. A
+        // submission naming a creation id that was never created comes back as
+        // a *method* error about an unresolved reference, and reporting that
+        // would tell the user the server had a problem rather than that it
+        // could not read the message.
+        var imported = Jmap.responseArguments(responses, "Email/import")
+        var refusedImport = Jmap.notCreatedEntry(imported, Jmap.CREATE_EMAIL)
+        if (refusedImport) {
+          root.hand(callback, null, Jmap.submissionError(refusedImport))
+          return
+        }
+        if (failure) {
+          root.hand(callback, null, failure)
+          return
+        }
+        var refusedSend = Jmap.notCreatedEntry(
+          Jmap.responseArguments(responses, "EmailSubmission/set"), Jmap.CREATE_SUBMISSION)
+        if (!refusedSend) {
+          root.hand(callback, {}, "")
+          return
+        }
+        // A refused submission leaves its import standing and nothing else
+        // will remove it: left there it is a duplicate draft on the next
+        // refresh. The compose window still holds the text through its own
+        // recovery path, so this destroys the copy rather than the message.
+        root.discardImport(Jmap.createdId(imported, Jmap.CREATE_EMAIL))
+        root.hand(callback, null, Jmap.submissionError(refusedSend))
+      }, Jmap.USING_SUBMISSION)
+    handle.children.push(child)
+  }
+
+  // Deliberately not a child of the send's handle. It is the cleanup after a
+  // failure the caller has already been told about, and aborting the send —
+  // which is what closing the compose window does — would leave the copy it
+  // exists to remove.
+  function discardImport(emailId) {
+    if (String(emailId || "") === "") return
+    call(Jmap.destroyRequest(accountId, [emailId]), null, function() {})
+  }
+
+  // The same upload and one request: import the new copy, destroy the old.
+  //
+  // An Email is immutable apart from its keywords and its mailboxes, so a
+  // saved draft is always a new id — as it is on IMAP, where the save is an
+  // APPEND and a delete. The callback is `({ saved, draftId, warning }, "")`;
+  // an old copy that would not go is the warning, because the draft was saved
+  // either way.
   function saveDraft(payload, callback) {
-    return answer(callback, null)
+    var handle = newHandle()
+    var raw = payload && payload.raw ? String(payload.raw) : ""
+    if (raw === "") {
+      hand(callback, null, "There is no draft to save")
+      return handle
+    }
+    var draftId = payload ? String(payload.draftId || "") : ""
+
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      var refusal = Jmap.saveGuard(root.session, root.roles, Jmap.base64ByteLength(raw))
+      if (refusal !== "") {
+        root.hand(callback, null, refusal)
+        return
+      }
+      root.uploadMessage(Mail.decodeBase64Url(raw), handle, function(blobId, uploadError) {
+        if (!root || handle.aborted) return
+        if (uploadError) {
+          root.hand(callback, null, uploadError)
+          return
+        }
+        var child = root.call(Jmap.saveRequest(root.accountId, blobId, root.roles, draftId),
+          null, function(responses, failure) {
+            if (!root || handle.aborted) return
+            var imported = Jmap.responseArguments(responses, "Email/import")
+            var refused = Jmap.notCreatedEntry(imported, Jmap.CREATE_EMAIL)
+            if (refused) {
+              root.hand(callback, null,
+                Jmap.submissionError(refused, "The draft could not be saved"))
+              return
+            }
+            if (failure) {
+              root.hand(callback, null, failure)
+              return
+            }
+            var result = Jmap.draftSaveResult(Jmap.responseArguments(responses, "Email/set"))
+            // The id the compose window would reopen on, and the one a second
+            // save destroys. A draft that was never on the server before has
+            // no old copy to remove and the same answer either way.
+            result.draftId = Jmap.createdId(imported, Jmap.CREATE_EMAIL)
+            root.hand(callback, result, "")
+          })
+        handle.children.push(child)
+      })
+    })
+    return handle
   }
 
   // One process per request, created and destroyed around it. The cost of
