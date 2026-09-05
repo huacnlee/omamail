@@ -152,6 +152,12 @@ Rectangle {
         else root.checkToggled()
       }
     }
+
+    PanelToolTip {
+      visible: checkMouse.containsMouse
+      text: (root.checked ? "Deselect" : "Select") + " · x (Shift+click a range, Ctrl+A all)"
+      fontFamily: root.panelFontFamily
+    }
   }
 
   Column {
