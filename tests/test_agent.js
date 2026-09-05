@@ -132,4 +132,37 @@ console.log("test_agent.js ok")
 assert.strictEqual(agent.jobAboutLabel({ messageId: "1", subject: "Invoice" }), "\u201CInvoice\u201D")
 assert.strictEqual(agent.jobAboutLabel({ messageId: "1" }), "A message")
 assert.strictEqual(agent.jobAboutLabel({ scope: "all" }), "Every mailbox")
+// A job about several messages answers to every one of them.
+{
+  const many = { id: "s", messageIds: ["m1", "m2"], state: "running", created: 9 }
+  deepEqual(agent.messageIdsOf(many), ["m1", "m2"])
+  deepEqual(agent.messageIdsOf({ messageId: "m3" }), ["m3"])
+  deepEqual(agent.messageIdsOf(null), [])
+  const map = agent.jobsByMessage([older, many])
+  assert.strictEqual(map.m1.id, "s", "the live selection job wins on a message it names")
+  assert.strictEqual(map.m2.id, "s")
+  assert.strictEqual(agent.jobFor([older, many], "m2").id, "s")
+  deepEqual(agent.jobsForMessage([older, many, asked], "m1").map(function (j) { return j.id }), ["s", "o"])
+  assert.strictEqual(agent.jobAboutLabel(many), "2 messages")
+  assert.strictEqual(agent.jobAboutLabel({ messageIds: ["m1"], subject: "One" }), "\u201COne\u201D")
+
+  assert.strictEqual(agent.progressText({ state: "running", progress: " Reading it " }), "Reading it")
+  assert.strictEqual(agent.progressText({ state: "done", progress: "x" }), "", "a finished job has a summary, not progress")
+  assert.strictEqual(agent.stallText({ state: "running", stall: "permission" }).indexOf("stopped to ask") > 0, true)
+  assert.strictEqual(agent.stallText({ state: "running" }), "")
+  assert.strictEqual(agent.stateLabel({ state: "running", stall: "permission" }), "Stopped to ask")
+
+  const cont = JSON.parse(agent.continuationPayload({ id: "q1" }, "  Yes, reply  ", "claude -p"))
+  assert.strictEqual(cont.parent, "q1")
+  assert.strictEqual(cont.prompt, "Yes, reply")
+  assert.strictEqual(cont.messageId, "")
+  const sel = JSON.parse(agent.selectionPayload(
+    [{ id: "a1", subject: "One", from: { email: "x@y" } }, { id: "", subject: "skip" }, { id: "a2", subject: "Two", from: {} }],
+    "ada@example.com", "INBOX", "codex exec", "File these"))
+  assert.strictEqual(sel.messages.length, 2)
+  assert.strictEqual(sel.messages[0].messageId, "a1")
+  assert.ok(sel.messages[0].message.indexOf("Subject: One") >= 0)
+  assert.strictEqual(sel.subject, "2 messages")
+  assert.strictEqual(sel.folder, "INBOX")
+}
 console.log("test_agent.js presets ok")

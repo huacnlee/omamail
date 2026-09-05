@@ -789,16 +789,46 @@ Item {
     return ""
   }
 
+  // With rows ticked, the ask is about all of them — one job, one popup
+  // titled with the count — by the rule every other action follows.
   function openAgentAt(id, sceneX, sceneY) {
-    if (!service || !service.hasAgent || String(id || "") === "") return false
+    if (!service || !service.hasAgent) return false
+    if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
+      agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
+      return true
+    }
+    if (String(id || "") === "") return false
     agentPrompt.openFor(id, agentSubjectFor(id), sceneX, sceneY)
     return true
   }
 
   function openAgentCentered(id) {
-    if (!service || !service.hasAgent || String(id || "") === "") return false
+    if (!service || !service.hasAgent) return false
+    if (selectionActive) {
+      var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
+        Math.max(0, root.height / 2 - Style.space(90)))
+      agentPrompt.openForSelection(checkedIds, centre.x, centre.y)
+      return true
+    }
+    if (String(id || "") === "") return false
     agentPrompt.openCenteredFor(id, agentSubjectFor(id))
     return true
+  }
+
+  // The pane, opened on one job: from a row's glyph, or the popup's button.
+  function showAgentJob(jobId) {
+    if (!showAgent()) return false
+    agentView.openOn(jobId)
+    return true
+  }
+
+  // A row's glyph means "show me what the agent is doing with this", which
+  // is the pane's card; the popup is for asking, and the reader's button
+  // and Alt+G still open it.
+  function openAgentFromRow(id, sceneX, sceneY) {
+    var job = service ? service.agentJobs[String(id || "")] : null
+    if (job) return showAgentJob(String(job.id))
+    return openAgentAt(id, sceneX, sceneY)
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -1647,7 +1677,7 @@ Item {
               checkedIds: root.checkedIds
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
-              onAgentRequested: function(id, sceneX, sceneY) { root.openAgentAt(id, sceneX, sceneY) }
+              onAgentRequested: function(id, sceneX, sceneY) { root.openAgentFromRow(id, sceneX, sceneY) }
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
@@ -2351,6 +2381,11 @@ Item {
         // job as the runner's listing changes under it.
         job: root.service && messageId !== "" ? (root.service.agentJobs[messageId] || null) : null
         onAsked: function(id, prompt) { if (root.service) root.service.askAgent(id, prompt) }
+        onAskedMany: function(ids, prompt) {
+          if (root.service && root.service.askAgentMany(ids, prompt)) root.checkedIds = []
+        }
+        onAnswered: function(jobId, answer) { if (root.service) root.service.answerAgent(jobId, answer) }
+        onPaneRequested: function(jobId) { root.showAgentJob(jobId) }
         onCancelRequested: function(id) { if (root.service) root.service.cancelAgent(id) }
       }
 

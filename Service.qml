@@ -138,6 +138,28 @@ Item {
     return true
   }
 
+  // The answer to a question, or a follow-up: a new job that continues the
+  // one named, with the runner rebuilding the prompt from it.
+  function answerAgent(jobId, answer) {
+    if (!hasAgent) return false
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || String(answer || "").trim() === "") return false
+    if (!agentRunner.start(Agent.continuationPayload(job, answer, agentCommand))) return false
+    if (current) current.note("Answered the agent")
+    return true
+  }
+
+  // One job over several messages, as the list knows them.
+  function askAgentMany(ids, prompt) {
+    if (!current || !hasAgent) return false
+    var summaries = Model.summariesById(current.messages, ids)
+    if (summaries.length === 0) return false
+    var line = Agent.selectionPayload(summaries, current.accountEmail, current.mailboxKey, agentCommand, prompt)
+    if (!agentRunner.start(line)) return false
+    current.note("Asked the agent about " + Agent.pluralizeMessages(summaries.length))
+    return true
+  }
+
   function cancelAgentJob(jobId) {
     var job = agentRunner.jobFor2(jobId)
     if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false

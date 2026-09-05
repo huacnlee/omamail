@@ -92,4 +92,39 @@ wait_state "$id" done failed cancelled
 grep -q 'Scope: the account whose address is ada@example.com' "$jobs/$id/prompt.txt" || fail "a one-account scope names it"
 printf '%s\n' '{"command":"true","prompt":"p","message":""}' | python3 "$runner" new >/dev/null 2>&1 && fail "no message and no scope is refused"
 python3 "$runner" show nope >/dev/null 2>&1 && fail "show refuses an unknown job"
+# A continuation: the parent's prompt, what its agent wrote, and the owner's
+# answer, all in the new prompt, with the parent's message carried forward.
+parent=$(new_job '{"messageId":"46:INBOX","account":"ada@example.com","folder":"INBOX","subject":"Invoice","command":"echo Looked; echo \"QUESTION: Reply to Bob?\"","prompt":"Handle this","message":"From: Bob\n\nPay me"}')
+wait_state "$parent" done failed cancelled
+child=$(new_job "{\"parent\":\"$parent\",\"command\":\"cat > seen.txt; echo Replied\",\"prompt\":\"Yes, reply and say it is paid\",\"message\":\"\"}")
+wait_state "$child" done failed cancelled
+[ "$(field "$child" state)" = "done" ] || fail "a continuation runs"
+[ "$(field "$child" parent)" = "$parent" ] || fail "the continuation names its parent"
+[ "$(field "$child" messageId)" = "46:INBOX" ] || fail "the continuation is about the parent's message"
+[ "$(field "$child" subject)" = "Invoice" ] || fail "and keeps its subject"
+grep -q 'Pay me' "$jobs/$child/message.txt" || fail "the parent's message is carried forward"
+grep -q 'The owner asked:' "$jobs/$child/seen.txt" && grep -q 'QUESTION: Reply to Bob?' "$jobs/$child/seen.txt" \
+  && grep -q 'Yes, reply and say it is paid' "$jobs/$child/seen.txt" || fail "the prompt holds the earlier exchange and the answer"
+printf '%s\n' '{"parent":"nope","command":"true","prompt":"p","message":""}' | python3 "$runner" new >/dev/null 2>&1 && fail "an unknown parent is refused"
+
+# Several messages: one file each, the prompt numbering them, the job naming every id.
+many=$(new_job '{"messages":[{"messageId":"50:INBOX","message":"First body"},{"messageId":"51:INBOX","message":"Second body"}],"account":"ada@example.com","folder":"INBOX","subject":"2 messages","command":"cat > seen.txt; ls message-*.txt | wc -l","prompt":"File both","message":""}')
+wait_state "$many" done failed cancelled
+[ "$(field "$many" state)" = "done" ] || fail "a selection job runs"
+[ "$(field "$many" summary)" = "2" ] || fail "one file per message"
+python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); assert j["messageIds"]==["50:INBOX","51:INBOX"], j["messageIds"]' "$jobs/$many/job.json" || fail "every id is on the job"
+grep -q 'Message 2 of 2' "$jobs/$many/seen.txt" && grep -q '2 email messages' "$jobs/$many/seen.txt" || fail "the prompt numbers the messages"
+
+# The listing carries the agent's last line while it runs, and a tail that
+# looks like a permission prompt and stays still is reported as a stall.
+slow=$(new_job '{"messageId":"60:INBOX","command":"echo Reading the message; sleep 1.5; echo \"Allow Bash(himalaya envelope list)? (y/n)\"; sleep 40","prompt":"p","message":"m"}')
+wait_state "$slow" running
+sleep 0.8
+python3 "$runner" list | python3 -c 'import json,sys; j=[x for x in json.load(sys.stdin) if x["id"]==sys.argv[1]][0]; assert j["progress"]=="Reading the message", j.get("progress")' "$slow" || fail "the listing carries the last line as progress"
+for _ in $(seq 1 200); do [ "$(field "$slow" stall)" = "permission" ] && break; sleep 0.1; done
+[ "$(field "$slow" stall)" = "permission" ] || fail "a still prompt-shaped tail is a permission stall"
+[ "$(field "$slow" state)" = "running" ] || fail "a stalled job is still running, so it can be cancelled"
+python3 "$runner" cancel "$slow"
+wait_state "$slow" cancelled
+[ "$(field "$slow" stall)" = "" ] || fail "a finished job carries no stall"
 echo "test_agent_job.sh ok"

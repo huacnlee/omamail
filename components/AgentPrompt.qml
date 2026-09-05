@@ -20,10 +20,13 @@ Item {
   required property color popupBorderColor
   required property string panelFontFamily
 
-  // The message the popup is about, and the job it has if it has one.
+  // The message the popup is about, and the job it has if it has one. A
+  // popup over a selection carries the ids and no single message.
   property string messageId: ""
+  property var messageIds: []
   property string subject: ""
   property var job: null
+  readonly property bool overSelection: messageIds.length > 1
 
   readonly property bool opened: menu.opened
   readonly property bool working: Agent.isActive(job)
@@ -31,6 +34,9 @@ Item {
   readonly property string detailText: Agent.detailText(job)
 
   signal asked(string messageId, string prompt)
+  signal askedMany(var messageIds, string prompt)
+  signal answered(string jobId, string answer)
+  signal paneRequested(string jobId)
   signal cancelRequested(string messageId)
 
   anchors.fill: parent
@@ -39,10 +45,25 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
 
+  function openForSelection(ids, sceneX, sceneY) {
+    messageIds = Array.isArray(ids) ? ids.slice() : []
+    messageId = ""
+    subject = Agent.pluralizeMessages(messageIds.length)
+    field.text = ""
+    replyField.text = ""
+    var local = root.mapFromGlobal(sceneX, sceneY)
+    anchorX = local.x
+    anchorY = local.y
+    menu.open()
+    place()
+  }
+
   function openFor(id, subjectText, sceneX, sceneY) {
     messageId = String(id || "")
+    messageIds = []
     subject = String(subjectText || "")
     field.text = ""
+    replyField.text = ""
     var local = root.mapFromGlobal(sceneX, sceneY)
     anchorX = local.x
     anchorY = local.y
@@ -52,8 +73,10 @@ Item {
 
   function openCenteredFor(id, subjectText) {
     messageId = String(id || "")
+    messageIds = []
     subject = String(subjectText || "")
     field.text = ""
+    replyField.text = ""
     anchorX = Math.max(0, (root.width - menu.width) / 2)
     anchorY = Math.max(0, (root.height - menu.implicitHeight) / 2)
     menu.open()
@@ -72,9 +95,22 @@ Item {
 
   function submit() {
     var prompt = String(field.text || "").trim()
-    if (prompt === "" || messageId === "") return
+    if (prompt === "") return
+    if (overSelection) {
+      menu.close()
+      root.askedMany(messageIds, prompt)
+      return
+    }
+    if (messageId === "") return
     menu.close()
     root.asked(messageId, prompt)
+  }
+
+  function submitAnswer() {
+    var answer = String(replyField.text || "").trim()
+    if (answer === "" || !job) return
+    menu.close()
+    root.answered(String(job.id), answer)
   }
 
   QQC.Popup {
@@ -88,7 +124,8 @@ Item {
     onHeightChanged: root.place()
     onOpened: {
       root.place()
-      field.forceActiveFocus()
+      if (root.job && String(root.job.question || "") !== "") replyField.forceActiveFocus()
+      else field.forceActiveFocus()
     }
     background: Rectangle {
       radius: Style.cornerRadius
@@ -105,7 +142,9 @@ Item {
         width: parent.width
         textFormat: Text.PlainText
         // The subject was written by the sender.
-        text: root.subject === "" ? "Ask the agent" : "Ask the agent about “" + root.subject + "”"
+        text: root.subject === "" ? "Ask the agent"
+          : (root.overSelection ? "Ask the agent about " + root.subject
+            : "Ask the agent about “" + root.subject + "”")
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
@@ -141,17 +180,65 @@ Item {
           }
         }
 
+        // While it works, the agent's last line as it changes; stopped to
+        // ask, why; finished, its question, its error or its summary.
         Text {
           width: parent.width
-          visible: root.detailText !== ""
+          visible: text !== ""
           textFormat: Text.PlainText
-          text: root.detailText
-          color: Agent.glyphState(root.job) === "failed" ? root.urgentColor : root.dimColor
+          text: {
+            var stall = Agent.stallText(root.job)
+            if (stall !== "") return stall
+            var progress = Agent.progressText(root.job)
+            if (progress !== "") return progress
+            return root.detailText
+          }
+          color: Agent.glyphState(root.job) === "failed" || Agent.stallText(root.job) !== ""
+            ? root.urgentColor : root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.WordWrap
           maximumLineCount: 6
           elide: Text.ElideRight
+        }
+
+        // A question gets its answer here. Return sends it; the answer starts
+        // a job that continues this one, so the agent picks up where it was.
+        Rectangle {
+          width: parent.width
+          visible: !!root.job && String(root.job.question || "") !== ""
+          height: Style.spacing.controlHeight
+          radius: Style.cornerRadius
+          color: "transparent"
+          border.width: 1
+          border.color: replyField.activeFocus
+            ? Style.hoverBorderFor(root.textColor, root.accentColor)
+            : Style.normalBorderFor(root.textColor, root.accentColor)
+
+          TextInput {
+            id: replyField
+            objectName: "agent-answer-field"
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(8)
+            anchors.rightMargin: Style.space(8)
+            verticalAlignment: TextInput.AlignVCenter
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            clip: true
+            selectByMouse: true
+            onAccepted: root.submitAnswer()
+
+            Text {
+              anchors.fill: parent
+              verticalAlignment: Text.AlignVCenter
+              visible: replyField.text === "" && !replyField.activeFocus
+              text: "Your answer"
+              color: root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
         }
       }
 
@@ -209,6 +296,23 @@ Item {
           fontSize: Style.font.caption
           enabled: String(field.text || "").trim() !== "" && !root.working
           onClicked: root.submit()
+        }
+
+        // The whole story of this message's jobs lives in the pane.
+        Button {
+          objectName: "agent-pane-button"
+          visible: !!root.job
+          text: "Open in pane"
+          tooltipText: "Every job on this message, with the agent's full output"
+          foreground: root.textColor
+          bordered: false
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          onClicked: {
+            menu.close()
+            root.paneRequested(String(root.job.id))
+          }
         }
 
         // Only while something is running. Closing the popup does not do

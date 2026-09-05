@@ -45,7 +45,7 @@ function jobFor(jobs, messageId) {
   if (id === "") return null
   var newest = null
   for (var i = 0; i < list.length; i++) {
-    if (String(list[i].messageId || "") !== id) continue
+    if (messageIdsOf(list[i]).indexOf(id) < 0) continue
     if (isActive(list[i])) return list[i]
     if (!newest || Number(list[i].created || 0) > Number(newest.created || 0)) newest = list[i]
   }
@@ -54,16 +54,41 @@ function jobFor(jobs, messageId) {
 
 // messageId -> job, for a list that asks per row without walking the whole
 // job list per row.
+// Every message a job is about: the one it names, or the several.
+function messageIdsOf(job) {
+  if (!job) return []
+  var many = Array.isArray(job.messageIds) ? job.messageIds : []
+  var out = []
+  for (var i = 0; i < many.length; i++) if (String(many[i] || "") !== "") out.push(String(many[i]))
+  var one = String(job.messageId || "")
+  if (one !== "" && out.indexOf(one) < 0) out.push(one)
+  return out
+}
+
 function jobsByMessage(jobs) {
   var list = Array.isArray(jobs) ? jobs : []
   var out = {}
   for (var i = 0; i < list.length; i++) {
-    var id = String(list[i].messageId || "")
-    var current = out[id]
-    if (!current || isActive(list[i])
-        || (!isActive(current) && Number(list[i].created || 0) > Number(current.created || 0)))
-      out[id] = list[i]
+    var ids = messageIdsOf(list[i])
+    for (var k = 0; k < ids.length; k++) {
+      var id = ids[k]
+      var current = out[id]
+      if (!current || isActive(list[i])
+          || (!isActive(current) && Number(list[i].created || 0) > Number(current.created || 0)))
+        out[id] = list[i]
+    }
   }
+  return out
+}
+
+// Every job about a message, newest first — what the pane shows when it is
+// opened from a row.
+function jobsForMessage(jobs, messageId) {
+  var list = Array.isArray(jobs) ? jobs : []
+  var id = String(messageId || "")
+  var out = []
+  for (var i = 0; i < list.length; i++) if (messageIdsOf(list[i]).indexOf(id) >= 0) out.push(list[i])
+  out.sort(function(a, b) { return Number(b.created || 0) - Number(a.created || 0) })
   return out
 }
 
@@ -78,9 +103,24 @@ function glyphState(job) {
   return ""
 }
 
+// What the agent last wrote while it works, or "" — the listing carries it
+// for a running job, so a row and a popup can show movement.
+function progressText(job) {
+  if (!job || !isActive(job)) return ""
+  return String(job.progress || "").trim()
+}
+
+// Why a running job is not moving, in words, or "".
+function stallText(job) {
+  if (!job || !isActive(job)) return ""
+  if (String(job.stall || "") === "permission")
+    return "The agent stopped to ask for permission it cannot be given here. Cancel it and give the harness its tools up front — see the presets in Settings."
+  return ""
+}
+
 function stateLabel(job) {
   var glyph = glyphState(job)
-  if (glyph === "running") return "Working"
+  if (glyph === "running") return String(job.stall || "") === "permission" ? "Stopped to ask" : "Working"
   if (glyph === "question") return "Has a question"
   if (glyph === "done") return "Done"
   if (glyph === "failed") return "Failed"
@@ -211,11 +251,18 @@ function scopeOf(all, email) {
 // job, the mailbox or every mailbox for a scope job.
 function jobAboutLabel(job, accountLabel) {
   if (!job) return ""
-  if (String(job.messageId || "") !== "") {
+  var many = Array.isArray(job.messageIds) ? job.messageIds.length : 0
+  if (many > 1) return pluralizeMessages(many)
+  if (String(job.messageId || "") !== "" || many === 1) {
     var subject = String(job.subject || "").trim()
     return subject === "" ? "A message" : "\u201C" + subject + "\u201D"
   }
   return scopeLabel(job.scope, accountLabel)
+}
+
+function pluralizeMessages(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  return n === 1 ? "1 message" : n + " messages"
 }
 
 function scopeLabel(scope, accountLabel) {
@@ -241,6 +288,42 @@ function scopePayload(prompt, scope, account, accounts, command) {
     account: String(account || ""),
     accounts: addresses,
     subject: "",
+    command: String(command || ""),
+    prompt: String(prompt || "").trim(),
+    message: ""
+  })
+}
+
+// A continuation: the answer to a job's question, or a follow-up ask. The
+// runner rebuilds the prompt from the parent, so only the parent id and the
+// new words cross.
+function continuationPayload(parentJob, answer, command) {
+  return JSON.stringify({
+    parent: String(parentJob && parentJob.id ? parentJob.id : ""),
+    messageId: "",
+    scope: "",
+    subject: "",
+    command: String(command || ""),
+    prompt: String(answer || "").trim(),
+    message: ""
+  })
+}
+
+// One job over several messages: each as the agent receives it, in list order.
+function selectionPayload(summaries, account, folder, command, prompt) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  var messages = []
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || String(rows[i].id || "") === "") continue
+    messages.push({ messageId: String(rows[i].id), message: messageText(rows[i], "") })
+  }
+  return JSON.stringify({
+    messageId: "",
+    messages: messages,
+    scope: "",
+    account: String(account || ""),
+    folder: String(folder || ""),
+    subject: pluralizeMessages(messages.length),
     command: String(command || ""),
     prompt: String(prompt || "").trim(),
     message: ""

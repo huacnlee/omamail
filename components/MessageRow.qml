@@ -27,6 +27,8 @@ Rectangle {
   // "question", "done", "failed" or "cancelled". State, so it shows whether
   // or not the row is hot, like the star.
   property string agentState: ""
+  // The agent's last line while it works on this message, for the tooltip.
+  property string agentProgress: ""
   // Whether any row in the list is ticked. While one is, every row shows its
   // box, so the lane the boxes sit in is the same on every row being compared.
   property bool selectionActive: false
@@ -251,7 +253,8 @@ Rectangle {
       objectName: "row-agent"
       visible: root.agentState !== ""
       iconName: "agent"
-      tooltipText: root.agentState === "running" ? "The agent is working on this"
+      tooltipText: root.agentState === "running"
+        ? (root.agentProgress !== "" ? root.agentProgress : "The agent is working on this")
         : root.agentState === "question" ? "The agent has a question"
         : root.agentState === "failed" ? "The agent failed on this"
         : root.agentState === "cancelled" ? "Agent actions were cancelled" : "The agent finished with this"

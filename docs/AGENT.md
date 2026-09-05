@@ -39,21 +39,17 @@ Beside a message's own button there is a pane — the third root of the window a
 
 Settings offers a harness list beside the command: Claude Code (`claude -p --allowedTools "Bash(himalaya:*)"`), Codex (`codex exec --full-auto`), Gemini CLI (`gemini --yolo -p …`), OpenCode (`opencode run "$(cat)"`), and Custom. Choosing one writes its line into the field, which stays editable; an edited line reads back as Custom rather than pretending to be the preset. `Agent.PRESETS` is the list, and the service marks the ones whose binary is not on PATH. Every preset grants the agent its tools up front, because a job has no terminal to answer a permission prompt on — a harness that stops to ask never finishes.
 
-## Where the interaction falls short, and the fix
+## How the surfaces meet
 
-Looked at as a whole, the agent has three surfaces — the message popup, the row glyph, the pane — and the seams between them are the problem.
+Looked at as a whole, the agent has three surfaces — the message popup, the row glyph, the pane — and the seams between them were the problem. This is how they meet now.
 
-- **A message job's answer is unreadable.** The popup shows the state and one line; the pane shows the whole output. So the pane now lists every job, message jobs under their subject, and the popup's job is the same card there. The next step is a link from the popup and the row glyph straight to that card.
-- **A question is a dead end.** The glyph turns urgent, the card shows the question, and there is nowhere to answer. The fix that works for every harness is a *continuation job*: a new job whose prompt is the previous prompt, the agent's output, and the owner's answer, with `parent` naming the job it continues. No harness-specific resume flag; the runner already has everything it needs. The card grows a reply field when its job asked a question.
-- **Silence while it works.** "Working" and a spinner say nothing about which himalaya call the agent is on. The pane's output tail already streams; the popup and the row should show the last line as it changes, not only at the end.
-- **The popup asks one question and forgets.** A message ends up with several jobs and the popup shows the newest. Better: the popup is a quick ask and hands the conversation to the pane, where the message's jobs sit together.
-- **Permissions are the failure people will hit first.** A harness run headless prompts for tool use and hangs; the job sits at "Working" until Cancel. The presets carry the flags; the failure state should say "the agent stopped to ask for permission" when the output ends on a prompt, which is a pattern match on the tail the runner already keeps.
-- **Selection has no agent.** The multi-select and the agent shipped in the same week and do not meet. One job over a selection is a list of message files in one directory and one prompt naming them; the runner needs a `messages` array, the popup a "these N messages" title.
+- **The pane is where every job lives.** Message jobs sit beside scope jobs under the message's subject, and a message job's full output is readable there. A row's glyph opens the pane on that message's card; the popup carries "Open in pane" for the same. The popup is for asking, the pane for reading.
+- **A question is answered where it is seen.** A job whose last line was `QUESTION:` shows a reply field in the popup and on its card. The answer starts a **continuation job**: `parent` names the job it continues, and the runner builds the prompt from the parent's prompt, what the parent's agent wrote, and the owner's answer, carrying the parent's message forward. No harness-specific resume flag; it works for every command line the same way.
+- **Movement is shown while it happens.** The runner's listing carries `progress` — the agent's last line — for every running job, so the popup, the card and the row's tooltip change as the agent works rather than only at the end.
+- **A permission stall is named.** A headless harness that stops to ask never exits. The runner watches the output while the job runs; a tail that looks like a prompt (`Allow…?`, `(y/n)`, `Do you want to…`) and stays still for twelve seconds marks the job `stall: permission`. The state stays running so Cancel actions still works, and the popup and card say what happened and what to do — give the harness its tools up front, which the presets do.
+- **A selection is one job.** With rows ticked, the reader's button, Alt+G and a ticked row's glyph open the popup titled with the count; the job carries `messages`, one file each, and `messageIds`, so every row it names shows the glyph. The prompt numbers the messages and the rules say how many there are.
 
-In that order: link the surfaces, answer questions, show progress, then selections.
+## Not here yet
 
-## Not in the first slice
-
-- Answering a question. The state, the glyph and the pane's card are there; the reply path — writing the answer into the job and resuming the agent — is the next slice, and depends on the agent command having a resume flag to give it.
-- A job over a selection. The popup and the runner take one message. A selection is a list of message files in one job directory and one prompt naming them, and nothing above the runner changes.
-- A per-account himalaya account name. The pane hands over every address and the agent matches them against `himalaya account list`. The address is enough for himalaya to be told which it is.
+- A per-account himalaya account name. The pane hands over every address and the agent matches them against `himalaya account list`.
+- Streaming inside the popup beyond the last line. The pane shows the tail; the popup shows one line on purpose, because it is a place to ask, not to read. The address is enough for himalaya to be told which it is.

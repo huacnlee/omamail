@@ -38,6 +38,14 @@ Item {
 
   function takeFocus() { promptField.forceActiveFocus() }
 
+  // Opened on one job — from a row's glyph or the popup — with its card open.
+  function openOn(jobId) { chosenId = String(jobId || "") }
+
+  function answer(jobId, text) {
+    if (!service || String(text || "").trim() === "") return false
+    return service.answerAgent(jobId, text)
+  }
+
   function submit() {
     var prompt = String(promptField.text || "").trim()
     if (prompt === "" || !service || !hasAgent) return
@@ -269,15 +277,30 @@ Item {
               elide: Text.ElideRight
             }
 
+            // A closed card says one line: what it is doing, or what it said.
             Text {
               width: parent.width
-              visible: !card.open && Agent.detailText(card.modelData) !== ""
+              visible: !card.open && text !== ""
               textFormat: Text.PlainText
-              text: Agent.detailText(card.modelData)
+              text: Agent.progressText(card.modelData) !== ""
+                ? Agent.progressText(card.modelData) : Agent.detailText(card.modelData)
               color: card.glyph === "failed" ? root.urgentColor : root.dimColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
+            }
+
+            // Stopped to ask for permission: said in the urgent colour, with
+            // what to do about it, on the open card.
+            Text {
+              width: parent.width
+              visible: card.open && Agent.stallText(card.modelData) !== ""
+              textFormat: Text.PlainText
+              text: Agent.stallText(card.modelData)
+              color: root.urgentColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
 
             Item {
@@ -301,6 +324,40 @@ Item {
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WrapAnywhere
+            }
+
+            // The question, answered here: a job that continues this one.
+            Row {
+              width: parent.width
+              visible: card.open && String(card.modelData.question || "") !== ""
+              spacing: Style.space(8)
+
+              TextField {
+                id: answerField
+                objectName: "agent-pane-answer"
+                width: parent.width - answerButton.width - parent.spacing
+                foreground: root.textColor
+                accent: root.accentColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.bodySmall
+                placeholderText: "Your answer"
+                onAccepted: if (root.answer(String(card.modelData.id), text)) text = ""
+              }
+
+              Button {
+                id: answerButton
+                objectName: "agent-pane-answer-button"
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Answer"
+                tooltipText: "Continue the agent with this answer · Return"
+                foreground: root.textColor
+                bordered: true
+                accent: root.accentColor
+                fontFamily: root.panelFontFamily
+                fontSize: Style.font.caption
+                enabled: String(answerField.text || "").trim() !== ""
+                onClicked: if (root.answer(String(card.modelData.id), answerField.text)) answerField.text = ""
+              }
             }
 
             Row {
