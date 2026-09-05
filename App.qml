@@ -303,8 +303,10 @@ Item {
   readonly property string page: navPage.kind
   readonly property string overlay: navOverlay ? navOverlay.kind : ""
   readonly property string currentView: page === "reader" ? "reader"
-    : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
+    : ((page === "calendar" || page === "calendarDetail") ? "calendar"
+      : (page === "agent" ? "agent" : "list"))
   readonly property bool calendarVisible: currentView === "calendar"
+  readonly property bool agentVisible: currentView === "agent"
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -479,7 +481,8 @@ Item {
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
     cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
-    if (service) {
+    // A stub service in the tests carries no widths; a real one always does.
+    if (service && service.sidebarWidth !== undefined) {
       sidebarWidth = service.sidebarWidth
       listWidth = service.listWidth
     }
@@ -546,6 +549,14 @@ Item {
   function showCalendar() {
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+  }
+
+  // The agent pane is the third root, beside mail and the calendar.
+  function showAgent() {
+    if (!service || !service.hasAgent) return false
+    navUntouched = false
+    nav = Nav.replaceRoot(nav, "agent")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -913,6 +924,7 @@ Item {
       return
     }
     if (id === "mailView") return backToList()
+    if (id === "agentView") { showAgent(); return }
     if (id === "calendarView") {
       showCalendar()
       calendarView.refresh()
@@ -1203,6 +1215,7 @@ Item {
         composing: root.composing,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
+        agentVisible: root.agentVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
@@ -1222,6 +1235,7 @@ Item {
           else compose.takeFocus()
         }
         else if (keyContext === "search") searchBar.focusField()
+        else if (keyContext === "agent") agentView.takeFocus()
         else parkKeyboard()
       }
 
@@ -1307,7 +1321,7 @@ Item {
             id: mailboxScope
             objectName: "scope-mailbox"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
             iconName: root.scope.icon
             text: root.scope.name
             tooltipText: "Go to a mailbox · Alt+M"
@@ -1371,7 +1385,7 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
               && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
@@ -1445,7 +1459,7 @@ Item {
           Button {
             objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
             text: "Compose"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -1487,6 +1501,8 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          agentSelected: root.agentVisible
+          onAgentRequested: root.showAgent()
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
@@ -1680,7 +1696,7 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showPage && !root.composing && !root.calendarVisible
+          visible: !root.showPage && !root.composing && !root.calendarVisible && !root.agentVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
@@ -1767,6 +1783,24 @@ Item {
             else root.dropOverlay("eventComposer")
           }
           controller: root.service ? root.service.calendarController : null
+          textColor: root.foreground
+          backgroundColor: root.background
+          accentColor: root.accent
+          urgentColor: root.urgent
+          dimColor: root.dim
+          panelFontFamily: root.fontFamily
+        }
+
+        AgentView {
+          id: agentView
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
+          visible: root.agentVisible && !root.showPage && !root.composing
+          z: 11
+          service: root.service
           textColor: root.foreground
           backgroundColor: root.background
           accentColor: root.accent

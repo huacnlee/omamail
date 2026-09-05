@@ -78,4 +78,18 @@ id=$(new_job '{"messageId":"45:INBOX","account":"a","folder":"f","command":"tr -
 wait_state "$id" done failed cancelled
 [ ! -e "$jobs/$id/pwned" ] && [ ! -e "$jobs/$id/pwned2" ] || fail "message text was executed"
 [ "$(field "$id" summary)" = '$(touch pwned); `touch pwned2`' ] || fail "the agent saw the text as text"
+# A scope job has no message: the prompt names the account, or every account,
+# and `show` returns the job with the tail of what the agent wrote.
+id=$(new_job '{"scope":"all","accounts":["ada@example.com","bob@example.com"],"command":"echo one; echo two; echo Found three","prompt":"Find invoices","message":""}')
+wait_state "$id" done failed cancelled
+[ "$(field "$id" state)" = "done" ] || fail "a scope job runs without a message"
+[ "$(field "$id" scope)" = "all" ] || fail "the scope is kept"
+grep -q 'Scope: every account. Their addresses: ada@example.com, bob@example.com' "$jobs/$id/prompt.txt" || fail "the prompt names every account"
+grep -q 'The message' "$jobs/$id/prompt.txt" && fail "a scope prompt carries no message block"
+python3 "$runner" show "$id" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["job"]["id"]==sys.argv[1]; assert d["output"]=="one\ntwo\nFound three\n", repr(d["output"])' "$id" || fail "show returns the job and its output"
+id=$(new_job '{"scope":"account:ada@example.com","account":"ada@example.com","command":"true","prompt":"p","message":""}')
+wait_state "$id" done failed cancelled
+grep -q 'Scope: the account whose address is ada@example.com' "$jobs/$id/prompt.txt" || fail "a one-account scope names it"
+printf '%s\n' '{"command":"true","prompt":"p","message":""}' | python3 "$runner" new >/dev/null 2>&1 && fail "no message and no scope is refused"
+python3 "$runner" show nope >/dev/null 2>&1 && fail "show refuses an unknown job"
 echo "test_agent_job.sh ok"

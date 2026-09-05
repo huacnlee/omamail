@@ -28,7 +28,11 @@ Item {
   signal failed(string text)
 
   property string startPayload: ""
-  property string startedMessageId: ""
+
+  // One job's output, for the pane: the id being watched and the tail the
+  // runner last returned. Re-read on every poll while that job is running.
+  property string shownId: ""
+  property string shownOutput: ""
 
   function runner() { return pluginDir + "/scripts/agent-job.py" }
 
@@ -52,12 +56,31 @@ Item {
     return true
   }
 
+  readonly property bool cancelling: canceller.running
+
   function cancel(messageId) {
     var job = jobFor(messageId)
+    if (!job) return false
+    return cancelById(job.id)
+  }
+
+  function cancelById(jobId) {
+    var job = jobFor2(jobId)
     if (!job || !Agent.isActive(job) || canceller.running) return false
     canceller.command = ["python3", runner(), "cancel", String(job.id)]
     canceller.running = true
     return true
+  }
+
+  function show(jobId) {
+    var id = String(jobId || "")
+    if (id !== shownId) {
+      shownId = id
+      shownOutput = ""
+    }
+    if (pluginDir === "" || id === "" || shower.running) return
+    shower.command = ["python3", runner(), "show", id]
+    shower.running = true
   }
 
   function applyListing(text) {
@@ -106,11 +129,37 @@ Item {
     }
   }
 
+  Process {
+    id: shower
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      var shown = Agent.parseShown(String(stdout.text || ""))
+      if (!shown || String(shown.job.id || "") !== root.shownId) return
+      root.shownOutput = shown.output
+    }
+  }
+
   Timer {
     interval: 2000
     repeat: true
     running: root.anyActive
-    onTriggered: root.refresh()
+    onTriggered: {
+      root.refresh()
+      if (root.shownId !== "" && Agent.isActive(root.jobFor2(root.shownId))) root.show(root.shownId)
+    }
+  }
+
+  // After a listing, the shown job's output is read once more if it just
+  // finished, so the last lines land without waiting for a poll that will
+  // not come.
+  onJobsChanged: if (shownId !== "") show(shownId)
+
+  function jobFor2(jobId) {
+    var list = root.jobs || []
+    for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(jobId)) return list[i]
+    return null
   }
 
   Component.onCompleted: Qt.callLater(root.refresh)

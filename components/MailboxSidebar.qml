@@ -21,11 +21,13 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property bool agentSelected: false
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
   signal folderToggled(string path)
   signal calendarRequested()
+  signal agentRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -158,6 +160,16 @@ Item {
       icon: "calendar"
       selected: root.calendarSelected
       onActivated: root.calendarRequested()
+    }
+
+    // Only where an agent is set: the pane with no agent is a page saying so.
+    Entry {
+      x: Style.space(6)
+      visible: !!root.service && root.service.hasAgent
+      label: "Agent"
+      icon: "agent"
+      selected: root.agentSelected
+      onActivated: root.agentRequested()
     }
 
     Item {

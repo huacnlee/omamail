@@ -102,6 +102,33 @@ Item {
     return true
   }
 
+  // The pane's jobs and the one it is reading, forwarded so a view never
+  // reaches past `service`.
+  readonly property var agentScopeJobs: Agent.scopeJobs(agentRunner.jobs)
+  readonly property string agentShownId: agentRunner.shownId
+  readonly property string agentShownOutput: agentRunner.shownOutput
+
+  function showAgentJob(jobId) { agentRunner.show(jobId) }
+
+  // An ask across the open account, or every account. No message crosses;
+  // the agent is told the addresses and does its own reading.
+  function askAgentScope(prompt, everyAccount) {
+    if (!current || !hasAgent) return false
+    var addresses = []
+    var list = sendIdentities || []
+    for (var i = 0; i < list.length; i++) if (list[i].email) addresses.push(String(list[i].email))
+    var scope = Agent.scopeOf(everyAccount === true, current.accountEmail)
+    var line = Agent.scopePayload(prompt, scope, current.accountEmail, addresses, agentCommand)
+    if (!agentRunner.start(line)) return false
+    return true
+  }
+
+  function cancelAgentJob(jobId) {
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false
+    return agentRunner.cancelById(jobId)
+  }
+
   function cancelAgent(messageId) {
     if (!agentRunner.cancel(messageId)) return false
     if (current) current.note("Cancelling the agent's actions")

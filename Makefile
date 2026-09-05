@@ -43,6 +43,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/AccountSwitcher.qml \
 	components/MailboxSwitcher.qml \
 	components/AgentPrompt.qml \
+	components/AgentView.qml \
 	agent/AgentRunner.qml \
 	components/ScopeButton.qml \
 	components/AccountRemovalDialog.qml \

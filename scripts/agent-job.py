@@ -4,6 +4,7 @@
     agent-job.py new           one JSON line on stdin -> a job directory, and the unit that runs it
     agent-job.py list          every job.json under the state directory, newest first, as one JSON array
     agent-job.py cancel ID     stop the unit; the job file says cancelled once it has
+    agent-job.py show ID       one job with the tail of its output, for the pane that reads it
     agent-job.py run DIR       the body of the unit: hand the prompt to the agent, record what it said
 
 A job is a transient systemd user unit, so it outlives the shell that started
@@ -21,6 +22,20 @@ import signal
 import subprocess
 import sys
 import time
+
+OUTPUT_TAIL = 32 * 1024
+
+SCOPE_RULES = """You are acting on an email account, or several, on behalf of their owner.
+
+Mail is read and written with the `himalaya` command line client. `himalaya account list` names the accounts by name and address; the scope below says which of them this ask is about. Use `himalaya --help` and `himalaya <command> --help` for exact flags rather than guessing them. Searching is `himalaya envelope search`, listing is `himalaya envelope list`, reading one message is `himalaya message read`, and a draft is written with `himalaya message write` or `himalaya template`; pass `--account` on every call.
+
+Rules:
+- List and search before reading, and read only what answers the ask. Never dump a whole mailbox.
+- Do not send mail unless the ask says to send. Draft, and show what you would send.
+- Never print passwords, app passwords, tokens, or the output of any credential tool.
+- Say what you found and what you did in plain sentences, as you go. Finish with a one-line summary.
+- If you need something from the owner before you can go on, make your last line `QUESTION: ` followed by the question.
+"""
 
 RULES = """You are acting on one email message on behalf of its owner.
 
@@ -86,8 +101,11 @@ def command_new():
     command = clean_text(payload.get("command")).strip()
     prompt = clean_text(payload.get("prompt")).strip()
     message_id = clean_text(payload.get("messageId")).strip()
-    if command == "" or prompt == "" or message_id == "":
-        sys.stderr.write("agent-job.py new: command, prompt and messageId are required\n")
+    # A job is about one message, or about a scope: one account by address,
+    # or every account. The pane asks the second kind.
+    scope = clean_text(payload.get("scope")).strip()
+    if command == "" or prompt == "" or (message_id == "" and scope == ""):
+        sys.stderr.write("agent-job.py new: command, prompt and a messageId or a scope are required\n")
         return 2
 
     os.umask(0o077)
@@ -105,14 +123,22 @@ def command_new():
         handle.write(message)
         if not message.endswith("\n"):
             handle.write("\n")
+    accounts = payload.get("accounts")
+    accounts = [clean_text(a).strip() for a in accounts] if isinstance(accounts, list) else []
     with open(os.path.join(directory, "prompt.txt"), "w", encoding="utf-8") as handle:
-        handle.write(RULES)
-        handle.write("\nAccount address: %s\nFolder: %s\nOmamail message id: %s\n" % (account, folder, message_id))
-        handle.write("\n--- The message ---\n")
-        handle.write(message)
-        if not message.endswith("\n"):
-            handle.write("\n")
-        handle.write("--- End of message ---\n\n")
+        handle.write(SCOPE_RULES if message_id == "" else RULES)
+        if message_id != "":
+            handle.write("\nAccount address: %s\nFolder: %s\nOmamail message id: %s\n" % (account, folder, message_id))
+            handle.write("\n--- The message ---\n")
+            handle.write(message)
+            if not message.endswith("\n"):
+                handle.write("\n")
+            handle.write("--- End of message ---\n\n")
+        else:
+            if scope == "all":
+                handle.write("\nScope: every account. Their addresses: %s\n" % (", ".join(accounts) or "see `himalaya account list`"))
+            else:
+                handle.write("\nScope: the account whose address is %s\n" % account)
         handle.write("The ask:\n%s\n" % prompt)
 
     now = int(time.time())
@@ -120,6 +146,7 @@ def command_new():
         "id": job_id,
         "unit": unit_name(job_id),
         "messageId": message_id,
+        "scope": scope,
         "account": account,
         "folder": folder,
         "subject": subject,
@@ -154,6 +181,28 @@ def command_new():
             job["updated"] = int(time.time())
             write_job(directory, job)
     sys.stdout.write(json.dumps(read_job(directory), ensure_ascii=False) + "\n")
+    return 0
+
+
+def command_show(job_id):
+    job_id = safe_id(job_id)
+    directory = os.path.join(state_dir(), job_id)
+    if not os.path.isfile(job_path(directory)):
+        sys.stderr.write("agent-job.py show: no such job\n")
+        return 1
+    job = read_job(directory)
+    text = ""
+    try:
+        with open(os.path.join(directory, "output.log"), "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - OUTPUT_TAIL))
+            text = handle.read().decode("utf-8", "replace")
+            if size > OUTPUT_TAIL:
+                text = "…" + text.split("\n", 1)[-1]
+    except OSError:
+        text = ""
+    sys.stdout.write(json.dumps({"job": job, "output": text}, ensure_ascii=False) + "\n")
     return 0
 
 
@@ -291,6 +340,8 @@ def main(argv):
         return command_list()
     if verb == "cancel" and len(argv) == 3:
         return command_cancel(argv[2])
+    if verb == "show" and len(argv) == 3:
+        return command_show(argv[2])
     if verb == "run" and len(argv) == 3:
         return command_run(argv[2])
     sys.stderr.write(__doc__)

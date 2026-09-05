@@ -31,8 +31,12 @@ The agent reads and writes mail through **himalaya**, not through this plugin. T
 
 A row whose message has a job shows the agent glyph in its action lane with the state — running, a question waiting, done, failed — and the reader's button holds a selected style while the popup is up. A job finishing writes one status-line note, the same way an action does.
 
+## The pane
+
+Beside a message's own button there is a pane — the third root of the window after mail and the calendar, reached from the rail's foot or `Ctrl+Shift+G`. It takes an ask about the open mailbox or every mailbox: find the messages about X between two dates, find the last message from someone about something and draft a reply from what another thread says. No message crosses; the job carries a **scope** (`account:<address>` or `all`) and every address the agent may look in, and the agent does its own listing, searching and reading through himalaya. The pane lists these jobs newest first, and the open one shows the tail of what the agent wrote, re-read every two seconds while it runs (`agent-job.py show`). Cancel actions is the same `systemctl --user stop`.
+
 ## Not in the first slice
 
-- Answering a question. The state and the glyph are there; the reply path — writing the answer into the job and resuming the agent — is the next slice, and depends on the agent command having a resume flag to give it.
+- Answering a question. The state, the glyph and the pane's card are there; the reply path — writing the answer into the job and resuming the agent — is the next slice, and depends on the agent command having a resume flag to give it.
 - A job over a selection. The popup and the runner take one message. A selection is a list of message files in one job directory and one prompt naming them, and nothing above the runner changes.
-- A per-account himalaya account name. The address is enough for himalaya to be told which it is.
+- A per-account himalaya account name. The pane hands over every address and the agent matches them against `himalaya account list`. The address is enough for himalaya to be told which it is.

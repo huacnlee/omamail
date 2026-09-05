@@ -30,6 +30,7 @@ readonly property string keyContext:
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
+  : root.agentVisible ? "agent"
   : root.currentView === "reader" ? "reader"
   : "list"
 ```
@@ -42,6 +43,7 @@ readonly property string keyContext:
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `agent` | The agent pane, an ask being typed | `Escape`, and the modified keys |
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
@@ -119,8 +121,9 @@ used to exist, and they had.
 | `switchMailbox` | `Alt+M` | mail | Go to a mailbox |
 | `askAgent` | `Alt+G` | mail | Ask the agent about the message |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
-| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
-| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar+agent | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar+agent | Go to calendar |
+| `agentView` | `Ctrl+Shift+G` | mail+calendar+agent | Go to the agent pane |
 | `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |

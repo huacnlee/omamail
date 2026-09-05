@@ -186,3 +186,60 @@ function folderOf(messageId, mailboxKey) {
       && !/^\d+$/.test(id.slice(at + 1))) return id.slice(at + 1)
   return String(mailboxKey || "")
 }
+
+// ------------------------------------------------------------ the pane
+
+// A pane job is about a scope rather than a message: one account by address,
+// or every account. `scopeJobs` is what the pane lists, newest first as the
+// runner listed them.
+function isScopeJob(job) {
+  return !!job && String(job.messageId || "") === "" && String(job.scope || "") !== ""
+}
+
+function scopeJobs(jobs) {
+  var list = Array.isArray(jobs) ? jobs : []
+  var out = []
+  for (var i = 0; i < list.length; i++) if (isScopeJob(list[i])) out.push(list[i])
+  return out
+}
+
+function scopeOf(all, email) {
+  return all ? "all" : "account:" + String(email || "")
+}
+
+function scopeLabel(scope, accountLabel) {
+  var value = String(scope || "")
+  if (value === "all") return "Every mailbox"
+  var name = String(accountLabel || "")
+  if (name !== "") return name
+  return value.indexOf("account:") === 0 ? value.slice("account:".length) : value
+}
+
+// What crosses to the runner for a pane job: no message, a scope, and every
+// address the agent may be asked to look in.
+function scopePayload(prompt, scope, account, accounts, command) {
+  var list = Array.isArray(accounts) ? accounts : []
+  var addresses = []
+  for (var i = 0; i < list.length; i++) {
+    var address = String(list[i] || "")
+    if (address !== "" && addresses.indexOf(address) < 0) addresses.push(address)
+  }
+  return JSON.stringify({
+    messageId: "",
+    scope: String(scope || ""),
+    account: String(account || ""),
+    accounts: addresses,
+    subject: "",
+    command: String(command || ""),
+    prompt: String(prompt || "").trim(),
+    message: ""
+  })
+}
+
+// The pane's listing of one job's output, from `agent-job.py show`.
+function parseShown(text) {
+  var parsed = null
+  try { parsed = JSON.parse(String(text || "")) } catch (e) { parsed = null }
+  if (!parsed || typeof parsed !== "object" || !parsed.job) return null
+  return { job: parsed.job, output: String(parsed.output || "") }
+}
