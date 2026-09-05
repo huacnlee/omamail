@@ -301,14 +301,14 @@ Item {
   function removeAccount(id) {
     activeIndex = -1
     accountList = Accounts.remove(accountList, id)
-    saveAccounts()
+    saveAccounts({ allowDrop: true })
     refreshCurrent()
   }
 
   function removeAccountAt(index) {
     activeIndex = -1
     accountList = Accounts.removeAt(accountList, index)
-    saveAccounts()
+    saveAccounts({ allowDrop: true })
     refreshCurrent()
   }
 
@@ -384,11 +384,14 @@ Item {
     if (raw.imap !== undefined) entry.imap = raw.imap
     if (raw.label !== undefined) entry.label = raw.label
 
-    var updated = Accounts.emptyList()
-    updated.activeId = accountList.activeId
-    for (var i = 0; i < accounts.length; i++)
-      updated = Accounts.add(updated, i === index ? entry : accounts[i])
+    // Never rebuild through `add`: a colliding id replaces the *other* row
+    // and drops this one, which is how re-authing Proton deleted iCloud.
+    if (Accounts.collidingId(accountList, index, entry)) {
+      duplicateAccount(String(entry.email || ""))
+      return
+    }
 
+    var updated = Accounts.replaceAt(accountList, index, entry)
     var id = Accounts.accountId(entry.email, entry.provider)
     if (id !== "" && (updated.activeId === "" || activeIndex === index))
       updated = Accounts.setActive(updated, id)
@@ -402,6 +405,11 @@ Item {
   // Dropping it is what made adding a mailbox undo itself: the new account was
   // never written, and the watcher then read the older file back over it.
   property bool accountsSaveQueued: false
+  property bool accountsSaveQueuedAllowDrop: false
+  // Ids last successfully loaded or written. `dropsNamedMailbox` only sees
+  // memory, so once a buggy save has already dropped a row in memory it will
+  // not refuse the write. This snapshot is what stops that reaching disk.
+  property var lastPersistedIds: []
 
   // Identical text is not a write. The editor saves when it is done with
   // rather than on every keystroke, but it is also rebuilt by the write it
@@ -421,7 +429,7 @@ Item {
     saveAccounts()
   }
 
-  function saveAccounts() {
+  function saveAccounts(opts) {
     if (!accountsLoaded) return
     // A nameless row is setup state, never a mailbox. There is no legitimate
     // path that persists only one — Add waits for configureAccount, and the UI
@@ -443,11 +451,16 @@ Item {
     // row. Removal never arrives here as an omission: it goes through
     // `remove` or `removeAt`, so the row is gone from `accountList` too.
     if (Accounts.dropsNamedMailbox(accountList, writable)) return
+    var allowDrop = !!(opts && opts.allowDrop)
+    if (!allowDrop && Accounts.dropsAnyId(lastPersistedIds, writable)) return
     if (accountsWriter.running) {
       accountsSaveQueued = true
+      if (allowDrop) accountsSaveQueuedAllowDrop = true
       return
     }
     accountsSaveQueued = false
+    accountsSaveQueuedAllowDrop = false
+    lastPersistedIds = Accounts.namedIds(writable)
     accountsWritePayload = Accounts.serialize(writable)
     accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
     accountsWriter.running = true
@@ -483,6 +496,7 @@ Item {
     if (accountsWriter.running || accountsSaveQueued) return
     accountList = loaded
     accountsLoaded = true
+    lastPersistedIds = Accounts.namedIds(Accounts.savedOnly(loaded))
   }
 
   signal accountAdded()
@@ -1168,7 +1182,10 @@ Item {
     }
     onExited: {
       root.accountsWritePayload = ""
-      if (root.accountsSaveQueued) root.saveAccounts()
+      if (root.accountsSaveQueued) {
+        var drop = root.accountsSaveQueuedAllowDrop
+        root.saveAccounts(drop ? { allowDrop: true } : undefined)
+      }
     }
   }
 
