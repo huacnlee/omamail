@@ -97,21 +97,20 @@ function bytesToLatin1(bytes) {
   return out
 }
 
-// Qt.atob is native C++ and skips the per-character base64 loop entirely; it
-// hands back a string of raw bytes, which still needs UTF-8 decoding. The pure
-// JS path stays for the node tests, and as the fallback anywhere Qt is absent.
-function binaryStringToUtf8(binary) {
-  var bytes = []
-  for (var i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff)
-  return bytesToUtf8(bytes)
-}
-
+// Qt.atob is native C++ and skips the per-character base64 loop entirely. It
+// does not hand back raw bytes: Qt's implementation is QString::fromUtf8 over
+// the decoded bytes, so the result is already text. Measured on Qt 6.11 —
+// "Alex à l'école" comes back 14 characters with U+00E0 in it, not 16 bytes
+// with C3 A0. Decoding that text a second time as UTF-8 bytes is what turned
+// every accented calendar title and 8-bit mail body into CJK mojibake. The
+// pure JS path stays for the node tests, and as the fallback anywhere Qt is
+// absent.
 function decodeBase64Url(text) {
   var input = String(text || "")
   if (input === "") return ""
   if (typeof Qt !== "undefined" && typeof Qt.atob === "function") {
     try {
-      return binaryStringToUtf8(Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/")))
+      return Qt.atob(input.replace(/-/g, "+").replace(/_/g, "/"))
     } catch (e) {
       // Fall through to the portable path rather than losing the message.
     }
@@ -182,11 +181,67 @@ function decodeQuotedPrintableWord(text) {
   return bytes
 }
 
+// Whether these bytes are UTF-8 that a single-byte charset could not have
+// produced: at least one well-formed multi-byte sequence, and nothing
+// malformed anywhere.
+//
+// A charset header is a claim, and this is the evidence. Mail that declares
+// `us-ascii` or `iso-8859-1` while carrying UTF-8 is common enough that every
+// other client sniffs for it, and the two readings are never both plausible:
+// read as one byte each, the UTF-8 for "ń" is "Å" followed by a control
+// character, which is not something anybody wrote. Genuine Latin-1 and
+// Latin-2 text does not survive this test — a lone "ł" in ISO 8859-2 is 0xB3,
+// a continuation byte with no lead, which is malformed UTF-8 and hands the
+// decision back to the declaration.
+//
+// Strict on purpose. An overlong form, a surrogate or a truncated tail all
+// count as malformed, because each is likelier to be single-byte text that
+// happens to begin a sequence than UTF-8 worth trusting over the header.
+function looksLikeUtf8(bytes) {
+  var values = bytes || []
+  var multi = 0
+  var i = 0
+  while (i < values.length) {
+    var byte1 = values[i++]
+    if (byte1 < 0x80) continue
+    var needed = 0
+    var codePoint = 0
+    if (byte1 >= 0xc2 && byte1 <= 0xdf) {
+      needed = 1
+      codePoint = byte1 & 0x1f
+    } else if (byte1 >= 0xe0 && byte1 <= 0xef) {
+      needed = 2
+      codePoint = byte1 & 0x0f
+    } else if (byte1 >= 0xf0 && byte1 <= 0xf4) {
+      needed = 3
+      codePoint = byte1 & 0x07
+    } else {
+      // 0x80-0xc1 is a continuation with no lead, or an overlong two-byte
+      // form; 0xf5 and above is past the last code point.
+      return false
+    }
+    if (i + needed > values.length) return false
+    for (var n = 0; n < needed; n++) {
+      var next = values[i + n]
+      if (next < 0x80 || next > 0xbf) return false
+      codePoint = (codePoint << 6) | (next & 0x3f)
+    }
+    i += needed
+    if (needed === 1 && codePoint < 0x80) return false
+    if (needed === 2 && codePoint < 0x800) return false
+    if (needed === 3 && (codePoint < 0x10000 || codePoint > 0x10ffff)) return false
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) return false
+    multi += 1
+  }
+  return multi > 0
+}
+
 function decodeWordBytes(charset, bytes) {
   var name = String(charset || "").toLowerCase()
   if (name.indexOf("utf-8") === 0 || name.indexOf("utf8") === 0) return bytesToUtf8(bytes)
   if (name.indexOf("iso-8859") === 0 || name.indexOf("windows-125") === 0
-    || name.indexOf("us-ascii") === 0 || name === "") return bytesToLatin1(bytes)
+    || name.indexOf("us-ascii") === 0 || name === "")
+    return looksLikeUtf8(bytes) ? bytesToUtf8(bytes) : bytesToLatin1(bytes)
   // GB18030, Shift_JIS and friends need a table this plugin does not carry.
   // UTF-8 decoding degrades to Latin-1 per byte, which at least keeps the
   // ASCII parts of the header readable.
@@ -823,6 +878,8 @@ function summarize(message, now) {
     important: hasLabel(message, "IMPORTANT"),
     inInbox: hasLabel(message, "INBOX"),
     inTrash: hasLabel(message, "TRASH"),
+    inSpam: hasLabel(message, "SPAM"),
+    isSent: hasLabel(message, "SENT"),
     isDraft: hasLabel(message, "DRAFT"),
     labelIds: labelIds(message).slice(),
     sizeEstimate: Math.max(0, Math.floor(Number(message && message.sizeEstimate) || 0))
@@ -996,91 +1053,72 @@ function mimeBoundary(given) {
   return "=_Omamail_" + (new Date()).getTime().toString(36) + "_" + random
 }
 
+// The domain of an address, reduced to the characters a domain may hold, or
+// "" when the value carries none.
+function addressDomain(value) {
+  var address = headerSafe(value).trim()
+  var at = address.lastIndexOf("@")
+  return at < 0 ? "" : address.substring(at + 1).replace(/[^A-Za-z0-9.-]/g, "")
+}
+
+// The domain half of a Message-ID is the sender's own, so the id agrees with
+// the address the message is from — or, when the From line is left for the
+// provider to fill in, the address the mailbox is signed in as. Gmail writes
+// its own From and the IMAP client puts the account on the envelope rather
+// than in the headers, so a compose window sending none is ordinary; a JMAP
+// server stores exactly the bytes it was handed, so there the fallback is what
+// keeps the id in the account's own domain.
+function messageIdDomain(from, accountAddress) {
+  var domain = addressDomain(from) || addressDomain(accountAddress)
+  // RFC 2606 reserves .invalid, so a message with no address at all borrows no domain that belongs to somebody else.
+  return domain === "" ? "omamail.invalid" : domain
+}
+
+// Unique by the rule mimeBoundary already uses, and the caller may state one, which is what lets a test read it.
+function messageIdValue(given, from, nowMs, accountAddress) {
+  var stated = String(given === undefined || given === null ? "" : given)
+  // A stated id is this client's own choice rather than a stranger's, so one that is not an id is replaced.
+  if (stated.length <= 250
+      && /^<[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*@[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*>$/.test(stated))
+    return stated
+  var now = Math.floor(Number(nowMs) || Date.now())
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "<" + now.toString(36) + "." + random + ".omamail@"
+    + messageIdDomain(from, accountAddress) + ">"
+}
+
+// The date a message states, in RFC 5322's own shape: a numeric zone rather than toUTCString's obsolete GMT.
+function sentDate(given, nowMs) {
+  var stated = headerSafe(given).trim()
+  // JavaScript also parses ISO dates and shorthand spellings that are not
+  // legal header values, so a stated date needs this client's canonical shape
+  // and RFC 5322's semantic calendar constraints.
+  var canonical = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (0[1-9]|[12][0-9]|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [+-][0-9]{2}[0-5][0-9]$/
+  var parts = stated.match(canonical)
+  if (parts) {
+    var day = Number(parts[2])
+    var month = MONTHS.indexOf(parts[3])
+    var year = Number(parts[4])
+    var calendar = new Date(Date.UTC(year, month, day))
+    if (year >= 1900 && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month
+        && calendar.getUTCDate() === day && WEEKDAYS[calendar.getUTCDay()] === parts[1])
+      return stated
+  }
+  var date = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
+  if (isNaN(date.getTime())) date = new Date()
+  var offset = -date.getTimezoneOffset()
+  var minutes = Math.abs(offset)
+  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " " + MONTHS[date.getMonth()]
+    + " " + date.getFullYear() + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    + ":" + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
+    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
+}
+
 // One method name, and nothing that could end the header early: this string
 // arrives from a calendar file somebody else wrote.
 function calendarMethod(value) {
   var text = String(value || "").toUpperCase().replace(/[^A-Z]/g, "")
   return text === "" ? "REPLY" : text.substring(0, 20)
-}
-
-// ------------------------------------- the two headers a message carries out
-//
-// A message is dated and identified here rather than by whatever sends it,
-// because the four providers disagree about who writes these. Gmail keeps or
-// replaces its own and an SMTP server leaves a header that is already there
-// alone — but a JMAP server stores and delivers exactly the bytes it was
-// handed, so a message that leaves without them arrives undated and with
-// nothing for a reply to thread against.
-
-// A date, whichever realm built it. `instanceof Date` is asked of a prototype
-// chain rather than of the object, and answers no for a Date that crossed a
-// boundary — which the node tests do cross, loading this file into a vm
-// context of their own. Asking the object is the question that was meant.
-function isDate(value) {
-  return !!value && typeof value === "object" && typeof value.getTime === "function"
-}
-
-// The date, in the form RFC 5322 states it in, with the sender's own offset
-// rather than as UTC. The offset is the part that says what time of day it was
-// where the message was written, and a reader elsewhere is shown their own
-// clock from it either way.
-function rfc5322Date(when) {
-  var date = isDate(when) ? when : new Date(Number(when) || 0)
-  // getTimezoneOffset is minutes to *add* to local time to reach UTC, so it
-  // runs the opposite way from the sign a header carries.
-  var offset = -date.getTimezoneOffset()
-  var minutes = Math.abs(offset)
-  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " "
-    + MONTHS[date.getMonth()] + " " + date.getFullYear() + " "
-    + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":"
-    + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
-    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
-}
-
-// The clock, unless the caller stated a date — a string is the header value
-// itself, a Date or an epoch is formatted. Stated so a test can assert the
-// exact header, and for nothing else.
-function dateValue(given, when) {
-  if (typeof given === "string" && headerSafe(given).trim() !== "")
-    return headerSafe(given).trim()
-  if (isDate(given)) return rfc5322Date(given)
-  if (typeof given === "number" && isFinite(given) && given > 0)
-    return rfc5322Date(new Date(given))
-  return rfc5322Date(when)
-}
-
-// The domain a generated message id belongs to. Found with a pattern rather
-// than by splitting on "@", because the value has already been through
-// `headerSafe` — an address that arrived carrying a second one is still one
-// string, and the sender is the first of them.
-function addressDomain(value) {
-  var text = headerSafe(value).trim()
-  var angled = /<([^>]*)>/.exec(text)
-  if (angled) text = angled[1]
-  var found = /@([A-Za-z0-9.\-]+)/.exec(text)
-  if (!found) return ""
-  return found[1].toLowerCase().replace(/^[.\-]+/, "").replace(/[.\-]+$/, "")
-}
-
-// `<epochms.random@domain>`: unique without asking anything about the machine
-// it was written on. The domain is the one the message says it is from, or the
-// one the mailbox is signed in as when the From line is left for the provider
-// to fill in — Gmail writes its own and the IMAP client puts the account on
-// the envelope instead, so a compose window can legitimately send no From at
-// all.
-//
-// A stated id is cut down the way a reference is, because it lands in the same
-// kind of header, and is bracketed if it did not arrive bracketed.
-function messageIdValue(given, when, from, accountAddress) {
-  var stated = referenceValue(given)
-  if (stated !== "") {
-    if (stated.charAt(0) === "<" && stated.charAt(stated.length - 1) === ">")
-      return stated
-    return "<" + stated.replace(/[<>]/g, "") + ">"
-  }
-  var domain = addressDomain(from) || addressDomain(accountAddress) || "localhost"
-  var random = Math.floor(Math.random() * 0x100000000).toString(36)
-  return "<" + when.getTime() + "." + random + "@" + domain + ">"
 }
 
 // Which way a message being sent runs.
@@ -1160,7 +1198,7 @@ function buildRawMessage(fields) {
   var values = fields || {}
   // One reading of the clock for both headers, so a message cannot be dated a
   // millisecond apart from the id that names it.
-  var now = new Date()
+  var now = Date.now()
   var lines = []
   if (values.from) lines.push(fromHeader(values.from, values.fromName))
   lines.push(foldHeader("To", values.to || ""))
@@ -1175,9 +1213,11 @@ function buildRawMessage(fields) {
   // Behind the addressing rather than in front of it: RFC 5322 makes header
   // order insignificant outside the trace fields, so the raw form still opens
   // with the From line everything that reads one here already expects.
-  lines.push("Date: " + dateValue(values.date, now))
+  // RFC 5322 requires a Date on a message this client originates, and the writer's clock is the one it means.
+  lines.push("Date: " + sentDate(values.date, now))
+  // RFC 5322 asks every message for an id, and a relay told not to add missing headers relays none.
   lines.push("Message-ID: "
-    + messageIdValue(values.messageId, now, values.from, values.accountAddress))
+    + messageIdValue(values.messageId, values.from, now, values.accountAddress))
   lines.push("MIME-Version: 1.0")
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""

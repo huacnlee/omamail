@@ -18,6 +18,10 @@ var CAPABILITIES = {
   // No labels: a message is in one folder. The reader hides the label strip
   // rather than showing an empty one.
   labels: false,
+  // One folder per message is what makes a move the plain thing to do here:
+  // `labels: false` is about the strip the reader draws, not about whether a
+  // message can be put somewhere else.
+  move: true,
   // No server-side conversation id. Threading falls back to References, which
   // is what every other IMAP client does.
   threads: false,

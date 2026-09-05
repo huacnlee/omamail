@@ -19,6 +19,7 @@ var GLYPHS = {
   replyAll: 0xF0F1F,     // reply-all-outline
   forward: 0xF0932,      // share-outline — the mail-forward arrow, not "next"
   archive: 0xF120E,      // archive-outline
+  download: 0xF0DA9,     // download-outline — keeping the file, not opening it
   trash: 0xF0A7A,        // trash-can-outline — the can, not the bin
   spam: 0xF0CE6,         // alert-octagon-outline
   unread: 0xF01F0,       // email-outline

@@ -38,6 +38,7 @@ Column {
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
   readonly property var sections: [
+    { key: "bar", title: "Bar", y: barHeading.y },
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
@@ -59,6 +60,41 @@ Column {
     for (var i = 0; i < signatureAccounts.length; i++)
       out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
     return out
+  }
+
+  property string selectedNameAccountId: ""
+
+  function nameOptions() {
+    var out = []
+    for (var i = 0; i < signatureAccounts.length; i++)
+      out.push({ value: signatureAccounts[i].id, label: signatureAccounts[i].email })
+    return out
+  }
+
+  function saveName() {
+    if (service && selectedNameAccountId !== "")
+      service.setAccountLabel(selectedNameAccountId, nameEdit.text)
+  }
+
+  function selectNameAccount(id) {
+    var next = signatureAccount(id)
+    if (!next || String(next.id || "") === selectedNameAccountId) return
+    saveName()
+    selectedNameAccountId = String(next.id || "")
+    nameEdit.text = String(next.label || "")
+  }
+
+  function ensureNameAccount() {
+    if (signatureAccounts.length === 0) {
+      selectedNameAccountId = ""
+      nameEdit.text = ""
+      return
+    }
+    if (signatureAccount(selectedNameAccountId)) return
+    var activeId = service ? String(service.activeAccountId || "") : ""
+    var next = signatureAccount(activeId) || signatureAccounts[0]
+    selectedNameAccountId = String(next.id || "")
+    nameEdit.text = String(next.label || "")
   }
 
   function saveSignature() {
@@ -87,8 +123,14 @@ Column {
     signatureEdit.text = String(next.signature || "")
   }
 
-  onSignatureAccountsChanged: ensureSignatureAccount()
-  Component.onCompleted: ensureSignatureAccount()
+  onSignatureAccountsChanged: {
+    ensureSignatureAccount()
+    ensureNameAccount()
+  }
+  Component.onCompleted: {
+    ensureSignatureAccount()
+    ensureNameAccount()
+  }
 
   spacing: Style.space(16)
 
@@ -98,6 +140,83 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.heading
     font.bold: true
+  }
+
+  // ------------------------------------------------------------------- bar
+
+  Text {
+    id: barHeading
+    text: "BAR"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: barIconText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: barIconSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Show the icon in the bar"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      // Says what turning it off costs, and what it does not: mail is still
+      // checked and still notifies. The keybinding is the part worth naming,
+      // because without one the window is only reachable from a terminal —
+      // which is true, and is why this does not claim there is no way back.
+      Text {
+        width: parent.width
+        text: "Mail is still checked and still notifies; only the envelope goes. "
+          + "With it off the window opens from a keybinding or a terminal and "
+          + "nowhere else, so bind a key before turning this off:"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "o.bind(\"SUPER + SHIFT + G\", \"Omamail\", "
+          + "\"omarchy shell shell toggle omamail '\{}'\")"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WrapAnywhere
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: barIconSwitch
+      objectName: "showBarIconSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.showBarIcon !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
   }
 
   // --------------------------------------------------------------- reading
@@ -502,6 +621,94 @@ Column {
     font.letterSpacing: 1
   }
 
+  // What to call a mailbox, which the list below draws and the switcher and
+  // every merged row draw too. Two of these can differ only in their domain
+  // and elide to the same handful of characters, so a name is the one thing
+  // that tells them apart at a glance.
+  //
+  // A picker and one field rather than a field on each row: the rows carry
+  // live mailbox state and are rebuilt whenever a poll changes an unread
+  // count, which would take the field apart while it was being typed into.
+  // This is the same reason the signature editor is shaped this way.
+  Column {
+    width: parent.width
+    spacing: Style.space(6)
+    visible: root.signatureAccounts.length > 0
+
+    // Two questions, one under the other, each with its own label: which
+    // mailbox, and what to call it. They were one block under a single "Name"
+    // heading, which read as though the address in the picker *was* the name
+    // and left nothing that looked like somewhere to type.
+    Text {
+      width: parent.width
+      visible: root.signatureAccounts.length > 1
+      text: "Mailbox"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Dropdown {
+      objectName: "settings-name-account-picker"
+      visible: root.signatureAccounts.length > 1
+      width: parent.width
+      showLabel: false
+      value: root.selectedNameAccountId
+      options: root.nameOptions()
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { root.selectNameAccount(next) }
+    }
+
+    Item {
+      width: parent.width
+      implicitHeight: Style.space(4)
+      visible: root.signatureAccounts.length > 1
+    }
+
+    Text {
+      width: parent.width
+      text: "Name"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // The kit's own single-line input, which is what every other field on
+    // this page is: it carries the focus ring, the selection colours and a
+    // real placeholder, and it takes a click without one being arranged for
+    // it. A hand-built Rectangle around a bare TextInput drew the same box
+    // and could not be typed into.
+    TextField {
+      id: nameEdit
+      objectName: "settings-name-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+
+      // Saved on the way out rather than on every keystroke, so the account
+      // file is written once per edit and the field is never rebuilt from
+      // under the cursor.
+      onActiveFocusChanged: if (!activeFocus) root.saveName()
+      onAccepted: root.saveName()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "What this mailbox is called in Omamail — in the switcher, in this "
+        + "list, and beside every message in a combined view. Leave it empty "
+        + "to use the address. It is not sent to anyone."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+  }
+
   Column {
     width: parent.width
     spacing: Style.space(2)
@@ -518,9 +725,12 @@ Column {
         implicitHeight: Math.max(rowText.implicitHeight, rowActions.implicitHeight)
           + Style.space(16)
         radius: Style.cornerRadius
-        color: modelData.active
-          ? Style.selectedFillFor(root.textColor, root.accentColor)
-          : Style.normalFillFor(root.textColor, root.accentColor)
+        // Which mailbox the window is showing is not a fact about this page.
+        // Nothing here acts on it — `Edit...` acts on its own row, and the
+        // signature section names the mailbox it signs — and the row answers
+        // no click, so marking it borrowed the switcher's "you are here, click
+        // another" fill for a row that switches nothing.
+        color: Style.normalFillFor(root.textColor, root.accentColor)
 
         Column {
           id: rowText
@@ -534,16 +744,26 @@ Column {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: row.modelData.email !== "" ? row.modelData.email : "New mailbox"
+            // The name if one was given, so this list and the switcher agree
+            // about what each mailbox is called. The address is on the line
+            // below either way, which keeps the row identifiable.
+            text: {
+              var named = row.modelData.name !== undefined
+                && String(row.modelData.name) !== ""
+              if (named) return String(row.modelData.name)
+              return row.modelData.email !== "" ? row.modelData.email : "New mailbox"
+            }
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
-            font.bold: row.modelData.active
             elide: Text.ElideMiddle
           }
 
           Text {
             width: parent.width
+            // The address and whatever a server had to say are both in here,
+            // and Qt's default would run the rich text engine over either.
+            textFormat: Text.PlainText
             text: {
               if (row.modelData.error !== undefined && row.modelData.error !== "")
                 return row.modelData.error
@@ -551,7 +771,12 @@ Column {
               var count = row.modelData.unread
               var unread = count === 0 ? "No unread mail"
                 : (count === 1 ? "1 unread message" : count + " unread messages")
-              return row.modelData.active ? unread + " · showing now" : unread
+              // A named row has put its name on the line above, so the address
+              // belongs here — otherwise nothing on the row says which mailbox
+              // it is.
+              var named = row.modelData.name !== undefined
+                && String(row.modelData.name) !== ""
+              return named ? String(row.modelData.email) + " · " + unread : unread
             }
             color: row.modelData.error !== undefined && row.modelData.error !== ""
               ? root.urgentColor : root.dimColor

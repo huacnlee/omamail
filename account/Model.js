@@ -256,18 +256,51 @@ function threadAfterAction(row, action) {
   return block
 }
 
+// The label a move is aimed at, or "" for every other verb.
+//
+// The destination travels inside the action string rather than beside it
+// because `act` threads one verb through the capability guard, the optimistic
+// edit, the cache repair and the restore on failure. A second argument would
+// have had to be carried, and correctly put back, by all four.
+var MOVE_PREFIX = "label:"
+
+// Gmail's own labels are upper case with no `Label_` prefix; a user's carry one
+// or are a folder name on IMAP. Only the second kind is a place a message is
+// filed under and can be taken out of. `survivesAction` does not read that
+// rule a second time — it asks `labelChangesFor` whether the label actually
+// comes off — so the two cannot disagree about a row.
+var SYSTEM_LABEL_IDS = ["INBOX", "UNREAD", "STARRED", "IMPORTANT", "SENT",
+  "DRAFT", "TRASH", "SPAM", "CHAT"]
+
+function isSystemLabelId(id) {
+  var value = String(id || "")
+  if (SYSTEM_LABEL_IDS.indexOf(value) >= 0) return true
+  return value.indexOf("CATEGORY_") === 0
+}
+
+function labelTarget(action) {
+  var verb = String(action || "")
+  if (verb.indexOf(MOVE_PREFIX) !== 0) return ""
+  return verb.slice(MOVE_PREFIX.length)
+}
+
 // After an action the message may no longer belong in the mailbox being
 // viewed. Archiving from Inbox removes the row; archiving from All mail does
 // not. Getting this wrong either strands a row that is gone or hides one that
 // is still there.
+//
+// `labels` is whether the provider files by label rather than by folder, which
+// is the one thing this cannot infer and the one thing `unarchive` turns on: a
+// folder provider answers it with a UID MOVE, so the message leaves the list
+// with a new id and a surviving row would point at nothing.
 //
 // A row that is a conversation answers on the conversation's evidence instead:
 // the recomputed block, so marking one member read in the Unread view keeps
 // the row while any other member is unread, and an unstar keeps it in Starred
 // while any member is still starred. Every other case, and every row without a
 // block, is the verb rule as it was — which is what leaves Gmail and IMAP
-// exactly where they were.
-function survivesAction(mailboxKey, action, row) {
+// exactly where they were. `row` is read for that block and nothing else.
+function survivesAction(mailboxKey, action, rawQuery, labels, sourceLabelId, row) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
   var block = Conversation.blockOf(row ? row.thread : null)
@@ -277,21 +310,98 @@ function survivesAction(mailboxKey, action, row) {
   }
   if (verb === "trash") return key === "trash"
   if (verb === "untrash") return key !== "trash"
-  if (verb === "archive") return key !== "inbox" && key !== "unread"
+  if (verb === "unarchive") {
+    // Moving relocates on a folder provider: the message is given a new UID in
+    // INBOX, nothing parses COPYUID, and the row it left would point at a
+    // message that is no longer there — opening it says so, a star succeeds
+    // against nothing, and no reload corrects it.
+    if (labels !== true) return false
+    // On a label provider the row stays in a mailbox or a search, which still
+    // contain it, and leaves a label's list because the label came off. Which
+    // of those a label view is, is `labelChangesFor`'s answer rather than a
+    // second reading of the same rule here: a system label is not a place a
+    // message is filed under, so it stays on the message and the row stays in
+    // its list.
+    if (String(rawQuery || "") === "") return true
+    var filed = String(sourceLabelId || "")
+    // A label view with nothing naming its label cannot say the label stayed,
+    // so the row goes: a row that leaves and should not have comes back on the
+    // reload `invalidatesPage` asks for, and one that stays and should not
+    // have is stale until something else reloads the list.
+    if (filed === "") return false
+    return labelChangesFor("unarchive", filed).remove.length === 0
+  }
+  // A move takes INBOX away exactly as archive does, so it leaves exactly the
+  // lists archive leaves. Said once, because two branches with the same answer
+  // are two places for it to drift.
+  if (labelTarget(verb) !== "" && String(rawQuery || "") !== "") return false
+  if (verb === "archive" || labelTarget(verb) !== "")
+    return key !== "inbox" && key !== "unread"
   if (verb === "markRead") return key !== "unread"
   if (verb === "unstar") return key !== "starred"
   return true
 }
 
-function labelChangesFor(action) {
+function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }
   if (action === "star") return { add: ["STARRED"], remove: [] }
   if (action === "unstar") return { add: [], remove: ["STARRED"] }
   if (action === "archive") return { add: [], remove: ["INBOX"] }
-  if (action === "unarchive") return { add: ["INBOX"], remove: [] }
+  // Moving back to the inbox takes the message out of the label whose list it
+  // was found in, the same way a move does and for the same reason: a label
+  // somebody files things under is a queue, and one that keeps everything ever
+  // put in it only grows. `sourceLabelId` is already "" on a provider whose
+  // labels are folders, so a folder name never reaches a Gmail remove list.
+  if (action === "unarchive") {
+    var filed = String(sourceLabelId || "")
+    if (filed === "" || isSystemLabelId(filed)) return { add: ["INBOX"], remove: [] }
+    return { add: ["INBOX"], remove: [filed] }
+  }
   if (action === "spam") return { add: ["SPAM"], remove: ["INBOX"] }
+  // A move is archive with somewhere to go. Where a folder is a label, putting
+  // a message in one is adding that label and taking INBOX away -- the same
+  // pair archive already writes, with the destination filled in.
+  var target = labelTarget(action)
+  if (target !== "") {
+    var remove = ["INBOX"]
+    var source = String(sourceLabelId || "")
+    if (source !== "" && source !== target && remove.indexOf(source) < 0)
+      remove.push(source)
+    return { add: [target], remove: remove }
+  }
   return null
+}
+
+// The labels a message can be moved into, filtered by what has been typed.
+//
+// System labels are left out: INBOX, SENT, SPAM and the rest are the mailboxes
+// the rail already draws, and offering them here would put two ways of saying
+// "archive" in a list whose whole job is the destinations that have no key of
+// their own. The label or folder already on screen is not a destination: on
+// Gmail it would leave the source label attached while optimistically removing
+// its row, and IMAP would be asked to UID MOVE a message into the same folder.
+// Sorted by name rather than by the order the provider returned, which on
+// Gmail is neither alphabetical nor stable between accounts.
+function movableLabels(labels, query, currentLabelId) {
+  var candidates = Array.isArray(labels) ? labels : []
+  var typed = String(query || "").trim().toLowerCase()
+  var current = String(currentLabelId || "")
+  var destinations = []
+  for (var i = 0; i < candidates.length; i++) {
+    var label = candidates[i]
+    if (!label || label.system === true) continue
+    if (String(label.id || "") === current) continue
+    var labelName = String(label.name || "")
+    if (typed !== "" && labelName.toLowerCase().indexOf(typed) < 0) continue
+    destinations.push(label)
+  }
+  destinations.sort(function(left, right) {
+    var leftName = String(left.name || "").toLowerCase()
+    var rightName = String(right.name || "").toLowerCase()
+    return leftName < rightName ? -1 : (leftName > rightName ? 1 : 0)
+  })
+  return destinations
 }
 
 // Which capability an action needs, or "" for the ones every provider has.
@@ -306,6 +416,7 @@ function actionCapability(action) {
   if (verb === "archive" || verb === "unarchive") return "archive"
   if (verb === "star" || verb === "unstar") return "star"
   if (verb === "spam") return "spam"
+  if (labelTarget(verb) !== "") return "move"
   return ""
 }
 
@@ -318,6 +429,7 @@ function actionUnavailable(action, provider) {
   if (needs === "archive") return name + " has no archive"
   if (needs === "star") return name + " has no star"
   if (needs === "spam") return name + " has no junk verb to report to"
+  if (needs === "move") return name + " has no destination you can name"
   return ""
 }
 
@@ -349,12 +461,13 @@ function rowWithThread(summary, thread) {
   return next
 }
 
-// The summary an action leaves behind. The optional block is the conversation
-// asserted outright — `threadAfterAction` for an action on the row, or
-// `threadAfterMemberChange` for one on a member.
-function applyLabelChange(summary, action, thread) {
+// The summary an action leaves behind. `sourceLabelId` is the label whose
+// list the row was found in, which a move or an unarchive takes off. The
+// optional block is the conversation asserted outright — `threadAfterAction`
+// for an action on the row, or `threadAfterMemberChange` for one on a member.
+function applyLabelChange(summary, action, sourceLabelId, thread) {
   if (!summary) return summary
-  var change = labelChangesFor(action)
+  var change = labelChangesFor(action, sourceLabelId)
   if (!change) return summary
   var next = {}
   for (var key in summary) next[key] = summary[key]
@@ -368,6 +481,15 @@ function applyLabelChange(summary, action, thread) {
   }
   next.labelIds = labels
   next.inInbox = labels.indexOf("INBOX") >= 0
+  // Every flag that mirrors a label, rather than the three that used to be the
+  // only ones read. `spam` moves a row between two of these, and a menu asking
+  // a stale `inSpam` offers "Move to Inbox" on a message just reported as
+  // spam — which would add INBOX and keep SPAM. Unread and starred are the
+  // conversation's as well as the labels', which is `rowWithThread`'s rule.
+  next.inTrash = labels.indexOf("TRASH") >= 0
+  next.inSpam = labels.indexOf("SPAM") >= 0
+  next.isSent = labels.indexOf("SENT") >= 0
+  next.isDraft = labels.indexOf("DRAFT") >= 0
   return rowWithThread(next, thread)
 }
 
@@ -696,22 +818,22 @@ function cursorAfterReload(list, cursorId) {
 // Unchanged while the row is already visible. Recentring on every press would
 // drag the list under someone who is only stepping one row down it.
 function contentYToReveal(contentY, viewportHeight, itemY, itemHeight,
-                          contentHeight, margin) {
+                          contentHeight, margin, originY, topMargin, bottomMargin) {
   var top = Number(contentY) || 0
   var view = Number(viewportHeight) || 0
   var y = Number(itemY) || 0
   var height = Number(itemHeight) || 0
   var pad = Number(margin) || 0
-  var furthest = Math.max(0, (Number(contentHeight) || 0) - view)
   var next = top
   // A row that cannot fit shows its beginning. Aligning its bottom, which is
   // what the off-the-bottom rule would do, pushes the part being read away.
   if (height + pad + pad > view) next = y - pad
   else if (y - pad < top) next = y - pad
   else if (y + height + pad > top + view) next = y + height + pad - view
-  if (next < 0) next = 0
-  if (next > furthest) next = furthest
-  return next
+  // The same range the wheel is held to. Callers that scroll a plain
+  // Flickable pass no origin or margins and get the range they had.
+  return clampContentY(next, contentYBounds(originY, contentHeight, view,
+    topMargin, bottomMargin))
 }
 
 function unreadCount(list) {
@@ -971,6 +1093,84 @@ function settingsContentHeight(sections, pageHeight, viewportHeight) {
   var viewport = Math.max(0, Number(viewportHeight) || 0)
   if (known.length === 0) return page
   return Math.max(page, known[known.length - 1].y + viewport)
+}
+
+// --------------------------------------------------- what a scroller can reach
+//
+// `contentY` does not run from 0 to `contentHeight - height`, which is what
+// three separate clamps in this repository assumed.
+//
+// `originY` moves the start: a `ListView` with a 200-tall header reports
+// `originY == -200`, and a clamp with a floor of 0 makes the header
+// unreachable and turns the first notch into a 200-pixel jump. Measured, not
+// inferred — that view settles at exactly `originY` and at
+// `originY + contentHeight - height`.
+//
+// Margins extend both ends: a `Flickable` with a `topMargin` rests at
+// `-topMargin` with its content below the gap, and a clamp with a floor of 0
+// answers a scroll *up* at the top by moving *down* to 0, after which the
+// margin can never be seen again. (`StopAtBounds` does not correct a
+// programmatic assignment, so this end comes from Qt's documented semantics
+// rather than from a probe like the `originY` one.)
+function contentYBounds(originY, contentHeight, viewportHeight, topMargin, bottomMargin) {
+  var origin = Number(originY) || 0
+  var content = Number(contentHeight) || 0
+  var view = Number(viewportHeight) || 0
+  var top = Number(topMargin) || 0
+  var bottom = Number(bottomMargin) || 0
+  var min = origin - top
+  // Content shorter than its own view has one position rather than a negative
+  // range, and that position is the top of it.
+  var max = Math.max(min, origin + content + bottom - view)
+  return { min: min, max: max }
+}
+
+function clampContentY(value, bounds) {
+  var limits = bounds || { min: 0, max: 0 }
+  return Math.max(limits.min, Math.min(limits.max, Number(value) || 0))
+}
+
+// ------------------------------------------------------------------ the wheel
+//
+// How far a wheel turn moves a Flickable, which the Flickable itself gets
+// wrong on a mouse that reports finely.
+//
+// A Flickable answers a wheel event with a *flick* — a velocity it then
+// decelerates — so the distance depends on how the turn was chopped up rather
+// than on how far the wheel went. One notch arrives as `angleDelta` 120 and
+// moves about 72 pixels; a high-resolution wheel reports the same physical
+// notch as eight deltas of 15, each starting and damping its own little
+// flick, and the same turn of the same wheel moves about 9. Eight times less
+// for the same gesture, which is what "slower than every other app" is.
+//
+// Rotation is the thing that does not change: `angleDelta` is eighths of a
+// degree, a notch is 15 degrees, and eight fractions of a notch still add up
+// to 15. So the distance is computed from rotation and nothing else, in
+// notches rather than in degrees — a notch is the unit a hand turns and 120
+// pixels is three lines of text, which is what a GTK application moves for it.
+//
+// Nothing is capped. A cap on one *event* would put the chunking dependence
+// straight back at the coarse end: an MX Master in free spin delivers ten
+// notches as one event, and a bound would move it a notch and a half while
+// the same ten notches arriving as ten events moved ten. A bound worth having
+// would be per unit time, and no bound at all is honest — the wheel was
+// turned that far.
+var WHEEL_UNITS_PER_NOTCH = 120
+var WHEEL_PIXELS_PER_NOTCH = 120
+
+// Numerically the identity at these two values, and written as a ratio anyway:
+// the constant that matters is "a notch moves 120 pixels", and it is the one a
+// reader changes.
+function wheelDistance(angleDelta) {
+  return (Number(angleDelta) || 0) / WHEEL_UNITS_PER_NOTCH * WHEEL_PIXELS_PER_NOTCH
+}
+
+// Where the view lands, inside what it can actually reach.
+function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight,
+                           originY, topMargin, bottomMargin) {
+  var bounds = contentYBounds(originY, contentHeight, viewportHeight,
+    topMargin, bottomMargin)
+  return clampContentY((Number(contentY) || 0) - wheelDistance(angleDelta), bounds)
 }
 
 // Where a click on a section name scrolls to: its heading, clamped into the

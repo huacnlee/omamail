@@ -111,14 +111,27 @@ grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
 if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
   fail "the reader view must not sanitise a body; the account renders it once"
 fi
-grep -q 'withReader: true' account/MailAccount.qml \
-  || fail "the reading document must come off the same parse as the formatted one"
+grep -q 'withReader: eagerReader' account/MailAccount.qml \
+  || fail "the current reading mode must decide whether reader rebuilding is on the paint path"
+grep -q 'Qt.callLater(function()' account/MailAccount.qml \
+  || fail "a deferred reading document must be completed outside the first paint"
+grep -q 'RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)' account/MailAccount.qml \
+  || fail "reopening a cached body must reuse its process-local parsed documents"
+grep -q 'RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)' account/MailAccount.qml \
+  || fail "a parsed body must enter the bounded process-local render cache"
+grep -q 'onAccountIdChanged: renderCache = RenderCache.create(12)' account/MailAccount.qml \
+  || fail "the render cache must not cross account identities"
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
-grep -q 'max-redirs = 0' scripts/image-fetch.sh \
-  || fail "the image fetcher must not follow an unchecked redirect"
+grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/MailAccount.qml \
+  || fail "remote images must use the public-IP-checked Python transport"
+grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
+  || fail "one-click unsubscribe must use the public-IP-checked Python transport"
+# Redirect and DNS policy require behavioral tests, not a matching config line.
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
+grep -q 'bodyMode: root.bodyMode' Service.qml \
+  || fail "each account must know which body representation is on the paint path"
 # Choosing between three readings that were all built when the body arrived is a
 # preference and nothing else. A mode switch that re-rendered would re-run the
 # image policy, and one that re-fetched would tell the sender the mail was
@@ -900,6 +913,27 @@ for file in components/AppMenu.qml components/MessageMenu.qml; do
     fail "$file duplicates the shared menu-row presentation"
   fi
 done
+
+# A row that is drawn but left out of `menuRows` is mouse-only: the cursor is an
+# index into that array, so j and k step over the row, Enter can never reach it,
+# and `MenuActionRow.selected` never matches. "Move to Inbox" was added to the
+# column and left out of the array.
+python3 - <<'MENUROWS'
+import re
+from pathlib import Path
+
+for name in ("components/AppMenu.qml", "components/MessageMenu.qml"):
+    source = Path(name).read_text()
+    listed = re.search(r"property var menuRows: \[(.*?)\]", source, re.S)
+    if not listed:
+        raise SystemExit("test_source.sh: %s must list its rows in menuRows" % name)
+    known = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", listed.group(1)))
+    drawn = re.findall(r"MenuRow \{\s*id: ([A-Za-z_][A-Za-z0-9_]*)", source)
+    missing = [row for row in drawn if row not in known]
+    if missing:
+        raise SystemExit("test_source.sh: %s draws %s without listing it in menuRows"
+                         % (name, ", ".join(missing)))
+MENUROWS
 
 # Feature views receive semantic colours from App. Reading theme roles locally
 # makes the same concept drift between pages and prevents App from naming it.

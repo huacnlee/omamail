@@ -9,7 +9,11 @@
 // caches, which is the entire reason a cache exists. Everything here is pure:
 // CacheStore.qml owns the file.
 
-var VERSION = 1
+// Bumped for the summary fields a page is read for: rows written before
+// `inSpam` and `isSent` existed answer "not spam" to a menu that asks, and
+// offer to move a spam message to the inbox until the first load replaces
+// them. Bodies are separate files, so a bump costs one cold list load.
+var VERSION = 2
 var MAX_QUERIES = 12
 var MAX_SUMMARIES_PER_QUERY = 100
 // Bodies are the one thing worth keeping deep: a message body never changes, so

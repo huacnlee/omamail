@@ -329,6 +329,22 @@ for (const count of [1, 2, 3, 4]) {
     count + ": no column runs away with the sheet (" + heaviest + ")")
 }
 
+// `v` is Gmail's own move key, which is what issue #58 asks these to match.
+// `m` mutes there, so a move on `m` would be the one binding somebody arriving
+// from Gmail has to unlearn -- pinned here because "it was free" is exactly the
+// reasoning that would put it back.
+const move = keymap.BINDINGS.filter(b => b.id === "moveToLabel")
+assert.strictEqual(move.length, 1, "one move row")
+deepEqual(move[0].keys, ["v"], "Gmail moves with v")
+assert.ok(keymap.BINDINGS.every(b => b.keys.indexOf("m") < 0 || b.contexts.indexOf("calendar") >= 0),
+  "m stays out of the mailbox, where Gmail means mute by it")
+
+// Bound where a message is, and nowhere else: the calendar has no message to
+// move, and a row added to the wrong context list would bind it there silently.
+deepEqual(keymap.bindingsFor("list").filter(b => b.id === "moveToLabel").length, 1)
+deepEqual(keymap.bindingsFor("reader").filter(b => b.id === "moveToLabel").length, 1)
+deepEqual(keymap.bindingsFor("calendar").filter(b => b.id === "moveToLabel").length, 0)
+
 // A count that is not a count still has to draw something.
 deepEqual(keymap.helpColumns(0), [keymap.helpGroups()])
 deepEqual(keymap.helpColumns(-3), [keymap.helpGroups()])

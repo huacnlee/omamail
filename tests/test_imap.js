@@ -366,6 +366,31 @@ deepEqual(imap.draftSaveResult("server refused UID EXPUNGE"), {
   warning: "The updated draft was saved, but the old copy could not be removed: server refused UID EXPUNGE"
 }, "a cleanup failure must not invite another APPEND of the saved draft")
 deepEqual(imap.draftSaveResult(""), { saved: true, warning: "" })
+
+// A sent copy is filed in the server's own Sent, learned from LIST like every
+// folder name. A server that named none is answered with an empty string and
+// never a guess, because a made-up name creates a folder rather than finds one.
+deepEqual(imap.sentFolder({ "\\sent": "Sent Items", "\\drafts": "Drafts" }), "Sent Items")
+deepEqual(imap.sentFolder({ "\\drafts": "Drafts" }), "",
+  "a server that named no Sent folder must not be answered with a guess")
+deepEqual(imap.sentFolder(undefined), "")
+
+// curl spells APPEND flags as words. A draft keeps its marker; a sent copy
+// arrives seen, because its author has read it.
+assert.strictEqual(imap.appendFlagWords(true), "seen")
+assert.strictEqual(imap.appendFlagWords(false), "draft")
+
+// The message is out either way, so a copy that did not land is a warning
+// carried on a success, never a failure of the send.
+deepEqual(imap.sentCopyResult("Sent Items", true), { sent: true, warning: "" })
+deepEqual(imap.sentCopyResult("Sent Items", false), {
+  sent: true,
+  warning: "Sent, but the copy for the Sent folder could not be saved"
+})
+deepEqual(imap.sentCopyResult("", false), {
+  sent: true,
+  warning: "Sent, but no Sent folder was found to file a copy in"
+}, "a server that named no Sent folder is told to the user plainly")
 deepEqual(imap.storeCommand([4, 5], ["\\Seen"], ["\\Flagged"]), [
   "UID STORE 4,5 +FLAGS.SILENT (\\Seen)",
   "UID STORE 4,5 -FLAGS.SILENT (\\Flagged)"
@@ -504,6 +529,37 @@ assert.strictEqual(plainSpecial["\\sent"], "Sent")
 assert.strictEqual(plainSpecial["\\junk"], "Junk")
 assert.strictEqual(plainSpecial["\\archive"], "Archive")
 
+// Exchange Online's IMAP advertises no SPECIAL-USE either, so its folders are
+// found by name or not at all. Four of the five are what the bare-word
+// fallback would have guessed anyway; "Junk Email" is the one that is not, and
+// pointing the Junk mailbox at a folder the server does not have is the fault.
+const exchangeList = imap.parseList(
+  "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Sent Items\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Deleted Items\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Drafts\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Junk Email\"\r\n" +
+  "* LIST (\\HasNoChildren) \"/\" \"Archive\"\r\n")
+const exchange = imap.specialFolders(exchangeList)
+assert.strictEqual(imap.resolveFolder("\\Sent", exchange), "Sent Items")
+assert.strictEqual(imap.resolveFolder("\\Trash", exchange), "Deleted Items")
+assert.strictEqual(imap.resolveFolder("\\Drafts", exchange), "Drafts")
+assert.strictEqual(imap.resolveFolder("\\Archive", exchange), "Archive")
+assert.strictEqual(imap.resolveFolder("\\Junk", exchange), "Junk Email",
+  "the bare word names a folder Exchange does not have")
+
+// The other spellings of the same folder, and a folder that merely starts
+// with the word and is somebody's own.
+function junkNamed(name) {
+  const listed = imap.parseList("* LIST () \"/\" \"" + name + "\"\r\n")
+  return imap.specialFolders(listed)["\\junk"]
+}
+assert.strictEqual(junkNamed("Junk E-mail"), "Junk E-mail")
+assert.strictEqual(junkNamed("Junk E-Mail"), "Junk E-Mail")
+assert.strictEqual(junkNamed("Spam"), "Spam")
+assert.strictEqual(junkNamed("Junk Drawer"), undefined,
+  "an unrelated folder must not be adopted as Junk")
+
 // Flags win over names: a server that says so is not second-guessed.
 const conflicting = imap.parseList(
   "* LIST (\\Sent) \"/\" \"Verzonden\"\r\n" +
@@ -606,6 +662,28 @@ deepEqual(imap.flagPlanForLabels([], ["STARRED"], {}),
 // same request is a move.
 deepEqual(imap.flagPlanForLabels([], ["INBOX"], { "\\archive": "Archive" }),
   { add: [], remove: [], move: "Archive" })
+// A named destination is the same shape as archive -- out of the inbox -- so
+// it has to win over the archive default rather than be overwritten by it.
+deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX"], { "\\archive": "Archive" }),
+  { add: [], remove: [], move: "Receipts" }, "a chosen folder beats the archive default")
+deepEqual(imap.flagPlanForLabels(["Receipts/2026"], ["INBOX"], {}),
+  { add: [], remove: [], move: "Receipts/2026" }, "a nested folder is a name like any other")
+deepEqual(imap.flagPlanForLabels(["Starred"], ["INBOX"], { "\\archive": "Archive" }),
+  { add: [], remove: [], move: "Starred" },
+  "a named folder does not become the Gmail flag with the same spelling")
+deepEqual(imap.flagPlanForLabels(["Unread"], ["INBOX"], {}),
+  { add: [], remove: [], move: "Unread" },
+  "a named folder does not become Gmail's unread state")
+deepEqual(imap.flagPlanForLabels(["Trash"], ["INBOX"], { "\\trash": "Deleted Items" }),
+  { add: [], remove: [], move: "Trash" },
+  "a regular folder does not become the server's special Trash folder")
+deepEqual(imap.flagPlanForLabels(["Spam"], ["INBOX"], { "\\junk": "Junk Mail" }),
+  { add: [], remove: [], move: "Spam" },
+  "a regular folder does not become the server's special Spam folder")
+// Marking read on the way is still a flag, not a move.
+deepEqual(imap.flagPlanForLabels(["Receipts"], ["INBOX", "UNREAD"], {}),
+  { add: ["\\Seen"], remove: [], move: "Receipts" })
+
 deepEqual(imap.flagPlanForLabels(["INBOX"], [], {}),
   { add: [], remove: [], move: "INBOX" }, "unarchiving is a move back")
 deepEqual(imap.flagPlanForLabels([], ["INBOX"], {}),

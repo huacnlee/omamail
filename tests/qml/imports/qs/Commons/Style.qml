@@ -13,7 +13,18 @@ QtObject {
     controlHeight: 30, controlGap: 6, sm: 3, md: 6
   })
 
-  function space(value) { return Number(value) }
+  // The shell's own `space` is `round(px * scale)`, and the rounding is the
+  // point rather than an implementation detail: a theme whose spacing follows
+  // the font — `base-size 14` gives 7/6 — makes `space(4)` 5 while `space(8)`
+  // is 9, so a box that pads by one and measures itself by the other comes out
+  // a pixel short. A stub that multiplied nothing could not see that, and did
+  // not. Tests that care set `spacingScale`; the rest run at 1, where this
+  // rounds integers to themselves.
+  property real spacingScale: 1
+  function space(value) {
+    var n = Number(value) * spacingScale
+    return n <= 0 ? 0 : Math.max(1, Math.round(n))
+  }
   function hoverFillFor(_foreground, accent) { return accent }
   function selectedFillFor(_foreground, accent) { return accent }
   function selectionFillFor(_foreground, accent) { return accent }

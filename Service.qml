@@ -44,6 +44,15 @@ Item {
     ? String(manifest.id) : "omamail"
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
+  // Shown in the empty reader, so a screenshot in a bug report says which build
+  // it came from. The shell's manifest validation requires both fields, so a
+  // loaded plugin always has them; the fallbacks are for a harness that
+  // constructs the service with a stub manifest, and an empty version makes the
+  // interface say nothing rather than guess a number.
+  readonly property string pluginName: manifest && manifest.name
+    ? String(manifest.name) : "Omamail"
+  readonly property string version: manifest && manifest.version
+    ? String(manifest.version) : ""
 
   readonly property var defaultSettingValues: ({
     refreshIntervalSec: 120,
@@ -54,7 +63,8 @@ Item {
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
-    unifiedCalendarView: false
+    unifiedCalendarView: false,
+    showBarIcon: true
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -69,6 +79,17 @@ Item {
     settings ? settings.contentDirection : null)
   readonly property bool unifiedCalendarView: !!settings
     && settings.unifiedCalendarView === true
+
+  // Whether the bar draws an envelope for this.
+  //
+  // A settings file written before this existed keeps its icon because
+  // `applySettings` lays every default down first, so a missing key is
+  // already the manifest's `true` — the same way `unifiedCalendarView` gets
+  // its `false`. What "anything but a stored false" buys instead is the
+  // hand-edited `shell.json`: a `"false"` or a `0` in there is somebody's
+  // typo rather than an answer given in the interface, and a typo should not
+  // be what takes the icon away.
+  readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
@@ -128,6 +149,10 @@ Item {
 
   function setUnifiedCalendarView(value) {
     persistSetting("unifiedCalendarView", value === true)
+  }
+
+  function setShowBarIcon(value) {
+    persistSetting("showBarIcon", value === true)
   }
 
   // ---------------------------------------------------------- the accounts
@@ -384,6 +409,13 @@ Item {
   // rather than on every keystroke, but it is also rebuilt by the write it
   // causes — so the value it hands back on the way out is routinely the one
   // already on disk, and a file round trip for it would be pure cost.
+  function setAccountLabel(id, text) {
+    var next = Accounts.setLabel(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
   function setAccountSignature(id, text) {
     var next = Accounts.setSignature(accountList, id, text)
     if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
@@ -624,6 +656,9 @@ Item {
       out.push({
         id: accounts[i].id,
         email: accounts[i].email,
+        // The name as it was typed, empty when none was, so a field editing
+        // it shows what is there rather than the address standing in for it.
+        label: String(accounts[i].label || ""),
         signature: String(accounts[i].signature || "")
       })
     }
@@ -640,6 +675,10 @@ Item {
         email: accounts[i].email,
         provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
+        // The name that was chosen, if one was. `label` always answers —
+        // falling through to the local part — so it cannot say whether
+        // anything was named, and the switcher has to know the difference.
+        name: String(accounts[i].label || ""),
         // One more line about this particular mailbox, in its provider's own
         // words. Empty for the three that have nothing to add, and the row
         // draws it only when it is not.
@@ -744,6 +783,7 @@ Item {
   readonly property bool canOpenOnWeb: !current || current.canOpenOnWeb
   readonly property bool canOpenWebInbox: !!current && current.canOpenWebInbox
   readonly property var unavailableActions: current ? current.unavailableActions : []
+  readonly property var savingAttachmentIds: current ? current.savingAttachmentIds : ({})
   readonly property bool canSend: !current || current.canSend
   // Whether this account's listing is one row per conversation, and everything
   // the reader's rail is drawn from. Forwarded like every other account fact:
@@ -758,6 +798,7 @@ Item {
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""
+  readonly property string rawLabelId: current ? current.rawLabelId : ""
   readonly property bool listLoading: !!current && current.listLoading
   readonly property bool listLoaded: !!current && current.listLoaded
   readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
@@ -790,7 +831,17 @@ Item {
   readonly property bool unsubscribing: !!current && current.unsubscribing
   readonly property bool detailLoading: !!current && current.detailLoading
   readonly property bool detailPainted: !!current && current.detailPainted
-  readonly property bool sending: !!current && current.sending
+  // ComposeView owns one parked draft for the whole service, so an in-flight
+  // send is global even though the request belongs to one account host. This
+  // also keeps the visible Send button honest after switching accounts.
+  readonly property var sendingHost: {
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host && host.sending) return host
+    }
+    return null
+  }
+  readonly property bool sending: !!sendingHost
   readonly property var pendingSendHost: {
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
@@ -823,13 +874,31 @@ Item {
   }
   function selectMailbox(key) { if (current) current.selectMailbox(key) }
   function search(text) { if (current) current.search(text) }
-  function selectLabel(name) { if (current) current.selectLabel(name) }
+  function selectLabel(name, labelId) {
+    if (current) current.selectLabel(name, labelId)
+  }
+  function refuseUnavailableAction(action) {
+    return current ? current.refuseUnavailableAction(action) : true
+  }
   function act(id, action, quiet) {
     return current ? current.act(id, action, quiet) : false
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
-  function send(fields) { return current ? current.send(fields) : false }
+  function send(fields) {
+    // The button has the same guard, but Ctrl+Return reaches this function
+    // directly. Enforce the one-global-parked-draft invariant at the action
+    // boundary so another account cannot overwrite it.
+    if (pendingSendHost) {
+      if (current) current.fail("Another message is waiting to be sent")
+      return false
+    }
+    if (sendingHost) {
+      if (current) current.fail("Another message is still being sent")
+      return false
+    }
+    return current ? current.send(fields) : false
+  }
   function saveDraft(fields, callback) {
     var values = fields || ({})
     var target = String(values.accountId || "")
@@ -862,6 +931,10 @@ Item {
   }
   function openAttachment(messageId, attachment) {
     if (current) current.openAttachment(messageId, attachment)
+  }
+
+  function saveAttachment(messageId, attachment) {
+    if (current) current.saveAttachment(messageId, attachment)
   }
   function preferredSendAs(recipients) {
     return current ? current.preferredSendAs(recipients) : null
@@ -964,6 +1037,16 @@ Item {
   }
 
   signal replySent()
+  signal replyFailed()
+
+  // A queued send keeps running on its own account when the visible mailbox
+  // changes. Put that account back in front before App restores the draft, so
+  // a retry cannot be addressed to whichever mailbox happened to be visible.
+  function forwardReplyFailure(index) {
+    var host = accountAt(index)
+    if (host && host !== current) switchToIndex(index)
+    replyFailed()
+  }
 
   // ------------------------------------------------------------- instances
 
@@ -1024,6 +1107,7 @@ Item {
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
       settings: root.settings
+      bodyMode: root.bodyMode
       // Every mailbox obeys the one answer: it is about what the reader is
       // willing to tell a sender, not about which account the mail came to.
       alwaysShowImages: root.alwaysShowImages
@@ -1032,6 +1116,7 @@ Item {
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
+      onReplyFailed: root.forwardReplyFailure(index)
 
       Component.onCompleted: Qt.callLater(root.refreshCurrent)
       Component.onDestruction: Qt.callLater(root.refreshCurrent)

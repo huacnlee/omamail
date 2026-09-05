@@ -29,6 +29,8 @@ var MARK = "gmail.png"
 
 var CAPABILITIES = {
   labels: true,
+  // Adding a label and taking INBOX away, which is archive with a destination.
+  move: true,
   threads: true,
   archive: true,
   spam: true,

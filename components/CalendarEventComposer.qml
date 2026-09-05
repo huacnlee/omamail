@@ -169,6 +169,10 @@ Rectangle {
   }
 
   Flickable {
+    id: composerFlick
+
+    WheelScroller { view: composerFlick }
+
     anchors.fill: parent
     anchors.margins: Style.space(18)
     contentWidth: width

@@ -24,7 +24,7 @@ Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yah
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
 - **Gmail, HEY, JMAP and IMAP.** Sign in to Gmail with Google directly, to HEY through the HEY CLI that 37signals publish, or add a mailbox on any JMAP or IMAP server with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
-- **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
+- **Keyboard-first.** `j`/`k` to move, `e` to archive, `v` to file, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
   A key the mailbox has no verb for says so instead of pretending: HEY has
@@ -47,6 +47,10 @@ Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yah
   offers an address gets a message; one that only offers a page says so before
   it opens your browser. Nothing is ever fetched from a sender's address until
   you ask.
+- **Attachments open or keep.** The filename opens one in whatever handles its
+  type; the arrow beside it saves the file to your download folder and says
+  where it went. Two messages carrying one name are two files: the second is
+  numbered rather than landing on top of the first.
 - **Images stay blocked.** Loading a sender's pictures tells them the mail was
   read, from which address and when. They load when you ask, for that one
   message.
@@ -95,8 +99,8 @@ Once the plugin is enabled, Omamail handles `mailto:` links. Clicking an
 address in a browser, a PDF, or a notification opens compose here.
 `xdg-open mailto:you@example.com` is the check.
 
-Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
-`curl` — all of which Omarchy already ships. A HEY mailbox additionally needs
+Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open`, `python3` and
+`curl`. Python handles remote images, one-click unsubscribe and attachments; curl handles IMAP, SMTP and CalDAV. A HEY mailbox additionally needs
 `hey`; see below.
 
 ## Mailboxes it can open
@@ -168,6 +172,8 @@ could not keep. Archive appears only when the server has an archive folder to
 move to. Sending goes out over SMTP, or the mailbox is read-only if no SMTP
 server is set.
 
+The sent copy is filed by Omamail rather than left to the server: a message handed to SMTP submission lands nowhere on its own. It goes to the server's own Sent folder, named by the server rather than guessed, and arrives already marked read; a server that reports no Sent folder holds no copy, and the status row says so. One thing worth knowing: a Gmail account read over IMAP has Google file its own copy of anything sent through Gmail's SMTP, so those accounts hold two.
+
 To remove it:
 
 ```bash
@@ -225,6 +231,7 @@ and the client itself are console-only; there is no CLI for them.
 | `e` | Archive |
 | `d` | Move to trash |
 | `s` | Star or unstar |
+| `v` | Move to a label or folder |
 | `Shift+I` / `Shift+U` | Mark read / unread |
 | `r` / `a` / `f` | Reply, reply all, forward |
 | `c` | Compose |
@@ -250,7 +257,6 @@ A signature is set per mailbox on the settings page, under Writing. It is placed
   written in. A browser engine cannot be embedded in a plugin at all:
   `QtWebEngineQuick::initialize()` has to run before the host process builds
   its `QGuiApplication`, and a plugin loads long after that.
-- **No attachment downloads.** Not yet.
 
 Remote images in a message body are blocked until you ask for them, and asking
 covers that one message. Qt really does fetch an `<img src="https://…">`, so
@@ -300,8 +306,9 @@ make install          # symlink this checkout into ~/.config/omarchy/plugins
 make validate         # node tests, source regressions, qmllint, manifest check
 ```
 
-Working agreements are in [AGENTS.md](AGENTS.md) and the specification is in
-[docs/SPEC.md](docs/SPEC.md).
+How to send a change — there is no issue tracker — is in
+[CONTRIBUTING.md](CONTRIBUTING.md). Working agreements are in
+[AGENTS.md](AGENTS.md) and the specification is in [docs/SPEC.md](docs/SPEC.md).
 
 Omamail is an independent project and is not affiliated with Google or
 37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals,

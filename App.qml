@@ -658,12 +658,19 @@ Item {
     })
   }
 
-  function undoPendingSend() {
-    if (!service || !service.undoSend()) return false
-    if (!compose.resumePendingSend()) return true
+  // Put the parked draft back in front of the writer.
+  //
+  // Undo and a failed send want the same thing and used to be one of them:
+  // the message is in `pendingDraft` and nowhere else, so whatever reopens it
+  // has to also deal with the draft that was started on top of it during the
+  // undo window. `resumePendingSend` moves that newer one to
+  // `interruptedDraft`, and saving it is what keeps reopening the parked one
+  // from overwriting it.
+  function restoreParkedDraft() {
+    if (!compose.resumePendingSend()) return false
     var interrupted = compose.interruptedDraft
     var fields = compose.interruptedFields()
-    if (!interrupted || !fields) return true
+    if (!interrupted || !fields || !service) return true
     service.saveDraft(fields, function(saved, error) {
       if (!root) return
       if (error) {
@@ -677,11 +684,29 @@ Item {
     return true
   }
 
+  function undoPendingSend() {
+    if (!service || !service.undoSend()) return false
+    root.restoreParkedDraft()
+    return true
+  }
+
   Timer {
     id: draftSavedTimer
     interval: 4000
     repeat: false
     onTriggered: root.draftSavedNotice = ""
+  }
+
+  // Opened on the cursor rather than on the selection, the way every other
+  // acting key works: `v` in the list means the row under the cursor, and in
+  // the reader there is only one message it could mean. Refuse an unavailable
+  // move before asking for a destination, through the same provider guard that
+  // checks the final action before its optimistic update.
+  function openLabelPicker() {
+    if (!service || cursorId === "") return false
+    if (service.refuseUnavailableAction("label:destination")) return false
+    labelPicker.open()
+    return true
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -697,7 +722,14 @@ Item {
       && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(service.messages, acted)
-    var leaves = !Model.survivesAction(service.mailboxKey, action, row)
+    // The same six facts `MailAccount.act` decides with. Asking with three of
+    // them made the cursor repair disagree with the list it repairs: moving a
+    // message back to the inbox removes the row on a provider that moves, and
+    // this read it as staying. The row itself is the sixth: a conversation
+    // answers on its recomputed block, so a mark-read in the Unread view keeps
+    // the row while a reply is still unread.
+    var leaves = !Model.survivesAction(service.mailboxKey, action,
+      service.rawQuery, service.hasLabels, service.rawLabelId, row)
     if (!service.act(acted, action)) return false
     if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a
@@ -731,7 +763,7 @@ Item {
     if (slot.kind === "mailbox") return goMailbox(slot.key)
     // Not a search: the provider decides what selecting a label means, and on
     // IMAP it is a folder rather than a term to look for.
-    service.selectLabel(slot.name)
+    service.selectLabel(slot.name, slot.id)
     backToList()
   }
 
@@ -768,6 +800,7 @@ Item {
       if (service && starred !== "") service.toggleStar(starred)
       return
     }
+    if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
     if (id === "reply") return composeFromCursor("reply")
@@ -850,6 +883,15 @@ Item {
       if (!compose.completePendingSend()) return
       if (compose.opened) root.scheduleComposeRecovery()
       else root.clearComposeRecovery()
+    }
+    // The send did not happen, so the draft is still the only copy. Reopening
+    // it is the whole answer: the status bar already carries the reason, and a
+    // composer that stays shut leaves the writer with a sentence about a
+    // message they can no longer see. Recovery is scheduled rather than
+    // cleared for the same reason — the words are still unsent.
+    function onReplyFailed() {
+      if (!root.restoreParkedDraft()) return
+      root.scheduleComposeRecovery()
     }
     // Every time the list is replaced — first arrival, a mailbox switch, a
     // search, a refresh that dropped things. A cursor whose message survived
@@ -1340,7 +1382,7 @@ Item {
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
-            root.service.selectLabel(name)
+            root.service.selectLabel(name, labelId)
             root.backToList()
           }
         }
@@ -1390,6 +1432,8 @@ Item {
           // viewport, which would push the bar inward with it.
           Flickable {
             id: listFlick
+
+            WheelScroller { view: listFlick }
             anchors.fill: parent
             contentWidth: width
             contentHeight: list.implicitHeight + Style.space(16)
@@ -1638,6 +1682,8 @@ Item {
         // the mailbox is connected.
         Flickable {
           id: setupFlick
+
+          WheelScroller { view: setupFlick }
           anchors.fill: parent
           anchors.margins: Style.space(18)
           anchors.topMargin: parent.pageTop
@@ -1740,6 +1786,8 @@ Item {
 
         Flickable {
           id: settingsFlick
+
+          WheelScroller { view: settingsFlick }
           // The whole width, rail included: the wheel scrolls the page from
           // anywhere in the block, and the scrollbar keeps the window's edge.
           anchors.left: parent.left
@@ -1866,11 +1914,14 @@ Item {
           anchors.leftMargin: railToggle.visible
             ? Style.space(9) - (railToggle.size - railToggle.iconSize) / 2
             : Style.space(14)
-          // An invisible sibling still holds its place, so the hints must only
-          // take room from this line while they are actually on screen.
-          anchors.right: statusBar.hasNotice
-            ? notice.left
-            : (keyHints.visible ? keyHints.left : parent.right)
+          // The address runs to the end of the line and the hints take what it
+          // leaves. Stopping at the hints instead asked a question with no
+          // answer: the slot wanted to know how much the hints had left over
+          // while the hints wanted to know whether the address had left them
+          // room. A notice is the one thing that does push the address over,
+          // because a notice is what the window most needs to say and it says
+          // it only while there is something wrong.
+          anchors.right: statusBar.hasNotice ? notice.left : parent.right
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
           height: Style.space(24)
@@ -1879,7 +1930,16 @@ Item {
             id: accountControl
             objectName: "status-account-button"
             property bool selected: accountSwitcher.opened
-            width: Math.min(parent.width, accountText.implicitWidth + Style.space(8))
+            // One inset, counted twice, rather than asked for again as its own
+            // double. `Style.space` rounds, and a theme whose spacing follows
+            // the font does not round the two the same way: at `base-size 14`
+            // the scale is 7/6, which makes `space(4)` 5 a side while
+            // `space(8)` is 9 — a box a pixel narrower than the text it holds.
+            // The text was then elided at every window width, which is what put
+            // "just n..." on the line and why it looked like a fixed width: the
+            // cut had nothing to do with how much room there was.
+            readonly property real inset: Style.space(4)
+            width: Math.min(parent.width, accountText.implicitWidth + inset * 2)
             height: parent.height
 
             Rectangle {
@@ -1897,10 +1957,11 @@ Item {
 
             Text {
               id: accountText
+              objectName: "status-account-label"
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(4)
+              anchors.leftMargin: accountControl.inset
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(4)
+              anchors.rightMargin: accountControl.inset
               anchors.verticalCenter: parent.verticalCenter
               // The full address lives here at every window width; the sync
               // age follows it, and the line opens the account controls.
@@ -1958,10 +2019,19 @@ Item {
 
         KeyHints {
           id: keyHints
+          objectName: "status-key-hints"
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
-          visible: !statusBar.hasNotice && !root.compact
+          // Only once the address has been given its room, and only whole:
+          // hints are a nicety and the address is a fact, so the run of them
+          // steps off the line rather than arriving with its last pair cut in
+          // half. `accountSlot` no longer measures itself against this, which
+          // is what keeps the two from asking each other.
+          readonly property real roomLeft: statusBar.width
+            - (accountSlot.x + accountControl.width)
+            - Style.space(12) - Style.space(14)
+          visible: !statusBar.hasNotice && !root.compact && roomLeft >= implicitWidth
           textColor: root.foreground
           dimColor: root.dimmer
           accentColor: root.accent
@@ -2023,6 +2093,23 @@ Item {
         onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()
+        }
+      }
+
+      LabelPicker {
+        id: labelPicker
+        objectName: "label-picker"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        labels: root.service ? root.service.labels : []
+        currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        onLabelChosen: function(labelId) {
+          root.actOnCursor("label:" + labelId)
         }
       }
 

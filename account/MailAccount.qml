@@ -14,6 +14,7 @@ import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Conversation.js" as Conversation
 import "Accounts.js" as Accounts
+import "RenderCache.js" as RenderCache
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -73,6 +74,11 @@ Item {
 
   // The window drives this; the unread poll keeps running while it is false.
   property bool windowOpen: false
+  // The representation currently on screen. Reader mode needs its rebuild on
+  // the first paint; the other modes let that work finish on the next turn.
+  property string bodyMode: "reader"
+  // Keyed by attachmentId, holding only the saves that are in flight.
+  property var savingAttachmentIds: ({})
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -128,6 +134,7 @@ Item {
   readonly property bool canArchive: Provider.can(providerId, "archive", capabilityRefusals)
   readonly property bool canReportSpam: Provider.can(providerId, "spam", capabilityRefusals)
   readonly property bool canStar: Provider.can(providerId, "star", capabilityRefusals)
+  readonly property bool canMove: Provider.can(providerId, "move", capabilityRefusals)
   readonly property bool hasLabels: Provider.can(providerId, "labels")
   readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
   // A different question from the one above: whether *this mailbox*, as it is
@@ -145,7 +152,7 @@ Item {
   // `Model.actionCapability` speaks, so the hint row and the guard in `act`
   // read one answer rather than each asking the registry its own way.
   readonly property var actionCapabilities: ({
-    archive: canArchive, star: canStar, spam: canReportSpam })
+    archive: canArchive, star: canStar, spam: canReportSpam, move: canMove })
   // The key-bound actions this mailbox cannot honour, for the hint row. The
   // buttons are hidden by the three properties above; the keys are bound
   // whatever provider is open, so the row that says what the keyboard does here
@@ -165,6 +172,10 @@ Item {
   // search — an IMAP folder wrapped in a TEXT search would go looking for the
   // folder's own name inside the inbox.
   property string rawQuery: ""
+  // The label id behind that raw query. Gmail needs it to make "Move to"
+  // remove the label supplying the current view; IMAP moves out of its source
+  // folder inherently and therefore never passes this into a label change.
+  property string rawLabelId: ""
   property var messages: []
   property var previewMessages: []
   property var labels: []
@@ -284,6 +295,12 @@ Item {
   // of one has nowhere to go.
   readonly property bool showsRail:
     Conversation.drawsRail(showsConversations, selectedThread)
+
+  // Parsed trees are expensive and immutable after sanitize returns. Keep only
+  // the recent working set in memory; the durable cache remains the sender's
+  // source HTML so sanitizer fixes still apply after a restart.
+  property var renderCache: RenderCache.create(12)
+  onAccountIdChanged: renderCache = RenderCache.create(12)
 
   // Which of this account's own addresses this message arrived at.
   //
@@ -1236,14 +1253,22 @@ Item {
   // know about this body comes back from the same call — how heavy it is, and
   // its plain-text reading — because each of those asked separately is another
   // parse of the whole message to work out what was just worked out.
-  function renderSource(source, withPlainText) {
+  function renderSource(source, withPlainText, completeReader) {
     sourceHtml = String(source || "")
-    var ready = Html.sanitize(sourceHtml, ({
-      allowRemoteImages: remoteImagesAllowed,
-      remoteImageData: remoteImagesAllowed ? remoteImageData : null,
-      withPlainText: withPlainText === true,
-      withReader: true
-    }))
+    withPlainText = withPlainText === true
+    var eagerReader = completeReader === true || bodyMode === "reader" || remoteImagesAllowed
+    var ready = remoteImagesAllowed ? null
+      : RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)
+    if (!ready) {
+      ready = Html.sanitize(sourceHtml, ({
+        allowRemoteImages: remoteImagesAllowed,
+        remoteImageData: remoteImagesAllowed ? remoteImageData : null,
+        withPlainText: withPlainText,
+        withReader: eagerReader
+      }))
+      if (!remoteImagesAllowed && eagerReader)
+        RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)
+    }
     selectedHtml = ready.html
     selectedDocument = ready.document
     selectedReaderDocument = ready.reader ? ready.reader.document : null
@@ -1258,6 +1283,16 @@ Item {
       && Object.keys(remoteImageData).length === 0
       && selectedRemoteImageSources.length > 0)
       Qt.callLater(root.prepareRemoteImages)
+    if (!ready.reader && !remoteImagesAllowed && !eagerReader) {
+      var deferredId = selectedId
+      var deferredSource = sourceHtml
+      var deferredSerial = detailSerial
+      Qt.callLater(function() {
+        if (root.detailSerial !== deferredSerial || root.selectedId !== deferredId
+          || root.sourceHtml !== deferredSource) return
+        root.renderSource(deferredSource, withPlainText, true)
+      })
+    }
     return ready
   }
 
@@ -1288,7 +1323,7 @@ Item {
     var source = String(queue.shift())
     imageFetchQueue = queue
     var request = imageFetchComponent.createObject(root, {
-      command: [pluginDir + "/scripts/image-fetch.sh"],
+      command: ["python3", pluginDir + "/scripts/image-fetch.py"],
       requestLine: Mail.encodeBase64(source)
     })
     imageFetchProcess = request
@@ -1437,6 +1472,22 @@ Item {
   // Every action moves the list immediately and reconciles afterwards. Waiting
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
+  //
+  // The booleans the buttons were drawn from are what is read, rather than
+  // the registry a second time: an account may refuse what its provider
+  // declares, and the two halves of that rule stay together only while both
+  // come from one answer. The account's own reason is what a user is told
+  // when it has one — "This account has no Archive mailbox" says more than
+  // the provider's "IMAP has no archive" ever could about an account whose
+  // neighbour of the same kind archives fine.
+  function refuseUnavailableAction(action) {
+    var needs = Model.actionCapability(action)
+    if (needs === "" || actionCapabilities[needs] === true) return false
+    var refused = Provider.refusal(providerId, needs, capabilityRefusals)
+    note(refused !== "" ? refused : Model.actionUnavailable(action, Provider.badge(providerId)))
+    return true
+  }
+
   function act(id, action, quiet) {
     var messageId = String(id || "")
     if (!ready || messageId === "") return false
@@ -1445,20 +1496,7 @@ Item {
     // honour reaches here even though the panel drew no button for it — and the
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
-    //
-    // The booleans the buttons were drawn from are what is read, rather than
-    // the registry a second time: an account may refuse what its provider
-    // declares, and the two halves of that rule stay together only while both
-    // come from one answer. The account's own reason is what a user is told
-    // when it has one — "This account has no Archive mailbox" says more than
-    // the provider's "IMAP has no archive" ever could about an account whose
-    // neighbour of the same kind archives fine.
-    var needs = Model.actionCapability(action)
-    if (needs !== "" && actionCapabilities[needs] !== true) {
-      var refused = Provider.refusal(providerId, needs, capabilityRefusals)
-      note(refused !== "" ? refused : Model.actionUnavailable(action, Provider.badge(providerId)))
-      return false
-    }
+    if (refuseUnavailableAction(action)) return false
     if (pendingAction !== "") {
       if (quiet === true) {
         queueQuietAction(messageId, action, cacheKey)
@@ -1519,6 +1557,7 @@ Item {
     }
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var rowId = String(before.id || "")
+    var sourceLabelId = hasLabels ? rawLabelId : ""
 
     // The messages this action is sent for. Expansion is the row's and it
     // happens here: a conversation-scoped verb reaches every counted member and
@@ -1546,7 +1585,7 @@ Item {
     for (var t = 0; t < targets.length; t++) {
       var known = memberSummaries[targets[t]]
       if (!known) continue
-      var after = Model.applyLabelChange(known, action)
+      var after = Model.applyLabelChange(known, action, sourceLabelId)
       if (!after || after === known) continue
       rememberBefore(targets[t], known)
       memberAfter[targets[t]] = after
@@ -1563,7 +1602,7 @@ Item {
       // A conversation action asserts the block outright: every counted member
       // was sent the same patch, so the row says so at once rather than waiting
       // for the next read to agree.
-      updated = Model.applyLabelChange(before, action,
+      updated = Model.applyLabelChange(before, action, sourceLabelId,
         Model.threadAfterAction(before, action))
     } else {
       // One message changed, so the block is recomputed from the members
@@ -1571,7 +1610,8 @@ Item {
       // is what keeps a row in the Unread view while a reply nobody has read is
       // still in it — and what stops the quiet mark-read on opening a thread
       // from clearing the dot of every other member with it.
-      var ownLabels = memberAction ? before : Model.applyLabelChange(before, action)
+      var ownLabels = memberAction ? before
+        : Model.applyLabelChange(before, action, sourceLabelId)
       var nextMembers = ({})
       for (var held in memberSummaries) nextMembers[held] = memberSummaries[held]
       for (var changed in memberAfter) nextMembers[changed] = memberAfter[changed]
@@ -1595,7 +1635,8 @@ Item {
 
     // The recomputed row is what decides whether it stays: a mark-read in the
     // Unread view keeps the row while any member is still unread.
-    var survives = Model.survivesAction(mailboxKey, action, updated)
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
+      sourceLabelId, updated)
 
     if (action === "markRead" && before.unread && !updated.unread)
       inboxUnread = Math.max(0, inboxUnread - 1)
@@ -1633,7 +1674,7 @@ Item {
       else if (selectedId === rowId) selectedMessage = updated
       else if (memberAfter[selectedId]) selectedMessage = memberAfter[selectedId]
       else if (targets.indexOf(selectedId) >= 0 && selectedMessage)
-        selectedMessage = Model.applyLabelChange(selectedMessage, action)
+        selectedMessage = Model.applyLabelChange(selectedMessage, action, sourceLabelId)
     }
     var optimisticMessages = messages.slice()
     var optimisticToken = nextPageToken
@@ -1726,7 +1767,7 @@ Item {
     if (action === "trash") api.trashMessage(sent, done)
     else if (action === "untrash") api.untrashMessage(sent, done)
     else {
-      var change = Model.labelChangesFor(action)
+      var change = Model.labelChangesFor(action, sourceLabelId)
       if (!change) {
         pendingAction = ""
         pendingActionQuery = ""
@@ -1795,7 +1836,13 @@ Item {
     if (action === "unstar") return "Unstarred"
     if (action === "markRead") return "Marked read"
     if (action === "markUnread") return "Marked unread"
+    if (action === "unarchive") return "Moved to Inbox"
     if (action === "spam") return "Reported as spam"
+    // Named, not "Moved": the destination was chosen a keystroke ago from a
+    // list of thirty, and a note that does not say which one leaves the only
+    // question the user has -- did it go where I meant? -- unanswered.
+    var target = Model.labelTarget(action)
+    if (target !== "") return "Moved to " + labelName(target)
     return "Done"
   }
 
@@ -1809,6 +1856,16 @@ Item {
     var known = Model.messageById(messages, previewMessages, id)
     if (known) return known
     return memberSummaries[String(id || "")] || null
+  }
+
+  // A label id is what the provider wants and what the caches key on; a name
+  // is what the person who pressed `v` picked. Falling back to the id keeps a
+  // note honest when the label list has not arrived rather than printing
+  // nothing where the destination should be -- and on IMAP the two are the
+  // same string anyway, because a folder's id is its name.
+  function labelName(labelId) {
+    var index = Model.indexById(labels, labelId)
+    return index >= 0 ? labels[index].name : labelId
   }
 
   function toggleStar(id) {
@@ -2009,24 +2066,134 @@ Item {
     })
   }
 
+  // Keeping an attachment rather than opening it once.
+  //
+  // The same shape as `openAttachment` because it is the same journey up to
+  // the last step: sign-in, then the provider's own fetch, then one script.
+  // Only the script differs, and the answer it gives back — a path, which the
+  // notice repeats, because a saved file nobody can find is not saved.
+  function saveAttachment(messageId, attachment) {
+    var source = attachment || ({})
+    if (!ready) {
+      fail("Sign in before saving an attachment")
+      return
+    }
+    if (String(messageId || "") === "" || String(source.attachmentId || "") === "") {
+      fail("That attachment is not available")
+      return
+    }
+    // One save at a time for one attachment. A download arrow is a single
+    // click, and a double one used to start a second fetch that the script
+    // then dutifully numbered: two identical files in Downloads, and a notice
+    // that read the same both times, so nothing said it had happened.
+    var key = String(source.attachmentId)
+    if (savingAttachmentIds[key]) return
+    markSavingAttachment(key, true)
+    clearNotice()
+    note("Saving " + String(source.filename || "attachment"))
+    loadAttachments(messageId, [source], function(loaded, error) {
+      if (error || !loaded || loaded.length === 0) {
+        root.markSavingAttachment(key, false)
+        root.fail(error || "That attachment could not be loaded")
+        return
+      }
+      var file = loaded[0]
+      var request = attachmentSaveComponent.createObject(root, {
+        command: [pluginDir + "/scripts/save-attachment.py"],
+        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
+          + "\n" + String(file.data || "") + "\n"
+      })
+      if (!request) {
+        root.markSavingAttachment(key, false)
+        root.fail("That attachment could not be saved")
+        return
+      }
+      request.finished.connect(function(exitCode, path, detail) {
+        request.destroy()
+        if (!root) return
+        root.markSavingAttachment(key, false)
+        if (exitCode !== 0) {
+          root.fail(detail || "That attachment could not be saved")
+          return
+        }
+        // The name first, then the folder. `unique_path` numbers a name that
+        // is already taken, so the file on disk is not always the one the row
+        // shows — and reporting only the folder left the reader opening last
+        // month's `invoice.pdf` believing it was the one just saved. The
+        // notice elides from the right, so the part that can differ from what
+        // was clicked has to come before the part that cannot.
+        var saved = String(path || "")
+        var at = saved.lastIndexOf("/")
+        root.note(at > 0
+          ? "Saved " + saved.substring(at + 1) + " to " + saved.substring(0, at)
+          : "Saved")
+      })
+      request.running = true
+    })
+  }
+
+  // Which attachments are being saved right now, so the row that asked can
+  // show it and refuse a second click. Re-assigned rather than written into: a
+  // binding on a `var` does not notice a key appearing inside the object it is
+  // already holding.
+  function markSavingAttachment(key, saving) {
+    var next = ({})
+    for (var id in savingAttachmentIds)
+      if (id !== key) next[id] = true
+    if (saving) next[key] = true
+    savingAttachmentIds = next
+  }
+
   // One entry point for every kind of outgoing message. Reply, reply-all and
   // forward differ only in what the compose window puts in the fields, which
   // is where that decision belongs.
+  // Every way out of here that is not a delivery emits `replyFailed`, because
+  // by this point `deliverPending` has dropped the queued payload and the
+  // composer is parked: the message exists only in the draft the panel is
+  // holding, and a return that says nothing throws it away. The mailbox can
+  // stop being ready during the undo window — a reload, a sign-out — so the
+  // guards are reachable and not only the transport's own error.
+  function reportSendFailure(error) {
+    fail(error)
+    // A zero-delay send can be rejected synchronously by a provider before
+    // ComposeView has returned from service.send() and parked its accepted
+    // draft. Cross the event-loop boundary so every terminal signal observes
+    // the same state as an ordinary network reply.
+    Qt.callLater(function() {
+      if (root) root.replyFailed()
+    })
+  }
+
+  function reportSendSuccess(result) {
+    // The sent copy is filed after the send has answered, so how the filing
+    // went is a footnote on a success rather than a failure of one: the note
+    // says what happened to the copy, and the reply still counts as sent.
+    var warning = result && result.warning ? String(result.warning) : ""
+    note(warning !== "" ? warning : "Sent")
+    // Success has the same ordering requirement as failure: a provider may
+    // finish locally, but the composer owns parking after send() returns.
+    Qt.callLater(function() {
+      if (root) root.replySent()
+    })
+  }
+
   function deliver(payload) {
     if (!ready) {
-      fail("The mailbox is not ready to send")
+      reportSendFailure("The mailbox is not ready to send")
       return false
     }
-    if (sending) return false
+    if (sending) {
+      reportSendFailure("Another message is still being sent")
+      return false
+    }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
-        root.fail(error)
+        root.reportSendFailure(error)
         return
       }
-      root.note("Sent")
-      root.replySent()
+      root.reportSendSuccess(sentPayload)
     })
     return true
   }
@@ -2146,6 +2313,10 @@ Item {
   }
 
   signal replySent()
+
+  // A send that did not happen. The panel answers it by putting the parked
+  // draft back in front of the writer, which is the only remaining copy.
+  signal replyFailed()
 
   // ------------------------------------------------------------------ RSVP
 
@@ -2287,14 +2458,10 @@ Item {
   // are checked, and it borrows the judgement that decides whether a message
   // may load a picture.
   //
-  // **Sent by curl rather than by XMLHttpRequest, because a gate that judges
-  // only the first address is not a gate.** Qt's XHR follows a 3xx by itself
-  // and re-sends the POST, body intact, wherever that answer points — measured
-  // against a loopback target, which recorded the POST arriving after a single
-  // `302`. So the address the sender wrote would be checked, and a different
-  // address entirely would be the one this machine connected to, from inside
-  // the user's own network. curl follows nothing unless told to, and
-  // `scripts/unsubscribe.sh` tells it twice not to.
+  // Qt's XHR follows redirects without rechecking the destination. The Python
+  // worker instead resolves and checks every IP, connects to that exact answer
+  // while retaining the original TLS hostname, and never follows a redirect.
+  // URL bytes remain data throughout: there is no shell or curl config.
   //
   // The reply is never read beyond its status. It is a document from whoever
   // sent the mail, and the only question being asked of it is whether the
@@ -2306,7 +2473,7 @@ Item {
     }
     unsubscribing = true
     var request = unsubscribeComponent.createObject(root, {
-      command: [pluginDir + "/scripts/unsubscribe.sh"],
+      command: ["python3", pluginDir + "/scripts/unsubscribe.py"],
       requestLine: [Mail.encodeBase64(String(url)),
         Mail.encodeBase64(Unsub.postContentType()),
         Mail.encodeBase64(Unsub.postBody())].join(" ")
@@ -2386,7 +2553,7 @@ Item {
       }
 
       onExited: function(exitCode) {
-        // "<curl exit code> <http status>", and nothing else is read.
+        // "<transport error code> <http status>", and nothing else is read.
         var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
         var code = Math.floor(Number(parts[0]))
         var status = Math.floor(Number(parts[1]))
@@ -2396,6 +2563,50 @@ Item {
         }
         unsubscribeProcess.finished(code, status)
       }
+    }
+  }
+
+  Component {
+    id: attachmentSaveComponent
+
+    Process {
+      id: attachmentSaveProcess
+
+      property string requestPayload: ""
+      // Exactly one answer reaches the caller, whichever way this ends.
+      property bool reported: false
+      signal finished(int exitCode, string path, string detail)
+
+      stdinEnabled: true
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+
+      function report(exitCode, path, detail) {
+        if (reported) return
+        reported = true
+        finished(exitCode, path, detail)
+      }
+
+      onStarted: {
+        write(requestPayload)
+        requestPayload = ""
+      }
+
+      onExited: function(exitCode) {
+        var path = String(attachmentSaveProcess.stdout.text || "").trim()
+        var detail = String(attachmentSaveProcess.stderr.text || "").trim()
+        attachmentSaveProcess.report(exitCode, path, detail)
+      }
+
+      // A program that could not be started never exits, so `onExited` never
+      // arrives. Without this the caller waits for an answer that is not
+      // coming, and the save it is holding open would keep the row's button
+      // turning for as long as the window stays open. Deferred by a turn so a
+      // real exit, which clears `running` as well, always reports first.
+      onRunningChanged: if (!running) Qt.callLater(function() {
+        if (attachmentSaveProcess)
+          attachmentSaveProcess.report(1, "", "That attachment could not be saved")
+      })
     }
   }
 
@@ -2452,6 +2663,7 @@ Item {
     mailboxKey = String(key || "inbox")
     searchQuery = ""
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     previewMessages = []
@@ -2465,6 +2677,7 @@ Item {
     searchQuery = query
     // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
+    rawLabelId = ""
     clearSelection()
     messages = []
     listLoaded = false
@@ -2473,11 +2686,13 @@ Item {
 
   // A label on Gmail, a folder on IMAP. One entry point either way, because the
   // sidebar draws one kind of row.
-  function selectLabel(name) {
+  function selectLabel(name, labelId) {
     var query = Provider.labelQuery(providerId, name)
-    if (query === "" || query === rawQuery) return
+    var id = String(labelId || "")
+    if (query === "" || (query === rawQuery && id === rawLabelId)) return
     searchQuery = ""
     rawQuery = query
+    rawLabelId = id
     clearSelection()
     messages = []
     listLoaded = false

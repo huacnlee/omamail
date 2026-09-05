@@ -53,6 +53,8 @@ Item {
 
   Flickable {
     id: flick
+
+    WheelScroller { view: flick }
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.top: parent.top

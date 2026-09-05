@@ -61,9 +61,53 @@ assert.strictEqual(model.survivesAction("inbox", "trash"), false)
 assert.strictEqual(model.survivesAction("trash", "trash"), true)
 assert.strictEqual(model.survivesAction("trash", "untrash"), false)
 
+// A move is archive with a destination, so it leaves the same lists archive
+// leaves. Reading a user label goes through `rawQuery` and keeps this key on
+// "inbox", which is why moving between two labels takes the row away.
+assert.strictEqual(model.survivesAction("inbox", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("unread", "label:Label_7"), false)
+assert.strictEqual(model.survivesAction("all", "label:Label_7"), true, "All mail still contains a moved message")
+assert.strictEqual(model.survivesAction("starred", "label:Label_7", "folder:Receipts"), false,
+  "a selected folder leaves even when the previous mailbox key was Starred")
+
 deepEqual(model.labelChangesFor("archive"), { add: [], remove: ["INBOX"] })
 deepEqual(model.labelChangesFor("star"), { add: ["STARRED"], remove: [] })
 assert.strictEqual(model.labelChangesFor("trash"), null, "trash is its own endpoint, not a label change")
+
+// The destination rides inside the verb, so the pipeline that carries one
+// string carries the move too.
+deepEqual(model.labelChangesFor("label:Label_7"), { add: ["Label_7"], remove: ["INBOX"] })
+deepEqual(model.labelChangesFor("label:Label_7", "Label_3"),
+  { add: ["Label_7"], remove: ["INBOX", "Label_3"] },
+  "moving from a Gmail label removes the label that supplied the current view")
+assert.strictEqual(model.labelTarget("label:Label_7"), "Label_7")
+assert.strictEqual(model.labelTarget("archive"), "", "a verb that is not a move names no label")
+assert.strictEqual(model.labelChangesFor("label:"), null, "a move with no destination is not a change")
+
+// Not the `labels` capability, which is about the strip the reader draws: a
+// mailbox with one folder per message is the case where moving is the plain
+// thing to do. What the guard in `act` asks is whether the destination is the
+// user's to name, which on HEY it is not.
+assert.strictEqual(model.actionCapability("label:Label_7"), "move")
+assert.strictEqual(model.actionUnavailable("label:Label_7", "HEY"), "HEY has no destination you can name")
+
+// ------------------------------------------------------- movable labels
+//
+// The rail draws the system labels, so offering them here would put a second
+// archive in a list whose job is the destinations with no key of their own.
+const labelSet = [
+  { id: "L2", name: "zebra" },
+  { id: "S1", name: "Inbox", system: true },
+  { id: "L1", name: "Archive notes" },
+  { id: "L3", name: "banana" }
+]
+deepEqual(model.movableLabels(labelSet, "").map(l => l.id), ["L1", "L3", "L2"])
+deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3"], "filtering is case-insensitive and matches anywhere")
+deepEqual(model.movableLabels(labelSet, "  ZEB  ").map(l => l.id), ["L2"], "a typed query is trimmed")
+deepEqual(model.movableLabels(labelSet, "inbox").map(l => l.id), [], "a system label is not a destination")
+deepEqual(model.movableLabels(labelSet, "", "L3").map(l => l.id), ["L1", "L2"],
+  "the current Gmail label or IMAP folder is not a move destination")
+deepEqual(model.movableLabels(null, ""), [])
 
 // The optimistic update has to move the derived flags too, or a row shows a
 // filled star with `starred: false` underneath it until the next refresh.
@@ -189,7 +233,7 @@ deepEqual(model.threadAfterAction(conversation({ thread: block({ flagged: false 
 const readRow = model.applyLabelChange(conversation(), "markRead")
 assert.strictEqual(readRow.unread, true, "a member is still unread")
 deepEqual(readRow.labelIds, ["INBOX"])
-const readConversation = model.applyLabelChange(conversation(), "markRead",
+const readConversation = model.applyLabelChange(conversation(), "markRead", "",
   model.threadAfterAction(conversation(), "markRead"))
 assert.strictEqual(readConversation.unread, false)
 assert.strictEqual(readConversation.thread.unread, false)
@@ -197,19 +241,21 @@ assert.strictEqual(readConversation.thread.unread, false)
 // Whether the row leaves. With a block the recomputed conversation decides; the
 // verb rule is what every row without one keeps, so Gmail and IMAP are
 // untouched.
-assert.strictEqual(model.survivesAction("unread", "markRead", conversation()), true)
-assert.strictEqual(model.survivesAction("unread", "markRead",
+// The row is the last argument, after the view's own facts.
+const survives = (key, action, row) => model.survivesAction(key, action, "", false, "", row)
+assert.strictEqual(survives("unread", "markRead", conversation()), true)
+assert.strictEqual(survives("unread", "markRead",
   conversation({ thread: block({ unread: false }) })), false)
-assert.strictEqual(model.survivesAction("unread", "markRead", { id: "g1" }), false)
-assert.strictEqual(model.survivesAction("starred", "unstar",
+assert.strictEqual(survives("unread", "markRead", { id: "g1" }), false)
+assert.strictEqual(survives("starred", "unstar",
   conversation({ thread: block({ flagged: true }) })), true)
-assert.strictEqual(model.survivesAction("starred", "unstar",
+assert.strictEqual(survives("starred", "unstar",
   conversation({ thread: block({ flagged: false }) })), false)
-assert.strictEqual(model.survivesAction("starred", "unstar", { id: "g1" }), false)
+assert.strictEqual(survives("starred", "unstar", { id: "g1" }), false)
 // Every other case is the verb rule, block or no block.
-assert.strictEqual(model.survivesAction("inbox", "archive", conversation()), false)
-assert.strictEqual(model.survivesAction("inbox", "markRead", conversation()), true)
-assert.strictEqual(model.survivesAction("trash", "trash", conversation()), true)
+assert.strictEqual(survives("inbox", "archive", conversation()), false)
+assert.strictEqual(survives("inbox", "markRead", conversation()), true)
+assert.strictEqual(survives("trash", "trash", conversation()), true)
 
 // "Mark these read" counts rows, because rows are what the user saw, and names
 // them from evidence: "conversations" only where a row stood for more than one.
@@ -778,3 +824,161 @@ assert.strictEqual(model.settingsScrollTarget(sections, "mailboxes", 1000, 500),
 assert.strictEqual(model.settingsScrollTarget(sections, "reading", 400, 500), 0, "a page shorter than its viewport does not scroll")
 assert.strictEqual(model.settingsScrollTarget(sections, "nope", 1200, 500), -1)
 assert.strictEqual(model.settingsScrollTarget(null, "reading", 1200, 500), -1)
+
+// --------------------------------------------- what a scroller can reach
+
+// `contentY` does not run from 0 to `contentHeight - height`, which is what
+// three clamps in this repository assumed.
+
+// A plain view is the range that assumption described.
+deepEqual(model.contentYBounds(0, 5000, 300, 0, 0), { min: 0, max: 4700 })
+
+// Margins extend both ends. A view resting at the top of its own top margin
+// sits at a negative contentY, and a floor of 0 answers a scroll *up* there by
+// moving *down*, after which the margin can never be seen again.
+deepEqual(model.contentYBounds(0, 5000, 300, 50, 70), { min: -50, max: 4770 })
+
+// `originY` moves the start. A ListView with a 200-tall header reports -200,
+// and a floor of 0 makes the header unreachable — measured against a real
+// ListView, which settles at exactly these two values.
+deepEqual(model.contentYBounds(-200, 4200, 300, 0, 0), { min: -200, max: 3700 })
+
+// Content shorter than its own view has one position rather than a negative
+// range, and that position is the top of it.
+deepEqual(model.contentYBounds(0, 100, 300, 0, 0), { min: 0, max: 0 })
+deepEqual(model.contentYBounds(0, 100, 300, 50, 70), { min: -50, max: -50 })
+
+assert.strictEqual(model.clampContentY(9999, { min: -50, max: 4770 }), 4770)
+assert.strictEqual(model.clampContentY(-9999, { min: -50, max: 4770 }), -50)
+assert.strictEqual(model.clampContentY(100, { min: -50, max: 4770 }), 100)
+
+// ------------------------------------------------------------- the wheel
+
+// A Flickable answers each wheel event with its own flick, so the distance
+// depends on how the turn was reported rather than on how far the wheel went.
+// Rotation is the part that does not change: a notch is 120 units of
+// angleDelta, and eight fractions of a notch still add up to one notch.
+const NOTCH = 120
+assert.strictEqual(model.wheelDistance(-NOTCH), -model.WHEEL_PIXELS_PER_NOTCH,
+  "a notch moves a notch's worth, whatever that is set to")
+assert.strictEqual(model.WHEEL_PIXELS_PER_NOTCH, 120,
+  "and it is three lines of text, which is what a GTK application moves")
+
+// The same turn, chopped up the way a high-resolution wheel reports it.
+let fine = 0
+for (let i = 0; i < 8; i++) fine += model.wheelDistance(-NOTCH / 8)
+assert.strictEqual(fine, -120, "eight fractions of a notch are still one notch")
+
+assert.strictEqual(model.wheelDistance(-3 * NOTCH), -360, "three notches")
+assert.strictEqual(model.wheelDistance(0), 0)
+assert.strictEqual(model.wheelDistance(null), 0)
+
+// Nothing is capped. A cap on one event would put the chunking dependence
+// straight back at the coarse end: a free-spinning wheel delivers ten notches
+// as one event, and a bound would have moved it a notch and a half while the
+// same ten notches arriving as ten events moved ten.
+assert.strictEqual(model.wheelDistance(-10 * NOTCH), -1200)
+let asTen = 0
+for (let i = 0; i < 10; i++) asTen += model.wheelDistance(-NOTCH)
+assert.strictEqual(asTen, model.wheelDistance(-10 * NOTCH),
+  "ten notches move the same distance however they arrive")
+
+// Where the view lands, inside what it can actually reach.
+assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300), 120)
+assert.strictEqual(model.wheelScrollTarget(500, NOTCH, 5000, 300), 380)
+assert.strictEqual(model.wheelScrollTarget(0, 2 * NOTCH, 5000, 300), 0,
+  "there is nothing above the first row")
+assert.strictEqual(model.wheelScrollTarget(4700, -2 * NOTCH, 5000, 300), 4700)
+assert.strictEqual(model.wheelScrollTarget(0, -2 * NOTCH, 100, 300), 0,
+  "content shorter than its view cannot scroll")
+
+// A margined view scrolled up at the top stays in its margin. With a floor of
+// 0 this moved *down* to 0 in answer to a scroll up.
+assert.strictEqual(model.wheelScrollTarget(-50, NOTCH, 5000, 300, 0, 50, 70), -50)
+assert.strictEqual(model.wheelScrollTarget(-50, -NOTCH, 5000, 300, 0, 50, 70), 70)
+assert.strictEqual(model.wheelScrollTarget(4770, -NOTCH, 5000, 300, 0, 50, 70), 4770,
+  "and the bottom margin is reachable rather than cut off")
+
+// A ListView with a header: one notch is one notch, not a jump to 0.
+assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), -80)
+assert.strictEqual(model.wheelScrollTarget(-200, NOTCH, 4200, 300, -200, 0, 0), -200,
+  "and the header stays reachable")
+// ------------------------------------------- moving back into the inbox
+
+// The same pattern a `label:` move already writes: a message filed under a
+// label and pulled back into the inbox has been dealt with, and leaving the
+// label on it means it is still waiting in a list it is no longer in.
+deepEqual(model.labelChangesFor("unarchive", "Label_17"),
+  { add: ["INBOX"], remove: ["Label_17"] })
+deepEqual(model.labelChangesFor("unarchive"), { add: ["INBOX"], remove: [] })
+deepEqual(model.labelChangesFor("unarchive", ""), { add: ["INBOX"], remove: [] })
+
+// Never a system label: INBOX would undo the move it is part of, and UNREAD,
+// STARRED or a CATEGORY_ are states rather than places a message is filed
+// under. `survivesAction` asks this function rather than reading the rule
+// again, which is asserted below rather than assumed here.
+deepEqual(model.labelChangesFor("unarchive", "INBOX"), { add: ["INBOX"], remove: [] })
+deepEqual(model.labelChangesFor("unarchive", "CATEGORY_PERSONAL"),
+  { add: ["INBOX"], remove: [] })
+assert.strictEqual(model.isSystemLabelId("Label_17"), false)
+assert.strictEqual(model.isSystemLabelId("IMPORTANT"), true)
+assert.strictEqual(model.isSystemLabelId("CATEGORY_UPDATES"), true)
+
+// A provider that files by folder answers this with a UID MOVE: the message is
+// given a new id in INBOX, nothing parses COPYUID, and a surviving row would
+// point at a message that is no longer there.
+assert.strictEqual(model.survivesAction("archive", "unarchive", "", false), false,
+  "a folder provider relocates, so the row cannot stay")
+assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", false), false)
+
+// A label provider keeps the message in a mailbox or a search, and takes it
+// out of the label whose list it was found in.
+assert.strictEqual(model.survivesAction("all", "unarchive", "", true), true)
+assert.strictEqual(model.survivesAction("all", "unarchive", "label:TODO", true), false,
+  "a label view with nothing naming its label cannot say the label stayed")
+
+// The two answering together, which is the whole of it: a system label's list
+// is not a place a message is filed under, so the label stays on the message
+// and the row stays in the list. Paired against `labelChangesFor` rather than
+// against a constant, because a constant would let the two drift apart again.
+deepEqual(model.labelChangesFor("unarchive", "IMPORTANT").remove, [])
+assert.strictEqual(
+  model.survivesAction("all", "unarchive", "label:important", true, "IMPORTANT"), true,
+  "the label stays, so the row stays")
+deepEqual(model.labelChangesFor("unarchive", "Label_17").remove, ["Label_17"])
+assert.strictEqual(
+  model.survivesAction("all", "unarchive", "label:todo", true, "Label_17"), false,
+  "the label comes off, so the row goes")
+
+// The third argument is still main's query string, not a boolean. Passing a
+// boolean here would have read every non-empty query as "in a label view" at
+// every existing call site.
+assert.strictEqual(model.survivesAction("inbox", "archive", ""), false,
+  "archive still leaves the inbox")
+assert.strictEqual(model.survivesAction("all", "archive", ""), true)
+
+// End to end on a summary: the label goes, INBOX arrives, the derived flags
+// follow, and the original is untouched.
+const filed = { id: "m1", labelIds: ["Label_17", "IMPORTANT"], unread: false,
+  starred: false, inInbox: false }
+const moved = model.applyLabelChange(filed, "unarchive", "Label_17")
+deepEqual(moved.labelIds, ["IMPORTANT", "INBOX"])
+assert.strictEqual(moved.inInbox, true)
+assert.strictEqual(filed.labelIds.indexOf("Label_17"), 0)
+
+// Every flag that mirrors a label follows the labels, not the three that used
+// to be read. Reporting spam is the press that moves a row between two of
+// them, and a menu asking a stale `inSpam` offers "Move to Inbox" on the
+// message just reported — a press that would add INBOX, keep SPAM, and leave
+// it sitting in Spam.
+const reported = model.applyLabelChange(
+  { id: "m2", labelIds: ["UNREAD", "INBOX"], inInbox: true, inSpam: false }, "spam")
+deepEqual(reported.labelIds, ["UNREAD", "SPAM"])
+assert.strictEqual(reported.inInbox, false)
+assert.strictEqual(reported.inSpam, true, "the row is in Spam the moment it is reported")
+const binned = model.applyLabelChange(
+  { id: "m3", labelIds: ["Label_17"], isSent: true, isDraft: true, inTrash: true },
+  "unarchive", "Label_17")
+assert.strictEqual(binned.isSent, false)
+assert.strictEqual(binned.isDraft, false)
+assert.strictEqual(binned.inTrash, false)

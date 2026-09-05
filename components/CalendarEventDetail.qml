@@ -85,6 +85,10 @@ Rectangle {
   }
 
   Flickable {
+    id: detailFlick
+
+    WheelScroller { view: detailFlick }
+
     anchors.fill: parent
     anchors.margins: Style.space(18)
     contentWidth: width

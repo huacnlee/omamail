@@ -138,6 +138,8 @@ Item {
 
       ListView {
         id: contactsList
+
+        WheelScroller { view: contactsList }
         width: parent.width
         implicitHeight: Math.min(contentHeight, Style.space(280))
         clip: true

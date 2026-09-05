@@ -72,11 +72,23 @@ BarWidget {
     else if (typeof bar.shell.toggle === "function") bar.shell.toggle("omamail", payload)
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  // Whether this draws anything. The widget itself stays: it is the only thing
+  // that hands plugin settings to the service, so a widget removed from the
+  // bar layout instead of hidden here would leave the service running on
+  // defaults — the refresh interval, the notification and every other stored
+  // answer quietly replaced by the one in the manifest.
+  //
+  // Off, it is not merely invisible but takes no width either, so the bar
+  // closes over the gap rather than leaving a hole where the envelope was.
+  readonly property bool drawsIcon: !gmail || gmail.showBarIcon
+
+  visible: drawsIcon
+  implicitWidth: drawsIcon ? button.implicitWidth : 0
+  implicitHeight: drawsIcon ? button.implicitHeight : 0
 
   BarIconButton {
     id: button
+    visible: root.drawsIcon
     anchors.fill: parent
     bar: root.bar
     tooltipText: root.gmail ? root.gmail.barTooltip : "Omamail"

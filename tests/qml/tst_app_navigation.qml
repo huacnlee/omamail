@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import qs.Commons
 import "../.." as Omamail
 
 // Where the window is, is a history. Every page is an entry on it, every Back
@@ -108,6 +109,7 @@ Item {
 
     property var log: []
     property var lastSavedDraft: null
+    property bool refuseMove: false
 
     signal accountAdded()
     signal replySent()
@@ -187,6 +189,12 @@ Item {
     function refresh() {}
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
+    function refuseUnavailableAction(action) {
+      record("guard:" + String(action || ""))
+      if (!refuseMove) return false
+      note("HEY has no destination you can name")
+      return true
+    }
   }
 
   Omamail.App {
@@ -237,8 +245,12 @@ Item {
     function kinds() { return app.navKinds.join(",") }
 
     function init() {
+      // A test that failed part way through its scales must not leave the next
+      // one measuring at somebody else's.
+      Style.spacingScale = 1
       mailService.log = []
       mailService.lastSavedDraft = null
+      mailService.refuseMove = false
       mailService.accountCount = 1
       mailService.providerId = "imap"
       mailService.hasSavedAccounts = true
@@ -369,6 +381,78 @@ Item {
       switcher.close()
     }
 
+    // The address is what this line is about and the key hints are a nicety
+    // beside it, so the room goes to the address first.
+    function test_the_status_address_keeps_its_room_from_the_key_hints() {
+      // The right of the line carries a notice or the hints, never both, so a
+      // status an earlier test left standing is a line with no hints on it.
+      mailService.actionStatus = ""
+      mailService.lastError = ""
+      app.notice = ""
+      mailService.syncedLabel = "Synced just now"
+      waitForRendering(app)
+
+      var label = named(app, "status-account-label")
+      var hints = named(app, "status-key-hints")
+      verify(label && hints)
+      compare(label.text, "me@example.com \u00b7 just now")
+      verify(!label.truncated, "a short address and its age fit beside the hints")
+      verify(hints.visible, "and the hints keep the room they were left")
+
+      // Grown rather than measured: how many characters fit is a fact about
+      // the theme's font, and what is being asserted is which of the two gives
+      // way, whatever that number turns out to be.
+      var address = "a.long.standing.mailbox.address@example.org"
+      for (var i = 0; i < 20 && hints.visible; i++) {
+        address = "longer." + address
+        mailService.accountEmail = address
+        waitForRendering(app)
+      }
+      verify(!hints.visible, "the hints step off the line rather than cutting the address")
+      verify(!label.truncated, "and the address keeps every character it has room for")
+
+      mailService.accountEmail = "me@example.com"
+      waitForRendering(app)
+      verify(hints.visible, "the hints come back when the address gives the room up")
+
+      // The one thing that still pushes the address over, because a notice is
+      // what the window most needs to say.
+      var slot = label.parent.parent
+      var wide = slot.width
+      mailService.actionStatus = "Moved to Archive"
+      waitForRendering(app)
+      verify(slot.width < wide, "a notice takes the right of the line back")
+
+      mailService.actionStatus = ""
+      mailService.syncedLabel = ""
+      waitForRendering(app)
+    }
+
+    // The box around the address pads it by one number and measures itself by
+    // another, and `Style.space` rounds each on its own. At the shell's
+    // `base-size 14` the two disagree by a pixel, and a Text a pixel short of
+    // its own content is elided however wide the window is — which is what put
+    // "just n..." on the line and made it look like a fixed width.
+    function test_the_status_address_is_not_a_pixel_short_of_its_box() {
+      var label = named(app, "status-account-label")
+      verify(label)
+      mailService.syncedLabel = "Synced just now"
+
+      // Every scale a rounded 4 and a rounded 8 can fall out of step on, and a
+      // couple where they agree, because the assertion is the same either way.
+      var scales = [1, 0.9, 7 / 6, 1.25, 1.375, 1.4, 1.5, 1.9]
+      for (var i = 0; i < scales.length; i++) {
+        Style.spacingScale = scales[i]
+        waitForRendering(app)
+        verify(!label.truncated,
+          "the address fits its own box at spacing scale " + scales[i])
+      }
+
+      Style.spacingScale = 1
+      mailService.syncedLabel = ""
+      waitForRendering(app)
+    }
+
     function test_header_creation_actions_keep_their_labels() {
       var compose = named(app, "compose-button")
       verify(compose && compose.visible)
@@ -459,6 +543,18 @@ Item {
       app.back()
       compare(kinds(), "list,settings")
       compare(mailService.count("discard"), 0)
+    }
+
+    function test_an_unavailable_move_is_refused_before_the_picker_opens() {
+      mailService.refuseMove = true
+      app.cursorId = "message-1"
+
+      app.runShortcut("moveToLabel", "v")
+
+      compare(mailService.count("guard:label:destination"), 1,
+        "the provider guard answers the key before a destination is requested")
+      compare(named(app, "label-picker").opened, false)
+      compare(mailService.actionStatus, "HEY has no destination you can name")
     }
   }
 }

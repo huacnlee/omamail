@@ -42,16 +42,18 @@ jobs:
       # The parsing, formatting and decision rules are plain JS and the source
       # checks are shell, so those need nothing at all and run here.
       #
-      # Two gates stay local. qmllint needs the Omarchy shell on the import
-      # path, which a runner does not have. The QML tests need the Qt the
-      # plugin actually runs on: Ubuntu ships 6.4 and Omarchy is current, and
-      # they exercise exactly the engine behaviour that differs between them —
-      # shortcut objects rebuilt when a context changes fire on one and not the
-      # other. Running them here would report on an engine nobody uses.
+      # Three gates stay local, and for one reason: each reports on a version of
+      # something the plugin does not run on. qmllint needs the Omarchy shell on
+      # the import path, which a runner does not have. The QML tests need the Qt
+      # the plugin actually runs on — Ubuntu ships 6.4 and Omarchy is current,
+      # and they exercise exactly the engine behaviour that differs between
+      # them: shortcut objects rebuilt when a context changes fire on one and
+      # not the other. `test-shell-libcurl` asserts which of libcurl's two
+      # output channels carries a fetched message, which its version decides.
       #
-      # `make test` includes them, so it is not what runs here.
+      # `make test` includes all three, so it is not what runs here.
       - name: Test
-        run: make test-js test-shell
+        run: make test-js test-shell-portable
 
       - name: Publish the release
         env:

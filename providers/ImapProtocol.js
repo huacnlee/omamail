@@ -653,6 +653,37 @@ function draftSaveResult(replaceError) {
   }
 }
 
+// The folder a sent copy is filed in: the server's own Sent, learned from
+// LIST like every folder name is. An empty answer means the server named
+// none, and names are never guessed — a client that made one up would create
+// folders rather than find them.
+function sentFolder(special) {
+  return (special || {})["\\sent"] || ""
+}
+
+// curl's upload-flags names flags as bare words rather than as the
+// parenthesised list IMAP puts on the APPEND line. A draft keeps its \Draft
+// marker; a sent copy arrives seen, because its author has read it.
+function appendFlagWords(sent) {
+  return sent === true ? "seen" : "draft"
+}
+
+// What a finished send reports about the copy the mailbox keeps. The message
+// itself is out either way, so a copy that did not land is a warning carried
+// on a success, never a failure of the send. An empty folder name stands for
+// every reason no folder was known — the server listed none, or the listing
+// could not be asked — because what the user does about them is the same:
+// nothing.
+function sentCopyResult(folder, filed) {
+  if (String(folder || "") === "")
+    return { sent: true, warning: "Sent, but no Sent folder was found to file a copy in" }
+  return {
+    sent: true,
+    warning: filed === true ? ""
+      : "Sent, but the copy for the Sent folder could not be saved"
+  }
+}
+
 function statusCommand(folder) {
   return "STATUS " + quote(folder) + " (MESSAGES UNSEEN)"
 }
@@ -1055,7 +1086,10 @@ function specialFolders(folders) {
     if (!map["\\sent"] && /^sent( mail| items| messages)?$/.test(leaf)) map["\\sent"] = name
     if (!map["\\trash"] && /^(trash|deleted( items| messages)?)$/.test(leaf)) map["\\trash"] = name
     if (!map["\\drafts"] && /^drafts?$/.test(leaf)) map["\\drafts"] = name
-    if (!map["\\junk"] && /^(junk|spam|bulk mail)$/.test(leaf)) map["\\junk"] = name
+    // Exchange calls it "Junk Email", which is the one name in this list that
+    // the bare word cannot stand in for: every other fallback below happens to
+    // be what Exchange calls the folder anyway.
+    if (!map["\\junk"] && /^(junk([ -]?e-?mail)?|spam|bulk mail)$/.test(leaf)) map["\\junk"] = name
     if (!map["\\archive"] && /^(archive|all mail)$/.test(leaf)) map["\\archive"] = name
   }
   return map
@@ -1133,19 +1167,44 @@ function flagPlanForLabels(addLabelIds, removeLabelIds, special) {
     return false
   }
 
+  // A move always adds its named destination while taking INBOX away. Read it
+  // before interpreting Gmail's system ids: an ordinary IMAP folder may itself
+  // be named "Starred", "Unread", "Trash", or "Spam".
+  var destination = folderTarget(added, removed)
+
   // The inversion again: Gmail's UNREAD is a label you add, IMAP's \Seen is a
   // flag you remove. Getting this backwards marks read what the user just
   // marked unread.
-  if (has(added, "UNREAD")) plan.remove.push("\\Seen")
+  if (destination === "" && has(added, "UNREAD")) plan.remove.push("\\Seen")
   if (has(removed, "UNREAD")) plan.add.push("\\Seen")
-  if (has(added, "STARRED")) plan.add.push("\\Flagged")
+  if (destination === "" && has(added, "STARRED")) plan.add.push("\\Flagged")
   if (has(removed, "STARRED")) plan.remove.push("\\Flagged")
 
   if (has(removed, "INBOX")) plan.move = map["\\archive"] || ""
-  if (has(added, "INBOX")) plan.move = "INBOX"
-  if (has(added, "TRASH")) plan.move = map["\\trash"] || ""
-  if (has(added, "SPAM")) plan.move = map["\\junk"] || ""
+  if (destination === "" && has(added, "INBOX")) plan.move = "INBOX"
+  if (destination === "" && has(added, "TRASH")) plan.move = map["\\trash"] || ""
+  if (destination === "" && has(added, "SPAM")) plan.move = map["\\junk"] || ""
+
+  // A named destination, which is the one case where the request is already
+  // IMAP: `getLabels` reports folder names as label ids, so a move asks for
+  // the folder by the name the server gave it. It is read last because such a
+  // request also removes INBOX -- the archive above is the default for "out of
+  // the inbox", and this is the same message with somewhere better to be.
+  if (destination !== "") plan.move = destination
   return plan
+}
+
+// The destination carried by a move. `labelChangesFor` shapes one as a label
+// added while INBOX is removed; preserving that shape is what keeps a folder
+// named like a Gmail system id from being mistaken for the system operation.
+function folderTarget(addLabelIds, removeLabelIds) {
+  var added = Array.isArray(addLabelIds) ? addLabelIds : []
+  var removed = Array.isArray(removeLabelIds) ? removeLabelIds : []
+  if (added.length === 0) return ""
+  for (var i = 0; i < removed.length; i++) {
+    if (String(removed[i]).toUpperCase() === "INBOX") return String(added[0])
+  }
+  return ""
 }
 
 // -------------------------------------------------------------- the errors

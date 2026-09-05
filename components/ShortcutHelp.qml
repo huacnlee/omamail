@@ -3,6 +3,7 @@ import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 import "../keys/Keymap.js" as Keymap
+import "../account/Model.js" as Model
 
 // The reference sheet behind ?. A plain list rather than a dialog because it
 // never needs an answer — Esc, ? again, or a click puts it away.
@@ -29,11 +30,15 @@ Rectangle {
   // The keyboard's answer to a sheet that scrolls. `j`/`k` survive the overlay
   // for this and nothing else, so the reference sheet is not the one screen in
   // the window that needs a mouse to read.
+  // The third copy of the same clamp, and now the same one the wheel and
+  // `contentYToReveal` use: a range that knows about margins and `originY`
+  // rather than assuming 0 to `contentHeight - height`.
   function scrollBy(steps) {
     if (!scroller.interactive) return
-    var limit = scroller.contentHeight - scroller.height
-    scroller.contentY = Math.max(0, Math.min(limit,
-      scroller.contentY + steps * Style.space(20)))
+    scroller.contentY = Model.clampContentY(
+      scroller.contentY + steps * Style.space(20),
+      Model.contentYBounds(scroller.originY, scroller.contentHeight,
+        scroller.height, scroller.topMargin, scroller.bottomMargin))
   }
 
   // How wide one column of keys and their labels wants to be, and how many of
@@ -62,6 +67,8 @@ Rectangle {
 
   Flickable {
     id: scroller
+
+    WheelScroller { view: scroller }
     // Filling the sheet rather than hugging the content is the whole of the
     // scrollbar fix: a Flickable sized to its column puts the bar at that
     // column's edge, which on a wide window is the middle of the screen.
