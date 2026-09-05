@@ -32,6 +32,9 @@ Column {
   signal checkToggled(string id)
   signal checkRangeRequested(string id)
   signal agentRequested(string id, real sceneX, real sceneY)
+  // A row's own star, archive and trash buttons. Routed up rather than
+  // straight to the service so a ticked row's button means the selection.
+  signal rowActionRequested(string id, string action)
   signal menuRequested(string id, real sceneX, real sceneY)
 
   width: parent ? parent.width : 0
@@ -73,9 +76,9 @@ Column {
       onCheckToggled: root.checkToggled(modelData.id)
       onCheckRangeRequested: root.checkRangeRequested(modelData.id)
       onAgentRequested: function(sceneX, sceneY) { root.agentRequested(modelData.id, sceneX, sceneY) }
-      onStarToggled: root.service.toggleStar(modelData.id)
-      onArchiveRequested: root.service.act(modelData.id, "archive")
-      onTrashRequested: root.service.act(modelData.id, "trash")
+      onStarToggled: root.rowActionRequested(modelData.id, "star")
+      onArchiveRequested: root.rowActionRequested(modelData.id, "archive")
+      onTrashRequested: root.rowActionRequested(modelData.id, "trash")
       onMenuRequested: function(sceneX, sceneY) {
         root.menuRequested(modelData.id, sceneX, sceneY)
       }

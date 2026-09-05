@@ -761,6 +761,22 @@ Item {
     return true
   }
 
+  // A row's own button: the selection when the row is ticked, that row alone
+  // when it is not — the rule the row menu follows, so a click and a key on
+  // the same row cannot mean different sets of messages.
+  function actFromRow(id, action) {
+    if (!service) return false
+    var outside = checkedIds.indexOf(id) < 0
+    cursorId = id
+    if (action === "star") {
+      if (selectionActive && !outside)
+        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
+      service.toggleStar(id)
+      return true
+    }
+    return actOnCursor(action, outside)
+  }
+
   // The agent popup on a message: at a control's edge from a button, centred
   // from the key. The subject is read off the list row or the open message so
   // the popup can say which message it is asking about.
@@ -1632,6 +1648,7 @@ Item {
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
               onAgentRequested: function(id, sceneX, sceneY) { root.openAgentAt(id, sceneX, sceneY) }
+              onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY) {
