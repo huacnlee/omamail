@@ -4,6 +4,7 @@ const { load, deepEqual } = require("./load")
 const jmap = load("providers/JmapProtocol.js")
 const description = load("providers/Jmap.js")
 const registry = load("providers/Registry.js")
+const message = load("message/Message.js")
 
 // --------------------------------------------------------- transport errors
 //
@@ -109,6 +110,25 @@ assert.strictEqual(jmap.requestError('{"type":"urn:ietf:params:jmap:error:limit"
   "The server's limit for maxSizeUpload was hit", "an unparsed body is parsed here")
 assert.strictEqual(jmap.requestError("not json at all"), "The mail server had a problem")
 assert.strictEqual(jmap.requestError(null), "The mail server had a problem")
+
+// A successful reply is not a request error, and this function is where a
+// caller who forgot to look inside first lands. A problem-details object always
+// names a `type`; a reply that worked never does and carries `methodResponses`
+// instead — so asking about a full mailbox has to answer "nothing went wrong"
+// rather than inventing a failure out of it.
+assert.strictEqual(jmap.requestError({ methodResponses: [["Mailbox/get", { list: [] }, "0"]] }), "")
+assert.strictEqual(jmap.requestError({ methodResponses: [] }), "",
+  "a reply with no invocations in it is still a reply")
+assert.strictEqual(jmap.requestError('{"methodResponses":[["Email/query",{"ids":[]},"0"]]}'), "")
+assert.strictEqual(jmap.requestError({ sessionState: "s1", methodResponses: [] }), "")
+// A document naming both is a refusal that happens to echo something back, and
+// the type is what says so.
+assert.strictEqual(
+  jmap.requestError({ type: "urn:ietf:params:jmap:error:limit", limit: "maxCallsInRequest",
+    methodResponses: [] }),
+  "The server's limit for maxCallsInRequest was hit")
+assert.strictEqual(jmap.requestError({}), "The mail server had a problem",
+  "and a document that is neither is still unreadable")
 
 // ------------------------------------------------------------ method errors
 
@@ -239,6 +259,14 @@ assert.strictEqual(jmap.MAX_BLOB_BYTES, 20971520, "20 MB, the same figure attach
 assert.strictEqual(jmap.AUTH_BASIC, "basic")
 assert.strictEqual(jmap.AUTH_BEARER, "bearer")
 assert.strictEqual(jmap.AUTH_NONE, "none")
+
+// The `using` array of every request, built here and nowhere else: a vendor URN
+// in one of them would make every request refuseable by a server that never
+// heard of it, and a missing one comes back `unknownCapability`.
+deepEqual(jmap.USING_MAIL, ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"])
+deepEqual(jmap.USING_SUBMISSION, ["urn:ietf:params:jmap:core",
+  "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission"],
+  "mail as well as submission: a send also imports the message into a mailbox")
 
 // --------------------------------------------------------------- discovery
 //
@@ -523,6 +551,554 @@ assert.strictEqual(jmap.schemeLabel("Bearer"), "API token")
 assert.strictEqual(jmap.schemeLabel(""), "app password",
   "an account with nothing recorded is Basic, which is what sign-in tries first")
 assert.strictEqual(jmap.schemeLabel(null), "app password")
+
+// ------------------------------------------------------ mailboxes and roles
+//
+// The list is the reference test account's, read from the server with the
+// client's own property list: an Inbox, a Junk, a Drafts, a Trash and a Sent,
+// and no Archive at all — which is the account the absent-row and refusal rules
+// below have to be right about.
+
+const boxes = [
+  { id: "a", name: "Inbox", parentId: null, role: "inbox", sortOrder: 0,
+    totalEmails: 7, unreadEmails: 2, unreadThreads: 2 },
+  { id: "c", name: "Junk Mail", parentId: null, role: "junk", sortOrder: 0,
+    totalEmails: 1, unreadEmails: 0, unreadThreads: 0 },
+  { id: "d", name: "Drafts", parentId: null, role: "drafts", sortOrder: 0,
+    totalEmails: 1, unreadEmails: 0, unreadThreads: 0 },
+  { id: "b", name: "Deleted Items", parentId: null, role: "trash", sortOrder: 0,
+    totalEmails: 1, unreadEmails: 0, unreadThreads: 0 },
+  { id: "e", name: "Sent Items", parentId: null, role: "sent", sortOrder: 0,
+    totalEmails: 0, unreadEmails: 0, unreadThreads: 0 }
+]
+
+// By role first, which is the answer on every mailbox this account has.
+assert.strictEqual(jmap.resolveRole("inbox", boxes), "a")
+assert.strictEqual(jmap.resolveRole("junk", boxes), "c")
+assert.strictEqual(jmap.resolveRole("trash", boxes), "b")
+assert.strictEqual(jmap.resolveRole("drafts", boxes), "d")
+assert.strictEqual(jmap.resolveRole("sent", boxes), "e")
+assert.strictEqual(jmap.resolveRole("archive", boxes), "",
+  "and nothing at all where the account has no such mailbox")
+assert.strictEqual(jmap.resolveRole("INBOX", boxes), "a", "the role is matched case-insensitively")
+assert.strictEqual(jmap.resolveRole("", boxes), "")
+assert.strictEqual(jmap.resolveRole("archive", null), "")
+
+// Then by the leaf name, which is what a server that publishes no role on a
+// mailbox it plainly means as one needs — the reference Stalwart's own Archive
+// folders are exactly that.
+const unrolled = [
+  { id: "1", name: "Inbox", parentId: null, role: "inbox" },
+  { id: "2", name: "Archive", parentId: null, role: null },
+  { id: "3", name: "Deleted Items", parentId: null, role: null },
+  { id: "4", name: "Sent Mail", parentId: null, role: null },
+  { id: "5", name: "Drafts", parentId: null, role: null },
+  { id: "6", name: "Bulk Mail", parentId: null, role: null }
+]
+assert.strictEqual(jmap.resolveRole("archive", unrolled), "2")
+assert.strictEqual(jmap.resolveRole("trash", unrolled), "3")
+assert.strictEqual(jmap.resolveRole("sent", unrolled), "4")
+assert.strictEqual(jmap.resolveRole("drafts", unrolled), "5")
+assert.strictEqual(jmap.resolveRole("junk", unrolled), "6")
+assert.strictEqual(jmap.resolveRole("archive", [{ id: "9", name: "All Mail", parentId: null }]), "9")
+
+// A role wins over a name, wherever both are on offer.
+assert.strictEqual(jmap.resolveRole("archive",
+  [{ id: "n", name: "Archive", parentId: null }, { id: "r", name: "Filed", role: "archive" }]),
+  "r", "the mailbox carrying the role, not the one merely named like it")
+
+// Never guessed: the inbox, because `role: "inbox"` is the one role RFC 8621
+// requires and a name match could only ever find a second folder called Inbox.
+assert.strictEqual(jmap.resolveRole("inbox", [{ id: "x", name: "Inbox", parentId: null }]), "",
+  "a mailbox named Inbox with no role is a folder, not the inbox")
+
+// And never a nested one: an "Archive" under "Projects" is somebody's filing.
+assert.strictEqual(jmap.resolveRole("archive",
+  [{ id: "p", name: "Projects", parentId: null }, { id: "n", name: "Archive", parentId: "p" }]),
+  "", "archiving into somebody's own Archive folder is filing their mail for them")
+
+// The map every filter and every label id is read through.
+deepEqual(jmap.roleMap(boxes),
+  { inbox: "a", sent: "e", drafts: "d", archive: "", junk: "c", trash: "b" })
+deepEqual(jmap.roleMap([]),
+  { inbox: "", sent: "", drafts: "", archive: "", junk: "", trash: "" })
+
+// The rows the rail drops, keyed as `Registry.mailboxes` takes them — so the
+// row for the `junk` role answers to "spam".
+deepEqual(jmap.absentMailboxes(boxes), ["archive"])
+deepEqual(jmap.absentMailboxes([{ id: "a", name: "Inbox", role: "inbox" }]),
+  ["archive", "spam", "trash"])
+deepEqual(jmap.absentMailboxes(unrolled), [])
+assert.strictEqual(jmap.absentMailboxes([]), null,
+  "nothing read yet is null, so the registry draws every row")
+assert.strictEqual(jmap.absentMailboxes(null), null)
+
+// One sentence for a missing mailbox, wherever it is caught.
+assert.strictEqual(jmap.missingMailboxError("archive"), "This account has no Archive mailbox")
+assert.strictEqual(jmap.missingMailboxError("junk"), "This account has no Junk mailbox")
+assert.strictEqual(jmap.missingMailboxError("trash"), "This account has no Trash mailbox")
+assert.strictEqual(jmap.missingMailboxError("nonesuch"), "This account has no such mailbox")
+
+// ------------------------------------------------------------- the query DSL
+
+deepEqual(jmap.parseQuery("role:inbox"),
+  { role: "inbox", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("role:inbox unseen"),
+  { role: "inbox", mailboxId: "", criteria: "unseen", text: "" })
+deepEqual(jmap.parseQuery("role:inbox flagged"),
+  { role: "inbox", mailboxId: "", criteria: "flagged", text: "" })
+deepEqual(jmap.parseQuery("role:junk"), { role: "junk", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("  role:trash  "),
+  { role: "trash", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("role:inbox nonsense"),
+  { role: "inbox", mailboxId: "", criteria: "", text: "" },
+  "a criterion this DSL does not have is no criterion, not a filter nobody wrote")
+
+deepEqual(jmap.parseQuery("mailbox:a1b2"),
+  { role: "", mailboxId: "a1b2", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("text:invoice from ada"),
+  { role: "", mailboxId: "", criteria: "", text: "invoice from ada" })
+deepEqual(jmap.parseQuery('text:"of three"'),
+  { role: "", mailboxId: "", criteria: "", text: '"of three"' },
+  "a quoted phrase reaches the server exactly as it was typed")
+
+// Every string the panel produces round trips through the parse.
+for (const box of registry.define(description).mailboxes) {
+  const parsed = jmap.parseQuery(box.query)
+  assert.strictEqual(parsed.role !== "", true, box.key + " names a role")
+  assert.strictEqual(jmap.filterFor(parsed, jmap.roleMap(unrolled)) !== null, true,
+    box.key + " builds a filter on an account that has every mailbox")
+}
+assert.strictEqual(jmap.parseQuery(description.searchQuery('  a "b c"  ')).text, 'a "b c"')
+assert.strictEqual(jmap.parseQuery(description.labelQuery("  a1b2 ")).mailboxId, "a1b2")
+
+// A query that names nothing is the inbox, which is where every other provider
+// falls back to as well.
+deepEqual(jmap.parseQuery(""), { role: "inbox", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery(null), { role: "inbox", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("role:"), { role: "inbox", mailboxId: "", criteria: "", text: "" })
+deepEqual(jmap.parseQuery("text:  "), { role: "inbox", mailboxId: "", criteria: "", text: "" })
+// And a string that is none of the three is read as a search for those words:
+// the only way to make one is a default query typed into settings, and showing
+// somebody their words beats showing them an empty mailbox.
+deepEqual(jmap.parseQuery("in:inbox older_than:1d"),
+  { role: "", mailboxId: "", criteria: "", text: "in:inbox older_than:1d" })
+
+// ----------------------------------------------------------------- filters
+
+const roles = jmap.roleMap(boxes)
+
+deepEqual(jmap.filterFor(jmap.parseQuery("role:inbox"), roles), { inMailbox: "a" })
+// Unread is the absence of `$seen`, which is the one inversion in the vocabulary.
+deepEqual(jmap.filterFor(jmap.parseQuery("role:inbox unseen"), roles),
+  { inMailbox: "a", notKeyword: "$seen" })
+deepEqual(jmap.filterFor(jmap.parseQuery("role:inbox flagged"), roles),
+  { inMailbox: "a", hasKeyword: "$flagged" })
+deepEqual(jmap.filterFor(jmap.parseQuery("role:sent"), roles), { inMailbox: "e" })
+deepEqual(jmap.filterFor(jmap.parseQuery("role:drafts"), roles), { inMailbox: "d" })
+deepEqual(jmap.filterFor(jmap.parseQuery("role:junk"), roles), { inMailbox: "c" })
+deepEqual(jmap.filterFor(jmap.parseQuery("role:trash"), roles), { inMailbox: "b" })
+deepEqual(jmap.filterFor(jmap.parseQuery("mailbox:zz9"), roles), { inMailbox: "zz9" })
+
+// A rail row this account has no mailbox for builds no filter and no rows, and
+// says so in the sentence the button and the registry already use.
+assert.strictEqual(jmap.filterFor(jmap.parseQuery("role:archive"), roles), null)
+assert.strictEqual(jmap.queryError(jmap.parseQuery("role:archive"), roles),
+  "This account has no Archive mailbox")
+assert.strictEqual(jmap.queryError(jmap.parseQuery("role:inbox"), roles), "")
+
+// A search names no mailbox and excludes two, which is Gmail's rule and
+// Fastmail's own web default.
+deepEqual(jmap.filterFor(jmap.parseQuery("text:notes"), roles), {
+  operator: "AND",
+  conditions: [{ text: "notes" }, { inMailboxOtherThan: ["c", "b"] }]
+})
+deepEqual(jmap.filterFor(jmap.parseQuery('text:"of three"'), roles), {
+  operator: "AND",
+  conditions: [{ text: '"of three"' }, { inMailboxOtherThan: ["c", "b"] }]
+})
+// An account with neither mailbox needs no exclusion, and an empty
+// `inMailboxOtherThan` is a condition some servers refuse.
+deepEqual(jmap.filterFor(jmap.parseQuery("text:notes"), { inbox: "a" }), { text: "notes" })
+deepEqual(jmap.filterFor(jmap.parseQuery("text:notes"), { inbox: "a", trash: "b" }), {
+  operator: "AND",
+  conditions: [{ text: "notes" }, { inMailboxOtherThan: ["b"] }]
+})
+
+// ------------------------------------------------------------------ paging
+
+// The request. `receivedAt` descending on every page, uncollapsed until ticket
+// 11 flips it, and `calculateTotal` on every one of them.
+deepEqual(jmap.emailQuery("t", { inMailbox: "a" }, 3, ""), {
+  accountId: "t",
+  filter: { inMailbox: "a" },
+  sort: [{ property: "receivedAt", isAscending: false }],
+  collapseThreads: false,
+  limit: 3,
+  calculateTotal: true,
+  position: 0
+})
+// A page with a token is fetched by anchor: newest-first with mail arriving
+// between pages is the common case, and the anchor keeps the seam exact.
+deepEqual(jmap.emailQuery("t", { inMailbox: "a" }, 3, "3|maaaaaf"), {
+  accountId: "t",
+  filter: { inMailbox: "a" },
+  sort: [{ property: "receivedAt", isAscending: false }],
+  collapseThreads: false,
+  limit: 3,
+  calculateTotal: true,
+  anchor: "maaaaaf",
+  anchorOffset: 1
+})
+// And recovered by the position beside it when the anchor has gone.
+deepEqual(jmap.emailQuery("t", { inMailbox: "a" }, 3, "3|maaaaaf", true).position, 3)
+assert.strictEqual(jmap.emailQuery("t", null, 3, "3|maaaaaf", true).anchor, undefined)
+assert.strictEqual(jmap.emailQuery("t", null, 0, "").limit, 25, "a page size of nothing is 25")
+
+deepEqual(jmap.parsePageToken("3|maaaaaf"), { position: 3, anchor: "maaaaaf" })
+deepEqual(jmap.parsePageToken(""), { position: 0, anchor: "" })
+deepEqual(jmap.parsePageToken("nonsense"), { position: 0, anchor: "" })
+deepEqual(jmap.parsePageToken("3|"), { position: 0, anchor: "" })
+assert.strictEqual(jmap.pageToken(3, ["x", "y", "z"]), "6|z")
+assert.strictEqual(jmap.pageToken(0, []), "")
+
+// The reply, with a total: the estimate is the total, exact on both reference
+// servers, and the token stops the moment the total is reached.
+deepEqual(jmap.queryPage({ position: 0, ids: ["2aaaaah", "yaaaaag", "maaaaaf"], total: 7 }, 3),
+  { ids: ["2aaaaah", "yaaaaag", "maaaaaf"], threadIds: [], nextPageToken: "3|maaaaaf", estimate: 7 })
+deepEqual(jmap.queryPage({ position: 3, ids: ["maaaaae", "maaaaad", "iaaaaac"], total: 7 }, 3),
+  { ids: ["maaaaae", "maaaaad", "iaaaaac"], threadIds: [], nextPageToken: "6|iaaaaac", estimate: 7 })
+deepEqual(jmap.queryPage({ position: 6, ids: ["eaaaaab"], total: 7 }, 3),
+  { ids: ["eaaaaab"], threadIds: [], nextPageToken: "", estimate: 7 })
+// A position past the end is an empty page, not an error.
+deepEqual(jmap.queryPage({ position: 50, ids: [], total: 7 }, 3),
+  { ids: [], threadIds: [], nextPageToken: "", estimate: 7 })
+deepEqual(jmap.queryPage({ position: 0, ids: ["baaaaaai"], total: 1 }, 25),
+  { ids: ["baaaaaai"], threadIds: [], nextPageToken: "", estimate: 1 })
+
+// And without one, which RFC 8620 lets a server decline: what has been seen so
+// far, plus one for a page that came back full — the same lower bound the IMAP
+// search reports, and the reason the panel words a provider total as "about".
+deepEqual(jmap.queryPage({ position: 0, ids: ["x", "y", "z"] }, 3),
+  { ids: ["x", "y", "z"], threadIds: [], nextPageToken: "3|z", estimate: 4 })
+deepEqual(jmap.queryPage({ position: 3, ids: ["p", "q"] }, 3),
+  { ids: ["p", "q"], threadIds: [], nextPageToken: "", estimate: 5 },
+  "a short page is the end of the result under either reading")
+deepEqual(jmap.queryPage({ position: 0, ids: [] }, 3),
+  { ids: [], threadIds: [], nextPageToken: "", estimate: 0 })
+deepEqual(jmap.queryPage(null, 3),
+  { ids: [], threadIds: [], nextPageToken: "", estimate: 0 })
+// `total: 0` is a calculated total and not a missing one.
+deepEqual(jmap.queryPage({ position: 0, ids: [], total: 0 }, 3).estimate, 0)
+
+// -------------------------------------------------------- mailboxes as labels
+
+const labels = jmap.mailboxLabels(boxes, roles)
+deepEqual(labels.map(label => label.id), ["b", "d", "a", "c", "e"],
+  "one sort order across the account, so the printed path breaks the tie")
+deepEqual(labels.filter(label => label.id === "a")[0], {
+  id: "a",
+  name: "Inbox",
+  // The id twice: one is the cache key, the other is what goes back in a
+  // filter, and only the printed name is a path.
+  rawName: "a",
+  system: true,
+  unread: 2,
+  total: 7,
+  threadsUnread: 2
+})
+assert.strictEqual(labels.every(label => label.system), true,
+  "every mailbox on this account is a row the rail already draws")
+
+// A folder tree is printed as a path, because the sidebar is a flat list and
+// two folders called "Receipts" would otherwise be one row twice.
+const nested = [
+  { id: "p", name: "Projects", parentId: null, sortOrder: 0, totalEmails: 0, unreadEmails: 0 },
+  { id: "k", name: "Receipts", parentId: "p", sortOrder: 0, totalEmails: 4, unreadEmails: 1 },
+  { id: "w", name: "Work", parentId: null, sortOrder: 1, totalEmails: 2, unreadEmails: 0 },
+  { id: "i", name: "Inbox", parentId: null, role: "inbox", sortOrder: 0 }
+]
+const nestedLabels = jmap.mailboxLabels(nested, jmap.roleMap(nested))
+deepEqual(nestedLabels.map(label => label.name),
+  ["Inbox", "Projects", "Projects / Receipts", "Work"])
+deepEqual(nestedLabels.map(label => label.system), [true, false, false, false],
+  "a mailbox the rail does not draw is a label under its own name")
+assert.strictEqual(nestedLabels.filter(label => label.id === "k")[0].unread, 1)
+
+// A parent chain that loops is a server bug; here it would be an infinite loop
+// on the thread that draws the whole desktop.
+deepEqual(jmap.mailboxLabels(
+  [{ id: "1", name: "One", parentId: "2" }, { id: "2", name: "Two", parentId: "1" }],
+  {}).map(label => label.name), ["One / Two", "Two / One"])
+
+deepEqual(jmap.labelCounts({ id: "a", totalEmails: 7, unreadEmails: 2, unreadThreads: 2 }),
+  { id: "a", unread: 2, total: 7, threadsUnread: 2 })
+deepEqual(jmap.labelCounts(null), { id: "", unread: 0, total: 0, threadsUnread: 0 })
+
+// ------------------------------------------------------------- label ids
+//
+// Every keyword and every membership, because a row, a star and an unread dot
+// above the seam are read from Gmail's vocabulary and nothing else.
+
+assert.strictEqual(jmap.labelIdsFor({ keywords: {} }, roles).indexOf("UNREAD"), 0,
+  "unread is the absence of $seen")
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true } }, roles), [])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true, "$flagged": true } }, roles), ["STARRED"])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true, "$draft": true } }, roles), ["DRAFT"])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { d: true } }, roles),
+  ["DRAFT"], "membership of the Drafts mailbox says the same thing the keyword does")
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { a: true } }, roles),
+  ["INBOX"])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { e: true } }, roles),
+  ["SENT"])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { b: true } }, roles),
+  ["TRASH"])
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { c: true } }, roles),
+  ["SPAM"])
+deepEqual(jmap.labelIdsFor({ keywords: {}, mailboxIds: { a: true, e: true } }, roles),
+  ["UNREAD", "INBOX", "SENT"], "a message in two mailboxes gets both, as Gmail's does")
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { zz9: true } }, roles),
+  [], "a user folder is no label id at all")
+deepEqual(jmap.labelIdsFor({ keywords: { "$seen": true }, mailboxIds: { "": true } }, roles), [],
+  "and neither is an unresolved role, whose id is the empty string")
+deepEqual(jmap.labelIdsFor(null, roles), ["UNREAD"])
+
+// ------------------------------------------------- an Email as a message row
+//
+// The Email is the reference account's own, read from the server with the
+// client's property list — including the leading space Stalwart writes on a raw
+// header value, and the key it files one under.
+
+const listEmail = {
+  id: "2aaaaah",
+  blobId: "cbiovn1qoqv0990mypxekxgla3z2fmw3qyp3e09bw73o1fnn00mfmeyaa2",
+  threadId: "h",
+  mailboxIds: { a: true },
+  keywords: {},
+  size: 242,
+  receivedAt: "2026-08-24T09:00:00Z",
+  from: [{ name: "Eve Lund", email: "eve@example.net" }],
+  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  cc: null,
+  subject: "[omamail-test] Unread",
+  preview: "This one is unread.\n",
+  hasAttachment: false,
+  messageId: ["unread@omamail-test.invalid"],
+  inReplyTo: null,
+  references: null,
+  "header:List-Unsubscribe": null,
+  "header:List-Unsubscribe-Post": null,
+  // Not `header:Date:asRaw`, which is what was asked for: the reference server
+  // answers under the name without the form, and a composer that read only the
+  // asked-for key got no Date and no unsubscribe link at all.
+  "header:Date": " Mon, 24 Aug 2026 09:00:00 +0000"
+}
+
+const row = jmap.toMessage(listEmail, roles)
+assert.strictEqual(row.id, "2aaaaah", "the bare Email id: unique per account, stable across a move")
+assert.strictEqual(row.threadId, "h")
+deepEqual(row.labelIds, ["UNREAD", "INBOX"])
+assert.strictEqual(row.internalDate, String(Date.parse("2026-08-24T09:00:00Z")))
+assert.strictEqual(row.sizeEstimate, 242)
+assert.strictEqual(row.payload.mimeType, "text/plain")
+deepEqual(row.payload.parts, [])
+deepEqual(row.payload.headers, [
+  { name: "From", value: '"Eve Lund" <eve@example.net>' },
+  { name: "To", value: "omamail-test@depodra.com" },
+  { name: "Subject", value: "[omamail-test] Unread" },
+  { name: "Date", value: "Mon, 24 Aug 2026 09:00:00 +0000" },
+  { name: "Message-ID", value: "<unread@omamail-test.invalid>" }
+])
+
+// The snippet is escaped because `Mail.decodeSnippet` unescapes Gmail's, so a
+// sender writing "<3" keeps it instead of losing it to a tag nobody wrote.
+assert.strictEqual(jmap.toMessage({ preview: "a < b & c > d" }, roles).snippet,
+  "a &lt; b &amp; c &gt; d")
+assert.strictEqual(message.decodeSnippet(jmap.toMessage({ preview: "a < b & c" }, roles).snippet),
+  "a < b & c", "and comes back out of the row exactly as the server wrote it")
+
+// The header forms JMAP splits apart and a header line joins together.
+deepEqual(jmap.toMessage({
+  messageId: ["m@x"], inReplyTo: ["p@x"], references: ["r1@x", "r2@x"],
+  "header:List-Unsubscribe:asRaw": " <https://example.org/u>",
+  "header:List-Unsubscribe-Post:asRaw": " List-Unsubscribe=One-Click"
+}, roles).payload.headers, [
+  { name: "Message-ID", value: "<m@x>" },
+  { name: "In-Reply-To", value: "<p@x>" },
+  { name: "References", value: "<r1@x> <r2@x>" },
+  { name: "List-Unsubscribe", value: "<https://example.org/u>" },
+  { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }
+])
+
+// A row is what the panel reads through, so it is checked through the panel's
+// own reader rather than field by field here.
+const summary = message.summarize(row, new Date(Date.parse("2026-08-24T10:00:00Z")))
+assert.strictEqual(summary.subject, "[omamail-test] Unread")
+assert.strictEqual(summary.from.email, "eve@example.net")
+assert.strictEqual(summary.from.name, "Eve Lund")
+assert.strictEqual(summary.unread, true)
+assert.strictEqual(summary.inInbox, true)
+assert.strictEqual(summary.snippet, "This one is unread.")
+assert.strictEqual(summary.date.getTime(), Date.parse("2026-08-24T09:00:00Z"),
+  "the row's date is `receivedAt`, which is what every list and every sort reads")
+
+deepEqual(jmap.toMessage(null, roles).payload.headers, [])
+assert.strictEqual(jmap.toMessage(null, roles).internalDate, "")
+
+// ------------------------------------------------------------- known states
+//
+// The newest state per type, which push reads to tell its own echo from
+// somebody else's change.
+
+deepEqual(jmap.recordStates({}, [["Mailbox/get", { state: "sia", list: [] }, "0"]]),
+  { Mailbox: "sia" })
+deepEqual(jmap.recordStates({ Mailbox: "sia" }, [["Email/get", { state: "s41", list: [] }, "0"]]),
+  { Mailbox: "sia", Email: "s41" })
+deepEqual(jmap.recordStates({ Email: "s1" },
+  [["Email/set", { oldState: "s1", newState: "s2" }, "0"]]), { Email: "s2" },
+  "a set moves the type to its new state")
+// `queryState` is the state of one query rather than of the type, a change
+// notification never names one, and filing it under Email would silence a real
+// change.
+deepEqual(jmap.recordStates({}, [["Email/query", { queryState: "sia", ids: [] }, "0"]]), {})
+deepEqual(jmap.recordStates({ Email: "s1" }, [["error", { type: "anchorNotFound" }, "0"]]),
+  { Email: "s1" })
+deepEqual(jmap.recordStates(null, null), {})
+
+// -------------------------------------------------- session limits and calls
+//
+// Read from the session, never assumed. The figures are the reference server's,
+// measured through the transport.
+
+const limited = session({
+  capabilities: {
+    "urn:ietf:params:jmap:core": {
+      maxSizeUpload: 50000000, maxConcurrentUpload: 4, maxSizeRequest: 10000000,
+      maxConcurrentRequests: 4, maxCallsInRequest: 16,
+      maxObjectsInGet: 500, maxObjectsInSet: 500
+    },
+    "urn:ietf:params:jmap:mail": {},
+    "urn:ietf:params:jmap:submission": {}
+  }
+})
+
+assert.strictEqual(jmap.sessionLimit(limited, "maxObjectsInGet", 100), 500)
+assert.strictEqual(jmap.sessionLimit(limited, "maxConcurrentRequests", 4), 4)
+assert.strictEqual(jmap.sessionLimit(limited, "maxObjectsInSet", 100), 500)
+assert.strictEqual(jmap.sessionLimit(limited, "notAThing", 7), 7,
+  "the floor under a server that omitted one, not an assumption about one that stated it")
+assert.strictEqual(jmap.sessionLimit(null, "maxObjectsInGet", 100), 100)
+assert.strictEqual(jmap.sessionLimit(limited, "maxObjectsInGet", 0), 500)
+assert.strictEqual(jmap.sessionLimit(JSON.stringify(limited), "maxObjectsInGet", 100), 500,
+  "the document may still be text")
+assert.strictEqual(jmap.primaryAccountId(session()), "t")
+assert.strictEqual(jmap.primaryAccountId(null), "")
+
+deepEqual(jmap.chunked(["a", "b", "c", "d", "e"], 2), [["a", "b"], ["c", "d"], ["e"]])
+deepEqual(jmap.chunked(["a", "b"], 500), [["a", "b"]])
+deepEqual(jmap.chunked([], 500), [])
+deepEqual(jmap.chunked(["a", "b"], 0), [["a"], ["b"]])
+
+const reply = [
+  ["Email/query", { position: 0, ids: ["x"], total: 1 }, "0"],
+  ["Email/get", { state: "s41", list: [{ id: "x" }] }, "1"]
+]
+deepEqual(jmap.responseArguments(reply, "Email/get"), { state: "s41", list: [{ id: "x" }] })
+assert.strictEqual(jmap.responseArguments(reply, "Mailbox/get"), null,
+  "which is a different thing from an invocation that answered an empty list")
+assert.strictEqual(jmap.responseArguments(null, "Email/get"), null)
+
+// ------------------------------------------------------ per-account refusals
+//
+// The provider's list is a ceiling and an account withdraws from it. Presence
+// of a key is the refusal; the value is the sentence a user reads.
+
+// The reference account: a Junk mailbox, a server that learns from it, a
+// credential that may submit — and no Archive at all.
+deepEqual(jmap.refusals(session(), "t", boxes),
+  { archive: "This account has no Archive mailbox" })
+deepEqual(jmap.refusals(JSON.stringify(session()), "t", boxes),
+  { archive: "This account has no Archive mailbox" })
+
+// The same account on a server with no vendor URN and no Fastmail host: the
+// Junk mailbox is real, only the verb is gone, and the row stays on the rail.
+function generic(overrides) {
+  const doc = session(Object.assign({ apiUrl: "https://mail.example.org/jmap/" }, overrides || {}))
+  delete doc.accounts.t.accountCapabilities["urn:stalwart:jmap"]
+  return doc
+}
+
+deepEqual(jmap.refusals(generic(), "t", boxes), {
+  archive: "This account has no Archive mailbox",
+  spam: "This server is not known to learn from its Junk mailbox"
+})
+
+// Stalwart is named by its URN, and by the *account's* capabilities first —
+// which is where the reference server puts it. A rule written to the session's
+// top-level list alone would refuse spam on the very server it was written for.
+assert.strictEqual(jmap.learnsFromJunk(session(), "t"), true)
+assert.strictEqual(jmap.learnsFromJunk(generic(), "t"), false)
+const publishedOnSession = generic()
+publishedOnSession.capabilities["urn:stalwart:jmap"] = {}
+assert.strictEqual(jmap.learnsFromJunk(publishedOnSession, "t"), true,
+  "and the session's own list is read as well, for a server that publishes it there")
+
+// Fastmail publishes no vendor URN naming itself, so the API host identifies it.
+assert.strictEqual(
+  jmap.learnsFromJunk(generic({ apiUrl: "https://api.fastmail.com/jmap/api/" }), "t"), true)
+assert.strictEqual(
+  jmap.learnsFromJunk(generic({ apiUrl: "https://api.fastmail.com:443/jmap/" }), "t"), true,
+  "the port is not part of the host")
+assert.strictEqual(
+  jmap.learnsFromJunk(generic({ apiUrl: "https://api.notfastmail.com/jmap/" }), "t"), false,
+  "a host that merely ends in the same letters is not the same host")
+assert.strictEqual(
+  jmap.learnsFromJunk(generic({ apiUrl: "https://fastmail.com/jmap/" }), "t"), false)
+assert.strictEqual(jmap.learnsFromJunk(null, "t"), false)
+
+// Every row of the table on one account: no Archive, no Junk, no submission.
+const inboxOnly = [{ id: "a", name: "Inbox", parentId: null, role: "inbox" }]
+const readOnlyCredential = generic()
+delete readOnlyCredential.accounts.t.accountCapabilities["urn:ietf:params:jmap:submission"]
+deepEqual(jmap.refusals(readOnlyCredential, "t", inboxOnly), {
+  archive: "This account has no Archive mailbox",
+  spam: "This account has no Junk mailbox",
+  send: "This account cannot send mail"
+})
+
+// Submission is asked of the account and not of the session, which still
+// declares it: a session-level fallback would draw a Send button for a
+// read-only credential.
+assert.strictEqual(
+  readOnlyCredential.capabilities["urn:ietf:params:jmap:submission"] !== undefined, true)
+assert.strictEqual(jmap.hasSubmission(readOnlyCredential, "t"), false)
+assert.strictEqual(jmap.hasSubmission(session(), "t"), true)
+
+// An account that refuses nothing answers an empty object, which is a positive
+// statement and not the same thing as null.
+deepEqual(jmap.refusals(session(), "t", unrolled), {})
+
+// Null until both a session and a mailbox list are in hand: with null the
+// registry answers the ceiling, which is what a button should say while the
+// list is still on its way rather than a promise about a mailbox nobody has
+// looked for yet.
+assert.strictEqual(jmap.refusals(session(), "t", []), null)
+assert.strictEqual(jmap.refusals(session(), "t", null), null)
+assert.strictEqual(jmap.refusals(null, "t", boxes), null)
+
+// And the whole point of it, through the registry the panel actually asks.
+const accountRefusals = jmap.refusals(session(), "t", boxes)
+assert.strictEqual(registry.can("jmap", "archive", accountRefusals), false,
+  "no Archive mailbox, so no archive button and no `e` hint")
+assert.strictEqual(registry.refusal("jmap", "archive", accountRefusals),
+  "This account has no Archive mailbox")
+assert.strictEqual(registry.can("jmap", "spam", accountRefusals), true,
+  "and a Report spam button, because this server is known to learn from Junk")
+assert.strictEqual(registry.can("jmap", "star", accountRefusals), true)
+assert.strictEqual(registry.can("jmap", "send", accountRefusals), true)
+deepEqual(registry.mailboxes("jmap", jmap.absentMailboxes(boxes)).map(box => box.key),
+  ["inbox", "unread", "starred", "sent", "drafts", "spam", "trash"],
+  "the Archive row is gone and Junk moves up, because the number keys are positional")
 
 // ------------------------------------------------------- the provider itself
 //

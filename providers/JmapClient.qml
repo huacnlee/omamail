@@ -7,17 +7,29 @@ import "../message/Message.js" as Mail
 
 // A JMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //
-// At this point in the build it does one thing and does it completely: it
-// signs the account in. Discovery, the session GET under each scheme in turn,
-// the four-step check and the one `Mailbox/get` that proves the API URL all
-// live here, because all of them are requests and requests are this object's
-// half of the provider pair. Everything else — the list, the reader, the
-// actions, the push and the send — is a stub the following tickets fill, and
-// each of them answers an empty result rather than pretending to fail.
-//
 // The transport is `scripts/jmap-transport.sh`, which is curl. The protocol is
 // `JmapProtocol.js`. This file is the part in between: which requests a given
 // job becomes, in what order, and what to do when one of them fails.
+//
+// It signs the account in — discovery, the session GET under each scheme in
+// turn, the four-step check — and it reads: the rail, the labels, the list, a
+// page, a search and the counts. The reader, the actions, the push and the
+// send are stubs the following tickets fill, and each answers an empty result
+// rather than pretending to fail.
+//
+// ## Three things every read depends on, in this order
+//
+//   1. the *session*. Its API URL, its download template and its limits are
+//      the server's answer rather than the account's settings, so it is held
+//      in memory, kept in the account's cache file and refetched when neither
+//      has one. A restart has neither until this runs.
+//   2. the *mailbox list*, read once on first need. Every query gates on it
+//      the way IMAP's gates on LIST: a filter needs the mailbox id a role
+//      resolved to, and so does every label id on every row.
+//   3. the *role map* over that list, which is what a rail row means on this
+//      account. Rebuilt whenever the list is replaced, and with it `refusals`
+//      and `absentMailboxes` — the two answers that take a button, a key hint
+//      and a rail row away before anything reaches the server.
 Item {
   id: root
 
@@ -47,17 +59,57 @@ Item {
   property bool credentialsRejected: false
 
   // The session object this account is working from, and the mailboxes the
-  // sign-in read. Held for the tickets that build the list on them.
+  // last read returned. Everything below is a binding over these two, so
+  // replacing either is what moves the rail, the buttons and the key hints.
   property var session: null
   property var mailboxList: []
 
+  // The id every method call names. The session's own primary wins: it is the
+  // session this request is being made against, and an account id written down
+  // at sign-in is only ever the answer before one has arrived.
+  readonly property string accountId: {
+    var primary = Jmap.primaryAccountId(session)
+    if (primary !== "") return primary
+    return auth && auth.settings ? String(auth.settings.accountId || "") : ""
+  }
+
+  // Where every method call goes, read from the session rather than assumed:
+  // on the reference account the session is on one host and this is on another.
+  readonly property string apiUrl: Jmap.apiUrl(session)
+
+  // What each rail row means on this account — a mailbox id per role, or "" for
+  // a role this account has no mailbox for. Every filter and every label id is
+  // read through it, so a page of fifty rows resolves six roles rather than
+  // three hundred and a row cannot be labelled from a different answer than the
+  // query that found it.
+  readonly property var roles: Jmap.roleMap(mailboxList)
+
+  // What this account withdraws from the provider's ceiling, and which rail
+  // rows it has no mailbox for. Both null until the first `Mailbox/get`, and
+  // with null the registry answers the ceiling — which is the right thing for a
+  // button while the list is still on its way rather than a promise about a
+  // mailbox nobody has looked for yet.
+  readonly property var refusals: Jmap.refusals(session, accountId, mailboxList)
+  readonly property var absentMailboxes: Jmap.absentMailboxes(mailboxList)
+
+  // The newest state the server has reported per type, from every reply. Push
+  // (ticket 09) is the only reader: a change notification naming a state this
+  // client has already been told is the echo of its own write.
+  property var knownStates: ({})
+
   function newHandle() {
-    return { aborted: false, process: null, children: [] }
+    return { aborted: false, process: null, children: [], queueEntry: null }
   }
 
   function abortRequest(handle) {
     if (!handle) return
     handle.aborted = true
+    // A request still waiting for a slot has no process to stop and must not
+    // take one: withdrawing it is what stops an abandoned page from holding the
+    // queue open behind the page that replaced it.
+    if (handle.queueEntry && callQueue) {
+      if (callQueue.withdraw(handle.queueEntry)) handle.queueEntry = null
+    }
     if (handle.process) {
       handle.process.running = false
       handle.process = null
@@ -65,6 +117,13 @@ Item {
     var children = handle.children || []
     for (var i = 0; i < children.length; i++) abortRequest(children[i])
     handle.children = []
+  }
+
+  // What a caller gets back, whichever way the request ended. Every public read
+  // here answers through one of these, so an aborted handle calls back nothing
+  // and a live one calls back exactly once.
+  function hand(callback, value, error) {
+    if (typeof callback === "function") callback(value, String(error || ""))
   }
 
   // ------------------------------------------------------------- transport
@@ -251,9 +310,15 @@ Item {
       }
       // Core and mail, and never a vendor capability: what this request needs
       // is exactly what every list will need.
+      //
+      // The same properties every later `Mailbox/get` asks for, so the list
+      // sign-in leaves behind is the list the rail, the sidebar and the counts
+      // can all be drawn from without a second read.
       var body = JSON.stringify({
-        using: [Jmap.CAPABILITY_CORE, Jmap.CAPABILITY_MAIL],
-        methodCalls: [["Mailbox/get", { accountId: accountId, ids: null }, "0"]]
+        using: Jmap.USING_MAIL,
+        methodCalls: [["Mailbox/get", {
+          accountId: accountId, ids: null, properties: Jmap.MAILBOX_PROPERTIES
+        }, "0"]]
       })
       request("call", api, credential(scheme), body, handle, function(reply) {
         if (handle.aborted) return
@@ -286,6 +351,11 @@ Item {
 
         root.session = Jmap.parseJson(sessionText)
         root.mailboxList = boxes
+        // A sign-in that came back with mailboxes has already done the read
+        // every query gates on. An empty answer is left unloaded so the first
+        // query asks again rather than starting from nothing.
+        root.mailboxesLoaded = boxes.length > 0
+        root.knownStates = Jmap.recordStates(root.knownStates, responses)
         root.credentialsRejected = false
         rememberSession(url, sessionText)
         finish({
@@ -352,6 +422,16 @@ Item {
     process.running = true
   }
 
+  // Everything read off one server, dropped together. The rail falls back to
+  // the provider's ceiling while it is empty, which is what `refusals` and
+  // `absentMailboxes` answering null means.
+  function forgetServer() {
+    session = null
+    mailboxList = []
+    mailboxesLoaded = false
+    knownStates = ({})
+  }
+
   // Beside the query cache, keyed on the URL it came from and the state the
   // server stamped on it. A cache miss costs one round trip; a cache hit from
   // the wrong server would cost a credential, which is why the URL is part of
@@ -371,19 +451,283 @@ Item {
       })
     }
     // A mailbox pointed at a different server is a different mailbox: the
-    // session and the folders belong to the old one.
+    // session, the folders and every state read off them belong to the old one.
     function onSettingsChanged() {
-      root.session = null
-      root.mailboxList = []
+      root.forgetServer()
     }
     // A deliberate sign-out is not a refused credential. Left standing, the
     // flag would draw the re-entry card over a mailbox nobody has offered a
     // secret to yet.
     function onLoggedOut() {
       root.credentialsRejected = false
-      root.session = null
-      root.mailboxList = []
+      root.forgetServer()
     }
+  }
+
+  // ------------------------------------------------------------ the queue
+
+  // One FIFO over every method call, at the concurrency the session named.
+  // RFC 8620 lets a server refuse a request beyond `maxConcurrentRequests`, and
+  // a page of rows plus a count plus a label read is easily more than four at
+  // once — so the limit is honoured here rather than discovered as a refusal.
+  //
+  // Built once, at the first call after the session arrived, and never torn
+  // down: a queue destroyed with entries waiting would strand their callbacks.
+  // A mailbox pointed at another server keeps this one's limit, which is a
+  // difference in pace and not in correctness.
+  property var callQueue: null
+
+  function queue() {
+    if (!callQueue) {
+      callQueue = Jmap.makeQueue(
+        Jmap.sessionLimit(session, "maxConcurrentRequests", Jmap.DEFAULT_CONCURRENCY))
+    }
+    return callQueue
+  }
+
+  // One finished, so the next one starts. Called exactly once per admitted
+  // entry, on every path out of it — including the ones that never reached
+  // curl, because a slot held by a request that failed to start is a slot
+  // nothing ever gives back.
+  function releaseSlot() {
+    if (!callQueue) return
+    var next = callQueue.release()
+    if (next) next.start()
+  }
+
+  // ---------------------------------------------------------- the session
+
+  property var sessionWaiters: []
+  property bool sessionLoading: false
+
+  function finishSessionWaiters(error) {
+    sessionLoading = false
+    var pending = sessionWaiters.slice()
+    sessionWaiters = []
+    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
+  }
+
+  // The session object: memory, then the cache, then the server.
+  //
+  // A shell restart has neither of the first two. What the account carries is
+  // the session URL, the scheme and the account id; the session itself — the
+  // API URL, the download template, the limits, the state — is the server's
+  // answer, so it lives beside the query results and is restored from there.
+  // Without this read a signed-in mailbox would have nowhere to send its first
+  // request after every restart.
+  //
+  // The cached copy is used as it stands, and is verified the way a fetched one
+  // is. It is keyed on the URL it came from, so it cannot be another server's;
+  // revalidating it against the server on every start would cost a round trip
+  // before the first row every time, which is the cost this read exists to
+  // avoid. A server that has moved its API URL since answers the first call
+  // with a 404, and that is what `readCall` drops the session on.
+  function ensureSession(callback) {
+    if (session) {
+      callback("")
+      return
+    }
+    var url = auth && auth.settings ? String(auth.settings.sessionUrl || "") : ""
+    if (url === "") {
+      callback("Sign in to this mailbox first")
+      return
+    }
+    if (cache && typeof cache.getSession === "function") {
+      var entry = cache.getSession(url)
+      if (entry && entry.session && Jmap.verifySession(entry.session).error === "") {
+        root.session = entry.session
+        callback("")
+        return
+      }
+    }
+
+    var waiting = sessionWaiters.slice()
+    waiting.push(callback)
+    sessionWaiters = waiting
+    if (sessionLoading) return
+    sessionLoading = true
+
+    auth.withCredentials(function(credential, error) {
+      if (!root) return
+      if (error || !credential) {
+        root.finishSessionWaiters(error || "Sign in to this mailbox first")
+        return
+      }
+      root.request("session", url, credential, null, null, function(reply) {
+        if (!root) return
+        if (reply.exit !== 0 || reply.status !== 200) {
+          root.finishSessionWaiters(
+            Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+          return
+        }
+        // The same four-step check sign-in runs, because a session fetched now
+        // is a session that may have changed: an account whose mail capability
+        // or `receivedAt` sort has gone is one every list would fail on.
+        var check = Jmap.verifySession(reply.body)
+        if (check.error !== "") {
+          root.finishSessionWaiters(check.error)
+          return
+        }
+        root.session = Jmap.parseJson(reply.body)
+        root.credentialsRejected = false
+        root.rememberSession(url, reply.body)
+        root.finishSessionWaiters("")
+      })
+    })
+  }
+
+  // ------------------------------------------------------------ one call
+
+  // One API POST, through the queue and the credential, with the three levels a
+  // JMAP request fails at read in the right order.
+  //
+  // `callback(responses, error, errorType)`. The type is handed over beside the
+  // sentence because `methodError` returning "" cannot be told from "no error",
+  // and because one caller — the paging retry — has a branch for a particular
+  // one.
+  function call(methodCalls, handle, callback) {
+    var owner = handle || newHandle()
+    var entry = { owner: owner }
+
+    entry.start = function() {
+      if (!root || owner.aborted) {
+        if (root) root.releaseSlot()
+        return
+      }
+      if (!root.auth) {
+        root.releaseSlot()
+        root.hand(callback, null, "Sign in to this mailbox first")
+        return
+      }
+      if (root.apiUrl === "") {
+        root.releaseSlot()
+        root.hand(callback, null, "Sign in to this mailbox again")
+        return
+      }
+      root.auth.withCredentials(function(credential, error) {
+        if (!root) return
+        if (owner.aborted) {
+          root.releaseSlot()
+          return
+        }
+        if (error || !credential) {
+          root.releaseSlot()
+          root.hand(callback, null, error || "Sign in to this mailbox first")
+          return
+        }
+        var body = JSON.stringify({ using: Jmap.USING_MAIL, methodCalls: methodCalls })
+        root.request("call", root.apiUrl, credential, body, owner, function(reply) {
+          if (!root) return
+          root.releaseSlot()
+          if (owner.aborted) return
+          root.readCall(reply, callback)
+        })
+      })
+    }
+
+    owner.queueEntry = entry
+    if (queue().admit(entry)) entry.start()
+    return owner
+  }
+
+  function readCall(reply, callback) {
+    if (reply.exit !== 0 || reply.status !== 200) {
+      // A method that failed comes back inside a 200 with an `error`
+      // invocation, so a 404 from the API URL is not a missing message — it is
+      // a URL that is no longer there, which is what a restored session whose
+      // server has moved since looks like. Dropping it has the next read fetch
+      // a fresh one rather than failing against the same stale address for as
+      // long as the account is open.
+      if (reply.status === 404) forgetServer()
+      hand(callback, null,
+        Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+      return
+    }
+    var payload = Jmap.parseJson(reply.body)
+    if (!payload) {
+      hand(callback, null, "The server sent an answer this client could not read")
+      return
+    }
+    // JMAP fails at two levels inside a 200. A request-level failure replaces
+    // the whole document, so it is the absence of `methodResponses` that says
+    // which of the two this is.
+    var responses = payload.methodResponses
+    if (!Array.isArray(responses)) {
+      hand(callback, null, Jmap.requestError(payload))
+      return
+    }
+    root.knownStates = Jmap.recordStates(root.knownStates, responses)
+    var type = Jmap.methodErrorType(responses)
+    if (typeof callback === "function")
+      callback(responses, type !== "" ? Jmap.methodError(responses) : "", type)
+  }
+
+  // ------------------------------------------------------- the mailbox list
+
+  property bool mailboxesLoaded: false
+  property bool mailboxLoading: false
+  property var mailboxWaiters: []
+
+  function finishMailboxWaiters(error) {
+    mailboxLoading = false
+    var pending = mailboxWaiters.slice()
+    mailboxWaiters = []
+    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
+  }
+
+  // Every query gates on this, the way IMAP's gates on LIST. Read once on first
+  // need and kept, then replaced wholesale by every `getLabels` — which sign-in
+  // and every refresh call, so a folder added on the server reaches the rail
+  // without anything here watching for it.
+  function ensureMailboxes(callback) {
+    // The flag, not the list's length. A server that really does answer with no
+    // mailboxes at all would otherwise be read again on every query for as long
+    // as the account was open; one read and an honest refusal from every rail
+    // row is the right answer to an account with nothing in it.
+    if (mailboxesLoaded) {
+      callback("")
+      return
+    }
+    var waiting = mailboxWaiters.slice()
+    waiting.push(callback)
+    mailboxWaiters = waiting
+    if (mailboxLoading) return
+    mailboxLoading = true
+
+    ensureSession(function(error) {
+      if (!root) return
+      if (error) {
+        root.finishMailboxWaiters(error)
+        return
+      }
+      root.readMailboxList(null, function(list, failure) {
+        if (!root) return
+        root.finishMailboxWaiters(failure)
+      })
+    })
+  }
+
+  // One `Mailbox/get`, with the properties the rail, the sidebar and the counts
+  // are all read out of. Replacing the list is what recomputes the role map,
+  // the refusals and the absent rows.
+  function readMailboxList(handle, callback) {
+    return call([["Mailbox/get", {
+      accountId: root.accountId,
+      ids: null,
+      properties: Jmap.MAILBOX_PROPERTIES
+    }, "0"]], handle, function(responses, error) {
+      if (!root) return
+      if (error) {
+        callback([], error)
+        return
+      }
+      var args = Jmap.responseArguments(responses, "Mailbox/get")
+      var list = args && Array.isArray(args.list) ? args.list : []
+      root.mailboxList = list
+      root.mailboxesLoaded = true
+      callback(list, "")
+
+    })
   }
 
   // ---------------------------------------------------------------- reads
@@ -408,30 +752,131 @@ Item {
     return newHandle()
   }
 
-  // ------------------------------------------------------------- to follow
+  // ------------------------------------------------------------- the list
+
+  // One page of ids, newest first.
   //
-  // The rest of the interface, answering the empty result rather than an
-  // error: an account that has just signed in has a working session and no
-  // list yet, and "this failed" is not what that is. Each of these is filled
-  // in by the ticket that owns it — the query and the list, the reader, the
-  // actions, the send — and none of them is a button the panel draws until it
-  // is.
-
-  function answer(callback, value) {
-    if (typeof callback !== "function") return newHandle()
-    Qt.callLater(function() {
-      if (!root) return
-      callback(value, "")
-    })
-    return newHandle()
-  }
-
+  //   { ids, threadIds, nextPageToken, estimate }
+  //
+  // `threadIds` is empty: the query runs uncollapsed here and a row is a
+  // message, which ticket 11 changes. `progress` goes unused because one POST
+  // answers the whole page — there is no partial result to paint early, the way
+  // IMAP's windowed search has.
   function listMessages(query, maxResults, pageToken, callback, progress) {
-    return answer(callback, { ids: [], threadIds: [], nextPageToken: "", estimate: 0 })
+    var handle = newHandle()
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      var parsed = Jmap.parseQuery(query)
+      var filter = Jmap.filterFor(parsed, root.roles)
+      // A rail row whose role resolves to nothing on this account. The row is
+      // already gone from the sidebar and the button is already off; this is
+      // the layer underneath both, for a mailbox deleted since the last read.
+      if (!filter) {
+        root.hand(callback, null, Jmap.queryError(parsed, root.roles))
+        return
+      }
+      root.runQuery(filter, maxResults, pageToken, false, handle, callback)
+    })
+    return handle
   }
 
+  function runQuery(filter, maxResults, token, byPosition, handle, callback) {
+    var child = call([["Email/query",
+      Jmap.emailQuery(root.accountId, filter, maxResults, token, byPosition), "0"]],
+      null, function(responses, error, type) {
+        if (!root || handle.aborted) return
+        // The anchor moved or was deleted between pages — the one thing anchor
+        // paging cannot survive, and the reason the token carries a position
+        // beside it. One retry, by position, and never a second: a page that
+        // cannot be found twice is a result that is changing faster than it can
+        // be read.
+        if (type === "anchorNotFound" && byPosition !== true) {
+          root.runQuery(filter, maxResults, token, true, handle, callback)
+          return
+        }
+        if (error) {
+          root.hand(callback, null, error)
+          return
+        }
+        root.hand(callback,
+          Jmap.queryPage(Jmap.responseArguments(responses, "Email/query"), maxResults), "")
+      })
+    handle.children.push(child)
+  }
+
+  // The rows behind those ids, in the order they were asked for.
+  //
+  // `full` is ignored here: a full read is `bodyStructure` and body values, and
+  // it belongs to the ticket that builds the reader. Every row goes through the
+  // same composer, so a list row and a preview row are the same shape.
   function getMessages(ids, full, callback, existingHandle, progress) {
-    return answer(callback, [])
+    var handle = existingHandle || newHandle()
+    var wanted = []
+    var source = Array.isArray(ids) ? ids : []
+    for (var i = 0; i < source.length; i++) {
+      var id = String(source[i] || "")
+      if (id !== "") wanted.push(id)
+    }
+    if (wanted.length === 0) {
+      hand(callback, [], "")
+      return handle
+    }
+
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, [], error)
+        return
+      }
+      var chunks = Jmap.chunked(wanted,
+        Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
+      var byId = {}
+      var remaining = chunks.length
+      var firstError = ""
+
+      function finish() {
+        if (!root || handle.aborted) return
+        var ordered = []
+        for (var k = 0; k < wanted.length; k++) {
+          if (byId[wanted[k]]) ordered.push(byId[wanted[k]])
+        }
+        // A partial page is still a failed page: hiding one failed chunk
+        // because another answered would let the caller keep a continuation
+        // token beyond the missing row.
+        root.hand(callback, ordered, firstError)
+      }
+
+      for (var c = 0; c < chunks.length; c++) {
+        (function(chunk) {
+          var child = root.call([["Email/get", {
+            accountId: root.accountId,
+            ids: chunk,
+            properties: Jmap.LIST_PROPERTIES
+          }, "0"]], null, function(responses, failure) {
+            if (!root || handle.aborted) return
+            if (failure && firstError === "") firstError = failure
+            var args = Jmap.responseArguments(responses, "Email/get")
+            var list = args && Array.isArray(args.list) ? args.list : []
+            var painted = []
+            for (var j = 0; j < list.length; j++) {
+              var message = Jmap.toMessage(list[j], root.roles)
+              if (message.id === "") continue
+              byId[message.id] = message
+              painted.push(message)
+            }
+            if (painted.length > 0 && typeof progress === "function") progress(painted)
+            remaining = remaining - 1
+            if (remaining === 0) finish()
+          })
+          handle.children.push(child)
+        })(chunks[c])
+      }
+    })
+    return handle
   }
 
   function getMessage(id, full, callback) {
@@ -442,12 +887,79 @@ Item {
     return answer(callback, null)
   }
 
+  // The server's own folders, in the shape the sidebar reads Gmail's labels in.
+  //
+  // A fresh `Mailbox/get` every time, which is the mailbox list's whole refresh
+  // path: sign-in and every refresh call this, so a folder created, renamed or
+  // deleted on the server reaches the rail, the role map and the refusals
+  // together rather than one of them at a time.
   function getLabels(callback) {
-    return answer(callback, [])
+    var handle = newHandle()
+    ensureSession(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, [], error)
+        return
+      }
+      root.readMailboxList(handle, function(list, failure) {
+        if (!root || handle.aborted) return
+        if (failure) {
+          root.hand(callback, [], failure)
+          return
+        }
+        root.hand(callback, Jmap.mailboxLabels(list, root.roles), "")
+      })
+    })
+    return handle
   }
 
   function getLabelCounts(labelId, callback) {
-    return answer(callback, { unread: 0, total: 0, threadsUnread: 0 })
+    var handle = newHandle()
+    var id = String(labelId || "")
+    if (id === "") {
+      hand(callback, { id: "", unread: 0, total: 0, threadsUnread: 0 }, "")
+      return handle
+    }
+    ensureSession(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      root.call([["Mailbox/get", {
+        accountId: root.accountId,
+        ids: [id],
+        properties: Jmap.MAILBOX_PROPERTIES
+      }, "0"]], handle, function(responses, failure) {
+        if (!root || handle.aborted) return
+        if (failure) {
+          root.hand(callback, null, failure)
+          return
+        }
+        var args = Jmap.responseArguments(responses, "Mailbox/get")
+        var list = args && Array.isArray(args.list) ? args.list : []
+        root.hand(callback, list.length > 0 ? Jmap.labelCounts(list[0])
+          : { id: id, unread: 0, total: 0, threadsUnread: 0 }, "")
+      })
+    })
+    return handle
+  }
+
+  // ------------------------------------------------------------- to follow
+  //
+  // The rest of the interface, answering the empty result rather than an
+  // error: an account that has just signed in has a working session and
+  // nothing written yet, and "this failed" is not what that is. Each of these
+  // is filled in by the ticket that owns it — the reader, the actions, the
+  // send — and none of them is a button the panel draws until it is.
+
+  function answer(callback, value) {
+    if (typeof callback !== "function") return newHandle()
+    Qt.callLater(function() {
+      if (!root) return
+      callback(value, "")
+    })
+    return newHandle()
   }
 
   function getSendAs(callback) {
