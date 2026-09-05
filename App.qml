@@ -11,6 +11,7 @@ import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
+import "providers/Registry.js" as Provider
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
@@ -721,6 +722,17 @@ Item {
   readonly property var sidebarSlots: service
     ? Model.sidebarSlots(service.mailboxes, service.labels, 10) : []
 
+  // What the header names: the mailbox open, or the label. Derived from the
+  // same facts the rail draws its selected row from.
+  readonly property var scope: service
+    ? Model.currentScope(service.mailboxKey, service.mailboxes, service.labels,
+        service.rawQuery, service.rawLabelId,
+        function(name) { return Provider.labelQuery(service.providerId, name) })
+    : Model.currentScope("inbox", [], [], "", "", null)
+
+  readonly property var switcherRows: service
+    ? Model.switcherRows(sidebarSlots, service.labels, scope) : []
+
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
     var slot = sidebarSlots[index]
@@ -784,6 +796,7 @@ Item {
       return
     }
     if (id === "switchAccount") return accountSwitcher.openCentered()
+    if (id === "switchMailbox") return mailboxSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
       else {
@@ -1138,13 +1151,61 @@ Item {
             brand: true
           }
 
+          // What this window is looking at, said where the eye lands first:
+          // the account, then the mailbox or label open in it. Each half is
+          // the control that changes it, so the line is the switcher as much
+          // as the title. The rail says the same thing further down and only
+          // when it is expanded; the status line carries the address.
+          ScopeButton {
+            id: accountScope
+            objectName: "scope-account"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing
+            text: root.ready ? root.service.accountLabel : "No account"
+            tooltipText: "Switch account · Alt+A"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: accountSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              accountSwitcher.openAt(scene.x, scene.y)
+            }
+          }
+
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Omamail"
-            color: root.foreground
+            visible: accountScope.visible && mailboxScope.visible
+            text: "\u203A"
+            color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.title
+            font.pixelSize: Style.font.body
+          }
+
+          ScopeButton {
+            id: mailboxScope
+            objectName: "scope-mailbox"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && !root.calendarVisible
+            iconName: root.scope.icon
+            text: root.scope.name
+            tooltipText: "Go to a mailbox · Alt+M"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: mailboxSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              mailboxSwitcher.openAt(scene.x, scene.y)
+            }
           }
 
           // Next to the mark: this is the window's own menu, not an action on
@@ -2015,6 +2076,20 @@ Item {
         onManageRequested: {
           root.openSettings()
         }
+      }
+
+      MailboxSwitcher {
+        id: mailboxSwitcher
+        objectName: "mailbox-switcher"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        rows: root.switcherRows
+        onRowChosen: function(index) { root.goSlot(index) }
       }
 
       LabelPicker {
