@@ -1922,8 +1922,30 @@ Item {
     // block still said unread.
     var next = []
     for (var j = 0; j < messages.length; j++) {
-      next.push(Model.applyLabelChange(messages[j], "markRead",
+      next.push(Model.applyLabelChange(messages[j], "markRead", "",
         Model.threadAfterAction(messages[j], "markRead")))
+    }
+    // The rail draws from `memberSummaries` and the reader from
+    // `selectedMessage`, and both are among what was just marked: every member
+    // this holds a summary for takes the change, and a representative takes
+    // its row's, block and all. Left alone, a stop kept its dot for the rest
+    // of the session, because nothing later re-reads a member it already has.
+    var memberBefore = memberSummaries
+    var memberAfter = ({})
+    for (var m = 0; m < ids.length; m++) {
+      var held = memberSummaries[ids[m]]
+      if (held) memberAfter[ids[m]] = Model.applyLabelChange(held, "markRead")
+    }
+    for (var r = 0; r < next.length; r++) {
+      if (memberSummaries[next[r].id]) memberAfter[next[r].id] = next[r]
+    }
+    memberSummaries = Conversation.mergedSummaries(memberSummaries, memberAfter,
+      Conversation.MAX_REMEMBERED)
+    var selectedBefore = selectedMessage
+    var selectedWas = selectedId
+    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
+      selectedMessage = memberAfter[selectedId]
+        || Model.applyLabelChange(selectedMessage, "markRead")
     }
     var survives = Model.survivesAction(mailboxKey, "markRead")
     var opaqueQuery = effectiveQuery
@@ -1952,6 +1974,10 @@ Item {
             nextPageToken: actionToken
           }))
         }
+        // The rail and the reader go back with the rows, unless the reader
+        // has moved on to something this never touched.
+        root.memberSummaries = memberBefore
+        if (root.selectedId === selectedWas) root.selectedMessage = selectedBefore
         root.fail(error)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
         if (interrupted && root.cacheKey === actionQuery)

@@ -51,6 +51,19 @@ function blockOf(value) {
   }
 }
 
+// Whether one member, on its own, carries a label. A summary's `unread` and
+// `starred` are `Message.summarize`'s reading of the *row*: the label, or any
+// counted member's — so a representative that has been read while a reply has
+// not is still an unread row. A stop in the rail is one message, and asking
+// the row's flag drew a dot on the representative for every unread reply and
+// counted it in the caption. The label list is the member's own; the flag is
+// only the fallback for a summary that carries none.
+function memberHasLabel(summary, label, fallbackKey) {
+  if (!summary || typeof summary !== "object") return false
+  if (Array.isArray(summary.labelIds)) return summary.labelIds.indexOf(label) >= 0
+  return summary[fallbackKey] === true
+}
+
 function threadOfSummary(summary) {
   if (!summary || typeof summary !== "object") return null
   return blockOf(summary.thread)
@@ -224,8 +237,8 @@ function stops(block, summaries, openId, viewKey, mailboxes) {
       sender: summary ? senderOf(summary) : "",
       time: summary ? String(summary.time || "") : "",
       fullTime: summary ? String(summary.fullTime || "") : "",
-      unread: !!summary && summary.unread === true,
-      flagged: !!summary && summary.starred === true,
+      unread: memberHasLabel(summary, "UNREAD", "unread"),
+      flagged: memberHasLabel(summary, "STARRED", "starred"),
       mailbox: summary ? mailboxNameFor(summary, viewKey, mailboxes) : ""
     })
   }
@@ -247,8 +260,8 @@ function caption(block, summaries) {
   if (!thread || thread.count < MINIMUM_MEMBERS) return ""
   var unread = 0
   for (var i = 0; i < thread.memberIds.length; i++) {
-    var summary = summaryFor(summaries, thread.memberIds[i])
-    if (summary && summary.unread === true) unread = unread + 1
+    if (memberHasLabel(summaryFor(summaries, thread.memberIds[i]), "UNREAD", "unread"))
+      unread = unread + 1
   }
   var text = pluralize(thread.count, "message", "messages")
   return unread > 0 ? text + " · " + unread + " unread" : text

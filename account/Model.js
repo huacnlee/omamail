@@ -209,9 +209,7 @@ function rowIndexForMember(messages, id) {
 // representative whenever *any* member is unread — so recomputing a block from
 // them would never clear it. The labels are the one message's own answer.
 function memberHasLabel(summary, label, fallbackKey) {
-  if (!summary || typeof summary !== "object") return false
-  if (Array.isArray(summary.labelIds)) return summary.labelIds.indexOf(label) >= 0
-  return summary[fallbackKey] === true
+  return Conversation.memberHasLabel(summary, label, fallbackKey)
 }
 
 // The row's block after one of its members changed.

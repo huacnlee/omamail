@@ -172,14 +172,38 @@ assert.strictEqual(conversation.mailboxNameFor({ labelIds: ["SPAM"] }, "inbox", 
 }
 
 {
+  // The member's own label is what the flag reads; see the block below.
   const flagged = Object.assign({}, known, {
-    maaaaae: summary("maaaaae", { starred: true })
+    maaaaae: summary("maaaaae", { starred: true, labelIds: ["INBOX", "STARRED"] })
   })
   deepEqual(conversation.stops(block, flagged, "maaaaaf", "inbox", mailboxes)
     .map(s => s.flagged), [false, true, false])
 }
 
 deepEqual(conversation.stops(null, known, "", "inbox", mailboxes), [])
+
+// A stop is one message. The representative's summary is the row's, and a
+// row's `unread` and `starred` are "this message *or* any counted member" —
+// so a representative read while a reply is not carries `unread: true` and
+// must not draw a dot, and the caption counts the reply and not the row.
+{
+  const representative = summary("maaaaad", {
+    unread: true, starred: true, labelIds: ["INBOX"],
+    thread: { id: "d", count: 3, unread: true, flagged: true, memberIds: block.memberIds }
+  })
+  const withRow = Object.assign({}, known, { maaaaad: representative })
+  const drawn = conversation.stops(block, withRow, "maaaaaf", "inbox", mailboxes)
+  assert.strictEqual(drawn[0].unread, false, "the representative's own labels say read")
+  assert.strictEqual(drawn[0].flagged, false, "and unstarred")
+  assert.strictEqual(drawn[2].unread, true, "the reply is the unread one")
+  assert.strictEqual(conversation.caption(block, withRow), "3 messages · 1 unread",
+    "the row's OR does not count as a second unread")
+  // A summary with no label list at all falls back to the flag, which is the
+  // only answer it has.
+  assert.strictEqual(conversation.memberHasLabel({ unread: true }, "UNREAD", "unread"), true)
+  assert.strictEqual(conversation.memberHasLabel({ labelIds: [] , unread: true }, "UNREAD", "unread"), false)
+  assert.strictEqual(conversation.memberHasLabel(null, "UNREAD", "unread"), false)
+}
 
 // A sender with no display name falls back to the address, the way a row does.
 assert.strictEqual(

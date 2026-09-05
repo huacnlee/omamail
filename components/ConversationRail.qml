@@ -106,7 +106,7 @@ Item {
 
   Flickable {
     id: railFlick
-    objectName: "conversationRail"
+    objectName: "conversationRailFlick"
     anchors.top: captionText.bottom
     anchors.topMargin: Style.space(8)
     anchors.left: edge.right
