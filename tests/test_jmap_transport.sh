@@ -250,6 +250,46 @@ stream_status=$?
 set -e
 equals "the stream exits with curl's own code" "$stream_status" 22
 
+# Stopping the stream stops curl.
+#
+# The owner stops a stream by stopping the process it started, which is this
+# shell — and a pipeline puts curl on the far side of a pipe from it. Without
+# the trap the shell dies, curl is reparented to init and holds an
+# authenticated connection open until its own `max-time` an hour later. This is
+# the assertion that the signal actually crosses the pipe: a curl that ignores
+# it and lives is the bug.
+cat > "$work/bin/curl-slow" <<'SLOW'
+#!/bin/sh
+cat >/dev/null
+printf '%s\n' "$$" > "$CURL_STUB_PIDFILE"
+sleep 30
+SLOW
+chmod +x "$work/bin/curl-slow"
+mkdir -p "$work/slow"
+cp "$work/bin/curl-slow" "$work/slow/curl"
+
+pidfile="$work/curl.pid"
+rm -f "$pidfile"
+printf '%s\n' "$stream_request" \
+  | CURL_STUB_PIDFILE="$pidfile" PATH="$work/slow:$PATH" sh "$script" >/dev/null 2>&1 &
+script_pid=$!
+waited=0
+while [ ! -s "$pidfile" ] && [ "$waited" -lt 50 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+curl_pid=$(cat "$pidfile" 2>/dev/null || printf '')
+kill -TERM "$script_pid" 2>/dev/null || true
+wait "$script_pid" 2>/dev/null || true
+sleep 0.3
+if [ -n "$curl_pid" ] && kill -0 "$curl_pid" 2>/dev/null; then
+  kill -KILL "$curl_pid" 2>/dev/null || true
+  printf '  FAIL %s\n' "stopping the stream leaves curl running"
+  failures=$((failures + 1))
+else
+  printf '  ok   %s\n' "stopping the stream takes curl down with it"
+fi
+
 # ----------------------------------------------------------------- scheme gate
 #
 # The second gate. The client validated the URL; this is what stops a

@@ -1345,6 +1345,320 @@ deepEqual(jmap.recordStates({ Email: "s1" }, [["error", { type: "anchorNotFound"
   { Email: "s1" })
 deepEqual(jmap.recordStates(null, null), {})
 
+// ------------------------------------------------------------ the event stream
+//
+// Where the stream connects. The template is the session's own, and every
+// value goes through the same percent-encoding a download URL's does: a server
+// is free to publish a template whose variables sit in the path, and a `types`
+// list carrying a `&` or a `/` would otherwise steer the request off the
+// address the session named.
+
+const eventTemplate =
+  "https://mx2.depodra.com/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
+
+assert.strictEqual(jmap.eventSourceTemplate(session({ eventSourceUrl: eventTemplate })),
+  eventTemplate)
+assert.strictEqual(
+  jmap.eventSourceTemplate(JSON.stringify(session({ eventSourceUrl: eventTemplate }))),
+  eventTemplate, "the document may still be text")
+assert.strictEqual(jmap.eventSourceTemplate(session()), "",
+  "a server that publishes no event source has none")
+assert.strictEqual(jmap.eventSourceTemplate(null), "")
+
+assert.strictEqual(
+  jmap.eventSourceUrl(eventTemplate, jmap.EVENT_TYPES, jmap.EVENT_PING_SECONDS),
+  "https://mx2.depodra.com/jmap/eventsource/"
+  + "?types=Email%2CMailbox&closeafter=no&ping=30")
+
+// `closeafter` is never asked for: ending the response after the first state
+// event is a poll with a long wait, for proxies that will not pass a
+// persistent response, and rotation here is curl's own `max-time`.
+assert.ok(jmap.eventSourceUrl(eventTemplate, "Email", 30).indexOf("closeafter=no") > 0,
+  "the response is persisted, whatever the caller asks for")
+
+// The same placeholder more than once, and a value that would otherwise be
+// read as another parameter.
+assert.strictEqual(
+  jmap.eventSourceUrl("https://s.example/{types}/es?types={types}&closeafter={closeafter}&ping={ping}",
+    "Email,Mailbox", 30),
+  "https://s.example/Email%2CMailbox/es?types=Email%2CMailbox&closeafter=no&ping=30")
+assert.strictEqual(
+  jmap.eventSourceUrl("https://s.example/es?types={types}&closeafter={closeafter}&ping={ping}",
+    "Email&ping=0", 30),
+  "https://s.example/es?types=Email%26ping%3D0&closeafter=no&ping=30",
+  "a type list cannot smuggle a second parameter past the template")
+
+// No template, no stream. An empty answer is what the owner reads as "this
+// server has no event source" rather than connecting to the empty string.
+assert.strictEqual(jmap.eventSourceUrl("", "Email", 30), "")
+assert.strictEqual(jmap.eventSourceUrl(null, "Email", 30), "")
+
+// Defaults, for a caller that asked for nothing sensible.
+assert.ok(jmap.eventSourceUrl(eventTemplate, "", 30).indexOf("types=Email%2CMailbox") > 0)
+assert.ok(jmap.eventSourceUrl(eventTemplate, "Email", -5).indexOf("ping=30") > 0)
+assert.ok(jmap.eventSourceUrl(eventTemplate, "Email", "x").indexOf("ping=30") > 0)
+assert.ok(jmap.eventSourceUrl(eventTemplate, "Email", 0).indexOf("ping=0") > 0,
+  "zero is a real answer — it means no pings — and is left alone")
+
+assert.strictEqual(jmap.EVENT_TYPES, "Email,Mailbox",
+  "Thread never moves without an Email change, EmailSubmission has no consumer "
+  + "and Identity is read once per session")
+assert.strictEqual(jmap.EVENT_PING_SECONDS, 30)
+
+// ------------------------------------------------------------- event lines
+//
+// One line at a time, because that is how curl hands the stream over. The
+// state carried between calls is the half-read event, and the answer is in the
+// same object: `kind` is "" until a blank line ends one.
+
+function readEvent(lines) {
+  let state = jmap.emptyEventState()
+  const events = []
+  for (let i = 0; i < lines.length; i++) {
+    state = jmap.parseEventLine(state, lines[i])
+    if (state.kind !== "") events.push(state)
+  }
+  return events
+}
+
+const stateJson =
+  '{"@type":"StateChange","changed":{"t":{"Email":"s42","Mailbox":"s9"}}}'
+
+let events = readEvent(["event: state", "data: " + stateJson, ""])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].kind, "state")
+deepEqual(events[0].changed, { t: { Email: "s42", Mailbox: "s9" } })
+
+// A ping says the interval the server settled on, which may not be the one
+// that was asked for: RFC 8620 lets a server clamp, and Stalwart clamps up to
+// thirty. The watchdog follows what the server said rather than what it wanted.
+events = readEvent(["event: ping", 'data: {"interval": 60}', ""])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].kind, "ping")
+assert.strictEqual(events[0].interval, 60)
+assert.strictEqual(events[0].changed, null)
+
+// Stalwart sends a third event on the same connection. A mail client has
+// nothing to do with it and must not mistake it for either of the two it does.
+events = readEvent(["event: calendarAlert", 'data: {"id":"7"}', ""])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].kind, "calendarAlert")
+assert.strictEqual(events[0].changed, null)
+assert.strictEqual(events[0].interval, 0)
+
+// A comment line is the spec's keep-alive and carries nothing.
+events = readEvent([": keep-alive", ""])
+assert.strictEqual(events.length, 0, "a comment is not an event, and ends none")
+
+// CRLF. `SplitParser` splits on "\n", so a server writing CRLF leaves the CR
+// on the end of every line — including the blank one that ends an event, which
+// would then never be blank and no event would ever complete.
+events = readEvent(["event: state\r", "data: " + stateJson + "\r", "\r"])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].kind, "state")
+deepEqual(events[0].changed, { t: { Email: "s42", Mailbox: "s9" } })
+
+// An id line is dropped: Stalwart sends none, so there is nothing to replay
+// and no `Last-Event-ID` to send back. A retry line is dropped too — the
+// reconnect table here is this client's own.
+events = readEvent(["id: 9", "retry: 5000", "event: state", "data: " + stateJson, ""])
+assert.strictEqual(events.length, 1)
+deepEqual(events[0].changed, { t: { Email: "s42", Mailbox: "s9" } })
+
+// Two events on one connection, and the accumulator carrying nothing across.
+events = readEvent(["event: ping", 'data: {"interval":30}', "",
+  "event: state", "data: " + stateJson, ""])
+assert.strictEqual(events.length, 2)
+assert.strictEqual(events[0].kind, "ping")
+assert.strictEqual(events[1].kind, "state")
+deepEqual(events[1].changed, { t: { Email: "s42", Mailbox: "s9" } })
+
+// Data over more than one line is joined with a newline, as the spec says, so
+// a document a server chose to wrap still parses.
+events = readEvent(["event: state", 'data: {"@type":"StateChange",',
+  'data: "changed":{"t":{"Email":"s42"}}}', ""])
+assert.strictEqual(events.length, 1)
+deepEqual(events[0].changed, { t: { Email: "s42" } })
+
+// A single space after the colon is the separator and is dropped; a second one
+// is data. No space at all is legal too.
+events = readEvent(["event:state", "data:" + stateJson, ""])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].kind, "state")
+
+// An event whose data is not a JSON object completes with nothing to act on,
+// rather than throwing inside the process that draws the desktop.
+events = readEvent(["event: state", "data: not json", ""])
+assert.strictEqual(events.length, 1)
+assert.strictEqual(events[0].changed, null)
+events = readEvent(["event: state", "data: []", ""])
+assert.strictEqual(events[0].changed, null, "an array is not a changed map")
+
+// A blank line between events is the spec's own keep-alive and completes
+// nothing.
+events = readEvent(["", "", ""])
+assert.strictEqual(events.length, 0)
+
+// The half-read event is held in the process that draws the whole desktop, so
+// a server or a proxy that never sends the blank line cannot grow it forever.
+let long = jmap.emptyEventState()
+long = jmap.parseEventLine(long, "event: state")
+for (let i = 0; i < 40; i++)
+  long = jmap.parseEventLine(long, "data: " + new Array(4000).join("x"))
+assert.ok(long.data.length <= jmap.MAX_EVENT_CHARS,
+  "an event that never ends is dropped rather than accumulated")
+
+// ---------------------------------------------------------- what a push means
+
+const known = { Email: "s41", Mailbox: "s8" }
+
+// Another account on the same server. One connection carries changes for every
+// account the credential can see, and this one is not ours.
+assert.strictEqual(jmap.refreshPlan({ other: { Email: "s99" } }, "t", known), null)
+assert.strictEqual(jmap.refreshPlan({ t: { Email: "s42" } }, "", known), null)
+assert.strictEqual(jmap.refreshPlan(null, "t", known), null)
+assert.strictEqual(jmap.refreshPlan({ t: null }, "t", known), null)
+
+// The echo. Stalwart tells every connection about this panel's own write about
+// a second after the action's callback has already revalidated, and the state
+// it names is the one that reply handed over.
+assert.strictEqual(jmap.refreshPlan({ t: { Email: "s41" } }, "t", known), null)
+assert.strictEqual(jmap.refreshPlan({ t: { Email: "s41", Mailbox: "s8" } }, "t", known), null,
+  "every state matching is the whole event being an echo")
+
+// One type moving is enough, and it is the only one acted on.
+deepEqual(jmap.refreshPlan({ t: { Email: "s41", Mailbox: "s9" } }, "t", known),
+  { mail: false, mailboxes: true },
+  "a rename or a folder added: the rail moves, the list does not")
+deepEqual(jmap.refreshPlan({ t: { Email: "s42", Mailbox: "s8" } }, "t", known),
+  { mail: true, mailboxes: false })
+deepEqual(jmap.refreshPlan({ t: { Email: "s42", Mailbox: "s9" } }, "t", known),
+  { mail: true, mailboxes: true },
+  "a keyword flip moves both on this server, which is what reloads the counts")
+
+// A type the client has never recorded is a change, because it has never been
+// told otherwise.
+deepEqual(jmap.refreshPlan({ t: { Email: "s42" } }, "t", {}), { mail: true, mailboxes: false })
+deepEqual(jmap.refreshPlan({ t: { Email: "s42" } }, "t", null), { mail: true, mailboxes: false })
+
+// Types this account subscribes to nothing for. `Thread` never moves without
+// an `Email` change and `EmailSubmission` has no consumer, so an event naming
+// only those is not a reason to fetch anything.
+assert.strictEqual(jmap.refreshPlan({ t: { Thread: "s3" } }, "t", known), null)
+assert.strictEqual(jmap.refreshPlan({ t: { EmailSubmission: "s3" } }, "t", known), null)
+
+// ---------------------------------------------------------------- reconnect
+
+// A clean close and the planned rotation: at once, and the failure count is
+// left where it was — only a line off a working connection resets it.
+deepEqual(jmap.reconnectDelay(0, 200, 0), { delay: 0, attempt: 0, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(28, 200, 4), { delay: 0, attempt: 4, stop: false, rejected: false })
+
+// Everything else doubles from a second.
+deepEqual(jmap.reconnectDelay(7, 0, 0), { delay: 1000, attempt: 1, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(6, 0, 1), { delay: 2000, attempt: 2, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(35, 0, 2), { delay: 4000, attempt: 3, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(52, 0, 3), { delay: 8000, attempt: 4, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(56, 0, 4), { delay: 16000, attempt: 5, stop: false, rejected: false })
+
+// The cap. Five minutes is what a server that is down is asked at, rather than
+// a doubling that reaches hours and never comes back.
+assert.strictEqual(jmap.reconnectDelay(7, 0, 8).delay, 256000)
+assert.strictEqual(jmap.reconnectDelay(7, 0, 9).delay, 300000)
+assert.strictEqual(jmap.reconnectDelay(7, 0, 40).delay, 300000,
+  "and it stays capped however long it has been failing")
+
+// The reset is the caller's: it passes zero once a line has arrived.
+assert.strictEqual(jmap.reconnectDelay(7, 0, 0).delay, 1000,
+  "the first failure after a working connection waits a second again")
+
+// `--fail` turns any 4xx or 5xx into exit 22, and the `http <code>` trailer is
+// what splits it. Only a 401 is a credential: it is a revoked app password,
+// there is nothing to retry, and re-sending a Basic password is what locks one.
+deepEqual(jmap.reconnectDelay(22, 401, 0), { delay: 0, attempt: 0, stop: true, rejected: true })
+deepEqual(jmap.reconnectDelay(22, 401, 6), { delay: 0, attempt: 6, stop: true, rejected: true })
+deepEqual(jmap.reconnectDelay(22, 403, 0), { delay: 1000, attempt: 1, stop: false, rejected: false },
+  "a forbidden stream is the server, not the password")
+deepEqual(jmap.reconnectDelay(22, 429, 0), { delay: 1000, attempt: 1, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(22, 502, 2), { delay: 4000, attempt: 3, stop: false, rejected: false })
+// A 401 on something that is not the stream's own failure exit is not this
+// rule: the status without the exit is a trailer left over from an earlier
+// connection, and the exit without a status is a connection that never got one.
+deepEqual(jmap.reconnectDelay(7, 401, 0), { delay: 1000, attempt: 1, stop: false, rejected: false })
+deepEqual(jmap.reconnectDelay(22, 0, 0), { delay: 1000, attempt: 1, stop: false, rejected: false })
+
+// The owner's own code for a connection it stopped because the server had gone
+// silent, or because the credential could not be read. Not a curl exit, and it
+// backs off like one.
+assert.strictEqual(jmap.EXIT_STREAM_SILENT, -1)
+deepEqual(jmap.reconnectDelay(jmap.EXIT_STREAM_SILENT, 0, 0),
+  { delay: 1000, attempt: 1, stop: false, rejected: false })
+
+// curl's trailer, told from an event line. It arrives on the same stdout as
+// the events, and reading it as one is what resets the backoff on every failed
+// connection — measured as a reconnect every second for as long as the server
+// was down, before this rule existed.
+assert.strictEqual(jmap.streamTrailerStatus("http 401"), 401)
+assert.strictEqual(jmap.streamTrailerStatus("http 200"), 200)
+assert.strictEqual(jmap.streamTrailerStatus("http 200\n"), 200,
+  "the tail of the stream keeps the newline curl printed")
+assert.strictEqual(jmap.streamTrailerStatus("http 401\r"), 401)
+// Zero is a real answer and -1 is "not the trailer". curl writes `000` when
+// there was no HTTP response at all — a refused connection, a failed handshake
+// — which is the commonest trailer of all and what `reconnectDelay` reads as
+// "no status". Folding the two together made every failed connection look like
+// a line off a working one, and the backoff never grew past a second.
+assert.strictEqual(jmap.streamTrailerStatus("http 000"), 0)
+assert.strictEqual(jmap.streamTrailerStatus("event: state"), -1)
+assert.strictEqual(jmap.streamTrailerStatus('data: {"http": 200}'), -1)
+assert.strictEqual(jmap.streamTrailerStatus("http401"), -1)
+assert.strictEqual(jmap.streamTrailerStatus(""), -1)
+assert.strictEqual(jmap.streamTrailerStatus(null), -1)
+
+// What the table reads for a connection that has just ended. A connection that
+// heard nothing is not a clean close whatever curl exited with: a server or a
+// proxy answering 200 and closing at once would otherwise be reopened every few
+// milliseconds for as long as it kept doing it.
+assert.strictEqual(jmap.streamExit(0, true), 0, "an hour of pings then a close is clean")
+assert.strictEqual(jmap.streamExit(28, true), 28, "and so is the planned rotation")
+assert.strictEqual(jmap.streamExit(0, false), jmap.EXIT_STREAM_SILENT)
+assert.strictEqual(jmap.streamExit(28, false), jmap.EXIT_STREAM_SILENT)
+// Every other exit keeps its own meaning, which is what leaves the 401 alone:
+// `--fail` writes no body, so a rejected credential always heard nothing.
+assert.strictEqual(jmap.streamExit(22, false), 22)
+assert.strictEqual(jmap.streamExit(7, false), 7)
+assert.strictEqual(jmap.streamExit(35, true), 35)
+assert.strictEqual(jmap.streamExit(0, undefined), jmap.EXIT_STREAM_SILENT,
+  "silence is the default, not a clean close")
+deepEqual(jmap.reconnectDelay(jmap.streamExit(22, false), 401, 0),
+  { delay: 0, attempt: 0, stop: true, rejected: true },
+  "the two rules together are what stops a revoked app password being retried")
+deepEqual(jmap.reconnectDelay(jmap.streamExit(0, false), 200, 0),
+  { delay: 1000, attempt: 1, stop: false, rejected: false })
+
+// ------------------------------------------------------------- a clock jump
+//
+// Qt's timers run on the monotonic clock, which stops while the machine is
+// suspended: a thirty-second timer that fires after four hours has counted
+// thirty seconds of running time and knows nothing happened. The wall clock is
+// what knows.
+
+const tick = 30000
+assert.strictEqual(jmap.clockJumped(1000, 1000 + tick, tick), false,
+  "a timer that fired on time is a timer that fired on time")
+assert.strictEqual(jmap.clockJumped(1000, 1000 + tick * 2, tick), false,
+  "twice the interval is the threshold, and the threshold is not over it")
+assert.strictEqual(jmap.clockJumped(1000, 1000 + tick * 2 + 1, tick), true)
+assert.strictEqual(jmap.clockJumped(1000, 1000 + 4 * 3600 * 1000, tick), true,
+  "a night's suspend")
+// A busy GUI thread delays a timer by tens of milliseconds routinely, and
+// reconnecting every time the desktop was busy would be worse than the problem.
+assert.strictEqual(jmap.clockJumped(1000, 1000 + tick + 500, tick), false)
+// The clock going backwards — an NTP correction — is not a resume.
+assert.strictEqual(jmap.clockJumped(1000 + tick, 1000, tick), false)
+assert.strictEqual(jmap.clockJumped(0, 0, 0), false)
+assert.strictEqual(jmap.clockJumped(null, undefined, tick), false)
+
 // -------------------------------------------------- session limits and calls
 //
 // Read from the session, never assumed. The figures are the reference server's,

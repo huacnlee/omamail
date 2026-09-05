@@ -2429,6 +2429,22 @@ Item {
       // settings, so it is kept beside the query results rather than in
       // accounts.json.
       cache: cacheStore
+
+      // The one provider that is told rather than asked. The plan says which
+      // of the two doors to knock on, and both are the ones the poll already
+      // uses: `loadLabels()` re-reads the mailbox list, which is what moves the
+      // rail rows and re-binds this account's refusals; `refresh()` is the
+      // poll's own door, so the counts, the badge, the notification and — only
+      // for the account on screen with the window open — the list all follow
+      // exactly as they do on a tick.
+      //
+      // Labels first: a message that arrived in a mailbox this rail has never
+      // heard of should not be counted against a row that is about to appear.
+      onRemoteChanged: function(plan) {
+        if (!root.ready || !plan) return
+        if (plan.mailboxes) root.loadLabels()
+        if (plan.mail) root.refresh()
+      }
     }
   }
 

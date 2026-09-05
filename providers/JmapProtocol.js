@@ -839,6 +839,289 @@ function recordStates(known, responses) {
   return out
 }
 
+// ------------------------------------------------------------ the event stream
+//
+// The stream is one `stream` request held open per account, and everything it
+// costs is decided here: which URL it opens, what a line off it means, what a
+// change notification amounts to for this account, and how long to wait before
+// opening it again.
+//
+// RFC 8620 section 7.3 gives the resource three template variables. `types` is
+// `Email,Mailbox` and nothing else: `Thread` never moves without an `Email`
+// change, `EmailSubmission` has no consumer here, and `Identity` is read once
+// per session. `closeafter` is `no` — the `state` form is a poll with a long
+// wait, for proxies that will not pass a persistent response, and rotation is
+// curl's `max-time` instead. `ping` is the floor the RFC makes every server
+// accept; a server that clamps it up says so in the ping's own `interval`.
+
+var EVENT_TYPES = "Email,Mailbox"
+var EVENT_CLOSE_AFTER = "no"
+var EVENT_PING_SECONDS = 30
+
+// The two types a `StateChange` may name that this account acts on.
+var TYPE_EMAIL = "Email"
+var TYPE_MAILBOX = "Mailbox"
+
+// The template the session published, which is the only place an event-source
+// address comes from — the same rule the API URL and the download template
+// follow, and for the same reason: it is a URL a credential is sent to.
+function eventSourceTemplate(session) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc.eventSourceUrl) : ""
+}
+
+// The template, filled. Percent-encoded through `fillTemplate` exactly as a
+// download URL is: `types` is a comma list and a server is free to publish a
+// template whose variables sit in the path rather than the query, so a value
+// that carried a `&`, a `/` or a `?` could otherwise steer the request off the
+// address the session named.
+function eventSourceUrl(template, types, ping) {
+  var filled = String(template === undefined || template === null ? "" : template)
+  if (filled === "") return ""
+  var seconds = Math.floor(Number(ping))
+  if (!isFinite(seconds) || seconds < 0) seconds = EVENT_PING_SECONDS
+  filled = fillTemplate(filled, "types", trimmed(types) !== "" ? trimmed(types) : EVENT_TYPES)
+  filled = fillTemplate(filled, "closeafter", EVENT_CLOSE_AFTER)
+  filled = fillTemplate(filled, "ping", String(seconds))
+  return filled
+}
+
+// ------------------------------------------------------------- event lines
+//
+// `text/event-stream` is a line grammar: `field: value` lines, then a blank
+// line that ends the event. curl hands the transport's stdout over one line at
+// a time, so this is fed one line at a time and carries the half-read event
+// between calls rather than buffering the connection.
+//
+// The state it takes and the state it returns are the same object shape, and
+// the answer is in it: `kind` is "" while an event is still being read and the
+// event's own name once a blank line has ended one. That is one value to carry
+// and one to branch on, rather than a parser plus a queue.
+//
+//   { event: "", data: "", kind: "", changed: null, interval: 0 }
+//
+// `id:` lines are dropped because Stalwart sends none and there is therefore
+// nothing to replay; comment lines (`:` first) are dropped because the spec
+// says they are keep-alives; `retry:` is dropped because the reconnect table
+// below is this client's own and not the server's to set.
+
+// A `StateChange` for one account naming two types is a few hundred bytes. The
+// ceiling is not about Stalwart — it is that a half-read event is held in the
+// process that draws the desktop, and a server or a proxy that never sends the
+// blank line would otherwise grow it without end.
+var MAX_EVENT_CHARS = 65536
+
+function emptyEventState() {
+  return { event: "", data: "", kind: "", changed: null, interval: 0 }
+}
+
+function parseEventLine(state, line) {
+  var previous = state && typeof state === "object" ? state : emptyEventState()
+  var next = {
+    event: String(previous.event || ""),
+    data: String(previous.data || ""),
+    kind: "",
+    changed: null,
+    interval: 0
+  }
+  // SplitParser splits on "\n", so a server writing CRLF leaves the CR on the
+  // end of every line — including the blank one that ends an event, which
+  // would then never be recognised as blank.
+  var text = String(line === undefined || line === null ? "" : line).replace(/\r+$/, "")
+
+  if (text === "") {
+    // A blank line with nothing before it is the keep-alive between events,
+    // not an event with no name.
+    if (next.event === "" && next.data === "") return next
+    next.kind = next.event !== "" ? next.event : "message"
+    if (next.kind === "state") {
+      var payload = parseJson(next.data)
+      var changed = payload ? payload.changed : null
+      next.changed = changed && typeof changed === "object" && !Array.isArray(changed)
+        ? changed : null
+    } else if (next.kind === "ping") {
+      var ping = parseJson(next.data)
+      var seconds = ping ? Math.floor(Number(ping.interval)) : 0
+      next.interval = isFinite(seconds) && seconds > 0 ? seconds : 0
+    }
+    next.event = ""
+    next.data = ""
+    return next
+  }
+
+  if (text.charAt(0) === ":") return next
+
+  var colon = text.indexOf(":")
+  var field = colon < 0 ? text : text.substring(0, colon)
+  // "A single leading space after the colon is ignored", and only one.
+  var value = colon < 0 ? "" : text.substring(colon + 1)
+  if (value.charAt(0) === " ") value = value.substring(1)
+
+  if (field === "event") {
+    next.event = value
+  } else if (field === "data") {
+    // Data lines are joined with a newline, which is what the spec says and
+    // what keeps a JSON document split across lines readable.
+    next.data = next.data === "" ? value : next.data + "\n" + value
+    if (next.data.length > MAX_EVENT_CHARS) {
+      next.event = ""
+      next.data = ""
+    }
+  }
+  // `id`, `retry` and any field this client has not heard of fall through.
+  return next
+}
+
+// ---------------------------------------------------------- what a push means
+//
+// One rule over a `StateChange`'s `changed` map, and the whole of what the
+// panel does with a push:
+//
+//   null            this event is not about this account, or the panel already
+//                   holds every state it names — its own write, echoed back
+//   { mail, mailboxes }
+//
+// `mailboxes` re-reads the mailbox list, which is what re-binds the rail rows,
+// the per-account refusals and the absent mailboxes; `mail` runs the account's
+// own refresh, the same door the poll knocks on.
+function refreshPlan(changed, accountId, knownStates) {
+  var map = changed && typeof changed === "object" && !Array.isArray(changed) ? changed : null
+  var wanted = trimmed(accountId)
+  if (!map || wanted === "") return null
+  var types = map[wanted]
+  if (!types || typeof types !== "object" || Array.isArray(types)) return null
+
+  var known = knownStates && typeof knownStates === "object" ? knownStates : {}
+  var mail = false
+  var mailboxes = false
+  for (var type in types) {
+    var state = trimmed(types[type])
+    if (state === "") continue
+    // The echo. The server tells every connection about the panel's own write
+    // about a second after the action's callback has already revalidated, and
+    // a state this client was handed by the reply it is the echo of is the one
+    // thing a push can be that is worth nothing.
+    if (trimmed(known[type]) === state) continue
+    if (type === TYPE_EMAIL) mail = true
+    else if (type === TYPE_MAILBOX) mailboxes = true
+  }
+  if (!mail && !mailboxes) return null
+  return { mail: mail, mailboxes: mailboxes }
+}
+
+// --------------------------------------------------------------- reconnect
+//
+// curl's exit code says what happened to the stream, and the `http <code>`
+// trailer the `stream` verb prints says what the server answered before it
+// did. Together they are the whole of the decision:
+//
+//   0    the server ended the response — a restart, a proxy cutting an idle
+//        connection, or `closeafter=state` if it were ever asked for
+//   28   `max-time`, which is the planned hourly rotation
+//   22   `--fail` on a 4xx or 5xx. A 401 is a revoked app password and there
+//        is nothing to retry: the flag is raised, the setup card draws, and
+//        this stops until a sign-in clears it. Every other status is the
+//        server having a bad minute and backs off like a dropped socket.
+//   any  6, 7, 35, 52, 56 and the rest: the network. Back off.
+//
+// `attempt` is how many failures have already been backed off from; the caller
+// resets it to zero on the first event or ping of a connection, which is the
+// only evidence that a connection is working.
+
+var RECONNECT_BASE_MS = 1000
+var RECONNECT_CAP_MS = 300000
+var RECONNECT_AT_ONCE_MS = 0
+
+// Not a curl exit code: what the owner reports when it stopped a connection
+// curl was still perfectly happy with — the watchdog's two silent ping
+// intervals, or a credential that could not be read. curl's own code for a
+// process it was told to end says nothing about which of them ended it, and
+// "the server stopped answering" has to back off rather than reconnect at once.
+// Negative so it can never collide with one.
+var EXIT_STREAM_SILENT = -1
+
+// curl's own trailer, told from an event line. The `stream` verb ends its
+// output with `http <code>`, printed by `--write-out` once the transfer has
+// ended, and it arrives on the same stdout as the events — so it has to be
+// recognised, and it has to be recognised as *not* being the server talking.
+// Reading it as a line off a working connection is what resets the backoff on
+// every failed connection, which is a reconnect every second for as long as
+// the server is down; that was measured before this rule existed.
+//
+// **-1 is "not the trailer", and zero is a real answer.** curl writes `000`
+// when there was no HTTP response at all — a refused connection, a failed
+// handshake — which is the most common trailer of all and exactly what
+// `reconnectDelay` reads as "no status". Folding the two together is the bug
+// this return value exists to prevent.
+var NOT_A_TRAILER = -1
+
+function streamTrailerStatus(line) {
+  var match = /^http[ \t]+(\d+)$/.exec(trimmed(line))
+  if (!match) return NOT_A_TRAILER
+  var code = Math.floor(Number(match[1]))
+  return isFinite(code) && code > 0 ? code : 0
+}
+
+// What the table below should read for a connection that has just ended.
+//
+// `heard` is whether the server said anything at all on it — an event, a ping,
+// even a comment. A connection that ended having heard nothing is not a clean
+// close, whatever curl exited with: the two at-once exits are the ones that
+// mean "the server finished with this connection", and a server or a proxy
+// answering 200 and closing immediately would otherwise be reopened every few
+// milliseconds for as long as it kept doing it. Reading the decision's own
+// "reset on the first event or ping" the other way round is what this is: a
+// connection that never got one has nothing to reset.
+//
+// Every other exit keeps its meaning, which is what leaves the 401 alone —
+// `--fail` writes no body, so a rejected credential is *always* a connection
+// that heard nothing.
+function streamExit(exit, heard) {
+  var code = Math.floor(Number(exit))
+  if (!isFinite(code)) return EXIT_STREAM_SILENT
+  if (heard === true) return code
+  return code === 0 || code === 28 ? EXIT_STREAM_SILENT : code
+}
+
+function reconnectDelay(exit, status, attempt) {
+  var code = Math.floor(Number(exit))
+  var http = Math.floor(Number(status))
+  var tries = Math.floor(Number(attempt))
+  if (!isFinite(tries) || tries < 0) tries = 0
+
+  if (code === 22 && http === 401)
+    return { delay: 0, attempt: tries, stop: true, rejected: true }
+
+  if (code === 0 || code === 28)
+    return { delay: RECONNECT_AT_ONCE_MS, attempt: tries, stop: false, rejected: false }
+
+  // Doubling from a second, capped. `Math.pow` rather than a running multiply
+  // so the caller holds a count rather than a duration, and a reset is one
+  // assignment.
+  var delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, tries), RECONNECT_CAP_MS)
+  return { delay: delay, attempt: tries + 1, stop: false, rejected: false }
+}
+
+// A resume from suspend, told from a timer that simply fired late.
+//
+// Qt's timers run on the monotonic clock, which stops while the machine is
+// suspended: a thirty-second timer that fires after a four-hour sleep has
+// counted thirty seconds of running time and knows nothing has happened. The
+// wall clock does know, so the two are compared — and the connection sitting
+// underneath is dead however alive the socket still looks, because the server
+// gave up on it hours ago.
+//
+// Twice the interval rather than any advance at all: a busy GUI thread delays
+// a timer by tens of milliseconds routinely, and reconnecting the stream every
+// time the desktop was busy would be worse than the problem.
+function clockJumped(lastMs, nowMs, intervalMs) {
+  var last = Number(lastMs)
+  var now = Number(nowMs)
+  var interval = Number(intervalMs)
+  if (!isFinite(last) || !isFinite(now) || !isFinite(interval) || interval <= 0) return false
+  return now - last > interval * 2
+}
+
 // ------------------------------------------------------------ mailbox roles
 //
 // A rail row is keyed on an RFC 8621 *role* rather than on a folder name,

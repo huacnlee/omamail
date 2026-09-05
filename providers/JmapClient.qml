@@ -15,9 +15,10 @@ import "../message/Message.js" as Mail
 // turn, the four-step check — and it reads: the rail, the labels, the list, a
 // page, a search, the counts, one message whole and the octets of a part. It
 // writes, too: read, star, archive, trash, junk and their reverses, each one
-// `Email/set` patch per message. The push and the send are stubs the following
-// tickets fill, and each answers an empty result rather than pretending to
-// fail.
+// `Email/set` patch per message. It holds an event stream open for as long as
+// the account is signed in, and reports what changes on it. The send is the
+// stub the following ticket fills, and it answers an empty result rather than
+// pretending to fail.
 //
 // ## Three things every read depends on, in this order
 //
@@ -95,9 +96,26 @@ Item {
   readonly property var absentMailboxes: Jmap.absentMailboxes(mailboxList)
 
   // The newest state the server has reported per type, from every reply. Push
-  // (ticket 09) is the only reader: a change notification naming a state this
-  // client has already been told is the echo of its own write.
+  // is the only reader: a change notification naming a state this client has
+  // already been told is the echo of its own write.
   property var knownStates: ({})
+
+  // ------------------------------------------------------------------ push
+  //
+  // The one thing this client does that no other provider's does: it is told
+  // when the mailbox changed instead of asking. `JmapPush` at the bottom holds
+  // the stream open and decides what an event means; these two properties are
+  // the whole of what that costs this object's interface.
+  //
+  // `remoteChanged` is what the account wires to `loadLabels()` and
+  // `refresh()`. Its argument is the plan — `{ mail, mailboxes }` — and it is
+  // emitted once per connect as well as per event, because the server replays
+  // nothing between connections.
+  signal remoteChanged(var plan)
+
+  // Whether the stream has heard the server within two ping intervals. Nothing
+  // draws it yet; it is the input for a later "Live" beside "Synced".
+  readonly property bool live: push.live
 
   function newHandle() {
     return { aborted: false, process: null, children: [], queueEntry: null }
@@ -1302,6 +1320,21 @@ Item {
           Mail.bytesToUtf8(Mail.base64ToBytes(lines[3])))
       }
     }
+  }
+
+  // One stream for this account, built here because the client is what knows
+  // the session, the credential and the states already seen — and kept out of
+  // this file because a connection held open for an hour has a lifecycle, and
+  // nothing else here does.
+  JmapPush {
+    id: push
+
+    client: root
+    onRemoteChanged: function(plan) { root.remoteChanged(plan) }
+    // The same flag a 401 on any request raises, from the one place a stream
+    // can learn it. A successful `verifyCredentials` clears it, and clearing it
+    // is what lets the stream start again.
+    onSecretRejected: root.credentialsRejected = true
   }
 
   Component {

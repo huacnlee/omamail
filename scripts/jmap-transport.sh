@@ -267,8 +267,26 @@ build_config() {
 }
 
 if [ "$verb" = "stream" ]; then
+  # curl in the background, and a TERM trap that passes the signal on.
+  #
+  # A pipeline puts curl on the far side of a pipe from this shell, and the
+  # owner stops a stream by stopping the process it started — which is this
+  # shell. Measured: the shell dies, curl is reparented to init and keeps the
+  # authenticated connection open until its own `max-time` an hour later. Every
+  # stop here is one that matters: the watchdog giving up on a silent
+  # connection, the resume detector shedding one the server closed during
+  # suspend, a mailbox being removed. Each would leak a curl.
+  #
+  # `$!` after a background pipeline is the last command in it, which is curl.
+  # `wait` returns 128+15 when the trap interrupts it, and that is what the
+  # caller sees — a code its reconnect table reads as a failure, which is right:
+  # the connection is gone either way, and a stop the owner asked for is one it
+  # already knows it asked for.
   set +e
-  build_config | curl --config -
+  build_config | curl --config - &
+  streaming=$!
+  trap 'kill -TERM "$streaming" 2>/dev/null; exit 143' TERM INT HUP
+  wait "$streaming"
   status=$?
   set -e
   exit "$status"
