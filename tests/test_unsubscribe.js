@@ -55,6 +55,21 @@ assert.strictEqual(unsub.parseMailto("mailto:bye@example.com?subject=100%").subj
 
 // --------------------------------------------------------------------- URLs
 
+for (const control of ["\r", "\n", "\r\n", "\t", "\u0000", "\u007f"]) {
+  const url = "https://list.example.com/u" + control + "next"
+  assert.strictEqual(unsub.isPostableUrl(url), false, "reject raw URL controls")
+  assert.strictEqual(unsub.from("<" + url + ">", "List-Unsubscribe=One-Click").available,
+    false, "a rejected URL must not become a browser fallback")
+  assert.strictEqual(unsub.from("<https://list.example.com/u" + control + ">",
+    "List-Unsubscribe=One-Click").available, false, "trimming must not erase trailing controls")
+}
+
+const message = load("message/Message.js")
+const malformedHeader = "List-Unsubscribe: <https://list.example.com/u\rnext>\r\n"
+  + "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n\r\nbody"
+assert.strictEqual(unsub.fromMessage({ payload: message.parseRfc822(malformedHeader) }).available,
+  false, "a bare CR surviving IMAP header parsing must be refused")
+
 assert.strictEqual(unsub.isPublicWebUrl("https://list.example.com/u/1"), true)
 assert.strictEqual(unsub.isPublicWebUrl("http://list.example.com/u/1"), true)
 assert.strictEqual(unsub.isPublicWebUrl("https://127.0.0.1/u/1"), false)

@@ -35,7 +35,8 @@ function entries(value) {
       continue
     }
     if (character !== ">" || open < 0) continue
-    var entry = text.substring(open + 1, i).trim()
+    var raw = text.substring(open + 1, i)
+    var entry = /[\u0000-\u001f\u007f]/.test(raw) ? "" : raw.trim()
     if (entry !== "") found.push(entry)
     open = -1
   }
@@ -105,6 +106,7 @@ function parseMailto(entry) {
 // single-label name — the same judgement that decides whether a message may
 // load a picture, for the same reason.
 function isPublicWebUrl(value) {
+  if (/[\u0000-\u001f\u007f]/.test(String(value || ""))) return false
   var text = String(value || "").trim()
   if (!/^https?:\/\//i.test(text)) return false
   return Html.imageSourceKind(text) === "remote"
