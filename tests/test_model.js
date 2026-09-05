@@ -950,3 +950,36 @@ assert.strictEqual(binned.inTrash, false)
   deepEqual(model.togglePath([], "Archive/2026"), ["Archive/2026"])
   deepEqual(model.labelTree(null, null), [])
 }
+
+// ------------------------------------------------------------ label names
+{
+  assert.strictEqual(model.labelLeaf("Archive/2026/Q1", "/"), "Q1")
+  assert.strictEqual(model.labelLeaf("Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelParent("Archive/2026/Q1", "/"), "Archive/2026")
+  assert.strictEqual(model.labelParent("Receipts", "/"), "")
+  assert.strictEqual(model.labelPathJoin("Archive", " 2026 ", "/"), "Archive/2026")
+  assert.strictEqual(model.labelPathJoin("", "Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelPathJoin("a", "b", "."), "a.b")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "." }), ".")
+  assert.strictEqual(model.labelDelimiter({}), "/")
+  assert.strictEqual(model.labelNameProblem("  ", "/"), "A label needs a name")
+  assert.strictEqual(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") > 0, true)
+  assert.strictEqual(model.labelNameProblem("Receipts", "/"), "")
+
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive", rawName: "Archive" },
+    { id: "Archive/2026", rawName: "Archive/2026" },
+    { id: "Archive/2026/Q1", rawName: "Archive/2026/Q1" },
+    { id: "Receipts", rawName: "Receipts" }]
+  deepEqual(model.labelMoveTargets(labels, "Archive/2026", "/").map(function (t) { return t.path }),
+    ["", "Receipts"], "not itself, not its children, not its current parent, never a system label")
+  deepEqual(model.labelMoveTargets(labels, "Receipts", "/").map(function (t) { return t.path }),
+    ["", "Archive", "Archive/2026", "Archive/2026/Q1"])
+  assert.strictEqual(model.labelMoveTargets(labels, "Receipts", "/")[0].name, "Top level")
+}
+
+assert.strictEqual(model.monitoredNote([{ name: "Receipts", delta: 3 }]), "3 new in Receipts")
+assert.strictEqual(model.monitoredNote([{ name: "A", delta: 1 }, { name: "B", delta: 4 }, { name: "C", delta: 2 }]),
+  "4 new in B, 2 new in C and 1 more")
+assert.strictEqual(model.monitoredNote([]), "")

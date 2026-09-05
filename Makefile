@@ -44,6 +44,10 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/MailboxSwitcher.qml \
 	components/AgentPrompt.qml \
 	components/AgentView.qml \
+	components/LabelMenu.qml \
+	components/LabelMovePicker.qml \
+	components/NamePrompt.qml \
+	components/AddressMenu.qml \
 	agent/AgentRunner.qml \
 	components/ScopeButton.qml \
 	components/AccountRemovalDialog.qml \

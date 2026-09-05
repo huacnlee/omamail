@@ -138,6 +138,9 @@ function makeAccount(account) {
     imap: makeImapSettings(raw.imap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
+    // The labels watched for new mail, by id. A fact about the mailbox, so
+    // it lives beside its name rather than in the window's file.
+    monitored: idList(raw.monitored),
     // Whether this row is the setup form's working state rather than a
     // mailbox. It used to be inferred from the id being empty, and that read
     // a mailbox whose address had been corrupted as a draft and dropped it at
@@ -399,6 +402,31 @@ function discardDraftAt(list, index) {
 // Empty is not a name and clears it, which is what puts the address back:
 // `label()` falls through to the local part, so there is no state in which a
 // mailbox has nothing to be called.
+function idList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = trimmed(list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
+// A label watched, or no longer: the id toggled in the account's list.
+function toggleMonitored(list, id, labelId) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  var key = trimmed(labelId)
+  if (key === "") return next
+  var index = entry.monitored.indexOf(key)
+  if (index >= 0) entry.monitored.splice(index, 1)
+  else entry.monitored.push(key)
+  next.accounts[at] = entry
+  return next
+}
+
 function setLabel(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)

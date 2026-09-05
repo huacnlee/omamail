@@ -441,8 +441,58 @@ Item {
   function refresh() {
     if (!ready) return
     refreshCounts()
+    refreshMonitored()
     if (active && (windowOpen || !listLoaded)) loadMessages(false)
   }
+
+  // The labels watched for new mail, by id: set from the account entry, and
+  // counted on every refresh the way the inbox is. A count that grew says so
+  // on the status line; the rail's row carries the number either way.
+  property var monitoredIds: []
+  property bool monitoredLoading: false
+
+  function refreshMonitored() {
+    var ids = Array.isArray(monitoredIds) ? monitoredIds : []
+    if (!ready || monitoredLoading || ids.length === 0) return
+    monitoredLoading = true
+    var remaining = ids.length
+    var grown = []
+    for (var i = 0; i < ids.length; i++) {
+      (function(labelId) {
+        api.getLabelCounts(labelId, function(counts, error) {
+          if (!root) return
+          remaining--
+          if (!error && counts) {
+            var index = Model.indexById(root.labels, labelId)
+            if (index >= 0) {
+              var before = Math.max(0, Math.floor(Number(root.labels[index].unread) || 0))
+              var after = Math.max(0, Math.floor(Number(counts.unread) || 0))
+              var updated = {}
+              for (var key in root.labels[index]) updated[key] = root.labels[index][key]
+              updated.unread = after
+              updated.total = Math.max(0, Math.floor(Number(counts.total) || 0))
+              root.labels = Model.replaceById(root.labels, updated)
+              if (after > before && root.monitoredSeen[labelId] !== undefined)
+                grown.push({ name: String(updated.name || labelId), delta: after - before })
+              var seen = {}
+              for (var k in root.monitoredSeen) seen[k] = root.monitoredSeen[k]
+              seen[labelId] = after
+              root.monitoredSeen = seen
+            }
+          }
+          if (remaining === 0) {
+            root.monitoredLoading = false
+            if (grown.length > 0) root.note(Model.monitoredNote(grown))
+            root.cacheStore.putLabels(root.labels)
+          }
+        })
+      })(String(ids[i]))
+    }
+  }
+
+  // The last count each watched label was seen at, so a refresh knows growth
+  // from the first read. Not persisted: a restart reads once and says nothing.
+  property var monitoredSeen: ({})
 
   function refreshCounts() {
     if (!ready || countLoading) return
@@ -2367,6 +2417,109 @@ Item {
     Quickshell.execDetached(["notify-send", "-a", "Omamail", "-i",
       root.pluginDir + "/assets/omamail.svg",
       "--", Model.pluralize(list.length, "new message"), names.join(", ")])
+  }
+
+  // ------------------------------------------------------------ labels
+
+  // Whether the label list can be changed from here, and the four changes:
+  // create beside or beneath a label, rename it, move it under another,
+  // delete it. Every one goes to the provider first and reloads the list
+  // from the server after — a label is the server's fact, not this window's,
+  // and a Gmail label's id is only known once Gmail has made it.
+  readonly property bool canManageLabels: Provider.can(providerId, "manageLabels")
+
+  function labelById(id) {
+    var index = Model.indexById(labels, id)
+    return index >= 0 ? labels[index] : null
+  }
+
+  function labelPathOf(label) {
+    return label ? String(label.rawName || label.name || "") : ""
+  }
+
+  function createLabel(parentPath, leaf) {
+    if (!ready || !canManageLabels) return false
+    var delimiter = Model.labelDelimiter(labels.length > 0 ? labels[0] : null)
+    var problem = Model.labelNameProblem(leaf, delimiter)
+    if (problem !== "") { fail(problem); return false }
+    var name = Model.labelPathJoin(parentPath, leaf, delimiter)
+    api.createLabel(name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not create " + name + ": " + String(error)); return }
+      root.note("Created " + name)
+      root.reloadLabels()
+    })
+    return true
+  }
+
+  function renameLabel(id, leaf) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var delimiter = Model.labelDelimiter(label)
+    var problem = Model.labelNameProblem(leaf, delimiter)
+    if (problem !== "") { fail(problem); return false }
+    var path = labelPathOf(label)
+    var name = Model.labelPathJoin(Model.labelParent(path, delimiter), leaf, delimiter)
+    if (name === path) return false
+    api.renameLabel(String(label.id), name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not rename " + path + ": " + String(error)); return }
+      root.note("Renamed to " + name)
+      root.afterLabelMoved(path, name)
+    })
+    return true
+  }
+
+  function moveLabel(id, newParentPath) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var delimiter = Model.labelDelimiter(label)
+    var path = labelPathOf(label)
+    var name = Model.labelPathJoin(newParentPath, Model.labelLeaf(path, delimiter), delimiter)
+    if (name === path) return false
+    api.renameLabel(String(label.id), name, function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not move " + path + ": " + String(error)); return }
+      root.note("Moved to " + name)
+      root.afterLabelMoved(path, name)
+    })
+    return true
+  }
+
+  function deleteLabel(id) {
+    var label = labelById(id)
+    if (!ready || !canManageLabels || !label) return false
+    var path = labelPathOf(label)
+    api.deleteLabel(String(label.id), function(payload, error) {
+      if (!root) return
+      if (error) { root.fail("Could not delete " + path + ": " + String(error)); return }
+      root.note("Deleted " + path)
+      // The list this window was looking at may have been the label just
+      // deleted; the inbox is the honest place to stand then.
+      if (root.rawLabelId === String(label.id)) root.selectMailbox("inbox")
+      root.reloadLabels()
+    })
+    return true
+  }
+
+  // The label on screen follows its own rename, so a rename does not leave
+  // the window on a query for a name the server no longer has.
+  function afterLabelMoved(oldPath, newPath) {
+    if (rawQuery !== "" && rawQuery === Provider.labelQuery(providerId, oldPath)) {
+      rawQuery = Provider.labelQuery(providerId, newPath)
+      rawLabelId = providerId === "imap" ? newPath : rawLabelId
+      loadMessages(false)
+    }
+    reloadLabels()
+  }
+
+  function reloadLabels() {
+    if (!ready) return
+    api.getLabels(function(result, error) {
+      if (!root || error) return
+      root.labels = result
+      root.cacheStore.putLabels(result)
+    })
   }
 
   // ------------------------------------------------------------ navigation

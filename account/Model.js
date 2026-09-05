@@ -1305,3 +1305,73 @@ function visibleLabels(labels, collapsedPaths) {
 function togglePath(paths, path) {
   return toggleId(paths, path)
 }
+
+// ------------------------------------------------------------ label names
+
+// A label's path taken apart and put together with the delimiter its
+// provider nests with: "/" for Gmail, whatever the server said for IMAP.
+function labelDelimiter(label) {
+  return String(label && label.delimiter ? label.delimiter : "") || "/"
+}
+
+function labelLeaf(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter || "") || "/"
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? text : text.slice(at + sep.length)
+}
+
+function labelParent(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter || "") || "/"
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? "" : text.slice(0, at)
+}
+
+function labelPathJoin(parent, leaf, delimiter) {
+  var head = String(parent || "")
+  var tail = String(leaf || "").trim()
+  var sep = String(delimiter || "") || "/"
+  return head === "" ? tail : head + sep + tail
+}
+
+// Whether a name typed for a label is one the provider can take: not empty,
+// and not carrying the delimiter, which would make two labels of one.
+function labelNameProblem(name, delimiter) {
+  var text = String(name || "").trim()
+  var sep = String(delimiter || "") || "/"
+  if (text === "") return "A label needs a name"
+  if (text.indexOf(sep) >= 0) return "A name cannot contain " + sep + "; use New sub-label to nest"
+  return ""
+}
+
+// Where a label may be moved: every other label that is not beneath it, plus
+// the top level. Moving a label under its own descendant would swallow it.
+function labelMoveTargets(labels, movingPath, delimiter) {
+  var all = Array.isArray(labels) ? labels : []
+  var sep = String(delimiter || "") || "/"
+  var moving = String(movingPath || "")
+  var out = [{ id: "", name: "Top level", path: "" }]
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var path = String(label.rawName || label.name || "")
+    if (path === "" || path === moving) continue
+    if (moving !== "" && path.indexOf(moving + sep) === 0) continue
+    if (path === labelParent(moving, sep)) continue
+    out.push({ id: String(label.id || ""), name: path, path: path })
+  }
+  return out
+}
+
+// "3 new in Receipts", or the two labels with the most, for the status line.
+function monitoredNote(grown) {
+  var list = Array.isArray(grown) ? grown.slice() : []
+  if (list.length === 0) return ""
+  list.sort(function(a, b) { return Number(b.delta || 0) - Number(a.delta || 0) })
+  var parts = []
+  for (var i = 0; i < list.length && i < 2; i++)
+    parts.push(Math.max(1, Math.floor(Number(list[i].delta) || 1)) + " new in " + String(list[i].name || ""))
+  var more = list.length - parts.length
+  return parts.join(", ") + (more > 0 ? " and " + more + " more" : "")
+}

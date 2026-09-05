@@ -924,4 +924,18 @@ assert.strictEqual(imap.decodeResponse("", mail.base64ToBytes, mail.bytesToLatin
 assert.strictEqual(imap.decodeResponse("abc", null, null), "",
   "no decoder is an empty response, not a crash")
 
+// A folder name the user typed goes out in modified UTF-7 and comes back the
+// same: the round trip through `decodeMailbox` is the whole assertion.
+assert.strictEqual(imap.encodeMailbox("Receipts"), "Receipts")
+assert.strictEqual(imap.encodeMailbox("Tom & Jerry"), "Tom &- Jerry")
+assert.strictEqual(imap.encodeMailbox("日本語"), "&ZeVnLIqe-")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("日本語")), "日本語")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("Tom & Jerry/2026")), "Tom & Jerry/2026")
+assert.strictEqual(imap.decodeMailbox(imap.encodeMailbox("Café ☕")), "Café ☕")
+assert.strictEqual(imap.encodeMailbox(""), "")
+assert.strictEqual(imap.createCommand("Archive/2026"), "CREATE \"Archive/2026\"")
+assert.strictEqual(imap.renameCommand("Old", "Archive/New"), "RENAME \"Old\" \"Archive/New\"")
+assert.strictEqual(imap.deleteCommand("A \"quoted\" one"), "DELETE \"A \\\"quoted\\\" one\"")
+assert.strictEqual(imap.createCommand("日本語"), "CREATE \"&ZeVnLIqe-\"")
+
 console.log("Imap.js ok")

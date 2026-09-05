@@ -672,3 +672,20 @@ assert.strictEqual(withBoth.accounts[0].signature, "Best, me")
 assert.strictEqual(
   accounts.setLabel(withBoth, "me@gmail.com", "Personal").accounts[0].signature,
   "Best, me", "naming a mailbox does not forget its signature")
+
+
+// Monitored labels ride with the mailbox and survive its other edits.
+{
+  const watched = accounts.toggleMonitored(named, "me@gmail.com", "Label_7")
+  deepEqual(watched.accounts[0].monitored, ["Label_7"])
+  deepEqual(accounts.toggleMonitored(watched, "me@gmail.com", "Label_7").accounts[0].monitored, [],
+    "toggling again stops watching")
+  const two = accounts.toggleMonitored(watched, "me@gmail.com", "Label_9")
+  deepEqual(two.accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.setLabel(two, "me@gmail.com", "Work").accounts[0].monitored, ["Label_7", "Label_9"],
+    "naming the mailbox keeps what it watches")
+  deepEqual(accounts.toggleMonitored(two, "nobody@example.org", "x").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.toggleMonitored(two, "me@gmail.com", "  ").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.load(accounts.serialize(two)).accounts[0].monitored, ["Label_7", "Label_9"],
+    "and it is written to disk and read back")
+}

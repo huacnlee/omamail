@@ -59,6 +59,9 @@ function capabilities(values) {
     webBox: raw.webBox === true,
     // Free-text search the server runs.
     search: raw.search === true,
+    // The label or folder list can be changed from here: created, renamed,
+    // moved under another, deleted. HEY's labels are HEY's own.
+    manageLabels: raw.manageLabels === true,
     // Sends mail. A read-only provider still shows a reader; it just cannot
     // answer from it.
     send: raw.send === true
@@ -105,6 +108,7 @@ function define(source) {
     cachedSummaryInSearch: typeof raw.cachedSummaryInSearch === "function"
       ? raw.cachedSummaryInSearch : function() { return false },
     labelQuery: typeof raw.labelQuery === "function" ? raw.labelQuery : function() { return "" },
+    addressQuery: typeof raw.addressQuery === "function" ? raw.addressQuery : function() { return "" },
     // Where a message and a mailbox live on the web, for the provider that has
     // a web UI worth opening. A provider that declares no `web` capability
     // never reaches these, and answers "" if something asks anyway.
@@ -232,6 +236,12 @@ function cachedSummaryInSearch(id, sourceQuery, summary) {
 // own labels are — an operator for Gmail, a folder for IMAP.
 function labelQuery(id, name) {
   return get(id).labelQuery(name)
+}
+
+// The query that finds mail from, or to, one address on this provider, or ""
+// where the provider cannot ask that.
+function addressQuery(id, field, address) {
+  return get(id).addressQuery(field, address)
 }
 
 // What the unread badge counts. A lookup rather than a second definition that
