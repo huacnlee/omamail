@@ -44,6 +44,11 @@ var CAPABILITIES = {
   labels: true,
   // A topic id, which is HEY's own conversation.
   threads: true,
+  // And the listing is already made of them: `hey threads` answers one entry
+  // per topic, so a HEY row has always stood for a conversation rather than
+  // for a message. Nothing above the seam has to group anything here; it only
+  // has to know that a row means what this says it means.
+  conversations: true,
   // Deliberately off. HEY has no archive: a thread is moved to another box, or
   // set aside, or left where it is, and none of those is what the key means.
   // Spending "e" on a move to Paper Trail would file mail somewhere the user

@@ -693,6 +693,10 @@ DropArea {
       subject: subjectField.text,
       body: bodyEdit.text,
       attachments: root.allOutgoingAttachments(),
+      // The draft this form was opened from, which sending replaces. A save
+      // has always named it; a send dropped it, and the draft stayed in the
+      // list after the message it had become was already gone.
+      draftId: root.sourceDraftId,
       // A forward starts a new conversation; a reply must stay in the old one.
       threadId: root.mode === "forward" ? "" : root.threadId,
       inReplyTo: root.mode === "forward" ? "" : root.inReplyTo

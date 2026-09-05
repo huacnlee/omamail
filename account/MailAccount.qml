@@ -92,28 +92,46 @@ Item {
   readonly property var api: apiLoader.item
   readonly property alias cache: cacheStore
 
+  // What *this account* takes back from what its provider declares, and the
+  // rail rows it has no mailbox for. Two accounts of one kind can honestly
+  // differ — one server has an Archive folder and trains on its Junk, the next
+  // has neither — so the provider list is a ceiling and the client withdraws
+  // from it. A client that exposes neither, which is all three of Gmail, HEY
+  // and IMAP, leaves every answer below exactly the ceiling's.
+  //
+  // Both are null while the loader is between clients and until the client has
+  // read its mailboxes, which is what makes the ceiling the right default: a
+  // button reflects the last known list, and a press against a mailbox that
+  // has since gone lands on the client's own refusal at request time.
+  readonly property var capabilityRefusals: api ? api.refusals : null
+  readonly property var absentMailboxes: api ? api.absentMailboxes : null
+
   // The mailboxes this account has, which is a property of its provider rather
   // than of the panel. The sidebar and the tab row draw whatever is here.
-  readonly property var mailboxes: Provider.mailboxes(providerId)
+  readonly property var mailboxes: Provider.mailboxes(providerId, absentMailboxes)
 
   // What the panel may offer for this account. A button the service cannot
   // honour is worse than a missing one: it fails after the user has committed
   // to it, with the row already moved.
-  readonly property bool canArchive: Provider.can(providerId, "archive")
-  readonly property bool canReportSpam: Provider.can(providerId, "spam")
-  readonly property bool canStar: Provider.can(providerId, "star")
+  readonly property bool canArchive: Provider.can(providerId, "archive", capabilityRefusals)
+  readonly property bool canReportSpam: Provider.can(providerId, "spam", capabilityRefusals)
+  readonly property bool canStar: Provider.can(providerId, "star", capabilityRefusals)
   readonly property bool hasLabels: Provider.can(providerId, "labels")
   readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
   // A different question from the one above: whether *this mailbox*, as it is
   // filtered right now, has an address in the provider's web app at all.
   readonly property bool canOpenWebInbox: Provider.can(providerId, "webBox")
-  readonly property bool canSend: Provider.can(providerId, "send")
+  readonly property bool canSend: Provider.can(providerId, "send", capabilityRefusals)
+  // The refined answers again, keyed by the capability names
+  // `Model.actionCapability` speaks, so the hint row and the guard in `act`
+  // read one answer rather than each asking the registry its own way.
+  readonly property var actionCapabilities: ({
+    archive: canArchive, star: canStar, spam: canReportSpam })
   // The key-bound actions this mailbox cannot honour, for the hint row. The
   // buttons are hidden by the three properties above; the keys are bound
   // whatever provider is open, so the row that says what the keyboard does here
   // has to be told as well.
-  readonly property var unavailableActions: Model.unavailableActions({
-    archive: canArchive, star: canStar, spam: canReportSpam })
+  readonly property var unavailableActions: Model.unavailableActions(actionCapabilities)
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.
@@ -1293,9 +1311,18 @@ Item {
     // honour reaches here even though the panel drew no button for it — and the
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
+    //
+    // The booleans the buttons were drawn from are what is read, rather than
+    // the registry a second time: an account may refuse what its provider
+    // declares, and the two halves of that rule stay together only while both
+    // come from one answer. The account's own reason is what a user is told
+    // when it has one — "This account has no Archive mailbox" says more than
+    // the provider's "IMAP has no archive" ever could about an account whose
+    // neighbour of the same kind archives fine.
     var needs = Model.actionCapability(action)
-    if (needs !== "" && !Provider.can(providerId, needs)) {
-      note(Model.actionUnavailable(action, Provider.badge(providerId)))
+    if (needs !== "" && actionCapabilities[needs] !== true) {
+      var refused = Provider.refusal(providerId, needs, capabilityRefusals)
+      note(refused !== "" ? refused : Model.actionUnavailable(action, Provider.badge(providerId)))
       return false
     }
     if (pendingAction !== "") {
@@ -1720,6 +1747,9 @@ Item {
     var payload = Mail.buildSendPayload({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
+      // What the generated Message-ID takes its domain from when the draft
+      // names no From of its own.
+      accountAddress: ownAddress,
       to: String(values.to || "").trim(),
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
@@ -1728,9 +1758,9 @@ Item {
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
       threadId: values.threadId,
       inReplyTo: values.inReplyTo,
-      references: values.references
+      references: values.references,
+      draftId: String(values.draftId || "")
     })
-    payload.draftId = String(values.draftId || "")
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
     })
@@ -1766,6 +1796,9 @@ Item {
     var payload = Mail.buildSendPayload({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
+      // What the generated Message-ID takes its domain from when the compose
+      // window states no From and the provider fills one in for itself.
+      accountAddress: ownAddress,
       to: to,
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
@@ -1774,7 +1807,11 @@ Item {
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
       threadId: values.threadId,
       inReplyTo: values.inReplyTo,
-      references: values.references
+      references: values.references,
+      // The draft this send replaces, carried through the undo window with the
+      // rest of the payload. Dropping it here is what left a sent message's
+      // draft behind on every provider.
+      draftId: String(values.draftId || "")
     })
 
     var queued = Outbox.schedule(payload, Date.now(), undoSendSeconds)
@@ -1831,6 +1868,7 @@ Item {
       // them would have written this one.
       from: answeringAs,
       fromName: answeringName,
+      accountAddress: ownAddress,
       to: fields.to,
       subject: fields.subject,
       body: fields.body,
@@ -1906,6 +1944,7 @@ Item {
         // an alias has no reason to act on a request from anywhere else.
         from: receivedAsAddress,
         fromName: receivedAsName,
+        accountAddress: ownAddress,
         to: info.mail.to,
         subject: info.mail.subject,
         body: info.mail.body

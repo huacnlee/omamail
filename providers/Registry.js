@@ -36,6 +36,13 @@ function capabilities(values) {
     labels: raw.labels === true,
     // A server-side conversation id.
     threads: raw.threads === true,
+    // A different question: whether the *listing* collapses to one row per
+    // conversation. Having thread ids does not settle it — Gmail has them and
+    // still lists messages, because collapsing its list would cost a
+    // `threads.get` per thread — while HEY's rows already are conversations
+    // with nothing here to do. Grouping is a rule above this seam, and this is
+    // what gates it.
+    conversations: raw.conversations === true,
     // "Archive" means something.
     archive: raw.archive === true,
     // A junk verb the server acts on.
@@ -159,14 +166,57 @@ function unavailableReason(id) {
   return String(get(id).unavailable || "")
 }
 
-function can(id, capability) {
-  return get(id).capabilities[String(capability)] === true
+// A provider's capability list is a *ceiling*: the most any account of that
+// kind may offer. One account can honestly do less than another of the same
+// kind — a JMAP server with no Archive mailbox, one whose Junk folder trains
+// nothing — so an account may *refuse* a ceiling capability. It may never add
+// one, which is why every answer below starts from the ceiling.
+//
+// A refusal is the client's own `refusals` object: capability name to the
+// reason a user is shown. An absent key means "as the ceiling says", so a
+// client that exposes none — Gmail, HEY and IMAP — is answered exactly as it
+// was before the argument existed.
+function refuses(refusals, capability) {
+  if (!refusals) return false
+  // Presence is the refusal; the value is only the sentence shown for it. Read
+  // rather than tested for with `hasOwnProperty`, because these objects cross
+  // the QML boundary and a plain read is the one thing that means the same on
+  // both sides of it.
+  var reason = refusals[String(capability)]
+  return reason !== undefined && reason !== null
+}
+
+function can(id, capability, refusals) {
+  if (get(id).capabilities[String(capability)] !== true) return false
+  return !refuses(refusals, capability)
+}
+
+// Why this account said no, for the note shown when a key reaches an action the
+// account cannot honour. "" when the account refused nothing — including when
+// the ceiling never offered the capability, since there is nothing there to
+// withdraw and the provider's own wording is the honest answer.
+function refusal(id, capability, refusals) {
+  if (get(id).capabilities[String(capability)] !== true) return ""
+  if (!refuses(refusals, capability)) return ""
+  return String(refusals[String(capability)])
 }
 
 // ---------------------------------------------------------------- queries
 
-function mailboxes(id) {
-  return get(id).mailboxes.slice()
+// `absent` is the rail keys this account has no mailbox for, which is a fact
+// about the account rather than about the provider: a JMAP server need not have
+// an Archive or a Junk folder. Their rows are dropped rather than drawn dead,
+// and because the number keys are positional the rows below move up.
+function mailboxes(id, absent) {
+  var list = get(id).mailboxes
+  var missing = Array.isArray(absent) ? absent : []
+  var drop = []
+  for (var i = 0; i < missing.length; i++) drop.push(String(missing[i]))
+  var out = []
+  for (var j = 0; j < list.length; j++) {
+    if (drop.indexOf(list[j].key) < 0) out.push(list[j])
+  }
+  return out
 }
 
 function mailboxIndex(id, key) {
