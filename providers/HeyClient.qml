@@ -511,12 +511,17 @@ Item {
     return act(verb, ids, callback)
   }
 
+  // One id or a list of them. A HEY message id is `<posting>:<topic>`, and a
+  // conversation's members all share the topic — so a list arriving from a row
+  // that stands for a conversation can name the same posting more than once.
+  // `Cli.actionCommand` already keeps each posting once, which is why the list
+  // is handed straight to it rather than wrapped in another array.
   function trashMessage(id, callback) {
-    return act("trash", [id], callback)
+    return act("trash", Array.isArray(id) ? id : [id], callback)
   }
 
   function untrashMessage(id, callback) {
-    return act("untrash", [id], callback)
+    return act("untrash", Array.isArray(id) ? id : [id], callback)
   }
 
   // One verb, however many threads: every HEY command takes a list of ids, so a
