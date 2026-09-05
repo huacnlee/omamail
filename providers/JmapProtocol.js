@@ -1742,6 +1742,210 @@ function substitutePart(payload, part, data) {
   return done
 }
 
+// ------------------------------------------------------ actions as patches
+//
+// `MailAccount` does not know which provider it is driving: it asks for a
+// *label change*, in Gmail's vocabulary, because that is the vocabulary every
+// view already speaks. This is where that request becomes JMAP, exactly as
+// `ImapProtocol.flagPlanForLabels` is where it becomes IMAP.
+//
+// The unit is a **patch**: one RFC 8620 update object for one Email, keyword
+// keys and mailbox keys together, sent under `Email/set`'s `update` map. Two of
+// the mappings are not keywords at all — Gmail archives by removing the INBOX
+// label, while a JMAP message holds a *set* of mailboxes — so those become
+// `mailboxIds` keys instead.
+
+// How a keyword is taken away. RFC 8620 patches a value out with `null`; the
+// reference server also accepts `false`, which is not used, because `null` is
+// the form the RFC names and a server entitled to refuse the other one is
+// entitled to.
+var KEYWORD_OFF = null
+
+// What `maxObjectsInSet` is worth when the session does not say, for the same
+// reason `DEFAULT_OBJECTS_IN_GET` exists: RFC 8620 makes the figure mandatory,
+// so this is the floor under a server that omitted it rather than an assumption
+// about one that stated it. The reference server says 500.
+var DEFAULT_OBJECTS_IN_SET = 100
+
+// Where each move goes and what it leaves behind.
+//
+//   to       the destination role, which has to resolve or the whole request
+//            fails here, before anything is sent.
+//   from     the role the message stops being in, skipped when it resolves to
+//            nothing — leaving a mailbox this account has not got is not a
+//            thing that can happen, and `null` on an absent key is harmless.
+//   replace  true where `mailboxIds` is written *whole* rather than patched, so
+//            the message is in exactly the one mailbox afterwards.
+//
+// Archive and unarchive are patches on purpose: a message may legitimately sit
+// in a user folder as well as the Inbox, and archiving it should swap the one
+// membership rather than file away the other. Trash and spam are replaces,
+// which is what `Model.survivesAction` and `cachedSummaryInSearch` already
+// assume about a message that has been thrown away or reported.
+var MOVES = {
+  archive: { to: "archive", from: "inbox", replace: false },
+  unarchive: { to: "inbox", from: "archive", replace: false },
+  untrash: { to: "inbox", from: "trash", replace: false },
+  trash: { to: "trash", from: "", replace: true },
+  spam: { to: "junk", from: "", replace: true }
+}
+
+function hasLabel(list, id) {
+  var source = Array.isArray(list) ? list : []
+  for (var i = 0; i < source.length; i++) {
+    if (trimmed(source[i]).toUpperCase() === id) return true
+  }
+  return false
+}
+
+// Which move a set of label changes amounts to, or "" for a change that is only
+// keywords.
+//
+// Named in the table's own order so a later move overrides an earlier one, and
+// that is a rule rather than a tie-break: "report spam" arrives as add SPAM
+// *and* remove INBOX, and reading the first of those as an archive would file
+// the message on an account with an Archive mailbox and refuse the request on
+// one without — for a user who asked to report junk.
+function moveFor(added, removed) {
+  var move = ""
+  if (hasLabel(removed, "INBOX")) move = "archive"
+  if (hasLabel(added, "INBOX")) move = "unarchive"
+  // Untrash arrives as its own verb rather than as a label change, and this is
+  // the Gmail vocabulary for it: a restored message is one the TRASH label came
+  // off. JMAP remembers no previous mailbox — a trashed Email carries
+  // `mailboxIds` and keywords and nothing else — so it goes to the Inbox, which
+  // is where `ImapClient.untrashMessage` moves one.
+  if (hasLabel(removed, "TRASH")) move = "untrash"
+  if (hasLabel(added, "TRASH")) move = "trash"
+  if (hasLabel(added, "SPAM")) move = "spam"
+  return move
+}
+
+// One patch for one message, from the label ids to add and remove and the
+// account's role map — **or an error sentence**, when the account has no
+// mailbox for the move being asked for. The two are told apart by type: a patch
+// is an object and a refusal is a string.
+//
+// The refusal is the point. IMAP's plan yields no move on an account with no
+// Archive folder and the request quietly succeeds, having done nothing; here a
+// destination that does not resolve is a failure before any request, so the
+// account puts the row back and says which mailbox is missing. The alternative
+// the server offers is worse: a `mailboxIds/<inbox>: null` with nothing to take
+// its place is refused as "Message has to belong to at least one mailbox".
+function patchFor(addLabelIds, removeLabelIds, roles) {
+  var added = Array.isArray(addLabelIds) ? addLabelIds : []
+  var removed = Array.isArray(removeLabelIds) ? removeLabelIds : []
+  var map = roles && typeof roles === "object" ? roles : {}
+  var patch = {}
+
+  // The inversion: Gmail's UNREAD is a label you *add*, JMAP's `$seen` is a
+  // keyword you *take away*. Getting this backwards marks read what the user
+  // has just marked unread.
+  if (hasLabel(added, "UNREAD")) patch["keywords/$seen"] = KEYWORD_OFF
+  if (hasLabel(removed, "UNREAD")) patch["keywords/$seen"] = true
+  if (hasLabel(added, "STARRED")) patch["keywords/$flagged"] = true
+  if (hasLabel(removed, "STARRED")) patch["keywords/$flagged"] = KEYWORD_OFF
+
+  var move = moveFor(added, removed)
+  if (move === "") return patch
+
+  var plan = MOVES[move]
+  var to = trimmed(map[plan.to])
+  if (to === "") return missingMailboxError(plan.to)
+
+  if (plan.replace) {
+    var only = {}
+    only[to] = true
+    patch.mailboxIds = only
+  } else {
+    patch["mailboxIds/" + to] = true
+    var from = plan.from === "" ? "" : trimmed(map[plan.from])
+    if (from !== "" && from !== to) patch["mailboxIds/" + from] = KEYWORD_OFF
+  }
+
+  // Reporting spam says something about the message as well as moving it. RFC
+  // 8621 registers both keywords and the reference server writes `$junk` on a
+  // message its own classifier caught; a server that ignores them loses
+  // nothing, and one that learns from them is told. Nothing sets `$notjunk`,
+  // because no action moves a message back out of Junk.
+  if (move === "spam") {
+    patch["keywords/$junk"] = true
+    patch["keywords/$notjunk"] = KEYWORD_OFF
+  }
+  return patch
+}
+
+// A patch that would change nothing, which is a request worth not making: a
+// label change this provider has no mapping for should not cost a round trip
+// and an `Email/set` that names every id and then asks for nothing.
+function patchIsEmpty(patch) {
+  if (!patch || typeof patch !== "object") return true
+  for (var key in patch) return false
+  return true
+}
+
+// The `Email/set` arguments for one patch over a list of ids, so the request an
+// action becomes is described in one place and a test can read exactly what
+// crosses.
+//
+// No `ifInState`, ever. A value the server never issued comes back as a
+// request-level 400 `notRequest` on the reference server rather than the
+// `stateMismatch` RFC 8620 describes, so a client that guessed one would fail
+// every action outright; and an action is a change the user asked for rather
+// than one conditional on the list being current. If refresh-by-delta ever
+// adopts it, it may only ever carry a state the server returned.
+function emailSet(accountId, ids, patch) {
+  var update = {}
+  var list = Array.isArray(ids) ? ids : []
+  for (var i = 0; i < list.length; i++) {
+    var id = trimmed(list[i])
+    if (id !== "") update[id] = patch
+  }
+  return { accountId: trimmed(accountId), update: update }
+}
+
+// One `notUpdated` entry as a sentence, in the style of
+// `ImapProtocol.responseError`: the server's own words are written for whoever
+// reads its logs, and these are the ones a user can act on.
+function setError(entry) {
+  var source = entry && typeof entry === "object" ? entry : {}
+  var type = errorType(source.type)
+  if (type === "notFound") return "That message is no longer on the server"
+  if (type === "forbidden") return "The server refused that change"
+  if (type === "tooLarge" || type === "overQuota") return "The mailbox is over its storage quota"
+  if (type === "rateLimit") return "The mail server is busy. Try again shortly"
+  // `invalidProperties`, `invalidPatch` and whatever a server invents: its own
+  // description if it wrote one, because a type name is not a sentence.
+  var described = describedBy(source)
+  if (described !== "") return redact(described)
+  return "The mail server could not complete this request"
+}
+
+// What an `Email/set` reply amounts to: "" when everything the request named
+// was updated, else the sentence for the first entry that was not.
+//
+// `tolerateNotFound` is the whole difference between a batch and one message.
+// "Mark these read" over a page somebody else has been deleting from is not a
+// failed request — what is still there was marked, and the next list load drops
+// the rest — so a `notFound` inside a batch is passed over. One message the
+// user pointed at is a different thing: there is nothing to report but the
+// failure, and reporting success would leave the row moved.
+//
+// Application is per object, so the objects that were not refused have already
+// been changed. The account restores its whole list on the error and the next
+// poll or push corrects the rows that did change, which is the contract it
+// already keeps for every provider.
+function notUpdatedError(args, tolerateNotFound) {
+  var source = args && typeof args === "object" ? args.notUpdated : null
+  if (!source || typeof source !== "object") return ""
+  for (var id in source) {
+    var entry = source[id] && typeof source[id] === "object" ? source[id] : {}
+    if (tolerateNotFound === true && errorType(entry.type) === "notFound") continue
+    return setError(entry)
+  }
+  return ""
+}
+
 // --------------------------------------------------- per-account refusals
 //
 // The provider's capability list is a ceiling and an account may withdraw from

@@ -1388,6 +1388,225 @@ assert.strictEqual(jmap.responseArguments(reply, "Mailbox/get"), null,
   "which is a different thing from an invocation that answered an empty list")
 assert.strictEqual(jmap.responseArguments(null, "Email/get"), null)
 
+// ------------------------------------------------------ actions as patches
+//
+// `roles` above is the reference test account's map — Inbox `a`, Trash `b`,
+// Junk `c`, Drafts `d`, Sent `e` — and **no Archive at all**, which is what
+// makes the unresolved-role rows below the account's real behaviour rather than
+// a hypothetical. `filed` is the same account with one.
+
+const filed = jmap.roleMap(boxes.concat([
+  { id: "f", name: "Archive", parentId: null, role: "archive", sortOrder: 0 }
+]))
+
+assert.strictEqual(roles.archive, "")
+assert.strictEqual(filed.archive, "f")
+
+// Every row of the table, in the vocabulary `Model.labelChangesFor` speaks.
+
+// Read and unread. The inversion is the one that has to be right: Gmail's
+// UNREAD is a label you add, `$seen` is a keyword you take away.
+deepEqual(jmap.patchFor([], ["UNREAD"], roles), { "keywords/$seen": true })
+deepEqual(jmap.patchFor(["UNREAD"], [], roles), { "keywords/$seen": null })
+
+// Star, both ways. Removal is `null`, the RFC 8620 patch form; `false` also
+// works on the reference server and is deliberately not used.
+deepEqual(jmap.patchFor(["STARRED"], [], roles), { "keywords/$flagged": true })
+deepEqual(jmap.patchFor([], ["STARRED"], roles), { "keywords/$flagged": null })
+
+// Archive swaps Inbox for Archive and leaves every other membership alone, so a
+// message filed in a user folder as well stays filed there.
+deepEqual(jmap.patchFor([], ["INBOX"], filed),
+  { "mailboxIds/f": true, "mailboxIds/a": null })
+deepEqual(jmap.patchFor(["INBOX"], [], filed),
+  { "mailboxIds/a": true, "mailboxIds/f": null })
+
+// Trash and spam are whole-property replaces: the message is there and nowhere
+// else, which is what the after-action rule already assumes about it.
+deepEqual(jmap.patchFor(["TRASH"], [], roles), { mailboxIds: { b: true } })
+deepEqual(jmap.patchFor(["SPAM"], [], roles), {
+  mailboxIds: { c: true },
+  "keywords/$junk": true,
+  "keywords/$notjunk": null
+})
+
+// Untrash is the TRASH label coming off, and it goes to the Inbox because JMAP
+// keeps no record of where a trashed message came from.
+deepEqual(jmap.patchFor([], ["TRASH"], roles),
+  { "mailboxIds/a": true, "mailboxIds/b": null })
+
+// Several label ids combine in one patch: one message, one update object.
+deepEqual(jmap.patchFor(["STARRED"], ["UNREAD"], roles),
+  { "keywords/$flagged": true, "keywords/$seen": true })
+deepEqual(jmap.patchFor(["TRASH"], ["UNREAD"], roles),
+  { "keywords/$seen": true, mailboxIds: { b: true } })
+
+// A later move overrides an earlier one, and this is the case that matters:
+// "report spam" arrives as add SPAM *and* remove INBOX. Reading the first of
+// those as an archive would file the message rather than report it — and on
+// this account, which has no Archive mailbox, would refuse the request outright
+// for a user who asked for junk.
+deepEqual(jmap.patchFor(["SPAM"], ["INBOX"], roles), {
+  mailboxIds: { c: true },
+  "keywords/$junk": true,
+  "keywords/$notjunk": null
+})
+deepEqual(jmap.patchFor(["SPAM"], ["INBOX"], filed), {
+  mailboxIds: { c: true },
+  "keywords/$junk": true,
+  "keywords/$notjunk": null
+}, "and the same on an account that does have one, rather than an archive")
+deepEqual(jmap.patchFor(["TRASH"], ["INBOX"], filed), { mailboxIds: { b: true } })
+
+// The three unresolved-role errors: a destination this account has no mailbox
+// for is a failure in the client, in the query's own wording, before any
+// request. Not a silent success, which is what IMAP does today, and not a patch
+// that would leave the message in no mailbox at all — the server refuses that
+// with "Message has to belong to at least one mailbox".
+assert.strictEqual(jmap.patchFor([], ["INBOX"], roles),
+  "This account has no Archive mailbox")
+assert.strictEqual(jmap.patchFor(["TRASH"], [], jmap.roleMap([])),
+  "This account has no Trash mailbox")
+assert.strictEqual(jmap.patchFor(["SPAM"], [], jmap.roleMap([])),
+  "This account has no Junk mailbox")
+assert.strictEqual(jmap.patchFor(["INBOX"], [], jmap.roleMap([])),
+  "This account has no Inbox mailbox",
+  "and unarchive names the mailbox it was going to, not the one it was leaving")
+
+// The refusal is the *destination*. Unarchiving on an account with no Archive
+// mailbox has nowhere to leave from and that is nothing to do, so the patch is
+// the move into the Inbox and no `null` for a key that could not exist.
+deepEqual(jmap.patchFor(["INBOX"], [], roles), { "mailboxIds/a": true })
+deepEqual(jmap.patchFor([], ["TRASH"], jmap.roleMap([
+  { id: "a", name: "Inbox", parentId: null, role: "inbox" }
+])), { "mailboxIds/a": true })
+
+// A keyword change never needs a mailbox, so it never refuses.
+deepEqual(jmap.patchFor([], ["UNREAD"], jmap.roleMap([])), { "keywords/$seen": true })
+
+// Nothing recognised is an empty patch rather than an error, and the client
+// answers it without a round trip.
+deepEqual(jmap.patchFor([], [], roles), {})
+deepEqual(jmap.patchFor(["IMPORTANT"], ["CATEGORY_PROMOTIONS"], roles), {})
+deepEqual(jmap.patchFor(null, null, null), {})
+assert.strictEqual(jmap.patchIsEmpty(jmap.patchFor([], [], roles)), true)
+assert.strictEqual(jmap.patchIsEmpty(jmap.patchFor([], ["UNREAD"], roles)), false)
+assert.strictEqual(jmap.patchIsEmpty(null), true)
+assert.strictEqual(jmap.patchIsEmpty("This account has no Archive mailbox"), true,
+  "a refusal is not a patch to send either")
+
+// Label ids arrive uppercase from the model, and a stray lower-case one is the
+// same request rather than a silent no-op.
+deepEqual(jmap.patchFor(["starred"], [], roles), { "keywords/$flagged": true })
+
+// ---------------------------------------------------------- the set request
+
+// One patch per message under one `update` map, and never `ifInState` — a
+// value the server never issued is a request-level 400 on the reference server
+// rather than the `stateMismatch` the RFC describes.
+const seen = jmap.patchFor([], ["UNREAD"], roles)
+deepEqual(jmap.emailSet("t", ["eaaaaab", "iaaaaac"], seen), {
+  accountId: "t",
+  update: {
+    eaaaaab: { "keywords/$seen": true },
+    iaaaaac: { "keywords/$seen": true }
+  }
+})
+assert.strictEqual("ifInState" in jmap.emailSet("t", ["eaaaaab"], seen), false)
+deepEqual(jmap.emailSet("t", ["eaaaaab", "", null], seen), {
+  accountId: "t",
+  update: { eaaaaab: { "keywords/$seen": true } }
+}, "an empty id would name a message the server has no way to refuse")
+deepEqual(jmap.emailSet("t", [], seen), { accountId: "t", update: {} })
+deepEqual(jmap.emailSet("t", null, seen), { accountId: "t", update: {} })
+
+// Chunking, at and above the session's own figure. The reference server says
+// 500; the fallback is a floor under a server that omitted a mandatory number,
+// not a guess about one that stated it.
+const many = []
+for (let i = 0; i < 501; i++) many.push("id" + i)
+const setLimit = jmap.sessionLimit(limited, "maxObjectsInSet", jmap.DEFAULT_OBJECTS_IN_SET)
+assert.strictEqual(setLimit, 500)
+assert.strictEqual(jmap.sessionLimit(null, "maxObjectsInSet", jmap.DEFAULT_OBJECTS_IN_SET), 100)
+
+assert.strictEqual(jmap.chunked(many.slice(0, 499), setLimit).length, 1)
+assert.strictEqual(jmap.chunked(many.slice(0, 500), setLimit).length, 1,
+  "exactly the limit is one request, not two")
+const split = jmap.chunked(many, setLimit)
+assert.strictEqual(split.length, 2)
+assert.strictEqual(split[0].length, 500)
+deepEqual(split[1], ["id500"])
+assert.strictEqual(jmap.chunked(many, setLimit)
+  .reduce((total, chunk) => total + chunk.length, 0), 501,
+  "and every id is in exactly one of them")
+
+// ------------------------------------------------------------- set errors
+
+assert.strictEqual(jmap.setError({ type: "notFound" }),
+  "That message is no longer on the server")
+assert.strictEqual(jmap.setError({ type: "forbidden" }), "The server refused that change")
+assert.strictEqual(jmap.setError({ type: "tooLarge" }),
+  "The mailbox is over its storage quota")
+assert.strictEqual(jmap.setError({ type: "overQuota" }),
+  "The mailbox is over its storage quota")
+assert.strictEqual(jmap.setError({ type: "rateLimit" }),
+  "The mail server is busy. Try again shortly")
+// Anything else in the server's own words, because a type name is not a
+// sentence — and redacted, because those words are the server's.
+assert.strictEqual(jmap.setError({
+  type: "invalidProperties",
+  description: "Message has to belong to at least one mailbox"
+}), "Message has to belong to at least one mailbox")
+assert.strictEqual(jmap.setError({ type: "invalidPatch" }),
+  "The mail server could not complete this request")
+assert.strictEqual(jmap.setError({}), "The mail server could not complete this request")
+assert.strictEqual(jmap.setError(null), "The mail server could not complete this request")
+assert.strictEqual(jmap.setError({
+  type: "serverFail",
+  description: "upstream said Bearer sk-live-41d2 was rejected"
+}), "upstream said Bearer [redacted] was rejected")
+
+// ------------------------------------------------- what a reply amounts to
+
+const updatedBoth = {
+  accountId: "t",
+  newState: "s42",
+  updated: { eaaaaab: null, iaaaaac: null },
+  notUpdated: null
+}
+assert.strictEqual(jmap.notUpdatedError(updatedBoth, true), "")
+assert.strictEqual(jmap.notUpdatedError(updatedBoth, false), "")
+assert.strictEqual(jmap.notUpdatedError({ accountId: "t", newState: "s42" }, false), "")
+assert.strictEqual(jmap.notUpdatedError(null, false), "")
+
+// "Mark these read" over a page somebody else has been deleting from finishes
+// and reports nothing: what is still there was marked, and the next list load
+// drops the rest.
+const oneGone = {
+  updated: { eaaaaab: null },
+  notUpdated: { nosuchid: { type: "notFound" } }
+}
+assert.strictEqual(jmap.notUpdatedError(oneGone, true), "")
+// The same reply for one message the user pointed at is the answer.
+assert.strictEqual(jmap.notUpdatedError(oneGone, false),
+  "That message is no longer on the server")
+
+// Any other refusal is an error either way, and the first entry is the one
+// reported — one sentence is what the account shows.
+assert.strictEqual(jmap.notUpdatedError({
+  notUpdated: { eaaaaab: { type: "forbidden" } }
+}, true), "The server refused that change")
+assert.strictEqual(jmap.notUpdatedError({
+  notUpdated: {
+    nosuchid: { type: "notFound" },
+    eaaaaab: { type: "overQuota" }
+  }
+}, true), "The mailbox is over its storage quota",
+  "the tolerated one is passed over rather than ending the search")
+assert.strictEqual(jmap.notUpdatedError({
+  notUpdated: { eaaaaab: { type: "notFound" }, iaaaaac: { type: "forbidden" } }
+}, false), "That message is no longer on the server")
+
 // ------------------------------------------------------ per-account refusals
 //
 // The provider's list is a ceiling and an account withdraws from it. Presence

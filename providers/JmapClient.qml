@@ -13,9 +13,11 @@ import "../message/Message.js" as Mail
 //
 // It signs the account in — discovery, the session GET under each scheme in
 // turn, the four-step check — and it reads: the rail, the labels, the list, a
-// page, a search, the counts, one message whole and the octets of a part. The
-// actions, the push and the send are stubs the following tickets fill, and
-// each answers an empty result rather than pretending to fail.
+// page, a search, the counts, one message whole and the octets of a part. It
+// writes, too: read, star, archive, trash, junk and their reverses, each one
+// `Email/set` patch per message. The push and the send are stubs the following
+// tickets fill, and each answers an empty result rather than pretending to
+// fail.
 //
 // ## Three things every read depends on, in this order
 //
@@ -1105,13 +1107,125 @@ Item {
     return handle
   }
 
+  // -------------------------------------------------------------- actions
+  //
+  // Every action is one `Email/set` patch per message, built by the protocol
+  // library out of the Gmail label ids `MailAccount` speaks. The callback is
+  // `(null, "")` on success and `(null, <sentence>)` otherwise — the contract
+  // the other three clients keep — so the account's optimistic update and the
+  // restore behind it need no branch for this provider.
+
+  function modifyMessage(id, addLabelIds, removeLabelIds, callback) {
+    return batchModify([id], addLabelIds, removeLabelIds, callback)
+  }
+
+  function batchModify(ids, addLabelIds, removeLabelIds, callback) {
+    var handle = newHandle()
+    // The role map is what a label id means on this account, so an action gates
+    // on the mailbox list exactly as a query does.
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, null, error)
+        return
+      }
+      var patch = Jmap.patchFor(addLabelIds, removeLabelIds, root.roles)
+      // A destination role this account has no mailbox for. The button is
+      // already gone and `MailAccount.act` already refuses the key; this is the
+      // layer underneath both, for a request that reached the client anyway —
+      // an account whose Archive folder was deleted since the last read. It
+      // fails *before* a request rather than after one, so the row goes back
+      // and nothing on the server was touched.
+      if (typeof patch === "string") {
+        root.hand(callback, null, patch)
+        return
+      }
+      root.applyPatch(ids, patch, callback, handle)
+    })
+    return handle
+  }
+
+  // One patch over one id or many, `maxObjectsInSet` at a time.
+  //
+  // The chunks go one after another rather than together: the queue would admit
+  // four of them at once and a "mark all read" over a long page is exactly the
+  // request that would sit on `maxConcurrentRequests` while the rest of the
+  // panel waited behind it. A chunk that fails stops the rest — the account
+  // restores the whole list on any error, so sending the remainder would only
+  // widen the gap between what the screen says and what the server holds.
+  function applyPatch(ids, patch, callback, existingHandle) {
+    var handle = existingHandle || newHandle()
+    var wanted = []
+    var source = Array.isArray(ids) ? ids : [ids]
+    for (var i = 0; i < source.length; i++) {
+      var id = String(source[i] || "")
+      if (id !== "" && wanted.indexOf(id) < 0) wanted.push(id)
+    }
+    if (wanted.length === 0 || Jmap.patchIsEmpty(patch)) {
+      hand(callback, null, "")
+      return handle
+    }
+
+    // One message the user pointed at is not a batch: a `notFound` there is the
+    // answer, while inside a batch it is a message somebody else deleted and
+    // not a failure of "mark these read".
+    var tolerateNotFound = wanted.length > 1
+    var chunks = Jmap.chunked(wanted,
+      Jmap.sessionLimit(root.session, "maxObjectsInSet", Jmap.DEFAULT_OBJECTS_IN_SET))
+    var index = 0
+
+    function next() {
+      if (!root || handle.aborted) return
+      if (index >= chunks.length) {
+        root.hand(callback, null, "")
+        return
+      }
+      var chunk = chunks[index]
+      index = index + 1
+      var child = root.call([[
+        "Email/set", Jmap.emailSet(root.accountId, chunk, patch), "0"
+      ]], null, function(responses, failure) {
+        if (!root || handle.aborted) return
+        if (failure) {
+          root.hand(callback, null, failure)
+          return
+        }
+        var refused = Jmap.notUpdatedError(
+          Jmap.responseArguments(responses, "Email/set"), tolerateNotFound)
+        if (refused !== "") {
+          root.hand(callback, null, refused)
+          return
+        }
+        next()
+      })
+      handle.children.push(child)
+    }
+
+    next()
+    return handle
+  }
+
+  // One id or an array of them, as every client's trash takes. A whole
+  // `mailboxIds` replace, so the message is in Trash and nowhere else, which is
+  // what the after-action rule already assumes about a thrown-away message.
+  function trashMessage(id, callback) {
+    return batchModify(Array.isArray(id) ? id : [id], ["TRASH"], [], callback)
+  }
+
+  // The reverse, and it goes to the Inbox: JMAP keeps no record of where a
+  // trashed message came from, so there is no previous mailbox to restore it
+  // to. `ImapClient.untrashMessage` moves to INBOX for the same reason.
+  function untrashMessage(id, callback) {
+    return batchModify(Array.isArray(id) ? id : [id], [], ["TRASH"], callback)
+  }
+
   // ------------------------------------------------------------- to follow
   //
   // The rest of the interface, answering the empty result rather than an
   // error: an account that has just signed in has a working session and
   // nothing written yet, and "this failed" is not what that is. Each of these
-  // is filled in by the ticket that owns it — the reader, the actions, the
-  // send — and none of them is a button the panel draws until it is.
+  // is filled in by the ticket that owns it — the send — and none of them is a
+  // button the panel draws until it is.
 
   function answer(callback, value) {
     if (typeof callback !== "function") return newHandle()
@@ -1124,22 +1238,6 @@ Item {
 
   function getSendAs(callback) {
     return answer(callback, [])
-  }
-
-  function modifyMessage(id, addLabelIds, removeLabelIds, callback) {
-    return answer(callback, null)
-  }
-
-  function batchModify(ids, addLabelIds, removeLabelIds, callback) {
-    return answer(callback, null)
-  }
-
-  function trashMessage(id, callback) {
-    return answer(callback, null)
-  }
-
-  function untrashMessage(id, callback) {
-    return answer(callback, null)
   }
 
   function sendMessage(payload, callback) {
