@@ -683,10 +683,42 @@ grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml
   || fail "paging membership must not follow the reader's keep-open decision"
 grep -q 'if (!service.act(acted, action)) return false' App.qml \
   || fail "a refused action must not move the keyboard cursor"
-grep -q 'queueQuietAction(messageId, action, cacheKey)' account/MailAccount.qml \
+grep -q 'queueAction(messageId, action, cacheKey, quiet === true)' account/MailAccount.qml \
   || fail "automatic mark-read must wait rather than disappear behind another action"
+# Clearing a mailbox means pressing the same key down a list faster than any
+# server answers. Refusing the second press dropped it: the message stayed, the
+# note blamed the user for a failure they had not caused, and the false return
+# held the keyboard cursor on a row the user had already left behind.
 awk '
-  /function runQueuedQuietAction\(\)/ { in_quiet = 1 }
+  /function act\(/ { in_act = 1 }
+  in_act && /if \(pendingAction !== ""\)/ { in_guard = 1 }
+  in_guard && /queueAction\(messageId, action, cacheKey, quiet === true\)/ { queues = 1 }
+  in_guard && /return true/ { exit !queues }
+  END { exit !queues }
+' account/MailAccount.qml \
+  || fail "an action taken while one is pending must queue rather than be refused"
+# Scoped to `act`. `markAllRead` still refuses on purpose: it reads the unread
+# set at the moment it runs, so one queued behind a mutation would send a list
+# the mailbox had already moved past.
+awk '
+  /function act\(/ { in_act = 1 }
+  in_act && /Another action is still finishing/ { refuses = 1 }
+  in_act && /var index = Model\.indexById\(messages, messageId\)/ { exit refuses }
+  END { exit refuses }
+' account/MailAccount.qml \
+  || fail "a queued action must not report a failure the user did not cause"
+# The reader keeps a quiet row that the same explicit action would evict, so the
+# flag has to survive the wait. Draining every request as quiet would leave a
+# trashed message on screen under the reader that deleted it.
+awk '
+  /function runQueuedAction\(\)/ { in_queued = 1 }
+  in_queued && /act\(request\.id, request\.action, request\.quiet\)/ { forwards = 1 }
+  /function refuseUnavailableAction\(/ { exit !forwards }
+  END { exit !forwards }
+' account/MailAccount.qml \
+  || fail "a queued action must run with the quietness it was taken with"
+awk '
+  /function runQueuedAction\(\)/ { in_quiet = 1 }
   in_quiet && /listSerial\+\+/ { interrupts = 1 }
   in_quiet && /root\.loadMessages\(false, true/ { reloads = 1 }
   /function act\(/ { exit !(interrupts && reloads) }
