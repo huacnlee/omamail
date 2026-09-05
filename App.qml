@@ -7,6 +7,7 @@ import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "account/Conversation.js" as Conversation
 import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
@@ -448,6 +449,33 @@ Item {
     pushEntry("reader", { id: cursorId })
   }
 
+  // One member of the conversation the reader is inside, opened in the same
+  // reader. `openMessage` and nothing else: the header paints from the member's
+  // summary at once, the body from the cache or the network, and the navigation
+  // stack replaces a reader entry with a reader entry, so Back still lands on
+  // the list from any member.
+  //
+  // The one thing that does not happen is the cursor moving. `cursorId` is
+  // where the keyboard stands in the *list*, and a member is not a row — the
+  // list is one row per conversation — so leaving the cursor on a message the
+  // list has never drawn would send the next `j` back to the top of it.
+  function openMember(id) {
+    var member = String(id || "")
+    if (!service || member === "") return
+    var cursor = cursorId
+    openMessage(member)
+    cursorId = cursor
+  }
+
+  // Along the rail by keyboard: `n` to the next member, `p` to the previous,
+  // stopping at the ends rather than wrapping. `j` and `k` keep moving the list
+  // cursor underneath, which is the other thing in this window that moves.
+  function stepMember(delta) {
+    if (!service || !service.showsRail) return
+    var next = Conversation.memberStep(service.selectedThread, service.selectedId, delta)
+    if (next !== "" && next !== service.selectedId) openMember(next)
+  }
+
   function editDraft(id) {
     if (!service || service.mailboxKey !== "drafts") return false
     var draftId = String(id || "")
@@ -716,6 +744,8 @@ Item {
     if (id === "cursorUp") return moveCursor(-1)
     if (id === "open") return openMessage(cursorId)
     if (id === "backToList") return backToList()
+    if (id === "nextMember") return stepMember(1)
+    if (id === "previousMember") return stepMember(-1)
     if (id === "archive") return actOnCursor("archive")
     if (id === "trash") return actOnCursor("trash")
     // Through the same guard actOnCursor applies rather than around it:
@@ -1449,15 +1479,25 @@ Item {
           onZoomRequested: function(step) { root.zoomBy(step) }
           onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
           onBackRequested: root.back()
+          onMemberRequested: function(id) { root.openMember(id) }
           onComposeRequested: function(mode) { root.startCompose(mode) }
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
           }
           onActionRequested: function(action) {
-            if (root.service && root.service.selectedId !== "") {
+            if (!root.service || root.service.selectedId === "") return
+            // The toolbar acts on the message it is under, which is normally
+            // the row the cursor is on — but with the rail up the reader can be
+            // showing a *member*, and the list has no row for one. Moving the
+            // cursor onto it would leave `j` unable to find where it stands, so
+            // the cursor is only followed to a message the list actually drew;
+            // from a member the action lands on the row the conversation was
+            // opened from, which is where the reader came from. Which members
+            // an action reaches from there is "Actions on a conversation row".
+            if (!Conversation.holdsMember(root.service.selectedThread,
+                root.service.selectedId) || root.cursorId === "")
               root.cursorId = root.service.selectedId
-              root.actOnCursor(action)
-            }
+            root.actOnCursor(action)
           }
         }
 

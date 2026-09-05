@@ -1,0 +1,337 @@
+import QtQuick 2.15
+import QtTest 1.3
+import "../.." as Omamail
+
+// `n` and `p` walk the conversation rail; `j` and `k` go on walking the list.
+//
+// Why this needs Qt rather than a node test: the whole claim is that two
+// positions in one window move independently under real keystrokes. Three
+// things have to agree for that — `KeyRouter` binding the letters only in the
+// reader context, `App.runShortcut` routing them to the rail rather than to the
+// cursor, and `openMember` putting the cursor back where it was after
+// `openMessage` moved it. `Conversation.memberStep` is asserted on its own in
+// `tests/test_conversation.js`; a test of that function alone would pass with
+// the keys unbound, with them bound in the list context, or with the cursor
+// following the reader — which are exactly the three ways this breaks.
+//
+// A fake service, the way `tst_app_navigation.qml` uses one: the account's own
+// fetching is not what is under test, and the rail draws whatever it is given.
+Item {
+  width: 900
+  height: 600
+
+  QtObject {
+    id: fakeShell
+    function hide(id) {}
+  }
+
+  QtObject {
+    id: fakeAuth
+
+    property bool credentialsPresent: true
+    property bool loggedIn: true
+    property bool loginBusy: false
+    property bool toolsChecked: true
+    property bool toolsPresent: true
+    property bool credentialsWriteBusy: false
+    property var missingTools: []
+    property string lastError: ""
+    property string clientId: ""
+    property string clientDescription: ""
+    property string credentialsPath: ""
+    property var credentials: null
+    property var settings: ({})
+
+    function recheck() {}
+    function saveCredentials() {}
+  }
+
+  // The seeded thread: three messages, oldest first, the newest one unread and
+  // the one the list drew a row for.
+  readonly property var members: ["maaaaad", "maaaaae", "maaaaaf"]
+
+  function memberSummary(id, unread, labels) {
+    return ({
+      id: id,
+      threadId: "d",
+      subject: "The engine",
+      snippet: "",
+      from: ({ display: "Ada Lovelace", email: "ada@example.org" }),
+      to: [], cc: [], bcc: [],
+      time: "3d",
+      fullTime: "2 September 2026 at 09:14",
+      date: null,
+      unread: unread,
+      starred: false,
+      labelIds: labels
+    })
+  }
+
+  QtObject {
+    id: mailService
+
+    property bool ready: true
+    property bool anyAccountReady: true
+    property bool hasSavedAccounts: true
+    property bool sendPending: false
+    property bool sending: false
+    property bool windowOpen: true
+    property bool sidebarCollapsed: false
+    property bool alwaysShowImages: false
+    property bool unifiedCalendarView: false
+    property bool selectedReaderEmpty: false
+    property bool selectedReaderTooHeavy: false
+    property bool selectedTooHeavy: false
+    property bool detailLoading: false
+    property bool detailPainted: true
+    property bool canOpenOnWeb: false
+    property bool canRespondToInvite: false
+    property bool rsvpSending: false
+    property bool canArchive: true
+    property bool canStar: true
+    property bool canSpam: true
+    property bool canTrash: true
+    property bool canMarkRead: true
+    property bool canMarkUnread: true
+    property bool accountDraftOpen: false
+    property bool signInProgress: false
+    property int sendSecondsRemaining: 0
+    property int accountCount: 1
+    property int inboxUnread: 1
+    property real bodyZoom: 1
+    property string bodyMode: "reader"
+    property string providerId: "jmap"
+    property string pluginDir: ""
+    property string accountEmail: "me@example.com"
+    property string accountAddress: "me@example.com"
+    property string activeAccountId: "jmap:me@example.com"
+    property string mailboxKey: "inbox"
+    property string searchQuery: ""
+    property string rawQuery: ""
+    property string selectedId: ""
+    property string lastError: ""
+    property string actionStatus: ""
+    property string syncedLabel: ""
+    property string recipientContactStatus: ""
+    property var auth: fakeAuth
+    property var accountSummaries: [{ provider: "jmap", email: "me@example.com" }]
+    property var mailboxes: [
+      { key: "inbox", label: "Inbox", icon: "inbox" },
+      { key: "sent", label: "Sent", icon: "sent" },
+      { key: "drafts", label: "Drafts", icon: "compose" }
+    ]
+    property var labels: []
+    property var selectedAttachments: []
+    property var selectedInvite: null
+    property var selectedResponse: ""
+    property var recipientContacts: []
+    property var sendAsAliases: []
+    property var sendIdentities: []
+    property var calendarController: null
+    property var selectedBody: ({ text: "A body", source: "plain" })
+    property var selectedMessage: null
+
+    // What this test is about. The list is one row per conversation, so the
+    // rail's other two stops are messages the list has no row for at all.
+    property bool showsConversations: true
+    property bool showsRail: true
+    property string viewedMailboxKey: "inbox"
+    property var selectedThread: ({
+      id: "d", count: 3, unread: true, flagged: false,
+      memberIds: ["maaaaad", "maaaaae", "maaaaaf"]
+    })
+    property var memberSummaries: ({})
+
+    // Two conversations in the Inbox, each drawn by its representative.
+    property var messages: [
+      { id: "maaaaaf", subject: "The engine", unread: true, starred: false,
+        from: ({ display: "Ada", email: "ada@example.org" }), time: "3d",
+        snippet: "", labelIds: ["INBOX", "UNREAD"],
+        thread: ({ id: "d", count: 3, unread: true, flagged: false,
+          memberIds: ["maaaaad", "maaaaae", "maaaaaf"] }) },
+      { id: "yaaaaag", subject: "Notes", unread: false, starred: false,
+        from: ({ display: "Grace", email: "grace@example.org" }), time: "1d",
+        snippet: "", labelIds: ["INBOX"] }
+    ]
+
+    function editingIndex() { return 0 }
+    function addAccount(provider) {}
+    function configureCurrentAccount(values) {}
+    function discardCurrentDraft() {}
+    function switchToIndex(index) { return true }
+    function selectMailbox(key) { mailboxKey = String(key || "") }
+    function search(query) { searchQuery = String(query || "") }
+    function preferredSendAs(recipients) { return null }
+    function refreshRecipientContacts() {}
+    // The list cursor's own movement, over the rows the list actually has.
+    function cursorOffset(id, delta) {
+      for (var i = 0; i < messages.length; i++) {
+        if (messages[i].id !== String(id)) continue
+        var next = i + (delta > 0 ? 1 : -1)
+        if (next < 0 || next >= messages.length) return messages[i].id
+        return messages[next].id
+      }
+      return messages.length > 0 ? messages[0].id : ""
+    }
+    function clearSelection() { selectedId = "" }
+    // The account's own `select` holds the conversation across a move to one of
+    // its members, which is `Conversation.threadAfterSelect`. Held here too,
+    // because the rail must not empty underneath the keys being tested.
+    function select(id) {
+      selectedId = String(id || "")
+      selectedMessage = memberSummary(selectedId, selectedId === "maaaaaf",
+        selectedId === "maaaaad" ? ["INBOX", "DRAFT"] : ["INBOX"])
+    }
+    function loadAttachments(messageId, attachments, callback) { callback([], "") }
+    function send(fields) { return true }
+    function undoSend() { return false }
+    function saveDraft(fields, callback) { callback("draft-1", "") }
+    function refresh() {}
+    function toggleStar(id) {}
+    function act(id, action, quiet) { return true }
+    function fail(text) { lastError = String(text || "") }
+    function note(text) { actionStatus = String(text || "") }
+  }
+
+  Omamail.App {
+    id: app
+    service: mailService
+    shell: fakeShell
+  }
+
+  TestCase {
+    name: "ConversationRail"
+    when: windowShown
+
+    function named(item, objectName) {
+      if (!item) return null
+      if (item.objectName === objectName) return item
+      var values = item.children || []
+      for (var i = 0; i < values.length; i++) {
+        var found = named(values[i], objectName)
+        if (found) return found
+      }
+      return null
+    }
+
+    function init() {
+      app.opened = true
+      app.backToList()
+      app.resetNavigation()
+      mailService.selectedId = ""
+      mailService.selectedMessage = null
+      mailService.memberSummaries = ({})
+      app.cursorId = "maaaaaf"
+      waitForRendering(app)
+    }
+
+    // The rail is on screen with one stop per member, whether or not the
+    // summaries have arrived — that is what stops it moving when they do.
+    function test_the_rail_draws_one_stop_per_member_before_the_summaries_land() {
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+
+      var rail = named(app, "conversationRail")
+      verify(rail, "the reader draws a rail for a conversation of three")
+      compare(rail.stops.length, 3, "one stop per member id, summaries or not")
+      compare(rail.stops[0].id, "maaaaad", "oldest first, Thread/get's own order")
+      compare(rail.stops[2].id, "maaaaaf")
+      verify(!rail.stops[0].known, "and a member with no summary is a skeleton")
+      verify(rail.stops[2].open, "the open message keeps its place in the timeline")
+      compare(rail.caption, "3 messages", "the length is known before any summary")
+
+      // The summaries land. The stops do not move: same ids, same order, same
+      // count — only the lanes inside them fill in.
+      var before = rail.stops.map(function(s) { return s.id })
+      mailService.memberSummaries = ({
+        maaaaad: memberSummary("maaaaad", false, ["INBOX", "DRAFT"]),
+        maaaaae: memberSummary("maaaaae", false, ["INBOX"]),
+        maaaaaf: memberSummary("maaaaaf", true, ["INBOX", "UNREAD"])
+      })
+      waitForRendering(app)
+      compare(rail.stops.map(function(s) { return s.id }).join(","), before.join(","))
+      verify(rail.stops[0].known, "and now every stop is settled")
+      compare(rail.stops[0].mailbox, "Drafts",
+        "the member outside the mailbox on screen says where it is")
+      compare(rail.stops[1].mailbox, "", "and one inside it says nothing")
+      compare(rail.caption, "3 messages · 1 unread")
+    }
+
+    // The claim. Both keys move the reader along the rail and neither moves the
+    // list cursor, which `j` still owns.
+    function test_n_and_p_move_along_the_rail_and_not_the_list_cursor() {
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      compare(app.currentView, "reader")
+      compare(app.cursorId, "maaaaaf", "opening a row put the cursor on it")
+
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaae", "p opens the previous member")
+      compare(app.cursorId, "maaaaaf", "and leaves the list cursor where it was")
+
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaad", "p again, to the oldest member")
+      compare(app.cursorId, "maaaaaf")
+
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaad",
+        "and stops there rather than wrapping to the newest")
+
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaae", "n walks back up the rail")
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaaf")
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaaf", "and stops at the newest")
+      compare(app.cursorId, "maaaaaf", "the cursor never moved at all")
+
+      // The other half: the list keys still move the list, from inside the
+      // reader, and moving it does not move the reader.
+      keyClick(Qt.Key_J)
+      compare(app.cursorId, "yaaaaag", "j still moves the list cursor")
+      compare(mailService.selectedId, "maaaaaf", "and moving is not opening")
+      keyClick(Qt.Key_K)
+      compare(app.cursorId, "maaaaaf")
+    }
+
+    // Opening a member replaces the reader entry rather than pushing one, so
+    // Back from any member lands on the list. No new rule: `Navigation.push`
+    // already replaces a reader entry with a reader entry.
+    function test_back_from_any_member_returns_to_the_list() {
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      compare(app.navKinds.join(","), "list,reader")
+
+      keyClick(Qt.Key_P)
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaad")
+      compare(app.navKinds.join(","), "list,reader",
+        "walking the rail lengthens nothing")
+
+      app.back()
+      waitForRendering(app)
+      compare(app.currentView, "list", "Back lands on the list from any member")
+    }
+
+    // A conversation of one draws no rail, and then both keys are dead letters
+    // rather than keys that do something else.
+    function test_a_message_of_one_draws_no_rail() {
+      mailService.showsRail = false
+      mailService.selectedThread = null
+      app.openMessage("yaaaaag")
+      waitForRendering(app)
+
+      var rail = named(app, "conversationRail")
+      verify(!rail || !rail.visible, "nothing is drawn beside a single message")
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "yaaaaag", "and n has nowhere to go")
+      compare(app.cursorId, "yaaaaag")
+
+      mailService.showsRail = true
+      mailService.selectedThread = ({
+        id: "d", count: 3, unread: true, flagged: false,
+        memberIds: ["maaaaad", "maaaaae", "maaaaaf"]
+      })
+    }
+  }
+}

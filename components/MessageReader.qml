@@ -6,6 +6,7 @@ import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
+import "../account/Conversation.js" as Conversation
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -43,12 +44,43 @@ Item {
   property bool forceRichAnyway: false
 
   signal backRequested()
+  signal memberRequested(string id)
   signal bodyModeRequested(string mode)
   signal zoomRequested(real step)
   signal zoomResetRequested()
   signal composeRequested(string mode)
   signal mailtoRequested(string url)
   signal actionRequested(string action)
+
+  // ------------------------------------------------------- the conversation
+
+  // The rail down the right edge: every counted member of the open message's
+  // conversation, oldest first, as a stop that opens in this same reader.
+  //
+  // Drawn above the seam for any provider that collapses its listing, off the
+  // block the row was opened with — so a count of 0, which is what a provider
+  // that does not collapse reports and what HEY reports for rows that already
+  // are conversations, draws nothing at all. The account owns both decisions;
+  // this asks.
+  readonly property bool showsRail: !!service && service.showsRail === true
+  readonly property var conversationStops: !root.showsRail ? []
+    : Conversation.stops(service.selectedThread, service.memberSummaries,
+        service.selectedId, service.viewedMailboxKey, service.mailboxes)
+  readonly property string conversationCaption: !root.showsRail ? ""
+    : Conversation.caption(service.selectedThread, service.memberSummaries)
+
+  // The member the rail should have on screen, revealed with the smallest
+  // scroll — the list cursor's rule. Watched rather than called from the click,
+  // because `n` and `p` move the reader from the keyboard and a stop opened
+  // from off the bottom of the rail has to come into view either way.
+  //
+  // Deferred a turn: a conversation opened for the first time changes the stops
+  // and lays them out in the same frame, and a scroll computed before the
+  // Column has heights is a scroll to the wrong place.
+  onConversationStopsChanged: if (root.showsRail) Qt.callLater(root.revealOpenStop)
+  function revealOpenStop() {
+    if (root.showsRail && root.service) rail.reveal(root.service.selectedId)
+  }
 
   function openLink(url) {
     if (Mailto.parse(url)) {
@@ -324,6 +356,40 @@ Item {
     }
   }
 
+  // ------------------------------------------------------------------ rail
+
+  // The rail keeps its width against the body rather than shrinking with it, so
+  // there is a pane width at which the two of them together leave the message
+  // nothing. That width is not a designed layout: it is where the reader has
+  // already replaced the list, and the fallback if this proves too tight is the
+  // prototype's variant A — lines under the header — rather than a rail three
+  // words wide. Until then the rail simply goes, and nothing else moves.
+  readonly property bool fitsRail: width >= rail.implicitWidth + Style.space(260)
+
+  // From the header's bottom edge to the footer, its own scroll owner beside
+  // the body — the way the list is beside the reader. It takes width and never
+  // height: the message keeps its reading measure and a long conversation
+  // scrolls inside the rail rather than lengthening the page.
+  ConversationRail {
+    id: rail
+    objectName: "conversationRail"
+    visible: !!root.summary && root.showsRail && root.fitsRail
+    anchors.top: headerBlock.bottom
+    anchors.topMargin: Style.space(10)
+    anchors.right: parent.right
+    anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
+    width: visible ? implicitWidth : 0
+    stops: root.conversationStops
+    caption: root.conversationCaption
+    textColor: root.textColor
+    backgroundColor: root.backgroundColor
+    accentColor: root.accentColor
+    dimColor: root.dimColor
+    dimmerColor: root.dimmerColor
+    panelFontFamily: root.panelFontFamily
+    onMemberActivated: function(id) { root.memberRequested(id) }
+  }
+
   // --------------------------------------------------------------- notices
 
   // Why this message does not look the way its sender meant it to, and the one
@@ -335,7 +401,7 @@ Item {
     id: notices
     anchors.top: headerBlock.bottom
     anchors.left: parent.left
-    anchors.right: parent.right
+    anchors.right: rail.visible ? rail.left : parent.right
     anchors.leftMargin: root.pageInset
     anchors.rightMargin: root.pageInset
     // No gap where there is nothing to separate. An empty Column is zero high,
@@ -437,7 +503,11 @@ Item {
     id: bodyFlick
     anchors.top: notices.bottom
     anchors.left: parent.left
-    anchors.right: parent.right
+    // The rail takes its width out of the body's, which is what keeps the
+    // message's own measure honest: `readingMeasure` is derived from this
+    // flickable's width, so a body that ran under the rail would be centred on
+    // a column that is not there.
+    anchors.right: rail.visible ? rail.left : parent.right
     anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
     contentWidth: width
     contentHeight: bodyText.y + bodyText.implicitHeight + Style.space(28)

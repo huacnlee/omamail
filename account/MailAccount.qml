@@ -12,6 +12,7 @@ import "../message/Calendar.js" as Calendar
 import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
+import "Conversation.js" as Conversation
 import "Accounts.js" as Accounts
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
@@ -249,6 +250,40 @@ Item {
   // do — those clear themselves after a few seconds, and this is the answer to
   // a question the user may look back at the message to ask.
   property string unsubscribeDone: ""
+
+  // ------------------------------------------------------- the conversation
+
+  // The conversation the reader is inside, as a `thread` block, or null.
+  //
+  // Held rather than read off `selectedMessage` on every frame, because a
+  // member opened on its own carries no block at all: a detail read is one
+  // message and says nothing about the thread it belongs to. Walking the rail
+  // would empty it otherwise, one stop at a time. `Conversation.threadAfterSelect`
+  // is the whole rule — a member of the held conversation keeps it, anything
+  // else replaces it with its own.
+  property var selectedThread: null
+
+  // Every member of a conversation whose summary is known, by message id.
+  //
+  // Seeded on select from the rows the list already drew and filled from the
+  // server for the members it did not — a sent reply, a message a filter moved
+  // to a user folder — through the client's `getSummaries`. Kept across selects
+  // inside one conversation, so walking the rail re-reads nothing and a member
+  // opened once is a settled stop the next time its conversation is opened.
+  property var memberSummaries: ({})
+  property var memberHandle: null
+
+  // Whether the reader is looking at a mailbox at all. A typed search is a view
+  // of the account and a label or folder is a mailbox the rail has no row for,
+  // so in both every member says where it sits.
+  readonly property bool viewingSearch: searchQuery !== "" || rawQuery !== ""
+  readonly property string viewedMailboxKey:
+    Conversation.viewedMailboxKey(mailboxKey, viewingSearch)
+  // What the rail draws, decided here rather than in the reader: whether the
+  // provider collapses its listing at all is an account fact, and a conversation
+  // of one has nowhere to go.
+  readonly property bool showsRail:
+    Conversation.drawsRail(showsConversations, selectedThread)
 
   // Which of this account's own addresses this message arrived at.
   //
@@ -1003,6 +1038,12 @@ Item {
     // on there being no summary and only the live payload ever set one.
     var knownSummary = Model.messageById(messages, previewMessages, messageId)
     if (knownSummary) selectedMessage = knownSummary
+    // Which conversation the reader is now inside, and the stops it draws.
+    // Decided from the row rather than from the read, because `memberIds` is
+    // known the moment a row is opened and no summary is — so the rail draws a
+    // skeleton stop per id at once and nothing moves when the summaries land.
+    selectedThread = Conversation.threadAfterSelect(selectedThread, messageId, knownSummary)
+    loadMembers()
 
     // A message that has been opened before opens from its file, usually well
     // before Gmail answers. The read is asynchronous, so the live copy can win
@@ -1096,10 +1137,79 @@ Item {
       root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
       root.messages = Model.replaceById(root.messages, summary)
       root.previewMessages = Model.replaceById(root.previewMessages, summary)
+      // A message opened from somewhere other than its own row — a notification,
+      // a member whose summary had not arrived when it was asked for — brings
+      // its conversation with the read rather than before it.
+      root.selectedThread =
+        Conversation.threadAfterSelect(root.selectedThread, messageId, summary)
+      root.rememberMember(summary)
+      root.loadMembers()
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
       if (summary.unread) root.act(messageId, "markRead", true)
     })
+  }
+
+  // ---------------------------------------------------------- the rail
+
+  // One summary the rail can draw a stop from, kept by its own id.
+  function rememberMember(summary) {
+    if (!summary || !summary.id) return
+    var added = ({})
+    added[summary.id] = summary
+    memberSummaries = Conversation.mergedSummaries(memberSummaries, added,
+      Conversation.MAX_REMEMBERED)
+  }
+
+  // The summaries the open conversation still owes, asked for in one read.
+  //
+  // Seeded first from what is already on hand: the representative is a row the
+  // list drew and needs no request, and a member opened before is still in the
+  // store. Only what is left goes to the server, so moving along a rail costs
+  // nothing after the first stop.
+  //
+  // Every client answers this; only a provider that collapses its listing ever
+  // has anything to say, and one that does not reports a count of 0, which
+  // never gets here.
+  function loadMembers() {
+    if (!showsRail || !api) return
+    var ids = Conversation.blockOf(selectedThread).memberIds
+    var seeded = ({})
+    for (var i = 0; i < ids.length; i++) {
+      if (memberSummaries[ids[i]]) continue
+      var known = Model.messageById(messages, previewMessages, ids[i])
+      if (known) seeded[ids[i]] = known
+    }
+    memberSummaries = Conversation.mergedSummaries(memberSummaries, seeded,
+      Conversation.MAX_REMEMBERED)
+
+    var wanted = Conversation.missingMemberIds(selectedThread, memberSummaries)
+    if (wanted.length === 0) return
+    abortRequest(memberHandle)
+    memberHandle = api.getSummaries(wanted, function(payloads, error) {
+      root.memberHandle = null
+      // A member the read did not answer for stays the skeleton it already
+      // was, which is what a stop with no summary draws. Nothing is retried:
+      // the rail is complete in `memberIds` from the moment the row was read,
+      // and only the lanes inside a stop are ever waiting.
+      if (error || !payloads || payloads.length === 0) return
+      var arrived = ({})
+      var now = new Date()
+      for (var j = 0; j < payloads.length; j++) {
+        var summary = Mail.summarize(payloads[j], now)
+        if (summary.id !== "") arrived[summary.id] = summary
+      }
+      root.memberSummaries = Conversation.mergedSummaries(root.memberSummaries, arrived,
+        Conversation.MAX_REMEMBERED)
+    })
+  }
+
+  // A member's summary after an action on it, so the rail's stop agrees with
+  // what was just done to the message the reader is showing.
+  function applyMemberChange(messageId, action) {
+    var summary = memberSummaries[messageId]
+    if (!summary) return
+    rememberMember(Model.applyLabelChange(summary, action))
   }
 
   // The invitation the message pointed at. Nothing happens for the messages
@@ -1238,6 +1348,12 @@ Item {
     selectedUnsubscribe = null
     unsubscribeDone = ""
     detailLoading = false
+    // The rail goes with the reader. The member summaries do not: they are a
+    // cache of what has been read, and closing one conversation is no reason to
+    // pay for the next one twice.
+    selectedThread = null
+    abortRequest(memberHandle)
+    memberHandle = null
   }
 
   // The cursor is the list's own position and moves relative to itself.
@@ -1353,7 +1469,22 @@ Item {
     }
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
-    if (index < 0 && previewIndex < 0) return false
+    // A counted member is not a row. The list is one row per conversation, so
+    // every stop on the rail but the representative's is a message the list has
+    // never drawn — and opening one still owes the server the quiet mark-read
+    // that opening a row does. It goes out with no row to move: the optimistic
+    // update is the member's own summary, which is what the rail draws, and the
+    // request itself is the detached branch `runQueuedQuietAction` already has.
+    if (index < 0 && previewIndex < 0) {
+      if (quiet !== true || !Conversation.holdsMember(selectedThread, messageId)) return false
+      if (!Model.labelChangesFor(action)) return false
+      applyMemberChange(messageId, action)
+      if (selectedId === messageId && selectedMessage)
+        selectedMessage = Model.applyLabelChange(selectedMessage, action)
+      queueQuietAction(messageId, action, cacheKey)
+      Qt.callLater(root.runQueuedQuietAction)
+      return true
+    }
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
@@ -1378,6 +1509,9 @@ Item {
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var updated = Model.applyLabelChange(before, action)
     var survives = Model.survivesAction(mailboxKey, action)
+    // A representative is a row and a stop at once, so it changes in both
+    // places or the rail contradicts the list it was opened from.
+    if (memberSummaries[messageId]) rememberMember(updated)
 
     if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
     if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
@@ -1436,6 +1570,7 @@ Item {
           : root.previewMessages.slice(0, previewIndex).concat(
               [before], root.previewMessages.slice(previewIndex))
       }
+      if (root.memberSummaries[messageId]) root.rememberMember(before)
       root.refreshCounts()
       root.fail(error)
     }

@@ -298,6 +298,21 @@ Item {
     return handle
   }
 
+  // The counted members of a conversation, for the reader's conversation rail.
+  //
+  // Always empty, and HEY is never asked: a HEY row already *is* a conversation
+  // and carries no member ids, so its `thread` block reports a count of 0 —
+  // unknown — and the rail draws nothing. The body on screen is the whole
+  // conversation here, which is the thing the rail would otherwise be for.
+  function getSummaries(ids, callback) {
+    var handle = newHandle()
+    Qt.callLater(function() {
+      if (!root || handle.aborted || typeof callback !== "function") return
+      callback([], "")
+    })
+    return handle
+  }
+
   // A whole page with no round trips at all: the listing that produced these
   // ids carried every field a row needs, so this is the cache answering.
   //

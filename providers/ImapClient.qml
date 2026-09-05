@@ -378,6 +378,20 @@ Item {
     return handle
   }
 
+  // The counted members of a conversation, for the reader's conversation rail.
+  //
+  // Always empty, and IMAP is never asked: it declares neither `threads` nor
+  // `conversations`. A row is a message and stands for nothing else, so there
+  // are no members to read.
+  function getSummaries(ids, callback) {
+    var handle = newHandle()
+    Qt.callLater(function() {
+      if (!root || handle.aborted || typeof callback !== "function") return
+      callback([], "")
+    })
+    return handle
+  }
+
   // A whole page in one round trip. Gmail costs one request per message here;
   // IMAP fetches the lot with a single UID FETCH, which is the one place this
   // provider is comfortably faster than the other.

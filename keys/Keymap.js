@@ -42,6 +42,25 @@ var BINDINGS = [
     hintKey: "o", hint: { list: "open", reader: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],
     group: "Moving", label: "Back to the list" },
+  // Along the conversation rail, which only the reader has. Two letters rather
+  // than a reuse of `j` and `k`: those move the list cursor, and they go on
+  // moving it while the reader is open — the cursor and the open message are
+  // two different things, and a key that moved both would collapse them. Gmail
+  // uses this pair for the same movement, and both were unbound here.
+  //
+  // A conversation of one draws no rail and these do nothing, which is the
+  // context doing its job: what a key means is a property of the application,
+  // and whether there is anywhere to go is a property of the message.
+  //
+  // No status hint. The hint row says what the keyboard does *here*, and here
+  // is any open message — while these two do something only on a conversation
+  // of two or more. Offering them on every message would be the promise the
+  // hint filter exists to stop being made, one line lower down. They are on the
+  // shortcut sheet, with the rest of the table.
+  { id: "nextMember", keys: ["n"], contexts: ["reader"],
+    group: "Moving", label: "Next message in the conversation" },
+  { id: "previousMember", keys: ["p"], contexts: ["reader"],
+    group: "Moving", label: "Previous message in the conversation" },
 
   { id: "archive", keys: ["e"], contexts: MAIL,
     group: "Acting", label: "Archive",

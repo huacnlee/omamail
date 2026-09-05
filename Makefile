@@ -29,6 +29,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/AttachmentRow.qml \
   components/KeyHints.qml \
 	components/MessageReader.qml \
+	components/ConversationRail.qml \
 	components/ReaderNotice.qml \
 	components/InviteCard.qml \
 	components/ReaderBlankSlate.qml \
@@ -87,6 +88,7 @@ test-js:
 	node tests/test_model.js
 	node tests/test_icons.js
 	node tests/test_navigation.js
+	node tests/test_conversation.js
 	node tests/test_keymap.js
 	node tests/test_accounts.js
 	node tests/test_aliases.js

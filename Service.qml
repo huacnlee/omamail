@@ -745,6 +745,16 @@ Item {
   readonly property bool canOpenWebInbox: !!current && current.canOpenWebInbox
   readonly property var unavailableActions: current ? current.unavailableActions : []
   readonly property bool canSend: !current || current.canSend
+  // Whether this account's listing is one row per conversation, and everything
+  // the reader's rail is drawn from. Forwarded like every other account fact:
+  // the views are given one object and never reach past it, so a property the
+  // facade does not name is a property the window reads as `undefined` — which
+  // is what the conversation count on a row was doing.
+  readonly property bool showsConversations: !!current && current.showsConversations
+  readonly property bool showsRail: !!current && current.showsRail
+  readonly property var selectedThread: current ? current.selectedThread : null
+  readonly property var memberSummaries: current ? current.memberSummaries : ({})
+  readonly property string viewedMailboxKey: current ? current.viewedMailboxKey : ""
   readonly property string mailboxKey: current ? current.mailboxKey : "inbox"
   readonly property string searchQuery: current ? current.searchQuery : ""
   readonly property string rawQuery: current ? current.rawQuery : ""

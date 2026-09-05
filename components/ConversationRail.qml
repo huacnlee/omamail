@@ -1,0 +1,324 @@
+import QtQuick
+import QtQuick.Controls
+import qs.Commons
+
+// The conversation beside the message, as a timeline down the right edge of the
+// reader.
+//
+// A row stands for a conversation and opens one member of it; this is the rest
+// of the conversation, oldest first, every member a stop that opens in the same
+// reader. It takes width from the body and never height: the message keeps its
+// reading measure and the rail scrolls in a viewport of its own, the way the
+// list scrolls beside the reader.
+//
+// It decides nothing. `account/Conversation.js` says which stops there are and
+// what each of them shows; this draws them and reports which one was asked for.
+Item {
+  id: root
+
+  // `Conversation.stops`: one entry per member, oldest first, each carrying
+  // whether its summary has arrived, whether it is the open message, and the
+  // mailbox name it needs when it sits outside the one on screen.
+  required property var stops
+  // "3 messages · 1 unread", from the same file.
+  required property string caption
+  required property color textColor
+  // The panel behind the rail, which is what a hollow node is filled with. A
+  // literal would be a colour this file chose; the theme's is the one the
+  // message beside it is drawn on.
+  required property color backgroundColor
+  required property color accentColor
+  required property color dimColor
+  required property color dimmerColor
+  required property string panelFontFamily
+
+  signal memberActivated(string id)
+
+  // About two hundred pixels: wide enough for a date, a name and a mailbox
+  // under it, narrow enough that the reading measure beside it survives.
+  implicitWidth: Style.space(200)
+
+  // One animation for every skeleton on the rail, for the reason
+  // `ReaderSkeleton` has one for the whole reader: a timer per bar puts a dozen
+  // of them on the thread that draws the desktop.
+  property real pulse: 0.5
+
+  SequentialAnimation on pulse {
+    running: root.visible && root.hasSkeleton
+    loops: Animation.Infinite
+    NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutQuad }
+    NumberAnimation { to: 0.45; duration: 900; easing.type: Easing.InOutQuad }
+  }
+
+  readonly property bool hasSkeleton: {
+    var list = root.stops || []
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i].known) return true
+    }
+    return false
+  }
+
+  // Bring one stop on screen with the smallest scroll — the list cursor's own
+  // rule, `Model.contentYToReveal`, reached through the row's own geometry
+  // rather than through an index, because this is a Column in a Flickable for
+  // the same reason the list is.
+  function reveal(id) {
+    var wanted = String(id || "")
+    for (var i = 0; i < stopColumn.children.length; i++) {
+      var stop = stopColumn.children[i]
+      if (!stop || stop.memberId !== wanted) continue
+      railFlick.revealItem(stop.y, stop.height)
+      return
+    }
+  }
+
+  // The rule separating the rail from the message, the full height of the pane.
+  // Not a `PanelSeparator`: that one is a horizontal divider and fixes its own
+  // height, which is the wrong half of the geometry to have decided for a rule
+  // that runs down the edge. The tint is the same alpha-on-foreground.
+  Rectangle {
+    id: edge
+    anchors.left: parent.left
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    width: 1
+    color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.12)
+  }
+
+  Text {
+    id: captionText
+    objectName: "railCaption"
+    anchors.top: parent.top
+    anchors.left: edge.right
+    anchors.right: parent.right
+    anchors.leftMargin: Style.space(12)
+    anchors.rightMargin: Style.space(10)
+    anchors.topMargin: Style.space(14)
+    // Generated here out of a count, not written by a sender — but the rule is
+    // cheap and the file it sits in draws senders two lines down.
+    textFormat: Text.PlainText
+    text: root.caption
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    elide: Text.ElideRight
+  }
+
+  Flickable {
+    id: railFlick
+    objectName: "conversationRail"
+    anchors.top: captionText.bottom
+    anchors.topMargin: Style.space(8)
+    anchors.left: edge.right
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    contentWidth: width
+    contentHeight: stopColumn.implicitHeight + Style.space(16)
+    clip: true
+    boundsBehavior: Flickable.StopAtBounds
+    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+    // The smallest scroll that puts this much of the content on screen, and no
+    // scroll at all while it is already there — recentring on every step would
+    // drag the rail under somebody walking one stop down it.
+    function revealItem(itemY, itemHeight) {
+      var pad = Style.space(8)
+      var furthest = Math.max(0, contentHeight - height)
+      var next = contentY
+      if (itemHeight + pad + pad > height) next = itemY - pad
+      else if (itemY - pad < contentY) next = itemY - pad
+      else if (itemY + itemHeight + pad > contentY + height)
+        next = itemY + itemHeight + pad - height
+      if (next < 0) next = 0
+      if (next > furthest) next = furthest
+      contentY = next
+    }
+
+    Column {
+      id: stopColumn
+      width: railFlick.width
+      spacing: 0
+
+      Repeater {
+        model: root.stops
+
+        Stop {}
+      }
+    }
+  }
+
+  // One member. Not a button: it is a place on a timeline that can be gone to,
+  // and the open one wears the list's own selected fill rather than a pressed
+  // state.
+  component Stop: Rectangle {
+    id: stop
+
+    required property var modelData
+    readonly property string memberId: String(modelData.id || "")
+
+    width: stopColumn.width
+    implicitHeight: stopBody.implicitHeight + Style.space(14)
+    height: implicitHeight
+    radius: Style.cornerRadius
+    color: modelData.open
+      ? Style.selectedFillFor(root.textColor, root.accentColor)
+      : (hover.containsMouse
+        ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+
+    MouseArea {
+      id: hover
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.memberActivated(stop.memberId)
+    }
+
+    // The timeline itself, drawn per stop rather than once behind them: the
+    // rail scrolls, and a single rule sized to the content would have to be
+    // kept in step with a Column whose stops change height as the summaries
+    // land. One segment per stop is the same line and needs nothing kept true.
+    Rectangle {
+      x: node.x + (node.width - width) / 2
+      y: 0
+      width: Math.max(1, Style.space(1))
+      height: parent.height
+      color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.14)
+    }
+
+    // Filled with the accent while the member is unread, hollow once it has
+    // been read, and heavier for the open one — three states, none of them
+    // carried by colour alone: the open stop also has the selected fill behind
+    // it and the word "open" beside its sender.
+    Rectangle {
+      id: node
+      x: Style.space(10)
+      y: Style.space(13)
+      width: modelData.open ? Style.space(11) : Style.space(9)
+      height: width
+      radius: width / 2
+      color: modelData.unread ? root.accentColor : root.backgroundColor
+      border.width: modelData.unread ? 0 : Math.max(1, Style.space(modelData.open ? 2 : 1))
+      border.color: modelData.open ? root.textColor : root.dimColor
+    }
+
+    Column {
+      id: stopBody
+      anchors.left: parent.left
+      anchors.leftMargin: node.x + Style.space(22)
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      // The date leads, because the rail is a timeline and the date is where a
+      // stop sits on it. The flag rides beside it: it belongs to the message
+      // rather than to the person, and it is state the sender's own line must
+      // not be able to imitate.
+      Item {
+        width: parent.width
+        implicitHeight: Math.max(dateText.implicitHeight, flagIcon.height,
+          dateBar.visible ? dateBar.height : 0)
+
+        Text {
+          id: dateText
+          visible: stop.modelData.known
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: stop.modelData.time
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Bar {
+          id: dateBar
+          visible: !stop.modelData.known
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          width: Math.max(1, parent.width * 0.34)
+          height: Style.space(8)
+        }
+
+        ActionIcon {
+          id: flagIcon
+          visible: stop.modelData.flagged
+          anchors.left: stop.modelData.known ? dateText.right : dateBar.right
+          anchors.leftMargin: Style.space(5)
+          anchors.verticalCenter: parent.verticalCenter
+          name: "star"
+          filled: true
+          color: root.accentColor
+          iconSize: Style.font.iconSmall
+          fontFamily: root.panelFontFamily
+        }
+      }
+
+      Item {
+        width: parent.width
+        implicitHeight: Math.max(sender.implicitHeight, senderBar.visible ? senderBar.height : 0)
+
+        Text {
+          id: sender
+          visible: stop.modelData.known
+          anchors.left: parent.left
+          anchors.right: openMark.visible ? openMark.left : parent.right
+          anchors.rightMargin: openMark.visible ? Style.space(5) : 0
+          // A stranger wrote this name. AutoText would promote anything
+          // tag-shaped in it to rich text, and Qt's rich text engine fetches an
+          // <img src> for real.
+          textFormat: Text.PlainText
+          text: stop.modelData.sender
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          font.bold: stop.modelData.unread
+          elide: Text.ElideRight
+        }
+
+        Bar {
+          id: senderBar
+          visible: !stop.modelData.known
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          width: Math.max(1, parent.width * 0.62)
+          height: Style.space(9)
+        }
+
+        // The word, not only the fill: a theme whose selected surface is faint
+        // would otherwise leave nothing at all saying which of these is the
+        // message on screen.
+        Text {
+          id: openMark
+          visible: stop.modelData.open && stop.modelData.known
+          anchors.right: parent.right
+          anchors.baseline: sender.baseline
+          textFormat: Text.PlainText
+          text: "open"
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      // Where to find this member, when it is not where the reader is looking.
+      // The account's own name for the mailbox, the one the sidebar draws.
+      Text {
+        width: parent.width
+        visible: stop.modelData.mailbox !== ""
+        textFormat: Text.PlainText
+        text: stop.modelData.mailbox
+        color: root.dimmerColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+    }
+  }
+
+  component Bar: Rectangle {
+    radius: Style.cornerRadius
+    color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b,
+      0.06 + 0.05 * root.pulse)
+  }
+}

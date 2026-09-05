@@ -89,6 +89,8 @@ used to exist, and they had.
 | `cursorUp` | `k`, `Up` | mail | Move up |
 | `open` | `Return`, `o` | mail | Open the selected message |
 | `backToList` | `u` | reader | Back to the list |
+| `nextMember` | `n` | reader | Next message in the conversation |
+| `previousMember` | `p` | reader | Previous message in the conversation |
 | `archive` | `e` | mail | Archive |
 | `trash` | `d` | mail | Move to trash |
 | `star` | `s` | mail | Star or unstar |
@@ -130,6 +132,8 @@ The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
 In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
+
+`n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. They move the reader and nothing else: `j` and `k` go on moving the list cursor underneath, because the cursor and the open message are two different things. A message whose conversation has one member draws no rail, and both keys then do nothing.
 
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback. Back and `Escape` save a non-empty composition before leaving it. The explicit Discard button remains the destructive exit.
 

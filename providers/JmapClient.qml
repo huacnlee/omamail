@@ -970,6 +970,79 @@ Item {
     return message
   }
 
+  // The counted members of a conversation, for the rail beside the reader.
+  //
+  // One `Email/get` with the list-read properties, chunked at the limit — which
+  // is `getMessages` exactly, with one difference that is the whole reason this
+  // is its own name rather than a second caller of that one: **no thread
+  // block**. A block belongs to a row and speaks for the whole conversation, so
+  // a member that happens to be some row's representative would come back
+  // carrying its conversation's unread and flagged marks, and the rail would
+  // draw a stop that is bold because a *different* message in the thread is.
+  // A stop is one message and must tell the truth about that message.
+  //
+  // The other three clients answer with an empty list. Gmail declares `threads`
+  // but not `conversations`, so no row it serves carries member ids at all;
+  // HEY's rows already are conversations and report a count of 0, which is
+  // unknown; IMAP declares neither. Nothing above the seam has to know that —
+  // it asks, and an empty answer is a rail with nothing to add.
+  function getSummaries(ids, callback) {
+    var handle = newHandle()
+    var wanted = []
+    var source = Array.isArray(ids) ? ids : []
+    for (var i = 0; i < source.length; i++) {
+      var id = String(source[i] || "")
+      if (id !== "") wanted.push(id)
+    }
+    if (wanted.length === 0) {
+      hand(callback, [], "")
+      return handle
+    }
+
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, [], error)
+        return
+      }
+      var chunks = Jmap.chunked(wanted,
+        Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
+      var byId = {}
+      var remaining = chunks.length
+      var firstError = ""
+
+      for (var c = 0; c < chunks.length; c++) {
+        (function(chunk) {
+          var child = root.call([[
+            "Email/get", Jmap.emailGet(root.accountId, chunk, false), "0"
+          ]], null, function(responses, failure) {
+            if (!root || handle.aborted) return
+            if (failure && firstError === "") firstError = failure
+            var args = Jmap.responseArguments(responses, "Email/get")
+            var list = args && Array.isArray(args.list) ? args.list : []
+            for (var j = 0; j < list.length; j++) {
+              var message = Jmap.toMessage(list[j], root.roles)
+              if (message.id !== "") byId[message.id] = message
+            }
+            remaining = remaining - 1
+            if (remaining > 0) return
+            var ordered = []
+            for (var k = 0; k < wanted.length; k++) {
+              if (byId[wanted[k]]) ordered.push(byId[wanted[k]])
+            }
+            // A member the read did not answer for is simply not a stop the
+            // rail can fill in. Unlike a page, a partial answer here is worth
+            // keeping: the stops that arrived settle and the rest stay
+            // skeletons, which is what they already were.
+            root.hand(callback, ordered, ordered.length > 0 ? "" : firstError)
+          })
+          handle.children.push(child)
+        })(chunks[c])
+      }
+    })
+    return handle
+  }
+
   // The rows behind those ids, in the order they were asked for.
   //
   // `full` is ignored here: a full read is one message, and `getMessage` is

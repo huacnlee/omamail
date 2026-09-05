@@ -622,6 +622,25 @@ for client in providers/GmailApiClient.qml providers/HeyClient.qml providers/Ima
   grep -q 'function getMessages(ids, full, callback, existingHandle, progress)' "$client" \
     || fail "$client must expose the shared progressive list interface"
 done
+# The conversation rail asks every client for the members of the open thread and
+# draws whatever comes back. A provider that does not collapse its listing has
+# nothing to say and answers with an empty list — but it has to answer, or the
+# reader would need to know which provider it is looking at.
+for client in providers/GmailApiClient.qml providers/HeyClient.qml \
+    providers/ImapClient.qml providers/JmapClient.qml; do
+  grep -q 'function getSummaries(ids, callback)' "$client" \
+    || fail "$client must expose the shared conversation-member interface"
+done
+# A member is a message and a stop must tell the truth about that message. A
+# thread block speaks for the whole conversation, so putting one on a member
+# would draw a stop bold because a different message in the thread is unread.
+awk '
+  /function getSummaries\(/ { in_members = 1 }
+  in_members && /withThreadBlock/ { exit 1 }
+  in_members && /^  function getMessages\(/ { exit 0 }
+  END { exit 0 }
+' providers/JmapClient.qml \
+  || fail "a conversation member must not be given the row's thread block"
 grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
 grep -q 'Imap\.uidCeilingCommand()' providers/ImapClient.qml \
