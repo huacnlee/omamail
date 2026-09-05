@@ -359,16 +359,26 @@ function mergedInto(existing, additions, limit) {
 // rather than sent an empty patch, and an action every member is excluded from
 // is an empty plan and no request at all.
 function patchPlan(ids, addLabelIds, removeLabelIds, roles, memberships) {
-  var list = Array.isArray(ids) ? ids : [ids]
+  var source = Array.isArray(ids) ? ids : [ids]
   var map = memberships && typeof memberships === "object" ? memberships : {}
+  var list = []
+  for (var n = 0; n < source.length; n++) {
+    var named = Protocol.trimmed(source[n])
+    if (named !== "" && list.indexOf(named) < 0) list.push(named)
+  }
+  // The membership map keeps archive and spam off the members a *row* action
+  // reached without being asked about — a sent reply, a message a filter
+  // filed — and that is the only thing it is for. One id is the message the
+  // user acted on, whether it came from a row of one or from the reader, and
+  // its move is sent whatever the map says: otherwise the same key on the same
+  // message archived it when the last read had not carried it and quietly did
+  // nothing when it had, and said "Archived" both times.
+  var expanded = list.length > 1
   var groups = []
   var byPatch = {}
-  var seen = {}
   for (var i = 0; i < list.length; i++) {
-    var id = Protocol.trimmed(list[i])
-    if (id === "" || seen[id] === true) continue
-    seen[id] = true
-    var known = Array.isArray(map[id]) ? map[id] : null
+    var id = list[i]
+    var known = expanded && Array.isArray(map[id]) ? map[id] : null
     var patch = Protocol.patchFor(addLabelIds, removeLabelIds, roles, known)
     // One refusal is the whole action's: the destination mailbox is missing
     // from the account rather than from this member.

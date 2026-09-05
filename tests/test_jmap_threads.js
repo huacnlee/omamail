@@ -391,8 +391,23 @@ deepEqual(protocol.emailSet("t", ["m1", "m2"], { mailboxIds: { b: true } }), {
 // for nothing.
 deepEqual(jmap.patchPlan(["m1", "m1", "", "m2"], [], ["UNREAD"], roles, {}),
   [{ ids: ["m1", "m2"], patch: { "keywords/$seen": true } }])
-deepEqual(jmap.patchPlan(["m1"], [], ["INBOX"], archiveRoles, { m1: ["e"] }), [])
+deepEqual(jmap.patchPlan(["m1", "m2"], [], ["INBOX"], archiveRoles, { m1: ["e"], m2: ["e"] }), [])
 deepEqual(jmap.patchPlan([], [], ["UNREAD"], roles, {}), [])
+// The map speaks only for the members a row action reached without being
+// asked about. One id is the message the user acted on — a row of one, or the
+// member open in the reader — and its move goes whatever the map says, so the
+// same key on the same message does the same thing whether or not the last
+// read happened to carry it.
+deepEqual(jmap.patchPlan(["m1"], [], ["INBOX"], archiveRoles, { m1: ["e"] }),
+  [{ ids: ["m1"], patch: { "mailboxIds/f": true, "mailboxIds/a": null } }])
+deepEqual(jmap.patchPlan(["m1"], [], ["INBOX"], archiveRoles, {}),
+  [{ ids: ["m1"], patch: { "mailboxIds/f": true, "mailboxIds/a": null } }])
+deepEqual(jmap.patchPlan(["m1", "m1"], [], ["INBOX"], archiveRoles, { m1: ["e"] }),
+  [{ ids: ["m1"], patch: { "mailboxIds/f": true, "mailboxIds/a": null } }],
+  "the same id twice is still one message")
+deepEqual(jmap.patchPlan(["m1", "m2"], ["SPAM"], ["INBOX"], roles, { m1: ["e"], m2: ["a"] }),
+  [{ ids: ["m2"], patch: { mailboxIds: { c: true }, "keywords/$junk": true, "keywords/$notjunk": null } }],
+  "in a row action the map still keeps the account's own reply out of Junk")
 // One refusal is the whole action's: the mailbox is missing from the account
 // rather than from this member.
 assert.strictEqual(jmap.patchPlan(["m1", "m2"], [], ["INBOX"], roles, {}),
