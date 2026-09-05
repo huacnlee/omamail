@@ -136,6 +136,10 @@ var BINDINGS = [
   // then walks: `j`/`k` to move, `Enter` or `o` to take one.
   { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
+  // The rail as a list, for a window whose rail is collapsed or folded into
+  // tabs. Same rows, same digits: a bare digit inside it is the Ctrl digit.
+  { id: "switchMailbox", keys: ["Alt+M"], contexts: MAIL,
+    group: "Going", label: "Go to a mailbox" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },

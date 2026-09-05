@@ -245,6 +245,7 @@ and the client itself are console-only; there is no CLI for them.
 | `/` | Search |
 | `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
+| `Alt+M` | Go to a mailbox or label from a list |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `?` | Every shortcut |
