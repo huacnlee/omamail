@@ -596,9 +596,12 @@ Column {
         implicitHeight: Math.max(rowText.implicitHeight, rowActions.implicitHeight)
           + Style.space(16)
         radius: Style.cornerRadius
-        color: modelData.active
-          ? Style.selectedFillFor(root.textColor, root.accentColor)
-          : Style.normalFillFor(root.textColor, root.accentColor)
+        // Which mailbox the window is showing is not a fact about this page.
+        // Nothing here acts on it — `Edit...` acts on its own row, and the
+        // signature section names the mailbox it signs — and the row answers
+        // no click, so marking it borrowed the switcher's "you are here, click
+        // another" fill for a row that switches nothing.
+        color: Style.normalFillFor(root.textColor, root.accentColor)
 
         Column {
           id: rowText
@@ -616,7 +619,6 @@ Column {
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
-            font.bold: row.modelData.active
             elide: Text.ElideMiddle
           }
 
@@ -627,9 +629,8 @@ Column {
                 return row.modelData.error
               if (!row.modelData.signedIn) return "Signed out"
               var count = row.modelData.unread
-              var unread = count === 0 ? "No unread mail"
+              return count === 0 ? "No unread mail"
                 : (count === 1 ? "1 unread message" : count + " unread messages")
-              return row.modelData.active ? unread + " · showing now" : unread
             }
             color: row.modelData.error !== undefined && row.modelData.error !== ""
               ? root.urgentColor : root.dimColor
