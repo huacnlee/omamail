@@ -127,4 +127,15 @@ for _ in $(seq 1 200); do [ "$(field "$slow" stall)" = "permission" ] && break; 
 python3 "$runner" cancel "$slow"
 wait_state "$slow" cancelled
 [ "$(field "$slow" stall)" = "" ] || fail "a finished job carries no stall"
+# Forgetting removes a finished job and refuses a running one.
+count_before=$(python3 "$runner" list | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+python3 "$runner" forget "$many" || fail "a finished job can be forgotten"
+[ ! -e "$jobs/$many" ] || fail "the job directory is gone"
+[ "$(python3 "$runner" list | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = "$((count_before - 1))" ] || fail "and it left the listing"
+busy=$(new_job '{"messageId":"70:INBOX","command":"sleep 30","prompt":"p","message":"m"}')
+wait_state "$busy" running
+python3 "$runner" forget "$busy" >/dev/null 2>&1 && fail "a running job is not forgotten"
+[ -e "$jobs/$busy/job.json" ] || fail "and stays on disk"
+python3 "$runner" cancel "$busy"; wait_state "$busy" cancelled
+python3 "$runner" forget nope >/dev/null 2>&1 && fail "an unknown job is refused"
 echo "test_agent_job.sh ok"

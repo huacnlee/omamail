@@ -5,6 +5,7 @@
     agent-job.py list          every job.json under the state directory, newest first, as one JSON array
     agent-job.py cancel ID     stop the unit; the job file says cancelled once it has
     agent-job.py show ID       one job with the tail of its output, for the pane that reads it
+    agent-job.py forget ID     remove a finished job and everything it wrote; a running one is refused
 
 A job is about one message, several (`messages`), or a scope. A job may
 continue another (`parent`): its prompt is the parent's prompt, what the
@@ -285,6 +286,27 @@ def command_show(job_id):
     return 0
 
 
+def command_forget(job_id):
+    job_id = safe_id(job_id)
+    directory = os.path.join(state_dir(), job_id)
+    if not os.path.isfile(job_path(directory)):
+        sys.stderr.write("agent-job.py forget: no such job\n")
+        return 1
+    job = read_job(directory)
+    if job.get("state") in ("queued", "running"):
+        sys.stderr.write("agent-job.py forget: the job is still running; cancel it first\n")
+        return 1
+    # Only what the runner itself wrote, under the directory it made: no
+    # symlink is followed and nothing outside the job directory is touched.
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        os.unlink(path)
+    os.rmdir(directory)
+    return 0
+
+
 def command_list():
     base = state_dir()
     jobs = []
@@ -453,6 +475,8 @@ def main(argv):
         return command_cancel(argv[2])
     if verb == "show" and len(argv) == 3:
         return command_show(argv[2])
+    if verb == "forget" and len(argv) == 3:
+        return command_forget(argv[2])
     if verb == "run" and len(argv) == 3:
         return command_run(argv[2])
     sys.stderr.write(__doc__)

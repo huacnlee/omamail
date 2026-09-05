@@ -160,6 +160,9 @@ Item {
     return true
   }
 
+  function forgetAgentJob(jobId) { return agentRunner.forget(jobId) }
+  function forgetFinishedAgentJobs() { return agentRunner.forgetFinished() }
+
   function cancelAgentJob(jobId) {
     var job = agentRunner.jobFor2(jobId)
     if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false

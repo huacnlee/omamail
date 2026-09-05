@@ -188,6 +188,25 @@ Item {
       width: flick.width - Style.space(32)
       spacing: Style.space(8)
 
+      // One control for the whole history, beside the list it empties.
+      Row {
+        width: parent.width
+        visible: root.hasAgent && root.jobs.length > 0
+        layoutDirection: Qt.RightToLeft
+
+        Button {
+          objectName: "agent-pane-clear"
+          text: "Clear finished"
+          tooltipText: "Remove every job that is not running"
+          foreground: root.dimColor
+          bordered: false
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          onClicked: if (root.service) root.service.forgetFinishedAgentJobs()
+        }
+      }
+
       Text {
         width: parent.width
         visible: root.hasAgent && root.jobs.length === 0
@@ -361,11 +380,28 @@ Item {
             }
 
             Row {
-              visible: card.open && card.working
+              visible: card.open
               spacing: Style.space(8)
+
+              // A finished job can be removed, with everything it wrote. A
+              // running one cannot: cancel it first, so nothing is deleted
+              // out from under a process still writing to it.
+              Button {
+                objectName: "agent-pane-remove"
+                visible: !card.working
+                text: "Remove"
+                tooltipText: "Remove this job and everything it wrote"
+                foreground: root.dimColor
+                bordered: true
+                accent: root.accentColor
+                fontFamily: root.panelFontFamily
+                fontSize: Style.font.caption
+                onClicked: if (root.service) root.service.forgetAgentJob(String(card.modelData.id))
+              }
 
               Button {
                 objectName: "agent-pane-cancel"
+                visible: card.working
                 text: "Cancel actions"
                 tooltipText: "Stop the agent and everything it is doing"
                 foreground: root.urgentColor

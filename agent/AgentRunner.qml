@@ -83,6 +83,36 @@ Item {
     shower.running = true
   }
 
+  // A finished job and everything it wrote, removed. Several at once go one
+  // after another, each followed by a listing, so the pane empties as they go.
+  property var forgetQueue: []
+
+  function forget(jobId) {
+    var id = String(jobId || "")
+    if (id === "") return false
+    forgetQueue = forgetQueue.concat([id])
+    drainForgets()
+    return true
+  }
+
+  function forgetFinished() {
+    var list = jobs || []
+    var ids = []
+    for (var i = 0; i < list.length; i++) if (!Agent.isActive(list[i])) ids.push(String(list[i].id))
+    if (ids.length === 0) return false
+    forgetQueue = forgetQueue.concat(ids)
+    drainForgets()
+    return true
+  }
+
+  function drainForgets() {
+    if (pluginDir === "" || forgetter.running || forgetQueue.length === 0) return
+    var next = forgetQueue[0]
+    forgetQueue = forgetQueue.slice(1)
+    forgetter.command = ["python3", runner(), "forget", next]
+    forgetter.running = true
+  }
+
   function applyListing(text) {
     var next = Agent.parseJobs(text)
     var news = Agent.newlyFinished(jobs, next)
@@ -126,6 +156,17 @@ Item {
     onExited: function(exitCode) {
       if (exitCode !== 0) root.failed("Could not stop the agent: " + String(stderr.text || "").trim())
       root.refresh()
+    }
+  }
+
+  Process {
+    id: forgetter
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.failed("Could not remove the job: " + String(stderr.text || "").trim())
+      root.refresh()
+      root.drainForgets()
     }
   }
 

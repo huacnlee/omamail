@@ -45,7 +45,15 @@ Rectangle {
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
 
-  readonly property bool hot: mouse.containsMouse || hasCursor
+  // Hovered by a handler rather than by the MouseArea's `containsMouse`: a
+  // button on the row has a MouseArea of its own, and the pointer moving onto
+  // one took the row's hover away — the extra buttons hid, the lane closed,
+  // the button slid out from under the pointer, the row was hovered again,
+  // and the lane flickered open and shut. A HoverHandler is passive and stays
+  // hovered whatever the pointer is over inside the row.
+  readonly property bool hot: rowHover.hovered || hasCursor
+
+  HoverHandler { id: rowHover }
 
   // The subject is asked on its own account: a reply prefix is Latin whatever
   // the thread is written in, so `Re: مرحبا` reads left-to-right to anything
