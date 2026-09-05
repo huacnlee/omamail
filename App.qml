@@ -1835,11 +1835,14 @@ Item {
           anchors.leftMargin: railToggle.visible
             ? Style.space(9) - (railToggle.size - railToggle.iconSize) / 2
             : Style.space(14)
-          // An invisible sibling still holds its place, so the hints must only
-          // take room from this line while they are actually on screen.
-          anchors.right: statusBar.hasNotice
-            ? notice.left
-            : (keyHints.visible ? keyHints.left : parent.right)
+          // The address runs to the end of the line and the hints take what it
+          // leaves. Stopping at the hints instead asked a question with no
+          // answer: the slot wanted to know how much the hints had left over
+          // while the hints wanted to know whether the address had left them
+          // room. A notice is the one thing that does push the address over,
+          // because a notice is what the window most needs to say and it says
+          // it only while there is something wrong.
+          anchors.right: statusBar.hasNotice ? notice.left : parent.right
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
           height: Style.space(24)
@@ -1937,10 +1940,19 @@ Item {
 
         KeyHints {
           id: keyHints
+          objectName: "status-key-hints"
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
-          visible: !statusBar.hasNotice && !root.compact
+          // Only once the address has been given its room, and only whole:
+          // hints are a nicety and the address is a fact, so the run of them
+          // steps off the line rather than arriving with its last pair cut in
+          // half. `accountSlot` no longer measures itself against this, which
+          // is what keeps the two from asking each other.
+          readonly property real roomLeft: statusBar.width
+            - (accountSlot.x + accountControl.width)
+            - Style.space(12) - Style.space(14)
+          visible: !statusBar.hasNotice && !root.compact && roomLeft >= implicitWidth
           textColor: root.foreground
           dimColor: root.dimmer
           accentColor: root.accent

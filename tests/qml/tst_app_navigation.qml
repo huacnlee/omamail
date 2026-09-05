@@ -381,6 +381,53 @@ Item {
       switcher.close()
     }
 
+    // The address is what this line is about and the key hints are a nicety
+    // beside it, so the room goes to the address first.
+    function test_the_status_address_keeps_its_room_from_the_key_hints() {
+      // The right of the line carries a notice or the hints, never both, so a
+      // status an earlier test left standing is a line with no hints on it.
+      mailService.actionStatus = ""
+      mailService.lastError = ""
+      app.notice = ""
+      mailService.syncedLabel = "Synced just now"
+      waitForRendering(app)
+
+      var label = named(app, "status-account-label")
+      var hints = named(app, "status-key-hints")
+      verify(label && hints)
+      compare(label.text, "me@example.com \u00b7 just now")
+      verify(!label.truncated, "a short address and its age fit beside the hints")
+      verify(hints.visible, "and the hints keep the room they were left")
+
+      // Grown rather than measured: how many characters fit is a fact about
+      // the theme's font, and what is being asserted is which of the two gives
+      // way, whatever that number turns out to be.
+      var address = "a.long.standing.mailbox.address@example.org"
+      for (var i = 0; i < 20 && hints.visible; i++) {
+        address = "longer." + address
+        mailService.accountEmail = address
+        waitForRendering(app)
+      }
+      verify(!hints.visible, "the hints step off the line rather than cutting the address")
+      verify(!label.truncated, "and the address keeps every character it has room for")
+
+      mailService.accountEmail = "me@example.com"
+      waitForRendering(app)
+      verify(hints.visible, "the hints come back when the address gives the room up")
+
+      // The one thing that still pushes the address over, because a notice is
+      // what the window most needs to say.
+      var slot = label.parent.parent
+      var wide = slot.width
+      mailService.actionStatus = "Moved to Archive"
+      waitForRendering(app)
+      verify(slot.width < wide, "a notice takes the right of the line back")
+
+      mailService.actionStatus = ""
+      mailService.syncedLabel = ""
+      waitForRendering(app)
+    }
+
     // The box around the address pads it by one number and measures itself by
     // another, and `Style.space` rounds each on its own. At the shell's
     // `base-size 14` the two disagree by a pixel, and a Text a pixel short of
