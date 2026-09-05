@@ -2,11 +2,7 @@
 
 **Your mail as a native Omarchy window — not a browser tab.**
 
-Omamail is an Omarchy desktop email client: a Quickshell plugin that reads,
-triages, and answers your mail over the official Gmail API, over the HEY CLI
-client 37signals publish, or over IMAP and SMTP for every other mailbox. It
-runs inside the `omarchy-shell` process you already have, follows your active
-theme, and puts an unread count in the bar.
+Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages, and answers your mail over the official Gmail API, over the HEY CLI client 37signals publish, over JMAP, or over IMAP and SMTP for every other mailbox. It runs inside the `omarchy-shell` process you already have, follows your active theme, and puts an unread count in the bar.
 
 
 <img width="800" alt="Omamail - Reading a message in the three-column window" src="docs/images/full-mail.webp" />
@@ -19,9 +15,7 @@ And with mini size mode:
 
 <img width="265" alt="Omamail - Mini size: the message list" src="docs/images/mini-list.webp" /> <img width="265" alt="Omamail - Mini size: one message open" src="docs/images/mini-message.webp" /> <img width="265" alt="Omamail - Mini size: writing a new message" src="docs/images/mini-compose.webp" />
 
-Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**,
-**Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any
-other IMAP server — including one you run yourself.
+Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yahoo**, **Zoho**, **GMX**, **Proton Mail** (through its Bridge), and any server that speaks **JMAP** or **IMAP** — including one you run yourself.
 
 ## Features
 
@@ -29,10 +23,7 @@ other IMAP server — including one you run yourself.
   inside Omarchy rather than to look like a web app in a window. Three columns
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
-- **Gmail, HEY and IMAP.** Sign in to Gmail with Google directly, to HEY
-  through the HEY CLI that 37signals publish, or add any IMAP mailbox with an
-  address and an app password. Several accounts at once, each with its own
-  inbox, cache and unread count.
+- **Gmail, HEY, JMAP and IMAP.** Sign in to Gmail with Google directly, to HEY through the HEY CLI that 37signals publish, or add a mailbox on any JMAP or IMAP server with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `e` to archive, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
@@ -69,10 +60,7 @@ other IMAP server — including one you run yourself.
   every message read that way instead. The interface itself is unaffected.
 - **Your theme.** Every colour comes from the active Omarchy theme, so the
   mailbox changes the moment the desktop does.
-- **Keyring-backed.** The Gmail refresh token and every IMAP password live in
-  GNOME Keyring — never in a config file, never on a command line. A HEY
-  mailbox has no credential here at all: the HEY CLI holds its own token, and
-  Omamail only ever asks it whether it is signed in.
+- **Keyring-backed.** The Gmail refresh token and every JMAP and IMAP password live in GNOME Keyring — never in a config file, never on a command line. A HEY mailbox has no credential here at all: the HEY CLI holds its own token, and Omamail only ever asks it whether it is signed in.
 
 ## What it is
 
@@ -113,8 +101,7 @@ Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
 
 ## Mailboxes it can open
 
-Adding a mailbox asks which kind first, because the three setups have nothing in
-common.
+Adding a mailbox asks which kind first, because the four setups have nothing in common.
 
 **Gmail** signs in with Google directly. Google issues Gmail API access per
 project, so this route needs an OAuth client you create once — the setup page
@@ -160,6 +147,12 @@ the one-click unsubscribe, attachments and the Screener are all read out of
 parts of a message that `hey` does not serve, or out of an endpoint it does not
 expose — so they stay in HEY's own app, which the setup page links to.
 
+**JMAP** is an address and an app password or an API token — Fastmail, a Stalwart server of your own, or anything else that speaks the protocol. The server is looked up from your address's domain, and a **Server settings** disclosure is there for the one that cannot be found or that answers somewhere else. It is HTTPS only, and the credential goes to the server that answered and to the addresses inside that server's own session object.
+
+Where a server offers JMAP and IMAP alike, this is the better of the two. A JMAP row is a *conversation* rather than a single message, and the reader draws a rail of that conversation's other messages down its side — `n` and `p` walk it. Mail also arrives when the server sends it rather than when the next check comes round: every signed-in JMAP mailbox holds one event stream open whether or not the window is, so a message that lands on the server is in the list about a quarter of a second later.
+
+What your particular server does not have, the panel does not offer — and here that is a fact about your account rather than about the protocol. A server with no Archive mailbox has no Archive row and no `e`; one whose Junk folder trains nothing has no "report spam"; a credential that cannot submit mail makes the mailbox read-only. Each of them says which it is instead of failing after you have pressed it.
+
 
 **IMAP** is an address and a password. Fastmail, iCloud, Zoho, Outlook, GMX,
 Proton via its Bridge, or a server of your own: the servers are filled in from
@@ -185,7 +178,7 @@ That takes the plugin itself. Nothing it wrote lives inside your Omarchy
 config, so removing those is separate and entirely up to you:
 
 ```bash
-secret-tool clear service omamail    # the refresh token and IMAP passwords
+secret-tool clear service omamail    # the refresh token and JMAP and IMAP passwords
 hey auth logout                      # the HEY session, if you added one
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
@@ -227,6 +220,7 @@ and the client itself are console-only; there is no CLI for them.
 | --- | --- |
 | `j` / `k` | Move down / up |
 | `Enter` or `o` | Open the selected message |
+| `n` / `p` | Next / previous message in the conversation |
 | `Esc` | Back to the list; close the window from the list |
 | `e` | Archive |
 | `d` | Move to trash |
@@ -287,10 +281,8 @@ thousand of them, evicted least-recently-used.
   asks it whether it is signed in. Signing out from the setup page runs
   `hey auth logout`, which signs that client out for everything on the machine
   that uses it.
-- The Gmail refresh token goes to **GNOME Keyring**, keyed by client *and* account,
-  written over stdin so it never appears in the process table. Two mailboxes
-  share one client, so keying by client alone would have let the second sign-in
-  overwrite the first.
+- The Gmail refresh token goes to **GNOME Keyring**, keyed by client *and* account, written over stdin so it never appears in the process table. Two mailboxes share one client, so keying by client alone would have let the second sign-in overwrite the first.
+- A JMAP or IMAP password goes to the same keyring, keyed by the account, and over stdin for the same reason. A JMAP credential is only ever sent to the server that answered the session request and to the addresses inside that session object.
 - The OAuth client goes to `~/.config/omamail/credentials.json`, mode
   `0600`. Not to plugin settings — `shell.json` is world-readable.
 - The access token exists only in memory.
