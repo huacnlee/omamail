@@ -558,7 +558,8 @@ function sidebarSlots(mailboxes, labels, limit) {
   var boxes = Array.isArray(mailboxes) ? mailboxes : []
   for (var i = 0; i < boxes.length && out.length < max; i++) {
     if (!boxes[i] || !boxes[i].key) continue
-    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || "") })
+    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || ""),
+      icon: String(boxes[i].icon || "mail") })
   }
   var all = Array.isArray(labels) ? labels : []
   for (var j = 0; j < all.length && out.length < max; j++) {
@@ -991,4 +992,197 @@ function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
     return Math.max(0, Math.min(known[i].y, limit))
   }
   return -1
+}
+
+// ------------------------------------------------------------ the scope
+
+// What the window is looking at, named the way the rail names it: the mailbox
+// whose key is open, or the label or folder whose query is. A label is matched
+// by the id the rail selected it with first, and by its query second, because
+// a folder restored from the store carries the query and nothing else.
+//
+// The answer is never empty. A key the provider does not list — a cache from an
+// older version, a mailbox removed from the provider's table — still names
+// itself, capitalised, rather than leaving the header with nothing to say.
+function currentScope(mailboxKey, mailboxes, labels, rawQuery, rawLabelId, labelQueryOf) {
+  var query = String(rawQuery || "")
+  var labelId = String(rawLabelId || "")
+  var all = Array.isArray(labels) ? labels : []
+  if (query !== "") {
+    var i
+    for (i = 0; i < all.length; i++) {
+      if (!all[i] || all[i].system) continue
+      if (labelId !== "" && String(all[i].id || "") === labelId)
+        return { kind: "label", id: String(all[i].id || ""),
+          name: String(all[i].name || all[i].rawName || ""), icon: "label" }
+    }
+    for (i = 0; i < all.length; i++) {
+      if (!all[i] || all[i].system) continue
+      var name = String(all[i].rawName || all[i].name || "")
+      if (typeof labelQueryOf === "function" && labelQueryOf(name) === query)
+        return { kind: "label", id: String(all[i].id || ""),
+          name: String(all[i].name || name), icon: "label" }
+    }
+    return { kind: "label", id: labelId, name: query, icon: "label" }
+  }
+  var key = String(mailboxKey || "inbox")
+  var boxes = Array.isArray(mailboxes) ? mailboxes : []
+  for (var j = 0; j < boxes.length; j++) {
+    if (boxes[j] && String(boxes[j].key) === key)
+      return { kind: "mailbox", key: key, name: String(boxes[j].label || key),
+        icon: String(boxes[j].icon || "mail") }
+  }
+  return { kind: "mailbox", key: key,
+    name: key.charAt(0).toUpperCase() + key.slice(1), icon: "mail" }
+}
+
+// The rows the mailbox switcher draws: the rail's own numbered list, each row
+// told whether it is the scope on screen. Same slots as the badges and the
+// Ctrl digits, so the number a row shows here is the key that opens it from
+// the list too.
+function switcherRows(slots, labels, scope) {
+  var list = Array.isArray(slots) ? slots : []
+  var all = Array.isArray(labels) ? labels : []
+  var current = scope || {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var slot = list[i]
+    if (!slot) continue
+    var row = { kind: slot.kind, name: String(slot.name || ""), number: i + 1,
+      count: 0, icon: "mail", selected: false }
+    if (slot.kind === "mailbox") {
+      row.key = String(slot.key || "")
+      row.icon = String(slot.icon || "mail")
+      row.selected = current.kind === "mailbox" && current.key === row.key
+    } else {
+      row.id = String(slot.id || "")
+      row.icon = "label"
+      row.selected = current.kind === "label" && current.id !== "" && current.id === row.id
+      for (var j = 0; j < all.length; j++) {
+        if (all[j] && String(all[j].id || "") === row.id) {
+          row.count = Math.max(0, Math.floor(Number(all[j].unread) || 0))
+          if (!row.selected && current.kind === "label" && current.id === "")
+            row.selected = String(all[j].rawName || all[j].name || "") === current.name
+          break
+        }
+      }
+    }
+    out.push(row)
+  }
+  return out
+}
+
+// ------------------------------------------------------------ selection
+
+// The rows checked for a bulk action. A list of ids rather than a flag on the
+// summaries, because a summary is what the provider said about a message and
+// which rows the user has ticked is not that.
+function toggleId(ids, id) {
+  var list = Array.isArray(ids) ? ids.slice() : []
+  var key = String(id || "")
+  if (key === "") return list
+  var at = list.indexOf(key)
+  if (at >= 0) list.splice(at, 1)
+  else list.push(key)
+  return list
+}
+
+// Every id from one row to another, inclusive, in list order — what a
+// Shift+click means. Either end unknown to the list means just the other.
+function idsBetween(list, fromId, toId) {
+  var source = Array.isArray(list) ? list : []
+  var a = indexById(source, fromId)
+  var b = indexById(source, toId)
+  if (a < 0 && b < 0) return []
+  if (a < 0) a = b
+  if (b < 0) b = a
+  var lo = Math.min(a, b)
+  var hi = Math.max(a, b)
+  var out = []
+  for (var i = lo; i <= hi; i++) out.push(source[i].id)
+  return out
+}
+
+function unionIds(ids, more) {
+  var out = Array.isArray(ids) ? ids.slice() : []
+  var extra = Array.isArray(more) ? more : []
+  for (var i = 0; i < extra.length; i++) {
+    if (out.indexOf(extra[i]) < 0) out.push(extra[i])
+  }
+  return out
+}
+
+// The checked ids that are still listed. A reload, a search or an action can
+// take rows away, and a selection that kept naming them would act on messages
+// the user can no longer see.
+function retainIds(ids, list) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (indexById(source, checked[i]) >= 0) out.push(checked[i])
+  }
+  return out
+}
+
+function allIds(list) {
+  var source = Array.isArray(list) ? list : []
+  var out = []
+  for (var i = 0; i < source.length; i++) out.push(source[i].id)
+  return out
+}
+
+function summariesById(list, ids) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    var index = indexById(source, checked[i])
+    if (index >= 0) out.push(source[index])
+  }
+  return out
+}
+
+// Where the cursor goes when several rows leave at once: the first survivor
+// after it, or the last one before it. Worked out on the list as it still is,
+// like cursorAfterRemoval, and for the same reason.
+function cursorAfterRemovals(list, removedIds, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var gone = Array.isArray(removedIds) ? removedIds : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  var i
+  for (i = index; i < source.length; i++) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  for (i = index - 1; i >= 0; i--) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  return ""
+}
+
+// One star key over several rows: they all go the way the majority has not
+// gone yet. All starred means unstar; anything else means star, so a mixed
+// selection lands in one state rather than swapping every row.
+function starActionFor(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  if (rows.length === 0) return "star"
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !rows[i].starred) return "star"
+  }
+  return "unstar"
+}
+
+// "3 messages archived": the count, then the single-message note with its
+// capital taken off. One rule for every action, so a new action's note only
+// has to be written once.
+function batchNote(count, actionLabel) {
+  var label = String(actionLabel || "")
+  if (label === "") return pluralize(count, "message")
+  return pluralize(count, "message") + " " + label.charAt(0).toLowerCase() + label.slice(1)
+}
+
+function selectionStatus(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  return n === 0 ? "" : n + " selected"
 }

@@ -64,6 +64,13 @@ var BINDINGS = [
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
     group: "Acting", label: "Mark unread" },
+  // Gmail's `x`: tick the row under the cursor, and the acting keys above
+  // then mean every ticked row rather than the one the cursor is on. List
+  // only — in the reader there is one message and it is the one open.
+  { id: "toggleCheck", keys: ["x"], contexts: ["list"],
+    group: "Acting", label: "Select or deselect the message" },
+  { id: "checkAll", keys: ["Ctrl+A"], contexts: ["list"],
+    group: "Acting", label: "Select every message loaded, or none" },
 
   // Answering works from the list too, the way the row's own menu does: the
   // message is opened first and the draft waits for it. Binding these to the
@@ -136,6 +143,10 @@ var BINDINGS = [
   // then walks: `j`/`k` to move, `Enter` or `o` to take one.
   { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
+  // The rail as a list, for a window whose rail is collapsed or folded into
+  // tabs. Same rows, same digits: a bare digit inside it is the Ctrl digit.
+  { id: "switchMailbox", keys: ["Alt+M"], contexts: MAIL,
+    group: "Going", label: "Go to a mailbox" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },

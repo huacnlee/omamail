@@ -206,8 +206,9 @@ key. What matters while working:
   place the rule above inverts. It takes the key before the shortcut map sees
   it — `focus` true or false, bare or modified — so inside a popup a `KeyRouter`
   binding is what looks live and never runs, and a `Keys` handler on the
-  popup's `contentItem` is the only thing that works. The account switcher is
-  the one component that answers keys itself, for this reason.
+  popup's `contentItem` is the only thing that works. The account switcher and
+  the mailbox switcher are the two components that answer keys themselves, for
+  this reason.
   `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
   be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when

@@ -11,6 +11,7 @@ import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
+import "providers/Registry.js" as Provider
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
@@ -205,6 +206,58 @@ Item {
   readonly property bool compact: window.width < Style.space(760)
 
   property string cursorId: ""
+  // The rows ticked for a bulk action, by id. Like the cursor, a fact about
+  // this window rather than about the mailbox, and pruned the same way when
+  // the list under it changes. Only the list acts on it: in the reader there
+  // is one message and it is the one open.
+  property var checkedIds: []
+  readonly property bool selectionActive: checkedIds.length > 0 && currentView === "list"
+
+  function toggleCheck(id) {
+    var key = String(id || "")
+    if (key === "") return false
+    checkedIds = Model.toggleId(checkedIds, key)
+    return true
+  }
+
+  // Shift+click: everything from the cursor to here joins the selection, and
+  // the cursor moves here so the next stretch starts where this one ended.
+  function checkRange(id) {
+    if (!service) return false
+    var key = String(id || "")
+    if (key === "") return false
+    checkedIds = Model.unionIds(checkedIds, Model.idsBetween(service.messages, cursorId, key))
+    cursorId = key
+    return true
+  }
+
+  // Every loaded row, or none when every one is already ticked: one key that
+  // means "all of these" has to be able to mean "none of them" as well.
+  function checkAll() {
+    if (!service) return false
+    var all = Model.allIds(service.messages)
+    checkedIds = Model.retainIds(checkedIds, service.messages).length === all.length ? [] : all
+    return true
+  }
+
+  // Acting on the selection acts on every ticked row at once, then drops the
+  // selection: the rows it named have moved or changed, and a selection that
+  // outlived the action would be one keystroke from repeating it.
+  function actOnChecked(action) {
+    if (!service || checkedIds.length === 0) return false
+    var ids = checkedIds.slice()
+    var leaves = !Model.survivesAction(service.mailboxKey, action,
+      service.rawQuery, service.hasLabels, service.rawLabelId)
+    var next = leaves ? Model.cursorAfterRemovals(service.messages, ids, cursorId) : cursorId
+    if (!service.actMany(ids, action)) return false
+    checkedIds = []
+    if (leaves) {
+      cursorId = next
+      revealCursorRow()
+    }
+    return true
+  }
+
   // Kept across messages, and across the window being closed: how somebody
   // reads their mail is a fact about them, not about the message that made them
   // reach for it. The service holds it because that is what writes it to disk.
@@ -675,15 +728,22 @@ Item {
   // move before asking for a destination, through the same provider guard that
   // checks the final action before its optimistic update.
   function openLabelPicker() {
-    if (!service || cursorId === "") return false
+    if (!service || (cursorId === "" && !selectionActive)) return false
     if (service.refuseUnavailableAction("label:destination")) return false
     labelPicker.open()
     return true
   }
 
   // Acting on the open message closes it: it is about to leave this list.
-  function actOnCursor(action) {
-    if (!service || cursorId === "") return false
+  //
+  // With rows ticked, the key means all of them rather than the one under the
+  // cursor — the same key, the same guard in `MailAccount`, one more row in
+  // the request. `onlyCursor` is for the row menu opened on a row outside the
+  // selection, which means that row and nothing else.
+  function actOnCursor(action, onlyCursor) {
+    if (!service) return false
+    if (selectionActive && onlyCursor !== true) return actOnChecked(action)
+    if (cursorId === "") return false
     var acted = cursorId
     var wasOpen = currentView === "reader" && service.selectedId === acted
     // Worked out before the action, while the row still has neighbours.
@@ -721,6 +781,17 @@ Item {
   readonly property var sidebarSlots: service
     ? Model.sidebarSlots(service.mailboxes, service.labels, 10) : []
 
+  // What the header names: the mailbox open, or the label. Derived from the
+  // same facts the rail draws its selected row from.
+  readonly property var scope: service
+    ? Model.currentScope(service.mailboxKey, service.mailboxes, service.labels,
+        service.rawQuery, service.rawLabelId,
+        function(name) { return Provider.labelQuery(service.providerId, name) })
+    : Model.currentScope("inbox", [], [], "", "", null)
+
+  readonly property var switcherRows: service
+    ? Model.switcherRows(sidebarSlots, service.labels, scope) : []
+
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
     var slot = sidebarSlots[index]
@@ -751,9 +822,13 @@ Item {
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     if (id === "star") {
+      if (selectionActive)
+        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
       if (service && cursorId !== "") service.toggleStar(cursorId)
       return
     }
+    if (id === "toggleCheck") return toggleCheck(cursorId)
+    if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
@@ -784,6 +859,7 @@ Item {
       return
     }
     if (id === "switchAccount") return accountSwitcher.openCentered()
+    if (id === "switchMailbox") return mailboxSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
       else {
@@ -825,6 +901,12 @@ Item {
     if (searchBar.fieldFocused) {
       if (searchBar.queryText !== "") searchBar.clear()
       focusScope.parkKeyboard()
+      return
+    }
+    // A selection is the next nearest thing: Escape with rows ticked unticks
+    // them and goes nowhere, which is what every file manager does with it.
+    if (selectionActive) {
+      checkedIds = []
       return
     }
     back()
@@ -875,6 +957,8 @@ Item {
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
         root.service ? root.service.messages : [], root.cursorId)
+      root.checkedIds = Model.retainIds(root.checkedIds,
+        root.service ? root.service.messages : [])
     }
     function onDuplicateAccount(email) {
       root.notice = email + " is already added"
@@ -1138,13 +1222,61 @@ Item {
             brand: true
           }
 
+          // What this window is looking at, said where the eye lands first:
+          // the account, then the mailbox or label open in it. Each half is
+          // the control that changes it, so the line is the switcher as much
+          // as the title. The rail says the same thing further down and only
+          // when it is expanded; the status line carries the address.
+          ScopeButton {
+            id: accountScope
+            objectName: "scope-account"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing
+            text: root.ready ? root.service.accountLabel : "No account"
+            tooltipText: "Switch account · Alt+A"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: accountSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              accountSwitcher.openAt(scene.x, scene.y)
+            }
+          }
+
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Omamail"
-            color: root.foreground
+            visible: accountScope.visible && mailboxScope.visible
+            text: "\u203A"
+            color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.title
+            font.pixelSize: Style.font.body
+          }
+
+          ScopeButton {
+            id: mailboxScope
+            objectName: "scope-mailbox"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.composing && !root.calendarVisible
+            iconName: root.scope.icon
+            text: root.scope.name
+            tooltipText: "Go to a mailbox · Alt+M"
+            foreground: root.foreground
+            hoverColor: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
+            selected: mailboxSwitcher.opened
+            enabled: root.ready
+            onClicked: {
+              var scene = mapToGlobal(0, height)
+              mailboxSwitcher.openAt(scene.x, scene.y)
+            }
           }
 
           // Next to the mark: this is the window's own menu, not an action on
@@ -1393,7 +1525,10 @@ Item {
               dimColor: root.dim
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
+              checkedIds: root.checkedIds
               onMessageActivated: function(id) { root.openMessage(id) }
+              onCheckToggled: function(id) { root.toggleCheck(id) }
+              onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY) {
                 root.cursorId = id
                 rowMenu.openAt(id, sceneX, sceneY)
@@ -1826,9 +1961,27 @@ Item {
           onClicked: root.toggleSidebar()
         }
 
+        // How many rows are ticked, beside the rail toggle. Said here rather
+        // than in the list because the list is where the ticks already are;
+        // this is the count, for a selection longer than the window.
+        Text {
+          id: selectionLabel
+          objectName: "status-selection"
+          anchors.left: railToggle.visible ? railToggle.right : parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.selectionActive && !root.showPage && !root.composing
+          text: Model.selectionStatus(root.checkedIds.length)
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
         Item {
           id: accountSlot
-          anchors.left: railToggle.visible ? railToggle.right : parent.left
+          anchors.left: selectionLabel.visible ? selectionLabel.right
+            : (railToggle.visible ? railToggle.right : parent.left)
           // The rail's labels sit 9 after their glyph; the toggle's box runs
           // past its glyph by half its slack, so the text starts that much
           // less after the box.
@@ -2017,6 +2170,20 @@ Item {
         }
       }
 
+      MailboxSwitcher {
+        id: mailboxSwitcher
+        objectName: "mailbox-switcher"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        rows: root.switcherRows
+        onRowChosen: function(index) { root.goSlot(index) }
+      }
+
       LabelPicker {
         id: labelPicker
         objectName: "label-picker"
@@ -2073,8 +2240,11 @@ Item {
           root.startCompose(mode)
         }
         onActionRequested: function(action, id) {
+          // On a ticked row the menu means the selection; on any other row it
+          // means that row alone, whatever else is ticked.
+          var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
-          root.actOnCursor(action)
+          root.actOnCursor(action, outside)
         }
       }
 

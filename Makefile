@@ -41,6 +41,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/SearchBar.qml \
 	components/AppMenu.qml \
 	components/AccountSwitcher.qml \
+	components/MailboxSwitcher.qml \
+	components/ScopeButton.qml \
 	components/AccountRemovalDialog.qml \
 	components/BackBar.qml \
 	components/SettingsPage.qml \

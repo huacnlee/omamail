@@ -796,3 +796,103 @@ const binned = model.applyLabelChange(
 assert.strictEqual(binned.isSent, false)
 assert.strictEqual(binned.isDraft, false)
 assert.strictEqual(binned.inTrash, false)
+
+// ------------------------------------------------------------ the scope
+//
+// The header names what the window is looking at from the same facts the rail
+// draws: the open mailbox key, or the label whose query is open.
+{
+  const boxes = [
+    { key: "inbox", label: "Inbox", icon: "inbox" },
+    { key: "sent", label: "Sent", icon: "sent" }]
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Label_17", name: "Todo", rawName: "todo", unread: 3 },
+    { id: "Label_9", name: "Receipts", rawName: "Receipts", unread: 0 }]
+  const gmailQuery = function (name) { return "label:" + name }
+
+  deepEqual(model.currentScope("sent", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "sent", name: "Sent", icon: "sent" })
+  deepEqual(model.currentScope("", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "inbox", name: "Inbox", icon: "inbox" },
+    "an empty key is the inbox, as it is everywhere else")
+  deepEqual(model.currentScope("drafts", boxes, labels, "", "", gmailQuery),
+    { kind: "mailbox", key: "drafts", name: "Drafts", icon: "mail" },
+    "a key the provider does not list still names itself")
+
+  // A label selected from the rail carries its id; one carried by a query
+  // alone is found through the provider's own query rule.
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", gmailQuery),
+    { kind: "label", id: "Label_17", name: "Todo", icon: "label" })
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "", gmailQuery),
+    { kind: "label", id: "Label_17", name: "Todo", icon: "label" },
+    "the query alone still names the label")
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:gone", "", gmailQuery),
+    { kind: "label", id: "", name: "label:gone", icon: "label" },
+    "a query no label answers to is shown as it is rather than as nothing")
+  deepEqual(model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", null).name,
+    "Todo", "matching by id needs no query rule")
+
+  // The switcher's rows are the rail's slots, numbered the way the Ctrl keys
+  // are, with the open scope marked.
+  const slots = model.sidebarSlots(boxes, labels, 10)
+  const rows = model.switcherRows(slots, labels,
+    model.currentScope("inbox", boxes, labels, "label:todo", "Label_17", gmailQuery))
+  assert.strictEqual(rows.length, 4)
+  deepEqual(rows[0], { kind: "mailbox", key: "inbox", name: "Inbox", icon: "inbox",
+    number: 1, count: 0, selected: false })
+  deepEqual(rows[2], { kind: "label", id: "Label_17", name: "todo", icon: "label",
+    number: 3, count: 3, selected: true })
+  assert.strictEqual(rows[3].selected, false)
+  assert.strictEqual(rows[3].number, 4)
+
+  const inInbox = model.switcherRows(slots, labels,
+    model.currentScope("inbox", boxes, labels, "", "", gmailQuery))
+  assert.strictEqual(inInbox[0].selected, true)
+  assert.strictEqual(inInbox[2].selected, false)
+
+  // A folder known only by name — an IMAP label whose id the store did not
+  // keep — is still found on the row that shares the name.
+  const byName = model.switcherRows(slots, labels,
+    { kind: "label", id: "", name: "Receipts", icon: "label" })
+  assert.strictEqual(byName[3].selected, true)
+  assert.strictEqual(byName[2].selected, false)
+
+  assert.strictEqual(model.switcherRows(null, null, null).length, 0)
+}
+
+// ------------------------------------------------------------ selection
+{
+  const list = [{ id: "a", starred: true }, { id: "b" }, { id: "c", starred: true }, { id: "d" }]
+
+  deepEqual(model.toggleId([], "b"), ["b"])
+  deepEqual(model.toggleId(["b", "c"], "b"), ["c"])
+  deepEqual(model.toggleId(["b"], ""), ["b"], "an empty id toggles nothing")
+
+  deepEqual(model.idsBetween(list, "b", "d"), ["b", "c", "d"])
+  deepEqual(model.idsBetween(list, "d", "b"), ["b", "c", "d"], "either direction")
+  deepEqual(model.idsBetween(list, "", "c"), ["c"], "no anchor means the row itself")
+  deepEqual(model.idsBetween(list, "zz", "yy"), [])
+  deepEqual(model.unionIds(["a"], ["a", "c"]), ["a", "c"])
+
+  deepEqual(model.retainIds(["a", "gone", "c"], list), ["a", "c"])
+  deepEqual(model.allIds(list), ["a", "b", "c", "d"])
+  deepEqual(model.summariesById(list, ["c", "nope", "a"]), [list[2], list[0]])
+
+  // The cursor steps over every departing row to the first that stays, and
+  // back up the list only when nothing below survives.
+  assert.strictEqual(model.cursorAfterRemovals(list, ["b", "c"], "b"), "d")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["c", "d"], "c"), "b")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a", "b", "c", "d"], "b"), "")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "b"), "b", "a cursor off the selection stays")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "nope"), "")
+
+  assert.strictEqual(model.starActionFor([list[0], list[2]]), "unstar")
+  assert.strictEqual(model.starActionFor([list[0], list[1]]), "star", "a mixed selection stars")
+  assert.strictEqual(model.starActionFor([]), "star")
+
+  assert.strictEqual(model.batchNote(3, "Archived"), "3 messages archived")
+  assert.strictEqual(model.batchNote(1, "Moved to Todo"), "1 message moved to Todo")
+  assert.strictEqual(model.selectionStatus(0), "")
+  assert.strictEqual(model.selectionStatus(2), "2 selected")
+}
