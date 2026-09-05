@@ -695,14 +695,18 @@ awk '
   || fail "a detached quiet action must stop and revalidate its query stream"
 test "$(grep -c 'root.active && root.cacheKey !== actionQuery' account/MailAccount.qml)" -ge 2 \
   || fail "successful actions must revalidate a mailbox opened while they were pending"
+# Mark-all is one caller of the bulk action; the bulk action is where the live
+# list is stopped and revalidated, for every caller.
+grep -q 'return actMany(ids, "markRead")' account/MailAccount.qml \
+  || fail "mark-all must go through the bulk action"
 awk '
-  /function markAllRead\(\)/ { in_mark_all = 1 }
-  in_mark_all && /if \(interrupted\)/ { saw_interrupt = 1 }
-  in_mark_all && /root\.loadMessages\(false, true, error\)/ { saw_retry = 1 }
-  in_mark_all && /^  }/ { exit !(saw_interrupt && saw_retry) }
+  /function actMany\(/ { in_bulk = 1 }
+  in_bulk && /if \(interrupted\)/ { saw_interrupt = 1 }
+  in_bulk && /root\.loadMessages\(false, true, error\)/ { saw_retry = 1 }
+  in_bulk && /^  }/ { exit !(saw_interrupt && saw_retry) }
   END { exit !(saw_interrupt && saw_retry) }
 ' account/MailAccount.qml \
-  || fail "mark-all must stop and revalidate a live list too"
+  || fail "a bulk action must stop and revalidate a live list too"
 grep -q 'root\.loadMessages(false, true, error)' account/MailAccount.qml \
   || fail "a failed action must resume the list without losing its error"
 grep -q 'root\.loadMessages(false, true, "")' account/MailAccount.qml \

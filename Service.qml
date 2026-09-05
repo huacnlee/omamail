@@ -880,6 +880,7 @@ Item {
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }
+  function actMany(ids, action) { return current ? current.actMany(ids, action) : false }
   function send(fields) {
     // The button has the same guard, but Ctrl+Return reaches this function
     // directly. Enforce the one-global-parked-draft invariant at the action

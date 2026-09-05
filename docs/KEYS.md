@@ -95,6 +95,8 @@ used to exist, and they had.
 | `moveToLabel` | `v` | mail | Move to |
 | `markRead` | `Shift+I` | mail | Mark read |
 | `markUnread` | `Shift+U` | mail | Mark unread |
+| `toggleCheck` | `x` | list | Select or deselect the message |
+| `checkAll` | `Ctrl+A` | list | Select every message loaded, or none |
 | `reply` | `r` | mail | Reply |
 | `replyAll` | `a` | mail | Reply to all |
 | `forward` | `f` | mail | Forward |

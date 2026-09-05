@@ -860,3 +860,39 @@ assert.strictEqual(binned.inTrash, false)
 
   assert.strictEqual(model.switcherRows(null, null, null).length, 0)
 }
+
+// ------------------------------------------------------------ selection
+{
+  const list = [{ id: "a", starred: true }, { id: "b" }, { id: "c", starred: true }, { id: "d" }]
+
+  deepEqual(model.toggleId([], "b"), ["b"])
+  deepEqual(model.toggleId(["b", "c"], "b"), ["c"])
+  deepEqual(model.toggleId(["b"], ""), ["b"], "an empty id toggles nothing")
+
+  deepEqual(model.idsBetween(list, "b", "d"), ["b", "c", "d"])
+  deepEqual(model.idsBetween(list, "d", "b"), ["b", "c", "d"], "either direction")
+  deepEqual(model.idsBetween(list, "", "c"), ["c"], "no anchor means the row itself")
+  deepEqual(model.idsBetween(list, "zz", "yy"), [])
+  deepEqual(model.unionIds(["a"], ["a", "c"]), ["a", "c"])
+
+  deepEqual(model.retainIds(["a", "gone", "c"], list), ["a", "c"])
+  deepEqual(model.allIds(list), ["a", "b", "c", "d"])
+  deepEqual(model.summariesById(list, ["c", "nope", "a"]), [list[2], list[0]])
+
+  // The cursor steps over every departing row to the first that stays, and
+  // back up the list only when nothing below survives.
+  assert.strictEqual(model.cursorAfterRemovals(list, ["b", "c"], "b"), "d")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["c", "d"], "c"), "b")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a", "b", "c", "d"], "b"), "")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "b"), "b", "a cursor off the selection stays")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "nope"), "")
+
+  assert.strictEqual(model.starActionFor([list[0], list[2]]), "unstar")
+  assert.strictEqual(model.starActionFor([list[0], list[1]]), "star", "a mixed selection stars")
+  assert.strictEqual(model.starActionFor([]), "star")
+
+  assert.strictEqual(model.batchNote(3, "Archived"), "3 messages archived")
+  assert.strictEqual(model.batchNote(1, "Moved to Todo"), "1 message moved to Todo")
+  assert.strictEqual(model.selectionStatus(0), "")
+  assert.strictEqual(model.selectionStatus(2), "2 selected")
+}

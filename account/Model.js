@@ -1071,3 +1071,118 @@ function switcherRows(slots, labels, scope) {
   }
   return out
 }
+
+// ------------------------------------------------------------ selection
+
+// The rows checked for a bulk action. A list of ids rather than a flag on the
+// summaries, because a summary is what the provider said about a message and
+// which rows the user has ticked is not that.
+function toggleId(ids, id) {
+  var list = Array.isArray(ids) ? ids.slice() : []
+  var key = String(id || "")
+  if (key === "") return list
+  var at = list.indexOf(key)
+  if (at >= 0) list.splice(at, 1)
+  else list.push(key)
+  return list
+}
+
+// Every id from one row to another, inclusive, in list order — what a
+// Shift+click means. Either end unknown to the list means just the other.
+function idsBetween(list, fromId, toId) {
+  var source = Array.isArray(list) ? list : []
+  var a = indexById(source, fromId)
+  var b = indexById(source, toId)
+  if (a < 0 && b < 0) return []
+  if (a < 0) a = b
+  if (b < 0) b = a
+  var lo = Math.min(a, b)
+  var hi = Math.max(a, b)
+  var out = []
+  for (var i = lo; i <= hi; i++) out.push(source[i].id)
+  return out
+}
+
+function unionIds(ids, more) {
+  var out = Array.isArray(ids) ? ids.slice() : []
+  var extra = Array.isArray(more) ? more : []
+  for (var i = 0; i < extra.length; i++) {
+    if (out.indexOf(extra[i]) < 0) out.push(extra[i])
+  }
+  return out
+}
+
+// The checked ids that are still listed. A reload, a search or an action can
+// take rows away, and a selection that kept naming them would act on messages
+// the user can no longer see.
+function retainIds(ids, list) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (indexById(source, checked[i]) >= 0) out.push(checked[i])
+  }
+  return out
+}
+
+function allIds(list) {
+  var source = Array.isArray(list) ? list : []
+  var out = []
+  for (var i = 0; i < source.length; i++) out.push(source[i].id)
+  return out
+}
+
+function summariesById(list, ids) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    var index = indexById(source, checked[i])
+    if (index >= 0) out.push(source[index])
+  }
+  return out
+}
+
+// Where the cursor goes when several rows leave at once: the first survivor
+// after it, or the last one before it. Worked out on the list as it still is,
+// like cursorAfterRemoval, and for the same reason.
+function cursorAfterRemovals(list, removedIds, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var gone = Array.isArray(removedIds) ? removedIds : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  var i
+  for (i = index; i < source.length; i++) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  for (i = index - 1; i >= 0; i--) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  return ""
+}
+
+// One star key over several rows: they all go the way the majority has not
+// gone yet. All starred means unstar; anything else means star, so a mixed
+// selection lands in one state rather than swapping every row.
+function starActionFor(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  if (rows.length === 0) return "star"
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !rows[i].starred) return "star"
+  }
+  return "unstar"
+}
+
+// "3 messages archived": the count, then the single-message note with its
+// capital taken off. One rule for every action, so a new action's note only
+// has to be written once.
+function batchNote(count, actionLabel) {
+  var label = String(actionLabel || "")
+  if (label === "") return pluralize(count, "message")
+  return pluralize(count, "message") + " " + label.charAt(0).toLowerCase() + label.slice(1)
+}
+
+function selectionStatus(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  return n === 0 ? "" : n + " selected"
+}

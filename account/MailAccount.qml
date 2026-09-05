@@ -1552,20 +1552,46 @@ Item {
   }
 
   function markAllRead() {
-    if (!ready || messages.length === 0) return false
-    if (pendingAction !== "") {
-      note("Another action is still finishing")
-      return false
-    }
     var ids = []
     for (var i = 0; i < messages.length; i++) {
       if (messages[i].unread) ids.push(messages[i].id)
     }
-    if (ids.length === 0) return false
+    return actMany(ids, "markRead")
+  }
+
+  // One action over several rows, in one request where the provider takes a
+  // list and one request per message where it does not. The same optimistic
+  // shape as `act`: the rows move first, the note waits for the server, and a
+  // failure puts the list back as it was.
+  //
+  // A move to trash is the one action every client only takes one id at a
+  // time, so it is sent per message and the note waits for the last answer;
+  // the first error is the one reported, and the rows that went are not
+  // restored — the server has them, and a reload shows what stayed.
+  function actMany(ids, action) {
+    var wanted = Array.isArray(ids) ? ids : []
+    if (!ready || wanted.length === 0) return false
+    if (refuseUnavailableAction(action)) return false
+    if (pendingAction !== "") {
+      note("Another action is still finishing")
+      return false
+    }
+    var sourceLabelId = hasLabels ? rawLabelId : ""
+    var change = action === "trash" || action === "untrash"
+      ? { add: [], remove: [] } : Model.labelChangesFor(action, sourceLabelId)
+    if (!change) return false
+    var listed = []
+    for (var w = 0; w < wanted.length; w++) {
+      if (Model.indexById(messages, wanted[w]) >= 0) listed.push(String(wanted[w]))
+    }
+    if (listed.length === 0) return false
+
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
     var before = messages.slice()
+    var beforePreview = previewMessages.slice()
+    var beforeSelected = selectedMessage
     var interrupted = listLoading
     if (interrupted) {
       listSerial++
@@ -1575,20 +1601,47 @@ Item {
       nextPageToken = ""
       actionToken = ""
     }
+    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
+      sourceLabelId)
     var next = []
-    for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
-    var survives = Model.survivesAction(mailboxKey, "markRead")
+    var nextPreview = previewMessages.slice()
+    var unreadDelta = 0
+    var selectedGone = false
+    for (var j = 0; j < messages.length; j++) {
+      var row = messages[j]
+      if (listed.indexOf(row.id) < 0) {
+        next.push(row)
+        continue
+      }
+      var updated = Model.applyLabelChange(row, action, sourceLabelId)
+      if (action === "markRead" && row.unread) unreadDelta--
+      if (action === "markUnread" && !row.unread) unreadDelta++
+      if (survives) next.push(updated)
+      if (Model.indexById(nextPreview, row.id) >= 0) {
+        nextPreview = updated.unread
+          ? Model.replaceById(nextPreview, updated)
+          : Model.removeById(nextPreview, row.id)
+      }
+      if (selectedId === row.id) {
+        if (survives) selectedMessage = updated
+        else selectedGone = true
+      }
+    }
+    inboxUnread = Math.max(0, inboxUnread + unreadDelta)
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
     var invalidatesPage = !survives || opaqueQuery
-    messages = survives ? next : []
+    messages = next
+    previewMessages = nextPreview
+    if (selectedGone) clearSelection()
     if (invalidatesPage) nextPageToken = ""
     var optimistic = messages.slice()
     var optimisticToken = nextPageToken
     if (!interrupted) rememberList()
     pendingActionQuery = actionQuery
-    pendingAction = "markRead"
-    api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
+    pendingAction = action
+
+    var done = function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
       if (error) {
@@ -1596,6 +1649,10 @@ Item {
             && !root.deferredLoadCleared(actionQuery)) {
           root.nextPageToken = actionToken
           root.messages = before
+          root.previewMessages = beforePreview
+          if (!selectedGone && beforeSelected && beforeSelected.id === root.selectedId)
+            root.selectedMessage = beforeSelected
+          root.inboxUnread = Math.max(0, root.inboxUnread - unreadDelta)
           if (!interrupted) root.rememberList()
         } else if (root.cacheStore.loaded) {
           root.cacheStore.putQuery(actionQuery, ({
@@ -1610,7 +1667,7 @@ Item {
           root.loadMessages(false, true, error)
         return
       }
-      root.note(Model.pluralize(ids.length, "message") + " marked read")
+      root.note(Model.batchNote(listed.length, root.actionLabel(action)))
       root.refreshCounts()
       if (interrupted && root.deferredLoadCleared(actionQuery)
           && root.cacheStore.loaded) {
@@ -1635,7 +1692,23 @@ Item {
       }
       if (root.active && root.cacheKey !== actionQuery)
         root.loadMessages(false, true, "")
-    })
+    }
+
+    if (action === "trash" || action === "untrash") {
+      var remaining = listed.length
+      var firstError = ""
+      var each = function(payload, error) {
+        if (error && firstError === "") firstError = String(error)
+        remaining--
+        if (remaining === 0) done(null, firstError)
+      }
+      for (var t = 0; t < listed.length; t++) {
+        if (action === "trash") api.trashMessage(listed[t], each)
+        else api.untrashMessage(listed[t], each)
+      }
+    } else {
+      api.batchModify(listed, change.add, change.remove, done)
+    }
     return true
   }
 
