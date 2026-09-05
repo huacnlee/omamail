@@ -127,3 +127,17 @@ function labelQuery(id) {
   var value = Protocol.trimmed(id)
   return value === "" ? "" : "mailbox:" + value
 }
+
+// The second line the Mailboxes settings row draws under the address. Every
+// other provider has nothing to say there — a Gmail mailbox is at Gmail, and
+// an IMAP one already names its server on its own page — but a JMAP account is
+// a protocol plus a host, and which host is the only thing distinguishing two
+// of them.
+//
+// The host, not the session URL: the path is this client's business, and the
+// host is what somebody recognises as their server.
+function detail(account) {
+  var settings = (account || {}).jmap || {}
+  var host = Protocol.sessionHost(settings.sessionUrl)
+  return host === "" ? NAME : NAME + " · " + host
+}

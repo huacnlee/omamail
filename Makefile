@@ -5,7 +5,9 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	providers/AuthManager.qml providers/GmailApiClient.qml \
 	providers/ImapAuth.qml providers/ImapClient.qml \
 	providers/HeyAuth.qml providers/HeyClient.qml \
+	providers/JmapAuth.qml providers/JmapClient.qml \
 	components/ImapSetupPage.qml \
+	components/JmapSetupPage.qml \
 	components/HeySetupPage.qml \
 	components/ProviderPicker.qml \
 	components/GmailIcon.qml \

@@ -5,15 +5,19 @@ const provider = load("providers/Registry.js")
 
 // ------------------------------------------------------------- the registry
 //
-// Three providers, and the ids are what an accounts.json holds — renaming one
+// Four providers, and the ids are what an accounts.json holds — renaming one
 // silently orphans every account already written with the old name.
 //
 // The order is the order the chooser lists them in: the two hosted mailboxes
-// with a service of their own, then the one that is every other mailbox.
-deepEqual(provider.ids(), ["gmail", "hey", "imap"])
+// with a service of their own, then the two that are every other mailbox. IMAP
+// is last because it is the catch-all, and JMAP goes in front of it because a
+// server that speaks both is better read over JMAP.
+deepEqual(provider.ids(), ["gmail", "hey", "jmap", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
+assert.strictEqual(provider.get("jmap").name, "JMAP")
+assert.strictEqual(provider.exists("jmap"), true)
 
 // An id from a newer build, or a hand-edited file, still has to open a window.
 assert.strictEqual(provider.get("nonesuch").id, "gmail")
@@ -352,7 +356,21 @@ assert.strictEqual(provider.usesPassword("imap"), true)
 assert.strictEqual(provider.usesPassword("gmail"), false)
 
 assert.strictEqual(provider.badge("imap"), "IMAP")
+assert.strictEqual(provider.badge("jmap"), "JMAP", "the switcher badge is the protocol, no host")
 assert.ok(provider.summary("imap").length > 0)
+
+// One more line about a particular mailbox, for the row that lists them. Only
+// the provider with something to add answers, and it answers from the account
+// entry rather than from anything the panel holds.
+assert.strictEqual(provider.detail("gmail", { email: "ada@gmail.com" }), "")
+assert.strictEqual(provider.detail("hey", {}), "")
+assert.strictEqual(provider.detail("imap", { imap: { imapHost: "imap.example.org" } }), "")
+assert.strictEqual(
+  provider.detail("jmap", { jmap: { sessionUrl: "https://mail.example.org/jmap/session" } }),
+  "JMAP · mail.example.org")
+assert.strictEqual(provider.detail("jmap", {}), "JMAP",
+  "a mailbox that has not signed in yet still says what kind it is")
+assert.strictEqual(provider.detail("jmap", null), "JMAP")
 assert.strictEqual(provider.DEFAULT_ID, "gmail",
   "an account written before providers existed is a Gmail account")
 

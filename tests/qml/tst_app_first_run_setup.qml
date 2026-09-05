@@ -184,6 +184,13 @@ Item {
       return !!item && typeof item.currentSettings === "function"
     }
 
+    // The JMAP form, told apart from the IMAP one by the function only it has:
+    // discovery is what makes its server field optional, and it is the one
+    // page that plans a server before it saves anything.
+    function isJmapForm(item) {
+      return !!item && typeof item.plannedServer === "function"
+    }
+
     function init() {
       app.opened = true
       mailService.log = []
@@ -260,6 +267,60 @@ Item {
       verify(guide.visible, "a Gmail address shows the way to an app password")
       verify(/app password/i.test(guide.text), "and says so")
       verify(/^https:\/\/support\.google\.com\//.test(guide.tooltipText), "opening Google's own page")
+    }
+
+    // A JMAP mailbox is added the same way every other kind is, and the page
+    // it opens has to keep the two ways out: Back to the chooser, and Remove
+    // for a row that was saved but never signed in. A sole account trapped on
+    // its own form with neither is the defect this whole test exists for.
+    function test_jmap_kind_opens_its_own_page_and_keeps_back_and_remove() {
+      mailService.hasSavedAccounts = false
+      fakeAuth.credentialsPresent = false
+      mailService.providerId = "gmail"
+      waitForRendering(app)
+      verify(isPicker(page()), "first run opens on the chooser")
+
+      page().chosen("jmap")
+      waitForRendering(app)
+      compare(mailService.lastConfigured.provider, "jmap",
+        "the first-run row takes the kind rather than a second row appearing")
+      var loader = named(app, "setup-page")
+      compare(loader.kind, "jmap")
+      verify(isJmapForm(page()), "the JMAP form opens, not the IMAP one")
+      verify(!isImapForm(page()))
+
+      // Two fields and a disclosure: the address and the secret are all it
+      // asks for, and the server lives behind "Server settings".
+      verify(named(app, "jmap-address-field"), "the page asks for an address")
+      verify(named(app, "jmap-secret-field"), "and for one secret")
+      var server = named(app, "jmap-server-field")
+      verify(server, "the server field exists")
+      verify(!server.visible, "but stays behind the disclosure on a fresh page")
+
+      var back = named(app, "page-back")
+      verify(back && back.visible, "Back is shown even though no mailbox is ready")
+      back.activated()
+      waitForRendering(app)
+      verify(isPicker(page()), "Back leads to the provider chooser")
+    }
+
+    // Remove is the other way out, and it is drawn by the page rather than by
+    // the window — a JMAP row that was saved and never signed in must not be
+    // the one page with no way off it.
+    function test_jmap_page_offers_remove_beside_another_mailbox() {
+      named(app, "page-back").activated()
+      page().chosen("jmap")
+      waitForRendering(app)
+      verify(isJmapForm(page()))
+      compare(mailService.lastAddedProvider, "jmap",
+        "a saved list keeps its rows and gains a JMAP one")
+      compare(mailService.accountCount, 2)
+      compare(page().accountCount, 2, "so the page draws its Remove button")
+
+      var removed = 0
+      page().removeRequested.connect(function() { removed += 1 })
+      page().removeRequested()
+      compare(removed, 1, "and pressing it reaches the window")
     }
 
     function test_first_run_draft_switches_kind_in_place() {

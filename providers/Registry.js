@@ -3,6 +3,7 @@
 .import "Gmail.js" as Gmail
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
+.import "Jmap.js" as Jmap
 
 // What kind of mail service an account is, and what the rest of the plugin may
 // therefore ask of it.
@@ -118,17 +119,27 @@ function define(source) {
     webHomeUrl: typeof raw.webHomeUrl === "function" ? raw.webHomeUrl : function() { return "" },
     // Where the program a provider runs on lives, for the providers that run on
     // one. Only HEY does: the other two are spoken to directly.
-    clientUrl: String(raw.CLIENT_URL || "")
+    clientUrl: String(raw.CLIENT_URL || ""),
+    // One more line about a particular mailbox, for the row that lists them.
+    // Most providers have nothing to add — the address already says which
+    // service it is — so the default is silence, and a row draws this only
+    // when it is not.
+    detail: typeof raw.detail === "function" ? raw.detail : function() { return "" }
   }
 }
 
 // ---------------------------------------------------------------- registry
 
 // The order the provider chooser lists them in: the two hosted mailboxes with a
-// service of their own first, then the one that is every other mailbox. IMAP is
+// service of their own first, then the two that are every other mailbox. IMAP is
 // last because it is the answer for a server this list does not name, and a
 // chooser that opened with it would ask the question backwards.
-var ALL = [define(Gmail), define(Hey), define(Imap)]
+//
+// JMAP goes in front of it for the same reason and one more: a server that
+// speaks both is better read over JMAP — threads, a junk verb, and one round
+// trip for a batch — so somebody who has one should meet it before they settle
+// for the catch-all.
+var ALL = [define(Gmail), define(Hey), define(Jmap), define(Imap)]
 
 var DEFAULT_ID = "gmail"
 
@@ -296,6 +307,14 @@ function badge(id) {
 
 function summary(id) {
   return String(get(id).summary || "")
+}
+
+// What else there is to say about one mailbox of this kind, from its own
+// account entry. The settings row draws it under the address; "" is the answer
+// for every provider that has nothing to add, and the row then draws nothing
+// rather than an empty line.
+function detail(id, account) {
+  return String(get(id).detail(account) || "")
 }
 
 // The file in `assets/` that shows what this service is, or "" for one with no

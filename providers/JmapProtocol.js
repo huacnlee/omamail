@@ -631,3 +631,69 @@ function verifySession(session) {
   }
   return { error: "", accountId: primary }
 }
+
+// Sending is the one capability sign-in reads and does not refuse the account
+// over. A credential that cannot submit still reads mail perfectly well, so
+// the account signs in and loses its send button instead.
+//
+// Asked of the *account* and not of the session, and this is the one place
+// where the two must not be confused. The session's top-level list says the
+// server was built with submission in it; `accountCapabilities` says this
+// credential may use it, and RFC 8620 makes the second a subset of the first.
+// Falling back to the session's list would answer yes for a read-only app
+// password on a server that can submit for somebody else — a Send button that
+// fails after the message is written, which is the promise this whole seam
+// exists to stop being made.
+var CAPABILITY_SUBMISSION = "urn:ietf:params:jmap:submission"
+
+function hasSubmission(session) {
+  var doc = parseJson(session)
+  if (!doc) return false
+  var primary = doc.primaryAccounts && typeof doc.primaryAccounts === "object"
+    ? trimmed(doc.primaryAccounts[CAPABILITY_MAIL]) : ""
+  var account = doc.accounts && typeof doc.accounts === "object" && primary !== ""
+    ? doc.accounts[primary] : null
+  return !!account && hasCapability(account.accountCapabilities, CAPABILITY_SUBMISSION)
+}
+
+// Where every method call goes. Read from the session rather than assumed:
+// on the reference account the session is on one host and this URL is on
+// another, and it is the second of the two places a credential may go.
+function apiUrl(session) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc.apiUrl) : ""
+}
+
+// The server's own word for "nothing has changed". A cached session is good
+// for as long as this matches, and a push telling the client the state moved
+// is what makes it refetch — so it is what a cache entry is keyed on.
+function sessionState(session) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc.state) : ""
+}
+
+// The host a session URL names, which is what a user is shown afterwards: the
+// mailboxes row's second line and the "Signed in" line both say the host
+// rather than the whole URL, because the path is this client's business and
+// the host is the thing somebody recognises.
+//
+// The port survives when there is one — `mail.example.org:8443` is a different
+// server from `mail.example.org` and a line that hid the difference would be
+// wrong on the machine most likely to need it. Any userinfo is dropped: it is
+// not part of the address, and it is the half that could carry a secret.
+function sessionHost(url) {
+  var text = trimmed(url)
+  var match = /^https:\/\/([^/?#]+)/i.exec(text)
+  if (!match) return ""
+  var authority = match[1]
+  var at = authority.lastIndexOf("@")
+  if (at >= 0) authority = authority.substring(at + 1)
+  return authority.toLowerCase()
+}
+
+// What the user calls the credential that worked. The scheme is detected, so
+// this is the page telling them which of the two things they pasted turned out
+// to be right — and it names no provider, as the rest of the page does not.
+function schemeLabel(scheme) {
+  return trimmed(scheme).toLowerCase() === AUTH_BEARER ? "API token" : "app password"
+}

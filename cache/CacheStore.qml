@@ -50,6 +50,17 @@ Item {
     scheduleSave()
   }
 
+  // The JMAP session object, which is the one thing a provider keeps here that
+  // is not mail: it names the URLs every later request goes to, and refetching
+  // it on every start is a round trip before the first list can even be asked
+  // for. Keyed on the URL it came from and the state the server stamped on it.
+  function putSession(url, state, session) {
+    store = Cache.putSession(store, url, state, session, Date.now())
+    scheduleSave()
+  }
+
+  function getSession(url) { return Cache.getSession(store, url) }
+
   // Called once the mailbox address is known. A cache belongs to one mailbox,
   // so a different address starts from nothing rather than showing one
   // account's mail under another's name.

@@ -25,7 +25,7 @@ function summary(id, ms, extra) {
 // ------------------------------------------------------------------ store
 
 deepEqual(cache.emptyStore(), {
-  version: cache.VERSION, account: "", profile: null, labels: [], queries: {}
+  version: cache.VERSION, account: "", profile: null, labels: [], queries: {}, session: null
 })
 
 // Anything unreadable is an empty cache, never a crash: a cache is a
@@ -397,5 +397,42 @@ assert.strictEqual(throughDisk.date.getTime(), readRow.date.getTime(),
 // The other way too, so this is a round trip rather than a default.
 const unreadRow = { id: "18f3b", date: new Date("2026-08-20T11:00:00Z"), unread: true }
 assert.strictEqual(cache.hydrate(cache.dehydrate([unreadRow]))[0].unread, true)
+
+// ------------------------------------------------------------- the session
+//
+// A JMAP session object lives beside the queries it paid for: it names every
+// URL a later request goes to, and refetching it on every start is a round
+// trip before the first list can be asked for.
+
+const session = { apiUrl: "https://api.example.org/jmap", state: "s1" }
+const withSession = cache.putSession(cache.emptyStore(),
+  "https://mail.example.org/jmap/session", "s1", session, 1000)
+deepEqual(cache.getSession(withSession, "https://mail.example.org/jmap/session"), {
+  url: "https://mail.example.org/jmap/session", state: "s1", session: session, at: 1000
+})
+
+// The URL is part of the key. A mailbox pointed at a different server is a
+// different session, and the credential goes to the URLs read out of this
+// object — so handing back one fetched somewhere else is the mistake here
+// worth being careful about.
+assert.strictEqual(cache.getSession(withSession, "https://other.example.org/jmap/session"), null)
+assert.strictEqual(cache.getSession(cache.emptyStore(), "https://mail.example.org/jmap/session"), null)
+assert.strictEqual(cache.getSession(null, ""), null)
+
+// Anything that is not an object clears it rather than being stored as one.
+assert.strictEqual(
+  cache.putSession(withSession, "https://mail.example.org/jmap/session", "s1", null, 2000).session,
+  null)
+
+// It survives a round trip through the file, and the queries beside it are
+// untouched by either.
+const keptStore = cache.load(cache.serialize(
+  cache.putQuery(withSession, "role:inbox", { summaries: [], estimate: 0 }, 1000)))
+deepEqual(cache.getSession(keptStore, "https://mail.example.org/jmap/session").session, session)
+assert.ok(cache.getQuery(keptStore, "role:inbox"), "a session does not displace the query cache")
+
+// A store written before sessions existed reads back as one with none.
+assert.strictEqual(
+  cache.load(JSON.stringify({ version: cache.VERSION, queries: {} })).session, null)
 
 console.log("test_cache.js ok")

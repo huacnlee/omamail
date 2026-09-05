@@ -22,7 +22,7 @@ var MAX_SUMMARIES_PER_QUERY = 100
 var MAX_BODIES = 1000
 
 function emptyStore() {
-  return { version: VERSION, account: "", profile: null, labels: [], queries: {} }
+  return { version: VERSION, account: "", profile: null, labels: [], queries: {}, session: null }
 }
 
 function parseJson(text, fallback) {
@@ -49,6 +49,7 @@ function load(text) {
   store.profile = isObject(raw.profile) ? raw.profile : null
   store.labels = Array.isArray(raw.labels) ? raw.labels : []
   store.queries = isObject(raw.queries) ? raw.queries : {}
+  store.session = isObject(raw.session) ? raw.session : null
   return store
 }
 
@@ -112,7 +113,8 @@ function copyStore(store) {
     account: source.account || "",
     profile: source.profile || null,
     labels: source.labels || [],
-    queries: source.queries || {}
+    queries: source.queries || {},
+    session: source.session || null
   }
 }
 
@@ -284,6 +286,36 @@ function putLabels(store, labels, nowMs) {
   var next = copyStore(store)
   next.labels = Array.isArray(labels) ? labels : []
   return next
+}
+
+// A JMAP session object, kept beside the queries it paid for. It is the
+// server's answer rather than the account's settings — its URLs, its limits
+// and its state all move when the server does — so it lives here, where a
+// stale copy costs one refetch, rather than in accounts.json where it would
+// be edited by hand.
+//
+// Keyed on the URL it came from and the state the server stamped on it. The
+// URL because a mailbox pointed at a different server is a different session,
+// and the state because that is the server's own word for "nothing has
+// changed": a push saying it moved is what makes the cached copy wrong.
+function putSession(store, url, state, session, nowMs) {
+  var next = copyStore(store)
+  next.session = isObject(session)
+    ? { url: String(url || ""), state: String(state || ""), session: session, at: Number(nowMs) || 0 }
+    : null
+  return next
+}
+
+// The cached session for this URL, or null. A different URL answers null
+// rather than the wrong server's session — the credential goes to the URLs
+// read out of this object, so handing back one fetched from somewhere else is
+// the one mistake here worth being careful about.
+function getSession(store, url) {
+  var source = store || emptyStore()
+  var entry = isObject(source.session) ? source.session : null
+  if (!entry || !isObject(entry.session)) return null
+  if (String(entry.url || "") !== String(url || "")) return null
+  return entry
 }
 
 function putProfile(store, profile, nowMs) {

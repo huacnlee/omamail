@@ -49,6 +49,10 @@ Item {
   // Server settings for an IMAP account, straight off the account entry. Unused
   // by the others, and normalised before anything can dial one.
   property var imapSettings: null
+  // The same for a JMAP account, and the same rule: what is on the entry is
+  // what a hand edit could have written, so it is normalised before anything
+  // sends a credential to it.
+  property var jmapSettings: null
   // Only the mailbox that predates multi-account may claim the old
   // client-keyed refresh token. See AuthManager.mayAdoptLegacyToken.
   property bool mayAdoptLegacyToken: true
@@ -105,6 +109,13 @@ Item {
   // has since gone lands on the client's own refusal at request time.
   readonly property var capabilityRefusals: api ? api.refusals : null
   readonly property var absentMailboxes: api ? api.absentMailboxes : null
+
+  // Whether the client says the stored credential was refused. Only the
+  // providers whose credential can be revoked out from under them raise it —
+  // one whose client never declares it reads as false, which is what it was
+  // before this existed. It is not a sign-out: the account, its server and its
+  // cache are all still right, and the setup page draws the re-entry.
+  readonly property bool credentialsRejected: !!api && api.credentialsRejected === true
 
   // The mailboxes this account has, which is a property of its provider rather
   // than of the panel. The sidebar and the tab row draw whatever is here.
@@ -2297,7 +2308,8 @@ Item {
   Loader {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
-      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)
+      : (root.providerId === "jmap" ? jmapAuthComponent
+        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -2306,7 +2318,8 @@ Item {
     id: apiLoader
     active: !!authLoader.item
     sourceComponent: root.providerId === "imap" ? imapClientComponent
-      : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
+      : (root.providerId === "jmap" ? jmapClientComponent
+        : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))
   }
 
   Component {
@@ -2351,6 +2364,28 @@ Item {
   }
 
   Component {
+    id: jmapAuthComponent
+
+    JmapAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      // Discovery runs from the address's domain when no server was typed, so
+      // the address is part of this object's input rather than something it
+      // learns afterwards.
+      address: root.configuredEmail
+      settings: Accounts.makeJmapSettings(root.jmapSettings)
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: heyAuthComponent
 
     HeyAuth {
@@ -2382,6 +2417,18 @@ Item {
     ImapClient {
       auth: authLoader.item
       email: root.configuredEmail
+    }
+  }
+
+  Component {
+    id: jmapClientComponent
+    JmapClient {
+      auth: authLoader.item
+      email: root.configuredEmail
+      // The session object is the server's answer rather than the account's
+      // settings, so it is kept beside the query results rather than in
+      // accounts.json.
+      cache: cacheStore
     }
   }
 

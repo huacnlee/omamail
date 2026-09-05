@@ -1094,4 +1094,44 @@ if "FileDialog" in block or "execDetached" in block:
     )
 PY
 
+# The JMAP transport script builds the credential itself: `user = "name:secret"`
+# for Basic and an Authorization header for Bearer, and it refuses any other
+# scheme before curl runs. QML assembling one would be a second place the rule
+# lived, and the one that could get it wrong without a shell test noticing —
+# the script's own tests assert the config bytes, and nothing asserts a header
+# QML wrote.
+python3 - <<'PY1'
+from pathlib import Path
+import re
+
+for name in ("providers/JmapClient.qml", "providers/JmapAuth.qml",
+             "components/JmapSetupPage.qml"):
+    # Comments say what the rule is; only code can break it.
+    code = re.sub(r"//[^\n]*", "", Path(name).read_text())
+    for literal in re.findall(r'"(?:[^"\\]|\\.)*"', code):
+        if re.search(r"Authorization|Basic |Bearer ", literal):
+            raise SystemExit(
+                "test_source.sh: the JMAP transport builds the credential; "
+                + name + " must never assemble an Authorization value: " + literal
+            )
+PY1
+
+# The secret is an app password or an API token and it lives in the keyring.
+# accounts.json is world-readable, so the settings a JMAP account keeps are the
+# four things sign-in learned and nothing that could authenticate with them.
+python3 - <<'PY2'
+from pathlib import Path
+import re
+
+source = Path("account/Accounts.js").read_text()
+start = source.index("function makeJmapSettings(raw)")
+end = source.index("\nfunction ", start + 1)
+block = source[start:end]
+for word in ("secret", "password", "token"):
+    if re.search(word, block, re.I):
+        raise SystemExit(
+            "test_source.sh: a JMAP account's settings must not carry a credential: " + word
+        )
+PY2
+
 printf 'test_source.sh ok\n'

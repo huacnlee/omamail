@@ -559,6 +559,20 @@ Column {
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
           }
+
+          // What kind of mailbox this is, where the kind is not obvious from
+          // the address. Only the providers with something to add answer here,
+          // so the row gains a line rather than every row gaining a blank one.
+          Text {
+            width: parent.width
+            visible: text !== ""
+            textFormat: Text.PlainText
+            text: row.modelData.detail !== undefined ? row.modelData.detail : ""
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
         }
 
         Row {

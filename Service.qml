@@ -343,10 +343,11 @@ Item {
     return next
   }
 
-  // What the IMAP setup form saves: the address, the servers, and which
-  // provider this row is. Written before the password is tried, so a mailbox
-  // that fails to sign in still has its settings to correct rather than an
-  // empty form to fill in again.
+  // What a server-and-password setup form saves: the address, the server
+  // settings for whichever provider it is, and which provider the row is.
+  // Written before the secret is tried, so a mailbox that fails to sign in
+  // still has its settings to correct rather than an empty form to fill in
+  // again.
   function configureAccount(index, values) {
     var accounts = accountList.accounts
     if (index < 0 || index >= accounts.length) return
@@ -357,6 +358,7 @@ Item {
     if (raw.provider !== undefined) entry.provider = raw.provider
     if (raw.email !== undefined) entry.email = raw.email
     if (raw.imap !== undefined) entry.imap = raw.imap
+    if (raw.jmap !== undefined) entry.jmap = raw.jmap
     if (raw.label !== undefined) entry.label = raw.label
 
     var updated = Accounts.emptyList()
@@ -638,6 +640,10 @@ Item {
         email: accounts[i].email,
         provider: accounts[i].provider,
         label: Accounts.label(accounts[i]),
+        // One more line about this particular mailbox, in its provider's own
+        // words. Empty for the three that have nothing to add, and the row
+        // draws it only when it is not.
+        detail: Provider.detail(accounts[i].provider, accounts[i]),
         unread: host ? host.inboxUnread : 0,
         active: host ? host.active : false,
         signedIn: host ? host.ready : false,
@@ -788,6 +794,9 @@ Item {
   readonly property string lastError: current ? current.lastError : ""
   readonly property string actionStatus: current ? current.actionStatus : ""
   readonly property string signInProgress: current ? current.signInProgress : ""
+  // Whether the mailbox on screen has had its credential refused. The setup
+  // page draws the re-entry card from this; nothing signs out over it.
+  readonly property bool credentialsRejected: !!current && current.credentialsRejected
   readonly property string syncedLabel: current ? current.syncedLabel : ""
 
   function refresh() { if (current) current.refresh() }
@@ -1000,6 +1009,7 @@ Item {
       // account's provider in the file rebuilds it as that provider.
       providerId: entry ? entry.provider : Provider.DEFAULT_ID
       imapSettings: entry ? entry.imap : null
+      jmapSettings: entry ? entry.jmap : null
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")

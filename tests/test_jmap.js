@@ -462,11 +462,73 @@ assert.strictEqual(
 // password is RFC 8620's Basic credential, and only a 401 buys the second try.
 deepEqual(jmap.AUTH_SCHEME_ORDER, ["basic", "bearer"])
 
+// Where every method call goes, read from the session rather than assumed: on
+// the reference account the session is on one host and this URL is on another.
+assert.strictEqual(jmap.apiUrl(session()), "https://mx2.depodra.com/jmap/")
+assert.strictEqual(jmap.apiUrl(JSON.stringify(session())), "https://mx2.depodra.com/jmap/")
+assert.strictEqual(jmap.apiUrl(session({ apiUrl: undefined })), "")
+assert.strictEqual(jmap.apiUrl("not a session"), "")
+
+// The server's own word for "nothing has changed", which is what a cached
+// session is keyed on.
+assert.strictEqual(jmap.sessionState(session()), "abc")
+assert.strictEqual(jmap.sessionState(session({ state: undefined })), "")
+assert.strictEqual(jmap.sessionState(null), "")
+
+// Sending does not gate sign-in: a credential that cannot submit still reads
+// mail. Asked of the mail account first and of the session second, because the
+// two really do disagree — a per-account permission is stated on the account.
+assert.strictEqual(jmap.hasSubmission(session()), true)
+assert.strictEqual(jmap.hasSubmission(JSON.stringify(session())), true)
+assert.strictEqual(
+  jmap.hasSubmission(session({
+    accounts: {
+      t: {
+        accountCapabilities: {
+          "urn:ietf:params:jmap:mail": { emailQuerySortOptions: ["receivedAt"] }
+        }
+      }
+    }
+  })),
+  false,
+  "the session saying the server can submit is not this credential being allowed to")
+assert.strictEqual(
+  jmap.hasSubmission(session({ primaryAccounts: { "urn:ietf:params:jmap:mail": "other" } })),
+  false,
+  "no primary mail account is no account that may submit")
+assert.strictEqual(jmap.hasSubmission(null), false)
+assert.strictEqual(jmap.hasSubmission("<html>"), false)
+
+// The host a session URL names, which is the whole of what a user is shown
+// afterwards: the mailboxes row's second line and the "Signed in" line.
+assert.strictEqual(jmap.sessionHost("https://mail.depodra.com/jmap/session"), "mail.depodra.com")
+assert.strictEqual(jmap.sessionHost("https://Mail.Example.ORG/jmap/session"), "mail.example.org")
+assert.strictEqual(jmap.sessionHost("https://mail.example.org:8443/jmap/session"),
+  "mail.example.org:8443", "a port is part of the address and hiding it would be wrong")
+assert.strictEqual(jmap.sessionHost("https://mail.example.org"), "mail.example.org")
+assert.strictEqual(jmap.sessionHost("https://mail.example.org?x=1"), "mail.example.org")
+assert.strictEqual(jmap.sessionHost("https://ada:hunter2@mail.example.org/jmap/session"),
+  "mail.example.org", "userinfo is not the address, and it is the half that could carry a secret")
+assert.strictEqual(jmap.sessionHost("http://mail.example.org/jmap/session"), "",
+  "nothing here is ever reached over plain HTTP, so nothing here reports one")
+assert.strictEqual(jmap.sessionHost("mail.example.org"), "")
+assert.strictEqual(jmap.sessionHost(""), "")
+assert.strictEqual(jmap.sessionHost(null), "")
+
+// What the user calls the credential that worked. The scheme is detected, so
+// this is the page reporting which of the two things they pasted it was.
+assert.strictEqual(jmap.schemeLabel("basic"), "app password")
+assert.strictEqual(jmap.schemeLabel("bearer"), "API token")
+assert.strictEqual(jmap.schemeLabel("Bearer"), "API token")
+assert.strictEqual(jmap.schemeLabel(""), "app password",
+  "an account with nothing recorded is Basic, which is what sign-in tries first")
+assert.strictEqual(jmap.schemeLabel(null), "app password")
+
 // ------------------------------------------------------- the provider itself
 //
 // Loaded through the registry's own `define`, which is what the panel sees.
-// Not added to the chooser here — that is the setup page's ticket — so this is
-// the shape being proven rather than the listing.
+// The chooser's own listing is asserted in the provider tests; this is the
+// shape being proven rather than the order.
 
 const provider = registry.define(description)
 
