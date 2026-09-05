@@ -50,7 +50,8 @@ var GLYPHS = {
   calendar: 0xF0B66,     // calendar-blank-outline
   video: 0xF0BDC,        // video-outline
   pin: 0xF0931,          // pin-outline
-  people: 0xF000F        // account-multiple-outline
+  people: 0xF000F,       // account-multiple-outline
+  agent: 0xF167A         // robot-outline — the message agent
 }
 
 // The filled form, for the names that have a state to show. A filled star

@@ -3,6 +3,8 @@ import Quickshell
 import Quickshell.Io
 import "account"
 import "calendar"
+import "agent"
+import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
@@ -60,6 +62,7 @@ Item {
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
     defaultQuery: "in:inbox",
+    agentCommand: "",
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
@@ -72,6 +75,40 @@ Item {
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  // The default agent's command line, or "" for no agent — in which case no
+  // agent button is drawn anywhere. docs/AGENT.md.
+  readonly property string agentCommand: String(settings ? settings.agentCommand || "" : "").trim()
+  readonly property bool hasAgent: Agent.hasAgent(agentCommand)
+  readonly property var agentJobs: agentRunner.byMessage
+  readonly property bool agentBusy: agentRunner.anyActive
+
+  function agentJobFor(messageId) { return agentRunner.jobFor(messageId) }
+
+  // The message as the list knows it plus the text the reader has, handed to
+  // the runner on one line. The body is only there when the message is the
+  // open one; the agent can read the rest itself.
+  function askAgent(messageId, prompt) {
+    if (!current || !hasAgent) return false
+    var id = String(messageId || "")
+    var index = Model.indexById(current.messages, id)
+    var summary = index >= 0 ? current.messages[index]
+      : (current.selectedId === id ? current.selectedMessage : null)
+    if (!summary) return false
+    var body = current.selectedId === id && current.selectedBody ? String(current.selectedBody.text || "") : ""
+    var line = Agent.payload(summary, body, current.accountEmail,
+      Agent.folderOf(id, current.mailboxKey), agentCommand, prompt)
+    if (!agentRunner.start(line)) return false
+    current.note("Asked the agent")
+    return true
+  }
+
+  function cancelAgent(messageId) {
+    if (!agentRunner.cancel(messageId)) return false
+    if (current) current.note("Cancelling the agent's actions")
+    return true
+  }
+
+  function refreshAgentJobs() { agentRunner.refresh() }
   // Which way a message's own text is read: worked out from the text, or fixed
   // by the reader. The window's chrome is not affected either way — this is a
   // fact about the mail, not about the interface around it.
@@ -1144,6 +1181,16 @@ Item {
     interval: 200
     repeat: false
     onTriggered: root.reopenWindow()
+  }
+
+  AgentRunner {
+    id: agentRunner
+    pluginDir: root.pluginDir
+    onJobFinished: function(job) {
+      var text = Agent.finishedNote(job)
+      if (text !== "" && root.current) root.current.note(text)
+    }
+    onFailed: function(text) { if (root.current) root.current.fail(text) }
   }
 
   Process {

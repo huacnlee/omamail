@@ -12,6 +12,7 @@ import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
 import "providers/Registry.js" as Provider
+import "agent/Agent.js" as Agent
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
@@ -469,6 +470,8 @@ Item {
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
     cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
+    // Jobs finish while the window is shut; the rows say so as soon as it opens.
+    if (service && typeof service.refreshAgentJobs === "function") service.refreshAgentJobs()
     Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
@@ -734,6 +737,30 @@ Item {
     return true
   }
 
+  // The agent popup on a message: at a control's edge from a button, centred
+  // from the key. The subject is read off the list row or the open message so
+  // the popup can say which message it is asking about.
+  function agentSubjectFor(id) {
+    if (!service) return ""
+    var index = Model.indexById(service.messages, id)
+    if (index >= 0) return String(service.messages[index].subject || "")
+    if (service.selectedId === id && service.selectedMessage)
+      return String(service.selectedMessage.subject || "")
+    return ""
+  }
+
+  function openAgentAt(id, sceneX, sceneY) {
+    if (!service || !service.hasAgent || String(id || "") === "") return false
+    agentPrompt.openFor(id, agentSubjectFor(id), sceneX, sceneY)
+    return true
+  }
+
+  function openAgentCentered(id) {
+    if (!service || !service.hasAgent || String(id || "") === "") return false
+    agentPrompt.openCenteredFor(id, agentSubjectFor(id))
+    return true
+  }
+
   // Acting on the open message closes it: it is about to leave this list.
   //
   // With rows ticked, the key means all of them rather than the one under the
@@ -828,6 +855,10 @@ Item {
       return
     }
     if (id === "toggleCheck") return toggleCheck(cursorId)
+    if (id === "askAgent") {
+      var target = currentView === "reader" && service ? service.selectedId : cursorId
+      return openAgentCentered(target)
+    }
     if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
@@ -1526,7 +1557,9 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
+              onAgentRequested: function(id, sceneX, sceneY) { root.openAgentAt(id, sceneX, sceneY) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY) {
@@ -1615,11 +1648,18 @@ Item {
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
           }
+          agentOpen: agentPrompt.opened && !!root.service && agentPrompt.messageId === root.service.selectedId
+          agentWorking: !!root.service && root.service.selectedId !== ""
+            && Agent.isActive(root.service.agentJobs[root.service.selectedId])
           onActionRequested: function(action) {
-            if (root.service && root.service.selectedId !== "") {
-              root.cursorId = root.service.selectedId
-              root.actOnCursor(action)
+            if (!root.service || root.service.selectedId === "") return
+            if (action === "agent") {
+              var scene = reader.mapToGlobal(reader.width / 2, Style.space(48))
+              root.openAgentAt(root.service.selectedId, scene.x, scene.y)
+              return
             }
+            root.cursorId = root.service.selectedId
+            root.actOnCursor(action)
           }
         }
 
@@ -2182,6 +2222,24 @@ Item {
         panelFontFamily: root.fontFamily
         rows: root.switcherRows
         onRowChosen: function(index) { root.goSlot(index) }
+      }
+
+      AgentPrompt {
+        id: agentPrompt
+        objectName: "agent-prompt"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        urgentColor: root.urgent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        // Live while the popup is up: the state and the last line follow the
+        // job as the runner's listing changes under it.
+        job: root.service && messageId !== "" ? (root.service.agentJobs[messageId] || null) : null
+        onAsked: function(id, prompt) { if (root.service) root.service.askAgent(id, prompt) }
+        onCancelRequested: function(id) { if (root.service) root.service.cancelAgent(id) }
       }
 
       LabelPicker {

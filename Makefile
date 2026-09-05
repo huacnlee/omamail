@@ -42,6 +42,8 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/AppMenu.qml \
 	components/AccountSwitcher.qml \
 	components/MailboxSwitcher.qml \
+	components/AgentPrompt.qml \
+	agent/AgentRunner.qml \
 	components/ScopeButton.qml \
 	components/AccountRemovalDialog.qml \
 	components/BackBar.qml \
@@ -68,6 +70,7 @@ test: test-js test-shell test-qml
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
 	node tests/test_compose_recovery.js
+	node tests/test_agent.js
 	node tests/test_outbox.js
 	node tests/test_recipients.js
 	node tests/test_senders.js
@@ -112,6 +115,7 @@ test-shell-portable:
 	bash tests/test_source.sh
 	bash tests/test_service_source.sh
 	bash tests/test_config_store.sh
+	bash tests/test_agent_job.sh
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh

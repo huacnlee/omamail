@@ -147,6 +147,10 @@ var BINDINGS = [
   // tabs. Same rows, same digits: a bare digit inside it is the Ctrl digit.
   { id: "switchMailbox", keys: ["Alt+M"], contexts: MAIL,
     group: "Going", label: "Go to a mailbox" },
+  // The message agent, on the cursor row. A popup, so the same shape as the
+  // switchers: opened through the table, then answering its own keys.
+  { id: "askAgent", keys: ["Alt+G"], contexts: MAIL,
+    group: "Acting", label: "Ask the agent about the message" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },

@@ -248,6 +248,7 @@ and the client itself are console-only; there is no CLI for them.
 | `Alt+M` | Go to a mailbox or label from a list |
 | `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
 | `Ctrl+A` | Select every message loaded, or none |
+| `Alt+G` | Ask the default agent about the message, when one is set in Settings |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` | Check for mail |
 | `?` | Every shortcut |

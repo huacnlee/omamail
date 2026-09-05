@@ -117,6 +117,7 @@ used to exist, and they had.
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
 | `switchMailbox` | `Alt+M` | mail | Go to a mailbox |
+| `askAgent` | `Alt+G` | mail | Ask the agent about the message |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
