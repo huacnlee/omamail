@@ -109,3 +109,27 @@ assert.strictEqual(agent.parseShown("nope"), null)
 assert.strictEqual(agent.parseShown('{"output":"x"}'), null)
 
 console.log("test_agent.js ok")
+
+// Presets: a starting command for each harness, matched back honestly.
+{
+  const presets = agent.presets()
+  assert.ok(presets.length >= 4)
+  assert.ok(presets.every(function (p) { return p.id && p.name && typeof p.command === "string" }))
+  assert.strictEqual(agent.presetById("claude").binary, "claude")
+  assert.strictEqual(agent.presetById("nope"), null)
+  assert.strictEqual(agent.presetFor(agent.presetById("codex").command), "codex")
+  assert.strictEqual(agent.presetFor("codex exec --full-auto --model o3"), "custom", "an edited preset is custom")
+  assert.strictEqual(agent.presetFor(""), "")
+  const options = agent.presetOptions(["claude", "gemini"])
+  assert.strictEqual(options[0].label, "Claude Code")
+  assert.strictEqual(options[1].label, "Codex (not installed)")
+  assert.strictEqual(options[options.length - 1].label, "Custom command", "custom needs no binary")
+  deepEqual(agent.foundBinaries("/usr/bin/claude\n/home/x/.local/bin/gemini\n\ngemini\n"), ["claude", "gemini"])
+  deepEqual(agent.foundBinaries(""), [])
+  assert.ok(agent.presetBinaries().indexOf("claude") >= 0)
+  assert.ok(agent.presetBinaries().indexOf("") < 0)
+}
+assert.strictEqual(agent.jobAboutLabel({ messageId: "1", subject: "Invoice" }), "\u201CInvoice\u201D")
+assert.strictEqual(agent.jobAboutLabel({ messageId: "1" }), "A message")
+assert.strictEqual(agent.jobAboutLabel({ scope: "all" }), "Every mailbox")
+console.log("test_agent.js presets ok")

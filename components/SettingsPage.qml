@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../agent/Agent.js" as Agent
 
 // Where mailboxes are managed.
 //
@@ -638,7 +639,50 @@ Column {
 
     Text {
       width: parent.width
-      text: "Default agent command"
+      text: "Harness"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // A starting line for each harness, and "Custom" for one of your own.
+    // Choosing one writes its command into the field below, which stays
+    // editable; an edited line reads back as Custom, honestly.
+    Dropdown {
+      objectName: "settings-agent-preset"
+      width: parent.width
+      showLabel: false
+      value: Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom"
+      options: root.service ? root.service.agentPresetOptions : Agent.presetOptions([])
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) {
+        var preset = Agent.presetById(next)
+        if (!preset || !root.service) return
+        if (preset.command === "") return
+        agentEdit.text = preset.command
+        root.saveAgentCommand()
+      }
+    }
+
+    Text {
+      id: presetNote
+      width: parent.width
+      readonly property var preset: Agent.presetById(
+        Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom")
+      visible: !!preset && preset.note !== ""
+      textFormat: Text.PlainText
+      text: preset ? preset.note : ""
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Text {
+      width: parent.width
+      text: "Command"
       color: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
@@ -661,11 +705,11 @@ Column {
     Text {
       width: parent.width
       textFormat: Text.PlainText
-      text: "A command that reads a prompt on stdin and answers on stdout — "
-        + "claude -p, codex exec, a script of your own. With one set, every "
-        + "message gains an agent button and Alt+G, and the agent runs in the "
-        + "background as a systemd user unit, reading and writing mail through "
-        + "himalaya. Leave it empty for no agent."
+      text: "Runs in the background as a systemd user unit with the prompt on "
+        + "stdin, and reads and writes mail through himalaya, so the command "
+        + "must be able to run himalaya without stopping to ask. With one set, "
+        + "every message gains an agent button and Alt+G, and the rail gains the "
+        + "agent pane. Leave it empty for no agent."
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption

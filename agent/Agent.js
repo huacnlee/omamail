@@ -207,6 +207,17 @@ function scopeOf(all, email) {
   return all ? "all" : "account:" + String(email || "")
 }
 
+// What a pane card says it is about: the message's subject for a message
+// job, the mailbox or every mailbox for a scope job.
+function jobAboutLabel(job, accountLabel) {
+  if (!job) return ""
+  if (String(job.messageId || "") !== "") {
+    var subject = String(job.subject || "").trim()
+    return subject === "" ? "A message" : "\u201C" + subject + "\u201D"
+  }
+  return scopeLabel(job.scope, accountLabel)
+}
+
 function scopeLabel(scope, accountLabel) {
   var value = String(scope || "")
   if (value === "all") return "Every mailbox"
@@ -242,4 +253,82 @@ function parseShown(text) {
   try { parsed = JSON.parse(String(text || "")) } catch (e) { parsed = null }
   if (!parsed || typeof parsed !== "object" || !parsed.job) return null
   return { job: parsed.job, output: String(parsed.output || "") }
+}
+
+// ------------------------------------------------------------ presets
+
+// Command lines for the harnesses people actually run, each of which reads
+// the prompt on stdin and runs without a terminal to answer prompts on. The
+// tool flags are the ones that let the agent call himalaya without stopping
+// to ask; a preset is a starting point the field keeps editable, not a lock.
+// `binary` is what has to be on PATH for the preset to work, so Settings can
+// say which ones are installed.
+var PRESETS = [
+  { id: "claude", name: "Claude Code", binary: "claude",
+    command: "claude -p --allowedTools \"Bash(himalaya:*)\"",
+    note: "Non-interactive print mode; himalaya is the only tool allowed without asking." },
+  { id: "codex", name: "Codex", binary: "codex",
+    command: "codex exec --full-auto",
+    note: "Reads the prompt on stdin. Codex's sandbox may block network; use --sandbox danger-full-access if himalaya cannot reach the server." },
+  { id: "gemini", name: "Gemini CLI", binary: "gemini",
+    command: "gemini --yolo -p \"Act on the instructions above.\"",
+    note: "Headless mode; the -p text is appended to the prompt on stdin, and --yolo approves tool calls." },
+  { id: "opencode", name: "OpenCode", binary: "opencode",
+    command: "opencode run \"$(cat)\"",
+    note: "Takes the prompt as an argument, so the shell reads stdin into it." },
+  { id: "custom", name: "Custom command", binary: "",
+    command: "",
+    note: "Anything that reads a prompt on stdin and writes its answer on stdout." }
+]
+
+function presets() { return PRESETS.slice() }
+
+function presetById(id) {
+  for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i].id === String(id || "")) return PRESETS[i]
+  return null
+}
+
+// Which preset a command line is, or "custom" for one nobody shipped. Matched
+// on the exact text, so an edited preset is honestly reported as custom.
+function presetFor(command) {
+  var text = String(command || "").trim()
+  if (text === "") return ""
+  for (var i = 0; i < PRESETS.length; i++) {
+    if (PRESETS[i].command !== "" && PRESETS[i].command === text) return PRESETS[i].id
+  }
+  return "custom"
+}
+
+// The preset list as a dropdown wants it, with the binaries found on PATH
+// deciding the label. `found` is the list of binary names present.
+function presetOptions(found) {
+  var present = Array.isArray(found) ? found : []
+  var out = []
+  for (var i = 0; i < PRESETS.length; i++) {
+    var preset = PRESETS[i]
+    var label = preset.name
+    if (preset.binary !== "" && present.indexOf(preset.binary) < 0) label += " (not installed)"
+    out.push({ value: preset.id, label: label })
+  }
+  return out
+}
+
+// The names on PATH, from one line per name as `command -v` prints them.
+function foundBinaries(text) {
+  var lines = String(text || "").split("\n")
+  var out = []
+  for (var i = 0; i < lines.length; i++) {
+    var name = lines[i].trim()
+    if (name === "") continue
+    var slash = name.lastIndexOf("/")
+    if (slash >= 0) name = name.slice(slash + 1)
+    if (out.indexOf(name) < 0) out.push(name)
+  }
+  return out
+}
+
+function presetBinaries() {
+  var out = []
+  for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i].binary !== "") out.push(PRESETS[i].binary)
+  return out
 }

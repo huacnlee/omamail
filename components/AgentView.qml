@@ -25,7 +25,9 @@ Item {
   // The job whose output is open. The newest until one is chosen.
   property string chosenId: ""
 
-  readonly property var jobs: service ? service.agentScopeJobs : []
+  // Every job, the message ones included: this is where the agent's whole
+  // history lives, and a message job's output is only readable here.
+  readonly property var jobs: service ? service.agentPaneJobs : []
   readonly property string shownId: chosenId !== "" ? chosenId
     : (jobs.length > 0 ? String(jobs[0].id) : "")
   readonly property var shownJob: {
@@ -242,11 +244,14 @@ Item {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "· " + Agent.scopeLabel(card.modelData.scope,
+                // A subject was written by a stranger.
+                textFormat: Text.PlainText
+                text: "· " + Agent.jobAboutLabel(card.modelData,
                   root.service && card.modelData.scope !== "all" ? root.service.accountLabel : "")
                 color: root.dimColor
                 font.family: root.panelFontFamily
                 font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
               }
             }
 

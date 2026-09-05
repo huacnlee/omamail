@@ -84,6 +84,21 @@ Item {
 
   function agentJobFor(messageId) { return agentRunner.jobFor(messageId) }
 
+  // Which harness binaries are on PATH, so Settings can say which presets
+  // will actually run. Looked up once per service; a newly installed CLI
+  // shows up after the next shell restart, which is when PATH changes anyway.
+  property var agentToolsFound: []
+  readonly property var agentPresetOptions: Agent.presetOptions(agentToolsFound)
+
+  function findAgentTools() {
+    if (agentToolFinder.running) return
+    var names = Agent.presetBinaries()
+    var script = ""
+    for (var i = 0; i < names.length; i++) script += "command -v " + names[i] + " 2>/dev/null; "
+    agentToolFinder.command = ["/bin/sh", "-c", script]
+    agentToolFinder.running = true
+  }
+
   // The message as the list knows it plus the text the reader has, handed to
   // the runner on one line. The body is only there when the message is the
   // open one; the agent can read the rest itself.
@@ -104,7 +119,7 @@ Item {
 
   // The pane's jobs and the one it is reading, forwarded so a view never
   // reaches past `service`.
-  readonly property var agentScopeJobs: Agent.scopeJobs(agentRunner.jobs)
+  readonly property var agentPaneJobs: agentRunner.jobs
   readonly property string agentShownId: agentRunner.shownId
   readonly property string agentShownOutput: agentRunner.shownOutput
 
@@ -1250,6 +1265,13 @@ Item {
     onTriggered: root.reopenWindow()
   }
 
+  Process {
+    id: agentToolFinder
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.agentToolsFound = Agent.foundBinaries(String(stdout.text || ""))
+  }
+
   AgentRunner {
     id: agentRunner
     pluginDir: root.pluginDir
@@ -1323,6 +1345,7 @@ Item {
   }
 
   Component.onCompleted: {
+    Qt.callLater(root.findAgentTools)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
   }

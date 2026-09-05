@@ -35,6 +35,23 @@ A row whose message has a job shows the agent glyph in its action lane with the 
 
 Beside a message's own button there is a pane — the third root of the window after mail and the calendar, reached from the rail's foot or `Ctrl+Shift+G`. It takes an ask about the open mailbox or every mailbox: find the messages about X between two dates, find the last message from someone about something and draft a reply from what another thread says. No message crosses; the job carries a **scope** (`account:<address>` or `all`) and every address the agent may look in, and the agent does its own listing, searching and reading through himalaya. The pane lists these jobs newest first, and the open one shows the tail of what the agent wrote, re-read every two seconds while it runs (`agent-job.py show`). Cancel actions is the same `systemctl --user stop`.
 
+## Presets
+
+Settings offers a harness list beside the command: Claude Code (`claude -p --allowedTools "Bash(himalaya:*)"`), Codex (`codex exec --full-auto`), Gemini CLI (`gemini --yolo -p …`), OpenCode (`opencode run "$(cat)"`), and Custom. Choosing one writes its line into the field, which stays editable; an edited line reads back as Custom rather than pretending to be the preset. `Agent.PRESETS` is the list, and the service marks the ones whose binary is not on PATH. Every preset grants the agent its tools up front, because a job has no terminal to answer a permission prompt on — a harness that stops to ask never finishes.
+
+## Where the interaction falls short, and the fix
+
+Looked at as a whole, the agent has three surfaces — the message popup, the row glyph, the pane — and the seams between them are the problem.
+
+- **A message job's answer is unreadable.** The popup shows the state and one line; the pane shows the whole output. So the pane now lists every job, message jobs under their subject, and the popup's job is the same card there. The next step is a link from the popup and the row glyph straight to that card.
+- **A question is a dead end.** The glyph turns urgent, the card shows the question, and there is nowhere to answer. The fix that works for every harness is a *continuation job*: a new job whose prompt is the previous prompt, the agent's output, and the owner's answer, with `parent` naming the job it continues. No harness-specific resume flag; the runner already has everything it needs. The card grows a reply field when its job asked a question.
+- **Silence while it works.** "Working" and a spinner say nothing about which himalaya call the agent is on. The pane's output tail already streams; the popup and the row should show the last line as it changes, not only at the end.
+- **The popup asks one question and forgets.** A message ends up with several jobs and the popup shows the newest. Better: the popup is a quick ask and hands the conversation to the pane, where the message's jobs sit together.
+- **Permissions are the failure people will hit first.** A harness run headless prompts for tool use and hangs; the job sits at "Working" until Cancel. The presets carry the flags; the failure state should say "the agent stopped to ask for permission" when the output ends on a prompt, which is a pattern match on the tail the runner already keeps.
+- **Selection has no agent.** The multi-select and the agent shipped in the same week and do not meet. One job over a selection is a list of message files in one directory and one prompt naming them; the runner needs a `messages` array, the popup a "these N messages" title.
+
+In that order: link the surfaces, answer questions, show progress, then selections.
+
 ## Not in the first slice
 
 - Answering a question. The state, the glyph and the pane's card are there; the reply path — writing the answer into the job and resuming the agent — is the next slice, and depends on the agent command having a resume flag to give it.
