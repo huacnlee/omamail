@@ -31,6 +31,13 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
         ("mail-transport.sh", ["smtp"], [b"smtps://example.com/", b"user:secret", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com", b"next@example.com"], [0, 1, 2, 4, 5]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Drafts", b"user:secret", b"Subject: Draft\r\n\r\nBody\r\n", b"draft"], [0, 1, 3]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Sent", b"user:secret", b"Subject: Sent\r\n\r\nBody\r\n", b"seen"], [0, 1, 3]),
+        # JMAP: the URL, the scheme, the username and the secret are config
+        # fields for every verb; a call's JSON body is one too, and an upload's
+        # message is the one field that goes to a file instead.
+        ("jmap-transport.sh", ["session"], [b"https://mail.example.com/jmap/session", b"basic", b"jane", b"user:secret"], [0, 1, 2, 3]),
+        ("jmap-transport.sh", ["call"], [b"https://mail.example.com/jmap/", b"basic", b"jane", b"user:secret", b'{"using":[]}'], [0, 1, 2, 3, 4]),
+        ("jmap-transport.sh", ["download"], [b"https://mail.example.com/jmap/download/t/b/f", b"bearer", b"jane", b"user:secret"], [0, 1, 2, 3]),
+        ("jmap-transport.sh", ["upload"], [b"https://mail.example.com/jmap/upload/t/", b"basic", b"jane", b"user:secret", b"Subject: Up\r\n\r\nBody\r\n"], [0, 1, 2, 3]),
     ]
     count = 0
     for script, prefix, fields, protected in cases:

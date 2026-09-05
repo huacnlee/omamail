@@ -95,6 +95,8 @@ encode() {
   base64 < "$1" | tr -d '\n'
 }
 
+. "$(dirname "$0")/curl-config.sh"
+
 IFS= read -r line || fail 'jmap-transport.sh: no request on stdin'
 [ -n "$line" ] || fail 'jmap-transport.sh: empty request'
 
@@ -106,36 +108,38 @@ set -- $line
   || fail 'jmap-transport.sh: usage: <verb> <b64 url> <b64 scheme> <b64 user> <b64 secret> [<b64 field>]'
 
 verb=$1
+case "$verb" in
+  session|download|stream)
+    [ $# -eq 5 ] || fail 'jmap-transport.sh: this verb takes no extra field' ;;
+  call|upload)
+    [ $# -eq 6 ] || fail 'jmap-transport.sh: this verb needs exactly one extra field' ;;
+  *)
+    fail 'jmap-transport.sh: verb must be session, call, download, upload or stream' ;;
+esac
+
+# Every field that lands in curl's config is judged before it is decoded, and
+# before curl runs: a control character ends the `url = "..."` line and turns
+# whatever follows it into another curl option. A download URL is filled from
+# a blob id and a filename the *server* chose, so this is not a theoretical
+# value — `Jmap.downloadUrl` percent-encodes each of them and this is the
+# second gate. The shared check is the one every curl transport here runs; the
+# `-` sentinel is skipped because it is not base64 at all, and the uploaded
+# message is exempt because it goes to a file rather than into the config.
+field_number=0
+for field in "$@"; do
+  field_number=$((field_number + 1))
+  case "$verb:$field_number" in
+    *:1|upload:6) continue ;;
+  esac
+  [ "$field" != "-" ] || continue
+  validate_config_fields "$field"
+done
+
 url=$(decode "$2")
 scheme=$(decode "$3")
 username=$(decode "$4")
 secret=$(decode "$5")
 shift 5
-
-case "$verb" in
-  session|download|stream)
-    [ $# -eq 0 ] || fail 'jmap-transport.sh: this verb takes no extra field' ;;
-  call|upload)
-    [ $# -eq 1 ] || fail 'jmap-transport.sh: this verb needs exactly one extra field' ;;
-  *)
-    fail 'jmap-transport.sh: verb must be session, call, download, upload or stream' ;;
-esac
-
-# A CR or LF ends the `url = "..."` line and turns whatever follows it into
-# another curl option. A download URL is filled from a blob id and a filename
-# the *server* chose, so this is not a theoretical value: `Jmap.downloadUrl`
-# percent-encodes each of them and this is the second gate, the way
-# image-fetch.sh refuses a line break in an address a stranger wrote. The
-# uploaded message is exempt because it goes to a file rather than into the
-# config.
-nl='
-'
-cr=$(printf '\r')
-for field in "$url" "$scheme" "$username" "$secret"; do
-  case "$field" in
-    *"$nl"* | *"$cr"*) fail 'jmap-transport.sh: a request field may not span lines' ;;
-  esac
-done
 
 # The scheme gate runs before curl does, so an account carrying something else
 # never reaches a connection at all.
@@ -169,9 +173,6 @@ escaped_url=$(escape "$url")
 
 if [ "$verb" = "call" ]; then
   body=$(decode "$1")
-  case "$body" in
-    *"$nl"* | *"$cr"*) fail 'jmap-transport.sh: a JSON body may not span lines' ;;
-  esac
   escaped_body=$(escape "$body")
 elif [ "$verb" = "upload" ]; then
   # The message is the one value too large to be an argument, and curl uploads
@@ -283,7 +284,7 @@ if [ "$verb" = "stream" ]; then
   # the connection is gone either way, and a stop the owner asked for is one it
   # already knows it asked for.
   set +e
-  build_config | curl --config - &
+  build_config | curl -q --globoff --config - &
   streaming=$!
   trap 'kill -TERM "$streaming" 2>/dev/null; exit 143' TERM INT HUP
   wait "$streaming"
@@ -292,14 +293,26 @@ if [ "$verb" = "stream" ]; then
   exit "$status"
 fi
 
-# curl is the last stage, so `$?` is curl's own exit code rather than the
-# config builder's. `output` in the config carries the body, which leaves
-# curl's stdout free for `--write-out`.
+# curl is the last stage, so `wait` answers with curl's own exit code rather
+# than the config builder's. `output` in the config carries the body, which
+# leaves curl's stdout free for `--write-out`.
+#
+# In the background, with a trap, for the reason the stream is: the client
+# cancels a request by stopping this shell, and a curl in the foreground of a
+# pipeline is not stopped with it — the TERM waits until curl has finished,
+# which for a download or an upload is `max-time`, ten minutes away. Measured
+# on the stream first; the four request verbs had the same shape and the same
+# leak, and an aborted upload held its slot in the client's queue for as long
+# as the curl it had abandoned kept running.
+running=""
+trap 'kill -TERM "$running" 2>/dev/null; exit 143' TERM INT HUP
 attempt_curl() {
   : > "$work/out"
   : > "$work/err"
   : > "$work/status"
-  build_config | curl --config - > "$work/status" 2> "$work/err"
+  build_config | curl -q --globoff --config - > "$work/status" 2> "$work/err" &
+  running=$!
+  wait "$running"
 }
 
 # A dropped TLS handshake is worth a second go; a delivered request is not.

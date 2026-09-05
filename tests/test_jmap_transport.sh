@@ -157,10 +157,12 @@ check "the status and the redirect URL are asked for" "$config" \
   'write-out = "%{http_code} %{redirect_url}"'
 
 # The secret reaches curl on stdin, which is what keeps it out of the process
-# table. The stub records its own argv, and the whole of it is `--config -`.
+# table. The stub records its own argv, and the whole of it is the config on
+# stdin, with `-q` so no user config is read and `--globoff` so no URL is
+# expanded.
 argv="$work/argv"
 CURL_STUB_ARGV="$argv" run "$request" >/dev/null
-equals "curl is invoked with a config on stdin and nothing else" "$(cat "$argv")" '--config -'
+equals "curl is invoked with a config on stdin and nothing else — no user config, no URL globbing" "$(cat "$argv")" '-q --globoff --config -'
 check_absent "the secret is not on curl's command line" "$(cat "$argv")" 'hunter2'
 
 # ------------------------------------------------------------- session, bearer
@@ -290,6 +292,47 @@ else
   printf '  ok   %s\n' "stopping the stream takes curl down with it"
 fi
 
+# Stopping a request stops curl, for every verb and not only the stream.
+#
+# The client cancels a request by stopping this shell. With curl in the
+# foreground of the pipeline the shell's TERM trap waited for curl to finish,
+# which for a download or an upload was `max-time` — ten minutes — and an
+# aborted upload held its slot in the client's queue for as long as the curl it
+# had abandoned kept running. The four request verbs take the same background
+# and trap shape as the stream, and this is the assertion for each of them.
+for verb in session call download upload; do
+  case "$verb" in
+    call) stop_request="call $(b64 "$API_URL") $(b64 basic) $(b64 jane) $(b64 pw) $(b64 "$json")" ;;
+    upload) stop_request="upload $(b64 "$API_URL/upload/t/") $(b64 basic) $(b64 jane) $(b64 pw) $(b64 "$raw")" ;;
+    *) stop_request="$verb $(b64 "$SESSION_URL") $(b64 basic) $(b64 jane) $(b64 pw)" ;;
+  esac
+  rm -f "$pidfile"
+  started=$(date +%s)
+  printf '%s\n' "$stop_request" \
+    | CURL_STUB_PIDFILE="$pidfile" PATH="$work/slow:$PATH" sh "$script" >/dev/null 2>&1 &
+  script_pid=$!
+  waited=0
+  while [ ! -s "$pidfile" ] && [ "$waited" -lt 50 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  curl_pid=$(cat "$pidfile" 2>/dev/null || printf '')
+  kill -TERM "$script_pid" 2>/dev/null || true
+  wait "$script_pid" 2>/dev/null || true
+  sleep 0.3
+  ended=$(date +%s)
+  if [ -n "$curl_pid" ] && kill -0 "$curl_pid" 2>/dev/null; then
+    kill -KILL "$curl_pid" 2>/dev/null || true
+    printf '  FAIL %s\n' "stopping a $verb leaves curl running"
+    failures=$((failures + 1))
+  elif [ $((ended - started)) -ge 5 ]; then
+    printf '  FAIL %s\n' "stopping a $verb waited for curl instead of stopping it"
+    failures=$((failures + 1))
+  else
+    printf '  ok   %s\n' "stopping a $verb takes curl down with it"
+  fi
+done
+
 # ----------------------------------------------------------------- scheme gate
 #
 # The second gate. The client validated the URL; this is what stops a
@@ -323,6 +366,13 @@ refuses "a malformed request is refused rather than guessed at" 'not-base64-at-a
 refuses "a URL that spans lines is refused" \
   "session $(b64 'https://mail.example.org/jmap
 noproxy = ""') $(b64 basic) $(b64 jane) $(b64 pw)"
+refuses "a secret carrying a tab is refused: a control character is a config line ending" \
+  "session $(b64 "$SESSION_URL") $(b64 basic) $(b64 jane) $(b64 "$(printf 'pw\tnext')")"
+refuses "a call body that spans lines is refused" \
+  "call $(b64 "$API_URL") $(b64 basic) $(b64 jane) $(b64 pw) $(b64 '{"a":1}
+url = "https://elsewhere"')"
+refuses "a field that is not canonical base64 is refused" \
+  "session $(b64 "$SESSION_URL") $(b64 basic) $(b64 jane) c2Vlbh=="
 
 # ------------------------------------------------------------------ the framing
 
