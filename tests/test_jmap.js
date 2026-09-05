@@ -728,13 +728,13 @@ deepEqual(jmap.filterFor(jmap.parseQuery("text:notes"), { inbox: "a", trash: "b"
 
 // ------------------------------------------------------------------ paging
 
-// The request. `receivedAt` descending on every page, uncollapsed until ticket
-// 11 flips it, and `calculateTotal` on every one of them.
+// The request. `receivedAt` descending on every page, collapsed to one row per
+// conversation on every one of them, and `calculateTotal` on every one too.
 deepEqual(jmap.emailQuery("t", { inMailbox: "a" }, 3, ""), {
   accountId: "t",
   filter: { inMailbox: "a" },
   sort: [{ property: "receivedAt", isAscending: false }],
-  collapseThreads: false,
+  collapseThreads: true,
   limit: 3,
   calculateTotal: true,
   position: 0
@@ -745,7 +745,7 @@ deepEqual(jmap.emailQuery("t", { inMailbox: "a" }, 3, "3|maaaaaf"), {
   accountId: "t",
   filter: { inMailbox: "a" },
   sort: [{ property: "receivedAt", isAscending: false }],
-  collapseThreads: false,
+  collapseThreads: true,
   limit: 3,
   calculateTotal: true,
   anchor: "maaaaaf",

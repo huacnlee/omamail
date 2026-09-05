@@ -281,6 +281,57 @@ const withReplyTo = message.summarize({
 assert.strictEqual(withReplyTo.replyTo.email, "help@example.com")
 assert.strictEqual(withReplyTo.messageId, "<abc@mail.example.com>")
 
+// ------------------------------------------------------------- the thread block
+//
+// Every summary carries one, whatever provider it came from, so a row and a
+// cached row are the same shape and nothing above has to ask whether it is
+// there. A provider that does not group its listing reports a count of 0, which
+// means unknown and draws no badge — which is what this resource, carrying no
+// block at all, amounts to.
+deepEqual(summary.thread,
+  { id: "18f39", count: 0, unread: false, flagged: false, memberIds: [] })
+deepEqual(message.summarize({}, now).thread,
+  { id: "", count: 0, unread: false, flagged: false, memberIds: [] })
+
+// A collapsed listing hands one over, and `count` is how many members it
+// counted: a block cannot report a number it has no ids for.
+const collapsed = message.summarize({
+  id: "maaaaaf",
+  threadId: "d",
+  labelIds: ["INBOX", "UNREAD"],
+  thread: { id: "d", count: 3, unread: true, flagged: false,
+    memberIds: ["maaaaad", "maaaaae", "maaaaaf"] },
+  payload: { headers: [{ name: "Subject", value: "Re: Thread of three" }] }
+}, now)
+deepEqual(collapsed.thread,
+  { id: "d", count: 3, unread: true, flagged: false,
+    memberIds: ["maaaaad", "maaaaae", "maaaaaf"] })
+
+// The row's own marks are the conversation's as well as the message's. A thread
+// whose unread reply is not the message the server returned for this view is
+// still an unread row, and one with a flagged member is still a flagged row.
+const readRepresentative = message.summarize({
+  id: "maaaaad",
+  threadId: "d",
+  labelIds: ["DRAFT"],
+  thread: { id: "d", count: 3, unread: true, flagged: true,
+    memberIds: ["maaaaad", "maaaaae", "maaaaaf"] },
+  payload: { headers: [] }
+}, now)
+assert.strictEqual(readRepresentative.unread, true,
+  "the conversation has an unread member, so the row is unread")
+assert.strictEqual(readRepresentative.starred, true)
+
+// And the message's own answer is what is left when the block has none, so
+// nothing changes for a provider that reports no block.
+assert.strictEqual(message.summarize({
+  labelIds: ["UNREAD", "STARRED"], payload: { headers: [] }
+}, now).unread, true)
+assert.strictEqual(message.summarize({
+  labelIds: ["UNREAD", "STARRED"], payload: { headers: [] }
+}, now).starred, true)
+assert.strictEqual(collapsed.starred, false, "no counted member is flagged")
+
 assert.strictEqual(typeof message.draftFields, "function",
   "stored messages need one provider-neutral path back into compose")
 deepEqual(message.draftFields({

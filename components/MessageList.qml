@@ -56,6 +56,7 @@ Column {
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
       canArchive: root.service.canArchive
+      conversations: root.service.showsConversations
       contentDirection: root.service.contentDirection
       onActivated: root.messageActivated(modelData.id)
       onStarToggled: root.service.toggleStar(modelData.id)

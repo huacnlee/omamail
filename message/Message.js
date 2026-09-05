@@ -756,10 +756,43 @@ function decodeSnippet(text) {
   return htmlToText(String(text || "")).replace(/\s+/g, " ").trim()
 }
 
+// The conversation a row stands for:
+//
+//   { id, count, unread, flagged, memberIds }
+//
+// Every summary carries one, whatever provider it came from, so a row and a
+// cached row are the same shape and nothing above has to ask whether the block
+// is there. `memberIds` are the counted members oldest first and `count` is
+// their length — a count of 0 means the provider does not group its listing, or
+// does not know, and the row draws no badge. A conversation is never one
+// message: a count of 1 draws nothing either.
+//
+// `unread` and `flagged` are the whole conversation's, which is why the row's
+// own `unread` and `starred` below take them as well as the message's. A
+// provider that reports no block reports neither, so nothing changes for it.
+function threadOf(message) {
+  var source = message && message.thread && typeof message.thread === "object"
+    ? message.thread : {}
+  var list = Array.isArray(source.memberIds) ? source.memberIds : []
+  var ids = []
+  for (var i = 0; i < list.length; i++) {
+    var id = String(list[i] || "")
+    if (id !== "") ids.push(id)
+  }
+  return {
+    id: String(source.id || (message && message.threadId) || ""),
+    count: ids.length,
+    unread: source.unread === true,
+    flagged: source.flagged === true,
+    memberIds: ids
+  }
+}
+
 function summarize(message, now) {
   var from = parseAddress(headerValue(message, "From"))
   var date = messageDate(message)
   var subject = decodedHeader(message, "Subject").replace(/\s+/g, " ").trim()
+  var thread = threadOf(message)
   return {
     id: String(message && message.id ? message.id : ""),
     threadId: String(message && message.threadId ? message.threadId : ""),
@@ -778,8 +811,15 @@ function summarize(message, now) {
     date: date,
     time: relativeTime(date, now),
     fullTime: fullTime(date),
-    unread: hasLabel(message, "UNREAD"),
-    starred: hasLabel(message, "STARRED"),
+    thread: thread,
+    // The conversation's, not only the representative's. A thread whose unread
+    // reply is not the message the server returned for this view is still an
+    // unread row, and the representative is a counted member of its own
+    // conversation in every view that can produce one — so the two readings
+    // agree wherever both have an answer, and the message's own is what is left
+    // when the block has none.
+    unread: hasLabel(message, "UNREAD") || thread.unread,
+    starred: hasLabel(message, "STARRED") || thread.flagged,
     important: hasLabel(message, "IMPORTANT"),
     inInbox: hasLabel(message, "INBOX"),
     inTrash: hasLabel(message, "TRASH"),

@@ -59,6 +59,15 @@ assert.strictEqual(undated[0].date, null)
 deepEqual(cache.hydrate(null), [])
 deepEqual(cache.dehydrate(null), [])
 
+// The summary with its conversation block is what goes to disk. A row that
+// stood for a conversation and came back standing for one message would draw a
+// count of nothing on every cache-first paint.
+const conversation = summary("m3", NOW - 60000)
+conversation.thread = { id: "d", count: 3, unread: true, flagged: false,
+  memberIds: ["maaaaad", "maaaaae", "maaaaaf"] }
+deepEqual(cache.hydrate(JSON.parse(JSON.stringify(
+  cache.dehydrate([conversation]))))[0].thread, conversation.thread)
+
 // ------------------------------------------------------------------ keys
 
 assert.strictEqual(cache.queryKey("in:inbox", 25), "in:inbox|25")

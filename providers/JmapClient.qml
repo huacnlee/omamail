@@ -3,13 +3,15 @@ import Quickshell
 import Quickshell.Io
 
 import "JmapProtocol.js" as Jmap
+import "JmapThreads.js" as Threads
 import "../message/Message.js" as Mail
 
 // A JMAP mailbox, wearing the same interface `GmailApiClient` wears.
 //
 // The transport is `scripts/jmap-transport.sh`, which is curl. The protocol is
-// `JmapProtocol.js`. This file is the part in between: which requests a given
-// job becomes, in what order, and what to do when one of them fails.
+// `JmapProtocol.js`, with the collapsed list read in `JmapThreads.js`. This
+// file is the part in between: which requests a given job becomes, in what
+// order, and what to do when one of them fails.
 //
 // It signs the account in — discovery, the session GET under each scheme in
 // turn, the four-step check — and it reads: the rail, the labels, the list, a
@@ -823,10 +825,13 @@ Item {
   //
   //   { ids, threadIds, nextPageToken, estimate }
   //
-  // `threadIds` is empty: the query runs uncollapsed here and a row is a
-  // message, which ticket 11 changes. `progress` goes unused because one POST
-  // answers the whole page — there is no partial result to paint early, the way
-  // IMAP's windowed search has.
+  // One row per conversation: the query collapses threads, so an id here is a
+  // representative and the estimate counts conversations. `threadIds` stays
+  // empty — the block on each row's summary carries the thread id, and nothing
+  // above the seam reads the parallel array.
+  //
+  // `progress` goes unused because one POST answers the whole page — there is
+  // no partial result to paint early, the way IMAP's windowed search has.
   function listMessages(query, maxResults, pageToken, callback, progress) {
     var handle = newHandle()
     ensureMailboxes(function(error) {
@@ -844,14 +849,32 @@ Item {
         root.hand(callback, null, Jmap.queryError(parsed, root.roles))
         return
       }
-      root.runQuery(filter, maxResults, pageToken, false, handle, callback)
+      root.runQuery(filter, query, maxResults, pageToken, false, handle, callback)
     })
     return handle
   }
 
-  function runQuery(filter, maxResults, token, byPosition, handle, callback) {
-    var child = call([["Email/query",
-      Jmap.emailQuery(root.accountId, filter, maxResults, token, byPosition), "0"]],
+  // ------------------------------------------------------- conversations
+
+  // Representative id to the `thread` block the page read composed for it, and
+  // member id to the mailboxes that member sits in.
+  //
+  // Two maps rather than one because they answer two questions with different
+  // lifetimes: a block belongs to one row in one view and is consumed by the
+  // summary read a moment later, while a membership is a fact about a message
+  // that an action on a conversation still needs long after its page has gone.
+  //
+  // Merged rather than replaced on each read. The unread badge runs a small
+  // query of its own between a page's ids arriving and its summaries being
+  // asked for, and replacing would drop the page's blocks on the floor.
+  property var threadBlocks: ({})
+  property var memberships: ({})
+
+  // The query is carried alongside the filter because the counted-members rule
+  // needs the *view*, not the request: the same thread counts different members
+  // in the Junk view than it does in the Inbox.
+  function runQuery(filter, query, maxResults, token, byPosition, handle, callback) {
+    var child = call(Threads.listCalls(root.accountId, filter, maxResults, token, byPosition),
       null, function(responses, error, type) {
         if (!root || handle.aborted) return
         // The anchor moved or was deleted between pages — the one thing anchor
@@ -859,18 +882,92 @@ Item {
         // beside it. One retry, by position, and never a second: a page that
         // cannot be found twice is a result that is changing faster than it can
         // be read.
+        //
+        // Checked before anything is read out of the reply: an `anchorNotFound`
+        // answers with no `Email/query` invocation at all.
         if (type === "anchorNotFound" && byPosition !== true) {
-          root.runQuery(filter, maxResults, token, true, handle, callback)
+          root.runQuery(filter, query, maxResults, token, true, handle, callback)
+          return
+        }
+        var read = Threads.collapsedPage(responses, maxResults, root.roles, query, null)
+        // The member read alone was refused, which on a page of long threads is
+        // `requestTooLarge`: the other three calls answered and only the fourth
+        // is owed. Fetching those members in chunks before the page is handed
+        // over is what makes the page complete rather than a page of rows with
+        // no blocks — and the error the refusal produced is not the page's,
+        // which is why this branch comes before it.
+        if (read.pending.length > 0) {
+          root.readMembers(read.pending, handle, function(members, failure) {
+            if (!root || handle.aborted) return
+            if (failure) {
+              root.hand(callback, null, failure)
+              return
+            }
+            root.deliverPage(
+              Threads.collapsedPage(responses, maxResults, root.roles, query, members),
+              callback)
+          })
           return
         }
         if (error) {
           root.hand(callback, null, error)
           return
         }
-        root.hand(callback,
-          Jmap.queryPage(Jmap.responseArguments(responses, "Email/query"), maxResults), "")
+        root.deliverPage(read, callback)
       })
     handle.children.push(child)
+  }
+
+  function deliverPage(read, callback) {
+    threadBlocks = Threads.mergedInto(threadBlocks, read.blocks, Threads.MAX_REMEMBERED)
+    memberships = Threads.mergedInto(memberships, read.memberships, Threads.MAX_REMEMBERED)
+    hand(callback, read.page, "")
+  }
+
+  // The members again, by id, in chunks no larger than the server will answer.
+  // One `Email/get` per chunk, as the summary read does, and one failed chunk
+  // fails the page: a row whose block counted only the members that arrived
+  // would say the wrong thing about its conversation.
+  function readMembers(ids, handle, callback) {
+    var chunks = Jmap.chunked(ids,
+      Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
+    if (chunks.length === 0) {
+      callback([], "")
+      return
+    }
+    var members = []
+    var remaining = chunks.length
+    var firstError = ""
+
+    for (var c = 0; c < chunks.length; c++) {
+      (function(chunk) {
+        var child = root.call([[
+          "Email/get", Threads.memberGet(root.accountId, chunk), "0"
+        ]], null, function(responses, failure) {
+          if (!root || handle.aborted) return
+          if (failure && firstError === "") firstError = failure
+          var args = Jmap.responseArguments(responses, "Email/get")
+          var list = args && Array.isArray(args.list) ? args.list : []
+          for (var j = 0; j < list.length; j++) members.push(list[j])
+          remaining = remaining - 1
+          if (remaining === 0) callback(members, firstError)
+        })
+        handle.children.push(child)
+      })(chunks[c])
+    }
+  }
+
+  // The block the collapsed page read composed for this row, put on the
+  // resource its summary is built from.
+  //
+  // A message read outside a collapsed page — a preview, the reader's own full
+  // read — carries no block and reports a count of 0, which means unknown and
+  // draws no badge. `Model.detailSummary` is what keeps a row that had one from
+  // losing it to a full read that did not.
+  function withThreadBlock(message) {
+    var block = threadBlocks[message.id]
+    if (block) message.thread = block
+    return message
   }
 
   // The rows behind those ids, in the order they were asked for.
@@ -926,7 +1023,7 @@ Item {
             var list = args && Array.isArray(args.list) ? args.list : []
             var painted = []
             for (var j = 0; j < list.length; j++) {
-              var message = Jmap.toMessage(list[j], root.roles)
+              var message = root.withThreadBlock(Jmap.toMessage(list[j], root.roles))
               if (message.id === "") continue
               byId[message.id] = message
               painted.push(message)
@@ -991,7 +1088,7 @@ Item {
           return
         }
         var email = list[0]
-        var message = Jmap.toMessage(email, root.roles, true)
+        var message = root.withThreadBlock(Jmap.toMessage(email, root.roles, true))
         root.fillTruncated(message, Jmap.truncatedParts(email), handle, function() {
           if (!root || handle.aborted) return
           root.hand(callback, message, "")

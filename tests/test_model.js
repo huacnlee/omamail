@@ -526,6 +526,41 @@ assert.strictEqual(full.snippet, "Yes")
 assert.strictEqual(model.detailSummary(null, bodyless).subject, "(no subject)")
 assert.strictEqual(model.detailSummary(listed, null), listed)
 
+// A detail read is one message and knows nothing about the conversation it sits
+// in, so its block reports a count of 0 — unknown, not "one". The row's own
+// block stands until a listing replaces it, or opening a conversation would
+// drop its count.
+const grouped = {
+  id: "maaaaaf", subject: "Re: Thread of three",
+  from: { name: "Bea", email: "bea@example.org" }, snippet: "Third",
+  date: new Date("2026-08-22T10:00:00Z"), time: "10:00", fullTime: "x",
+  unread: true, starred: false,
+  thread: { id: "d", count: 3, unread: true, flagged: false,
+    memberIds: ["maaaaad", "maaaaae", "maaaaaf"] }
+}
+const opened = model.detailSummary(grouped, {
+  id: "maaaaaf", subject: "Re: Thread of three",
+  from: { name: "Bea", email: "bea@example.org" }, snippet: "Third",
+  date: new Date("2026-08-22T10:00:00Z"), time: "10:00", fullTime: "x",
+  unread: false, starred: false,
+  thread: { id: "d", count: 0, unread: false, flagged: false, memberIds: [] }
+})
+assert.strictEqual(opened.thread.count, 3, "the row keeps the count the listing gave it")
+deepEqual(opened.thread.memberIds, ["maaaaad", "maaaaae", "maaaaaf"])
+// Only the block. `unread` is something the detail read does carry, so it stays
+// its answer — restoring it from a block composed before the message was opened
+// would put the unread mark back on the row the reader is showing.
+assert.strictEqual(opened.unread, false)
+
+// A detail read that does know wins, as everything else it carries does.
+assert.strictEqual(model.detailSummary(grouped, {
+  id: "maaaaaf", subject: "Re: Thread of three",
+  from: { name: "Bea", email: "bea@example.org" }, snippet: "Third",
+  date: new Date("2026-08-22T10:00:00Z"), time: "10:00", fullTime: "x",
+  thread: { id: "d", count: 2, unread: false, flagged: false,
+    memberIds: ["maaaaae", "maaaaaf"] }
+}).thread.count, 2)
+
 // ------------------------------------------------------ a CLI-shaped sign-in
 //
 // A provider whose sign-in is a program of its own says which program: the

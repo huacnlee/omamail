@@ -9,11 +9,14 @@
 // direction, `toMessage`: a JMAP Email *composed* into the shared message
 // resource, the way `HeyClient.toMessage` composes rather than parses.
 //
-// This is the whole of the JMAP seam and the one place a rule about JMAP goes.
-// `Jmap.js` beside it is the provider *description* the registry reads — a
-// name, a ceiling, the rail's rows — and holds no protocol. The client imports
-// this file as `Jmap`, so every call in it reads as the decision tickets wrote
-// it: `Jmap.parseQuery`, `Jmap.toMessage`, `Jmap.refusals`.
+// This is the JMAP seam and the one place a rule about JMAP goes, with one job
+// beside it: `JmapThreads.js` holds the collapsed list read — the four chained
+// calls a page of conversations is, the rule about which members a row counts,
+// and the block a row draws from. `Jmap.js` is the provider *description* the
+// registry reads — a name, a ceiling, the rail's rows — and holds no protocol.
+// The client imports this file as `Jmap`, so every call in it reads as the
+// decision tickets wrote it: `Jmap.parseQuery`, `Jmap.toMessage`,
+// `Jmap.refusals`.
 //
 // What this file owns is every decision about what came back, which is what
 // the node tests reach without a compositor or a mailbox.
@@ -1360,11 +1363,14 @@ function queryError(parsed, roles) {
 // — so this cannot come back `unsupportedSort` at runtime.
 var EMAIL_SORT = [{ property: "receivedAt", isAscending: false }]
 
-// One row per message. Ticket 11 of the build flips this to true and gives the
-// summary its thread block; `total` then counts conversations rather than
-// messages, which is why the flip is one constant here rather than an argument
-// every caller would have to agree about.
-var COLLAPSE_THREADS = false
+// One row per conversation, on every query: rail rows, user folders and search
+// alike. `total` therefore counts conversations rather than messages, which is
+// what makes the Unread badge agree with the rows the Unread view draws.
+//
+// One constant rather than an argument because every query collapses, and a
+// caller free to disagree would be a caller free to make the badge lie. What a
+// collapsed page is then read as is `JmapThreads.js`.
+var COLLAPSE_THREADS = true
 
 function pageLimit(limit) {
   var value = Math.floor(Number(limit))
@@ -1431,9 +1437,10 @@ function emailQuery(accountId, filter, limit, token, byPosition) {
 // shorter than the limit, or a total already reached. A position past the end
 // is an empty page rather than an error, which is verified on the server.
 //
-// `threadIds` is empty here. The query runs uncollapsed in this ticket, so a
-// row is a message and nothing above groups them; ticket 11 chains an
-// `Email/get` through a `#ids` back-reference and fills it.
+// `threadIds` stays empty, as IMAP's and HEY's do. The collapsed read knows
+// every representative's thread id and hands it over on the summary instead;
+// nothing above the seam reads the parallel array, and a second place to state
+// a thread id is a second place for it to be wrong.
 function queryPage(args, limit) {
   var body = args && typeof args === "object" ? args : {}
   var ids = []

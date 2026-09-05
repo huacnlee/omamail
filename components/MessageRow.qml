@@ -17,6 +17,10 @@ Rectangle {
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
   property bool canArchive: true
+  // Whether this row stands for a conversation rather than for one message.
+  // Grouping is a panel rule gated on the provider's `conversations`
+  // capability; a row is told, and asks nobody.
+  property bool conversations: false
   property bool hasCursor: false
   property bool selected: false
   // How the direction of this message's own text is arrived at. Passed down
@@ -30,6 +34,12 @@ Rectangle {
   signal menuRequested(real sceneX, real sceneY)
 
   readonly property bool hot: mouse.containsMouse || hasCursor
+
+  // How many messages the conversation holds. Zero where the provider does not
+  // group its listing, or does not know — and where a summary was cached before
+  // rows carried a block at all, which is why this is asked rather than read
+  // straight off the summary.
+  readonly property int threadCount: root.summary.thread ? root.summary.thread.count : 0
 
   // The subject is asked on its own account: a reply prefix is Latin whatever
   // the thread is written in, so `Re: مرحبا` reads left-to-right to anything
@@ -137,15 +147,44 @@ Rectangle {
       }
     }
 
-    Text {
+    Item {
       width: parent.width
-      textFormat: Text.PlainText
-      text: root.summary.from.display
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      elide: Text.ElideRight
-      horizontalAlignment: root.textAlignment
+      implicitHeight: sender.implicitHeight
+
+      Text {
+        id: sender
+        anchors.left: parent.left
+        anchors.right: count.visible ? count.left : parent.right
+        anchors.rightMargin: count.visible ? Style.space(4) : 0
+        textFormat: Text.PlainText
+        text: root.summary.from.display
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+        horizontalAlignment: root.textAlignment
+      }
+
+      // How long the conversation is, beside who wrote it — where Gmail puts
+      // it, and the one place on the row that is about the thread rather than
+      // about the message the server returned for it.
+      //
+      // Two or more only. A row saying "1" would be saying nothing, and a count
+      // of 0 is a provider that does not group its listing rather than a
+      // conversation with nothing in it — which is what HEY reports, whose rows
+      // are already conversations and gain no badge here.
+      Text {
+        id: count
+        anchors.right: parent.right
+        anchors.baseline: sender.baseline
+        visible: root.conversations && root.threadCount >= 2
+        textFormat: Text.PlainText
+        text: root.threadCount
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: root.summary.unread
+      }
     }
 
     Text {

@@ -404,6 +404,18 @@ function detailSummary(previous, summary) {
     merged.time = previous.time
     merged.fullTime = previous.fullTime
   }
+  // A detail read is one message and knows nothing about the conversation it
+  // belongs to, so its block reports a count of 0 — which means unknown, not
+  // "one". The row's own block stands until a listing replaces it; without
+  // this, opening a conversation row dropped the count it was drawing.
+  //
+  // The block and nothing else. `unread` and `starred` are things the detail
+  // read does carry, so they stay its answer: restoring those from a block
+  // composed before the message was opened would put the unread mark straight
+  // back on the row the reader is showing.
+  if (merged.thread && merged.thread.count === 0
+      && previous.thread && previous.thread.count > 0)
+    merged.thread = previous.thread
   return merged
 }
 

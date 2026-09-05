@@ -133,6 +133,13 @@ Item {
   // filtered right now, has an address in the provider's web app at all.
   readonly property bool canOpenWebInbox: Provider.can(providerId, "webBox")
   readonly property bool canSend: Provider.can(providerId, "send", capabilityRefusals)
+  // Whether a row here stands for a conversation rather than for one message.
+  // Not a button and not refinable per account: it decides what a row draws,
+  // and grouping is a panel rule gated on the capability rather than anything a
+  // client does on its own. Every provider that declares it hands back the
+  // block the row draws from; the ones that do not report a count of 0 and the
+  // row draws nothing new.
+  readonly property bool showsConversations: Provider.can(providerId, "conversations")
   // The refined answers again, keyed by the capability names
   // `Model.actionCapability` speaks, so the hint row and the guard in `act`
   // read one answer rather than each asking the registry its own way.
