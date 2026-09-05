@@ -91,6 +91,7 @@ test-js:
 	node tests/test_menu.js
 	node tests/test_provider.js
 	node tests/test_imap.js
+	node tests/test_jmap.js
 	node tests/test_hey.js
 
 test-shell:
@@ -103,6 +104,7 @@ test-shell:
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
+	bash tests/test_jmap_transport.sh
 	bash tests/test_imap_ordering.sh
 	bash tests/test_unsubscribe_transport.sh
 	bash tests/test_image_fetch.sh
