@@ -20,6 +20,12 @@ const boxes = [
 ]
 const roles = protocol.roleMap(boxes)
 
+// The same account with an Archive mailbox, for the actions below. The test
+// account has none, which is what makes its archive refusal worth asserting
+// and its archive patches worth asserting against a second role map.
+const archiveRoles = protocol.roleMap(
+  boxes.concat([{ id: "f", name: "Archive", parentId: null, role: "archive" }]))
+
 // ------------------------------------------------------------- the request
 
 // The four calls, exactly as the probe measured them.
@@ -305,5 +311,91 @@ deepEqual(jmap.mergedInto({ a: 1 }, null, 0), { a: 1 })
 // be dropped belongs to a row that left the window long ago.
 deepEqual(jmap.mergedInto({ a: 1, b: 2 }, { c: 4 }, 2), { c: 4 })
 deepEqual(jmap.mergedInto({ a: 1 }, { c: 4 }, 2), { a: 1, c: 4 })
+
+
+// -------------------------------------------------- acting on a whole row
+//
+// An action on a conversation row arrives here as every counted member, and
+// where each member sits decides whether the move reaches it at all. The map
+// is the client's, `{ emailId: [mailboxId, ...] }`, last written by a list
+// read; an id it does not carry is *unknown* rather than "not in the Inbox".
+//
+// The account's own ids: `a` Inbox, `b` Trash, `c` Junk, `d` Drafts, `e` Sent.
+
+// Archive on a member in the Inbox is the swap ticket 06 defined, and it is a
+// patch rather than a replace so a message that also sits in a user folder
+// keeps that membership.
+deepEqual(protocol.patchFor([], ["INBOX"], archiveRoles, ["a"]),
+  { "mailboxIds/f": true, "mailboxIds/a": null })
+// The same member on an account with no Archive mailbox — this one — fails
+// before any request, whatever the membership says.
+assert.strictEqual(protocol.patchFor([], ["INBOX"], roles, ["a"]),
+  "This account has no Archive mailbox")
+// A member in Sent only is not in the Inbox, so archiving the conversation
+// does not touch it: Gmail's archive is "remove INBOX", which does nothing to
+// a message that never had it, and adding one to Archive would file a reply
+// the user never archived.
+deepEqual(protocol.patchFor([], ["INBOX"], archiveRoles, ["e"]), {})
+// A member the map does not name gets ticket 06's single-message patch, which
+// is also the right answer for a lone search hit in a user folder.
+deepEqual(protocol.patchFor([], ["INBOX"], archiveRoles, null),
+  { "mailboxIds/f": true, "mailboxIds/a": null })
+deepEqual(protocol.patchFor([], ["INBOX"], archiveRoles),
+  { "mailboxIds/f": true, "mailboxIds/a": null })
+
+// Spam is the mirror: every member is reported except the ones the account
+// sent, because moving its own replies into Junk would train the classifier on
+// them. The keywords go with the move, so a skipped member is not marked
+// `$junk` either.
+deepEqual(protocol.patchFor(["SPAM"], ["INBOX"], roles, ["a"]),
+  { mailboxIds: { c: true }, "keywords/$junk": true, "keywords/$notjunk": null })
+deepEqual(protocol.patchFor(["SPAM"], ["INBOX"], roles, ["e"]), {})
+deepEqual(protocol.patchFor(["SPAM"], ["INBOX"], roles, ["a", "e"]), {})
+deepEqual(protocol.patchFor(["SPAM"], ["INBOX"], roles, null),
+  { mailboxIds: { c: true }, "keywords/$junk": true, "keywords/$notjunk": null })
+
+// Trash keeps the whole replace for every member, membership or not: Gmail
+// trashes sent replies with the conversation, and so does this.
+deepEqual(protocol.patchFor(["TRASH"], [], roles, ["e"]), { mailboxIds: { b: true } })
+deepEqual(protocol.patchFor([], ["TRASH"], roles, ["b"]),
+  { "mailboxIds/a": true, "mailboxIds/b": null })
+// And a keyword change is about the message rather than about where it sits.
+deepEqual(protocol.patchFor([], ["UNREAD"], roles, ["e"]), { "keywords/$seen": true })
+
+// ------------------------------------------------------------- the groups
+
+// One action over many ids is one plan: the ids that share a patch share a
+// request, and a member the map excluded is dropped rather than sent an empty
+// one.
+deepEqual(jmap.patchPlan(["maaaaad", "maaaaae", "maaaaaf"], [], ["UNREAD"], roles,
+  { maaaaad: ["a", "d"], maaaaae: ["a"], maaaaaf: ["a"] }),
+  [{ ids: ["maaaaad", "maaaaae", "maaaaaf"], patch: { "keywords/$seen": true } }])
+// Archive over a conversation whose reply is in Sent and whose third member the
+// last read did not carry: two go, one is left where it is.
+deepEqual(jmap.patchPlan(["maaaaad", "maaaaae", "maaaaaf"], [], ["INBOX"], archiveRoles,
+  { maaaaad: ["a"], maaaaae: ["e"] }),
+  [{ ids: ["maaaaad", "maaaaaf"],
+     patch: { "mailboxIds/f": true, "mailboxIds/a": null } }])
+// A multi-id trash and untrash, which every client takes as one id or an array.
+deepEqual(jmap.patchPlan(["maaaaad", "maaaaae", "maaaaaf"], ["TRASH"], [], roles, {}),
+  [{ ids: ["maaaaad", "maaaaae", "maaaaaf"], patch: { mailboxIds: { b: true } } }])
+deepEqual(jmap.patchPlan(["m1", "m2"], [], ["TRASH"], roles, { m1: ["b"], m2: ["b"] }),
+  [{ ids: ["m1", "m2"], patch: { "mailboxIds/a": true, "mailboxIds/b": null } }])
+// Which is the request that crosses.
+deepEqual(protocol.emailSet("t", ["m1", "m2"], { mailboxIds: { b: true } }), {
+  accountId: "t",
+  update: { m1: { mailboxIds: { b: true } }, m2: { mailboxIds: { b: true } } }
+})
+// Ids are deduped, empties dropped, and a conversation every member of which
+// the map excluded is no request at all rather than an `Email/set` that asks
+// for nothing.
+deepEqual(jmap.patchPlan(["m1", "m1", "", "m2"], [], ["UNREAD"], roles, {}),
+  [{ ids: ["m1", "m2"], patch: { "keywords/$seen": true } }])
+deepEqual(jmap.patchPlan(["m1"], [], ["INBOX"], archiveRoles, { m1: ["e"] }), [])
+deepEqual(jmap.patchPlan([], [], ["UNREAD"], roles, {}), [])
+// One refusal is the whole action's: the mailbox is missing from the account
+// rather than from this member.
+assert.strictEqual(jmap.patchPlan(["m1", "m2"], [], ["INBOX"], roles, {}),
+  "This account has no Archive mailbox")
 
 console.log("jmap threads ok")

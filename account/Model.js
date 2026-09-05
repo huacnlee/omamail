@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Conversation.js" as Conversation
+
 // View models. Anything the panel decides — what the setup card should say,
 // whether a message still belongs in the list after an action, what the badge
 // reads — is decided here so the QML stays a description of the screen.
@@ -130,13 +132,149 @@ function setupActionLabel(state, provider, authKind) {
 
 // --------------------------------------------------------- list behaviour
 
+// ------------------------------------------------- a row is a conversation
+
+// Which verbs reach every counted member of a row.
+//
+// Scope is a property of the *action*, held in one table, because it is a fact
+// about what the verb means rather than about the row it lands on. Gmail's
+// rule: archiving a thread archives the thread, and a row that says "3" and
+// goes quiet while two of its members are still unread is a row lying about
+// itself.
+//
+// Star is the one message-scoped verb, because a star is a note about a
+// message and starring a conversation would star a reply nobody has read.
+// Unstar is *not* its mirror: the row's star is the conversation's —
+// `thread.flagged` is any member — so an unstar that left a reply starred
+// would leave the row starred, and the click would look broken.
+var CONVERSATION_ACTIONS = [
+  "archive", "unarchive", "trash", "untrash",
+  "spam", "markRead", "markUnread", "unstar"
+]
+
+function actionScope(action) {
+  return CONVERSATION_ACTIONS.indexOf(String(action || "")) >= 0
+    ? "conversation" : "message"
+}
+
+// The ids an action on a row is sent for.
+//
+// Expansion is a property of the *row*, and it happens here, above the seam:
+// the account hands the client one flat list and no client expands anything,
+// so `Thread/get` is never called for an action and the user acts on exactly
+// the members the row counted and drew. A row with no block — Gmail's, IMAP's,
+// and HEY's posting, which already is the conversation — is its own only
+// target, which is what leaves those three providers untouched.
+function actionTargets(row, action) {
+  var id = row && row.id !== undefined && row.id !== null ? String(row.id) : ""
+  var own = id === "" ? [] : [id]
+  if (actionScope(action) !== "conversation") return own
+  var block = Conversation.blockOf(row ? row.thread : null)
+  if (!block || block.count === 0) return own
+  return block.memberIds.slice()
+}
+
+// Whether a message id is this row: its own id, or a member of the
+// conversation it stands for.
+function rowHoldsMember(row, id) {
+  var wanted = String(id || "")
+  if (wanted === "") return false
+  if (row && String(row.id || "") === wanted) return true
+  return Conversation.holdsMember(row ? row.thread : null, wanted)
+}
+
+// The row a message id belongs to, or -1.
+//
+// A member is not a row: the list is one row per conversation, so every stop
+// on the rail but the representative's is a message the list never drew — and
+// an action on one still has a row to move, a summary to update and a block to
+// recompute. Own ids are matched first so a representative is never found as
+// somebody else's member.
+function rowIndexForMember(messages, id) {
+  var list = Array.isArray(messages) ? messages : []
+  var wanted = String(id || "")
+  if (wanted === "") return -1
+  var own = indexById(list, wanted)
+  if (own >= 0) return own
+  for (var i = 0; i < list.length; i++) {
+    if (Conversation.holdsMember(list[i] ? list[i].thread : null, wanted)) return i
+  }
+  return -1
+}
+
+// A member's own flag, read from its labels rather than from `unread` and
+// `starred`.
+//
+// Those two are `Message.summarize`'s OR with the conversation — true on the
+// representative whenever *any* member is unread — so recomputing a block from
+// them would never clear it. The labels are the one message's own answer.
+function memberHasLabel(summary, label, fallbackKey) {
+  if (!summary || typeof summary !== "object") return false
+  if (Array.isArray(summary.labelIds)) return summary.labelIds.indexOf(label) >= 0
+  return summary[fallbackKey] === true
+}
+
+// The row's block after one of its members changed.
+//
+// "Any known member has it, or an unknown member exists and the row already
+// said so." A member whose summary has not arrived says nothing either way, so
+// an unknown member never flips a flag off: a row leaves a view on evidence,
+// and the next load or push settles what the rail could not see.
+function threadAfterMemberChange(row, memberSummaries) {
+  var block = Conversation.blockOf(row ? row.thread : null)
+  if (!block) return null
+  var store = memberSummaries && typeof memberSummaries === "object"
+    ? memberSummaries : {}
+  var unread = false
+  var flagged = false
+  var unknown = false
+  for (var i = 0; i < block.memberIds.length; i++) {
+    var summary = store[block.memberIds[i]]
+    if (!summary || typeof summary !== "object") {
+      unknown = true
+      continue
+    }
+    if (memberHasLabel(summary, "UNREAD", "unread")) unread = true
+    if (memberHasLabel(summary, "STARRED", "starred")) flagged = true
+  }
+  block.unread = unread || (unknown && block.unread)
+  block.flagged = flagged || (unknown && block.flagged)
+  return block
+}
+
+// The block a conversation action asserts outright, because every counted
+// member was sent the same patch. A message-scoped action leaves it alone, and
+// so does a verb that moves the row out of the view it was in.
+function threadAfterAction(row, action) {
+  var block = Conversation.blockOf(row ? row.thread : null)
+  if (!block) return null
+  if (actionScope(action) !== "conversation") return block
+  var verb = String(action || "")
+  if (verb === "markRead") block.unread = false
+  else if (verb === "markUnread") block.unread = true
+  else if (verb === "unstar") block.flagged = false
+  return block
+}
+
 // After an action the message may no longer belong in the mailbox being
 // viewed. Archiving from Inbox removes the row; archiving from All mail does
 // not. Getting this wrong either strands a row that is gone or hides one that
 // is still there.
-function survivesAction(mailboxKey, action) {
+//
+// A row that is a conversation answers on the conversation's evidence instead:
+// the recomputed block, so marking one member read in the Unread view keeps
+// the row while any other member is unread, and an unstar keeps it in Starred
+// while any member is still starred. Every other case, and every row without a
+// block, is the verb rule as it was — which is what leaves Gmail and IMAP
+// exactly where they were.
+function survivesAction(mailboxKey, action, row) {
   var key = String(mailboxKey || "inbox")
   var verb = String(action || "")
+  var block = Conversation.blockOf(row ? row.thread : null)
+  if (block && block.count > 0) {
+    if (verb === "markRead" && key === "unread") return block.unread
+    if (verb === "unstar" && key === "starred") return block.flagged
+  }
   if (verb === "trash") return key === "trash"
   if (verb === "untrash") return key !== "trash"
   if (verb === "archive") return key !== "inbox" && key !== "unread"
@@ -194,7 +332,27 @@ function unavailableActions(capabilities) {
   return out
 }
 
-function applyLabelChange(summary, action) {
+// A row carrying a block, with its own flags read the way `Message.summarize`
+// reads them: unread and starred are "this message, *or* any counted member".
+// A representative that has been read while a reply has not is still an unread
+// row, and recomputing from the labels alone would quietly clear the row's dot
+// on every action that touched it.
+function rowWithThread(summary, thread) {
+  if (!summary) return summary
+  var next = {}
+  for (var key in summary) next[key] = summary[key]
+  if (thread) next.thread = thread
+  var block = Conversation.blockOf(next.thread)
+  var labels = Array.isArray(next.labelIds) ? next.labelIds : []
+  next.unread = labels.indexOf("UNREAD") >= 0 || (!!block && block.unread)
+  next.starred = labels.indexOf("STARRED") >= 0 || (!!block && block.flagged)
+  return next
+}
+
+// The summary an action leaves behind. The optional block is the conversation
+// asserted outright — `threadAfterAction` for an action on the row, or
+// `threadAfterMemberChange` for one on a member.
+function applyLabelChange(summary, action, thread) {
   if (!summary) return summary
   var change = labelChangesFor(action)
   if (!change) return summary
@@ -209,10 +367,8 @@ function applyLabelChange(summary, action) {
     if (labels.indexOf(change.add[j]) < 0) labels.push(change.add[j])
   }
   next.labelIds = labels
-  next.unread = labels.indexOf("UNREAD") >= 0
-  next.starred = labels.indexOf("STARRED") >= 0
   next.inInbox = labels.indexOf("INBOX") >= 0
-  return next
+  return rowWithThread(next, thread)
 }
 
 // Skeleton rows replace only an empty list's first fetch. Loading another page
@@ -680,16 +836,42 @@ function pluralize(count, singular, plural) {
   return value + " " + (value === 1 ? singular : (plural || singular + "s"))
 }
 
+// "Mark these read", once it has run. The count is of rows, because rows are
+// what the user saw and chose; the noun follows the evidence, so it says
+// "conversations" only where a row actually stood for more than itself and
+// never claims a number nobody was shown.
+function markAllReadNote(rows, expanded) {
+  return pluralize(rows, expanded === true ? "conversation" : "message")
+    + " marked read"
+}
+
+// What the rows on screen are, for the footer that counts them.
+//
+// On the evidence of the rows themselves rather than on the provider's
+// `conversations` capability: HEY's rows are conversations too, but its listing
+// reports no members, so a row there stands for a number nobody can see and
+// "messages" stays the honest word. A row that carries a block of two or more
+// has been collapsed and the count on screen is of conversations.
+function listNoun(list) {
+  var rows = Array.isArray(list) ? list : []
+  for (var i = 0; i < rows.length; i++) {
+    var block = Conversation.blockOf(rows[i] ? rows[i].thread : null)
+    if (block && block.count > 1) return "conversation"
+  }
+  return "message"
+}
+
 function resultSummary(list, estimate, hasMore) {
   var shown = Array.isArray(list) ? list.length : 0
   if (shown === 0) return "No messages"
-  if (!hasMore) return pluralize(shown, "message")
+  var noun = listNoun(list)
+  if (!hasMore) return pluralize(shown, noun)
   var total = Math.floor(Number(estimate) || 0)
   // A provider whose listing carries no total answers with what it read, which
   // is the number already on screen. "25 of about 25" would be a claim HEY
   // never made; "so far" is the honest reading of the same two numbers, and
   // there is a Load more below it saying the rest exists.
-  if (total <= shown) return pluralize(shown, "message") + " so far"
+  if (total <= shown) return pluralize(shown, noun) + " so far"
   return shown + " of about " + total
 }
 

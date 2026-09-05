@@ -342,6 +342,49 @@ function mergedInto(existing, additions, limit) {
   return out
 }
 
+// ------------------------------------------------------ acting on a row
+
+// The `Email/set` groups one action over one or many ids amounts to.
+//
+// A batch is not always one patch. An action on a conversation is sent for
+// every counted member, and `patchFor` answers per member — so archiving a
+// thread whose reply is in Sent yields the archive patch for the members that
+// were in the Inbox and nothing at all for the reply. Grouping by the patch,
+// rather than sending one request per id, keeps "mark these read" over a page
+// at one request per chunk and leaves the single-message case exactly one call.
+//
+// Returns an array of `{ ids, patch }` in first-appearance order, or the
+// refusal sentence `patchFor` answered with — the same two types the caller
+// already tells apart. Ids are deduped, a member the map excludes is dropped
+// rather than sent an empty patch, and an action every member is excluded from
+// is an empty plan and no request at all.
+function patchPlan(ids, addLabelIds, removeLabelIds, roles, memberships) {
+  var list = Array.isArray(ids) ? ids : [ids]
+  var map = memberships && typeof memberships === "object" ? memberships : {}
+  var groups = []
+  var byPatch = {}
+  var seen = {}
+  for (var i = 0; i < list.length; i++) {
+    var id = Protocol.trimmed(list[i])
+    if (id === "" || seen[id] === true) continue
+    seen[id] = true
+    var known = Array.isArray(map[id]) ? map[id] : null
+    var patch = Protocol.patchFor(addLabelIds, removeLabelIds, roles, known)
+    // One refusal is the whole action's: the destination mailbox is missing
+    // from the account rather than from this member.
+    if (typeof patch === "string") return patch
+    if (Protocol.patchIsEmpty(patch)) continue
+    var key = JSON.stringify(patch)
+    if (byPatch[key] === undefined) {
+      byPatch[key] = groups.length
+      groups.push({ ids: [id], patch: patch })
+    } else {
+      groups[byPatch[key]].ids.push(id)
+    }
+  }
+  return groups
+}
+
 // One collapsed page reply, read whole:
 //
 //   { page, blocks, memberships, pending }

@@ -2111,10 +2111,48 @@ function moveFor(added, removed) {
   return move
 }
 
-// One patch for one message, from the label ids to add and remove and the
-// account's role map — **or an error sentence**, when the account has no
-// mailbox for the move being asked for. The two are told apart by type: a patch
-// is an object and a refusal is a string.
+// Which members a move must leave alone, given where the message currently
+// sits.
+//
+// An action on a conversation row is sent for every counted member, and two of
+// these moves are wrong on a member that was never in the Inbox: archiving
+// would *add* a sent reply — or a message a filter put in a user folder — to
+// the Archive mailbox, and reporting spam would move the account's own replies
+// into Junk and train the classifier on them. Gmail's archive is "remove
+// INBOX", which does nothing to a message that has not got it; this is that
+// rule written out, because JMAP's archive has to name a destination.
+//
+// `mailboxIds` is the client's membership map for this one id, and `null` means
+// *unknown* rather than "not in the Inbox": an id the last list read did not
+// carry gets ticket 06's single-message patch, which is also the right answer
+// for a lone message — a search hit in a user folder is "add Archive".
+//
+// A role that does not resolve skips nothing. There is no membership to test
+// against, and a request that quietly did nothing is worse than one the server
+// answers for.
+function movesMember(move, mailboxIds, map) {
+  if (!Array.isArray(mailboxIds)) return true
+  var held = []
+  for (var i = 0; i < mailboxIds.length; i++) {
+    var id = trimmed(mailboxIds[i])
+    if (id !== "") held.push(id)
+  }
+  if (move === "archive") {
+    var inbox = trimmed(map.inbox)
+    return inbox === "" || held.indexOf(inbox) >= 0
+  }
+  if (move === "spam") {
+    var sent = trimmed(map.sent)
+    return sent === "" || held.indexOf(sent) < 0
+  }
+  return true
+}
+
+// One patch for one message, from the label ids to add and remove, the
+// account's role map and — for a member of a conversation — where that message
+// currently sits — **or an error sentence**, when the account has no mailbox
+// for the move being asked for. The two are told apart by type: a patch is an
+// object and a refusal is a string.
 //
 // The refusal is the point. IMAP's plan yields no move on an account with no
 // Archive folder and the request quietly succeeds, having done nothing; here a
@@ -2122,7 +2160,7 @@ function moveFor(added, removed) {
 // account puts the row back and says which mailbox is missing. The alternative
 // the server offers is worse: a `mailboxIds/<inbox>: null` with nothing to take
 // its place is refused as "Message has to belong to at least one mailbox".
-function patchFor(addLabelIds, removeLabelIds, roles) {
+function patchFor(addLabelIds, removeLabelIds, roles, mailboxIds) {
   var added = Array.isArray(addLabelIds) ? addLabelIds : []
   var removed = Array.isArray(removeLabelIds) ? removeLabelIds : []
   var map = roles && typeof roles === "object" ? roles : {}
@@ -2142,6 +2180,11 @@ function patchFor(addLabelIds, removeLabelIds, roles) {
   var plan = MOVES[move]
   var to = trimmed(map[plan.to])
   if (to === "") return missingMailboxError(plan.to)
+
+  // Where this member sits decides whether the move reaches it at all. The
+  // refusal above comes first on purpose: an account with no Archive mailbox is
+  // told so whichever members the row counted.
+  if (!movesMember(move, mailboxIds, map)) return patch
 
   if (plan.replace) {
     var only = {}

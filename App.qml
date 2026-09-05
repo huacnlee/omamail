@@ -688,10 +688,16 @@ Item {
   function actOnCursor(action) {
     if (!service || cursorId === "") return false
     var acted = cursorId
-    var wasOpen = currentView === "reader" && service.selectedId === acted
+    var row = service.messages[Model.indexById(service.messages, acted)]
+    // "Was open" is the conversation's: with the rail up the reader can be
+    // showing a member of the acted row rather than the row itself, and
+    // archiving from a member has to open the next row or go back rather than
+    // leave a message that has just moved on screen.
+    var wasOpen = currentView === "reader"
+      && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(service.messages, acted)
-    var leaves = !Model.survivesAction(service.mailboxKey, action)
+    var leaves = !Model.survivesAction(service.mailboxKey, action, row)
     if (!service.act(acted, action)) return false
     if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a
@@ -750,8 +756,16 @@ Item {
     if (id === "trash") return actOnCursor("trash")
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
+    //
+    // In the reader the star is the open message's own. Every reader action
+    // resolves through the selected id and every list action through the
+    // cursor, and this is the key where the difference shows: the cursor stays
+    // on the row while `n` and `p` walk the rail, so `s` would otherwise star
+    // the representative rather than the message on screen.
     if (id === "star") {
-      if (service && cursorId !== "") service.toggleStar(cursorId)
+      var starred = currentView === "reader" && service && service.selectedId !== ""
+        ? service.selectedId : cursorId
+      if (service && starred !== "") service.toggleStar(starred)
       return
     }
     if (id === "markRead") return actOnCursor("markRead")
@@ -1494,6 +1508,13 @@ Item {
             // from a member the action lands on the row the conversation was
             // opened from, which is where the reader came from. Which members
             // an action reaches from there is "Actions on a conversation row".
+            //
+            // A message-scoped verb never takes that route: star and unstar
+            // draw the open message's own state, so they act on it.
+            if (Model.actionScope(action) === "message") {
+              root.service.act(root.service.selectedId, action)
+              return
+            }
             if (!Conversation.holdsMember(root.service.selectedThread,
                 root.service.selectedId) || root.cursorId === "")
               root.cursorId = root.service.selectedId

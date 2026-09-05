@@ -1383,8 +1383,8 @@ Item {
     // account view. Navigation may have removed it meanwhile; marking a
     // message read because it was opened is still owed to the server then.
     if (cacheKey === request.cacheKey
-        && (Model.indexById(messages, request.id) >= 0
-        || Model.indexById(previewMessages, request.id) >= 0)) {
+        && (Model.rowIndexForMember(messages, request.id) >= 0
+        || Model.rowIndexForMember(previewMessages, request.id) >= 0)) {
       act(request.id, request.action, true)
       return
     }
@@ -1469,15 +1469,26 @@ Item {
     }
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
-    // A counted member is not a row. The list is one row per conversation, so
-    // every stop on the rail but the representative's is a message the list has
-    // never drawn — and opening one still owes the server the quiet mark-read
-    // that opening a row does. It goes out with no row to move: the optimistic
-    // update is the member's own summary, which is what the rail draws, and the
-    // request itself is the detached branch `runQueuedQuietAction` already has.
+    // A counted member is not a row, and it is still found by one. The list is
+    // one row per conversation, so every stop on the rail but the
+    // representative's is a message the list never drew — and an action on one
+    // has a row to move, a summary to update and a block to recompute all the
+    // same. Own ids are matched first, so this only ever runs for a member.
+    var memberAction = index < 0 && previewIndex < 0
+    if (memberAction) {
+      index = Model.rowIndexForMember(messages, messageId)
+      previewIndex = Model.rowIndexForMember(previewMessages, messageId)
+    }
+    // No row anywhere: the reader is inside a conversation whose row the list
+    // has navigated away from or has already moved. There is nothing to move,
+    // so the optimistic update is the member's own summary — which is what the
+    // rail draws — and only a message-scoped label change goes out: the quiet
+    // mark-read through the queue, and star or unstar through the branch below.
     if (index < 0 && previewIndex < 0) {
-      if (quiet !== true || !Conversation.holdsMember(selectedThread, messageId)) return false
-      if (!Model.labelChangesFor(action)) return false
+      if (!Conversation.holdsMember(selectedThread, messageId)) return false
+      var memberChange = Model.labelChangesFor(action)
+      if (!memberChange) return false
+      if (quiet !== true) return actOnDetachedMember(messageId, action, memberChange)
       applyMemberChange(messageId, action)
       if (selectedId === messageId && selectedMessage)
         selectedMessage = Model.applyLabelChange(selectedMessage, action)
@@ -1507,21 +1518,98 @@ Item {
       actionToken = ""
     }
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
-    var updated = Model.applyLabelChange(before, action)
-    var survives = Model.survivesAction(mailboxKey, action)
-    // A representative is a row and a stop at once, so it changes in both
-    // places or the rail contradicts the list it was opened from.
-    if (memberSummaries[messageId]) rememberMember(updated)
+    var rowId = String(before.id || "")
 
-    if (action === "markRead" && before.unread) inboxUnread = Math.max(0, inboxUnread - 1)
-    if (action === "markUnread" && !before.unread) inboxUnread = inboxUnread + 1
+    // The messages this action is sent for. Expansion is the row's and it
+    // happens here: a conversation-scoped verb reaches every counted member and
+    // the client is handed the flat list, so no client expands anything and
+    // `Thread/get` is never called for an action. A member action names the one
+    // message, and so does the quiet mark-read on opening — the reader shows
+    // one message, so one has been read, and the other unread members keep
+    // their accent nodes, which is what the rail is for.
+    var targets = memberAction || quiet === true
+      ? [messageId] : Model.actionTargets(before, action)
+    if (targets.length === 0) return false
+
+    // Every summary the update touches besides the row's own, and what it was.
+    // The rail draws from these, so a conversation action asserts the whole
+    // conversation across them and the restore behind it puts them back.
+    var memberBefore = ({})
+    var memberAfter = ({})
+    var changedMembers = []
+    function rememberBefore(id, summary) {
+      if (changedMembers.indexOf(id) < 0) {
+        changedMembers.push(id)
+        memberBefore[id] = summary
+      }
+    }
+    for (var t = 0; t < targets.length; t++) {
+      var known = memberSummaries[targets[t]]
+      if (!known) continue
+      var after = Model.applyLabelChange(known, action)
+      if (!after || after === known) continue
+      rememberBefore(targets[t], known)
+      memberAfter[targets[t]] = after
+    }
+
+    // Only an action that reached every counted member may speak for the
+    // conversation. The quiet mark-read on opening is message-scoped even on a
+    // representative — one message has been read, not the thread — so it takes
+    // the recomputation below with the rest.
+    var conversationAction = !memberAction && quiet !== true
+      && Model.actionScope(action) === "conversation"
+    var updated
+    if (conversationAction) {
+      // A conversation action asserts the block outright: every counted member
+      // was sent the same patch, so the row says so at once rather than waiting
+      // for the next read to agree.
+      updated = Model.applyLabelChange(before, action,
+        Model.threadAfterAction(before, action))
+    } else {
+      // One message changed, so the block is recomputed from the members
+      // rather than asserted. An unknown member never flips a flag off, which
+      // is what keeps a row in the Unread view while a reply nobody has read is
+      // still in it — and what stops the quiet mark-read on opening a thread
+      // from clearing the dot of every other member with it.
+      var ownLabels = memberAction ? before : Model.applyLabelChange(before, action)
+      var nextMembers = ({})
+      for (var held in memberSummaries) nextMembers[held] = memberSummaries[held]
+      for (var changed in memberAfter) nextMembers[changed] = memberAfter[changed]
+      // The representative's own new state is evidence whether or not the rail
+      // ever drew it, so it goes in rather than counting as an unknown member.
+      if (!memberAction) nextMembers[rowId] = ownLabels
+      updated = Model.rowWithThread(ownLabels,
+        Model.threadAfterMemberChange(before, nextMembers))
+    }
+    // A representative is a row and a stop at once, so it changes in both
+    // places or the rail contradicts the list it was opened from. Its own
+    // summary is the row's, block and all, rather than the member label change
+    // computed above.
+    if (memberSummaries[rowId]) {
+      rememberBefore(rowId, memberSummaries[rowId])
+      memberAfter[rowId] = updated
+    }
+    if (changedMembers.length > 0)
+      memberSummaries = Conversation.mergedSummaries(memberSummaries, memberAfter,
+        Conversation.MAX_REMEMBERED)
+
+    // The recomputed row is what decides whether it stays: a mark-read in the
+    // Unread view keeps the row while any member is still unread.
+    var survives = Model.survivesAction(mailboxKey, action, updated)
+
+    if (action === "markRead" && before.unread && !updated.unread)
+      inboxUnread = Math.max(0, inboxUnread - 1)
+    if (action === "markUnread" && !before.unread && updated.unread)
+      inboxUnread = inboxUnread + 1
 
     // An action the user did not ask for must never move them. Opening an
     // unread message marks it read, and being read is the very thing that
     // disqualifies it from the unread list — so evicting it there would close
     // the reader that the click had just opened. The row stays until the list
     // is next loaded, which is also what Gmail's own clients do.
-    var keepOpen = quiet === true && selectedId === messageId
+    // The keep-open rule reads the conversation too: the reader is showing the
+    // row or one of its members, and a quiet action must not close it.
+    var keepOpen = quiet === true && Model.rowHoldsMember(before, selectedId)
     var removed = !survives && !keepOpen
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
@@ -1529,18 +1617,23 @@ Item {
     if (invalidatesPage) nextPageToken = ""
 
     if (index >= 0) {
-      if (removed) messages = Model.removeById(messages, messageId)
+      if (removed) messages = Model.removeById(messages, rowId)
       else messages = Model.replaceById(messages, updated)
       if (interruptedQuery === "") rememberList()
     }
     if (previewIndex >= 0) {
       previewMessages = updated.unread
         ? Model.replaceById(previewMessages, updated)
-        : Model.removeById(previewMessages, messageId)
+        : Model.removeById(previewMessages, rowId)
     }
-    if (selectedId === messageId) {
+    var selectedBefore = selectedMessage
+    var selectedWas = selectedId
+    if (Model.rowHoldsMember(before, selectedId)) {
       if (removed) clearSelection()
-      else selectedMessage = updated
+      else if (selectedId === rowId) selectedMessage = updated
+      else if (memberAfter[selectedId]) selectedMessage = memberAfter[selectedId]
+      else if (targets.indexOf(selectedId) >= 0 && selectedMessage)
+        selectedMessage = Model.applyLabelChange(selectedMessage, action)
     }
     var optimisticMessages = messages.slice()
     var optimisticToken = nextPageToken
@@ -1570,7 +1663,12 @@ Item {
           : root.previewMessages.slice(0, previewIndex).concat(
               [before], root.previewMessages.slice(previewIndex))
       }
-      if (root.memberSummaries[messageId]) root.rememberMember(before)
+      // Both halves go back: the row the list drew and every member summary
+      // the optimistic update asserted the conversation across.
+      for (var m = 0; m < changedMembers.length; m++)
+        root.rememberMember(memberBefore[changedMembers[m]])
+      if (selectedWas !== "" && root.selectedId === selectedWas)
+        root.selectedMessage = selectedBefore
       root.refreshCounts()
       root.fail(error)
     }
@@ -1621,8 +1719,12 @@ Item {
         root.loadMessages(false, true, "")
     }
 
-    if (action === "trash") api.trashMessage(messageId, done)
-    else if (action === "untrash") api.untrashMessage(messageId, done)
+    // One id or many, and the interface keeps its fifteen names: `trashMessage`
+    // and `untrashMessage` take either on every client, and a list of more than
+    // one goes to `batchModify` rather than to a call per message.
+    var sent = targets.length > 1 ? targets : targets[0]
+    if (action === "trash") api.trashMessage(sent, done)
+    else if (action === "untrash") api.untrashMessage(sent, done)
     else {
       var change = Model.labelChangesFor(action)
       if (!change) {
@@ -1630,8 +1732,41 @@ Item {
         pendingActionQuery = ""
         return false
       }
-      api.modifyMessage(messageId, change.add, change.remove, done)
+      if (targets.length > 1) api.batchModify(targets, change.add, change.remove, done)
+      else api.modifyMessage(targets[0], change.add, change.remove, done)
     }
+    return true
+  }
+
+  // A member whose row is not in either list, acted on deliberately.
+  //
+  // The reader can outlive the row it was opened from — a conversation that has
+  // left the Unread view, a mailbox navigated away from — and star and unstar
+  // still belong to the message on screen. There is no row to move, so the
+  // optimistic update is the member's own summary and the reader's copy of it,
+  // and the restore behind it puts back exactly those two. Only a message-scoped
+  // label change reaches here: trash and untrash carry no label change, and
+  // every conversation verb is sent for the row rather than for a member.
+  function actOnDetachedMember(messageId, action, change) {
+    var beforeMember = memberSummaries[messageId] || null
+    var beforeSelected = selectedMessage
+    applyMemberChange(messageId, action)
+    if (selectedId === messageId && selectedMessage)
+      selectedMessage = Model.applyLabelChange(selectedMessage, action)
+    pendingActionQuery = cacheKey
+    pendingAction = action
+    api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
+      root.pendingAction = ""
+      root.pendingActionQuery = ""
+      if (error) {
+        if (beforeMember) root.rememberMember(beforeMember)
+        if (root.selectedId === messageId) root.selectedMessage = beforeSelected
+        root.fail(error)
+        return
+      }
+      root.note(root.actionLabel(action))
+      root.refreshCounts()
+    })
     return true
   }
 
@@ -1664,16 +1799,28 @@ Item {
     return "Done"
   }
 
+  // The star of whatever this id is: a row, or a member of one open in the
+  // reader. A member has no row of its own — the list is one row per
+  // conversation — so looking only in `messages` made the reader's star a
+  // silent no-op on every stop but the representative's. What the button draws
+  // is what it toggles: a row's star is the conversation's, a member's is the
+  // one message's, and `act` sends each to the scope its verb has.
+  function summaryOf(id) {
+    var known = Model.messageById(messages, previewMessages, id)
+    if (known) return known
+    return memberSummaries[String(id || "")] || null
+  }
+
   function toggleStar(id) {
-    var index = Model.indexById(messages, id)
-    if (index < 0) return
-    act(id, messages[index].starred ? "unstar" : "star")
+    var summary = summaryOf(id)
+    if (!summary) return
+    act(id, summary.starred ? "unstar" : "star")
   }
 
   function toggleRead(id) {
-    var index = Model.indexById(messages, id)
-    if (index < 0) return
-    act(id, messages[index].unread ? "markRead" : "markUnread")
+    var summary = summaryOf(id)
+    if (!summary) return
+    act(id, summary.unread ? "markRead" : "markUnread")
   }
 
   function markAllRead() {
@@ -1682,9 +1829,21 @@ Item {
       note("Another action is still finishing")
       return false
     }
+    // Every unread row expanded into one flat batch, which the client chunks.
+    // Every counted member is sent rather than only the unread ones: the row
+    // does not know which members are unread, a redundant patch is harmless,
+    // and asking would cost a read per row.
     var ids = []
+    var rows = 0
+    var expanded = false
     for (var i = 0; i < messages.length; i++) {
-      if (messages[i].unread) ids.push(messages[i].id)
+      if (!messages[i].unread) continue
+      rows = rows + 1
+      var targets = Model.actionTargets(messages[i], "markRead")
+      if (targets.length > 1) expanded = true
+      for (var t = 0; t < targets.length; t++) {
+        if (ids.indexOf(targets[t]) < 0) ids.push(targets[t])
+      }
     }
     if (ids.length === 0) return false
     var actionQuery = cacheKey
@@ -1700,8 +1859,15 @@ Item {
       nextPageToken = ""
       actionToken = ""
     }
+    // The block is asserted on every row for the same reason one action asserts
+    // it: a row whose members were all sent the patch is a read conversation,
+    // and a row that recomputed only its own labels would stay bold because its
+    // block still said unread.
     var next = []
-    for (var j = 0; j < messages.length; j++) next.push(Model.applyLabelChange(messages[j], "markRead"))
+    for (var j = 0; j < messages.length; j++) {
+      next.push(Model.applyLabelChange(messages[j], "markRead",
+        Model.threadAfterAction(messages[j], "markRead")))
+    }
     var survives = Model.survivesAction(mailboxKey, "markRead")
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
@@ -1735,7 +1901,7 @@ Item {
           root.loadMessages(false, true, error)
         return
       }
-      root.note(Model.pluralize(ids.length, "message") + " marked read")
+      root.note(Model.markAllReadNote(rows, expanded))
       root.refreshCounts()
       if (interrupted && root.deferredLoadCleared(actionQuery)
           && root.cacheStore.loaded) {

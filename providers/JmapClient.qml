@@ -1356,20 +1356,38 @@ Item {
         root.hand(callback, null, error)
         return
       }
-      var patch = Jmap.patchFor(addLabelIds, removeLabelIds, root.roles)
+      // One patch per message, grouped: an action on a conversation row arrives
+      // here as every counted member, and where each member sits decides
+      // whether archiving or reporting it as spam reaches it at all. The
+      // membership map is the last list read's answer to that, and a member it
+      // does not name gets the plain single-message patch.
+      var plan = Threads.patchPlan(ids, addLabelIds, removeLabelIds,
+        root.roles, root.memberships)
       // A destination role this account has no mailbox for. The button is
       // already gone and `MailAccount.act` already refuses the key; this is the
       // layer underneath both, for a request that reached the client anyway —
       // an account whose Archive folder was deleted since the last read. It
       // fails *before* a request rather than after one, so the row goes back
       // and nothing on the server was touched.
-      if (typeof patch === "string") {
-        root.hand(callback, null, patch)
+      if (typeof plan === "string") {
+        root.hand(callback, null, plan)
         return
       }
-      root.applyPatch(ids, patch, callback, handle)
+      root.applyPlan(plan, root.namedCount(ids) > 1, callback, handle)
     })
     return handle
+  }
+
+  // How many distinct messages an action named, which is what decides whether a
+  // `notFound` is the answer or a member somebody else deleted.
+  function namedCount(ids) {
+    var source = Array.isArray(ids) ? ids : [ids]
+    var seen = []
+    for (var i = 0; i < source.length; i++) {
+      var id = String(source[i] || "")
+      if (id !== "" && seen.indexOf(id) < 0) seen.push(id)
+    }
+    return seen.length
   }
 
   // One patch over one id or many, `maxObjectsInSet` at a time.
@@ -1381,24 +1399,41 @@ Item {
   // restores the whole list on any error, so sending the remainder would only
   // widen the gap between what the screen says and what the server holds.
   function applyPatch(ids, patch, callback, existingHandle) {
+    return applyPlan([{ ids: Array.isArray(ids) ? ids : [ids], patch: patch }],
+      namedCount(ids) > 1, callback, existingHandle)
+  }
+
+  // The same, for a plan whose groups do not share one patch — an action on a
+  // conversation, where a member outside the Inbox is moved differently or not
+  // at all. Every group's chunks join the one sequence, so the request count is
+  // still what the page costs rather than what the conversation is long.
+  //
+  // `tolerateNotFound` is the whole action's, not the group's: a batch that
+  // grouped down to one id is still a batch, and a message somebody else
+  // deleted is not a failure of "mark these read".
+  function applyPlan(plan, tolerateNotFound, callback, existingHandle) {
     var handle = existingHandle || newHandle()
-    var wanted = []
-    var source = Array.isArray(ids) ? ids : [ids]
-    for (var i = 0; i < source.length; i++) {
-      var id = String(source[i] || "")
-      if (id !== "" && wanted.indexOf(id) < 0) wanted.push(id)
+    var groups = Array.isArray(plan) ? plan : []
+    var limit = Jmap.sessionLimit(root.session, "maxObjectsInSet",
+      Jmap.DEFAULT_OBJECTS_IN_SET)
+    var chunks = []
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g] || {}
+      if (Jmap.patchIsEmpty(group.patch)) continue
+      var wanted = []
+      var source = Array.isArray(group.ids) ? group.ids : []
+      for (var i = 0; i < source.length; i++) {
+        var id = String(source[i] || "")
+        if (id !== "" && wanted.indexOf(id) < 0) wanted.push(id)
+      }
+      var parts = Jmap.chunked(wanted, limit)
+      for (var c = 0; c < parts.length; c++) chunks.push({ ids: parts[c], patch: group.patch })
     }
-    if (wanted.length === 0 || Jmap.patchIsEmpty(patch)) {
+    if (chunks.length === 0) {
       hand(callback, null, "")
       return handle
     }
 
-    // One message the user pointed at is not a batch: a `notFound` there is the
-    // answer, while inside a batch it is a message somebody else deleted and
-    // not a failure of "mark these read".
-    var tolerateNotFound = wanted.length > 1
-    var chunks = Jmap.chunked(wanted,
-      Jmap.sessionLimit(root.session, "maxObjectsInSet", Jmap.DEFAULT_OBJECTS_IN_SET))
     var index = 0
 
     function next() {
@@ -1410,7 +1445,7 @@ Item {
       var chunk = chunks[index]
       index = index + 1
       var child = root.call([[
-        "Email/set", Jmap.emailSet(root.accountId, chunk, patch), "0"
+        "Email/set", Jmap.emailSet(root.accountId, chunk.ids, chunk.patch), "0"
       ]], null, function(responses, failure) {
         if (!root || handle.aborted) return
         if (failure) {
