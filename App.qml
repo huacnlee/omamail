@@ -1552,13 +1552,9 @@ Item {
             // from a member the action lands on the row the conversation was
             // opened from, which is where the reader came from. Which members
             // an action reaches from there is "Actions on a conversation row".
-            //
-            // A message-scoped verb never takes that route: star and unstar
-            // draw the open message's own state, so they act on it.
-            if (Model.actionScope(action) === "message") {
-              root.service.act(root.service.selectedId, action)
-              return
-            }
+            // The toolbar emits archive and trash and nothing else; the star
+            // is a button of its own, through `toggleStar`, which acts on the
+            // open message.
             if (!Conversation.holdsMember(root.service.selectedThread,
                 root.service.selectedId) || root.cursorId === "")
               root.cursorId = root.service.selectedId

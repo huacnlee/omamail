@@ -1788,6 +1788,11 @@ Item {
   // and the restore behind it puts back exactly those two. Only a message-scoped
   // label change reaches here: trash and untrash carry no label change, and
   // every conversation verb is sent for the row rather than for a member.
+  //
+  // One id whatever the verb's scope on a row: `unstar` from a row clears
+  // every counted member's star, because the row's star means "any member";
+  // from the reader it clears the one message on screen, because that is the
+  // star the button beside it drew.
   function actOnDetachedMember(messageId, action, change) {
     var beforeMember = memberSummaries[messageId] || null
     var beforeSelected = selectedMessage

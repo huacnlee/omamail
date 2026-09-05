@@ -6,7 +6,7 @@
   "author": "huacnlee",
   "license": "MIT",
   "homepage": "https://huacnlee.github.io/omamail/",
-  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, Proton Bridge, or your own server — several accounts at once, each with its own inbox and unread count. Keyboard-first, three columns when there is room and one when there is not, and it follows your theme. Meeting invitations are drawn as meetings you can answer, newsletters unsubscribe in one click, and remote images stay blocked until you ask.",
+  "description": "Email client for Omarchy: read, triage, and reply to Gmail, HEY and any JMAP or IMAP mailbox in a native window. Fastmail, iCloud, Outlook, Zoho, Proton Bridge, or your own server — several accounts at once, each with its own inbox and unread count. Keyboard-first, three columns when there is room and one when there is not, and it follows your theme. Meeting invitations are drawn as meetings you can answer, newsletters unsubscribe in one click, and remote images stay blocked until you ask.",
   "kinds": [
     "service",
     "bar-widget",
@@ -20,7 +20,7 @@
   },
   "barWidget": {
     "displayName": "Omamail",
-    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail, HEY and any IMAP mail server.",
+    "description": "Unread mail count in the bar; the inbox itself opens as its own window. Works with Gmail, HEY and any JMAP or IMAP mail server.",
     "category": "Communication",
     "aliases": [
       "mail",
@@ -28,6 +28,7 @@
       "gmail",
       "hey",
       "imap",
+      "jmap",
       "inbox",
       "e-mail",
       "mailbox",
