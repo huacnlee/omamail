@@ -68,7 +68,8 @@ var BINDINGS = [
   // then mean every ticked row rather than the one the cursor is on. List
   // only — in the reader there is one message and it is the one open.
   { id: "toggleCheck", keys: ["x"], contexts: ["list"],
-    group: "Acting", label: "Select or deselect the message" },
+    group: "Acting", label: "Select or deselect the message",
+    hint: { list: "select" } },
   { id: "checkAll", keys: ["Ctrl+A"], contexts: ["list"],
     group: "Acting", label: "Select every message loaded, or none" },
 

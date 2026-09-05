@@ -269,7 +269,16 @@ Item {
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
   // 0 means "proportional"; anything else is a width somebody dragged to.
+  // Where the two dividers were dragged to, or 0 for each pane's own default.
+  // Seeded from the service's window file and written back when a drag ends.
   property real listWidth: 0
+  property real sidebarWidth: 0
+  readonly property real sidebarMinWidth: Style.space(110)
+  readonly property real sidebarMaxWidth: Style.space(360)
+
+  function persistPaneWidths() {
+    if (service) service.setPaneWidths(sidebarWidth, listWidth)
+  }
 
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
@@ -470,6 +479,10 @@ Item {
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
     cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
+    if (service) {
+      sidebarWidth = service.sidebarWidth
+      listWidth = service.listWidth
+    }
     // Jobs finish while the window is shut; the rows say so as soon as it opens.
     if (service && typeof service.refreshAgentJobs === "function") service.refreshAgentJobs()
     Qt.callLater(function() { focusScope.applyContextFocus() })
@@ -806,7 +819,7 @@ Item {
   // are drawn from, so the number beside a row and the row a number opens are
   // the same fact rather than two.
   readonly property var sidebarSlots: service
-    ? Model.sidebarSlots(service.mailboxes, service.labels, 10) : []
+    ? Model.sidebarSlots(service.mailboxes, service.visibleLabels, 10) : []
 
   // What the header names: the mailbox open, or the label. Derived from the
   // same facts the rail draws its selected row from.
@@ -817,7 +830,7 @@ Item {
     : Model.currentScope("inbox", [], [], "", "", null)
 
   readonly property var switcherRows: service
-    ? Model.switcherRows(sidebarSlots, service.labels, scope) : []
+    ? Model.switcherRows(sidebarSlots, service.visibleLabels, scope) : []
 
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
@@ -985,6 +998,8 @@ Item {
       root.resumeHeldDraft()
     }) }
 
+    function onSidebarWidthChanged() { root.sidebarWidth = root.service.sidebarWidth }
+    function onListWidthChanged() { root.listWidth = root.service.listWidth }
     function onMessagesChanged() {
       root.cursorId = Model.cursorAfterReload(
         root.service ? root.service.messages : [], root.cursorId)
@@ -1465,7 +1480,10 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
+          width: root.sidebarCollapsed ? Style.space(44)
+            : (root.sidebarWidth > 0
+              ? Math.max(root.sidebarMinWidth, Math.min(root.sidebarMaxWidth, root.sidebarWidth))
+              : Style.space(148))
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
@@ -1487,6 +1505,7 @@ Item {
             root.service.selectLabel(name, labelId)
             root.backToList()
           }
+          onFolderToggled: function(path) { root.service.toggleFolder(path) }
         }
 
         // Narrow windows lose the sidebar; the same mailboxes come back as a
@@ -1509,9 +1528,46 @@ Item {
           onSelected: function(key) { root.goMailbox(key) }
         }
 
+        // The rail's own divider, the same shape as the list's: a hairline
+        // that meets the rail's edge and a few pixels of drag target beside it.
+        // Only while the rail is open — collapsed, its width is the glyph's.
+        Item {
+          id: sidebarSplitter
+          anchors.left: sidebar.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          visible: sidebar.visible && !root.sidebarCollapsed
+          z: 5
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = sidebar.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.sidebarWidth = Math.max(root.sidebarMinWidth,
+                Math.min(root.sidebarMaxWidth, grabbedWidth + moved))
+            }
+            onReleased: root.persistPaneWidths()
+            onDoubleClicked: {
+              root.sidebarWidth = 0
+              root.persistPaneWidths()
+            }
+          }
+        }
+
         Item {
           id: listColumn
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
@@ -1608,9 +1664,13 @@ Item {
               var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
               root.listWidth = grabbedWidth + moved
             }
+            onReleased: root.persistPaneWidths()
             // Back to the proportional default, which is what most people
             // want after one bad drag.
-            onDoubleClicked: root.listWidth = 0
+            onDoubleClicked: {
+              root.listWidth = 0
+              root.persistPaneWidths()
+            }
           }
         }
 
@@ -1719,7 +1779,8 @@ Item {
           anchors.top: parent.top
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           visible: root.calendarVisible && !root.showPage && !root.composing
           color: root.background
           z: 10

@@ -511,7 +511,7 @@ assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
 assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
-  sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
+  sidebarCollapsed: false, sidebarWidth: 0, listWidth: 0, collapsedFolders: [], bodyZoom: 1, bodyMode: "reader",
   alwaysShowImages: false, windowOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
@@ -519,6 +519,13 @@ assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plai
 assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "original")
 assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').sidebarWidth, 180)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').listWidth, 420)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-3,"listWidth":"wide"}').sidebarWidth, 0,
+  "a bad width is a default, not a pane of no width")
+assert.strictEqual(model.paneWidth(99999), 4000)
+assert.strictEqual(model.paneWidth(0), 0)
+deepEqual(model.windowPrefs('{"collapsedFolders":["Archive","",3,"Archive"]}').collapsedFolders, ["Archive", "3"])
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
 
 // ------------------------------------------------- what a detail read carries
@@ -895,4 +902,51 @@ assert.strictEqual(binned.inTrash, false)
   assert.strictEqual(model.batchNote(1, "Moved to Todo"), "1 message moved to Todo")
   assert.strictEqual(model.selectionStatus(0), "")
   assert.strictEqual(model.selectionStatus(2), "2 selected")
+}
+
+// ------------------------------------------------------------ folder tree
+{
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive/2025", name: "Archive/2025", rawName: "Archive/2025", delimiter: "/", unread: 2 },
+    { id: "Archive", name: "Archive", rawName: "Archive", delimiter: "/", unread: 1 },
+    { id: "Archive/2026/Q1", name: "Archive/2026/Q1", rawName: "Archive/2026/Q1", delimiter: "/", unread: 4 },
+    { id: "Receipts", name: "Receipts", rawName: "Receipts", delimiter: "/", unread: 0 },
+    { id: "Label_3", name: "todo", rawName: "todo", unread: 1 }]
+
+  const open = model.labelTree(labels, [])
+  deepEqual(open.map(function (r) { return [r.path, r.depth, r.selectable, r.hasChildren, r.unread] }), [
+    ["Archive", 0, true, true, 1],
+    ["Archive/2025", 1, true, false, 2],
+    ["Archive/2026", 1, false, true, 0],
+    ["Archive/2026/Q1", 2, true, false, 4],
+    ["Receipts", 0, true, false, 0],
+    ["todo", 0, true, false, 1]],
+    "children hang under parents, a missing ancestor is a row of its own, siblings sort by name")
+  assert.strictEqual(open[0].name, "Archive")
+  assert.strictEqual(open[3].name, "Q1", "a row shows its own segment")
+  assert.strictEqual(open[3].id, "Archive/2026/Q1", "and keeps the whole id")
+
+  const folded = model.labelTree(labels, ["Archive"])
+  deepEqual(folded.map(function (r) { return r.path }), ["Archive", "Receipts", "todo"])
+  assert.strictEqual(folded[0].expanded, false)
+  assert.strictEqual(folded[0].unread, 7, "a folded parent counts its subtree")
+
+  const partly = model.labelTree(labels, ["Archive/2026"])
+  deepEqual(partly.map(function (r) { return r.path }), ["Archive", "Archive/2025", "Archive/2026", "Receipts", "todo"])
+  assert.strictEqual(partly[2].unread, 4)
+
+  // A server delimiter that is not a slash, and a Gmail label with none.
+  const dotted = model.labelTree([
+    { id: "a.b", name: "a.b", delimiter: "." }, { id: "a", name: "a", delimiter: "." },
+    { id: "x/y", name: "x/y" }], [])
+  deepEqual(dotted.map(function (r) { return [r.path, r.depth] }), [["a", 0], ["a.b", 1], ["x", 0], ["x/y", 1]])
+
+  deepEqual(model.visibleLabels(labels, ["Archive"]).map(function (l) { return l.id }),
+    ["Archive", "Receipts", "Label_3"], "the digits follow what is on screen")
+  deepEqual(model.visibleLabels(labels, []).map(function (l) { return l.id }),
+    ["Archive", "Archive/2025", "Archive/2026/Q1", "Receipts", "Label_3"])
+  deepEqual(model.togglePath(["Archive"], "Archive"), [])
+  deepEqual(model.togglePath([], "Archive/2026"), ["Archive/2026"])
+  deepEqual(model.labelTree(null, null), [])
 }

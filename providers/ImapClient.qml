@@ -537,6 +537,9 @@ Item {
           id: folder.name,
           name: Imap.decodeMailbox(folder.name),
           rawName: folder.name,
+          // What the server separates a hierarchy with, so the sidebar can
+          // fold "Archive/2026" under "Archive" without guessing the slash.
+          delimiter: String(folder.delimiter || ""),
           // "system" means the mailbox row already offers it, so the sidebar
           // lists only the rest below. Judged on SPECIAL-USE rather than on the
           // structural flags every server sends on every folder.

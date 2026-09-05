@@ -362,12 +362,34 @@ function clampZoom(value) {
     Math.round(zoom * ZOOM_STEPS_PER_UNIT) / ZOOM_STEPS_PER_UNIT))
 }
 
+// A dragged pane width as stored: a whole number of pixels, or 0 for "never
+// dragged". Anything else — a string, a negative, NaN from an old file — is 0,
+// so a bad value costs a default rather than a pane of no width.
+function paneWidth(value) {
+  var n = Math.floor(Number(value))
+  if (!isFinite(n) || n <= 0) return 0
+  return Math.min(n, 4000)
+}
+
+function stringList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = String(list[i] === undefined || list[i] === null ? "" : list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
 function windowPrefs(raw) {
   var parsed = null
   try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
   if (!parsed || typeof parsed !== "object") {
     return {
       sidebarCollapsed: false,
+      sidebarWidth: 0,
+      listWidth: 0,
+      collapsedFolders: [],
       bodyZoom: 1,
       bodyMode: "reader",
       alwaysShowImages: false,
@@ -379,6 +401,9 @@ function windowPrefs(raw) {
     bodyMode = parsed.plainTextForced === true ? "plain" : "reader"
   return {
     sidebarCollapsed: parsed.sidebarCollapsed === true,
+    sidebarWidth: paneWidth(parsed.sidebarWidth),
+    listWidth: paneWidth(parsed.listWidth),
+    collapsedFolders: stringList(parsed.collapsedFolders),
     bodyZoom: clampZoom(parsed.bodyZoom),
     bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
@@ -1185,4 +1210,98 @@ function batchNote(count, actionLabel) {
 function selectionStatus(count) {
   var n = Math.max(0, Math.floor(Number(count) || 0))
   return n === 0 ? "" : n + " selected"
+}
+
+// ------------------------------------------------------------ folder tree
+
+// The rail's labels as a tree: "Archive/2026" sits under "Archive", indented,
+// and a parent can be folded. The delimiter is the server's own where the
+// provider reported one and "/" otherwise, which is what Gmail nests with.
+//
+// An ancestor no label names — a folder the server marked \Noselect, or a
+// Gmail label whose parent was never created — is still a row, because its
+// children have to hang from something; it has no id, opens nothing, and
+// folds like any other parent.
+//
+// Rows come back depth-first, siblings in name order, with the rows under a
+// folded parent left out. `unread` on a folded parent is its subtree's, so
+// folding a queue does not hide that it has mail in it.
+function labelTree(labels, collapsedPaths) {
+  var all = Array.isArray(labels) ? labels : []
+  var folded = Array.isArray(collapsedPaths) ? collapsedPaths : []
+  var root = { children: {}, order: [] }
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var delimiter = String(label.delimiter || "") || "/"
+    var full = String(label.name || label.rawName || "")
+    if (full === "") continue
+    var parts = full.split(delimiter)
+    var node = root
+    var path = ""
+    for (var p = 0; p < parts.length; p++) {
+      var part = parts[p]
+      if (part === "" && p > 0) continue
+      path = path === "" ? part : path + delimiter + part
+      if (!node.children[part]) {
+        node.children[part] = { name: part, path: path, label: null,
+          unread: 0, children: {}, order: [] }
+        node.order.push(part)
+      }
+      node = node.children[part]
+    }
+    node.label = label
+    node.unread = Math.max(0, Math.floor(Number(label.unread) || 0))
+  }
+
+  function subtreeUnread(node) {
+    var sum = node.unread
+    for (var c = 0; c < node.order.length; c++) sum += subtreeUnread(node.children[node.order[c]])
+    return sum
+  }
+
+  var out = []
+  function walk(node, depth) {
+    var names = node.order.slice().sort(function(a, b) {
+      var left = a.toLowerCase(), right = b.toLowerCase()
+      return left < right ? -1 : (left > right ? 1 : 0)
+    })
+    for (var n = 0; n < names.length; n++) {
+      var child = node.children[names[n]]
+      var hasChildren = child.order.length > 0
+      var expanded = !hasChildren || folded.indexOf(child.path) < 0
+      out.push({
+        id: child.label ? String(child.label.id || "") : "",
+        rawName: child.label ? String(child.label.rawName || child.label.name || "") : "",
+        name: child.name,
+        path: child.path,
+        depth: depth,
+        hasChildren: hasChildren,
+        expanded: expanded,
+        selectable: !!child.label,
+        unread: expanded ? child.unread : subtreeUnread(child)
+      })
+      if (expanded) walk(child, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return out
+}
+
+// The labels in the order the rail draws them, folded rows left out — what
+// the Ctrl digits number, so a digit never opens a row that is not on screen.
+function visibleLabels(labels, collapsedPaths) {
+  var rows = labelTree(labels, collapsedPaths)
+  var all = Array.isArray(labels) ? labels : []
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].selectable) continue
+    var index = indexById(all, rows[i].id)
+    if (index >= 0) out.push(all[index])
+  }
+  return out
+}
+
+function togglePath(paths, path) {
+  return toggleId(paths, path)
 }

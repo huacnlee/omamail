@@ -42,11 +42,18 @@ Column {
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "agent", title: "Agent", y: agentHeading.y },
     { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
     { key: "calendars", title: "Calendars", y: calendarsSection.y },
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+
+  function saveAgentCommand() {
+    if (!root.service) return
+    var next = String(agentEdit.text || "").trim()
+    if (next !== root.service.agentCommand) root.service.setAgentCommand(next)
+  }
 
   function signatureAccount(id) {
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -608,6 +615,62 @@ Column {
     }
 
     Component.onDestruction: root.saveSignature()
+  }
+
+  // ----------------------------------------------------------------- agent
+
+  Text {
+    id: agentHeading
+    text: "AGENT"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  // The default agent: a command line, and nothing else. With it empty there
+  // is no agent button anywhere; docs/AGENT.md says what the command is
+  // handed and what it is expected to do.
+  Column {
+    objectName: "settings-agent-section"
+    width: parent.width
+    spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      text: "Default agent command"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    TextField {
+      id: agentEdit
+      objectName: "settings-agent-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "claude -p"
+      text: root.service ? root.service.agentCommand : ""
+      onActiveFocusChanged: if (!activeFocus) root.saveAgentCommand()
+      onAccepted: root.saveAgentCommand()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "A command that reads a prompt on stdin and answers on stdout — "
+        + "claude -p, codex exec, a script of your own. With one set, every "
+        + "message gains an agent button and Alt+G, and the agent runs in the "
+        + "background as a systemd user unit, reading and writing mail through "
+        + "himalaya. Leave it empty for no agent."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
   }
 
   // ------------------------------------------------------------- mailboxes
