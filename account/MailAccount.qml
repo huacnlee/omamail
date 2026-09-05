@@ -1720,6 +1720,9 @@ Item {
     var payload = Mail.buildSendPayload({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
+      // What the generated Message-ID takes its domain from when the draft
+      // names no From of its own.
+      accountAddress: ownAddress,
       to: String(values.to || "").trim(),
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
@@ -1728,9 +1731,9 @@ Item {
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
       threadId: values.threadId,
       inReplyTo: values.inReplyTo,
-      references: values.references
+      references: values.references,
+      draftId: String(values.draftId || "")
     })
-    payload.draftId = String(values.draftId || "")
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
     })
@@ -1766,6 +1769,9 @@ Item {
     var payload = Mail.buildSendPayload({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
+      // What the generated Message-ID takes its domain from when the compose
+      // window states no From and the provider fills one in for itself.
+      accountAddress: ownAddress,
       to: to,
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
@@ -1774,7 +1780,11 @@ Item {
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
       threadId: values.threadId,
       inReplyTo: values.inReplyTo,
-      references: values.references
+      references: values.references,
+      // The draft this send replaces, carried through the undo window with the
+      // rest of the payload. Dropping it here is what left a sent message's
+      // draft behind on every provider.
+      draftId: String(values.draftId || "")
     })
 
     var queued = Outbox.schedule(payload, Date.now(), undoSendSeconds)
@@ -1831,6 +1841,7 @@ Item {
       // them would have written this one.
       from: answeringAs,
       fromName: answeringName,
+      accountAddress: ownAddress,
       to: fields.to,
       subject: fields.subject,
       body: fields.body,
@@ -1906,6 +1917,7 @@ Item {
         // an alias has no reason to act on a request from anywhere else.
         from: receivedAsAddress,
         fromName: receivedAsName,
+        accountAddress: ownAddress,
         to: info.mail.to,
         subject: info.mail.subject,
         body: info.mail.body

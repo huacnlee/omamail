@@ -963,6 +963,86 @@ function calendarMethod(value) {
   return text === "" ? "REPLY" : text.substring(0, 20)
 }
 
+// ------------------------------------- the two headers a message carries out
+//
+// A message is dated and identified here rather than by whatever sends it,
+// because the four providers disagree about who writes these. Gmail keeps or
+// replaces its own and an SMTP server leaves a header that is already there
+// alone — but a JMAP server stores and delivers exactly the bytes it was
+// handed, so a message that leaves without them arrives undated and with
+// nothing for a reply to thread against.
+
+// A date, whichever realm built it. `instanceof Date` is asked of a prototype
+// chain rather than of the object, and answers no for a Date that crossed a
+// boundary — which the node tests do cross, loading this file into a vm
+// context of their own. Asking the object is the question that was meant.
+function isDate(value) {
+  return !!value && typeof value === "object" && typeof value.getTime === "function"
+}
+
+// The date, in the form RFC 5322 states it in, with the sender's own offset
+// rather than as UTC. The offset is the part that says what time of day it was
+// where the message was written, and a reader elsewhere is shown their own
+// clock from it either way.
+function rfc5322Date(when) {
+  var date = isDate(when) ? when : new Date(Number(when) || 0)
+  // getTimezoneOffset is minutes to *add* to local time to reach UTC, so it
+  // runs the opposite way from the sign a header carries.
+  var offset = -date.getTimezoneOffset()
+  var minutes = Math.abs(offset)
+  return WEEKDAYS[date.getDay()] + ", " + pad(date.getDate()) + " "
+    + MONTHS[date.getMonth()] + " " + date.getFullYear() + " "
+    + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":"
+    + pad(date.getSeconds()) + " " + (offset < 0 ? "-" : "+")
+    + pad(Math.floor(minutes / 60)) + pad(minutes % 60)
+}
+
+// The clock, unless the caller stated a date — a string is the header value
+// itself, a Date or an epoch is formatted. Stated so a test can assert the
+// exact header, and for nothing else.
+function dateValue(given, when) {
+  if (typeof given === "string" && headerSafe(given).trim() !== "")
+    return headerSafe(given).trim()
+  if (isDate(given)) return rfc5322Date(given)
+  if (typeof given === "number" && isFinite(given) && given > 0)
+    return rfc5322Date(new Date(given))
+  return rfc5322Date(when)
+}
+
+// The domain a generated message id belongs to. Found with a pattern rather
+// than by splitting on "@", because the value has already been through
+// `headerSafe` — an address that arrived carrying a second one is still one
+// string, and the sender is the first of them.
+function addressDomain(value) {
+  var text = headerSafe(value).trim()
+  var angled = /<([^>]*)>/.exec(text)
+  if (angled) text = angled[1]
+  var found = /@([A-Za-z0-9.\-]+)/.exec(text)
+  if (!found) return ""
+  return found[1].toLowerCase().replace(/^[.\-]+/, "").replace(/[.\-]+$/, "")
+}
+
+// `<epochms.random@domain>`: unique without asking anything about the machine
+// it was written on. The domain is the one the message says it is from, or the
+// one the mailbox is signed in as when the From line is left for the provider
+// to fill in — Gmail writes its own and the IMAP client puts the account on
+// the envelope instead, so a compose window can legitimately send no From at
+// all.
+//
+// A stated id is cut down the way a reference is, because it lands in the same
+// kind of header, and is bracketed if it did not arrive bracketed.
+function messageIdValue(given, when, from, accountAddress) {
+  var stated = referenceValue(given)
+  if (stated !== "") {
+    if (stated.charAt(0) === "<" && stated.charAt(stated.length - 1) === ">")
+      return stated
+    return "<" + stated.replace(/[<>]/g, "") + ">"
+  }
+  var domain = addressDomain(from) || addressDomain(accountAddress) || "localhost"
+  var random = Math.floor(Math.random() * 0x100000000).toString(36)
+  return "<" + when.getTime() + "." + random + "@" + domain + ">"
+}
+
 // Which way a message being sent runs.
 //
 // Qt resolves a compose field from the text already in it, so a writer sees
@@ -1038,6 +1118,9 @@ function pushBodyPart(lines, body, direction, boundary) {
 
 function buildRawMessage(fields) {
   var values = fields || {}
+  // One reading of the clock for both headers, so a message cannot be dated a
+  // millisecond apart from the id that names it.
+  var now = new Date()
   var lines = []
   if (values.from) lines.push(fromHeader(values.from, values.fromName))
   lines.push(foldHeader("To", values.to || ""))
@@ -1049,6 +1132,12 @@ function buildRawMessage(fields) {
     lines.push("In-Reply-To: " + inReplyTo)
     lines.push("References: " + (referenceValue(values.references) || inReplyTo))
   }
+  // Behind the addressing rather than in front of it: RFC 5322 makes header
+  // order insignificant outside the trace fields, so the raw form still opens
+  // with the From line everything that reads one here already expects.
+  lines.push("Date: " + dateValue(values.date, now))
+  lines.push("Message-ID: "
+    + messageIdValue(values.messageId, now, values.from, values.accountAddress))
   lines.push("MIME-Version: 1.0")
 
   var calendar = values.calendar && String(values.calendar.text || "") !== ""
@@ -1120,6 +1209,12 @@ function buildRawMessage(fields) {
 function buildSendPayload(fields) {
   var payload = { raw: encodeBase64Url(buildRawMessage(fields)) }
   if (fields && fields.threadId) payload.threadId = String(fields.threadId)
+  // The draft this message replaces, so a provider that can destroy it in the
+  // same request as the send or the save does not leave the old copy behind.
+  // Always present and empty when the compose window was not opened from one,
+  // because a client reading it asks whether there is one to destroy rather
+  // than whether the field exists.
+  payload.draftId = String((fields && fields.draftId) || "")
   var files = Array.isArray(fields && fields.attachments) ? fields.attachments : []
   var paths = []
   for (var i = 0; i < files.length; i++) {
