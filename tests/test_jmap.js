@@ -480,20 +480,52 @@ assert.strictEqual(provider.webHomeUrl(), "", "and no front door to open")
 
 // The ceiling. An account may refuse archive, spam or send from what its own
 // session and mailbox list say; nothing may add one back.
-deepEqual(provider.capabilities, {
+//
+// Declared wholesale here, because this literal is the provider's own and a
+// whole-object check is what catches a capability quietly added to or dropped
+// from it.
+deepEqual(description.CAPABILITIES, {
   labels: false,
   threads: true,
+  conversations: true,
   archive: true,
   spam: true,
   star: true,
   batch: true,
-  web: false,
-  webBox: false,
   search: true,
-  send: true
+  send: true,
+  web: false,
+  webBox: false
 })
-assert.strictEqual(description.CAPABILITIES.conversations, true,
-  "one row per conversation, from the server's own thread id")
+
+// And value by value through `define`, which is what the panel actually asks.
+// Not as a whole object: the registry's vocabulary is shared with every other
+// provider and grows when one of them needs a new word — `conversations` is
+// exactly that, arriving with the capability refinement hook — and a provider's
+// test that failed on somebody else's addition would be asserting the
+// registry's business rather than its own.
+assert.strictEqual(provider.capabilities.labels, false,
+  "a message is in one mailbox: the label strip was built for Gmail")
+assert.strictEqual(provider.capabilities.threads, true, "the thread id is the server's own")
+assert.strictEqual(provider.capabilities.archive, true)
+assert.strictEqual(provider.capabilities.spam, true,
+  "unlike IMAP: a move into Junk is a verb some servers really do learn from")
+assert.strictEqual(provider.capabilities.star, true)
+assert.strictEqual(provider.capabilities.batch, true)
+assert.strictEqual(provider.capabilities.search, true)
+assert.strictEqual(provider.capabilities.send, true)
+assert.strictEqual(provider.capabilities.web, false, "no web UI this plugin knows the address of")
+assert.strictEqual(provider.capabilities.webBox, false)
+
+// `conversations` is the word arriving with that hook, and this is the one
+// assertion that has to be written for both trees: absent from the registry's
+// vocabulary it is `undefined` here, and present it must be the `true` the
+// description declares — a registry that learned the word and dropped this
+// provider's answer would be one row per message on a mailbox that has threads.
+if (provider.capabilities.conversations !== undefined) {
+  assert.strictEqual(provider.capabilities.conversations, true,
+    "one row per conversation, from the server's own thread id")
+}
 
 // IMAP's eight rows, keyed on RFC 8621 roles rather than on folder names, and
 // the last three optional because an account may have no such mailbox at all.
