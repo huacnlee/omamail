@@ -102,6 +102,8 @@ test-shell: test-shell-portable test-shell-libcurl
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
+	python3 tests/test_curl_config.py
+	python3 tests/test_public_http.py
 	python3 tests/test_contacts.py
 	python3 tests/test_qml_names.py
 	python3 tests/test_qml_text_format.py
@@ -111,8 +113,6 @@ test-shell-portable:
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
-	bash tests/test_unsubscribe_transport.sh
-	bash tests/test_image_fetch.sh
 	bash tests/test_attachment_open.sh
 	bash tests/test_attachment_save.sh
 	bash tests/test_attachment.sh

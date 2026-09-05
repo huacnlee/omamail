@@ -350,6 +350,17 @@ key. What matters while working:
   them: "Sent" is "Sent Items" on Exchange and "[Gmail]/Sent Mail" on Gmail, and
   a client that guessed would create folders rather than find them.
 
+## Review: security is a release-blocking requirement
+
+- Every review includes a separate security verdict: **PASS**, **BLOCK**, or **NOT VERIFIED**. Functional correctness, appearance and passing general tests cannot compensate for a security failure. A change that introduces or leaves its affected security boundary unverified must not be approved or released; name the missing evidence rather than assuming safety.
+- Trace untrusted data from its author to its final consumer: mail headers and bodies, MIME names, server responses, URLs, credentials and persisted settings. Record each decoding, normalization, interpolation and process boundary. Validate the exact bytes consumed, not just a normalized interpretation. Base64 transports bytes; it does not make them safe for shell, curl config, IMAP, HTTP headers or HTML.
+- Every value interpolated into curl config must pass `scripts/curl-config.sh` before any curl process starts. Validate the entire batch, including later commands and recipients. Reject control characters and noncanonical text, including NUL and trailing LF that shell command substitution would otherwise discard. Keep legitimate multiline mail/event bodies out of config values. Quoting a string and escaping backslashes are insufficient; refusing inside the left side of `build_config | curl` is too late.
+- Invoke curl with `-q` as its first argument and `--globoff` so a user's default config and URL expansion cannot silently change the reviewed request. Review redirects, protocol restrictions, TLS verification, credential scope, deadlines and response-size bounds independently. An error or a failure status does not prove no earlier or later request happened.
+- Public-host spelling is not proof of a public destination. For sender-controlled network requests, review raw and decoded URL semantics, DNS answers, the actual connected address, proxies and redirects. `Html.isPublicHost` checks names only; `scripts/public_http.py` rejects non-public DNS answers and binds the connection to a checked numeric address while retaining TLS verification against the original hostname. A preflight lookup followed by independent resolution is not sufficient. No environment switch or production fallback may bypass this policy. Configured mail/CalDAV servers can legitimately be private and have a different trust boundary.
+- Credentials must stay out of argv, logs, world-readable settings and attacker-selected origins. Resource-bearing HTML and attachment paths are security boundaries regardless of which appearance or convenience option enabled them. Never trade these guarantees for compatibility or silently fall back to a less constrained path.
+- Security fixes require regression tests that fail on the vulnerable behavior and verify the forbidden effect did not happen: no process/network request, no credential disclosure, no file write. Cover alternate providers and sibling call sites, CR/LF/CRLF, trailing controls, NUL, malformed encoding and valid inputs with quotes, backslashes, Unicode and legitimate multiline bodies. Use controlled local targets and synthetic credentials; never real mailboxes or secrets.
+- Separate confirmed exploit behavior, a demonstrated boundary violation, and an unverified delivery hypothesis. Report tested runtime versions and environmental gaps. A fabricated Gmail resource is not evidence that Gmail delivers the same bytes; a curl stub is not evidence of curl's parsing or network behavior. Track pre-existing limitations explicitly and do not describe a scoped fix as a complete security audit.
+
 ## Secrets
 
 - Refresh tokens go to GNOME Keyring over stdin, never through a command line.
@@ -381,14 +392,11 @@ key. What matters while working:
   `XMLHttpRequest` follows a 3xx by itself and re-sends the request, body
   intact, wherever that answer points. Measured, not assumed: a loopback target
   answering `302 Location: /landed` recorded the POST arriving there. So the
-  one-click unsubscribe goes out through `scripts/unsubscribe.sh`, which is
-  curl, which follows nothing unless told to — and a 3xx is reported as a list
-  that did not unsubscribe rather than as an address to chase.
+  one-click unsubscribe goes out through `scripts/unsubscribe.py`, whose HTTP client never follows redirects. A 3xx is reported as a list that did not unsubscribe rather than as an address to chase. No sender-controlled value is interpolated into a shell or curl config.
 - **Qt never fetches a remote message image itself.** Its loader takes no policy
   from QML, follows redirects, and draws a broken placeholder while a resource
-  is pending. Once the reader has allowed images, `scripts/image-fetch.sh`
-  fetches each approved public HTTP(S) source with curl, no redirects, a size
-  ceiling and deadlines. Only a successful supported image comes back as a
+  is pending. Once the reader has allowed images, `scripts/image-fetch.py`
+  fetches each approved public HTTP(S) source through `public_http.py`, with checked DNS answers, pinned connections, no redirects, a size ceiling and a whole-process request deadline covering DNS too. The declared image type must match a supported raster signature; an SVG labelled PNG is refused. Only a successful supported image comes back as a
   `data:` URI; until then the source is absent from both rich documents. Do not
   hand the original remote URL back to Qt or replace this with a QML request,
   because that reopens both redirect SSRF and the loading-placeholder defect.

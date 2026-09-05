@@ -9,20 +9,15 @@ fail() { printf '%s\n' "$1" >&2; exit 2; }
 decode() { printf '%s' "$1" | base64 -d 2>/dev/null || fail 'calendar-delete.sh: bad base64 field'; }
 escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
+. "$(dirname "$0")/curl-config.sh"
+
 IFS= read -r line || fail 'calendar-delete.sh: no request on stdin'
 # shellcheck disable=SC2086
 set -- $line
 [ $# -eq 2 ] || fail 'calendar-delete.sh: expected URL and credentials'
+validate_config_fields "$@"
 url=$(decode "$1")
 credentials=$(decode "$2")
-# Each decoded field becomes one quoted line of the curl config; a line break
-# in one would smuggle in more options, so it is refused before curl runs.
-# (The newline is a literal: command substitution would strip it.)
-nl='
-'
-cr=$(printf '\r')
-case $url in *"$nl"* | *"$cr"*) fail 'calendar-delete.sh: URL may not span lines' ;; esac
-case $credentials in *"$nl"* | *"$cr"*) fail 'calendar-delete.sh: credentials may not span lines' ;; esac
 case "$url" in https://*) ;; *) fail 'calendar-delete.sh: CalDAV requires HTTPS' ;; esac
 
 build_config() {
@@ -34,5 +29,5 @@ build_config() {
   printf 'proto-redir = "=https"\n'
 }
 
-build_config | curl --config - --silent --show-error --fail-with-body \
+build_config | curl -q --globoff --config - --silent --show-error --fail-with-body \
   --max-time 60 --connect-timeout 20 >/dev/null
