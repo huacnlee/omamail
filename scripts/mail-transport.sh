@@ -49,8 +49,7 @@ decode() {
   printf '%s' "$1" | base64 -d 2>/dev/null || fail 'mail-transport.sh: bad base64 field'
 }
 
-# curl's config format quotes with "..." and escapes with a backslash. Only two
-# characters need it, and both turn up in real passwords.
+# Controls are refused before decoding; quotes and backslashes are escaped.
 escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
@@ -63,6 +62,8 @@ encode() {
   base64 < "$1" | tr -d '\n'
 }
 
+. "$(dirname "$0")/curl-config.sh"
+
 IFS= read -r line || fail 'mail-transport.sh: no request on stdin'
 [ -n "$line" ] || fail 'mail-transport.sh: empty request'
 
@@ -73,6 +74,17 @@ set -- $line
 [ $# -ge 4 ] || fail 'mail-transport.sh: usage: <mode> <url> <credentials> <arg>...'
 
 mode=$1
+# Validate ALL config fields before curl can see even the first command. Only
+# message bodies bypass this check: they are uploaded as files, never config.
+# APPEND flags (field 5) remain protected, just like URLs and credentials.
+field_number=0
+for field in "$@"; do
+  field_number=$((field_number + 1))
+  case "$mode:$field_number" in
+    *:1|smtp:5|imap-append:4) continue ;;
+  esac
+  validate_config_fields "$field"
+done
 # `imap-id` carries two URLs. The first section has to reach the server without
 # naming a mailbox: curl opens a URL's path before the first command it was
 # given, so a path there is a SELECT that nothing can be placed in front of,
@@ -171,6 +183,8 @@ else
   first=1
   for argument in "$@"; do
     [ "$first" = "1" ] || printf 'next\n'
+    # globoff is per-transfer too: next would otherwise expand later URLs.
+    printf 'globoff\n'
     # In imap-id the opening command runs against the server rather than a
     # mailbox, so that it lands in front of the SELECT curl derives from the
     # path. Every later section names the mailbox as usual.
@@ -220,7 +234,7 @@ fi
 # curl is the last stage, so `$?` is curl's own exit code rather than the
 # config builder's.
 attempt_curl() {
-  build_config "$@" | curl \
+  build_config "$@" | curl -q --globoff \
     --fail-early \
     --config - \
     --silent \

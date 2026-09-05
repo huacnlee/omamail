@@ -1176,7 +1176,7 @@ Item {
     var source = String(queue.shift())
     imageFetchQueue = queue
     var request = imageFetchComponent.createObject(root, {
-      command: [pluginDir + "/scripts/image-fetch.sh"],
+      command: ["python3", pluginDir + "/scripts/image-fetch.py"],
       requestLine: Mail.encodeBase64(source)
     })
     imageFetchProcess = request
@@ -2098,14 +2098,10 @@ Item {
   // are checked, and it borrows the judgement that decides whether a message
   // may load a picture.
   //
-  // **Sent by curl rather than by XMLHttpRequest, because a gate that judges
-  // only the first address is not a gate.** Qt's XHR follows a 3xx by itself
-  // and re-sends the POST, body intact, wherever that answer points — measured
-  // against a loopback target, which recorded the POST arriving after a single
-  // `302`. So the address the sender wrote would be checked, and a different
-  // address entirely would be the one this machine connected to, from inside
-  // the user's own network. curl follows nothing unless told to, and
-  // `scripts/unsubscribe.sh` tells it twice not to.
+  // Qt's XHR follows redirects without rechecking the destination. The Python
+  // worker instead resolves and checks every IP, connects to that exact answer
+  // while retaining the original TLS hostname, and never follows a redirect.
+  // URL bytes remain data throughout: there is no shell or curl config.
   //
   // The reply is never read beyond its status. It is a document from whoever
   // sent the mail, and the only question being asked of it is whether the
@@ -2117,7 +2113,7 @@ Item {
     }
     unsubscribing = true
     var request = unsubscribeComponent.createObject(root, {
-      command: [pluginDir + "/scripts/unsubscribe.sh"],
+      command: ["python3", pluginDir + "/scripts/unsubscribe.py"],
       requestLine: [Mail.encodeBase64(String(url)),
         Mail.encodeBase64(Unsub.postContentType()),
         Mail.encodeBase64(Unsub.postBody())].join(" ")
@@ -2197,7 +2193,7 @@ Item {
       }
 
       onExited: function(exitCode) {
-        // "<curl exit code> <http status>", and nothing else is read.
+        // "<transport error code> <http status>", and nothing else is read.
         var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
         var code = Math.floor(Number(parts[0]))
         var status = Math.floor(Number(parts[1]))

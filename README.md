@@ -111,8 +111,8 @@ Once the plugin is enabled, Omamail handles `mailto:` links. Clicking an
 address in a browser, a PDF, or a notification opens compose here.
 `xdg-open mailto:you@example.com` is the check.
 
-Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open` and
-`curl` — all of which Omarchy already ships. A HEY mailbox additionally needs
+Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open`, `python3` and
+`curl`. Python handles remote images, one-click unsubscribe and attachments; curl handles IMAP, SMTP and CalDAV. A HEY mailbox additionally needs
 `hey`; see below.
 
 ## Mailboxes it can open

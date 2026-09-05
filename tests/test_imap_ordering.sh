@@ -199,6 +199,35 @@ case "$(commands)" in
   *'UID FETCH'*) fail "--fail-early must stop the run at the BAD, saw: $(commands)" ;;
 esac
 
+# --next resets --globoff. A URL in a later section must never expand into
+# requests for other folders. Use real curl: checking argv misses the reset.
+for path in '{one,two}' '[1-2]'; do
+  start_server ok
+  printf 'imap-id %s %s %s %s %s %s\n' \
+    "$(b64 "imap://127.0.0.1:$port")" "$(b64 "imap://127.0.0.1:$port/$path")" \
+    "$(b64 'jane:pw')" "$(b64 'ID NIL')" \
+    "$(b64 'UID FETCH 1:* (UID)')" "$(b64 'NOOP')" \
+    | ./scripts/mail-transport.sh > "$work/out" 2>/dev/null || true
+  stop_server
+  case "$(commands)" in
+    *SELECT*|*'UID FETCH'*|*NOOP*) fail "a raw glob must not select or act on expanded folders, saw: $(commands)" ;;
+  esac
+  [ "$(head -1 "$work/out")" != "0" ] || fail "curl must refuse the raw folder URL"
+done
+
+# The provider percent-encodes folder names. A legitimate name containing
+# braces must still select exactly that mailbox and run each command once.
+start_server ok
+printf 'imap-id %s %s %s %s %s %s\n' \
+  "$(b64 "imap://127.0.0.1:$port")" "$(b64 "imap://127.0.0.1:$port/%7Bone%2Ctwo%7D")" \
+  "$(b64 'jane:pw')" "$(b64 'ID NIL')" \
+  "$(b64 'UID FETCH 1:* (UID)')" "$(b64 'NOOP')" \
+  | ./scripts/mail-transport.sh > "$work/out" 2>/dev/null || true
+stop_server
+[ "$(head -1 "$work/out")" = "0" ] || fail "an encoded folder name must succeed"
+[ "$(commands)" = 'CAPABILITY|LOGIN|ID NIL|SELECT "{one,two}"|UID FETCH 1:* (UID)|NOOP|LOGOUT|' ] \
+  || fail "an encoded folder must remain literal across all sections, saw: $(commands)"
+
 # The gate itself lives in QML, where none of the above can reach it.
 python3 - <<'SRC' || exit 1
 import re, sys
