@@ -60,6 +60,14 @@ Item {
 
   readonly property var summary: service ? service.selectedMessage : null
 
+  // The id the service answers to, which is not always the one on the summary.
+  // A list made of several mailboxes addresses a row by mailbox and id, and the
+  // account that owns the message only ever knows its own half of that — so a
+  // call made with the summary's own id reaches no mailbox at all. This is the
+  // composed id where there is one and the same string everywhere else, which
+  // is what the list and the compose view already hand back.
+  readonly property string selectedId: service ? String(service.selectedId || "") : ""
+
   // Which way this message runs.
   //
   // The subject is asked separately from the body, and not as an optimisation:
@@ -269,7 +277,7 @@ Item {
       foreground: root.summary && root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       fontFamily: root.panelFontFamily
-      onClicked: if (root.service && root.summary) root.service.toggleStar(root.summary.id)
+      onClicked: if (root.service && root.summary) root.service.toggleStar(root.selectedId)
     }
 
     Column {
@@ -386,7 +394,7 @@ Item {
       dimColor: root.dimColor
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
-      onActivated: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
+      onActivated: if (root.service && root.summary) root.service.openInBrowser(root.selectedId)
     }
 
     // Under the heavy-document notice when both are up: one says why the
@@ -624,7 +632,7 @@ Item {
         panelFontFamily: root.panelFontFamily
         onOpenRequested: function(attachment) {
           if (root.service && root.summary)
-            root.service.openAttachment(root.summary.id, attachment)
+            root.service.openAttachment(root.selectedId, attachment)
         }
         onSaveRequested: function(attachment) {
           if (root.service && root.summary)
@@ -815,7 +823,7 @@ Item {
           iconName: "browser"; tooltipText: "Open in browser"
           foreground: root.dimColor; hoverColor: root.textColor
           fontFamily: root.panelFontFamily
-          onClicked: if (root.service && root.summary) root.service.openInBrowser(root.summary.id)
+          onClicked: if (root.service && root.summary) root.service.openInBrowser(root.selectedId)
         }
       }
     }

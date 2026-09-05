@@ -676,7 +676,19 @@ Item {
   // checks the final action before its optimistic update.
   function openLabelPicker() {
     if (!service || cursorId === "") return false
-    if (service.refuseUnavailableAction("label:destination")) return false
+    // A merged list draws no labels, so there is nothing to offer and the
+    // picker would open empty on a destination list it cannot fill — and a
+    // chosen id would belong to whichever mailbox happened to be active
+    // rather than to the row. Refused where it cannot be honoured, which is
+    // the same rule every other unavailable action follows.
+    // Only the merged-list refusal belongs here. A single mailbox whose
+    // provider has no move verb is the provider guard's answer, and saying
+    // "needs one mailbox on screen" over it would name the wrong reason.
+    if (service.unified) {
+      service.fail("Moving to a label needs one mailbox on screen")
+      return false
+    }
+    if (service.refuseUnavailableAction("label:destination", cursorId)) return false
     labelPicker.open()
     return true
   }
@@ -945,10 +957,36 @@ Item {
     }
   }
 
+  // Every mailbox at once. The rail it lands on has to be one they all have,
+  // so a row only some of them offered — Gmail's own Archive beside an IMAP
+  // mailbox — does not leave the list asking for something nothing can serve.
+  function chooseUnified() {
+    if (!service) return false
+    var keepCalendar = calendarVisible
+    var mailbox = service.mailboxKey
+    service.setUnifiedMailboxes(true)
+    // The rail row is chosen either way. Returning early with the calendar up
+    // left every mailbox on whatever it had been showing while the rail
+    // claimed one, so coming back from the calendar landed on a list that was
+    // not the row highlighted beside it.
+    var target = Model.mailboxAfterAccountSwitch(mailbox, service.mailboxes)
+    service.selectMailbox(target !== "" ? target : "inbox")
+    if (keepCalendar) {
+      showCalendar()
+      return true
+    }
+    backToList()
+    return true
+  }
+
   function switchAccount(index) {
     if (!service) return false
     var keepCalendar = calendarVisible
     var mailbox = service.mailboxKey
+    // Choosing one mailbox is choosing to be in it, so the combined view goes
+    // off. Leaving it on would have named an account in the bar and gone on
+    // showing every one of them.
+    if (service.unifiedMailboxes) service.setUnifiedMailboxes(false)
     if (service.switchToIndex(index) !== true) return false
     if (keepCalendar) {
       showCalendar()
@@ -1888,7 +1926,8 @@ Item {
               // age follows it, and the line opens the account controls.
               text: {
                 if (!root.service || !root.ready) return "Not connected"
-                return Model.accountStatusLine(root.service.accountEmail, root.service.syncedLabel)
+                return Model.readingStatusLine(root.service.unified,
+                  root.service.accountEmail, root.service.syncedLabel)
               }
               color: accountMouse.containsMouse || accountControl.selected ? root.foreground : root.dim
               font.family: root.fontFamily
@@ -2008,9 +2047,11 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         accounts: root.service ? root.service.accountSummaries : []
+        unifiedActive: !!root.service && root.service.unified
         onAccountChosen: function(index) {
           root.switchAccount(index)
         }
+        onUnifiedChosen: root.chooseUnified()
         onAddAccountRequested: root.addMailbox()
         onManageRequested: {
           root.openSettings()

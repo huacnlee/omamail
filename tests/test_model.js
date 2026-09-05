@@ -796,3 +796,23 @@ const binned = model.applyLabelChange(
 assert.strictEqual(binned.isSent, false)
 assert.strictEqual(binned.isDraft, false)
 assert.strictEqual(binned.inTrash, false)
+
+// -------------------------------------------------- what is being read
+
+// The foot of the rail names the mailbox and how long ago it was checked.
+assert.strictEqual(model.readingStatusLine(false, "me@example.org", "Synced 2 min ago"),
+  "me@example.org · 2 min ago")
+assert.strictEqual(model.readingStatusLine(false, "me@example.org", ""), "me@example.org")
+
+// A combined view has no address to give, and no age either: the sync label
+// belongs to one mailbox, so putting it after "All mailboxes" would be a claim
+// about every one of them made from whichever was active underneath.
+assert.strictEqual(model.readingStatusLine(true, "me@example.org", "Synced 2 min ago"),
+  "All mailboxes")
+assert.strictEqual(model.readingStatusLine(true, "", ""), "All mailboxes")
+
+// One string in one place, because the switcher names the row and this names
+// what the row selected.
+assert.strictEqual(model.UNIFIED_LABEL, "All mailboxes")
+
+assert.strictEqual(model.readingStatusLine(false, "", ""), "Not connected")
