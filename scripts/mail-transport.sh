@@ -178,6 +178,8 @@ else
   first=1
   for argument in "$@"; do
     [ "$first" = "1" ] || printf 'next\n'
+    # globoff is per-transfer too: next would otherwise expand later URLs.
+    printf 'globoff\n'
     # In imap-id the opening command runs against the server rather than a
     # mailbox, so that it lands in front of the SELECT curl derives from the
     # path. Every later section names the mailbox as usual.

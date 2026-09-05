@@ -21,6 +21,7 @@ CONNECT_SECONDS = 10
 # Keep transition/special-purpose exclusions stable across Python versions.
 SPECIAL_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     "192.0.0.0/24", "192.88.99.0/24", "64:ff9b::/96", "64:ff9b:1::/48", "2001::/23", "2002::/16",
+    "fec0::/10",  # Deprecated site-local addresses can still be labelled global.
 ))
 
 

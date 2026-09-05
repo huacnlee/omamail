@@ -61,6 +61,21 @@ class Policy(unittest.TestCase):
                         transport.PublicConnection("http", "example.com", 80).connect()
             constructor.assert_not_called()
 
+    def test_site_local_dns_answers_never_create_a_socket(self):
+        # Python can label the deprecated site-local range as global. Test
+        # both ends, alone and mixed with a public answer in either order.
+        for ip in ["fec0::", "fec0::1234", "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"]:
+            for answers in [[answer(ip)], [answer("8.8.8.8"), answer(ip)],
+                            [answer(ip), answer("8.8.8.8")]]:
+                for scheme in ["http", "https"]:
+                    with self.subTest(ip=ip, answers=answers, scheme=scheme), \
+                            patch.object(socket, "getaddrinfo", return_value=answers), \
+                            patch.object(ssl, "create_default_context"), \
+                            patch.object(socket, "socket") as constructor:
+                        with self.assertRaises(transport.Refused):
+                            transport.PublicConnection(scheme, "example.com", 443).connect()
+                        constructor.assert_not_called()
+
     def test_one_lookup_numeric_connect_and_original_tls_name(self):
         with patch.object(socket, "getaddrinfo", return_value=[answer("8.8.8.8")]) as resolver, \
                 patch.object(socket, "socket") as constructor, patch.object(ssl, "create_default_context") as context:
