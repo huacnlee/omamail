@@ -638,9 +638,9 @@ var PUBLIC_TLD = /\.(xn--[a-z0-9-]+|[a-z]{2,})$/
 // ".internal", every IPv6 literal, and an address written in octal, in hex, or
 // as one number — without having to have thought of each of them first.
 //
-// A public name that resolves to a private address is beyond what any check on
-// the URL can see. That is DNS rebinding, and stopping it needs a resolver
-// this plugin does not own.
+// This is a name check only. scripts/public_http.py checks every DNS answer
+// and pins the connection to a checked IP before fetching a remote image or
+// posting an unsubscribe; a second hostname lookup would reopen rebinding.
 function isPublicHost(host) {
   var name = String(host || "")
   if (name === "" || name.length > 253) return false

@@ -123,8 +123,11 @@ grep -q 'onAccountIdChanged: renderCache = RenderCache.create(12)' account/MailA
   || fail "the render cache must not cross account identities"
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
-grep -q 'max-redirs = 0' scripts/image-fetch.sh \
-  || fail "the image fetcher must not follow an unchecked redirect"
+grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/MailAccount.qml \
+  || fail "remote images must use the public-IP-checked Python transport"
+grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
+  || fail "one-click unsubscribe must use the public-IP-checked Python transport"
+# Redirect and DNS policy require behavioral tests, not a matching config line.
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
 grep -q 'bodyMode: root.bodyMode' Service.qml \

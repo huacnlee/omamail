@@ -33,9 +33,9 @@ command -v omarchy >/dev/null 2>&1 || {
 # them and the setup page names whichever is missing. Installing them is the
 # user's call, and this script never does it for them.
 # socat, openssl and xdg-open are the Google sign-in; curl is every IMAP
-# mailbox; secret-tool holds the secret either way.
+# mailbox; Python handles public HTTP and attachments; secret-tool holds secrets.
 missing=()
-for tool in socat secret-tool openssl xdg-open curl; do
+for tool in socat secret-tool openssl xdg-open curl python3; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 if (( ${#missing[@]} )); then
