@@ -64,6 +64,13 @@ var BINDINGS = [
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
     group: "Acting", label: "Mark unread" },
+  // Gmail's `x`: tick the row under the cursor, and the acting keys above
+  // then mean every ticked row rather than the one the cursor is on. List
+  // only — in the reader there is one message and it is the one open.
+  { id: "toggleCheck", keys: ["x"], contexts: ["list"],
+    group: "Acting", label: "Select or deselect the message" },
+  { id: "checkAll", keys: ["Ctrl+A"], contexts: ["list"],
+    group: "Acting", label: "Select every message loaded, or none" },
 
   // Answering works from the list too, the way the row's own menu does: the
   // message is opened first and the draft waits for it. Binding these to the

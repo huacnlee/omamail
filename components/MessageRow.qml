@@ -19,11 +19,19 @@ Rectangle {
   property bool canArchive: true
   property bool hasCursor: false
   property bool selected: false
+  // Ticked for a bulk action. Not `selected`: that is the message the reader
+  // shows, and the two are different things for the same reason the cursor is.
+  property bool checked: false
+  // Whether any row in the list is ticked. While one is, every row shows its
+  // box, so the lane the boxes sit in is the same on every row being compared.
+  property bool selectionActive: false
   // How the direction of this message's own text is arrived at. Passed down
   // like every other fact a row draws, because a row decides nothing.
   property string contentDirection: Direction.MODE_DEFAULT
 
   signal activated()
+  signal checkToggled()
+  signal checkRangeRequested()
   signal starToggled()
   signal archiveRequested()
   signal trashRequested()
@@ -54,9 +62,13 @@ Rectangle {
   width: parent ? parent.width : 0
   implicitHeight: body.implicitHeight + Style.space(14)
   radius: Style.cornerRadius
+  // A ticked row is filled from the accent, but the tick is what says it is
+  // ticked: some themes put the accent close to the foreground.
   color: selected
     ? Style.selectedFillFor(textColor, accentColor)
-    : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent")
+    : (checked
+      ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, hot ? 0.22 : 0.14)
+      : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent"))
 
   MouseArea {
     id: mouse
@@ -71,6 +83,12 @@ Rectangle {
         // Middle-click archives: the one triage action worth having without
         // moving the pointer to a button.
         root.archiveRequested()
+      } else if (event.modifiers & Qt.ShiftModifier) {
+        // Shift extends the selection from the cursor to here; Ctrl ticks
+        // this row on its own. Both are the file manager's meaning of them.
+        root.checkRangeRequested()
+      } else if (event.modifiers & Qt.ControlModifier) {
+        root.checkToggled()
       } else {
         root.activated()
       }
@@ -85,8 +103,49 @@ Rectangle {
     width: Style.space(5)
     height: width
     radius: width / 2
-    visible: root.summary.unread
+    // The box takes the dot's place while it is shown; unread is still
+    // carried by the weight and the brighter subject.
+    visible: root.summary.unread && !checkBox.visible
     color: root.accentColor
+  }
+
+  // The tick, in the lane the unread dot lives in so the text never moves.
+  // Shown under the pointer or the cursor, and on every row while any row is
+  // ticked, so a selection being built can be read down the column.
+  Rectangle {
+    id: checkBox
+    objectName: "message-check"
+    anchors.left: parent.left
+    anchors.leftMargin: Style.space(1)
+    anchors.top: parent.top
+    anchors.topMargin: Style.space(10)
+    width: Style.space(10)
+    height: width
+    radius: Style.space(2)
+    visible: root.hot || root.checked || root.selectionActive
+    color: root.checked ? Style.selectedFillFor(root.textColor, root.accentColor) : "transparent"
+    border.width: Style.normalBorderWidth
+    border.color: root.checked ? root.accentColor
+      : (checkMouse.containsMouse ? root.textColor : root.dimColor)
+
+    ActionIcon {
+      anchors.centerIn: parent
+      visible: root.checked
+      name: "check"
+      iconSize: Style.space(8)
+      color: root.textColor
+    }
+
+    MouseArea {
+      id: checkMouse
+      anchors.fill: parent
+      anchors.margins: -Style.space(3)
+      hoverEnabled: true
+      onClicked: function(event) {
+        if (event.modifiers & Qt.ShiftModifier) root.checkRangeRequested()
+        else root.checkToggled()
+      }
+    }
   }
 
   Column {
