@@ -183,9 +183,24 @@ Item {
   // Read here rather than in the compose view, so the window never reaches into
   // the account list itself. A pending account has no id and so no signature,
   // which is the same answer as having set none.
-  readonly property string activeSignature: {
-    var entry = Accounts.find(accountList, activeAccountId)
+  readonly property string activeSignature: signatureFor(activeAccountId)
+
+  // The sign-off and the address of a *named* mailbox, which is not always the
+  // one on screen: a draft belongs to the mailbox the message it answers
+  // arrived in, and in a merged list that is routinely not the active account.
+  // Signing B's reply with A's name, or leaving A on the Cc of a reply from B,
+  // puts one identity's details into another's outgoing mail.
+  //
+  // Kept here rather than in the compose view for the same reason
+  // `activeSignature` was: the window never reaches into the account list.
+  function signatureFor(accountId) {
+    var entry = Accounts.find(accountList, String(accountId || ""))
     return entry ? String(entry.signature || "") : ""
+  }
+
+  function accountEmailFor(accountId) {
+    var entry = Accounts.find(accountList, String(accountId || ""))
+    return entry ? String(entry.email || "") : ""
   }
   readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
     ? String(current.accountId) : "__no_google_account__"
@@ -1291,7 +1306,24 @@ Item {
   }
 
   function saveAttachment(messageId, attachment) {
-    if (current) current.saveAttachment(messageId, attachment)
+    var host = hostForId(messageId)
+    if (host) host.saveAttachment(sourceIdFor(messageId), attachment)
+  }
+
+  // Whether this attachment of this message is being written out.
+  //
+  // The merged map is keyed by mailbox and attachment, because two mailboxes
+  // can be saving attachments whose ids collide — an IMAP part id is a number
+  // in a tree, not something unique across servers. A view holds an attachment
+  // and the message it hangs off; composing the key from those is the
+  // service's job, like every other id it issues.
+  function attachmentIsSaving(messageId, attachmentId) {
+    var key = String(attachmentId || "")
+    if (key === "") return false
+    if (!unified) return !!savingAttachmentIds[key]
+    var owner = Unified.accountOf(messageId)
+    if (owner === "") return false
+    return !!savingAttachmentIds[Unified.unifiedId(owner, key)]
   }
   // Asked of the mailbox the message arrived in rather than of the visible
   // one. Replying from a merged list otherwise composed from whichever

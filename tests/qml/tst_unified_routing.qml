@@ -190,6 +190,42 @@ Item {
       compare(bob().mailboxKey, "sent")
     }
 
+    // ------------------------------------------------------- attachments
+
+    // Saving reached whichever mailbox was active, so the file that came down
+    // was A's part id under B's filename — and on an IMAP pair, where a part
+    // id is a number in a tree rather than anything unique, the two collide
+    // routinely. Neither host can actually fetch here, so what is asserted is
+    // which of them was asked: the refusal lands on the mailbox that owns the
+    // message and nowhere else.
+    function test_saving_an_attachment_asks_the_mailbox_that_owns_it() {
+      ada().lastError = ""
+      bob().lastError = ""
+      compare(service.activeAccountId, adaId, "A is the active mailbox")
+
+      service.saveAttachment(Unified.unifiedId(bobId, "1"),
+        { attachmentId: "2", filename: "invoice.pdf" })
+
+      verify(bob().lastError !== "", "B was asked, because the message is B's")
+      compare(ada().lastError, "", "and A was not asked at all")
+    }
+
+    // The spinner is keyed by mailbox and attachment, and the reader holds
+    // only an attachment id — so composing the key is the service's job. It
+    // was looked up bare, found nothing, and the row never went busy.
+    function test_the_saving_row_is_the_owning_mailboxs_row() {
+      bob().markSavingAttachment("2", true)
+
+      compare(service.attachmentIsSaving(Unified.unifiedId(bobId, "1"), "2"), true)
+      compare(service.attachmentIsSaving(Unified.unifiedId(adaId, "1"), "2"), false,
+        "A is not saving anything, whatever B is doing")
+      compare(service.attachmentIsSaving("", "2"), false)
+      compare(service.attachmentIsSaving(Unified.unifiedId(bobId, "1"), ""), false)
+
+      bob().markSavingAttachment("2", false)
+      compare(service.attachmentIsSaving(Unified.unifiedId(bobId, "1"), "2"), false)
+    }
+
     function test_a_search_reaches_every_mailbox() {
       service.search("invoice")
       compare(ada().searchQuery, "invoice")

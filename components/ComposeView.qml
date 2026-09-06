@@ -46,11 +46,15 @@ DropArea {
   property string accountId: ""
   // The provider message that this form replaces when it is saved.
   property string sourceDraftId: ""
-  // The active account's sign-off, read when a draft is started rather than
-  // bound into the editor: the text is the user's to edit once it is in there,
-  // and a binding would overwrite what they had changed.
+  // The sign-off of the mailbox this draft belongs to, read when a draft is
+  // started rather than bound into the editor: the text is the user's to edit
+  // once it is in there, and a binding would overwrite what they had changed.
+  //
+  // The draft's own account, not the active one. `begin` sets `accountId`
+  // first, so a reply owned by B is signed by B even while A is on screen —
+  // otherwise one identity's name and contact details go out over another's.
   readonly property string accountSignature: root.service
-    ? String(root.service.activeSignature || "") : ""
+    ? String(root.service.signatureFor(root.accountId) || "") : ""
   // The body exactly as `placeBody` left it, plus whether the editor has seen a
   // user edit. Equality alone is not an edit history: somebody can type and
   // delete back to the same text. Together they separate an abandoned compose
@@ -345,9 +349,15 @@ DropArea {
 
   // Everyone on the original except this mailbox: replying to yourself is
   // never what reply-all was for.
+  //
+  // "This mailbox" is the one the draft is written from, not the one on
+  // screen. Reading the active account's address dropped the wrong name: a
+  // reply owned by B, to a message addressed to both, kept B on the Cc and
+  // removed A — copying the sender and losing a real recipient.
   function otherRecipients(summary) {
     if (!summary) return ""
-    var mine = String(root.service ? root.service.accountEmail : "").toLowerCase()
+    var mine = String(root.service
+      ? root.service.accountEmailFor(root.accountId) : "").toLowerCase()
     var list = Array.isArray(summary.to) ? summary.to : []
     var kept = []
     for (var i = 0; i < list.length; i++) {

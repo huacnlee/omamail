@@ -698,8 +698,11 @@ Item {
         required property var modelData
         width: parent.width
         attachment: modelData
-        saving: !!root.service && !!root.service.savingAttachmentIds[
-          String(modelData && modelData.attachmentId ? modelData.attachmentId : "")]
+        // Asked of the service by message and attachment rather than looked up
+        // by attachment alone: in a merged list the key is the mailbox's as
+        // well, and a bare id found nothing, so the row never went busy.
+        saving: !!root.service && root.service.attachmentIsSaving(root.selectedId,
+          modelData && modelData.attachmentId ? modelData.attachmentId : "")
         textColor: root.textColor
         dimColor: root.dimColor
         dimmerColor: root.dimmerColor
@@ -709,8 +712,11 @@ Item {
             root.service.openAttachment(root.selectedId, attachment)
         }
         onSaveRequested: function(attachment) {
+          // `selectedId`, like every other action on this message: `summary.id`
+          // is the id the owning account issued, which reaches no mailbox in a
+          // merged list and so saved from whichever one was active.
           if (root.service && root.summary)
-            root.service.saveAttachment(root.summary.id, attachment)
+            root.service.saveAttachment(root.selectedId, attachment)
         }
       }
     }

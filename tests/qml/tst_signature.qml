@@ -67,6 +67,29 @@ Item {
     function setAlwaysRenderHeavyMessages(_value) {}
     function setUndoSendSeconds(_value) {}
 
+    // A draft belongs to the mailbox it answers. With one account that is the
+    // active one, which is why these tests can go on setting `activeSignature`
+    // — tst_compose_identity.qml is where the two come apart.
+    property string composeAccountId: activeAccountId
+
+    function signatureFor(id) {
+      var want = String(id || "")
+      if (want === activeAccountId) return activeSignature
+      for (var i = 0; i < accountSignatures.length; i++)
+        if (accountSignatures[i].id === want)
+          return String(accountSignatures[i].signature || "")
+      return ""
+    }
+
+    function accountEmailFor(id) {
+      var want = String(id || "")
+      if (want === activeAccountId) return accountEmail
+      for (var i = 0; i < accountSignatures.length; i++)
+        if (accountSignatures[i].id === want)
+          return String(accountSignatures[i].email || "")
+      return ""
+    }
+
     function setAccountSignature(id, text) {
       savedId = String(id || "")
       savedText = String(text || "")

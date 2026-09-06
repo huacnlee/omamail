@@ -50,9 +50,28 @@ Item {
       attachmentId: "att-7"
     })]
 
+    property string savedMessageId: ""
+    property var savedAttachment: null
+
+    // Keyed by mailbox and attachment on the real service, because two
+    // mailboxes can be saving parts whose ids collide. Empty here, so a reader
+    // that looks up a bare attachment id finds nothing — which is what it did.
+    property var savingAttachmentIds: ({})
+    property string savingFor: ""
+
     function openAttachment(messageId, attachment) {
       openedMessageId = messageId
       openedAttachment = attachment
+    }
+
+    function saveAttachment(messageId, attachment) {
+      savedMessageId = messageId
+      savedAttachment = attachment
+    }
+
+    function attachmentIsSaving(messageId, attachmentId) {
+      return savingFor !== "" && String(messageId) === savingFor
+        && String(attachmentId) === "att-7"
     }
 
     function toggleStar(id) { starredId = String(id) }
@@ -120,6 +139,45 @@ Item {
       web.clicked()
       compare(mailService.browsedId, "b@example.net message-4")
 
+      mailService.selectedId = "message-4"
+    }
+
+    // Saving was the one that kept `selectedMessage.id`, so the file came down
+    // from whichever mailbox was active — and on two IMAP accounts a part id
+    // is a number in a tree, so A's part could arrive under B's filename.
+    function test_saving_answers_with_the_id_the_service_gave_it() {
+      mailService.selectedId = "b@example.net message-4"
+      mailService.savedMessageId = ""
+
+      var save = named(reader, "attachment-save-button")
+      verify(save, "the save control has to be there to be pressed")
+      save.clicked()
+
+      compare(mailService.savedMessageId, "b@example.net message-4")
+      compare(mailService.savedAttachment.attachmentId, "att-7")
+
+      mailService.selectedId = "message-4"
+    }
+
+    // And the spinner is asked the same way. The service keys it by mailbox,
+    // so a lookup by attachment alone found nothing and the row stayed idle
+    // through the whole save.
+    function test_the_row_goes_busy_for_the_mailbox_that_owns_it() {
+      mailService.selectedId = "b@example.net message-4"
+      var row = named(reader, "attachment-save-button").parent
+      verify(row, "the save control sits in the row it belongs to")
+
+      mailService.savingFor = ""
+      compare(row.saving, false)
+
+      mailService.savingFor = "b@example.net message-4"
+      compare(row.saving, true,
+        "asked by mailbox and attachment, which is how the service holds it")
+
+      mailService.savingFor = "a@example.org message-4"
+      compare(row.saving, false, "another mailbox's save is not this row's")
+
+      mailService.savingFor = ""
       mailService.selectedId = "message-4"
     }
   }
