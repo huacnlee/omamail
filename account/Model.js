@@ -203,6 +203,29 @@ function survivesAction(mailboxKey, action, rawQuery, labels, sourceLabelId) {
   return true
 }
 
+// Only the most recent intent for a message may be coalesced. Searching past
+// an opposite action would turn read/unread/read into read/unread. Explicit
+// intent wins over an automatic read because it may evict the open row.
+function enqueueAction(requests, request) {
+  var queued = requests.slice()
+  for (var i = queued.length - 1; i >= 0; i--) {
+    var previous = queued[i]
+    if (previous.id !== request.id) continue
+    if (previous.action === request.action && previous.cacheKey === request.cacheKey
+        && previous.sourceLabelId === request.sourceLabelId) {
+      queued[i] = {
+        id: request.id, action: request.action, cacheKey: request.cacheKey,
+        sourceLabelId: request.sourceLabelId,
+        quiet: previous.quiet === true && request.quiet === true
+      }
+      return queued
+    }
+    break
+  }
+  queued.push(request)
+  return queued
+}
+
 function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }

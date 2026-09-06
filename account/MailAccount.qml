@@ -1250,13 +1250,10 @@ Item {
   // under an open reader. A queued explicit trash that ran as if it were quiet
   // would leave the message the user deleted still on screen.
   function queueAction(messageId, action, actionQuery, quiet) {
-    var queued = queuedActions.slice()
-    for (var i = 0; i < queued.length; i++) {
-      if (queued[i].id === messageId && queued[i].action === action) return
-    }
-    queued.push({ id: messageId, action: action, cacheKey: actionQuery,
-      quiet: quiet === true })
-    queuedActions = queued
+    queuedActions = Model.enqueueAction(queuedActions, {
+      id: messageId, action: action, cacheKey: actionQuery,
+      sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true
+    })
   }
 
   function runQueuedAction() {
@@ -1266,16 +1263,18 @@ Item {
     queuedActions = queued
 
     // Prefer the normal optimistic path while the row is still in either
-    // account view. Navigation may have removed it meanwhile; marking a
-    // message read because it was opened is still owed to the server then.
+    // account view with the same label context. A typed search may have the
+    // same cache key as a label view but no source label to remove. Navigation
+    // does not change the operation already accepted for the original view.
     if (cacheKey === request.cacheKey
+        && (hasLabels ? rawLabelId : "") === request.sourceLabelId
         && (Model.indexById(messages, request.id) >= 0
         || Model.indexById(previewMessages, request.id) >= 0)) {
       act(request.id, request.action, request.quiet)
       return
     }
 
-    var change = Model.labelChangesFor(request.action)
+    var change = Model.labelChangesFor(request.action, request.sourceLabelId)
     if (request.action !== "trash" && request.action !== "untrash" && !change) {
       if (queuedActions.length > 0) Qt.callLater(root.runQueuedAction)
       return
