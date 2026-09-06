@@ -14,9 +14,8 @@
 // calls a page of conversations is, the rule about which members a row counts,
 // and the block a row draws from. `Jmap.js` is the provider *description* the
 // registry reads — a name, a ceiling, the rail's rows — and holds no protocol.
-// The client imports this file as `Jmap`, so every call in it reads as the
-// decision tickets wrote it: `Jmap.parseQuery`, `Jmap.toMessage`,
-// `Jmap.refusals`.
+// The client imports this file as `Jmap`, which is the name every call in it
+// is read under: `Jmap.parseQuery`, `Jmap.toMessage`, `Jmap.refusals`.
 //
 // What this file owns is every decision about what came back, which is what
 // the node tests reach without a compositor or a mailbox.
@@ -238,8 +237,8 @@ function firstMethodError(responses) {
   return null
 }
 
-// The type of that error, so a caller with a branch for one can take it.
-// Ticket 05's `anchorNotFound` retry and ticket 06's tolerated `notFound` both
+// The type of that error, so a caller with a branch for one can take it. The
+// paging retry on `anchorNotFound` and the batch that tolerates `notFound` both
 // need to know which error it was, not only that there was one.
 function methodErrorType(responses) {
   var found = firstMethodError(responses)
@@ -486,6 +485,18 @@ function typedSessionUrl(server) {
   return isValidHost(bare) ? "https://" + bare + SESSION_PATH : ""
 }
 
+// Which server, and as whom: the two settings that decide what a session is
+// worth. A different URL is a different server and a different username is a
+// different account on it, so a session read under one pair says nothing
+// under another. The scheme and the account id are what sign-in *learns* from
+// that pair, so a change to them alone — which is exactly what sign-in writes
+// onto the account — is the same mailbox, and the session it just fetched
+// still describes it.
+function serverIdentity(settings) {
+  var values = settings || {}
+  return trimmed(values.sessionUrl) + "\n" + trimmed(values.username)
+}
+
 // Where this address's JMAP server is looked for, and in what order.
 //
 //   { error, domain, steps: [ { kind, url } ] }
@@ -499,18 +510,6 @@ function typedSessionUrl(server) {
 // caller runs `scripts/jmap-srv.sh` for `domain`, hands what it printed to
 // `parseSrv`, and GETs the URL that comes back; a record that names no service
 // simply leaves that step with nothing to try.
-// Which server, and as whom: the two settings that decide what a session is
-// worth. A different URL is a different server and a different username is a
-// different account on it, so a session read under one pair says nothing
-// under another. The scheme and the account id are what sign-in *learns* from
-// that pair, so a change to them alone — which is exactly what sign-in writes
-// onto the account — is the same mailbox, and the session it just fetched
-// still describes it.
-function serverIdentity(settings) {
-  var values = settings || {}
-  return trimmed(values.sessionUrl) + "\n" + trimmed(values.username)
-}
-
 function discoveryPlan(address, server) {
   var domain = addressDomain(address)
   if (trimmed(server) !== "") {
@@ -855,7 +854,7 @@ function responseArguments(responses, name) {
 //
 //   { Email: "s41", Mailbox: "s7" }
 //
-// Push (ticket 09) is the only reader. A `StateChange` naming a state this
+// Push is the only reader. A `StateChange` naming a state this
 // client has already been told is the echo of its own write, and refreshing the
 // list on it is a round trip to fetch what is already on screen.
 //
@@ -1742,8 +1741,8 @@ function receivedMillis(value) {
 //
 // The body is empty and the mime type is `text/plain` with no data, which is
 // what Gmail's own metadata format hands over: a row draws from the headers,
-// the labels and the snippet. Ticket 07 adds the parts a full read walks out of
-// `bodyStructure`.
+// the labels and the snippet. A full read replaces that placeholder with the
+// parts `toPart` walks out of `bodyStructure`, below.
 //
 // Raw header values arrive from Stalwart with the leading space RFC 5322 puts
 // after the colon, and under a key that drops the form they were asked for
@@ -2168,7 +2167,7 @@ function moveFor(added, removed) {
 //
 // `mailboxIds` is the client's membership map for this one id, and `null` means
 // *unknown* rather than "not in the Inbox": an id the last list read did not
-// carry gets ticket 06's single-message patch, which is also the right answer
+// carry gets the plain single-message patch, which is also the right answer
 // for a lone message — a search hit in a user folder is "add Archive".
 //
 // A role that does not resolve skips nothing. There is no membership to test

@@ -133,8 +133,8 @@ equals() {
 
 printf 'jmap-transport.sh\n'
 
-SESSION_URL='https://mail.depodra.com/jmap/session'
-API_URL='https://mx2.depodra.com/jmap'
+SESSION_URL='https://mail.example.org/jmap/session'
+API_URL='https://api.example.org/jmap'
 SECRET='hunter2 "quoted" \ slashed'
 
 # -------------------------------------------------------------- session, basic

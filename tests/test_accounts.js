@@ -540,21 +540,21 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
 
 {
   const saved = accounts.serialize(accounts.add(accounts.emptyList(), {
-    email: "omamail-test@depodra.com",
+    email: "ada@example.org",
     provider: "jmap",
     jmap: {
-      sessionUrl: "https://mail.depodra.com/jmap/session",
-      username: "omamail-test",
+      sessionUrl: "https://mail.example.org/jmap/session",
+      username: "ada",
       authScheme: "basic",
       accountId: "t"
     }
   }))
-  const reloaded = accounts.find(accounts.load(saved), "jmap:omamail-test@depodra.com")
+  const reloaded = accounts.find(accounts.load(saved), "jmap:ada@example.org")
   assert.strictEqual(reloaded.provider, "jmap")
-  assert.strictEqual(reloaded.id, "jmap:omamail-test@depodra.com",
+  assert.strictEqual(reloaded.id, "jmap:ada@example.org",
     "one address can be an IMAP mailbox and a JMAP one at the same time")
-  assert.strictEqual(reloaded.jmap.sessionUrl, "https://mail.depodra.com/jmap/session")
-  assert.strictEqual(reloaded.jmap.username, "omamail-test")
+  assert.strictEqual(reloaded.jmap.sessionUrl, "https://mail.example.org/jmap/session")
+  assert.strictEqual(reloaded.jmap.username, "ada")
   assert.strictEqual(reloaded.jmap.authScheme, "basic")
   assert.strictEqual(reloaded.jmap.accountId, "t")
 

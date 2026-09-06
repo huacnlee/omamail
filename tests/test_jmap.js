@@ -221,18 +221,18 @@ assert.strictEqual(jmap.DEFAULT_CONCURRENCY, 4)
 
 // ------------------------------------------------------------ download URLs
 
-const template = "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
+const template = "https://api.example.org/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
 
 assert.strictEqual(
   jmap.downloadUrl(template, "t", "b-1", "report.pdf", "application/pdf"),
-  "https://mx2.depodra.com/jmap/download/t/b-1/report.pdf?accept=application%2Fpdf")
+  "https://api.example.org/jmap/download/t/b-1/report.pdf?accept=application%2Fpdf")
 
 // The blob id and the filename are the server's choices, not this client's. A
 // `/` in either would open a path of its own and a `?` would end the path and
 // start a query, so both are encoded and the request stays on the template.
 assert.strictEqual(
   jmap.downloadUrl(template, "t", "../../admin", "a/b?c=d", "text/plain"),
-  "https://mx2.depodra.com/jmap/download/t/..%2F..%2Fadmin/a%2Fb%3Fc%3Dd?accept=text%2Fplain")
+  "https://api.example.org/jmap/download/t/..%2F..%2Fadmin/a%2Fb%3Fc%3Dd?accept=text%2Fplain")
 assert.ok(jmap.downloadUrl(template, "t", "x", "a/b", "text/plain").indexOf("/a/b") < 0,
   "a filename may not add a path segment")
 assert.ok(jmap.downloadUrl(template, "t", "x", "n?a=1", "text/plain").indexOf("n?a=1") < 0,
@@ -408,7 +408,7 @@ function session(overrides) {
     },
     accounts: {
       t: {
-        name: "omamail-test@depodra.com",
+        name: "ada@example.org",
         isPersonal: true,
         isReadOnly: false,
         accountCapabilities: {
@@ -425,7 +425,7 @@ function session(overrides) {
       "urn:ietf:params:jmap:core": "t",
       "urn:ietf:params:jmap:mail": "t"
     },
-    apiUrl: "https://mx2.depodra.com/jmap/",
+    apiUrl: "https://api.example.org/jmap/",
     state: "abc"
   }
   return Object.assign(base, overrides || {})
@@ -503,8 +503,8 @@ deepEqual(jmap.schemeOrder(undefined), ["basic", "bearer"])
 
 // Where every method call goes, read from the session rather than assumed: on
 // the reference account the session is on one host and this URL is on another.
-assert.strictEqual(jmap.apiUrl(session()), "https://mx2.depodra.com/jmap/")
-assert.strictEqual(jmap.apiUrl(JSON.stringify(session())), "https://mx2.depodra.com/jmap/")
+assert.strictEqual(jmap.apiUrl(session()), "https://api.example.org/jmap/")
+assert.strictEqual(jmap.apiUrl(JSON.stringify(session())), "https://api.example.org/jmap/")
 assert.strictEqual(jmap.apiUrl(session({ apiUrl: undefined })), "")
 assert.strictEqual(jmap.apiUrl("not a session"), "")
 
@@ -553,7 +553,7 @@ assert.strictEqual(jmap.hasSubmission("<html>"), false)
 
 // The host a session URL names, which is the whole of what a user is shown
 // afterwards: the mailboxes row's second line and the "Signed in" line.
-assert.strictEqual(jmap.sessionHost("https://mail.depodra.com/jmap/session"), "mail.depodra.com")
+assert.strictEqual(jmap.sessionHost("https://mail.example.org/jmap/session"), "mail.example.org")
 assert.strictEqual(jmap.sessionHost("https://Mail.Example.ORG/jmap/session"), "mail.example.org")
 assert.strictEqual(jmap.sessionHost("https://mail.example.org:8443/jmap/session"),
   "mail.example.org:8443", "a port is part of the address and hiding it would be wrong")
@@ -908,7 +908,7 @@ const listEmail = {
   size: 242,
   receivedAt: "2026-08-24T09:00:00Z",
   from: [{ name: "Eve Lund", email: "eve@example.net" }],
-  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  to: [{ name: null, email: "ada@example.org" }],
   cc: null,
   subject: "[omamail-test] Unread",
   preview: "This one is unread.\n",
@@ -934,7 +934,7 @@ assert.strictEqual(row.payload.mimeType, "text/plain")
 deepEqual(row.payload.parts, [])
 deepEqual(row.payload.headers, [
   { name: "From", value: '"Eve Lund" <eve@example.net>' },
-  { name: "To", value: "omamail-test@depodra.com" },
+  { name: "To", value: "ada@example.org" },
   { name: "Subject", value: "[omamail-test] Unread" },
   { name: "Date", value: "Mon, 24 Aug 2026 09:00:00 +0000" },
   { name: "Message-ID", value: "<unread@omamail-test.invalid>" }
@@ -1016,14 +1016,14 @@ const plainEmail = {
   size: 262,
   receivedAt: "2026-08-20T09:00:00Z",
   from: [{ name: "Ari Novak", email: "ari@example.com" }],
-  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  to: [{ name: null, email: "ada@example.org" }],
   subject: "[omamail-test] Plain text",
   preview: "A plain-text message, nothing more.\n",
   messageId: ["plain@omamail-test.invalid"],
   "header:Date": " Thu, 20 Aug 2026 09:00:00 +0000",
   headers: [
     { name: "From", value: " Ari Novak <ari@example.com>" },
-    { name: "To", value: " omamail-test@depodra.com" },
+    { name: "To", value: " ada@example.org" },
     { name: "Subject", value: " [omamail-test] Plain text" },
     { name: "Date", value: " Thu, 20 Aug 2026 09:00:00 +0000" },
     { name: "Message-ID", value: " <plain@omamail-test.invalid>" },
@@ -1062,7 +1062,7 @@ assert.strictEqual(message.extractBody(plainRead.payload).source, "plain")
 // than either answer alone — and a name already written is never repeated.
 deepEqual(plainRead.payload.headers, [
   { name: "From", value: '"Ari Novak" <ari@example.com>' },
-  { name: "To", value: "omamail-test@depodra.com" },
+  { name: "To", value: "ada@example.org" },
   { name: "Subject", value: "[omamail-test] Plain text" },
   { name: "Date", value: "Thu, 20 Aug 2026 09:00:00 +0000" },
   { name: "Message-ID", value: "<plain@omamail-test.invalid>" },
@@ -1099,7 +1099,7 @@ const htmlEmail = {
   size: 1021,
   receivedAt: "2026-08-21T10:00:00Z",
   from: [{ name: "Dana Ridley", email: "dana@example.net" }],
-  to: [{ name: null, email: "omamail-test@depodra.com" }],
+  to: [{ name: null, email: "ada@example.org" }],
   subject: "[omamail-test] HTML with inline image and attachment",
   preview: "Hello from HTML. Here is the logo:\nNotes are attached.\n",
   hasAttachment: true,
@@ -1334,12 +1334,12 @@ assert.strictEqual(jmap.base64ByteLength(message.encodeBase64Url("Grüßen")), 8
 // URL this client assembled out of a host it guessed.
 
 const withDownload = session({
-  downloadUrl: "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
+  downloadUrl: "https://api.example.org/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
 })
 assert.strictEqual(jmap.downloadTemplate(withDownload),
-  "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}")
+  "https://api.example.org/jmap/download/{accountId}/{blobId}/{name}?accept={type}")
 assert.strictEqual(jmap.downloadTemplate(JSON.stringify(withDownload)),
-  "https://mx2.depodra.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+  "https://api.example.org/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
   "a session restored from the cache is still text when it is read")
 assert.strictEqual(jmap.downloadTemplate(session()), "",
   "and a server that published no template is not one this client invents one for")
@@ -1347,7 +1347,7 @@ assert.strictEqual(jmap.downloadTemplate(null), "")
 assert.strictEqual(
   jmap.downloadUrl(jmap.downloadTemplate(withDownload), "t", "cgnotes",
     "attachment", "application/octet-stream"),
-  "https://mx2.depodra.com/jmap/download/t/cgnotes/attachment?accept=application%2Foctet-stream")
+  "https://api.example.org/jmap/download/t/cgnotes/attachment?accept=application%2Foctet-stream")
 // The ceiling the transport fixes, and the sentence somebody who just clicked
 // an attachment reads when a blob is past it.
 assert.strictEqual(jmap.MAX_BLOB_BYTES, 20971520)
@@ -1383,7 +1383,7 @@ deepEqual(jmap.recordStates(null, null), {})
 // address the session named.
 
 const eventTemplate =
-  "https://mx2.depodra.com/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
+  "https://api.example.org/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
 
 assert.strictEqual(jmap.eventSourceTemplate(session({ eventSourceUrl: eventTemplate })),
   eventTemplate)
@@ -1396,7 +1396,7 @@ assert.strictEqual(jmap.eventSourceTemplate(null), "")
 
 assert.strictEqual(
   jmap.eventSourceUrl(eventTemplate, jmap.EVENT_TYPES, jmap.EVENT_PING_SECONDS),
-  "https://mx2.depodra.com/jmap/eventsource/"
+  "https://api.example.org/jmap/eventsource/"
   + "?types=Email%2CMailbox&closeafter=no&ping=30")
 
 // `closeafter` is never asked for: ending the response after the first state
@@ -1957,7 +1957,7 @@ assert.strictEqual(jmap.notUpdatedError({
 // on are its own words rather than invented ones.
 
 const sendSession = session({
-  uploadUrl: "https://mx2.depodra.com/jmap/upload/{accountId}/",
+  uploadUrl: "https://api.example.org/jmap/upload/{accountId}/",
   capabilities: {
     "urn:ietf:params:jmap:core": { maxSizeUpload: 50000000, maxConcurrentUpload: 4 },
     "urn:ietf:params:jmap:mail": {},
@@ -1966,14 +1966,14 @@ const sendSession = session({
 })
 
 assert.strictEqual(jmap.uploadTemplate(sendSession),
-  "https://mx2.depodra.com/jmap/upload/{accountId}/")
+  "https://api.example.org/jmap/upload/{accountId}/")
 assert.strictEqual(jmap.uploadTemplate(JSON.stringify(sendSession)),
-  "https://mx2.depodra.com/jmap/upload/{accountId}/", "the document may still be text")
+  "https://api.example.org/jmap/upload/{accountId}/", "the document may still be text")
 assert.strictEqual(jmap.uploadTemplate(session()), "")
 assert.strictEqual(jmap.uploadTemplate(null), "")
 
 assert.strictEqual(jmap.uploadUrl(jmap.uploadTemplate(sendSession), "t"),
-  "https://mx2.depodra.com/jmap/upload/t/")
+  "https://api.example.org/jmap/upload/t/")
 // An account id is a server's own string, so it is encoded on the way into
 // somebody else's template exactly as a blob id is.
 assert.strictEqual(jmap.uploadUrl("https://h/upload/{accountId}/", "a/b?c"),
@@ -2034,7 +2034,7 @@ assert.strictEqual(jmap.sendGuard(sendSession, { sent: "", drafts: "" }, 5000000
 // ------------------------------------------------------ one header, no parse
 
 const outgoing = [
-  "From: \"Test Account\" <omamail-test@depodra.com>",
+  "From: \"Test Account\" <ada@example.org>",
   "To: a@b.example,",
   "\tc@d.example",
   "Subject: [omamail-test] hello",
@@ -2044,7 +2044,7 @@ const outgoing = [
 ].join("\r\n")
 
 assert.strictEqual(jmap.messageHeader(outgoing, "From"),
-  "\"Test Account\" <omamail-test@depodra.com>")
+  "\"Test Account\" <ada@example.org>")
 assert.strictEqual(jmap.messageHeader(outgoing, "from"), jmap.messageHeader(outgoing, "From"),
   "a header name is not case-sensitive")
 assert.strictEqual(jmap.messageHeader(outgoing, "To"), "a@b.example, c@d.example",
@@ -2066,23 +2066,23 @@ assert.strictEqual(
 // of them is read.
 const serverIdentities = [
   {
-    id: "b", name: "Test Account", email: "omamail-test@depodra.com",
+    id: "b", name: "Test Account", email: "ada@example.org",
     replyTo: null, bcc: null, textSignature: "", htmlSignature: "", mayDelete: true
   },
-  { id: "c", name: "", email: "Alias@depodra.com" }
+  { id: "c", name: "", email: "Alias@example.org" }
 ]
 
-deepEqual(jmap.identityAliases(serverIdentities, "omamail-test@depodra.com"), [
+deepEqual(jmap.identityAliases(serverIdentities, "ada@example.org"), [
   {
-    id: "b", email: "omamail-test@depodra.com", displayName: "Test Account",
+    id: "b", email: "ada@example.org", displayName: "Test Account",
     isPrimary: true, isDefault: true
   },
-  { id: "c", email: "Alias@depodra.com", displayName: "", isPrimary: false, isDefault: false }
+  { id: "c", email: "Alias@example.org", displayName: "", isPrimary: false, isDefault: false }
 ])
 // The signed-in address is matched without regard to case, on either side.
-assert.strictEqual(jmap.identityAliases(serverIdentities, "OMAMAIL-TEST@Depodra.com")[0].isDefault, true)
-deepEqual(jmap.identityAliases([{ id: "c", email: "ALIAS@depodra.com" }], "alias@depodra.com"), [
-  { id: "c", email: "ALIAS@depodra.com", displayName: "", isPrimary: true, isDefault: true }
+assert.strictEqual(jmap.identityAliases(serverIdentities, "ADA@Example.org")[0].isDefault, true)
+deepEqual(jmap.identityAliases([{ id: "c", email: "ALIAS@example.org" }], "alias@example.org"), [
+  { id: "c", email: "ALIAS@example.org", displayName: "", isPrimary: true, isDefault: true }
 ])
 // A row with no id could never be submitted under and a row with no address
 // could never be chosen, so neither is offered.
@@ -2090,15 +2090,15 @@ deepEqual(jmap.identityAliases([{ name: "nameless" }, { id: "d" }], "x@y"), [])
 deepEqual(jmap.identityAliases([], "x@y"), [])
 deepEqual(jmap.identityAliases(null, "x@y"), [])
 
-const sendAs = jmap.identityAliases(serverIdentities, "omamail-test@depodra.com")
+const sendAs = jmap.identityAliases(serverIdentities, "ada@example.org")
 
 // The address the message states wins.
-assert.strictEqual(jmap.identityFor(sendAs, "Alias@depodra.com"), "c")
-assert.strictEqual(jmap.identityFor(sendAs, "omamail-test@depodra.com"), "b")
+assert.strictEqual(jmap.identityFor(sendAs, "Alias@example.org"), "c")
+assert.strictEqual(jmap.identityFor(sendAs, "ada@example.org"), "b")
 // Case on either side, and the address inside the angle brackets rather than a
 // phrase that happens to contain an `@`.
-assert.strictEqual(jmap.identityFor(sendAs, "\"a@b.example\" <ALIAS@DEPODRA.COM>"), "c")
-assert.strictEqual(jmap.identityFor(sendAs, "Test Account <omamail-test@depodra.com>"), "b")
+assert.strictEqual(jmap.identityFor(sendAs, "\"a@b.example\" <ALIAS@EXAMPLE.ORG>"), "c")
+assert.strictEqual(jmap.identityFor(sendAs, "Test Account <ada@example.org>"), "b")
 // No match is not a refusal: the RSVP and the unsubscribe send from the alias
 // the mail arrived at, and the server forces the envelope sender to the
 // identity while delivering the header as written.

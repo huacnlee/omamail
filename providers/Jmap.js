@@ -30,8 +30,8 @@ var AUTH = "password"
 // a service — so a mailbox here gets the themed envelope, as IMAP does.
 
 // The ceiling, not the guarantee. An account may refuse one of these from what
-// its own session and mailbox list say (`Jmap.refusals`, ticket 06 of the
-// build); nothing may add one back.
+// its own session and mailbox list say — `JmapProtocol.refusals` — and nothing
+// may add one back.
 var CAPABILITIES = {
   // A message is in one mailbox, near enough. Both reference servers put it
   // there, and the label strip was built for Gmail's several-at-once.

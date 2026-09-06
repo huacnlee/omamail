@@ -59,14 +59,18 @@ Column {
     if (String(values.sessionUrl || "") !== "") serverField.text = String(values.sessionUrl)
   }
 
+  // Neither of these places the keyboard. The page is a component in the
+  // setup context and the context owns the focus — it parks the keyboard here,
+  // because a form is typed into by the field that was clicked — so a field
+  // that took focus on a state change would be the second mechanism that
+  // design replaces. The field is emptied, or revealed, and left for the
+  // person to pick up.
   function clearSecret() {
     secretField.text = ""
-    secretField.forceActiveFocus()
   }
 
   function openServerField() {
     serversVisible = true
-    serverField.forceActiveFocus()
   }
 
   // The address is this mailbox's identity rather than a label on it:
