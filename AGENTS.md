@@ -222,15 +222,25 @@ key. What matters while working:
 
 ## Providers
 
-- A mailbox is a **provider**: `gmail`, `hey`, or `imap`, listed in that order
-  because IMAP is the answer for a server the other two do not name and a
-  chooser that opened with it would ask the question backwards. `Provider.js` is
+- A mailbox is a **provider**: `gmail`, `hey`, `jmap`, or `imap`, listed in that
+  order because IMAP is the answer for a server the others do not name and a
+  chooser that opened with it would ask the question backwards. JMAP sits ahead
+  of it for the same reason: fewer servers speak it, so it is the more specific
+  answer. `Provider.js` is
   the only place that knows the differences — which mailboxes exist, what a query
   string means, what the service can be asked to do, and how it signs in.
   Nothing above it branches on a provider id.
 - Two objects make a provider work: something that signs in (`AuthManager`,
-  `HeyAuth`, `ImapAuth`) and something that fetches (`GmailApiClient`,
-  `HeyClient`, `ImapClient`).
+  `HeyAuth`, `JmapAuth`, `ImapAuth`) and something that fetches
+  (`GmailApiClient`, `HeyClient`, `JmapClient`, `ImapClient`).
+- A capability a provider declares is a **ceiling**, not a promise. `Imap.js`
+  declares `archive` true and lets the client find out whether the server has
+  anywhere to put it; `Jmap.js` does the same for `send`, `archive` and `spam`,
+  and its client withdraws what this account cannot do in `unsupported`, which
+  `MailAccount.accountRefuses` reads. Anything gating an action on a capability
+  must consult both — `refuseUnavailableAction` checked only the provider once,
+  and a key bound in every mail context then did what the hidden button would
+  not have.
   `MailAccount` builds one pair through a `Loader` and drives them through an
   identical interface — same method names, same arguments, same callback shape.
   Adding a provider is those two files and a registry entry.

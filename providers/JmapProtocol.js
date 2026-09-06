@@ -469,16 +469,19 @@ function messagesFrom(list, rolesById) {
 function actionPlan(action, roles) {
   var verb = String(action || "")
   var map = roles && typeof roles === "object" ? roles : {}
-  var plan = { keywords: {}, moveTo: "", removeFrom: "" }
+  // `moveRole` is what the caller asked for; `moveTo` is what this account
+  // could resolve it to. They differ exactly when the server has no mailbox
+  // for that role — which must not read as "nothing to do".
+  var plan = { keywords: {}, moveTo: "", removeFrom: "", moveRole: "" }
 
   if (verb === "read") { plan.keywords["$seen"] = true; return plan }
   if (verb === "unread") { plan.keywords["$seen"] = null; return plan }
   if (verb === "star") { plan.keywords["$flagged"] = true; return plan }
   if (verb === "unstar") { plan.keywords["$flagged"] = null; return plan }
-  if (verb === "archive") { plan.moveTo = trimmed(map.archive); plan.removeFrom = trimmed(map.inbox); return plan }
-  if (verb === "trash") { plan.moveTo = trimmed(map.trash); return plan }
-  if (verb === "untrash") { plan.moveTo = trimmed(map.inbox); return plan }
-  if (verb === "spam") { plan.moveTo = trimmed(map.junk); return plan }
+  if (verb === "archive") { plan.moveRole = "archive"; plan.moveTo = trimmed(map.archive); plan.removeFrom = trimmed(map.inbox); return plan }
+  if (verb === "trash") { plan.moveRole = "trash"; plan.moveTo = trimmed(map.trash); return plan }
+  if (verb === "untrash") { plan.moveRole = "inbox"; plan.moveTo = trimmed(map.inbox); return plan }
+  if (verb === "spam") { plan.moveRole = "junk"; plan.moveTo = trimmed(map.junk); return plan }
   return plan
 }
 
@@ -527,7 +530,7 @@ function planFromLabels(addLabelIds, removeLabelIds, roles) {
   var added = Array.isArray(addLabelIds) ? addLabelIds : []
   var removed = Array.isArray(removeLabelIds) ? removeLabelIds : []
   var map = roles && typeof roles === "object" ? roles : {}
-  var plan = { keywords: {}, moveTo: "", removeFrom: "" }
+  var plan = { keywords: {}, moveTo: "", removeFrom: "", moveRole: "" }
 
   function has(list, name) {
     for (var i = 0; i < list.length; i++) {
@@ -546,13 +549,34 @@ function planFromLabels(addLabelIds, removeLabelIds, roles) {
   // A move is exclusive, so only one destination is honoured. Trash wins over
   // junk and junk over archive: the more destructive reading of an ambiguous
   // request is the one the user is least surprised by, because they can see it.
-  if (has(added, "TRASH")) plan.moveTo = trimmed(map.trash)
-  else if (has(added, "SPAM")) plan.moveTo = trimmed(map.junk)
-  else if (has(removed, "INBOX")) plan.moveTo = trimmed(map.archive)
-  else if (has(removed, "TRASH") || has(removed, "SPAM")) plan.moveTo = trimmed(map.inbox)
-  else if (has(added, "INBOX")) plan.moveTo = trimmed(map.inbox)
+  if (has(added, "TRASH")) plan.moveRole = "trash"
+  else if (has(added, "SPAM")) plan.moveRole = "junk"
+  else if (has(removed, "INBOX")) plan.moveRole = "archive"
+  else if (has(removed, "TRASH") || has(removed, "SPAM")) plan.moveRole = "inbox"
+  else if (has(added, "INBOX")) plan.moveRole = "inbox"
+  if (plan.moveRole !== "") plan.moveTo = trimmed(map[plan.moveRole])
 
   return plan
+}
+
+// A move was asked for and this account has nowhere to put it. Distinct from
+// an empty plan, and the distinction is the whole point: `planIsEmpty` would
+// say true for both, and a caller that treats "nothing to do" as success
+// reports an archive that never happened — the row leaves the list, the note
+// says "Archived", and the server was never asked. That is the fault AGENTS.md
+// records against HEY, and a per-account capability ceiling reintroduces it
+// unless this is checked first.
+function planUnresolved(plan) {
+  var wanted = plan || {}
+  return trimmed(wanted.moveRole) !== "" && trimmed(wanted.moveTo) === ""
+}
+
+// What to call the mailbox that is missing, for the note the user reads.
+var ROLE_NAMES = { archive: "Archive", trash: "Trash", junk: "Junk", inbox: "Inbox", sent: "Sent", drafts: "Drafts" }
+
+function roleName(role) {
+  var key = trimmed(role)
+  return ROLE_NAMES[key] || key
 }
 
 // Whether a plan asks for anything at all. A caller that would otherwise send

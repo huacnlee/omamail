@@ -215,17 +215,42 @@ Column {
       }
     }
 
-    TextField {
-      id: tokenField
-      objectName: "jmap-token-field"
+    Item {
       width: parent.width
       visible: !root.signedIn
-      foreground: root.textColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      echoMode: root.tokenVisible ? TextInput.Normal : TextInput.Password
-      placeholderText: "API token"
-      onAccepted: root.signIn()
+      implicitHeight: tokenField.implicitHeight
+
+      TextField {
+        id: tokenField
+        objectName: "jmap-token-field"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        // Masked by default: this window is shoulder-surfable. Readable on
+        // demand, because an API token is a long opaque string nobody can
+        // check by eye after pasting it.
+        password: !root.tokenVisible
+        rightPadding: horizontalPadding + Style.space(26)
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "API token"
+        onAccepted: root.signIn()
+      }
+
+      IconButton {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(4)
+        anchors.verticalCenter: tokenField.verticalCenter
+        visible: tokenField.text !== ""
+        iconName: root.tokenVisible ? "eyeOff" : "eye"
+        tooltipText: root.tokenVisible ? "Hide the token" : "Show the token"
+        foreground: root.dimColor
+        hoverColor: root.textColor
+        iconSize: Style.font.iconSmall
+        size: Style.space(22)
+        fontFamily: root.panelFontFamily
+        onClicked: root.tokenVisible = !root.tokenVisible
+      }
     }
 
     Text {

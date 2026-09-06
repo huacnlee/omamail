@@ -422,4 +422,45 @@ assert.strictEqual(jmap.pushBackoffMs(3), 8000)
 assert.strictEqual(jmap.pushBackoffMs(99), 300000, "capped, so a dead server is not hammered")
 assert.strictEqual(jmap.pushBackoffMs(0), 2000)
 
+
+// --- a move this account cannot make is not "nothing to do" -----------------
+//
+// The fault this guards: an archive on a server with no Archive mailbox left
+// moveTo empty, planIsEmpty said true, and the caller reported success having
+// sent nothing — the row leaves the list and the note says "Archived" for a
+// request no server ever saw. AGENTS.md records the same fault against HEY.
+
+const NO_ARCHIVE = { inbox: "m1", trash: "m9" }
+
+const stranded = jmap.planFromLabels([], ["INBOX"], NO_ARCHIVE)
+assert.strictEqual(stranded.moveRole, "archive", "the role asked for is recorded")
+assert.strictEqual(stranded.moveTo, "", "and could not be resolved")
+assert.ok(jmap.planIsEmpty(stranded), "it still looks empty, which is the trap")
+assert.ok(jmap.planUnresolved(stranded), "so this is what callers must check first")
+
+const landed = jmap.planFromLabels([], ["INBOX"], R)
+assert.strictEqual(landed.moveTo, "m2")
+assert.ok(!jmap.planUnresolved(landed), "a move that resolved is not unresolved")
+
+// A keyword-only change asks for no move at all, so it is neither.
+const starOnly = jmap.planFromLabels(["STARRED"], [], NO_ARCHIVE)
+assert.strictEqual(starOnly.moveRole, "")
+assert.ok(!jmap.planUnresolved(starOnly))
+assert.ok(!jmap.planIsEmpty(starOnly))
+
+// Every verb that moves records which role it wanted, resolvable or not.
+assert.strictEqual(jmap.actionPlan("archive", NO_ARCHIVE).moveRole, "archive")
+assert.strictEqual(jmap.actionPlan("trash", NO_ARCHIVE).moveRole, "trash")
+assert.strictEqual(jmap.actionPlan("spam", NO_ARCHIVE).moveRole, "junk")
+assert.strictEqual(jmap.actionPlan("untrash", NO_ARCHIVE).moveRole, "inbox")
+assert.strictEqual(jmap.actionPlan("star", NO_ARCHIVE).moveRole, "", "a keyword is not a move")
+assert.ok(jmap.planUnresolved(jmap.actionPlan("spam", NO_ARCHIVE)), "no Junk mailbox, no junk verb")
+assert.ok(!jmap.planUnresolved(jmap.actionPlan("trash", NO_ARCHIVE)), "this server does have Trash")
+
+// The note the user reads names the mailbox they have not got.
+assert.strictEqual(jmap.roleName("archive"), "Archive")
+assert.strictEqual(jmap.roleName("junk"), "Junk")
+assert.strictEqual(jmap.roleName("whatever"), "whatever")
+assert.strictEqual(jmap.roleName(""), "")
+
 console.log("test_jmap.js: ok")

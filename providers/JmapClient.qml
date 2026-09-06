@@ -44,8 +44,13 @@ Item {
   // same engine is underneath here.
   readonly property int requestTimeoutMs: 30000
 
+  // No `children` list, unlike `GmailApiClient`: that one fans a page out into
+  // a metadata request per message and has to be able to abort the fan-out.
+  // Every chain here is sequential and threads one handle through, so a list
+  // of children would never be filled and would imply a cancellation shape
+  // this client does not have.
   function newHandle() {
-    return { aborted: false, timedOut: false, xhr: null, deadline: null, children: [] }
+    return { aborted: false, timedOut: false, xhr: null, deadline: null }
   }
 
   // Stopped and destroyed together, because a Timer that outlives its request
@@ -63,9 +68,6 @@ Item {
     clearDeadline(handle)
     if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
     handle.xhr = null
-    var children = handle.children || []
-    for (var i = 0; i < children.length; i++) abortRequest(children[i])
-    handle.children = []
   }
 
   function parseJson(text) {
@@ -691,6 +693,19 @@ Item {
 
   function applyPlan(ids, plan, callback, existingHandle) {
     var handle = existingHandle || newHandle()
+    // Checked before the empty test, because an unresolvable move looks
+    // identical to an empty plan and must not be reported as done. Saying yes
+    // here moves the row out of the list and notes "Archived" for a request no
+    // server was ever sent.
+    if (Jmap.planUnresolved(plan)) {
+      if (typeof callback === "function") {
+        var missing = Jmap.roleName(plan.moveRole)
+        Qt.callLater(function() {
+          callback(false, "This mailbox has no " + missing + " folder to move it to")
+        })
+      }
+      return handle
+    }
     if (Jmap.planIsEmpty(plan) || !Array.isArray(ids) || ids.length === 0) {
       if (typeof callback === "function") Qt.callLater(function() { callback(true, "") })
       return handle
@@ -752,10 +767,16 @@ Item {
   }
 
   // An attachment is a blob like the message itself.
+  // The handle is threaded into the fetch rather than kept beside it: a handle
+  // that only guards the callback suppresses the answer while the request runs
+  // on, so closing the reader would leave a message download and a blob fetch
+  // in flight. `ImapClient.getAttachment` returns its `getMessage` handle for
+  // the same reason.
   function getAttachment(messageId, attachmentId, callback) {
     var handle = newHandle()
-    getMessage(messageId, true, function(message, error) {
+    getMessages([messageId], true, function(list, error) {
       if (!root || handle.aborted) return
+      var message = list && list.length > 0 ? list[0] : null
       if (error || !message) {
         if (typeof callback === "function") callback(null, error || "That message is no longer here")
         return
@@ -764,7 +785,7 @@ Item {
       if (typeof callback === "function")
         callback(part && part.body ? part.body.data : null,
           part ? "" : "That attachment is no longer on the message")
-    })
+    }, handle)
     return handle
   }
 

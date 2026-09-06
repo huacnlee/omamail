@@ -31,6 +31,11 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
         ("mail-transport.sh", ["smtp"], [b"smtps://example.com/", b"user:secret", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com", b"next@example.com"], [0, 1, 2, 4, 5]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Drafts", b"user:secret", b"Subject: Draft\r\n\r\nBody\r\n", b"draft"], [0, 1, 3]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Sent", b"user:secret", b"Subject: Sent\r\n\r\nBody\r\n", b"seen"], [0, 1, 3]),
+        # The push stream holds its connection open for hours, so its config is
+        # the one that is exposed longest. Both fields are protected: the URL
+        # comes from the server's own session response, the token is a bearer
+        # credential that must never reach an argument or an error.
+        ("jmap-push.sh", [], [b"https://example.com/jmap/event/", b"user:secret"], [0, 1]),
     ]
     count = 0
     for script, prefix, fields, protected in cases:

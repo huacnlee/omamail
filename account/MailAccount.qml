@@ -1332,9 +1332,14 @@ Item {
   // Every action moves the list immediately and reconciles afterwards. Waiting
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
+  // `accountRefuses` as well as `Provider.can`: a provider may declare a
+  // capability as a ceiling and leave the real answer to the account, which is
+  // what a JMAP mailbox does for send, archive and the junk verb. Checking only
+  // the provider makes this guard a no-op for such an account, and the key
+  // binding then does what the hidden button would not have.
   function refuseUnavailableAction(action) {
     var needs = Model.actionCapability(action)
-    if (needs === "" || Provider.can(providerId, needs)) return false
+    if (needs === "" || (Provider.can(providerId, needs) && !accountRefuses(needs))) return false
     note(Model.actionUnavailable(action, Provider.badge(providerId)))
     return true
   }
