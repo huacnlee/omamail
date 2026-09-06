@@ -408,6 +408,45 @@ equals "a timeout reports curl's exit rather than failing the script" \
 equals "a status with no redirect is the code alone" \
   "$(printf '%s\n' "$out" | sed -n '2p')" 200
 
+# ------------------------------------------------------------- the work dir
+#
+# A SIGKILL runs no trap, so a request whose owner was destroyed while it ran
+# leaves its directory behind with the reply or the message inside. The next
+# request sweeps such directories an hour after they were last written, and
+# only those: one written just now belongs to a request still running.
+
+stale_home="$work/tmp"
+mkdir -p "$stale_home/omamail-jmap.stale" "$stale_home/omamail-jmap.fresh" "$stale_home/omamail-other.stale"
+touch -t 202001010000 "$stale_home/omamail-jmap.stale" "$stale_home/omamail-other.stale"
+printf '%s\n' "$request" | TMPDIR="$stale_home" PATH="$work/bin:$PATH" sh "$script" >/dev/null
+if [ -d "$stale_home/omamail-jmap.stale" ]; then
+  printf '  FAIL %s\n' "a work directory left an hour ago is swept"
+  failures=$((failures + 1))
+else
+  printf '  ok   %s\n' "a work directory left an hour ago is swept"
+fi
+if [ -d "$stale_home/omamail-jmap.fresh" ] && [ -d "$stale_home/omamail-other.stale" ]; then
+  printf '  ok   %s\n' "a fresh one, and anything not ours, is left alone"
+else
+  printf '  FAIL %s\n' "a fresh one, and anything not ours, is left alone"
+  failures=$((failures + 1))
+fi
+equals "the request's own directory is gone with the request" \
+  "$(find "$stale_home" -maxdepth 1 -name 'omamail-jmap.*' | wc -l | tr -d ' ')" 1
+
+# Under the runtime directory when there is one — the user's own, cleared when
+# the session ends — and TMPDIR still wins when somebody set it.
+mkdir -p "$work/run"
+upload_request="upload $(b64 "$API_URL/upload/t/") $(b64 basic) $(b64 jane) $(b64 pw) $(b64 "$raw")"
+config=$(printf '%s\n' "$upload_request" \
+  | env -u TMPDIR XDG_RUNTIME_DIR="$work/run" PATH="$work/bin:$PATH" sh "$script" \
+  | sed -n '3p' | base64 -d)
+check "the work directory is under the runtime directory" "$config" "upload-file = \"$work/run/omamail-jmap."
+config=$(printf '%s\n' "$upload_request" \
+  | TMPDIR="$work/tmp" XDG_RUNTIME_DIR="$work/run" PATH="$work/bin:$PATH" sh "$script" \
+  | sed -n '3p' | base64 -d)
+check "unless TMPDIR says otherwise" "$config" "upload-file = \"$work/tmp/omamail-jmap."
+
 # --------------------------------------------------------------------- retrying
 #
 # Retrying is safe only before anything has been sent: 6, 7 and 35 all mean the

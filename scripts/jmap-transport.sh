@@ -161,10 +161,20 @@ esac
 # routinely destroyed rather than stopped — SIGKILL runs no trap — and it needs
 # neither a body file nor an output file, so a directory here would be one left
 # in /tmp per reconnect for the life of the session.
+#
+# The directory lives under the runtime directory when there is one: it is
+# the user's own, and the session's end clears it. A request that was
+# SIGKILLed — the owner destroyed while it ran — never reached its trap, and
+# what it left behind is a 0700 directory holding a reply or an outgoing
+# message. Those are swept here, an hour after they were last written: no
+# request lives that long, `max-time` being ten minutes at most.
 work=""
 if [ "$verb" != "stream" ]; then
   umask 077
-  work=$(mktemp -d "${TMPDIR:-/tmp}/omamail-jmap.XXXXXX") \
+  base=${TMPDIR:-${XDG_RUNTIME_DIR:-/tmp}}
+  find "$base" -maxdepth 1 -type d -name 'omamail-jmap.*' -user "$(id -un)" \
+    -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+  work=$(mktemp -d "$base/omamail-jmap.XXXXXX") \
     || fail 'jmap-transport.sh: no temporary directory'
   trap 'rm -rf "$work"' EXIT INT TERM HUP
 fi
