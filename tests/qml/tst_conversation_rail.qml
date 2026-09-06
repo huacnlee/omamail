@@ -286,6 +286,18 @@ Item {
       compare(bottom.line.top, bottom.y)
       compare(bottom.line.bottom, bottom.node.top, "and it ends at the top of the last circle")
       verify(bottom.line.bottom > bottom.line.top, "so the last segment still reaches its circle")
+
+      // One straight line. The open stop's circle is wider than the others,
+      // and its segment must not follow that width sideways: every segment
+      // shares one x, on a whole pixel, and every circle is centred on it.
+      verify(rail.stops[0].open, "the open stop is the top one here")
+      compare(top.line.x, middle.line.x, "the open stop's segment is in line with the next")
+      compare(middle.line.x, bottom.line.x, "and with the last")
+      compare(top.line.x, Math.round(top.line.x), "on a whole pixel")
+      compare(top.line.width, middle.line.width, "and no thicker than the others")
+      compare(top.node.centerX, middle.node.centerX, "the circles share the same centre")
+      verify(Math.abs((top.line.x + top.line.width / 2) - top.node.centerX) <= 0.5,
+        "and the line runs through it")
     }
 
     // The claim. Both keys move the reader along the rail and neither moves the

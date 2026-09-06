@@ -74,8 +74,10 @@ Item {
       if (!stop || stop.memberId !== wanted) continue
       return {
         y: stop.y, height: stop.height,
-        node: { top: stop.y + stop.nodeTop, bottom: stop.y + stop.nodeBottom },
-        line: { top: stop.y + stop.lineTop, bottom: stop.y + stop.lineBottom }
+        node: { top: stop.y + stop.nodeTop, bottom: stop.y + stop.nodeBottom,
+          centerX: stop.axis },
+        line: { top: stop.y + stop.lineTop, bottom: stop.y + stop.lineBottom,
+          x: stop.lineX, width: stop.lineWidth }
       }
     }
     return null
@@ -169,6 +171,15 @@ Item {
     readonly property real nodeBottom: node.y + node.height
     readonly property real lineTop: first ? nodeBottom : 0
     readonly property real lineBottom: last ? nodeTop : height
+    // One axis for every stop, whatever size its circle is. The open circle is
+    // wider than the others, and a segment centred on its own circle sat a
+    // pixel to the side of the segments above and below it, which read as a
+    // line that broke at the open message. The circle and the segment are
+    // both centred on this instead, and the segment lands on a whole pixel so
+    // it is one pixel wide rather than two half-shaded ones.
+    readonly property real axis: Style.space(10) + Style.space(11) / 2
+    readonly property real lineWidth: Math.max(1, Style.space(1))
+    readonly property real lineX: Math.round(axis - lineWidth / 2)
 
     width: stopColumn.width
     implicitHeight: stopBody.implicitHeight + Style.space(14)
@@ -193,10 +204,11 @@ Item {
     // needs nothing kept true — the first stop's begins under its circle and
     // the last stop's ends above its own.
     Rectangle {
+      id: segment
       objectName: "rail-segment"
-      x: node.x + (node.width - width) / 2
+      x: stop.lineX
       y: stop.lineTop
-      width: Math.max(1, Style.space(1))
+      width: stop.lineWidth
       height: Math.max(0, stop.lineBottom - stop.lineTop)
       color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.14)
     }
@@ -207,7 +219,7 @@ Item {
     // it and the word "open" beside its sender.
     Rectangle {
       id: node
-      x: Style.space(10)
+      x: stop.axis - width / 2
       y: Style.space(13)
       width: modelData.open ? Style.space(11) : Style.space(9)
       height: width
