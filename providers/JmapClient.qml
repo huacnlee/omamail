@@ -159,6 +159,22 @@ Item {
     if (typeof callback === "function") callback(value, String(error || ""))
   }
 
+  // The one sentence every request answers with while the credential stands
+  // refused, and "" while it does not.
+  //
+  // A 401 raises `credentialsRejected`; the stream reads the flag and stops,
+  // but a request read nothing, so the poll went on sending the refused
+  // secret every two minutes for as long as the account stood — which is
+  // exactly the retry that locks an app password on the server. Asked at the
+  // three places a request is about to carry the credential: the queue, the
+  // session fetch and a blob download. Sign-in is not gated, because sign-in
+  // is the request that clears the flag.
+  readonly property string rejectedSentence: "Sign in to this mailbox again"
+
+  function refusedByRejection() {
+    return credentialsRejected ? rejectedSentence : ""
+  }
+
   // ------------------------------------------------------------- transport
 
   // An empty value crosses as "-": base64 of the empty string is the empty
@@ -611,6 +627,12 @@ Item {
         send("", null, "Sign in to this mailbox first")
         return
       }
+      var refused = root.refusedByRejection()
+      if (refused !== "") {
+        root.releaseSlot(owner)
+        send("", null, refused)
+        return
+      }
       var url = urlFor()
       if (url === "") {
         root.releaseSlot(owner)
@@ -687,6 +709,11 @@ Item {
   // The session GET, under the credential, and the held session replaced by
   // what it answers. `callback(error)`.
   function fetchSession(url, callback) {
+    var refused = refusedByRejection()
+    if (refused !== "") {
+      callback(refused)
+      return
+    }
     auth.withCredentials(function(credential, error) {
       if (!root) return
       if (error || !credential) {
@@ -1234,6 +1261,11 @@ Item {
     var blob = String(blobId || "")
     if (blob === "") {
       hand(callback, "", "That attachment is not in the message")
+      return handle
+    }
+    var refused = refusedByRejection()
+    if (refused !== "") {
+      hand(callback, "", refused)
       return handle
     }
     ensureSession(function(error) {
