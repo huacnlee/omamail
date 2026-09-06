@@ -103,6 +103,25 @@ Item {
       else openSelects += 1
     }
 
+    // A body that has not landed. `select` puts the reader into this state on
+    // the real service; here the test says when it comes out of it, which is
+    // what a slow fetch and a failed one differ by.
+    function beginFetch() {
+      detailLoading = true
+      detailPainted = false
+    }
+
+    function finishFetch() {
+      detailLoading = false
+      detailPainted = true
+    }
+
+    // A fetch that failed: it stopped, and nothing was painted.
+    function failFetch() {
+      detailLoading = false
+      detailPainted = false
+    }
+
     function markPreviewRead(id) {
       var next = markedRead.slice()
       next.push(String(id || ""))
@@ -178,6 +197,7 @@ Item {
       mailService.previewSelects = 0
       mailService.openSelects = 0
       mailService.markedRead = []
+      mailService.finishFetch()
     }
 
     // ------------------------------------------------------------ the point
@@ -282,6 +302,82 @@ Item {
       app.moveCursor(1)
       tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 1000,
         "at once meaning with the preview, not before it")
+    }
+
+    // ------------------------------------------- the dwell and the body
+
+    // The dwell is time spent looking at a message. It began when the request
+    // went out, so a slow answer spent the whole of it loading and marked read
+    // a message whose body never appeared.
+    function test_a_body_that_has_not_landed_is_not_read() {
+      mailService.markReadDelaySec = 1
+      mailService.beginFetch()
+      app.moveCursor(1)
+
+      wait(1600)
+      compare(mailService.markedRead.indexOf("m1"), -1,
+        "nothing was on screen for the dwell to have been spent on")
+
+      // And when it does land, the dwell runs from there.
+      mailService.finishFetch()
+      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 3000,
+        "the dwell starts at the body, not at the request")
+    }
+
+    // A fetch that fails never paints, so it never arms the dwell at all.
+    function test_a_body_that_never_arrives_is_never_read() {
+      mailService.markReadDelaySec = 1
+      mailService.beginFetch()
+      app.moveCursor(1)
+      wait(600)
+      mailService.failFetch()
+
+      wait(1600)
+      compare(mailService.markedRead.indexOf("m1"), -1,
+        "a message that could not be shown was not read")
+    }
+
+    // Zero is the acute form: it marked the message read before the request
+    // had even been made.
+    function test_a_zero_delay_still_waits_for_the_body() {
+      mailService.markReadDelaySec = 0
+      mailService.beginFetch()
+      app.moveCursor(1)
+
+      wait(500)
+      compare(mailService.markedRead.indexOf("m1"), -1,
+        "at once means with the preview, not before it")
+
+      mailService.finishFetch()
+      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 1000)
+    }
+
+    // ------------------------------------------- coming back to a preview
+
+    // Away and back inside the settle. The dwell is stopped on the way out,
+    // and coming back matched `selectedId` and returned — which is what an
+    // *opened* message does, not a preview. The message the cursor ended up
+    // sitting on stayed unread for as long as it was left there.
+    function test_returning_to_a_preview_restarts_its_dwell() {
+      mailService.markReadDelaySec = 1
+      // Opened, so the window is on the reader — which is the state the early
+      // return is about. Previewing from the list never reaches it.
+      app.openMessage("m1")
+      compare(app.currentView, "reader")
+
+      app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m2", 1000)
+      compare(mailService.selectionIsPreview, true, "m2 was previewed, not opened")
+      mailService.markedRead = []
+
+      // Away and back inside the settle, so m2 is still the selection.
+      app.moveCursor(1)
+      wait(60)
+      app.moveCursor(-1)
+      compare(app.cursorId, "m2", "back on the message that was previewed")
+
+      tryVerify(function() { return mailService.markedRead.indexOf("m2") >= 0 }, 3000,
+        "sitting on it reads it, however it was arrived at")
     }
 
     // Opening marks it read itself, so a dwell still counting has nothing to

@@ -580,11 +580,18 @@ Item {
   // does that, which is what stops a held arrow key from reading a mailbox.
   function previewCursor() {
     markReadDwell.stop()
+    markReadDwell.dwelledOn = ""
     previewSettle.stop()
     if (!canPreview || cursorId === "") return
     // A message already open stays open on its own terms: it was opened, and
     // re-selecting it as a preview would take back the read mark it earned.
-    if (currentView === "reader" && service.selectedId === cursorId) return
+    //
+    // A *preview* of the same message is not that. Moving away and back
+    // inside the settle stops the dwell above and used to return here, so the
+    // message the cursor was sitting on never became read at all — the id
+    // matched, which is exactly what a preview does while not being open.
+    if (currentView === "reader" && service.selectedId === cursorId
+      && !service.selectionIsPreview) return
     // Per message, the same as opening one. Insisting on a document the bounds
     // refused is an answer about the message it was given for, and the row the
     // cursor moved to is a different message.
@@ -615,13 +622,40 @@ Item {
     if (id === "" || id !== cursorId || !canPreview) return
     if (currentView === "reader" && service.selectedId === id
       && !service.selectionIsPreview) return
-    service.select(id, true)
+    // Coming back to the message that is still the preview restarts its
+    // dwell rather than asking for it again.
+    if (service.selectedId !== id || !service.selectionIsPreview)
+      service.select(id, true)
+    markReadDwell.dwelledOn = id
+    armReadDwell()
+  }
+
+  // Whether the previewed message is actually on screen.
+  //
+  // The dwell measures time spent looking at something, so it cannot start
+  // before there is anything to look at. It began when the request went out,
+  // so a slow fetch spent the whole dwell loading and marked read a message
+  // whose body never appeared — worst at a zero dwell, which marked it read
+  // before the request had even been made. A fetch that fails never paints,
+  // so it never arms this at all.
+  readonly property bool previewShowing: !!service
+    && service.detailPainted && !service.detailLoading
+
+  onPreviewShowingChanged: if (previewShowing) armReadDwell()
+
+  function armReadDwell() {
+    if (!service || markReadDwell.dwelledOn === "") return
+    if (!canPreview || !previewShowing) return
+    // Still the message on screen: a search and a mailbox switch both drop the
+    // selection without moving the cursor off the row.
+    if (service.selectedId !== markReadDwell.dwelledOn) return
     if (service.markReadDelaySec <= 0) {
-      service.markPreviewRead(id)
+      var now = markReadDwell.dwelledOn
+      markReadDwell.dwelledOn = ""
+      service.markPreviewRead(now)
       return
     }
     markReadDwell.interval = service.markReadDelaySec * 1000
-    markReadDwell.dwelledOn = cursorId
     markReadDwell.restart()
   }
 
