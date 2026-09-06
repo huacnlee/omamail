@@ -394,6 +394,14 @@ equals "curl's exit code is the first line" "$(printf '%s\n' "$out" | sed -n '1p
 equals "the redirect URL follows the status on line two" \
   "$(printf '%s\n' "$out" | sed -n '2p')" '301 https://elsewhere.example.org/jmap'
 
+# curl writes the body it received before giving up on the ceiling; the stub
+# writes one too. Past the ceiling nobody reads it, and 28 MB of base64 is not
+# something to hand the shell process for an error line.
+out=$(printf '%s\n' "$request" | CURL_STUB_EXIT=63 PATH="$work/bin:$PATH" sh "$script")
+equals "a reply past the ceiling reports curl's exit" "$(printf '%s\n' "$out" | sed -n '1p')" 63
+equals "and carries no body, whatever curl wrote before it stopped" \
+  "$(printf '%s\n' "$out" | sed -n '3p')" ""
+
 out=$(printf '%s\n' "$request" | CURL_STUB_EXIT=28 PATH="$work/bin:$PATH" sh "$script")
 equals "a timeout reports curl's exit rather than failing the script" \
   "$(printf '%s\n' "$out" | sed -n '1p')" 28

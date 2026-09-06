@@ -343,6 +343,17 @@ while :; do
   sleep 1
 done
 
+# curl writes what it receives to `output` as it goes and gives up on the
+# ceiling only once it has been crossed, so on exit 63 the file holds the
+# whole 20 MB that arrived before it stopped — measured on a chunked body with
+# no Content-Length, which is the one shape the pre-transfer check cannot
+# refuse. Nobody reads a reply that failed for size, and encoding it would
+# hand 28 MB of base64 to the process that draws the desktop for the sake of
+# an error line.
+if [ "$status" = 63 ]; then
+  : > "$work/out"
+fi
+
 printf '%s\n' "$status"
 # The redirect URL is written by the server. Stripping the line breaks is what
 # keeps it one line of the reply rather than a `Location:` that could forge the
