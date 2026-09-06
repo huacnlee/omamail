@@ -63,6 +63,7 @@ Rectangle {
     anchors.fill: parent
     hoverEnabled: true
     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+    onWheel: function(wheel) { wheel.accepted = false }
     onClicked: function(event) {
       if (event.button === Qt.RightButton) {
         var scene = mapToGlobal(event.x, event.y)

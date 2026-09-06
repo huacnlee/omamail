@@ -717,6 +717,24 @@ assert.strictEqual(model.wheelScrollTarget(4770, -NOTCH, 5000, 300, 0, 50, 70), 
 assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), -80)
 assert.strictEqual(model.wheelScrollTarget(-200, NOTCH, 4200, 300, -200, 0, 0), -200,
   "and the header stays reachable")
+
+// A touchpad reports pixels, not notches. The same clamp, the same sign:
+// positive pixels are a scroll up, so contentY decreases.
+assert.strictEqual(model.wheelScrollByPixels(0, -40, 5000, 300), 40)
+assert.strictEqual(model.wheelScrollByPixels(500, 40, 5000, 300), 460)
+assert.strictEqual(model.wheelScrollByPixels(0, 40, 5000, 300), 0,
+  "there is nothing above the first row")
+assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300),
+  model.wheelScrollByPixels(0, model.wheelDistance(-NOTCH), 5000, 300),
+  "a notch is the pixel helper fed a notch's worth")
+
+assert.strictEqual(model.WHEEL_GAIN, 2)
+assert.strictEqual(model.wheelPixels(-NOTCH, 0), -240,
+  "a notch on screen is two GTK notches, which is what Chromium travels")
+assert.strictEqual(model.wheelPixels(0, -40), -80,
+  "a touchpad's pixels get the same gain")
+assert.strictEqual(model.wheelPixels(-NOTCH, -40), -80,
+  "pixelDelta wins when the device reports both")
 // ------------------------------------------- moving back into the inbox
 
 // The same pattern a `label:` move already writes: a message filed under a

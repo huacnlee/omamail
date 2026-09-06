@@ -960,6 +960,10 @@ function clampContentY(value, bounds) {
 // turned that far.
 var WHEEL_UNITS_PER_NOTCH = 120
 var WHEEL_PIXELS_PER_NOTCH = 120
+// Chromium on a 2x laptop travels further than GTK's three lines. The notch
+// stays 120 so the arithmetic is still "a notch is a notch"; the gain is how
+// far that notch moves on screen.
+var WHEEL_GAIN = 2
 
 // Numerically the identity at these two values, and written as a ratio anyway:
 // the constant that matters is "a notch moves 120 pixels", and it is the one a
@@ -968,12 +972,29 @@ function wheelDistance(angleDelta) {
   return (Number(angleDelta) || 0) / WHEEL_UNITS_PER_NOTCH * WHEEL_PIXELS_PER_NOTCH
 }
 
+// Pixels to move the view. `pixelDelta` wins when the device reports it
+// (touchpad, high-res wheel); otherwise the notch mapping. The gain is
+// applied here so QML cannot forget it.
+function wheelPixels(angleDelta, pixelDelta) {
+  var pixels = Number(pixelDelta) || 0
+  if (pixels === 0) pixels = wheelDistance(angleDelta)
+  return pixels * WHEEL_GAIN
+}
+
+// Where the view lands after a movement already expressed in pixels —
+// `pixelDelta` from a touchpad, or `wheelDistance` from a mouse notch.
+function wheelScrollByPixels(contentY, pixels, contentHeight, viewportHeight,
+                             originY, topMargin, bottomMargin) {
+  var bounds = contentYBounds(originY, contentHeight, viewportHeight,
+    topMargin, bottomMargin)
+  return clampContentY((Number(contentY) || 0) - (Number(pixels) || 0), bounds)
+}
+
 // Where the view lands, inside what it can actually reach.
 function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight,
                            originY, topMargin, bottomMargin) {
-  var bounds = contentYBounds(originY, contentHeight, viewportHeight,
-    topMargin, bottomMargin)
-  return clampContentY((Number(contentY) || 0) - wheelDistance(angleDelta), bounds)
+  return wheelScrollByPixels(contentY, wheelDistance(angleDelta), contentHeight,
+    viewportHeight, originY, topMargin, bottomMargin)
 }
 
 // Where a click on a section name scrolls to: its heading, clamped into the

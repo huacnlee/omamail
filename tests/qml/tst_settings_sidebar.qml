@@ -267,7 +267,7 @@ Item {
       view.contentY = 0
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
-      compare(view.contentY, 120, "one notch, in the real hierarchy")
+      compare(view.contentY, 240, "one notch, in the real hierarchy")
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, 120)
       compare(view.contentY, 0)

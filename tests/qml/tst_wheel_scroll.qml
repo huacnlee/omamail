@@ -74,7 +74,7 @@ Item {
 
     function test_one_notch_moves_three_lines_worth() {
       mouseWheel(view, 200, 150, 0, -120)
-      compare(view.contentY, 120)
+      compare(view.contentY, 240)
     }
 
     // The whole point. A high-resolution wheel reports one notch as many
@@ -82,7 +82,7 @@ Item {
     // where a bare Flickable is eight times short.
     function test_a_finely_reporting_wheel_moves_the_same_distance() {
       for (var i = 0; i < 8; i++) mouseWheel(view, 200, 150, 0, -15)
-      compare(view.contentY, 120, "eight fractions of a notch are still one notch")
+      compare(view.contentY, 240, "eight fractions of a notch are still one notch")
 
       for (var j = 0; j < 8; j++) mouseWheel(bare, 200, 150, 0, -15)
       wait(400)
@@ -92,24 +92,24 @@ Item {
 
     function test_three_notches_move_three_notches() {
       mouseWheel(view, 200, 150, 0, -360)
-      compare(view.contentY, 360)
+      compare(view.contentY, 720)
     }
 
     // Uncapped: ten notches as one event and as ten events agree. A per-event
     // cap put the chunking dependence back at the coarse end.
     function test_a_free_spinning_wheel_is_not_capped() {
       mouseWheel(view, 200, 150, 0, -1200)
-      compare(view.contentY, 1200)
+      compare(view.contentY, 2400)
 
       view.contentY = 0
       for (var i = 0; i < 10; i++) mouseWheel(view, 200, 150, 0, -120)
-      compare(view.contentY, 1200, "however the ten notches arrive")
+      compare(view.contentY, 2400, "however the ten notches arrive")
     }
 
     function test_it_scrolls_back_up() {
       view.contentY = 500
       mouseWheel(view, 200, 150, 0, 120)
-      compare(view.contentY, 380)
+      compare(view.contentY, 260)
     }
 
     // ------------------------------------------------------- the bounds
@@ -138,7 +138,7 @@ Item {
       compare(headed.contentY, -200)
 
       mouseWheel(headed, 200, 150, 0, -120)
-      compare(headed.contentY, -80, "one notch, not two hundred pixels")
+      compare(headed.contentY, 40, "one notch, not two hundred pixels")
 
       mouseWheel(headed, 200, 150, 0, 120)
       compare(headed.contentY, -200, "and the header comes back")
