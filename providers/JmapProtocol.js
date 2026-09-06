@@ -651,7 +651,13 @@ function redirectHop(status, redirectUrl) {
   var code = Number(status)
   if (!isFinite(code) || code < 300 || code >= 400) return ""
   var url = trimmed(redirectUrl)
-  return /^https:\/\//i.test(url) ? url : ""
+  if (!/^https:\/\//i.test(url)) return ""
+  // Userinfo in the hop is the server's own string, and curl sends it as a
+  // Basic credential when the request carries none — which the unauthenticated
+  // probe does not. Nothing of the user's could get there, but a URL that
+  // carries a credential is not one this client follows.
+  if (/^https:\/\/[^/?#]*@/i.test(url)) return ""
+  return url
 }
 
 // The `_jmap._tcp` SRV answer, as the one record to try:

@@ -341,6 +341,10 @@ assert.strictEqual(jmap.redirectHop(307, "https://mail.example.org/jmap/session"
   "https://mail.example.org/jmap/session")
 assert.strictEqual(jmap.redirectHop(301, "http://mail.example.org/jmap/session"), "",
   "a redirect to plaintext is not followed")
+assert.strictEqual(jmap.redirectHop(302, "https://a:b@mail.example.org/jmap/session"), "",
+  "a hop carrying userinfo is not followed: curl would send it as a Basic credential")
+assert.strictEqual(jmap.redirectHop(302, "https://mail.example.org/jmap/session?next=a@b"), "https://mail.example.org/jmap/session?next=a@b",
+  "an @ past the authority is only a character")
 assert.strictEqual(jmap.redirectHop(200, "https://mail.example.org/jmap/session"), "",
   "an answer is not a hop")
 assert.strictEqual(jmap.redirectHop(307, ""), "")
