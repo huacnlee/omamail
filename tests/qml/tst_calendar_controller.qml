@@ -47,6 +47,16 @@ Item {
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
       mailService.unifiedCalendarView = false
+      controller.sourceList = ({
+        version: 1,
+        sources: [{
+          id: "caldav:team", kind: "caldav", name: "Team",
+          url: "https://calendar.example/team/", username: "work@example.com",
+          enabled: true, readOnly: false, colorKey: "accent"
+        }]
+      })
+      controller.savingSource = false
+      controller.sourceWritePayload = ""
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
       controller.refreshAccountId = ""
@@ -133,6 +143,42 @@ Item {
 
       compare(controller.pendingRangeStart, 1000)
       compare(controller.pendingRangeEnd, 2000)
+    }
+
+    // Bringing hidden calendars back is one write, not one per calendar: a
+    // second call is refused while the first is still saving, so a loop over
+    // `setSourceEnabled` would only ever restore the first of them.
+    function test_show_all_calendars_is_a_single_write() {
+      controller.sourceList = ({
+        version: 1,
+        sources: [
+          { id: "caldav:team", kind: "caldav", name: "Team",
+            url: "https://calendar.example/team/", username: "work@example.com",
+            enabled: false, readOnly: false, colorKey: "accent" },
+          { id: "caldav:oncall", kind: "caldav", name: "On call",
+            url: "https://calendar.example/oncall/", username: "work@example.com",
+            enabled: false, readOnly: false, colorKey: "cyan" }
+        ]
+      })
+      controller.savingSource = false
+      controller.sourceWritePayload = ""
+
+      controller.showAllSources()
+
+      compare(controller.savingSource, true, "one write started")
+      var written = JSON.parse(controller.sourceWritePayload)
+      compare(written.sources.length, 2)
+      compare(written.sources[0].enabled, true)
+      compare(written.sources[1].enabled, true)
+
+      // Nothing hidden, nothing to write: a second press does not queue a
+      // save that would change nothing.
+      controller.savingSource = false
+      controller.sourceList = ({ version: 1, sources: written.sources })
+      controller.sourceWritePayload = ""
+      controller.showAllSources()
+      compare(controller.savingSource, false)
+      compare(controller.sourceWritePayload, "")
     }
   }
 }

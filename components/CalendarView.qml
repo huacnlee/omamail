@@ -14,6 +14,8 @@ Item {
   required property color dimColor
   required property color calendarBorderColor
   required property color calendarTodayBackgroundColor
+  required property color popupBackgroundColor
+  required property color popupBorderColor
   required property int calendarBorderWidth
   required property string panelFontFamily
 
@@ -214,6 +216,19 @@ Item {
               running: calendarLoading.visible
             }
           }
+        }
+
+        CalendarFilterMenu {
+          objectName: "calendarFilterMenu"
+          anchors.verticalCenter: parent.verticalCenter
+          controller: root.controller
+          textColor: root.textColor
+          dimColor: root.dimColor
+          accentColor: root.accentColor
+          urgentColor: root.urgentColor
+          popupBackgroundColor: root.popupBackgroundColor
+          popupBorderColor: root.popupBorderColor
+          panelFontFamily: root.panelFontFamily
         }
 
         IconTextButton {
