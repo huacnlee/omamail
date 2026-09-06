@@ -96,4 +96,81 @@ deepEqual(jmap.schemeOrder(""), ["basic", "bearer"])
 deepEqual(jmap.schemeOrder("none"), ["basic", "bearer"])
 deepEqual(jmap.schemeOrder(undefined), ["basic", "bearer"])
 
+
+// ------------------------------------------------- the session's addresses
+//
+// The fixture `test_jmap.js` judges sessions with, repeated here for the rule
+// that came after the split.
+function session(overrides) {
+  const base = {
+    capabilities: {
+      "urn:ietf:params:jmap:core": { maxCallsInRequest: 16, maxObjectsInGet: 500 },
+      "urn:ietf:params:jmap:mail": {},
+      "urn:ietf:params:jmap:submission": {}
+    },
+    accounts: {
+      t: {
+        name: "ada@example.org",
+        isPersonal: true,
+        isReadOnly: false,
+        accountCapabilities: {
+          "urn:ietf:params:jmap:mail": {
+            emailQuerySortOptions: ["receivedAt", "size", "from", "to", "subject"],
+            mayCreateTopLevelMailbox: true
+          },
+          "urn:ietf:params:jmap:submission": {},
+          "urn:stalwart:jmap": {}
+        }
+      }
+    },
+    primaryAccounts: {
+      "urn:ietf:params:jmap:core": "t",
+      "urn:ietf:params:jmap:mail": "t"
+    },
+    apiUrl: "https://api.example.org/jmap/",
+    state: "abc"
+  }
+  return Object.assign(base, overrides || {})
+}
+
+// The session's four addresses are the server's to write and the credential
+// goes to every one of them. HTTPS or nothing — the transport refuses anything
+// else before curl runs, and this is the same rule at the gate where the
+// session is judged, with this client's sentence rather than the script's.
+var notHttps = "The server's session names an address that is not HTTPS"
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "http://api.example.org/jmap/" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ downloadUrl: "file:///etc/passwd?{blobId}" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ uploadUrl: "ftp://api.example.org/{accountId}" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "ws://api.example.org/es" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "/jmap/" })).error, notHttps,
+  "a relative address is not one this client can send to either")
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "HTTPS://API.EXAMPLE.ORG/jmap/" })).error, "",
+  "the scheme is judged without regard to case")
+assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "" })).error, "",
+  "an address the server did not publish is not a wrong one")
+assert.strictEqual(jmap.verifySession(session({ downloadUrl: undefined })).error, "")
+
+// -------------------------------------------------------- the redirect hop
+
+assert.strictEqual(jmap.redirectHop(302, "https://mail.example.org/jmap/session"), "https://mail.example.org/jmap/session")
+assert.strictEqual(jmap.redirectHop(302, "https://a:b@mail.example.org/jmap/session"), "",
+  "a hop carrying userinfo is not followed: curl would send it as a Basic credential")
+assert.strictEqual(jmap.redirectHop(302, "https://mail.example.org/jmap/session?next=a@b"), "https://mail.example.org/jmap/session?next=a@b",
+  "an @ past the authority is only a character")
+
+// ---------------------------------------------------- a settled connection
+// A connection is believed once it has lasted a whole ping interval. Before
+// that a line the server sent says nothing about whether it will keep the
+// connection open — a server that answers a comment and closes cleanly gives
+// curl exit 0 in sixty milliseconds, and reading that line as a working
+// connection reset the backoff and reconnected at once, forever.
+assert.strictEqual(jmap.connectionSettled(1000, 31000, 30), true, "a whole interval")
+assert.strictEqual(jmap.connectionSettled(1000, 30999, 30), false, "one millisecond short")
+assert.strictEqual(jmap.connectionSettled(1000, 1060, 30), false, "the handshake-and-close case")
+assert.strictEqual(jmap.connectionSettled(1000, 3600000, 30), true, "an hour")
+assert.strictEqual(jmap.connectionSettled(0, 0, 30), false, "the moment it opened")
+assert.strictEqual(jmap.connectionSettled(1000, 31000, 0), false, "no interval to measure by")
+assert.strictEqual(jmap.connectionSettled(NaN, 31000, 30), false)
+assert.strictEqual(jmap.connectionSettled(1000, "soon", 30), false)
+
 console.log("jmap helpers ok")

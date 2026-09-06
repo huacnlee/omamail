@@ -341,10 +341,6 @@ assert.strictEqual(jmap.redirectHop(307, "https://mail.example.org/jmap/session"
   "https://mail.example.org/jmap/session")
 assert.strictEqual(jmap.redirectHop(301, "http://mail.example.org/jmap/session"), "",
   "a redirect to plaintext is not followed")
-assert.strictEqual(jmap.redirectHop(302, "https://a:b@mail.example.org/jmap/session"), "",
-  "a hop carrying userinfo is not followed: curl would send it as a Basic credential")
-assert.strictEqual(jmap.redirectHop(302, "https://mail.example.org/jmap/session?next=a@b"), "https://mail.example.org/jmap/session?next=a@b",
-  "an @ past the authority is only a character")
 assert.strictEqual(jmap.redirectHop(200, "https://mail.example.org/jmap/session"), "",
   "an answer is not a hop")
 assert.strictEqual(jmap.redirectHop(307, ""), "")
@@ -455,23 +451,6 @@ assert.strictEqual(
 // No mailbox for this account. Stalwart answers 200 with an empty `accounts`
 // when the Authorization header never arrives, so this is the check that stops
 // a 200 from being read as "signed in".
-// The session's four addresses are the server's to write and the credential
-// goes to every one of them. HTTPS or nothing — the transport refuses anything
-// else before curl runs, and this is the same rule at the gate where the
-// session is judged, with this client's sentence rather than the script's.
-var notHttps = "The server's session names an address that is not HTTPS"
-assert.strictEqual(jmap.verifySession(session({ apiUrl: "http://api.example.org/jmap/" })).error, notHttps)
-assert.strictEqual(jmap.verifySession(session({ downloadUrl: "file:///etc/passwd?{blobId}" })).error, notHttps)
-assert.strictEqual(jmap.verifySession(session({ uploadUrl: "ftp://api.example.org/{accountId}" })).error, notHttps)
-assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "ws://api.example.org/es" })).error, notHttps)
-assert.strictEqual(jmap.verifySession(session({ apiUrl: "/jmap/" })).error, notHttps,
-  "a relative address is not one this client can send to either")
-assert.strictEqual(jmap.verifySession(session({ apiUrl: "HTTPS://API.EXAMPLE.ORG/jmap/" })).error, "",
-  "the scheme is judged without regard to case")
-assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "" })).error, "",
-  "an address the server did not publish is not a wrong one")
-assert.strictEqual(jmap.verifySession(session({ downloadUrl: undefined })).error, "")
-
 assert.strictEqual(jmap.verifySession(session({ accounts: {} })).error,
   "The server has no mailbox for this account")
 assert.strictEqual(jmap.verifySession(session({ primaryAccounts: {} })).error,
@@ -1671,19 +1650,6 @@ assert.strictEqual(jmap.streamExit(22, false), 22)
 assert.strictEqual(jmap.streamExit(7, false), 7)
 assert.strictEqual(jmap.streamExit(35, true), 35)
 
-// A connection is believed once it has lasted a whole ping interval. Before
-// that a line the server sent says nothing about whether it will keep the
-// connection open — a server that answers a comment and closes cleanly gives
-// curl exit 0 in sixty milliseconds, and reading that line as a working
-// connection reset the backoff and reconnected at once, forever.
-assert.strictEqual(jmap.connectionSettled(1000, 31000, 30), true, "a whole interval")
-assert.strictEqual(jmap.connectionSettled(1000, 30999, 30), false, "one millisecond short")
-assert.strictEqual(jmap.connectionSettled(1000, 1060, 30), false, "the handshake-and-close case")
-assert.strictEqual(jmap.connectionSettled(1000, 3600000, 30), true, "an hour")
-assert.strictEqual(jmap.connectionSettled(0, 0, 30), false, "the moment it opened")
-assert.strictEqual(jmap.connectionSettled(1000, 31000, 0), false, "no interval to measure by")
-assert.strictEqual(jmap.connectionSettled(NaN, 31000, 30), false)
-assert.strictEqual(jmap.connectionSettled(1000, "soon", 30), false)
 assert.strictEqual(jmap.streamExit(0, undefined), jmap.EXIT_STREAM_SILENT,
   "silence is the default, not a clean close")
 deepEqual(jmap.reconnectDelay(jmap.streamExit(22, false), 401, 0),
