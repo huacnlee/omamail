@@ -828,14 +828,23 @@ function decodeSnippet(text) {
 function threadOf(message) {
   var source = message && message.thread && typeof message.thread === "object"
     ? message.thread : {}
+  return normalizeThread(source, message ? message.threadId : "")
+}
+
+// A block in the shape above, whatever shape it arrived in: the ids trimmed
+// and emptied of blanks, the count their length, the flags read as booleans,
+// and `fallbackId` the thread id when the block names none. This is the one
+// normalisation; `Conversation.blockOf` reads a cached row through it too.
+function normalizeThread(block, fallbackId) {
+  var source = block && typeof block === "object" ? block : {}
   var list = Array.isArray(source.memberIds) ? source.memberIds : []
   var ids = []
   for (var i = 0; i < list.length; i++) {
-    var id = String(list[i] || "")
+    var id = String(list[i] === undefined || list[i] === null ? "" : list[i]).trim()
     if (id !== "") ids.push(id)
   }
   return {
-    id: String(source.id || (message && message.threadId) || ""),
+    id: String(source.id || fallbackId || "").trim(),
     count: ids.length,
     unread: source.unread === true,
     flagged: source.flagged === true,

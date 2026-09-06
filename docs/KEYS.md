@@ -200,12 +200,12 @@ message list clamps.
 ## The cursor
 
 `cursorId` is where the keyboard is. `selectedId` is what the reader shows.
-
-`s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 They are two different things, and conflating them was the first bug in this
 area: movement was anchored on the opened message, so in the list — where
 nothing is open — every step resolved to the first row, and `j` moved once and
 then stopped.
+
+`s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 
 Three rules, all in `account/Model.js` so the node tests reach them:
 

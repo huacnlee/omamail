@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import "transports.js" as Transports
 import "../../account" as Account
 
 // The scheme detection asks a question with its first 401 and answers with
@@ -96,37 +97,7 @@ Item {
       sessionState: "s0"
     })
 
-    function transports(account) {
-      var out = []
-      var kids = account.api ? account.api.data : null
-      var count = kids ? kids.length : 0
-      for (var i = 0; i < count; i++) {
-        var kid = kids[i]
-        if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
-      }
-      return out
-    }
 
-    function newSince(account, before) {
-      var now = transports(account)
-      var out = []
-      for (var i = 0; i < now.length; i++)
-        if (before.indexOf(now[i]) < 0) out.push(now[i])
-      return out
-    }
-
-    // The verb and the scheme of a request, read back out of the line the
-    // client wrote for the transport: the scheme is the second base64 field.
-    function requested(process) {
-      var fields = String(process.requestLine).split(" ")
-      return { verb: fields[0], scheme: Qt.atob(fields[2]) }
-    }
-
-    function answer(process, status, body) {
-      var text = body === null ? "" : Qt.btoa(JSON.stringify(body))
-      process.stdout.text = ["0", String(status) + " ", text, ""].join("\n")
-      process.exited(0)
-    }
 
     function test_a_recorded_scheme_is_tried_first_and_only_the_last_refusal_counts() {
       verify(!!tokenAccount.auth && !!tokenAccount.api)
@@ -134,27 +105,27 @@ Item {
       tokenAccount.auth.secretChecked = true
       compare(tokenAccount.api.credentialsRejected, false)
 
-      var before = transports(tokenAccount)
+      var before = Transports.transports(tokenAccount.api)
       verify(tokenAccount.auth.signIn("new-token"), "the check starts")
-      var first = newSince(tokenAccount, before)
+      var first = Transports.newSince(tokenAccount.api, before)
       compare(first.length, 1, "one session GET")
-      compare(requested(first[0]).verb, "session")
-      compare(requested(first[0]).scheme, "bearer",
+      compare(Transports.requested(first[0]).verb, "session")
+      compare(Transports.requested(first[0]).scheme, "bearer",
         "the scheme the account recorded is the one tried first")
       compare(tokenAccount.auth.progressStep, 2, "and the page is told which wait this is")
 
       // Refused. That is the question, not the answer: the flag stays down and
       // the other scheme is tried.
-      var beforeSecond = transports(tokenAccount)
-      answer(first[0], 401, null)
+      var beforeSecond = Transports.transports(tokenAccount.api)
+      Transports.answer(first[0], 401, null)
       compare(tokenAccount.api.credentialsRejected, false,
         "one refused scheme is not a rejected credential")
-      var second = newSince(tokenAccount, beforeSecond)
+      var second = Transports.newSince(tokenAccount.api, beforeSecond)
       compare(second.length, 1, "the other scheme is tried")
-      compare(requested(second[0]).scheme, "basic")
+      compare(Transports.requested(second[0]).scheme, "basic")
 
       // Refused again. Now every scheme has been, and that is the answer.
-      answer(second[0], 401, null)
+      Transports.answer(second[0], 401, null)
       compare(tokenAccount.api.credentialsRejected, true,
         "a 401 from both is the rejected state")
       compare(tokenAccount.auth.loginBusy, false)
@@ -167,27 +138,27 @@ Item {
       var learned = null
       freshAccount.auth.sessionVerified.connect(function(result) { learned = result })
 
-      var before = transports(freshAccount)
+      var before = Transports.transports(freshAccount.api)
       verify(freshAccount.auth.signIn("api-token"))
-      var first = newSince(freshAccount, before)
+      var first = Transports.newSince(freshAccount.api, before)
       compare(first.length, 1)
-      compare(requested(first[0]).scheme, "basic", "nothing recorded: Basic first")
+      compare(Transports.requested(first[0]).scheme, "basic", "nothing recorded: Basic first")
 
-      var beforeSecond = transports(freshAccount)
-      answer(first[0], 401, null)
+      var beforeSecond = Transports.transports(freshAccount.api)
+      Transports.answer(first[0], 401, null)
       compare(freshAccount.api.credentialsRejected, false,
         "the token-only server's refusal of Basic draws no card")
-      var second = newSince(freshAccount, beforeSecond)
+      var second = Transports.newSince(freshAccount.api, beforeSecond)
       compare(second.length, 1)
-      compare(requested(second[0]).scheme, "bearer")
+      compare(Transports.requested(second[0]).scheme, "bearer")
 
-      var beforeMailboxes = transports(freshAccount)
-      answer(second[0], 200, session)
-      var calls = newSince(freshAccount, beforeMailboxes)
+      var beforeMailboxes = Transports.transports(freshAccount.api)
+      Transports.answer(second[0], 200, session)
+      var calls = Transports.newSince(freshAccount.api, beforeMailboxes)
       compare(calls.length, 1, "a good session is followed by one Mailbox/get")
-      compare(requested(calls[0]).verb, "call")
-      compare(requested(calls[0]).scheme, "bearer", "under the scheme that answered")
-      answer(calls[0], 200, mailboxes)
+      compare(Transports.requested(calls[0]).verb, "call")
+      compare(Transports.requested(calls[0]).scheme, "bearer", "under the scheme that answered")
+      Transports.answer(calls[0], 200, mailboxes)
 
       compare(freshAccount.api.credentialsRejected, false)
       verify(!!learned, "sign-in reported what it learned")

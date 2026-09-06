@@ -971,10 +971,21 @@ function markAllReadNote(rows, expanded) {
 function listNoun(list) {
   var rows = Array.isArray(list) ? list : []
   for (var i = 0; i < rows.length; i++) {
-    var block = Conversation.blockOf(rows[i] ? rows[i].thread : null)
-    if (block && block.count > 1) return "conversation"
+    if (badgeCount(rows[i]) > 0) return "conversation"
   }
   return "message"
+}
+
+// The number a row's badge shows: the conversation's length, or 0 for a row
+// that is not one. Two is the floor, `Conversation.MINIMUM_MEMBERS`: a row
+// saying "1" would be saying nothing, and a count of 0 is a provider that does
+// not group its listing — HEY's rows are already conversations and gain no
+// badge — rather than a conversation with nothing in it. Asked rather than
+// read straight off the summary, because a summary cached before rows carried
+// a block has none.
+function badgeCount(summary) {
+  var block = Conversation.blockOf(summary ? summary.thread : null)
+  return block && block.count >= Conversation.MINIMUM_MEMBERS ? block.count : 0
 }
 
 function resultSummary(list, estimate, hasMore) {

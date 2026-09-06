@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../account/Model.js" as Model
 
 // One message in the list. Unread is carried by weight and by the dot on the
 // left, never by colour alone — the accent is a theme value that some themes
@@ -35,11 +36,11 @@ Rectangle {
 
   readonly property bool hot: mouse.containsMouse || hasCursor
 
-  // How many messages the conversation holds. Zero where the provider does not
-  // group its listing, or does not know — and where a summary was cached before
-  // rows carried a block at all, which is why this is asked rather than read
-  // straight off the summary.
-  readonly property int threadCount: root.summary.thread ? root.summary.thread.count : 0
+  // How many messages the conversation holds, for the badge — and zero for a
+  // row that draws none, which `Model.badgeCount` decides: a provider that does
+  // not group its listing, a conversation of one, a summary cached before rows
+  // carried a block at all.
+  readonly property int threadCount: Model.badgeCount(root.summary)
 
   // The subject is asked on its own account: a reply prefix is Latin whatever
   // the thread is written in, so `Re: مرحبا` reads left-to-right to anything
@@ -169,15 +170,13 @@ Rectangle {
       // it, and the one place on the row that is about the thread rather than
       // about the message the server returned for it.
       //
-      // Two or more only. A row saying "1" would be saying nothing, and a count
-      // of 0 is a provider that does not group its listing rather than a
-      // conversation with nothing in it — which is what HEY reports, whose rows
-      // are already conversations and gain no badge here.
+      // Drawn only where the model gave it a number: two or more, on a provider
+      // that groups its listing.
       Text {
         id: count
         anchors.right: parent.right
         anchors.baseline: sender.baseline
-        visible: root.conversations && root.threadCount >= 2
+        visible: root.conversations && root.threadCount > 0
         textFormat: Text.PlainText
         text: root.threadCount
         color: root.dimColor

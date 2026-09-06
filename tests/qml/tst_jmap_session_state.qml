@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import "transports.js" as Transports
 import "../../account" as Account
 
 // A reply that names a newer session state has the session fetched again.
@@ -77,44 +78,18 @@ Item {
       })
     }
 
-    function transports() {
-      var out = []
-      var kids = account.api ? account.api.data : null
-      var count = kids ? kids.length : 0
-      for (var i = 0; i < count; i++) {
-        var kid = kids[i]
-        if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
-      }
-      return out
-    }
 
-    function newSince(before) {
-      var now = transports()
-      var out = []
-      for (var i = 0; i < now.length; i++)
-        if (before.indexOf(now[i]) < 0) out.push(now[i])
-      return out
-    }
-
-    function verbOf(process) {
-      return String(process.requestLine).split(" ")[0]
-    }
-
-    function answer(process, body) {
-      process.stdout.text = ["0", "200 ", Qt.btoa(JSON.stringify(body)), ""].join("\n")
-      process.exited(0)
-    }
 
     // One count read, answered under a reply that names each state in turn.
     function countUnder(sessionState) {
-      var before = transports()
+      var before = Transports.transports(account.api)
       account.api.getLabelCounts("a", function() {})
-      var requests = newSince(before)
+      var requests = Transports.newSince(account.api, before)
       compare(requests.length, 1, "one Mailbox/get")
-      compare(verbOf(requests[0]), "call")
-      var beforeAnswer = transports()
-      answer(requests[0], countReply(sessionState))
-      return newSince(beforeAnswer)
+      compare(Transports.requested(requests[0]).verb, "call")
+      var beforeAnswer = Transports.transports(account.api)
+      Transports.answer(requests[0], 200, countReply(sessionState))
+      return Transports.newSince(account.api, beforeAnswer)
     }
 
     function test_a_reply_naming_a_newer_state_refetches_the_session_once() {
@@ -130,12 +105,12 @@ Item {
 
       var refetch = countUnder("s1")
       compare(refetch.length, 1, "a newer state is one session GET")
-      compare(verbOf(refetch[0]), "session")
+      compare(Transports.requested(refetch[0]).verb, "session")
       compare(account.api.session.state, "s0", "and the held session stands until it answers")
 
       compare(countUnder("s1").length, 0, "the same state again is not a second GET")
 
-      answer(refetch[0], session("s1"))
+      Transports.answer(refetch[0], 200, session("s1"))
       compare(account.api.session.state, "s1", "the answer replaces the held session")
       compare(account.api.session.capabilities["urn:ietf:params:jmap:core"].maxObjectsInGet, 250,
         "limits included")

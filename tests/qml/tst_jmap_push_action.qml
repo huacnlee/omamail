@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import "transports.js" as Transports
 import "../../account" as Account
 
 // A push that lands while an action is still in the air.
@@ -82,28 +83,6 @@ Item {
         totalEmails: 0, unreadEmails: 0 }
     ]
 
-    // Every transport process the client currently holds. The stub `Process` is
-    // an `Item`, so it lands among the client's children, and `requestLine` is
-    // the property only a transport carries.
-    function transports() {
-      var out = []
-      var kids = account.api ? account.api.data : null
-      var count = kids ? kids.length : 0
-      for (var i = 0; i < count; i++) {
-        var kid = kids[i]
-        if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
-      }
-      return out
-    }
-
-    function newSince(before) {
-      var now = transports()
-      var out = []
-      for (var i = 0; i < now.length; i++)
-        if (before.indexOf(now[i]) < 0) out.push(now[i])
-      return out
-    }
-
     function test_push_while_action_pending_defers_and_replays() {
       verify(!!account.auth, "the JMAP account builds its own sign-in object")
       verify(!!account.api, "and its own client")
@@ -130,11 +109,11 @@ Item {
       account.listLoaded = true
       account.listLoading = false
 
-      var beforeAction = transports()
+      var beforeAction = Transports.transports(account.api)
       verify(account.act("m1", "markRead"), "the action was accepted")
       compare(account.pendingAction, "markRead")
       compare(account.pendingActionQuery, account.cacheKey)
-      var actionProcesses = newSince(beforeAction)
+      var actionProcesses = Transports.newSince(account.api, beforeAction)
       compare(actionProcesses.length, 1, "the action is one request in flight")
       var actionProcess = actionProcesses[0]
 
@@ -142,25 +121,25 @@ Item {
       // names a state the client does not already hold — the object it hands
       // over is `Jmap.refreshPlan`'s answer and nothing else.
       compare(account.deferredListLoad, null, "nothing is deferred yet")
-      var beforePush = transports()
+      var beforePush = Transports.transports(account.api)
       account.api.remoteChanged({ mail: true, mailboxes: false })
 
       verify(!!account.deferredListLoad,
         "a refresh arriving mid-action is deferred, not run over the edit")
       compare(account.deferredListLoad.cacheKey, account.cacheKey,
         "and it is deferred for the query the user is looking at")
-      compare(newSince(beforePush).length, 0,
+      compare(Transports.newSince(account.api, beforePush).length, 0,
         "no list request went out while the action was pending")
 
       // The action answers. The reply is short of the four lines the transport
       // writes, which is the script refusing before curl ran — the failure path,
       // where the row goes back and the deferred load is replayed all the same.
-      var beforeReply = transports()
+      var beforeReply = Transports.transports(account.api)
       actionProcess.exited(2)
 
       compare(account.pendingAction, "", "the action is finished")
       compare(account.deferredListLoad, null, "and the deferred load was taken")
-      compare(newSince(beforeReply).length, 1,
+      compare(Transports.newSince(account.api, beforeReply).length, 1,
         "the action's own callback is what put the list request out")
     }
   }

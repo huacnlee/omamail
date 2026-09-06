@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import "transports.js" as Transports
 import "../.." as Omamail
 
 // A JMAP sign-in has to leave the account able to sign in again.
@@ -97,43 +98,6 @@ Item {
       return null
     }
 
-    // Every transport process the client holds. The stub `Process` is an
-    // `Item`, so it lands among the client's children, and `requestLine` is
-    // the property only a transport carries.
-    function transports(client) {
-      var out = []
-      var kids = client ? client.data : null
-      var count = kids ? kids.length : 0
-      for (var i = 0; i < count; i++) {
-        var kid = kids[i]
-        if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
-      }
-      return out
-    }
-
-    function newSince(client, before) {
-      var now = transports(client)
-      var out = []
-      for (var i = 0; i < now.length; i++)
-        if (before.indexOf(now[i]) < 0) out.push(now[i])
-      return out
-    }
-
-    // The verb and the URL of a request, read back out of the line the client
-    // wrote for the transport script: base64 fields after the verb, the URL
-    // the first of them.
-    function requested(process) {
-      var fields = String(process.requestLine).split(" ")
-      return { verb: fields[0], url: Qt.atob(fields[1]) }
-    }
-
-    // A 200 with this body, in the four lines the transport script writes:
-    // curl's exit, the status line, the body and stderr, the last two base64.
-    function answer(process, body) {
-      process.stdout.text = ["0", "200 ", Qt.btoa(JSON.stringify(body)), ""].join("\n")
-      process.exited(0)
-    }
-
     function init() {
       app.opened = true
       mailService.accountList = ({ version: 1, accounts: [], activeId: "" })
@@ -188,25 +152,25 @@ Item {
       named(app, "jmap-server-field").text = "mail.example.test"
       named(app, "jmap-secret-field").text = "app-password"
 
-      var before = transports(account.api)
+      var before = Transports.transports(account.api)
       page.signIn()
       // The save names the row — it is `jmap:jane@example.test` from here —
       // and the sign-in is a tick behind it by design; the session GET is what
       // says it has begun.
       tryCompare(account, "accountId", accountId)
-      tryVerify(function() { return newSince(account.api, before).length === 1 }, 1000,
+      tryVerify(function() { return Transports.newSince(account.api, before).length === 1 }, 1000,
         "sign-in sends the session GET")
-      var sessionRequest = newSince(account.api, before)[0]
-      compare(requested(sessionRequest).verb, "session")
-      compare(requested(sessionRequest).url, sessionUrl,
+      var sessionRequest = Transports.newSince(account.api, before)[0]
+      compare(Transports.requested(sessionRequest).verb, "session")
+      compare(Transports.requested(sessionRequest).url, sessionUrl,
         "a bare typed host becomes the session URL under it")
 
-      var beforeMailboxes = transports(account.api)
-      answer(sessionRequest, session)
-      var calls = newSince(account.api, beforeMailboxes)
+      var beforeMailboxes = Transports.transports(account.api)
+      Transports.answer(sessionRequest, 200, session)
+      var calls = Transports.newSince(account.api, beforeMailboxes)
       compare(calls.length, 1, "a good session is followed by one Mailbox/get")
-      compare(requested(calls[0]).verb, "call")
-      answer(calls[0], mailboxes)
+      compare(Transports.requested(calls[0]).verb, "call")
+      Transports.answer(calls[0], 200, mailboxes)
       return account
     }
 

@@ -639,6 +639,16 @@ deepEqual(model.unavailableActions({ archive: false, star: false }), ["archive",
 deepEqual(model.unavailableActions(null), ["archive", "star"],
   "an unknown provider offers nothing it cannot prove")
 
+// The number a row's badge shows, and the floor under it: two or more on a
+// provider that grouped its listing, else nothing — a count of 0 is a provider
+// that never grouped, a count of 1 would say nothing, and a row cached before
+// rows carried a block has no block to read.
+assert.strictEqual(model.badgeCount({ thread: { id: "d", count: 3, memberIds: ["a", "b", "c"] } }), 3)
+assert.strictEqual(model.badgeCount({ thread: { id: "d", count: 1, memberIds: ["a"] } }), 0)
+assert.strictEqual(model.badgeCount({ thread: { id: "d", count: 0, memberIds: [] } }), 0)
+assert.strictEqual(model.badgeCount({ id: "m" }), 0)
+assert.strictEqual(model.badgeCount(null), 0)
+
 console.log("test_model.js ok")
 
 // ------------------------------------------------------------- reading zoom

@@ -49,9 +49,10 @@ three directories away from the client that calls it.
   tests can reach it without a compositor. QML holds no logic worth testing.
 - One JS resource may build on others with QML's `.import "Other.js" as Other`,
   which is how `providers/Registry.js` is assembled out of `Gmail.js`,
-  `Hey.js` and `Imap.js` — and those out of `GmailApi.js` and `HeyCli.js` in
-  turn, because where a message lives on the web is a fact about the service
-  rather than about the registry. `tests/load.js` resolves the chain the same
+  `Hey.js`, `Jmap.js` and `Imap.js` — and those out of `GmailApi.js`,
+  `HeyCli.js` and `JmapProtocol.js` in turn, because where a message lives on
+  the web, or what a query string means, is a fact about the service rather
+  than about the registry. `tests/load.js` resolves the chain the same
   way the engine does, so the tests exercise the real files.
 - Tests name the module path: `load("cache/Cache.js")`. A bare filename would no
   longer say where the thing lives.
@@ -225,8 +226,11 @@ key. What matters while working:
 - A mailbox is a **provider**: `gmail`, `hey`, `jmap`, or `imap`, listed in that order because IMAP is the answer for a server the other three do not name and a chooser that opened with it would ask the question backwards. JMAP goes in front of it for that reason and one more — a server speaking both is better read over JMAP, so somebody who has one should meet it before settling for the catch-all. `Provider.js` is the only place that knows the differences — which mailboxes exist, what a query string means, what the service can be asked to do, and how it signs in. Nothing above it branches on a provider id.
 - Two objects make a provider work: something that signs in (`AuthManager`, `HeyAuth`, `JmapAuth`, `ImapAuth`) and something that fetches (`GmailApiClient`, `HeyClient`, `JmapClient`, `ImapClient`). `MailAccount` builds one pair through a `Loader` and drives them through an identical interface — same method names, same arguments, same callback shape. Adding a provider is those two files and a registry entry.
 - **Every client hands back Gmail's message resource**: a headers array, a MIME
-  tree, part bodies in base64url. That is what lets one list, one reader, one
-  cache and one set of actions serve every provider. `Message.parseRfc822` is
+  tree, part bodies in base64url — and, from a provider whose listing collapses
+  to conversations, a `thread` block on each row (`Message.threadOf`), which
+  every other provider leaves absent and the row reads as a count of 0. That is
+  what lets one list, one reader, one cache and one set of actions serve every
+  provider. `Message.parseRfc822` is
   the adapter that rebuilds that shape from the wire format, and it is worth
   keeping even where IMAP's own structures would have been more natural.
   HEY never serves an RFC 822 message at all, so `HeyClient.toMessage`

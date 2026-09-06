@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import "transports.js" as Transports
 import "../../account" as Account
 
 // "Mark these read" reaches the rail and the open message, and comes back.
@@ -82,25 +83,6 @@ Item {
       })
     }
 
-    function transports() {
-      var out = []
-      var kids = account.api ? account.api.data : null
-      var count = kids ? kids.length : 0
-      for (var i = 0; i < count; i++) {
-        var kid = kids[i]
-        if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
-      }
-      return out
-    }
-
-    function newSince(before) {
-      var now = transports()
-      var out = []
-      for (var i = 0; i < now.length; i++)
-        if (before.indexOf(now[i]) < 0) out.push(now[i])
-      return out
-    }
-
     function test_mark_all_read_marks_the_rail_and_the_open_member_and_restores() {
       verify(!!account.auth && !!account.api)
       account.api.session = session
@@ -121,10 +103,10 @@ Item {
       account.selectedId = "m2"
       account.selectedMessage = member("m2", true)
 
-      var before = transports()
+      var before = Transports.transports(account.api)
       verify(account.markAllRead(), "the batch was accepted")
       compare(account.pendingAction, "markRead")
-      var requests = newSince(before)
+      var requests = Transports.newSince(account.api, before)
       compare(requests.length, 1, "one request for the whole batch")
 
       compare(account.messages[0].unread, false, "the row is read")

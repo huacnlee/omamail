@@ -1,5 +1,7 @@
 .pragma library
 
+.import "../message/Message.js" as Mail
+
 // The conversation the reader is inside, as the rail draws it.
 //
 // A row stands for a conversation and opens its representative in the
@@ -33,22 +35,11 @@ function trimmed(value) {
 
 // A block, whatever shape it arrived in, or null when there is none. Read
 // rather than trusted: a summary restored from the cache predates blocks
-// entirely, and `thread` is simply absent on it.
+// entirely, and `thread` is simply absent on it. The normalisation is
+// `Message.normalizeThread`'s, the one every row's block goes through.
 function blockOf(value) {
   if (!value || typeof value !== "object") return null
-  var ids = []
-  var list = Array.isArray(value.memberIds) ? value.memberIds : []
-  for (var i = 0; i < list.length; i++) {
-    var id = trimmed(list[i])
-    if (id !== "") ids.push(id)
-  }
-  return {
-    id: trimmed(value.id),
-    count: ids.length,
-    unread: value.unread === true,
-    flagged: value.flagged === true,
-    memberIds: ids
-  }
+  return Mail.normalizeThread(value, "")
 }
 
 // Whether one member, on its own, carries a label. A summary's `unread` and
