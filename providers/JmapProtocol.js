@@ -761,6 +761,21 @@ function sessionState(session) {
   return doc ? trimmed(doc.state) : ""
 }
 
+// The state a reply says the session has moved to, or "" when it has not.
+//
+// Every API reply carries `sessionState` (RFC 8620 section 3.4), and one that
+// differs from the held session's is the server saying its URLs, its limits or
+// its accounts changed — so the held one is refetched. A reply carrying none
+// says nothing, and a held session with no state of its own has nothing to
+// compare, so neither moves anything.
+function movedSessionState(session, payload) {
+  var doc = parseJson(payload)
+  var reported = doc ? trimmed(doc.sessionState) : ""
+  if (reported === "") return ""
+  var held = sessionState(session)
+  return held !== "" && held !== reported ? reported : ""
+}
+
 // The host a session URL names, which is what a user is shown afterwards: the
 // mailboxes row's second line and the "Signed in" line both say the host
 // rather than the whole URL, because the path is this client's business and
@@ -1187,12 +1202,14 @@ var OPTIONAL_RAIL_ROWS = [
 // guesses are not the other's to change, and a shared function is what would
 // carry the first divergence across. They are needed because a server may
 // publish no `role` at all on a mailbox it plainly means as one — the
-// reference Stalwart's Archive folders are exactly that.
+// reference Stalwart's Archive folders are exactly that. "Junk Email" is
+// Exchange's name for the one folder the bare word cannot stand in for, and
+// IMAP's copy learned it first.
 var ROLE_NAME_GUESSES = {
   sent: /^sent( mail| items| messages)?$/,
   trash: /^(trash|deleted( items| messages)?)$/,
   drafts: /^drafts?$/,
-  junk: /^(junk|spam|bulk mail)$/,
+  junk: /^(junk([ -]?e-?mail)?|spam|bulk mail)$/,
   archive: /^(archive|all mail)$/
 }
 

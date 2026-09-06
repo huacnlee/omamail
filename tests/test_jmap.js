@@ -514,6 +514,19 @@ assert.strictEqual(jmap.sessionState(session()), "abc")
 assert.strictEqual(jmap.sessionState(session({ state: undefined })), "")
 assert.strictEqual(jmap.sessionState(null), "")
 
+// A reply naming a state the held session does not have is the server saying
+// the session moved, and the state it names is what the refetch is keyed on. A
+// reply carrying none, or a held session with none, moves nothing.
+assert.strictEqual(jmap.movedSessionState(session(), { sessionState: "abd", methodResponses: [] }), "abd")
+assert.strictEqual(jmap.movedSessionState(session(), '{"sessionState":"abd","methodResponses":[]}'), "abd")
+assert.strictEqual(jmap.movedSessionState(session(), { sessionState: "abc", methodResponses: [] }), "",
+  "the state the session already has")
+assert.strictEqual(jmap.movedSessionState(session(), { methodResponses: [] }), "",
+  "a reply that names no state says nothing")
+assert.strictEqual(jmap.movedSessionState(session({ state: undefined }), { sessionState: "abd" }), "",
+  "and a held session with no state has nothing to compare")
+assert.strictEqual(jmap.movedSessionState(null, { sessionState: "abd" }), "")
+
 // Sending does not gate sign-in: a credential that cannot submit still reads
 // mail. Asked of the mail account first and of the session second, because the
 // two really do disagree — a per-account permission is stated on the account.
@@ -612,6 +625,12 @@ assert.strictEqual(jmap.resolveRole("sent", unrolled), "4")
 assert.strictEqual(jmap.resolveRole("drafts", unrolled), "5")
 assert.strictEqual(jmap.resolveRole("junk", unrolled), "6")
 assert.strictEqual(jmap.resolveRole("archive", [{ id: "9", name: "All Mail", parentId: null }]), "9")
+// Exchange's name for the junk folder, which the bare word cannot stand in for
+// — the same guess IMAP makes, so an account reads the same over either.
+assert.strictEqual(jmap.resolveRole("junk", [{ id: "j", name: "Junk Email", parentId: null }]), "j")
+assert.strictEqual(jmap.resolveRole("junk", [{ id: "j", name: "Junk E-mail", parentId: null }]), "j")
+assert.strictEqual(jmap.resolveRole("junk", [{ id: "j", name: "Junk-Email", parentId: null }]), "j")
+assert.strictEqual(jmap.resolveRole("junk", [{ id: "j", name: "Junky", parentId: null }]), "")
 
 // A role wins over a name, wherever both are on offer.
 assert.strictEqual(jmap.resolveRole("archive",

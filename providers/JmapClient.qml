@@ -27,7 +27,8 @@ import "../message/Message.js" as Mail
 //   1. the *session*. Its API URL, its download template and its limits are
 //      the server's answer rather than the account's settings, so it is held
 //      in memory, kept in the account's cache file and refetched when neither
-//      has one. A restart has neither until this runs.
+//      has one — or when a reply's `sessionState` says the one held has been
+//      superseded. A restart has neither until this runs.
 //   2. the *mailbox list*, read once on first need. Every query gates on it
 //      the way IMAP's gates on LIST: a filter needs the mailbox id a role
 //      resolved to, and so does every label id on every row.
@@ -641,18 +642,24 @@ Item {
     sessionWaiters = waiting
     if (sessionLoading) return
     sessionLoading = true
+    fetchSession(url, function(error) {
+      if (root) root.finishSessionWaiters(error)
+    })
+  }
 
+  // The session GET, under the credential, and the held session replaced by
+  // what it answers. `callback(error)`.
+  function fetchSession(url, callback) {
     auth.withCredentials(function(credential, error) {
       if (!root) return
       if (error || !credential) {
-        root.finishSessionWaiters(error || "Sign in to this mailbox first")
+        callback(error || "Sign in to this mailbox first")
         return
       }
       root.request("session", url, credential, null, null, function(reply) {
         if (!root) return
         if (reply.exit !== 0 || reply.status !== 200) {
-          root.finishSessionWaiters(
-            Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+          callback(Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
           return
         }
         // The same four-step check sign-in runs, because a session fetched now
@@ -660,16 +667,37 @@ Item {
         // or `receivedAt` sort has gone is one every list would fail on.
         var check = Jmap.verifySession(reply.body)
         if (check.error !== "") {
-          root.finishSessionWaiters(check.error)
+          callback(check.error)
           return
         }
         root.session = Jmap.parseJson(reply.body)
         root.serverIdentity = Jmap.serverIdentity(auth.settings)
         root.credentialsRejected = false
         root.rememberSession(url, reply.body)
-        root.finishSessionWaiters("")
+        callback("")
       })
     })
+  }
+
+  // The session again, when a reply's `sessionState` says the held one is
+  // stale — RFC 8620 section 3.4, and the one thing that tells this client a
+  // server has changed its URLs, its limits or its accounts without moving.
+  //
+  // Replaced rather than dropped: everything in flight keeps the URLs it
+  // started with and the next request reads the new ones, where forgetting the
+  // session would have every read wait on the refetch. One refetch per state
+  // the server names, whether or not it succeeds, so a server that keeps
+  // answering with a state this client cannot fetch costs one GET rather than
+  // one per reply.
+  property string sessionMovedTo: ""
+
+  function refetchSession(state) {
+    var reported = String(state || "")
+    if (reported === "" || reported === sessionMovedTo) return
+    sessionMovedTo = reported
+    var url = auth && auth.settings ? String(auth.settings.sessionUrl || "") : ""
+    if (url === "") return
+    fetchSession(url, function() {})
   }
 
   // ------------------------------------------------------------ one call
@@ -760,6 +788,7 @@ Item {
       return
     }
     root.knownStates = Jmap.recordStates(root.knownStates, responses)
+    refetchSession(Jmap.movedSessionState(root.session, payload))
     var type = Jmap.methodErrorType(responses)
     if (typeof callback === "function")
       callback(responses, type !== "" ? Jmap.methodError(responses) : "", type)
