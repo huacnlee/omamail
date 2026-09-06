@@ -101,6 +101,7 @@ test-js:
 	node tests/test_imap.js
 	node tests/test_jmap.js
 	node tests/test_jmap_threads.js
+	node tests/test_jmap_helpers.js
 	node tests/test_hey.js
 
 test-shell: test-shell-portable test-shell-libcurl

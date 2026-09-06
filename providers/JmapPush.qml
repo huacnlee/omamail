@@ -56,10 +56,6 @@ Item {
   // stops until a successful sign-in clears it.
   signal secretRejected()
 
-  // "The stream has heard the server within two ping intervals." Nothing draws
-  // it yet; it is what a later "Live" beside "Synced" reads.
-  readonly property bool live: stream.running && heard
-
   // The stream should be up: a mailbox with a secret in memory whose credential
   // has not been refused. Deliberately not gated on the window — the badge and
   // the notification for a mailbox nobody is looking at are the whole reason

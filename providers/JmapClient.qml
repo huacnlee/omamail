@@ -119,10 +119,6 @@ Item {
   // nothing between connections.
   signal remoteChanged(var plan)
 
-  // Whether the stream has heard the server within two ping intervals. Nothing
-  // draws it yet; it is the input for a later "Live" beside "Synced".
-  readonly property bool live: push.live
-
   function newHandle() {
     return { aborted: false, process: null, children: [], queueEntry: null }
   }
@@ -180,7 +176,7 @@ Item {
   // decoding every megabyte of every attachment on the chance one failed.
   function request(verb, url, credential, extra, handle, callback) {
     var owner = handle || newHandle()
-    var credentials = credential || { scheme: Jmap.AUTH_NONE, username: "", secret: "" }
+    var credentials = credential || Jmap.credential(Jmap.AUTH_NONE, "", "")
     var fields = [field(url), field(credentials.scheme),
       field(credentials.username), field(credentials.secret)]
     if (extra !== undefined && extra !== null) fields.push(field(extra))
@@ -286,7 +282,7 @@ Item {
     // the session fetched with it. Every step below the typed one therefore
     // finds its candidate unauthenticated first.
     function credential(scheme) {
-      return { scheme: scheme, username: username, secret: String(secret || "") }
+      return Jmap.credential(scheme, username, secret)
     }
 
     // One unauthenticated GET, and at most one redirect hop taken from the
@@ -325,7 +321,7 @@ Item {
             // so a discovered candidate gives way to the next step and a typed
             // one reports what happened.
             if (next) next()
-            else done(null, Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+            else done(null, Jmap.replyError(reply))
             return
           }
           if (reply.status === 401) {
@@ -339,7 +335,7 @@ Item {
           }
           if (reply.status !== 200) {
             if (next) next()
-            else done(null, Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+            else done(null, Jmap.replyError(reply))
             return
           }
           // The server answered as a server. Whatever is wrong from here is
@@ -375,53 +371,38 @@ Item {
       })
       request("call", api, credential(scheme), body, handle, function(reply) {
         if (handle.aborted) return
-        if (reply.exit !== 0 || reply.status !== 200) {
-          finish(null, Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
-          return
-        }
-        var payload = Jmap.parseJson(reply.body)
-        if (!payload) {
-          finish(null, "The server sent an answer this client could not read")
-          return
-        }
-        // JMAP fails at two levels inside a 200. A request-level failure
-        // replaces the whole document, so it is the absence of
-        // `methodResponses` that says which of the two this is — asking
-        // `requestError` about a successful response would invent one.
-        var responses = payload.methodResponses
-        if (!Array.isArray(responses)) {
-          finish(null, Jmap.requestError(payload))
-          return
-        }
-        // `methodError` returning "" cannot be told from "no error", so the
-        // type is what the branch is written on.
-        if (Jmap.methodErrorType(responses) !== "") {
-          finish(null, Jmap.methodError(responses))
-          return
-        }
-        var first = responses.length > 0 ? responses[0] : null
-        var boxes = first && first[1] && Array.isArray(first[1].list) ? first[1].list : []
+        // Read the way every reply after sign-in is read — the three levels a
+        // JMAP request fails at, in order — so the check and the first list
+        // cannot disagree about what an answer means.
+        root.readCall(reply, function(responses, error) {
+          if (handle.aborted) return
+          if (error) {
+            finish(null, error)
+            return
+          }
+          var args = Jmap.responseArguments(responses, "Mailbox/get")
+          var boxes = args && Array.isArray(args.list) ? args.list : []
 
-        root.session = Jmap.parseJson(sessionText)
-        // Under the settings the account is about to be given — the URL that
-        // answered and the username as typed — so the write that follows
-        // sign-in reads as the same mailbox rather than a new one.
-        root.serverIdentity = Jmap.serverIdentity({ sessionUrl: url, username: values.username })
-        root.mailboxList = boxes
-        // A sign-in that came back with mailboxes has already done the read
-        // every query gates on. An empty answer is left unloaded so the first
-        // query asks again rather than starting from nothing.
-        root.mailboxesLoaded = boxes.length > 0
-        root.knownStates = Jmap.recordStates(root.knownStates, responses)
-        root.credentialsRejected = false
-        rememberSession(url, sessionText)
-        finish({
-          sessionUrl: url,
-          authScheme: scheme,
-          accountId: accountId,
-          canSend: Jmap.hasSubmission(sessionText),
-          mailboxCount: boxes.length
-        }, "")
+          root.session = Jmap.parseJson(sessionText)
+          // Under the settings the account is about to be given — the URL
+          // that answered and the username as typed — so the write that
+          // follows sign-in reads as the same mailbox rather than a new one.
+          root.serverIdentity = Jmap.serverIdentity({ sessionUrl: url, username: values.username })
+          root.mailboxList = boxes
+          // A sign-in that came back with mailboxes has already done the read
+          // every query gates on. An empty answer is left unloaded so the
+          // first query asks again rather than starting from nothing.
+          root.mailboxesLoaded = boxes.length > 0
+          root.credentialsRejected = false
+          rememberSession(url, sessionText)
+          finish({
+            sessionUrl: url,
+            authScheme: scheme,
+            accountId: accountId,
+            canSend: Jmap.hasSubmission(sessionText),
+            mailboxCount: boxes.length
+          }, "")
+        })
       })
     }
 
@@ -550,7 +531,22 @@ Item {
   // difference in pace and not in correctness.
   property var callQueue: null
 
-  function queue() {
+  // The second FIFO, for the one verb that sends a body rather than receiving
+  // one. Its own limit because the session states its own: a 40 MB message on
+  // a slow link would otherwise hold a `maxConcurrentRequests` slot for the
+  // length of the upload while the rail, the counts and the list queued behind
+  // it. Built at the first upload and never torn down, for the same reason the
+  // call queue is not.
+  property var uploadQueue: null
+
+  function queueFor(uploading) {
+    if (uploading) {
+      if (!uploadQueue) {
+        uploadQueue = Jmap.makeQueue(
+          Jmap.sessionLimit(session, "maxConcurrentUpload", Jmap.DEFAULT_CONCURRENT_UPLOAD))
+      }
+      return uploadQueue
+    }
     if (!callQueue) {
       callQueue = Jmap.makeQueue(
         Jmap.sessionLimit(session, "maxConcurrentRequests", Jmap.DEFAULT_CONCURRENCY))
@@ -562,45 +558,63 @@ Item {
   // entry, on every path out of it — including the ones that never reached
   // curl, because a slot held by a request that failed to start is a slot
   // nothing ever gives back.
-  function releaseSlot() {
-    if (!callQueue) return
-    var next = callQueue.release()
+  function releaseFrom(uploading) {
+    var held = uploading ? uploadQueue : callQueue
+    if (!held) return
+    var next = held.release()
     if (next) next.start()
   }
 
-  // The second FIFO, for the one verb that sends a body rather than receiving
-  // one. Its own limit because the session states its own: a 40 MB message on
-  // a slow link would otherwise hold a `maxConcurrentRequests` slot for the
-  // length of the upload while the rail, the counts and the list queued behind
-  // it. Built at the first upload and never torn down, for the same reason the
-  // call queue is not.
-  property var uploadQueue: null
-
-  function uploads() {
-    if (!uploadQueue) {
-      uploadQueue = Jmap.makeQueue(
-        Jmap.sessionLimit(session, "maxConcurrentUpload", Jmap.DEFAULT_CONCURRENT_UPLOAD))
+  // One request through one of the two queues: admitted now or started when a
+  // slot frees, and then the same three refusals before curl — withdrawn,
+  // signed out, nowhere to send it — each of which gives the slot back.
+  // `urlFor` answers the address once the entry runs, because the session
+  // that names it may arrive while the entry waits, and `send(url, credential,
+  // error)` is the caller's own request or its refusal; the caller releases
+  // the slot when its process ends.
+  function dispatch(owner, uploading, urlFor, send) {
+    var entry = { owner: owner }
+    entry.start = function() {
+      if (!root || owner.aborted) {
+        if (root) root.releaseFrom(uploading)
+        return
+      }
+      if (!root.auth) {
+        root.releaseFrom(uploading)
+        send("", null, "Sign in to this mailbox first")
+        return
+      }
+      var url = urlFor()
+      if (url === "") {
+        root.releaseFrom(uploading)
+        send("", null, "Sign in to this mailbox again")
+        return
+      }
+      root.auth.withCredentials(function(credential, error) {
+        if (!root) return
+        if (owner.aborted) {
+          root.releaseFrom(uploading)
+          return
+        }
+        if (error || !credential) {
+          root.releaseFrom(uploading)
+          send("", null, error || "Sign in to this mailbox first")
+          return
+        }
+        send(url, credential, "")
+      })
     }
-    return uploadQueue
-  }
-
-  function releaseUploadSlot() {
-    if (!uploadQueue) return
-    var next = uploadQueue.release()
-    if (next) next.start()
+    owner.queueEntry = entry
+    if (queueFor(uploading).admit(entry)) entry.start()
   }
 
   // ---------------------------------------------------------- the session
 
-  property var sessionWaiters: []
-  property bool sessionLoading: false
-
-  function finishSessionWaiters(error) {
-    sessionLoading = false
-    var pending = sessionWaiters.slice()
-    sessionWaiters = []
-    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
-  }
+  // Who is waiting on the session, the mailbox list and the identities: three
+  // reads many callers need and one performs.
+  property var sessionWaiters: Jmap.makeWaiters()
+  property var mailboxWaiters: Jmap.makeWaiters()
+  property var identityWaiters: Jmap.makeWaiters()
 
   // The session object: memory, then the cache, then the server.
   //
@@ -637,13 +651,9 @@ Item {
       }
     }
 
-    var waiting = sessionWaiters.slice()
-    waiting.push(callback)
-    sessionWaiters = waiting
-    if (sessionLoading) return
-    sessionLoading = true
+    if (!sessionWaiters.join(callback)) return
     fetchSession(url, function(error) {
-      if (root) root.finishSessionWaiters(error)
+      if (root) root.sessionWaiters.finish(error)
     })
   }
 
@@ -659,7 +669,7 @@ Item {
       root.request("session", url, credential, null, null, function(reply) {
         if (!root) return
         if (reply.exit !== 0 || reply.status !== 200) {
-          callback(Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+          callback(Jmap.replyError(reply))
           return
         }
         // The same four-step check sign-in runs, because a session fetched now
@@ -715,49 +725,23 @@ Item {
   // a vendor URN never appears in either.
   function call(methodCalls, handle, callback, using) {
     var owner = handle || newHandle()
-    var entry = { owner: owner }
-
-    entry.start = function() {
-      if (!root || owner.aborted) {
-        if (root) root.releaseSlot()
-        return
-      }
-      if (!root.auth) {
-        root.releaseSlot()
-        root.hand(callback, null, "Sign in to this mailbox first")
-        return
-      }
-      if (root.apiUrl === "") {
-        root.releaseSlot()
-        root.hand(callback, null, "Sign in to this mailbox again")
-        return
-      }
-      root.auth.withCredentials(function(credential, error) {
-        if (!root) return
-        if (owner.aborted) {
-          root.releaseSlot()
-          return
-        }
-        if (error || !credential) {
-          root.releaseSlot()
-          root.hand(callback, null, error || "Sign in to this mailbox first")
+    dispatch(owner, false, function() { return root.apiUrl },
+      function(url, credential, error) {
+        if (error) {
+          root.hand(callback, null, error)
           return
         }
         var body = JSON.stringify({
           using: Array.isArray(using) ? using : Jmap.USING_MAIL,
           methodCalls: methodCalls
         })
-        root.request("call", root.apiUrl, credential, body, owner, function(reply) {
+        root.request("call", url, credential, body, owner, function(reply) {
           if (!root) return
-          root.releaseSlot()
+          root.releaseFrom(false)
           if (owner.aborted) return
           root.readCall(reply, callback)
         })
       })
-    }
-
-    owner.queueEntry = entry
-    if (queue().admit(entry)) entry.start()
     return owner
   }
 
@@ -771,7 +755,7 @@ Item {
       // long as the account is open.
       if (reply.status === 404) forgetServer()
       hand(callback, null,
-        Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+        Jmap.replyError(reply))
       return
     }
     var payload = Jmap.parseJson(reply.body)
@@ -797,15 +781,6 @@ Item {
   // ------------------------------------------------------- the mailbox list
 
   property bool mailboxesLoaded: false
-  property bool mailboxLoading: false
-  property var mailboxWaiters: []
-
-  function finishMailboxWaiters(error) {
-    mailboxLoading = false
-    var pending = mailboxWaiters.slice()
-    mailboxWaiters = []
-    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
-  }
 
   // Every query gates on this, the way IMAP's gates on LIST. Read once on first
   // need and kept, then replaced wholesale by every `getLabels` — which sign-in
@@ -820,21 +795,16 @@ Item {
       callback("")
       return
     }
-    var waiting = mailboxWaiters.slice()
-    waiting.push(callback)
-    mailboxWaiters = waiting
-    if (mailboxLoading) return
-    mailboxLoading = true
-
+    if (!mailboxWaiters.join(callback)) return
     ensureSession(function(error) {
       if (!root) return
       if (error) {
-        root.finishMailboxWaiters(error)
+        root.mailboxWaiters.finish(error)
         return
       }
       root.readMailboxList(null, function(list, failure) {
         if (!root) return
-        root.finishMailboxWaiters(failure)
+        root.mailboxWaiters.finish(failure)
       })
     })
   }
@@ -989,37 +959,94 @@ Item {
     hand(callback, read.page, "")
   }
 
-  // The members again, by id, in chunks no larger than the server will answer.
-  // One `Email/get` per chunk, as the summary read does, and one failed chunk
-  // fails the page: a row whose block counted only the members that arrived
-  // would say the wrong thing about its conversation.
-  function readMembers(ids, handle, callback) {
+  // One `Email/get` per chunk of ids, no chunk larger than the server will
+  // answer, all through the queue at once, and one `done(firstError)` when the
+  // last has answered. Each chunk's `list` goes to `onList` as it lands. A
+  // chunk that failed contributes no rows and the first failure's sentence;
+  // what a failure means for the whole read is the caller's — a page fails
+  // whole, a rail keeps the stops that arrived.
+  function readChunks(ids, argumentsFor, handle, onList, done) {
     var chunks = Jmap.chunked(ids,
       Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
     if (chunks.length === 0) {
-      callback([], "")
+      done("")
       return
     }
-    var members = []
     var remaining = chunks.length
     var firstError = ""
 
     for (var c = 0; c < chunks.length; c++) {
       (function(chunk) {
-        var child = root.call([[
-          "Email/get", Threads.memberGet(root.accountId, chunk), "0"
-        ]], null, function(responses, failure) {
-          if (!root || handle.aborted) return
-          if (failure && firstError === "") firstError = failure
-          var args = Jmap.responseArguments(responses, "Email/get")
-          var list = args && Array.isArray(args.list) ? args.list : []
-          for (var j = 0; j < list.length; j++) members.push(list[j])
-          remaining = remaining - 1
-          if (remaining === 0) callback(members, firstError)
-        })
+        var child = root.call([["Email/get", argumentsFor(chunk), "0"]], null,
+          function(responses, failure) {
+            if (!root || handle.aborted) return
+            if (failure && firstError === "") firstError = failure
+            var args = Jmap.responseArguments(responses, "Email/get")
+            onList(args && Array.isArray(args.list) ? args.list : [])
+            remaining = remaining - 1
+            if (remaining === 0) done(firstError)
+          })
         handle.children.push(child)
       })(chunks[c])
     }
+  }
+
+  // The members again, by id, for the follow-up after the server refused to
+  // answer the whole page's member read in one call. One failed chunk fails
+  // the page: a row whose block counted only the members that arrived would
+  // say the wrong thing about its conversation.
+  function readMembers(ids, handle, callback) {
+    var members = []
+    readChunks(ids, function(chunk) { return Threads.memberGet(root.accountId, chunk) }, handle,
+      function(list) { for (var j = 0; j < list.length; j++) members.push(list[j]) },
+      function(firstError) { callback(members, firstError) })
+  }
+
+  // The rows behind a list of ids, composed, in the order they were asked for.
+  //
+  // `withBlocks` puts the collapsed page's `thread` block on each row, which
+  // is what a list row carries and a rail stop must not (see `getSummaries`).
+  // `partialOk` is what a failed chunk means: a page is failed whole, because
+  // hiding one failed chunk behind another that answered would let the caller
+  // keep a continuation token beyond the missing row; a rail keeps the stops
+  // that arrived, because the rest stay the skeletons they already were.
+  // `progress` is handed each chunk's rows as they land.
+  function readRows(ids, withBlocks, partialOk, progress, existingHandle, callback) {
+    var handle = existingHandle || newHandle()
+    var wanted = Jmap.uniqueIds(ids)
+    if (wanted.length === 0) {
+      hand(callback, [], "")
+      return handle
+    }
+    ensureMailboxes(function(error) {
+      if (!root || handle.aborted) return
+      if (error) {
+        root.hand(callback, [], error)
+        return
+      }
+      var byId = {}
+      root.readChunks(wanted,
+        function(chunk) { return Jmap.emailGet(root.accountId, chunk, false) }, handle,
+        function(list) {
+          var painted = []
+          for (var j = 0; j < list.length; j++) {
+            var message = Jmap.toMessage(list[j], root.roles)
+            if (withBlocks) message = root.withThreadBlock(message)
+            if (message.id === "") continue
+            byId[message.id] = message
+            painted.push(message)
+          }
+          if (painted.length > 0 && typeof progress === "function") progress(painted)
+        },
+        function(firstError) {
+          var ordered = []
+          for (var k = 0; k < wanted.length; k++) {
+            if (byId[wanted[k]]) ordered.push(byId[wanted[k]])
+          }
+          root.hand(callback, ordered, partialOk && ordered.length > 0 ? "" : firstError)
+        })
+    })
+    return handle
   }
 
   // The block the collapsed page read composed for this row, put on the
@@ -1052,60 +1079,7 @@ Item {
   // unknown; IMAP declares neither. Nothing above the seam has to know that —
   // it asks, and an empty answer is a rail with nothing to add.
   function getSummaries(ids, callback) {
-    var handle = newHandle()
-    var wanted = []
-    var source = Array.isArray(ids) ? ids : []
-    for (var i = 0; i < source.length; i++) {
-      var id = String(source[i] || "")
-      if (id !== "") wanted.push(id)
-    }
-    if (wanted.length === 0) {
-      hand(callback, [], "")
-      return handle
-    }
-
-    ensureMailboxes(function(error) {
-      if (!root || handle.aborted) return
-      if (error) {
-        root.hand(callback, [], error)
-        return
-      }
-      var chunks = Jmap.chunked(wanted,
-        Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
-      var byId = {}
-      var remaining = chunks.length
-      var firstError = ""
-
-      for (var c = 0; c < chunks.length; c++) {
-        (function(chunk) {
-          var child = root.call([[
-            "Email/get", Jmap.emailGet(root.accountId, chunk, false), "0"
-          ]], null, function(responses, failure) {
-            if (!root || handle.aborted) return
-            if (failure && firstError === "") firstError = failure
-            var args = Jmap.responseArguments(responses, "Email/get")
-            var list = args && Array.isArray(args.list) ? args.list : []
-            for (var j = 0; j < list.length; j++) {
-              var message = Jmap.toMessage(list[j], root.roles)
-              if (message.id !== "") byId[message.id] = message
-            }
-            remaining = remaining - 1
-            if (remaining > 0) return
-            var ordered = []
-            for (var k = 0; k < wanted.length; k++) {
-              if (byId[wanted[k]]) ordered.push(byId[wanted[k]])
-            }
-            // A member the read did not answer for is simply not a stop the
-            // rail can fill in. Unlike a page, a partial answer here is worth
-            // keeping: the stops that arrived settle and the rest stay
-            // skeletons, which is what they already were.
-            root.hand(callback, ordered, ordered.length > 0 ? "" : firstError)
-          })
-          handle.children.push(child)
-        })(chunks[c])
-      }
-    })
-    return handle
+    return readRows(ids, false, true, null, null, callback)
   }
 
   // The rows behind those ids, in the order they were asked for.
@@ -1114,67 +1088,7 @@ Item {
   // where a body structure and its values are asked for. Every row goes through
   // the same composer, so a list row and a preview row are the same shape.
   function getMessages(ids, full, callback, existingHandle, progress) {
-    var handle = existingHandle || newHandle()
-    var wanted = []
-    var source = Array.isArray(ids) ? ids : []
-    for (var i = 0; i < source.length; i++) {
-      var id = String(source[i] || "")
-      if (id !== "") wanted.push(id)
-    }
-    if (wanted.length === 0) {
-      hand(callback, [], "")
-      return handle
-    }
-
-    ensureMailboxes(function(error) {
-      if (!root || handle.aborted) return
-      if (error) {
-        root.hand(callback, [], error)
-        return
-      }
-      var chunks = Jmap.chunked(wanted,
-        Jmap.sessionLimit(root.session, "maxObjectsInGet", Jmap.DEFAULT_OBJECTS_IN_GET))
-      var byId = {}
-      var remaining = chunks.length
-      var firstError = ""
-
-      function finish() {
-        if (!root || handle.aborted) return
-        var ordered = []
-        for (var k = 0; k < wanted.length; k++) {
-          if (byId[wanted[k]]) ordered.push(byId[wanted[k]])
-        }
-        // A partial page is still a failed page: hiding one failed chunk
-        // because another answered would let the caller keep a continuation
-        // token beyond the missing row.
-        root.hand(callback, ordered, firstError)
-      }
-
-      for (var c = 0; c < chunks.length; c++) {
-        (function(chunk) {
-          var child = root.call([[
-            "Email/get", Jmap.emailGet(root.accountId, chunk, false), "0"
-          ]], null, function(responses, failure) {
-            if (!root || handle.aborted) return
-            if (failure && firstError === "") firstError = failure
-            var args = Jmap.responseArguments(responses, "Email/get")
-            var list = args && Array.isArray(args.list) ? args.list : []
-            var painted = []
-            for (var j = 0; j < list.length; j++) {
-              var message = root.withThreadBlock(Jmap.toMessage(list[j], root.roles))
-              if (message.id === "") continue
-              byId[message.id] = message
-              painted.push(message)
-            }
-            if (painted.length > 0 && typeof progress === "function") progress(painted)
-            remaining = remaining - 1
-            if (remaining === 0) finish()
-          })
-          handle.children.push(child)
-        })(chunks[c])
-      }
-    })
-    return handle
+    return readRows(ids, true, false, progress, existingHandle, callback)
   }
 
   // One message, whole: the headers, the MIME tree and the text of the parts
@@ -1325,13 +1239,11 @@ Item {
         root.request("download", url, credential, null, handle, function(reply) {
           if (!root || handle.aborted) return
           if (reply.exit !== 0 || reply.status !== 200) {
-            // curl exit 63 is the 20 MB ceiling the script fixes, and its
-            // sentence is written for somebody who just clicked an attachment.
             // The body of a download crosses as base64 because it is bytes;
             // the one answer that is not bytes is the problem document a
             // failure carries, and it is small enough to read here.
-            root.hand(callback, "", Jmap.transportError(reply.exit, reply.status,
-              Mail.bytesToUtf8(Mail.base64ToBytes(reply.body)), reply.stderr, ""))
+            root.hand(callback, "", Jmap.downloadError(reply,
+              Mail.bytesToUtf8(Mail.base64ToBytes(reply.body))))
             return
           }
           root.hand(callback, String(reply.body || ""), "")
@@ -1446,13 +1358,7 @@ Item {
   // How many distinct messages an action named, which is what decides whether a
   // `notFound` is the answer or a member somebody else deleted.
   function namedCount(ids) {
-    var source = Array.isArray(ids) ? ids : [ids]
-    var seen = []
-    for (var i = 0; i < source.length; i++) {
-      var id = String(source[i] || "")
-      if (id !== "" && seen.indexOf(id) < 0) seen.push(id)
-    }
-    return seen.length
+    return Jmap.uniqueIds(ids).length
   }
 
   // One patch over one id or many, `maxObjectsInSet` at a time.
@@ -1485,13 +1391,7 @@ Item {
     for (var g = 0; g < groups.length; g++) {
       var group = groups[g] || {}
       if (Jmap.patchIsEmpty(group.patch)) continue
-      var wanted = []
-      var source = Array.isArray(group.ids) ? group.ids : []
-      for (var i = 0; i < source.length; i++) {
-        var id = String(source[i] || "")
-        if (id !== "" && wanted.indexOf(id) < 0) wanted.push(id)
-      }
-      var parts = Jmap.chunked(wanted, limit)
+      var parts = Jmap.chunked(Jmap.uniqueIds(group.ids), limit)
       for (var c = 0; c < parts.length; c++) chunks.push({ ids: parts[c], patch: group.patch })
     }
     if (chunks.length === 0) {
@@ -1573,15 +1473,6 @@ Item {
   // mailbox's.
   property var sendAsIdentities: []
   property bool identitiesLoaded: false
-  property bool identityLoading: false
-  property var identityWaiters: []
-
-  function finishIdentityWaiters(error) {
-    identityLoading = false
-    var pending = identityWaiters.slice()
-    identityWaiters = []
-    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
-  }
 
   // `Identity/get` for every id, under the submission capability — `Identity`
   // is that capability's object, and asking for it under core and mail alone
@@ -1591,16 +1482,11 @@ Item {
       callback("")
       return
     }
-    var waiting = identityWaiters.slice()
-    waiting.push(callback)
-    identityWaiters = waiting
-    if (identityLoading) return
-    identityLoading = true
-
+    if (!identityWaiters.join(callback)) return
     ensureSession(function(error) {
       if (!root) return
       if (error) {
-        root.finishIdentityWaiters(error)
+        root.identityWaiters.finish(error)
         return
       }
       // An account the session says cannot submit has no identities to read,
@@ -1612,21 +1498,21 @@ Item {
       if (!Jmap.hasSubmission(root.session, root.accountId)) {
         root.sendAsIdentities = []
         root.identitiesLoaded = true
-        root.finishIdentityWaiters("")
+        root.identityWaiters.finish("")
         return
       }
       root.call([["Identity/get", { accountId: root.accountId, ids: null }, "0"]], null,
         function(responses, failure) {
           if (!root) return
           if (failure) {
-            root.finishIdentityWaiters(failure)
+            root.identityWaiters.finish(failure)
             return
           }
           var args = Jmap.responseArguments(responses, "Identity/get")
           var list = args && Array.isArray(args.list) ? args.list : []
           root.sendAsIdentities = Jmap.identityAliases(list, root.email)
           root.identitiesLoaded = true
-          root.finishIdentityWaiters("")
+          root.identityWaiters.finish("")
         }, Jmap.USING_SUBMISSION)
     })
   }
@@ -1656,44 +1542,21 @@ Item {
   // through the process table and never sits on disk unprotected.
   function uploadMessage(message, handle, callback) {
     var owner = handle || newHandle()
-    var entry = { owner: owner }
-
-    entry.start = function() {
-      if (!root || owner.aborted) {
-        if (root) root.releaseUploadSlot()
-        return
-      }
-      var url = Jmap.uploadUrl(Jmap.uploadTemplate(root.session), root.accountId)
-      if (url === "") {
-        root.releaseUploadSlot()
-        root.hand(callback, "", "Sign in to this mailbox again")
-        return
-      }
-      if (!root.auth) {
-        root.releaseUploadSlot()
-        root.hand(callback, "", "Sign in to this mailbox first")
-        return
-      }
-      root.auth.withCredentials(function(credential, error) {
-        if (!root) return
-        if (owner.aborted) {
-          root.releaseUploadSlot()
-          return
-        }
-        if (error || !credential) {
-          root.releaseUploadSlot()
-          root.hand(callback, "", error || "Sign in to this mailbox first")
+    dispatch(owner, true,
+      function() { return Jmap.uploadUrl(Jmap.uploadTemplate(root.session), root.accountId) },
+      function(url, credential, error) {
+        if (error) {
+          root.hand(callback, "", error)
           return
         }
         root.request("upload", url, credential, message, owner, function(reply) {
           if (!root) return
-          root.releaseUploadSlot()
+          root.releaseFrom(true)
           if (owner.aborted) return
           // RFC 8620 answers an upload with 201; a server that says 200 has
           // still taken it, and the blob id is what either answer is read for.
           if (reply.exit !== 0 || (reply.status !== 200 && reply.status !== 201)) {
-            root.hand(callback, "",
-              Jmap.transportError(reply.exit, reply.status, reply.body, reply.stderr, ""))
+            root.hand(callback, "", Jmap.replyError(reply))
             return
           }
           var blobId = Jmap.uploadedBlobId(reply.body)
@@ -1704,10 +1567,6 @@ Item {
           root.hand(callback, blobId, "")
         })
       })
-    }
-
-    owner.queueEntry = entry
-    if (uploads().admit(entry)) entry.start()
     return owner
   }
 

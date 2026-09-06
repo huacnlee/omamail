@@ -132,11 +132,7 @@ Item {
   function credential() {
     var values = settings || {}
     var user = String(values.username || "")
-    return {
-      scheme: String(values.authScheme || Jmap.AUTH_BASIC),
-      username: user !== "" ? user : String(address || ""),
-      secret: secret
-    }
+    return Jmap.credential(values.authScheme, user !== "" ? user : String(address || ""), secret)
   }
 
   function finishWaiters(value, error) {

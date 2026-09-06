@@ -75,6 +75,25 @@ function trimmed(value) {
   return String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
 }
 
+// Ids as a list — trimmed, without blanks or repeats, in first-appearance
+// order. One id or an array of them, which is what every action takes.
+function uniqueIds(ids) {
+  var source = Array.isArray(ids) ? ids : [ids]
+  var out = []
+  for (var i = 0; i < source.length; i++) {
+    var id = trimmed(source[i])
+    if (id !== "" && out.indexOf(id) < 0) out.push(id)
+  }
+  return out
+}
+
+// A value that is there. JMAP's maps of keywords and of mailbox ids carry
+// `true` for a member; RFC 8620 patches one out with `null`, and the reference
+// server also accepts `false` — so all three read as absent.
+function isSet(value) {
+  return value !== undefined && value !== null && value !== false
+}
+
 // A JMAP answer is an object or it is not an answer. `JSON.parse` accepting
 // `4` or `"x"` is the difference between "the server sent JSON" and "the
 // server sent a JMAP document".
@@ -143,7 +162,7 @@ function transportError(exit, httpStatus, body, stderr, retryAfter) {
   if (code === 6 || code === 7) return "Could not reach the mail server"
   if (code === 28) return "The mail server took too long to answer"
   if (code === 35) return "Could not make a secure connection to the mail server"
-  if (code === 63) return "This attachment is larger than 20 MB"
+  if (code === 63) return "The server's answer was larger than 20 MB"
   // Exit 2 is the script's own refusal — a URL that is not https, an auth
   // scheme it does not build — and it says so on stderr in words that are
   // already about this request.
@@ -184,6 +203,26 @@ function transportError(exit, httpStatus, body, stderr, retryAfter) {
   return "Could not reach the mail server"
 }
 
+// The same, for the reply object the transport hands the client — `{ exit,
+// status, redirect, body, stderr }` — so a caller does not spell the four
+// fields out.
+function replyError(reply, retryAfter) {
+  var source = reply && typeof reply === "object" ? reply : {}
+  return transportError(source.exit, source.status, source.body, source.stderr, retryAfter)
+}
+
+// A blob download's failure, which is `replyError` with the one answer that is
+// about the attachment rather than the server: curl exit 63 is the 20 MB
+// ceiling the script fixes. `body` is the problem document a failed download
+// answers with, decoded by the caller from the bytes the verb answers in.
+var BLOB_TOO_LARGE = "This attachment is larger than 20 MB"
+
+function downloadError(reply, body) {
+  var source = reply && typeof reply === "object" ? reply : {}
+  if (Math.floor(Number(source.exit)) === 63) return BLOB_TOO_LARGE
+  return transportError(source.exit, source.status, body, source.stderr, "")
+}
+
 // ------------------------------------------------------------ request level
 
 // The server read the document and refused the whole of it. `payload` is the
@@ -218,20 +257,36 @@ function requestError(payload) {
 
 // ------------------------------------------------------------- method level
 
-// The first `error` invocation in a `methodResponses` array, or null. A JMAP
-// response is a list of `[name, arguments, callId]` triples and an error is
-// one of them rather than a failure of the request that carried it.
-function firstMethodError(responses) {
-  if (!responses || typeof responses !== "object" || !responses.length) return null
-  for (var i = 0; i < responses.length; i++) {
-    var row = responses[i]
+// Every invocation in a reply, as `{ name, arguments, callId }`. A JMAP
+// response is a list of `[name, arguments, callId]` triples, and this is the
+// one walk over it: a row that is not a triple is skipped rather than read,
+// and an error is an invocation named `error` rather than a failure of the
+// request that carried it.
+function invocations(responses) {
+  var list = responses && typeof responses === "object" && responses.length !== undefined
+    ? responses : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
     if (!row || typeof row !== "object" || row.length < 2) continue
-    if (String(row[0]) !== "error") continue
-    var args = row[1] && typeof row[1] === "object" ? row[1] : {}
+    out.push({
+      name: trimmed(row[0]),
+      arguments: row[1] && typeof row[1] === "object" ? row[1] : {},
+      callId: row.length > 2 ? trimmed(row[2]) : ""
+    })
+  }
+  return out
+}
+
+// The first `error` invocation in a `methodResponses` array, or null.
+function firstMethodError(responses) {
+  var list = invocations(responses)
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].name !== "error") continue
     return {
-      type: errorType(args.type),
-      arguments: args,
-      callId: row.length > 2 ? String(row[2]) : ""
+      type: errorType(list[i].arguments.type),
+      arguments: list[i].arguments,
+      callId: list[i].callId
     }
   }
   return null
@@ -327,6 +382,47 @@ function makeQueue(limit) {
   }
 
   return queue
+}
+
+// The waiting list behind a read many callers need and one performs — the
+// session, the mailbox list, the identities. Pure, for the reason the queue
+// is.
+//
+//   join(callback)  queues the callback; true for the caller that should
+//                   perform the read, which is the first since the last
+//                   `finish`, false for one that only waits
+//   finish(error)   calls every waiter once with the answer, "" for none,
+//                   and empties the list
+function makeWaiters() {
+  var gate = { loading: false, waiting: [] }
+
+  gate.join = function (callback) {
+    if (typeof callback === "function") gate.waiting.push(callback)
+    if (gate.loading) return false
+    gate.loading = true
+    return true
+  }
+
+  gate.finish = function (error) {
+    gate.loading = false
+    var pending = gate.waiting
+    gate.waiting = []
+    for (var i = 0; i < pending.length; i++) pending[i](String(error || ""))
+  }
+
+  return gate
+}
+
+// The credential as the transport takes it: three fields rather than one
+// string, because the script builds the `Authorization` value itself and
+// nothing in QML ever assembles one. `none` is discovery's well-known GET.
+function credential(scheme, username, secret) {
+  var kind = trimmed(scheme).toLowerCase()
+  return {
+    scheme: kind === AUTH_BEARER || kind === AUTH_NONE ? kind : AUTH_BASIC,
+    username: String(username === undefined || username === null ? "" : username),
+    secret: String(secret === undefined || secret === null ? "" : secret)
+  }
 }
 
 // ------------------------------------------------------------ download URLs
@@ -735,12 +831,19 @@ function accountFor(doc, accountId) {
   return account && typeof account === "object" ? account : null
 }
 
+// One string off the session object, or "" — the shape every URL, template
+// and state the session publishes is read in, and read by name here so the
+// five readers below cannot disagree about what an absent one means.
+function sessionField(session, name) {
+  var doc = parseJson(session)
+  return doc ? trimmed(doc[name]) : ""
+}
+
 // Where every method call goes. Read from the session rather than assumed:
 // on the reference account the session is on one host and this URL is on
 // another, and it is the second of the two places a credential may go.
 function apiUrl(session) {
-  var doc = parseJson(session)
-  return doc ? trimmed(doc.apiUrl) : ""
+  return sessionField(session, "apiUrl")
 }
 
 // The template every blob is fetched through, read from the session for the
@@ -748,16 +851,14 @@ function apiUrl(session) {
 // go, and on the reference account it is a different host from the session's
 // own. `downloadUrl` fills it; nothing else builds a download address.
 function downloadTemplate(session) {
-  var doc = parseJson(session)
-  return doc ? trimmed(doc.downloadUrl) : ""
+  return sessionField(session, "downloadUrl")
 }
 
 // The server's own word for "nothing has changed". A cached session is good
 // for as long as this matches, and a push telling the client the state moved
 // is what makes it refetch — so it is what a cache entry is keyed on.
 function sessionState(session) {
-  var doc = parseJson(session)
-  return doc ? trimmed(doc.state) : ""
+  return sessionField(session, "state")
 }
 
 // The state a reply says the session has moved to, or "" when it has not.
@@ -809,13 +910,20 @@ function schemeLabel(scheme) {
 // Stalwart says 500 and Fastmail says something else, and neither is guessed.
 var DEFAULT_OBJECTS_IN_GET = 100
 
-// A positive whole number from the session's core capability, or the fallback.
-function sessionLimit(session, name, fallback) {
+// A positive whole number off the session's core capability, or 0 for one the
+// session does not state.
+function coreLimit(session, name) {
   var doc = parseJson(session)
   var core = doc && doc.capabilities && typeof doc.capabilities === "object"
     ? doc.capabilities[CAPABILITY_CORE] : null
   var value = core && typeof core === "object" ? Math.floor(Number(core[trimmed(name)])) : NaN
-  if (isFinite(value) && value > 0) return value
+  return isFinite(value) && value > 0 ? value : 0
+}
+
+// The same, with the fallback for a session that does not state it.
+function sessionLimit(session, name, fallback) {
+  var value = coreLimit(session, name)
+  if (value > 0) return value
   var floor = Math.floor(Number(fallback))
   return isFinite(floor) && floor > 0 ? floor : 1
 }
@@ -837,13 +945,10 @@ function chunked(ids, size) {
 // Null when the reply does not carry it, which is a different thing from an
 // invocation that answered with an empty list.
 function responseArguments(responses, name) {
-  var list = Array.isArray(responses) ? responses : []
+  var list = invocations(responses)
   var wanted = trimmed(name)
   for (var i = 0; i < list.length; i++) {
-    var row = list[i]
-    if (!row || typeof row !== "object" || row.length < 2) continue
-    if (trimmed(row[0]) !== wanted) continue
-    return row[1] && typeof row[1] === "object" ? row[1] : {}
+    if (list[i].name === wanted) return list[i].arguments
   }
   return null
 }
@@ -867,14 +972,12 @@ function recordStates(known, responses) {
   var source = known && typeof known === "object" ? known : {}
   for (var key in source) out[key] = String(source[key])
 
-  var list = Array.isArray(responses) ? responses : []
+  var list = invocations(responses)
   for (var i = 0; i < list.length; i++) {
-    var row = list[i]
-    if (!row || typeof row !== "object" || row.length < 2) continue
-    var name = trimmed(row[0])
+    var name = list[i].name
     var slash = name.indexOf("/")
     if (slash <= 0) continue
-    var args = row[1] && typeof row[1] === "object" ? row[1] : {}
+    var args = list[i].arguments
     // `newState` is where a `/set` left the type; `state` is where a `/get`
     // read it. Either is the newest this client has been told about.
     var state = trimmed(args.newState) !== "" ? trimmed(args.newState) : trimmed(args.state)
@@ -910,8 +1013,7 @@ var TYPE_MAILBOX = "Mailbox"
 // address comes from — the same rule the API URL and the download template
 // follow, and for the same reason: it is a URL a credential is sent to.
 function eventSourceTemplate(session) {
-  var doc = parseJson(session)
-  return doc ? trimmed(doc.eventSourceUrl) : ""
+  return sessionField(session, "eventSourceUrl")
 }
 
 // The template, filled. Percent-encoded through `fillTemplate` exactly as a
@@ -1628,12 +1730,11 @@ function labelCounts(mailbox) {
 //
 // The three `header:…:asRaw` values are asked for by name because JMAP's parsed
 // fields do not carry them: the unsubscribe path reads the two `List-` lines
-// verbatim, and a `Date` header is what a reply quotes. `hasAttachment` is
-// asked for because the decision recorded it and it is one boolean the server
-// already holds; nothing reads it yet.
+// verbatim, and a `Date` header is what a reply quotes. Nothing is asked for
+// that no row reads — `hasAttachment` was, for a badge nothing drew.
 var LIST_PROPERTIES = [
   "id", "blobId", "threadId", "mailboxIds", "keywords", "size", "receivedAt",
-  "from", "to", "cc", "subject", "preview", "hasAttachment",
+  "from", "to", "cc", "subject", "preview",
   "messageId", "inReplyTo", "references",
   "header:List-Unsubscribe:asRaw", "header:List-Unsubscribe-Post:asRaw",
   "header:Date:asRaw"
@@ -1645,8 +1746,7 @@ function keywordSet(email) {
 }
 
 function hasKeyword(email, name) {
-  var value = keywordSet(email)[name]
-  return value !== undefined && value !== null && value !== false
+  return isSet(keywordSet(email)[name])
 }
 
 function inMailbox(email, mailboxId) {
@@ -1654,8 +1754,7 @@ function inMailbox(email, mailboxId) {
   if (id === "") return false
   var ids = (email || {}).mailboxIds
   if (!ids || typeof ids !== "object") return false
-  var value = ids[id]
-  return value !== undefined && value !== null && value !== false
+  return isSet(ids[id])
 }
 
 // The Gmail label ids a JMAP message amounts to, so a row, a star and an unread
@@ -2088,11 +2187,11 @@ function substitutePart(payload, part, data) {
 // label, while a JMAP message holds a *set* of mailboxes — so those become
 // `mailboxIds` keys instead.
 
-// How a keyword is taken away. RFC 8620 patches a value out with `null`; the
-// reference server also accepts `false`, which is not used, because `null` is
-// the form the RFC names and a server entitled to refuse the other one is
-// entitled to.
-var KEYWORD_OFF = null
+// How a key is taken out of a patch — a keyword, or a mailbox membership. RFC
+// 8620 patches a value out with `null`; the reference server also accepts
+// `false`, which is not used, because `null` is the form the RFC names and a
+// server entitled to refuse the other one is entitled to.
+var PATCH_REMOVE = null
 
 // What `maxObjectsInSet` is worth when the session does not say, for the same
 // reason `DEFAULT_OBJECTS_IN_GET` exists: RFC 8620 makes the figure mandatory,
@@ -2212,10 +2311,10 @@ function patchFor(addLabelIds, removeLabelIds, roles, mailboxIds) {
   // The inversion: Gmail's UNREAD is a label you *add*, JMAP's `$seen` is a
   // keyword you *take away*. Getting this backwards marks read what the user
   // has just marked unread.
-  if (hasLabel(added, "UNREAD")) patch["keywords/$seen"] = KEYWORD_OFF
+  if (hasLabel(added, "UNREAD")) patch["keywords/$seen"] = PATCH_REMOVE
   if (hasLabel(removed, "UNREAD")) patch["keywords/$seen"] = true
   if (hasLabel(added, "STARRED")) patch["keywords/$flagged"] = true
-  if (hasLabel(removed, "STARRED")) patch["keywords/$flagged"] = KEYWORD_OFF
+  if (hasLabel(removed, "STARRED")) patch["keywords/$flagged"] = PATCH_REMOVE
 
   var move = moveFor(added, removed)
   if (move === "") return patch
@@ -2236,7 +2335,7 @@ function patchFor(addLabelIds, removeLabelIds, roles, mailboxIds) {
   } else {
     patch["mailboxIds/" + to] = true
     var from = plan.from === "" ? "" : trimmed(map[plan.from])
-    if (from !== "" && from !== to) patch["mailboxIds/" + from] = KEYWORD_OFF
+    if (from !== "" && from !== to) patch["mailboxIds/" + from] = PATCH_REMOVE
   }
 
   // Reporting spam says something about the message as well as moving it. RFC
@@ -2246,7 +2345,7 @@ function patchFor(addLabelIds, removeLabelIds, roles, mailboxIds) {
   // because no action moves a message back out of Junk.
   if (move === "spam") {
     patch["keywords/$junk"] = true
-    patch["keywords/$notjunk"] = KEYWORD_OFF
+    patch["keywords/$notjunk"] = PATCH_REMOVE
   }
   return patch
 }
@@ -2368,8 +2467,7 @@ var CREATE_SUBMISSION = "s"
 // API URL is: it is a fourth place a credential may go, and on the reference
 // account it is a different host from the session's own.
 function uploadTemplate(session) {
-  var doc = parseJson(session)
-  return doc ? trimmed(doc.uploadUrl) : ""
+  return sessionField(session, "uploadUrl")
 }
 
 // The template filled, with the account id percent-encoded on the way in — the
@@ -2392,12 +2490,7 @@ function uploadedBlobId(body) {
 // rather than "nothing may be sent" — refusing every message because a server
 // omitted a number would be this client's failure, not the server's.
 function uploadCeiling(session) {
-  var doc = parseJson(session)
-  var core = doc && doc.capabilities && typeof doc.capabilities === "object"
-    ? doc.capabilities[CAPABILITY_CORE] : null
-  var value = core && typeof core === "object"
-    ? Math.floor(Number(core.maxSizeUpload)) : NaN
-  return isFinite(value) && value > 0 ? value : 0
+  return coreLimit(session, "maxSizeUpload")
 }
 
 // The three refusals that happen before any request, so a message too large or
@@ -2566,8 +2659,8 @@ function sendRequest(accountId, blobId, identityId, roles, draftId) {
   // this is the pair of memberships that changes.
   var moved = {}
   moved["mailboxIds/" + sent] = true
-  moved["mailboxIds/" + drafts] = KEYWORD_OFF
-  moved["keywords/$draft"] = KEYWORD_OFF
+  moved["mailboxIds/" + drafts] = PATCH_REMOVE
+  moved["keywords/$draft"] = PATCH_REMOVE
 
   var success = {}
   success["#" + CREATE_SUBMISSION] = moved
@@ -2607,13 +2700,7 @@ function saveRequest(accountId, blobId, roles, draftId) {
 // The follow-up a refused submission needs: the import stands, and nothing
 // else will remove it.
 function destroyRequest(accountId, ids) {
-  var source = Array.isArray(ids) ? ids : [ids]
-  var list = []
-  for (var i = 0; i < source.length; i++) {
-    var id = trimmed(source[i])
-    if (id !== "" && list.indexOf(id) < 0) list.push(id)
-  }
-  return [["Email/set", { accountId: trimmed(accountId), destroy: list }, "0"]]
+  return [["Email/set", { accountId: trimmed(accountId), destroy: uniqueIds(ids) }, "0"]]
 }
 
 // What a `create` map answered for one creation id: the new object's id, or

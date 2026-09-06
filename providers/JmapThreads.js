@@ -94,16 +94,10 @@ function memberGet(accountId, ids) {
 // the same label with the name `error`, which is how the too-large member read
 // is told from one that came back empty.
 function invocationAt(responses, callId) {
-  var list = Array.isArray(responses) ? responses : []
+  var list = Protocol.invocations(responses)
   var wanted = Protocol.trimmed(callId)
   for (var i = 0; i < list.length; i++) {
-    var row = list[i]
-    if (!row || typeof row !== "object" || row.length < 3) continue
-    if (Protocol.trimmed(row[2]) !== wanted) continue
-    return {
-      name: Protocol.trimmed(row[0]),
-      arguments: row[1] && typeof row[1] === "object" ? row[1] : {}
-    }
+    if (list[i].callId === wanted) return { name: list[i].name, arguments: list[i].arguments }
   }
   return null
 }
@@ -295,7 +289,7 @@ function mailboxIdsOf(email) {
   var out = []
   if (!ids || typeof ids !== "object") return out
   for (var key in ids) {
-    if (ids[key] === undefined || ids[key] === null || ids[key] === false) continue
+    if (!Protocol.isSet(ids[key])) continue
     var id = Protocol.trimmed(key)
     if (id !== "") out.push(id)
   }
@@ -359,13 +353,8 @@ function mergedInto(existing, additions, limit) {
 // rather than sent an empty patch, and an action every member is excluded from
 // is an empty plan and no request at all.
 function patchPlan(ids, addLabelIds, removeLabelIds, roles, memberships) {
-  var source = Array.isArray(ids) ? ids : [ids]
   var map = memberships && typeof memberships === "object" ? memberships : {}
-  var list = []
-  for (var n = 0; n < source.length; n++) {
-    var named = Protocol.trimmed(source[n])
-    if (named !== "" && list.indexOf(named) < 0) list.push(named)
-  }
+  var list = Protocol.uniqueIds(ids)
   // The membership map keeps archive and spam off the members a *row* action
   // reached without being asked about — a sent reply, a message a filter
   // filed — and that is the only thing it is for. One id is the message the

@@ -147,6 +147,7 @@ check "basic builds user from the username and the secret" "$config" \
 check "a session GET asks for JSON" "$config" 'header = "Accept: application/json"'
 check "the session connect deadline" "$config" 'connect-timeout = 20'
 check "the session transfer deadline" "$config" 'max-time = 60'
+check "a session reply has the 20 MB ceiling every read answer has" "$config" 'max-filesize = 20971520'
 check "JMAP bypasses desktop HTTP/SOCKS proxies" "$config" 'noproxy = "*"'
 check "the first request is bounded to https" "$config" 'proto = "=https"'
 check "a redirect could not leave https either" "$config" 'proto-redir = "=https"'
@@ -197,6 +198,7 @@ check "the request document reaches curl intact, escaped for its config" "$confi
   "data-binary = \"$escaped_json\""
 check "the call connect deadline" "$config" 'connect-timeout = 20'
 check "the call transfer deadline" "$config" 'max-time = 60'
+check "a method reply has the same ceiling" "$config" 'max-filesize = 20971520'
 
 # -------------------------------------------------------------------- download
 
@@ -220,6 +222,7 @@ check "an upload declares the raw message content type" "$config" \
 check "the message is uploaded from a file, not passed as an argument" "$config" 'upload-file = "'
 check_absent "the message body is not inlined into the config" "$config" 'Subject: hi'
 check "an upload gets the long transfer deadline" "$config" 'max-time = 600'
+check "an upload's answer has the same ceiling" "$config" 'max-filesize = 20971520'
 
 # ---------------------------------------------------------------------- stream
 #
@@ -237,6 +240,7 @@ check "the stream rotates rather than living forever" "$out" 'max-time = 3600'
 check "the stream asks for the status as a trailer" "$out" 'write-out = "http %{http_code}\n"'
 check_absent "the stream follows nothing either" "$out" 'location'
 check_absent "the stream is not base64: it is read line by line" "$out" 'output = '
+check_absent "the stream is bounded by its rotation, not by a size" "$out" 'max-filesize'
 equals "the stream ends with the http trailer" "$(printf '%s\n' "$out" | tail -n 1)" 'http 200'
 
 # The trailer is what splits a --fail exit 22 into a rejected credential and a

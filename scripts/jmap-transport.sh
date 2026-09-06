@@ -223,10 +223,6 @@ build_config() {
       printf 'max-time = 60\n'
       ;;
     download)
-      # A blob is the one answer that can be arbitrarily large. The ceiling is
-      # `Jmap.MAX_BLOB_BYTES`, the same figure attachment.sh sends up to, and
-      # exceeding it is curl exit 63 rather than a 20 MB base64 line.
-      printf 'max-filesize = 20971520\n'
       printf 'connect-timeout = 20\n'
       printf 'speed-limit = 1024\n'
       printf 'speed-time = 30\n'
@@ -262,6 +258,14 @@ build_config() {
     # the stream's own output rather than a channel of its own.
     printf 'write-out = "http %%{http_code}\\n"\n'
   else
+    # Every answer but the stream's is read whole and handed over as one
+    # base64 line, so every one of them has the same ceiling: a blob's, which
+    # is `Jmap.MAX_BLOB_BYTES` and the figure attachment.sh sends up to. A
+    # session object or a method reply near it is not one this client could
+    # use, and exceeding it is curl exit 63 rather than the process that draws
+    # the desktop holding 20 MB of base64. The stream is bounded by its
+    # rotation instead.
+    printf 'max-filesize = 20971520\n'
     printf 'output = "%s"\n' "$(escape "$work/out")"
     printf 'write-out = "%%{http_code} %%{redirect_url}"\n'
   fi

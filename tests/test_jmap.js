@@ -19,7 +19,7 @@ assert.strictEqual(jmap.transportError(7, 0, null, ""), "Could not reach the mai
 assert.strictEqual(jmap.transportError(28, 0, null, ""), "The mail server took too long to answer")
 assert.strictEqual(jmap.transportError(35, 0, null, ""),
   "Could not make a secure connection to the mail server")
-assert.strictEqual(jmap.transportError(63, 200, null, ""), "This attachment is larger than 20 MB")
+assert.strictEqual(jmap.transportError(63, 200, null, ""), "The server's answer was larger than 20 MB")
 
 // Exit 2 is the script refusing before curl ran, and it has already said why
 // in words about this request.
@@ -490,16 +490,6 @@ assert.strictEqual(
 // The scheme is detected rather than asked, and this is the order: an app
 // password is RFC 8620's Basic credential, and only a 401 buys the second try.
 deepEqual(jmap.AUTH_SCHEME_ORDER, ["basic", "bearer"])
-
-// An account that has signed in before starts from the scheme it recorded, so a
-// re-verify on a token-only server does not buy a 401 before the token is
-// tried. Nothing recorded, or a scheme that is not a credential, is the default.
-deepEqual(jmap.schemeOrder("bearer"), ["bearer", "basic"])
-deepEqual(jmap.schemeOrder("basic"), ["basic", "bearer"])
-deepEqual(jmap.schemeOrder("Bearer "), ["bearer", "basic"], "matched like every other scheme value")
-deepEqual(jmap.schemeOrder(""), ["basic", "bearer"])
-deepEqual(jmap.schemeOrder("none"), ["basic", "bearer"])
-deepEqual(jmap.schemeOrder(undefined), ["basic", "bearer"])
 
 // Where every method call goes, read from the session rather than assumed: on
 // the reference account the session is on one host and this URL is on another.
@@ -1348,10 +1338,12 @@ assert.strictEqual(
   jmap.downloadUrl(jmap.downloadTemplate(withDownload), "t", "cgnotes",
     "attachment", "application/octet-stream"),
   "https://api.example.org/jmap/download/t/cgnotes/attachment?accept=application%2Foctet-stream")
-// The ceiling the transport fixes, and the sentence somebody who just clicked
-// an attachment reads when a blob is past it.
+// The ceiling the transport fixes on every answer it reads whole —
+// `tests/test_jmap_transport.sh` asserts the same literal in the config — and
+// the sentence somebody who just clicked an attachment reads when a blob is
+// past it.
 assert.strictEqual(jmap.MAX_BLOB_BYTES, 20971520)
-assert.strictEqual(jmap.transportError(63, 0, "", ""),
+assert.strictEqual(jmap.downloadError({ exit: 63, status: 0, stderr: "" }, ""),
   "This attachment is larger than 20 MB")
 
 // ------------------------------------------------------------- known states
