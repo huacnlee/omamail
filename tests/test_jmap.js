@@ -1649,6 +1649,20 @@ assert.strictEqual(jmap.streamExit(28, false), jmap.EXIT_STREAM_SILENT)
 assert.strictEqual(jmap.streamExit(22, false), 22)
 assert.strictEqual(jmap.streamExit(7, false), 7)
 assert.strictEqual(jmap.streamExit(35, true), 35)
+
+// A connection is believed once it has lasted a whole ping interval. Before
+// that a line the server sent says nothing about whether it will keep the
+// connection open — a server that answers a comment and closes cleanly gives
+// curl exit 0 in sixty milliseconds, and reading that line as a working
+// connection reset the backoff and reconnected at once, forever.
+assert.strictEqual(jmap.connectionSettled(1000, 31000, 30), true, "a whole interval")
+assert.strictEqual(jmap.connectionSettled(1000, 30999, 30), false, "one millisecond short")
+assert.strictEqual(jmap.connectionSettled(1000, 1060, 30), false, "the handshake-and-close case")
+assert.strictEqual(jmap.connectionSettled(1000, 3600000, 30), true, "an hour")
+assert.strictEqual(jmap.connectionSettled(0, 0, 30), false, "the moment it opened")
+assert.strictEqual(jmap.connectionSettled(1000, 31000, 0), false, "no interval to measure by")
+assert.strictEqual(jmap.connectionSettled(NaN, 31000, 30), false)
+assert.strictEqual(jmap.connectionSettled(1000, "soon", 30), false)
 assert.strictEqual(jmap.streamExit(0, undefined), jmap.EXIT_STREAM_SILENT,
   "silence is the default, not a clean close")
 deepEqual(jmap.reconnectDelay(jmap.streamExit(22, false), 401, 0),

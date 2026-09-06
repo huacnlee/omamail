@@ -1222,6 +1222,24 @@ function streamTrailerStatus(line) {
 // Every other exit keeps its meaning, which is what leaves the 401 alone —
 // `--fail` writes no body, so a rejected credential is *always* a connection
 // that heard nothing.
+// Whether a connection has lived long enough to be believed.
+//
+// "Reset on the first line" read one way is the busy loop the table above
+// exists to prevent: a server — or a proxy in front of one — that answers a
+// comment and closes cleanly gives curl exit 0 in the time a TLS handshake
+// takes, and a line arrived, so the backoff reset and the table said "at
+// once". Measured: about sixty milliseconds per connection, with the
+// per-connect refresh behind every one of them. A connection is settled once
+// it has lasted a whole ping interval, which is the first moment the server
+// has had to prove it will keep it open; until then a line is a line, and
+// not a reason to forget how many times this has just failed.
+function connectionSettled(connectedAtMs, nowMs, pingSeconds) {
+  var since = Number(nowMs) - Number(connectedAtMs)
+  var interval = Math.floor(Number(pingSeconds))
+  if (!isFinite(since) || !isFinite(interval) || interval <= 0) return false
+  return since >= interval * 1000
+}
+
 function streamExit(exit, heard) {
   var code = Math.floor(Number(exit))
   if (!isFinite(code)) return EXIT_STREAM_SILENT

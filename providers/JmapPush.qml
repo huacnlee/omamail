@@ -106,6 +106,21 @@ Item {
   // at another server is another mailbox: the session goes, the template goes
   // with it, and a stream still attached to the old address has to go too.
   property string connectedTemplate: ""
+  // When the running connection was opened, on the wall clock. `Jmap.
+  // connectionSettled` reads it against `wallClockMs()`.
+  property double connectedAtMs: 0
+  // The wall clock, unless a test has pinned it: a ping interval is thirty
+  // seconds, and a test that moves time is one that need not wait it out.
+  property double pinnedClockMs: 0
+  function wallClockMs() { return pinnedClockMs > 0 ? pinnedClockMs : Date.now() }
+
+  // A connection that has lasted a whole ping interval. Only such a
+  // connection resets the backoff and only its clean close reconnects at
+  // once: one that a server closed after its first line, however clean the
+  // close, is a failure the table has to count.
+  function settled() {
+    return Jmap.connectionSettled(connectedAtMs, wallClockMs(), pingSeconds)
+  }
 
   // ---------------------------------------------------------- lifecycle
 
@@ -221,8 +236,8 @@ Item {
     readLine("")
     if (!spoke) return
     heard = true
-    attempt = 0
     watchdog.restart()
+    if (settled()) attempt = 0
   }
 
   // True when this line is the server talking, which is everything but curl's
@@ -252,7 +267,9 @@ Item {
 
   function finish(code) {
     var forced = forcedExit
-    var spoke = heard
+    // Heard *and* kept: a server that spoke once and closed in the same
+    // second has not shown the connection was ever any good.
+    var spoke = heard && settled()
     forcedExit = null
     watchdog.stop()
     heard = false
@@ -306,6 +323,7 @@ Item {
       // would wait forever for an EOF that does not come.
       write(root.requestLine + "\n")
       root.requestLine = ""
+      root.connectedAtMs = root.wallClockMs()
       watchdog.restart()
       // The server replays nothing between connections — Stalwart sends no
       // event ids at all — so everything that changed while this was down is
