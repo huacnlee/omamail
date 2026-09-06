@@ -23,6 +23,10 @@ UNTRUSTED = re.compile(
     r"|root\s*\.\s*requested\b|subjectField\s*\.\s*text\b"
     # A server's host name, which whoever answered discovery chose.
     r"|\.host\b"
+    # The conversation rail's stops and the row's badge: a sender, a mailbox
+    # name, a caption and a count all written by the server or the message,
+    # and the mailbox row's detail line, which names the server.
+    r"|\.sender\b|\.mailbox\b|\.caption\b|\.detail\b|threadCount\b"
     # A row that works out its own two lines and hands them over as strings.
     # The address goes in there, so the guard has to follow the value: read
     # from the element, the reference to `.email` is no longer visible and

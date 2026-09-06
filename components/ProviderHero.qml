@@ -123,6 +123,7 @@ Item {
 
     Text {
       width: parent.width
+      textFormat: Text.PlainText
       text: root.detail
       color: root.dimColor
       font.family: root.panelFontFamily
