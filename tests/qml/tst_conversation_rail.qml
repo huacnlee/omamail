@@ -266,6 +266,28 @@ Item {
       }
     }
 
+    // The timeline joins the circles and goes nowhere else: it begins under
+    // the first circle and ends above the last, rather than running the whole
+    // height of the rail as if there were a stop above the top and below the
+    // bottom. In between, each stop's segment spans its whole height so the
+    // line is continuous from circle to circle.
+    function test_the_timeline_runs_from_the_first_circle_to_the_last() {
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      var rail = named(app, "conversationRail")
+      var top = rail.boundsFor(rail.stops[0].id)
+      var middle = rail.boundsFor(rail.stops[1].id)
+      var bottom = rail.boundsFor(rail.stops[2].id)
+      verify(top.node.bottom > top.node.top, "a stop has a circle")
+      compare(top.line.top, top.node.bottom, "the line begins at the bottom of the first circle")
+      compare(top.line.bottom, top.y + top.height, "and runs to the foot of that stop")
+      compare(middle.line.top, middle.y, "a middle stop carries the line the whole way through")
+      compare(middle.line.bottom, middle.y + middle.height)
+      compare(bottom.line.top, bottom.y)
+      compare(bottom.line.bottom, bottom.node.top, "and it ends at the top of the last circle")
+      verify(bottom.line.bottom > bottom.line.top, "so the last segment still reaches its circle")
+    }
+
     // The claim. Both keys move the reader along the rail and neither moves the
     // list cursor, which `j` still owns.
     function test_n_and_p_move_along_the_rail_and_not_the_list_cursor() {

@@ -63,12 +63,20 @@ Item {
   // an id that is not a stop. The same question `MessageList.boundsFor` answers
   // for a row, for the same reason: this is a Column in a Flickable, so there
   // is no index to position by and geometry is what a reveal has to go on.
+  //
+  // `node` and `line` are the stop's circle and its piece of the timeline in
+  // the same coordinates, `{ top, bottom }` each, so a test can say where the
+  // line begins and ends without reaching into the delegate.
   function boundsFor(id) {
     var wanted = String(id || "")
     for (var i = 0; i < stopColumn.children.length; i++) {
       var stop = stopColumn.children[i]
       if (!stop || stop.memberId !== wanted) continue
-      return { y: stop.y, height: stop.height }
+      return {
+        y: stop.y, height: stop.height,
+        node: { top: stop.y + stop.nodeTop, bottom: stop.y + stop.nodeBottom },
+        line: { top: stop.y + stop.lineTop, bottom: stop.y + stop.lineBottom }
+      }
     }
     return null
   }
@@ -150,7 +158,17 @@ Item {
     id: stop
 
     required property var modelData
+    required property int index
     readonly property string memberId: String(modelData.id || "")
+    // The ends of the timeline. The line joins the stops; it does not run in
+    // from above the first circle or out below the last, because there is
+    // nothing at either end for it to be going to.
+    readonly property bool first: index === 0
+    readonly property bool last: index === (root.stops || []).length - 1
+    readonly property real nodeTop: node.y
+    readonly property real nodeBottom: node.y + node.height
+    readonly property real lineTop: first ? nodeBottom : 0
+    readonly property real lineBottom: last ? nodeTop : height
 
     width: stopColumn.width
     implicitHeight: stopBody.implicitHeight + Style.space(14)
@@ -172,12 +190,14 @@ Item {
     // The timeline itself, drawn per stop rather than once behind them: the
     // rail scrolls, and a single rule sized to the content would have to be
     // kept in step with the Column. One segment per stop is the same line and
-    // needs nothing kept true.
+    // needs nothing kept true — the first stop's begins under its circle and
+    // the last stop's ends above its own.
     Rectangle {
+      objectName: "rail-segment"
       x: node.x + (node.width - width) / 2
-      y: 0
+      y: stop.lineTop
       width: Math.max(1, Style.space(1))
-      height: parent.height
+      height: Math.max(0, stop.lineBottom - stop.lineTop)
       color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.14)
     }
 
