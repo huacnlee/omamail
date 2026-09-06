@@ -785,8 +785,21 @@ function verifySession(session) {
   if (!containsValue(sortOptions, "receivedAt")) {
     return { error: "The server cannot sort mail by date, which this client needs", accountId: "" }
   }
+  // The four addresses a credential is sent to, and every one of them written
+  // by the server. The transport refuses anything but HTTPS before curl runs,
+  // so nothing would have been sent either way; refusing here is the same
+  // rule one gate earlier, where the session is still being judged and the
+  // sentence is this client's rather than the script's stderr.
+  for (var i = 0; i < SESSION_ADDRESSES.length; i++) {
+    var address = trimmed(doc[SESSION_ADDRESSES[i]])
+    if (address !== "" && !/^https:\/\//i.test(address)) {
+      return { error: "The server's session names an address that is not HTTPS", accountId: "" }
+    }
+  }
   return { error: "", accountId: primary }
 }
+
+var SESSION_ADDRESSES = ["apiUrl", "downloadUrl", "uploadUrl", "eventSourceUrl"]
 
 // Sending is the one capability sign-in reads and does not refuse the account
 // over. A credential that cannot submit still reads mail perfectly well, so

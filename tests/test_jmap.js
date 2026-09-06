@@ -451,6 +451,23 @@ assert.strictEqual(
 // No mailbox for this account. Stalwart answers 200 with an empty `accounts`
 // when the Authorization header never arrives, so this is the check that stops
 // a 200 from being read as "signed in".
+// The session's four addresses are the server's to write and the credential
+// goes to every one of them. HTTPS or nothing — the transport refuses anything
+// else before curl runs, and this is the same rule at the gate where the
+// session is judged, with this client's sentence rather than the script's.
+var notHttps = "The server's session names an address that is not HTTPS"
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "http://api.example.org/jmap/" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ downloadUrl: "file:///etc/passwd?{blobId}" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ uploadUrl: "ftp://api.example.org/{accountId}" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "ws://api.example.org/es" })).error, notHttps)
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "/jmap/" })).error, notHttps,
+  "a relative address is not one this client can send to either")
+assert.strictEqual(jmap.verifySession(session({ apiUrl: "HTTPS://API.EXAMPLE.ORG/jmap/" })).error, "",
+  "the scheme is judged without regard to case")
+assert.strictEqual(jmap.verifySession(session({ eventSourceUrl: "" })).error, "",
+  "an address the server did not publish is not a wrong one")
+assert.strictEqual(jmap.verifySession(session({ downloadUrl: undefined })).error, "")
+
 assert.strictEqual(jmap.verifySession(session({ accounts: {} })).error,
   "The server has no mailbox for this account")
 assert.strictEqual(jmap.verifySession(session({ primaryAccounts: {} })).error,
