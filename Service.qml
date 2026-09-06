@@ -344,17 +344,13 @@ Item {
       return
     }
 
-    var updated = Accounts.emptyList()
-    updated.activeId = accountList.activeId
-    for (var i = 0; i < accounts.length; i++) {
-      // Everything but the address is carried over rather than listed field by
-      // field: a rebuild that names the fields it keeps silently drops the ones
-      // added afterwards, which is how an IMAP account would come back as a
-      // Gmail one the first time it learned its own name.
-      updated = Accounts.add(updated, i === index
-        ? withEmail(accounts[i], email) : accounts[i])
-    }
-    if (updated.activeId === "" || activeIndex === index)
+    // Everything but the address is carried over rather than listed field by
+    // field: a rebuild that names the fields it keeps silently drops the ones
+    // added afterwards, which is how an IMAP account would come back as a
+    // Gmail one the first time it learned its own name. The selection stays
+    // where it was unless this is the draft on screen, the same as a save.
+    var updated = Accounts.replaceAt(accountList, index, withEmail(accounts[index], email))
+    if (activeIndex === index)
       updated = Accounts.setActive(updated, named)
     if (activeIndex === index) activeIndex = -1
     accountList = updated
@@ -386,13 +382,12 @@ Item {
     if (raw.jmap !== undefined) entry.jmap = raw.jmap
     if (raw.label !== undefined) entry.label = raw.label
 
-    var updated = Accounts.emptyList()
-    updated.activeId = accountList.activeId
-    for (var i = 0; i < accounts.length; i++)
-      updated = Accounts.add(updated, i === index ? entry : accounts[i])
-
+    // The selection stays with the row that had it — `Accounts.replaceAt`
+    // decides that — and moves to this row only when it is the draft on
+    // screen, which is addressed by position because it had no id until now.
+    var updated = Accounts.replaceAt(accountList, index, entry)
     var id = Accounts.accountId(entry.email, entry.provider)
-    if (id !== "" && (updated.activeId === "" || activeIndex === index))
+    if (id !== "" && activeIndex === index)
       updated = Accounts.setActive(updated, id)
     if (activeIndex === index) activeIndex = -1
     accountList = updated

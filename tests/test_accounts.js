@@ -705,3 +705,76 @@ assert.strictEqual(withBoth.accounts[0].signature, "Best, me")
 assert.strictEqual(
   accounts.setLabel(withBoth, "me@gmail.com", "Personal").accounts[0].signature,
   "Best, me", "naming a mailbox does not forget its signature")
+
+// ---------------------------------------------------------------- replaceAt
+
+// Editing a row leaves the selection where it was. The rebuild passes through
+// `add`, whose rule for a list with no active row yet is "the first named row
+// is the one on screen" — right while a list is being built, and wrong while
+// one is being copied with its active row further down. Editing the second
+// mailbox used to hand the selection to the first, and the sign-in after the
+// save with it.
+const trio = accounts.add(accounts.add(accounts.add(accounts.emptyList(),
+  account("ada@example.com")),
+  account("bob@example.com", { provider: "imap" })),
+  account("cid@example.com", { provider: "jmap" }))
+const bobActive = accounts.setActive(trio, "imap:bob@example.com")
+const cidActive = accounts.setActive(trio, "jmap:cid@example.com")
+const beforeReplace = frozen(cidActive)
+
+const cidEdited = accounts.replaceAt(cidActive, 2,
+  Object.assign({}, cidActive.accounts[2], { jmap: { sessionUrl: "https://mail.example.com/jmap/session" } }))
+assert.strictEqual(frozen(cidActive), beforeReplace, "replaceAt leaves its input alone")
+assert.strictEqual(accounts.count(cidEdited), 3)
+assert.strictEqual(cidEdited.activeId, "jmap:cid@example.com",
+  "editing the active row keeps it active")
+assert.strictEqual(cidEdited.accounts[2].jmap.sessionUrl, "https://mail.example.com/jmap/session")
+assert.strictEqual(cidEdited.accounts[2].provider, "jmap", "and keeps the rest of the row")
+
+const adaEditedUnderCid = accounts.replaceAt(cidActive, 0,
+  Object.assign({}, cidActive.accounts[0], { label: "Work" }))
+assert.strictEqual(adaEditedUnderCid.activeId, "jmap:cid@example.com",
+  "editing another row does not move the selection to it")
+assert.strictEqual(adaEditedUnderCid.accounts[0].label, "Work")
+
+const bobEditedUnderCid = accounts.replaceAt(cidActive, 1,
+  Object.assign({}, cidActive.accounts[1], { label: "Home" }))
+assert.strictEqual(bobEditedUnderCid.activeId, "jmap:cid@example.com",
+  "nor to the first row, whichever row was edited")
+
+// The active row renamed follows its new id: the mailbox on screen is still
+// the one being edited, whatever it is now called.
+const bobRenamed = accounts.replaceAt(bobActive, 1,
+  Object.assign({}, bobActive.accounts[1], { email: "robert@example.com" }))
+assert.strictEqual(bobRenamed.accounts[1].id, "imap:robert@example.com")
+assert.strictEqual(bobRenamed.activeId, "imap:robert@example.com")
+
+// A row edited to name a mailbox already in the list folds into it, exactly as
+// `add` has always folded a re-added address, and the selection survives.
+const folded = accounts.replaceAt(cidActive, 1,
+  Object.assign({}, cidActive.accounts[1], { email: "ada@example.com", provider: "gmail" }))
+assert.strictEqual(accounts.count(folded), 2)
+assert.strictEqual(folded.accounts[0].id, "ada@example.com")
+assert.strictEqual(folded.accounts[1].id, "jmap:cid@example.com")
+assert.strictEqual(folded.activeId, "jmap:cid@example.com")
+
+// A draft that gains its address while another row is active leaves that row
+// active: a mailbox being typed in is not the one on screen until the
+// service says so.
+const draftBeside = accounts.add(bobActive, { email: "", pending: true })
+assert.strictEqual(draftBeside.activeId, "imap:bob@example.com")
+const draftNamed = accounts.replaceAt(draftBeside, 3,
+  Object.assign({}, draftBeside.accounts[3], { email: "dee@example.com", provider: "imap" }))
+assert.strictEqual(draftNamed.accounts[3].id, "imap:dee@example.com")
+assert.strictEqual(draftNamed.activeId, "imap:bob@example.com")
+
+// With nothing active, the first named row takes the selection, which is the
+// rule a list being built already has.
+const nothingActive = accounts.replaceAt(
+  { version: accounts.VERSION, accounts: [{ id: "", email: "", provider: "gmail", pending: true }], activeId: "" },
+  0, { email: "eve@example.com" })
+assert.strictEqual(nothingActive.activeId, "eve@example.com")
+
+// Out of range is no edit.
+assert.strictEqual(frozen(accounts.replaceAt(cidActive, 3, account("x@example.com"))), beforeReplace)
+assert.strictEqual(frozen(accounts.replaceAt(cidActive, -1, account("x@example.com"))), beforeReplace)
