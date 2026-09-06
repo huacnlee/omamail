@@ -236,14 +236,38 @@ Item {
     // a half-added mailbox could never be the one on screen, and setup would
     // have nothing to run in.
     if (!next && accountHosts.count > 0) next = accountHosts.objectAt(0)
-    if (next === current) return
+    if (next !== current) current = next
+    applyLiveHosts()
+  }
+
+  // Which mailboxes are live, which is what earns a list.
+  //
+  // `active` gates every list load there is: `refresh` will not reload an
+  // already-loaded list without it, `onActiveChanged` is what asks for the
+  // first one, and the poll timer checks it before extending one. Leaving it
+  // on the visible account meant a merged list refreshed one mailbox's rows
+  // and left the others as they were — counts moved, mail did not. A merged
+  // view has every mailbox on screen at once, so every mailbox gets one.
+  //
+  // `windowOpen` travels with it for the same reason: `refresh` reloads a
+  // loaded list only for a mailbox the window is showing.
+  function applyLiveHosts() {
     for (var i = 0; i < accountHosts.count; i++) {
       var host = accountHosts.objectAt(i)
-      if (host) host.active = host === next
+      if (!host) continue
+      // A mailbox part-way through being added has no id and no rows to
+      // contribute, so it is live only when it is the one on screen — which
+      // is what setup runs in.
+      var live = host === current
+        || (unified && String(host.accountId || "") !== "")
+      host.active = live
+      if (live) host.windowOpen = windowOpen
     }
-    current = next
-    if (current) current.windowOpen = windowOpen
   }
+
+  // Turning the merged view on or off changes which mailboxes are live, and
+  // `refreshCurrent` does not run for it: the account on screen has not moved.
+  onUnifiedChanged: applyLiveHosts()
 
   // The whole point of switching is that it is instant, which it is because
   // each account keeps its own cache on disk. A queued send belongs to its
@@ -788,10 +812,32 @@ Item {
 
   // Which services are involved, which is what decides the rail and every
   // button on it. Two Gmail mailboxes ask one provider's questions.
-  readonly property var unifiedProviders: {
+  // What every mailbox in the merge can actually do, and which rail rows it
+  // has. Read off the hosts rather than their provider ids: each one has
+  // already narrowed its provider by the refusals its server reported and the
+  // mailboxes that turned out not to be there, and those arrive while the app
+  // is running. Reading them here is what makes the intersection follow them.
+  readonly property var unifiedAbilities: {
+    var _epoch = listEpoch
+    var out = []
     var accounts = accountList ? accountList.accounts : []
-    return Unified.providersOf(accounts)
+    for (var i = 0; i < accounts.length; i++) {
+      if (!accounts[i].id) continue
+      var host = accountHosts.objectAt(i)
+      out.push({
+        archive: !!(host && host.canArchive),
+        spam: !!(host && host.canReportSpam),
+        star: !!(host && host.canStar),
+        labels: !!(host && host.hasLabels),
+        web: !!(host && host.canOpenOnWeb),
+        move: !!(host && host.canMove),
+        conversations: !!(host && host.showsConversations),
+        mailboxes: host ? host.mailboxes : []
+      })
+    }
+    return out
   }
+
 
   readonly property var unifiedMessages: Unified.mergeMessages(unifiedSources)
 
@@ -858,7 +904,7 @@ Item {
 
   property bool windowOpen: false
   onWindowOpenChanged: {
-    if (current) current.windowOpen = windowOpen
+    applyLiveHosts()
     if (windowOpen) restoreWindow = false
     saveWindowPrefs()
   }
@@ -911,7 +957,7 @@ Item {
   // view cannot offer it: the picker would open on an empty list, and a chosen
   // id would belong to whichever mailbox happened to be active.
   readonly property bool canMoveToLabel: !unified
-    && Provider.can(providerId, "move")
+    && !!current && current.canMove
 
   // Which service the mailbox on screen is, what mailboxes it has, and what it
   // can be asked to do. Forwarded like everything else so a view never has to
@@ -920,28 +966,28 @@ Item {
   // `providerId` stays the *visible* mailbox's even in a merged view: it
   // decides what a query string means and what a setup page offers, both of
   // which belong to one account. What a merged list may *do* comes from
-  // `Unified.sharedCapability` rather than from here.
+  // `Unified.everyMailboxCan` rather than from here.
   readonly property string providerId: current ? current.providerId : Provider.DEFAULT_ID
   readonly property var mailboxes: unified
-    ? Unified.sharedMailboxes(unifiedProviders)
+    ? Unified.sharedMailboxRows(unifiedAbilities)
     : (current ? current.mailboxes : Provider.mailboxes(Provider.DEFAULT_ID))
   readonly property bool canArchive: unified
-    ? Unified.sharedCapability(unifiedProviders, "archive")
+    ? Unified.everyMailboxCan(unifiedAbilities, "archive")
     : (!current || current.canArchive)
   readonly property bool canReportSpam: unified
-    ? Unified.sharedCapability(unifiedProviders, "spam")
+    ? Unified.everyMailboxCan(unifiedAbilities, "spam")
     : (!current || current.canReportSpam)
   readonly property bool canStar: unified
-    ? Unified.sharedCapability(unifiedProviders, "star")
+    ? Unified.everyMailboxCan(unifiedAbilities, "star")
     : (!current || current.canStar)
   readonly property bool hasLabels: unified
-    ? Unified.sharedCapability(unifiedProviders, "labels")
+    ? Unified.everyMailboxCan(unifiedAbilities, "labels")
     : (!current || current.hasLabels)
   // Intersected like every other capability: a merged list holds rows from
   // mailboxes whose provider has no web UI at all, and "Open in browser" on
   // one of those is a button that cannot be honoured.
   readonly property bool canOpenOnWeb: unified
-    ? Unified.sharedCapability(unifiedProviders, "web")
+    ? Unified.everyMailboxCan(unifiedAbilities, "web")
     : (!current || current.canOpenOnWeb)
   readonly property bool canOpenWebInbox: !unified && !!current && current.canOpenWebInbox
   // A key is not a button: `e` and `s` are bound whatever mailbox is open, so
@@ -986,14 +1032,25 @@ Item {
   // account's threads beside a mailbox that has none would draw a member count
   // on the rows that happened to carry one and nothing on the rest.
   readonly property bool showsConversations: unified
-    ? Unified.sharedCapability(unifiedProviders, "conversations")
+    ? Unified.everyMailboxCan(unifiedAbilities, "conversations")
     : (!!current && current.showsConversations)
   // The rail and its members are about the message being read, so they come
   // from the mailbox holding the selection — the same place `selectedMessage`
   // and `detailPainted` come from.
   readonly property bool showsRail: !!reading && reading.showsRail
-  readonly property var selectedThread: reading ? reading.selectedThread : null
-  readonly property var memberSummaries: reading ? reading.memberSummaries : ({})
+  // Composed on the way out, like `selectedId` and for the same reason: the
+  // rail hands a member id back to `select` and to `act`, and compares the
+  // open one against `selectedId`. A raw one reached no mailbox at all.
+  readonly property var selectedThread: {
+    if (!reading) return null
+    if (!unified) return reading.selectedThread
+    return Unified.composeThread(reading.accountId, reading.selectedThread)
+  }
+  readonly property var memberSummaries: {
+    if (!reading) return ({})
+    if (!unified) return reading.memberSummaries
+    return Unified.composeMembers(reading.accountId, reading.memberSummaries)
+  }
   readonly property string mailboxKey: unified
     ? unifiedMailboxKey : (current ? current.mailboxKey : "inbox")
   // What `mailboxKey` means for a reader that is looking at a thread, which is
@@ -1237,11 +1294,50 @@ Item {
     // account and carries the id, so compose can already name one; this is the
     // routing it was missing.
     var values = fields || ({})
-    var target = String(values.accountId || "")
-    var host = target !== "" ? findAccount(target) : null
-    if (!host) host = senderFor(String(values.from || ""))
-    if (!host) host = current
-    return host ? host.send(values) : false
+    var host = sendHostFor(values)
+    return host ? host.send(withSourceDraftId(values)) : false
+  }
+
+  // The mailbox a submission is sent from.
+  //
+  // A named one is the answer, and a named one that is not here is a refusal
+  // rather than permission to guess: falling through to matching the address
+  // sent the message from whichever mailbox matched first, which for two that
+  // share a send-as alias is not the one the composer chose. The address is
+  // only consulted when nothing named a mailbox at all.
+  //
+  // Resolved in one place so the choice can be asserted, rather than inferred
+  // from what happened after it.
+  function sendHostFor(fields) {
+    var values = fields || ({})
+    var target = draftOwner(values)
+    if (target !== "") return findAccount(target)
+    var host = senderFor(String(values.from || ""))
+    return host ? host : current
+  }
+
+  // The mailbox a submission belongs to: the one it names, or — for a draft
+  // raised from a merged list — the one its id was composed from.
+  function draftOwner(values) {
+    var named = String(values.accountId || "")
+    if (named !== "") return named
+    return Unified.accountOf(String(values.draftId || ""))
+  }
+
+  // The same submission with its draft id as the owning provider issued it.
+  //
+  // Asked of the id rather than of `unified`, because the composer can be
+  // opened from a merged list and saved after the reader has left it — and a
+  // provider handed a composed id answers that the draft is no longer there
+  // and writes nothing. A bare id cannot hold the separator, so this is safe
+  // to ask of any of them.
+  function withSourceDraftId(values) {
+    var id = String(values.draftId || "")
+    if (Unified.accountOf(id) === "") return values
+    var out = ({})
+    for (var key in values) out[key] = values[key]
+    out.draftId = Unified.sourceIdOf(id)
+    return out
   }
 
   // Which mailbox owns an address, for a From that named no account. Asked of
@@ -1269,13 +1365,13 @@ Item {
   }
   function saveDraft(fields, callback) {
     var values = fields || ({})
-    var target = String(values.accountId || "")
+    var target = draftOwner(values)
     var host = target !== "" ? findAccount(target) : current
     if (!host) {
       if (typeof callback === "function") callback(null, "The mailbox for this draft is unavailable")
       return null
     }
-    return host.saveDraft(values, callback)
+    return host.saveDraft(withSourceDraftId(values), callback)
   }
   function fail(text) { if (current) current.fail(text) }
   function note(text) { if (current) current.note(text) }

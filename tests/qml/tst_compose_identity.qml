@@ -67,10 +67,15 @@ Item {
       return ""
     }
 
+    // What `submit()` handed over, so the account it named can be asserted.
+    property var submitted: null
     function preferredSendAs(_recipients) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}
-    function send(_fields) { return true }
+    function send(fields) {
+      submitted = fields
+      return true
+    }
     function setAlwaysShowImages(_value) {}
     function setAlwaysRenderHeavyMessages(_value) {}
     function setUndoSendSeconds(_value) {}
@@ -167,6 +172,24 @@ Item {
       verify(cc.indexOf(adaId) >= 0, "A was on the original and stays on the Cc")
       compare(cc.indexOf(bobId) < 0, true,
         "B is writing it, so B is not copied on it")
+    }
+
+    // ------------------------------------------------------- the send
+
+    // The service can only route a submission to the mailbox that owns it if
+    // the submission says which that is. Without it the service fell back to
+    // matching the From address against each account in turn, so two
+    // mailboxes sharing a send-as alias sent B's draft from whichever came
+    // first — and that fallback cannot tell the difference.
+    function test_a_submission_names_the_mailbox_it_belongs_to() {
+      mailService.composeAccountId = bobId
+      mailService.submitted = null
+      compose.begin("reply", incoming(), "Original body", [])
+      compose.submit()
+
+      verify(mailService.submitted, "the draft was submitted")
+      compare(String(mailService.submitted.accountId), bobId,
+        "and it names B, which is the only thing that can route it")
     }
 
     function test_reply_all_from_the_active_mailbox_is_unchanged() {

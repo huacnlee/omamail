@@ -151,51 +151,42 @@ assert.strictEqual(unified.rowOf(merged, ""), null)
 
 // ------------------------------------------------------------------ rails
 
-// Two mailboxes on one service ask one provider's questions, not two.
-deepEqual(unified.providersOf([
-  { provider: "gmail" }, { provider: "gmail" }, { provider: "imap" }
-]), ["gmail", "imap"])
-deepEqual(unified.providersOf([]), [])
-deepEqual(unified.providersOf([{ provider: "" }]), [])
+// The rail rows and the verbs every mailbox in the merge has, asked of the
+// mailboxes rather than of their providers.
+//
+// A host narrows its provider by the refusals its server reported and the
+// mailboxes it turned out not to have. Intersecting provider ids reintroduced
+// an Archive button for an account whose own view hides it, because its server
+// has no Archive folder — the account is right and the provider is generic.
+const gmailish = { archive: true, spam: true, star: true, web: true,
+  mailboxes: [{ key: "inbox" }, { key: "spam" }, { key: "sent" }] }
+const noArchive = { archive: false, spam: true, star: true, web: false,
+  mailboxes: [{ key: "inbox" }, { key: "spam" }] }
 
-// One provider answers with its own whole rail.
-deepEqual(unified.sharedMailboxes(["gmail"]).map(function(row) { return row.key }),
-  ["inbox", "unread", "starred", "sent", "drafts", "all", "spam", "trash"])
+assert.strictEqual(unified.everyMailboxCan([gmailish], "archive"), true)
+assert.strictEqual(unified.everyMailboxCan([gmailish, noArchive], "archive"), false,
+  "one mailbox that cannot archive is a merged list that does not offer it")
+assert.strictEqual(unified.everyMailboxCan([gmailish, noArchive], "spam"), true)
+assert.strictEqual(unified.everyMailboxCan([gmailish, noArchive], "web"), false)
 
-// Several answer with the rows all of them have, in the first one's order —
-// a rail is a reading order, not a set.
-const shared = unified.sharedMailboxes(["gmail", "imap"]).map(function(row) { return row.key })
-deepEqual(shared, ["inbox", "unread", "starred", "sent", "drafts", "spam", "trash"])
+// A verb nobody named is not a verb anybody has.
+assert.strictEqual(unified.everyMailboxCan([gmailish], "labels"), false)
+assert.strictEqual(unified.everyMailboxCan([], "archive"), false,
+  "no mailboxes cannot do anything")
+assert.strictEqual(unified.everyMailboxCan([gmailish, null], "archive"), false,
+  "a mailbox that has not answered yet is not a yes")
 
-// HEY has neither a starred box nor a sent one it can serve, so a rail beside
-// it loses both rather than offering a row that answers for two mailboxes out
-// of three.
-const withHey = unified.sharedMailboxes(["gmail", "hey"]).map(function(row) { return row.key })
-assert.ok(withHey.indexOf("inbox") >= 0)
-assert.ok(withHey.indexOf("starred") < 0, "HEY has no star, so a unified rail beside it has no starred row")
-assert.ok(withHey.indexOf("sent") < 0, "the HEY client serves no Sent box")
+// The rail is the rows they share, in the first one's order.
+deepEqual(unified.sharedMailboxRows([gmailish]).map(function(row) { return row.key }),
+  ["inbox", "spam", "sent"])
+deepEqual(unified.sharedMailboxRows([gmailish, noArchive]).map(function(row) { return row.key }),
+  ["inbox", "spam"], "a row one server does not have is a row that cannot be opened")
+deepEqual(unified.sharedMailboxRows([]), [])
+deepEqual(unified.sharedMailboxRows([{ mailboxes: [] }, gmailish]), [])
 
-assert.strictEqual(unified.hasSharedMailbox(["gmail", "imap"], "spam"), true)
-assert.strictEqual(unified.hasSharedMailbox(["gmail", "hey"], "starred"), false)
-deepEqual(unified.sharedMailboxes([]), [])
-
-// ----------------------------------------------------------- capabilities
-
-// A capability only some of them declare is a button that fails on the rest,
-// after the row has already moved.
-assert.strictEqual(unified.sharedCapability(["gmail"], "spam"), true)
-assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "spam"), false,
-  "IMAP cannot teach a server anything by moving a message, so nothing may offer it")
-assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "archive"), true)
-assert.strictEqual(unified.sharedCapability(["gmail", "hey"], "star"), false)
-assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "search"), true)
-// Opening a message on the web is a capability like any other. An IMAP
-// mailbox has no address this plugin could know, so a list holding one of
-// its rows must not draw the button beside every row in it.
-assert.strictEqual(unified.sharedCapability(["gmail", "imap"], "web"), false)
-assert.strictEqual(unified.sharedCapability(["gmail", "hey"], "web"), true)
-assert.strictEqual(unified.sharedCapability([], "search"), false,
-  "no mailboxes can honour nothing")
+// A row with no key is not a row.
+deepEqual(unified.sharedMailboxRows([{ mailboxes: [{ key: "" }, { key: "inbox" }] },
+  gmailish]).map(function(row) { return row.key }), ["inbox"])
 
 // -------------------------------------------------------------- the state
 

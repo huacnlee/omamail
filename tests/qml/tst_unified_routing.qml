@@ -226,6 +226,163 @@ Item {
       compare(service.attachmentIsSaving(Unified.unifiedId(bobId, "1"), "2"), false)
     }
 
+    // ------------------------------------------- every mailbox is live
+
+    // `active` is what earns a mailbox a list: `refresh` will not reload one
+    // without it, and neither will the poll. Leaving it on the visible account
+    // meant a merged list refreshed one mailbox's rows and left the others as
+    // they were — the counts moved and the mail did not.
+    function test_every_merged_mailbox_is_given_a_list() {
+      compare(service.unified, true)
+      compare(ada().active, true)
+      compare(bob().active, true, "B is on screen too, so B gets a list")
+      compare(bob().windowOpen, ada().windowOpen,
+        "and the same answer about the window, which refresh also asks")
+    }
+
+    // Turning it off puts the list back on the one mailbox being shown.
+    function test_leaving_the_merged_view_stands_the_others_down() {
+      service.applySettings({ unifiedMailboxes: false })
+      wait(30)
+      compare(service.unified, false)
+      compare(ada().active, true, "A is the mailbox on screen")
+      compare(bob().active, false, "and B is no longer being drawn")
+    }
+
+    // ------------------------------------------------- the sending identity
+
+    // Two mailboxes can share a send-as alias, and the address alone then
+    // names both. Whichever host answered first got the message.
+    function test_a_draft_is_sent_from_the_mailbox_it_names() {
+      compare(service.sendHostFor({ accountId: bobId, from: "shared@example.com" }),
+        bob(), "the mailbox the composer named, not the one the address matched")
+
+      // The collision itself: one address, both mailboxes claiming it. Named
+      // still decides, and the first match no longer does.
+      ada().profile = { email: "shared@example.com" }
+      bob().profile = { email: "shared@example.com" }
+      compare(service.sendHostFor({ from: "shared@example.com" }), ada(),
+        "with nothing named the first match is all there is to go on")
+      compare(service.sendHostFor({ accountId: bobId, from: "shared@example.com" }),
+        bob(), "and naming one is what settles it")
+      ada().profile = null
+      bob().profile = null
+
+      // With neither, the mailbox on screen.
+      compare(service.sendHostFor({}), service.current)
+    }
+
+    // A draft raised from a merged list names its mailbox in its own id, so a
+    // submission that carries only that still reaches the right one.
+    function test_a_draft_id_alone_names_the_sending_mailbox() {
+      compare(service.sendHostFor({ draftId: Unified.unifiedId(bobId, "d1") }), bob())
+    }
+
+    // A named mailbox that is not here is a refusal rather than permission to
+    // fall back to matching the address.
+    function test_a_draft_naming_a_mailbox_that_is_gone_is_not_sent() {
+      ada().lastError = ""
+      bob().lastError = ""
+      compare(service.sendHostFor({ accountId: "gone@example.com", from: adaId }), null,
+        "A matches the address, and is still not asked")
+      compare(service.send({ accountId: "gone@example.com",
+        from: adaId, to: "her@example.com", subject: "x", body: "y" }), false)
+      compare(ada().lastError, "", "nothing was sent from anywhere")
+      compare(bob().lastError, "")
+    }
+
+    // ------------------------------------------------------- the draft id
+
+    // A draft opened from a merged list carries a composed id, and a provider
+    // handed one answers that the draft is gone and writes nothing.
+    function test_a_draft_is_saved_under_the_id_its_provider_issued() {
+      compare(service.draftOwner({ draftId: Unified.unifiedId(bobId, "d1") }), bobId,
+        "the owner is readable from the id alone")
+      compare(service.withSourceDraftId(
+        { draftId: Unified.unifiedId(bobId, "d1") }).draftId, "d1")
+
+      // Named account wins, and a bare id is left exactly as it is.
+      compare(service.draftOwner({ accountId: adaId, draftId: Unified.unifiedId(bobId, "d1") }),
+        adaId)
+      compare(service.withSourceDraftId({ draftId: "d1" }).draftId, "d1")
+    }
+
+    // Not gated on the merged view still being on: the composer can be opened
+    // from one and saved after the reader has left it.
+    function test_a_composed_draft_id_is_decoded_after_the_view_changes() {
+      service.applySettings({ unifiedMailboxes: false })
+      wait(30)
+      compare(service.unified, false)
+      compare(service.withSourceDraftId(
+        { draftId: Unified.unifiedId(bobId, "d1") }).draftId, "d1")
+      compare(service.draftOwner({ draftId: Unified.unifiedId(bobId, "d1") }), bobId)
+    }
+
+    // ----------------------------------------------- what a merge may do
+
+    // What the intersection is taken over: one row per mailbox, each row that
+    // mailbox's own answer.
+    //
+    // A host narrows its provider by the refusals its server reported and the
+    // mailboxes it turned out not to have, so a merged list that asks the
+    // provider ids puts back an Archive the account's own view hides. The
+    // narrowing itself arrives through `api`, which is a read-only loader
+    // item and cannot be injected here — so what is asserted is that every
+    // row is the host's answer and not a provider's. `everyMailboxCan` and
+    // `sharedMailboxRows` are held to the divergent case in
+    // tests/test_unified.js, and test_source.sh guards the call sites.
+    function test_the_intersection_is_taken_over_the_mailboxes_themselves() {
+      var rows = service.unifiedAbilities
+      compare(rows.length, 2, "one row per mailbox in the merge")
+
+      var hosts = [ada(), bob()]
+      for (var i = 0; i < hosts.length; i++) {
+        compare(rows[i].archive, hosts[i].canArchive)
+        compare(rows[i].spam, hosts[i].canReportSpam)
+        compare(rows[i].star, hosts[i].canStar)
+        compare(rows[i].labels, hosts[i].hasLabels)
+        compare(rows[i].web, hosts[i].canOpenOnWeb)
+        compare(rows[i].move, hosts[i].canMove)
+        compare(rows[i].conversations, hosts[i].showsConversations)
+        compare(rows[i].mailboxes.length, hosts[i].mailboxes.length)
+      }
+
+      compare(service.canArchive,
+        Unified.everyMailboxCan(rows, "archive"),
+        "and the offered verb is that intersection, nothing else")
+    }
+
+    // ------------------------------------------------ conversation members
+
+    // The rail steps from one member to the next and hands the id back to
+    // `select` and `act`. A raw member id reached no mailbox, so a merged
+    // conversation could be drawn and not walked.
+    function test_a_conversation_member_is_addressed_like_every_other_row() {
+      bob().selectedThread = { id: "t1", count: 2, unread: false, flagged: false,
+        memberIds: ["1", "2"] }
+      bob().memberSummaries = ({
+        "1": { id: "1", unread: true, labelIds: ["UNREAD"] },
+        "2": { id: "2", unread: false, labelIds: [] }
+      })
+      service.select(Unified.unifiedId(bobId, "1"))
+
+      deepCompare(service.selectedThread.memberIds,
+        [Unified.unifiedId(bobId, "1"), Unified.unifiedId(bobId, "2")])
+      compare(service.selectedThread.id, "t1",
+        "the thread's own handle is not a message id and is left alone")
+
+      var key = Unified.unifiedId(bobId, "2")
+      verify(service.memberSummaries[key], "the summaries are keyed the same way")
+      compare(service.memberSummaries[key].id, key,
+        "and a stop carries that id onward to an open")
+
+      // Which is what makes the next stop reachable.
+      compare(service.hostForId(service.selectedThread.memberIds[1]), bob())
+
+      bob().selectedThread = null
+      bob().memberSummaries = ({})
+    }
+
     function test_a_search_reaches_every_mailbox() {
       service.search("invoice")
       compare(ada().searchQuery, "invoice")

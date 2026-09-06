@@ -1219,4 +1219,37 @@ for word in ("secret", "password", "token"):
         )
 PY2
 
+python3 - <<'UNIFIEDCAPS'
+import re
+from pathlib import Path
+
+source = Path("Service.qml").read_text()
+
+# A merged list may offer only what every mailbox in it can honour, and a
+# mailbox is not its provider: a host narrows the provider by the refusals its
+# server reported and the mailboxes it turned out not to have. Asking the
+# provider ids reintroduced an Archive button for an account whose own view
+# hides it, so the intersection is taken over the hosts' own answers.
+block = re.search(r"readonly property var unifiedAbilities: \{(.*?)\n  \}", source, re.S)
+if not block:
+    raise SystemExit("test_source.sh: the merged capabilities must be read off the hosts "
+                     "(`unifiedAbilities`), not derived from provider ids")
+for verb in ("canArchive", "canReportSpam", "canStar", "hasLabels",
+             "canOpenOnWeb", "canMove", "showsConversations", "mailboxes"):
+    if "host." + verb not in block.group(1):
+        raise SystemExit("test_source.sh: `unifiedAbilities` must read host.%s, "
+                         "or a mailbox's own refusal is dropped in a merged list" % verb)
+
+for name in ("canArchive", "canReportSpam", "canStar", "hasLabels", "canOpenOnWeb"):
+    offered = re.search(r"readonly property bool " + name + r": unified\s*\n\s*\?([^\n]*)",
+                        source)
+    if not offered or "unifiedAbilities" not in offered.group(1):
+        raise SystemExit("test_source.sh: %s in a merged list must intersect "
+                         "`unifiedAbilities`" % name)
+
+if re.search(r"Unified\.(sharedCapability|sharedMailboxes|hasSharedMailbox)\b", source):
+    raise SystemExit("test_source.sh: the provider-only intersection is gone; "
+                     "use `Unified.everyMailboxCan` / `sharedMailboxRows`")
+UNIFIEDCAPS
+
 printf 'test_source.sh ok\n'

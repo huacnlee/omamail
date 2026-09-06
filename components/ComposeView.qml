@@ -705,6 +705,11 @@ DropArea {
     if (!opened || !service) return
     if (forwardAttachmentsLoading || forwardAttachmentError !== "") return
     var accepted = service.send(({
+      // The mailbox this draft belongs to, named rather than inferred. Without
+      // it the service fell back to matching `from` against each account in
+      // turn, so two mailboxes sharing a send-as alias sent B's draft from
+      // whichever of them came first.
+      accountId: root.accountId,
       from: root.fromEmail,
       to: toField.text,
       cc: ccField.text,

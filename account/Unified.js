@@ -125,6 +125,47 @@ function pageWatermark(sources) {
   return watermark
 }
 
+// A thread as the service hands it out, with its member ids composed.
+//
+// The rail steps from one member to the next and the reader compares the open
+// one against `selectedId`, so a raw member id reached no mailbox and the
+// comparison never matched: a merged conversation could be drawn and not
+// walked. The thread's own id is left alone — it is a provider's handle for a
+// conversation and is never routed to a mailbox.
+function composeThread(accountId, thread) {
+  if (!thread || typeof thread !== "object") return thread
+  if (!Array.isArray(thread.memberIds)) return thread
+  var out = ({})
+  for (var field in thread) out[field] = thread[field]
+  var composed = []
+  for (var i = 0; i < thread.memberIds.length; i++) {
+    composed.push(unifiedId(accountId, thread.memberIds[i]))
+  }
+  out.memberIds = composed
+  return out
+}
+
+// The rail's summaries, keyed and self-identifying the way every other row is.
+// A stop carries its own id onward to an open and an action, so the key alone
+// was not enough.
+function composeMembers(accountId, summaries) {
+  var source = summaries && typeof summaries === "object" ? summaries : ({})
+  var out = ({})
+  for (var key in source) {
+    var summary = source[key]
+    var copy = summary
+    if (summary && typeof summary === "object") {
+      copy = ({})
+      for (var field in summary) copy[field] = summary[field]
+      copy.sourceId = String(summary.id || "")
+      copy.id = unifiedId(accountId, summary.id)
+      if (summary.thread) copy.thread = composeThread(accountId, summary.thread)
+    }
+    out[unifiedId(accountId, key)] = copy
+  }
+  return out
+}
+
 function mergeMessages(sources) {
   var values = Array.isArray(sources) ? sources : []
   var out = []
@@ -148,6 +189,10 @@ function mergeMessages(sources) {
       copy.sourceId = String(item.id)
       copy.id = key
       copy.accountId = accountId
+      // A row's conversation members are addressed like the row: an archive
+      // asks whether the reader is showing one of them, against a `selectedId`
+      // that carries the mailbox.
+      if (item.thread) copy.thread = composeThread(accountId, item.thread)
       copy.sourceLabel = String(source.label || "Mailbox")
       out.push(copy)
     }
@@ -224,17 +269,37 @@ function cursorOffset(messages, cursorId, delta) {
 // Asked of the provider rather than of the account, because which rows a
 // service has is a fact about the service. An account still loading would
 // otherwise drop rows out of the rail while it caught up.
-function sharedMailboxes(providerIds) {
-  var ids = Array.isArray(providerIds) ? providerIds : []
-  if (ids.length === 0) return []
-  var first = Provider.mailboxes(ids[0])
+// Whether every mailbox in the merge offers this.
+//
+// Asked of the mailboxes rather than of their providers. A provider id is not
+// the whole answer: a host narrows it with the refusals the server reported
+// and the mailboxes it turned out not to have, so an account whose server has
+// no Archive folder answers `canArchive` false while its provider says yes.
+// Intersecting provider ids put that button back in a merged view, and the
+// account's own view is right to hide it.
+function everyMailboxCan(abilities, capability) {
+  var rows = Array.isArray(abilities) ? abilities : []
+  if (rows.length === 0) return false
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || rows[i][capability] !== true) return false
+  }
+  return true
+}
+
+// The rail rows every mailbox has, in the first mailbox's order — from each
+// one's own directory, for the same reason: a provider row the server does not
+// have is a row that cannot be opened.
+function sharedMailboxRows(abilities) {
+  var rows = Array.isArray(abilities) ? abilities : []
+  if (rows.length === 0) return []
+  var first = rowsOf(rows[0])
   var out = []
   for (var i = 0; i < first.length; i++) {
     var key = String(first[i].key || "")
     if (key === "") continue
     var everyone = true
-    for (var j = 1; j < ids.length; j++) {
-      if (!Provider.hasMailbox(ids[j], key)) {
+    for (var j = 1; j < rows.length; j++) {
+      if (!holdsMailbox(rows[j], key)) {
         everyone = false
         break
       }
@@ -244,37 +309,21 @@ function sharedMailboxes(providerIds) {
   return out
 }
 
-function hasSharedMailbox(providerIds, key) {
-  var rows = sharedMailboxes(providerIds)
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i].key || "") === String(key)) return true
+function rowsOf(row) {
+  return row && Array.isArray(row.mailboxes) ? row.mailboxes : []
+}
+
+function holdsMailbox(row, key) {
+  var list = rowsOf(row)
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].key || "") === key) return true
   }
   return false
 }
 
-// A capability every provider declares. One only some of them have is a button
-// that fails on the rest, after the row has already moved.
-function sharedCapability(providerIds, capability) {
-  var ids = Array.isArray(providerIds) ? providerIds : []
-  if (ids.length === 0) return false
-  for (var i = 0; i < ids.length; i++) {
-    if (!Provider.can(ids[i], capability)) return false
-  }
-  return true
-}
 
-// The distinct providers behind a set of accounts, in the order they appear.
-// Two Gmail mailboxes ask one provider's questions, not two.
-function providersOf(accounts) {
-  var values = Array.isArray(accounts) ? accounts : []
-  var out = []
-  for (var i = 0; i < values.length; i++) {
-    var id = String(values[i] && values[i].provider || "")
-    if (id === "" || out.indexOf(id) >= 0) continue
-    out.push(id)
-  }
-  return out
-}
+
+
 
 // ------------------------------------------------------------------ counting
 
