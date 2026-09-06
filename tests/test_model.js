@@ -6,6 +6,16 @@ const model = load("account/Model.js")
 // The mailboxes moved to Provider.js along with everything else that differs
 // between mail services; tests/test_provider.js covers them there.
 
+// A conversation row and its representative's rail stop share an id but
+// express different intent. Repeating one must not erase that distinction.
+const rowRead = { id: "m3", action: "markRead", cacheKey: "inbox",
+  sourceLabelId: "", quiet: false, memberOnly: false }
+const memberRead = { ...rowRead, memberOnly: true }
+const memberAgain = model.enqueueAction([memberRead], memberRead)
+assert.strictEqual(memberAgain.length, 1)
+assert.strictEqual(memberAgain[0].memberOnly, true)
+deepEqual(model.enqueueAction([memberRead], rowRead), [memberRead, rowRead])
+
 // ------------------------------------------------------------ setup state
 
 assert.strictEqual(model.setupState({ toolsPresent: false }), "tools_missing")

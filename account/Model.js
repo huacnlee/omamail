@@ -349,10 +349,12 @@ function enqueueAction(requests, request) {
     var previous = queued[i]
     if (previous.id !== request.id) continue
     if (previous.action === request.action && previous.cacheKey === request.cacheKey
-        && previous.sourceLabelId === request.sourceLabelId) {
+        && previous.sourceLabelId === request.sourceLabelId
+        && (previous.memberOnly === true) === (request.memberOnly === true)) {
       queued[i] = {
         id: request.id, action: request.action, cacheKey: request.cacheKey,
         sourceLabelId: request.sourceLabelId,
+        memberOnly: request.memberOnly === true,
         quiet: previous.quiet === true && request.quiet === true
       }
       return queued

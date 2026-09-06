@@ -452,11 +452,8 @@ function fillTemplate(template, key, value) {
 
 // --------------------------------------------------------------- discovery
 //
-// Finding the server is its own problem, and on the reference server it is the
-// one that fails: that Stalwart answers 403 at the well-known path and
-// publishes no `_jmap._tcp` record, so every account on it is reached by a host
-// somebody typed. Fastmail is the other end — nothing typed at all, an SRV
-// record naming `api.fastmail.com`. Both paths are here because both are real.
+// Discovery starts at the address domain over HTTPS. A server without that
+// endpoint is reached through the explicit server field.
 
 // The order the setup page tries the two credential schemes in.
 //
@@ -484,11 +481,9 @@ function schemeOrder(recorded) {
 }
 
 // What a discovery step is. `typed` is the URL built from what the user wrote,
-// and it is the only step there is when they wrote something; `srv` is the
-// `_jmap._tcp` record for the address's domain, which has to be looked up
-// before it has a URL; `well-known` is a well-known URL to GET.
+// and it is the only step when supplied; `well-known` starts at the address
+// domain so HTTPS authenticates any delegation to a different host.
 var STEP_TYPED = "typed"
-var STEP_SRV = "srv"
 var STEP_WELL_KNOWN = "well-known"
 
 // RFC 8620 section 2.2. The well-known URL is not the session object: it is
@@ -540,24 +535,6 @@ function addressDomain(address) {
   return isValidHost(domain) ? domain : ""
 }
 
-// The well-known URL on a host the SRV record named. The port is written only
-// when it is not 443: a record saying 443 and a URL saying `:443` are the same
-// address, and the shorter one is what a user is shown afterwards.
-function wellKnownUrl(host, port) {
-  var name = bareHost(host)
-  if (!isValidHost(name)) return ""
-  var suffix = isValidPort(port) && Math.floor(Number(port)) !== 443
-    ? ":" + Math.floor(Number(port)) : ""
-  return "https://" + name + suffix + WELL_KNOWN_PATH
-}
-
-// What the user typed in the "Server settings" field, as a URL — or "" when it
-// is not one this client will send a password to.
-//
-// A full HTTPS URL is used verbatim, because a session object living somewhere
-// this client would never have guessed is exactly why the field exists. A bare
-// host gains the session path. Anything else — `http://`, a scheme that is not
-// HTTP at all, a value with a space in it — is refused rather than repaired.
 function typedSessionUrl(server) {
   var text = trimmed(server)
   if (text === "") return ""
@@ -602,10 +579,8 @@ function serverIdentity(settings) {
 // answering a discovery that already failed, and walking the domain again
 // afterwards would only fail again more slowly.
 //
-// The SRV step carries no URL because it has not been looked up yet. The
-// caller runs `scripts/jmap-srv.sh` for `domain`, hands what it printed to
-// `parseSrv`, and GETs the URL that comes back; a record that names no service
-// simply leaves that step with nothing to try.
+// Only HTTPS on the original address domain may delegate discovery. An
+// unsigned SRV record cannot authorize sending a credential to another host.
 function discoveryPlan(address, server) {
   var domain = addressDomain(address)
   if (trimmed(server) !== "") {
@@ -623,7 +598,6 @@ function discoveryPlan(address, server) {
     error: "",
     domain: domain,
     steps: [
-      { kind: STEP_SRV, url: "" },
       { kind: STEP_WELL_KNOWN, url: "https://" + domain + WELL_KNOWN_PATH }
     ]
   }
@@ -658,59 +632,6 @@ function redirectHop(status, redirectUrl) {
   // carries a credential is not one this client follows.
   if (/^https:\/\/[^/?#]*@/i.test(url)) return ""
   return url
-}
-
-// The `_jmap._tcp` SRV answer, as the one record to try:
-//
-//   { target, port, url }
-//
-// `scripts/jmap-srv.sh` prints whatever `resolvectl` or `dig` said, and the
-// two disagree about everything but the four fields that matter: resolvectl
-// writes `_jmap._tcp.example.org IN SRV 0 1 443 api.example.org  -- link: wlan0`
-// and `dig +short` writes `0 1 443 api.example.org.`. So a record is found by
-// its shape — three small numbers in a row and a name after them — rather than
-// by counting fields from either end, which is what the interface suffix
-// resolvectl appends would break.
-//
-// RFC 2782 picks the lowest priority, then the highest weight. Weight is a
-// share of a random draw among equals; a client fetching one session object
-// has nothing to spread, so the heaviest wins and a tie takes the first.
-function parseSrv(text) {
-  var lines = String(text === undefined || text === null ? "" : text).split("\n")
-  var best = null
-  for (var i = 0; i < lines.length; i++) {
-    var record = srvRecord(lines[i])
-    if (!record) continue
-    if (!best || record.priority < best.priority
-      || (record.priority === best.priority && record.weight > best.weight)) {
-      best = record
-    }
-  }
-  // A target of "." is RFC 2782's way of saying the service is decidedly not
-  // available here, which is a different thing from no record at all — and the
-  // same answer to the one question this client asks.
-  if (!best || best.target === "") return { target: "", port: 0, url: "" }
-  return { target: best.target, port: best.port, url: wellKnownUrl(best.target, best.port) }
-}
-
-function srvRecord(line) {
-  var fields = trimmed(line).split(/\s+/)
-  for (var i = 0; i + 3 < fields.length; i++) {
-    if (!/^[0-9]{1,5}$/.test(fields[i])) continue
-    if (!/^[0-9]{1,5}$/.test(fields[i + 1])) continue
-    if (!/^[0-9]{1,5}$/.test(fields[i + 2]) || !isValidPort(fields[i + 2])) continue
-    var target = bareHost(fields[i + 3])
-    // "." strips to "", and a target that is not a hostname is not a record
-    // this client can act on either.
-    if (target !== "" && !isValidHost(target)) continue
-    return {
-      priority: Number(fields[i]),
-      weight: Number(fields[i + 1]),
-      port: Math.floor(Number(fields[i + 2])),
-      target: target
-    }
-  }
-  return null
 }
 
 // ------------------------------------------------------------ the session
@@ -2467,7 +2388,8 @@ function notUpdatedError(args, tolerateNotFound) {
 // boundary byte for byte, and lets the server thread the import by its own
 // References header.
 //
-// **A send is one upload and one API request.** The request carries, in order:
+// A send uploads and submits before a separate draft cleanup. The submission
+// request carries, in order:
 //
 //   0. `Email/import` of the blob into the Drafts role's mailbox, with
 //      `$draft` and `$seen`. `$seen` is what keeps Sent from showing an unread
@@ -2475,8 +2397,8 @@ function notUpdatedError(args, tolerateNotFound) {
 //   1. `EmailSubmission/set` creating from the import's *creation id*, with
 //      the chosen identity and an `onSuccessUpdateEmail` that moves the copy
 //      into Sent and clears `$draft`. Nothing appends to Sent by hand.
-//   2. when the compose window was opened from a draft, `Email/set` destroying
-//      it — measured to apply after the two above.
+// The client removes an existing draft only after a successful response, since
+// a failed method does not stop the remaining calls in a request.
 //
 // No `envelope`. The server derives the sender from the identity and the
 // recipients from To, Cc and Bcc, strips Bcc on delivery and keeps it on the
@@ -2684,7 +2606,7 @@ function importCall(accountId, blobId, draftsId, callId) {
 }
 
 // The whole send, in the order the server applies it.
-function sendRequest(accountId, blobId, identityId, roles, draftId) {
+function sendRequest(accountId, blobId, identityId, roles) {
   var map = roles && typeof roles === "object" ? roles : {}
   var account = trimmed(accountId)
   var drafts = trimmed(map.drafts)
@@ -2715,22 +2637,19 @@ function sendRequest(accountId, blobId, identityId, roles, draftId) {
       onSuccessUpdateEmail: success
     }, "1"]
   ]
-  var stale = trimmed(draftId)
-  if (stale !== "") calls.push(["Email/set", { accountId: account, destroy: [stale] }, "2"])
   return calls
 }
 
-// A draft save: the same import, and the copy it replaces destroyed after it.
+// A draft save imports only. The client destroys the old copy in a separate
+// call after confirming creation: method batches continue after failures.
 //
 // An Email is immutable apart from its keywords and its mailboxes — a subject
 // patch is refused `invalidProperties` — so a saved draft is always a new id,
 // as it is on IMAP. There is no `updateDraft`.
-function saveRequest(accountId, blobId, roles, draftId) {
+function saveRequest(accountId, blobId, roles) {
   var map = roles && typeof roles === "object" ? roles : {}
   var account = trimmed(accountId)
   var calls = [importCall(account, blobId, trimmed(map.drafts), "0")]
-  var stale = trimmed(draftId)
-  if (stale !== "") calls.push(["Email/set", { accountId: account, destroy: [stale] }, "1"])
   return calls
 }
 

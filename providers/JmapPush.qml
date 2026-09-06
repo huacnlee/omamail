@@ -302,16 +302,9 @@ Item {
     // untouched base64 blob a download stays as. It is read while it is open,
     // so there is nothing to wait for the end of and nothing to decode.
     //
-    // **The marker is the blank line between events, not the line break, and
-    // that is measured rather than chosen.** Quickshell's `SplitParser` never
-    // hands over an empty segment: given `a\n\nb\n` it emits `"a"` and then
-    // `"\nb"`, gluing the delimiter it skipped onto the front of the next
-    // chunk. Splitting on `"\n"` therefore never delivers the blank line that
-    // ends an SSE event — the event completes only when the *next* one arrives,
-    // and the last event before a quiet period never completes at all. On the
-    // reference server that looked exactly like push not working: the two lines
-    // of the event arrived and nothing happened. Splitting on `"\n\n"` hands
-    // over one whole event per read, the moment the server finishes it.
+    // The transport normalizes CR, LF and CRLF and bounds each complete
+    // event before it reaches this process. SplitParser itself has no size
+    // limit, so checking only in readBlock would be too late.
     stdout: SplitParser {
       splitMarker: "\n\n"
       onRead: function(block) { root.readBlock(block) }

@@ -20,7 +20,7 @@ import "../message/Message.js" as Mail
 // `Email/set` patch per message. It holds an event stream open for as long as
 // the account is signed in, and reports what changes on it. And it sends: one
 // upload of the raw message and one request that imports it, submits it under
-// the chosen identity and destroys the draft it came from.
+// the chosen identity. A confirmed send then retires the original draft.
 //
 // ## Three things every read depends on, in this order
 //
@@ -55,7 +55,6 @@ Item {
   readonly property bool busy: inFlight > 0
 
   readonly property string transport: auth ? auth.pluginDir + "/scripts/jmap-transport.sh" : ""
-  readonly property string srvLookup: auth ? auth.pluginDir + "/scripts/jmap-srv.sh" : ""
 
   // Raised by any 401 and cleared by a successful `verifyCredentials`. Nothing
   // else sets it: the secret is a static app password or API token, so a 401
@@ -261,8 +260,8 @@ Item {
   // Verifies an app password or an API token by using it, which is the only
   // way to find out. Four steps:
   //
-  //   1. find the server — a typed one wins outright, otherwise the SRV record
-  //      for the address's domain and then the domain's own well-known URL,
+  //   1. find the server — a typed one wins outright, otherwise the domain's
+  //      own HTTPS well-known URL,
   //      each fetched without a credential and followed one redirect hop
   //   2. the session GET with Basic and, only on a 401, once more with Bearer
   //   3. `Jmap.verifySession` on the 200: core and mail, a mail-capable
@@ -452,40 +451,11 @@ Item {
         if (candidate === "") walk(index + 1)
         else attempt(candidate, 0, function() { walk(index + 1) })
       }
-      if (step.kind === Jmap.STEP_SRV) {
-        lookupSrv(plan.domain, handle, function(url) {
-          if (handle.aborted) return
-          if (url === "") walk(index + 1)
-          else probe(url, 1, afterCandidate)
-        })
-        return
-      }
       probe(step.url, 1, afterCandidate)
     }
 
     walk(0)
     return handle
-  }
-
-  // The `_jmap._tcp` record, through a script that tries resolvectl and then
-  // dig. Neither is a required tool and no answer is simply no record, so a
-  // failure here is a step that found nothing rather than an error worth
-  // showing anybody.
-  function lookupSrv(domain, handle, callback) {
-    var process = srvComponent.createObject(root, { command: [root.srvLookup, String(domain || "")] })
-    if (!process) {
-      callback("")
-      return
-    }
-    handle.process = process
-    process.finished.connect(function(text) {
-      if (!root) return
-      if (handle.process === process) handle.process = null
-      process.destroy()
-      if (handle.aborted) return
-      callback(Jmap.parseSrv(text).url)
-    })
-    process.running = true
   }
 
   // Everything read off one server, dropped together. The rail falls back to
@@ -805,7 +775,11 @@ Item {
       // server has moved since looks like. Dropping it has the next read fetch
       // a fresh one rather than failing against the same stale address for as
       // long as the account is open.
-      if (reply.status === 404) forgetServer()
+      if (reply.status === 404) {
+        if (cache && typeof cache.putSession === "function")
+          cache.putSession("", "", null)
+        forgetServer()
+      }
       hand(callback, null,
         Jmap.replyError(reply))
       return
@@ -1625,7 +1599,8 @@ Item {
     return owner
   }
 
-  // One upload and one API request. The callback is `({}, "")` on success and
+  // Upload and submit, then clean up any original draft. The callback is
+  // `({}, "")` on success and
   // `(null, <sentence>)` otherwise, which is the contract the other three
   // clients keep, so the account's "Sent" notice needs no branch for this
   // provider.
@@ -1680,10 +1655,10 @@ Item {
     return handle
   }
 
-  // Import, submit and destroy the stale draft, in one request under the
-  // submission capability.
+  // Import and submit under the submission capability. Retire the old draft
+  // only after the server confirms sending, never in the same request.
   function submitMessage(blobId, identityId, draftId, handle, callback) {
-    var child = call(Jmap.sendRequest(accountId, blobId, identityId, roles, draftId), null,
+    var child = call(Jmap.sendRequest(accountId, blobId, identityId, roles), null,
       function(responses, failure) {
         if (!root || handle.aborted) return
         // The import is read first, even when the call reported an error. A
@@ -1704,6 +1679,13 @@ Item {
         var refusedSend = Jmap.notCreatedEntry(
           Jmap.responseArguments(responses, "EmailSubmission/set"), Jmap.CREATE_SUBMISSION)
         if (!refusedSend) {
+          var submitted = Jmap.createdId(
+            Jmap.responseArguments(responses, "EmailSubmission/set"), Jmap.CREATE_SUBMISSION)
+          if (submitted === "") {
+            root.hand(callback, null, "The server did not confirm sending the message")
+            return
+          }
+          root.discardImport(draftId)
           root.hand(callback, {}, "")
           return
         }
@@ -1717,16 +1699,15 @@ Item {
     handle.children.push(child)
   }
 
-  // Deliberately not a child of the send's handle. It is the cleanup after a
-  // failure the caller has already been told about, and aborting the send —
-  // which is what closing the compose window does — would leave the copy it
-  // exists to remove.
+  // Retire a copy after the outcome is known: the refused import on failure,
+  // or the original draft on success. This is not a child of the send handle,
+  // so closing the compose window cannot cancel cleanup.
   function discardImport(emailId) {
     if (String(emailId || "") === "") return
     call(Jmap.destroyRequest(accountId, [emailId]), null, function() {})
   }
 
-  // The same upload and one request: import the new copy, destroy the old.
+  // Upload and import the new copy, then retire the old one after confirmation.
   //
   // An Email is immutable apart from its keywords and its mailboxes, so a
   // saved draft is always a new id — as it is on IMAP, where the save is an
@@ -1759,7 +1740,7 @@ Item {
           root.hand(callback, null, uploadError)
           return
         }
-        var child = root.call(Jmap.saveRequest(root.accountId, blobId, root.roles, draftId),
+        var child = root.call(Jmap.saveRequest(root.accountId, blobId, root.roles),
           null, function(responses, failure) {
             if (!root || handle.aborted) return
             var imported = Jmap.responseArguments(responses, "Email/import")
@@ -1773,12 +1754,25 @@ Item {
               root.hand(callback, null, failure)
               return
             }
-            var result = Jmap.draftSaveResult(Jmap.responseArguments(responses, "Email/set"))
-            // The id the compose window would reopen on, and the one a second
-            // save destroys. A draft that was never on the server before has
-            // no old copy to remove and the same answer either way.
-            result.draftId = Jmap.createdId(imported, Jmap.CREATE_EMAIL)
-            root.hand(callback, result, "")
+            var savedId = Jmap.createdId(imported, Jmap.CREATE_EMAIL)
+            if (savedId === "") {
+              root.hand(callback, null, "The server did not confirm saving the draft")
+              return
+            }
+            var result = { saved: true, draftId: savedId, warning: "" }
+            if (draftId === "" || draftId === savedId) {
+              root.hand(callback, result, "")
+              return
+            }
+            // Cleanup cannot undo a successful save. A failure leaves a copy
+            // and returns the new id with a warning, so retrying never loses it.
+            root.call(Jmap.destroyRequest(root.accountId, [draftId]), null,
+              function(cleanup, cleanupError) {
+                if (!root || handle.aborted) return
+                result.warning = cleanupError ? Jmap.DRAFT_COPY_WARNING
+                  : Jmap.draftSaveResult(Jmap.responseArguments(cleanup, "Email/set")).warning
+                root.hand(callback, result, "")
+              })
           })
         handle.children.push(child)
       })
@@ -1855,22 +1849,5 @@ Item {
     // can learn it. A successful `verifyCredentials` clears it, and clearing it
     // is what lets the stream start again.
     onSecretRejected: root.credentialsRejected = true
-  }
-
-  Component {
-    id: srvComponent
-
-    Process {
-      id: srvProcess
-
-      signal finished(string text)
-
-      stdout: StdioCollector { id: srvOutput; waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-
-      onExited: function(exitCode) {
-        srvProcess.finished(exitCode === 0 ? String(srvOutput.text || "") : "")
-      }
-    }
   }
 }

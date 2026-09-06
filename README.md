@@ -155,7 +155,7 @@ the one-click unsubscribe, attachments and the Screener are all read out of
 parts of a message that `hey` does not serve, or out of an endpoint it does not
 expose — so they stay in HEY's own app, which the setup page links to.
 
-**JMAP** is an address and an app password or an API token — Fastmail, a Stalwart server of your own, or anything else that speaks the protocol. The server is looked up from your address's domain, and a **Server settings** disclosure is there for the one that cannot be found or that answers somewhere else. It is HTTPS only, and the credential goes to the server that answered and to the addresses inside that server's own session object.
+**JMAP** is an address and an app password or an API token — Fastmail, a Stalwart server of your own, or anything else that speaks the protocol. Discovery starts at `https://<your-address-domain>/.well-known/jmap`. If your domain does not serve that endpoint, enter the server URL under **Server settings**. Discovery uses HTTPS and may follow its authenticated redirect; an unsigned DNS SRV record cannot choose where your credential goes. The credential goes to that server and to the addresses inside its session object.
 
 Where a server offers JMAP and IMAP alike, this is the better of the two. A JMAP row is a *conversation* rather than a single message, and the reader draws a rail of that conversation's other messages down its side — `n` and `p` walk it. Mail also arrives when the server sends it rather than when the next check comes round: every signed-in JMAP mailbox holds one event stream open whether or not the window is, so a message that lands on the server is in the list about a second later.
 

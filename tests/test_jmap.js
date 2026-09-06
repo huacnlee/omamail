@@ -271,10 +271,8 @@ deepEqual(jmap.USING_SUBMISSION, ["urn:ietf:params:jmap:core",
 
 // --------------------------------------------------------------- discovery
 //
-// Where a JMAP server is looked for. Both halves are real: the reference
-// Stalwart is found only by a typed host, because its well-known path answers
-// 403 and it publishes no SRV record, and Fastmail is found only by discovery,
-// because nobody knows to type api.fastmail.com.
+// HTTPS on the address domain establishes discovery authority. Servers that
+// do not publish the well-known endpoint need an explicit server address.
 
 // A typed server wins outright, and a bare host means the session path.
 deepEqual(jmap.discoveryPlan("ada@example.org", "mail.example.org"), {
@@ -312,13 +310,11 @@ assert.strictEqual(jmap.discoveryPlan("ada@example.org", "user@mail.example.org"
 assert.strictEqual(jmap.discoveryPlan("ada@example.org", "mail.example.org:70000").error,
   "The server must be reached over HTTPS")
 
-// With nothing typed: the SRV record first, then the domain's own well-known
-// URL. The SRV step carries no URL because it has not been looked up yet.
+// Without a typed server, only the original domain can delegate credentials.
 deepEqual(jmap.discoveryPlan("Ada@Example.ORG", ""), {
   error: "",
   domain: "example.org",
   steps: [
-    { kind: "srv", url: "" },
     { kind: "well-known", url: "https://example.org/.well-known/jmap" }
   ]
 })
@@ -345,52 +341,6 @@ assert.strictEqual(jmap.redirectHop(200, "https://mail.example.org/jmap/session"
   "an answer is not a hop")
 assert.strictEqual(jmap.redirectHop(307, ""), "")
 assert.strictEqual(jmap.redirectHop(0, "https://mail.example.org/"), "")
-
-// ------------------------------------------------------------- SRV records
-//
-// Two tools print the same record two ways, and the parser reads both. The
-// resolvectl line is the one measured on this machine, interface suffix and
-// all: counting fields from the end would read `wlp9s0` as the target.
-
-deepEqual(jmap.parseSrv("_jmap._tcp.fastmail.com IN SRV 0 1 443 api.fastmail.com     -- link: wlp9s0"), {
-  target: "api.fastmail.com",
-  port: 443,
-  url: "https://api.fastmail.com/.well-known/jmap"
-})
-deepEqual(jmap.parseSrv("0 1 443 api.fastmail.com."), {
-  target: "api.fastmail.com",
-  port: 443,
-  url: "https://api.fastmail.com/.well-known/jmap"
-}, "dig writes the fully qualified name, and a URL does not want the dot")
-
-// RFC 2782: the lowest priority wins, whatever order the answers arrive in.
-assert.strictEqual(jmap.parseSrv("10 5 443 second.example.org.\n1 5 443 first.example.org.").target,
-  "first.example.org")
-assert.strictEqual(jmap.parseSrv("1 5 443 first.example.org.\n10 5 443 second.example.org.").target,
-  "first.example.org")
-
-// Then the highest weight among equals. A client fetching one session object
-// has nothing to spread across a random draw, so the heaviest simply wins.
-assert.strictEqual(jmap.parseSrv("1 5 443 light.example.org.\n1 50 443 heavy.example.org.").target,
-  "heavy.example.org")
-
-// A target of "." is the record saying the service is decidedly not available
-// here — a different statement from no record at all, and the same answer.
-deepEqual(jmap.parseSrv("0 0 443 ."), { target: "", port: 0, url: "" })
-deepEqual(jmap.parseSrv(""), { target: "", port: 0, url: "" })
-deepEqual(jmap.parseSrv("_jmap._tcp.example.org: resolve call failed: no such record"),
-  { target: "", port: 0, url: "" }, "a tool's complaint is not a record")
-deepEqual(jmap.parseSrv(null), { target: "", port: 0, url: "" })
-
-// A port that is not 443 is written into the URL; 443 is not, because a URL
-// saying `:443` is the same address spelled longer.
-assert.strictEqual(jmap.parseSrv("0 1 8443 jmap.example.org.").url,
-  "https://jmap.example.org:8443/.well-known/jmap")
-assert.strictEqual(jmap.parseSrv("0 1 8443 jmap.example.org.").port, 8443)
-assert.strictEqual(jmap.parseSrv("0 1 0 jmap.example.org.").target, "",
-  "port 0 is not somewhere to connect")
-assert.strictEqual(jmap.parseSrv("0 1 443 https://jmap.example.org/").target, "",
-  "a target that is not a hostname is not a record this client can act on")
 
 // --------------------------------------------------------- session object
 //
@@ -2130,10 +2080,9 @@ const submitCall = ["EmailSubmission/set", {
 
 deepEqual(jmap.sendRequest("t", "blob1", "b", roles, ""), [importCall, submitCall])
 
-// With a draft behind it, the same request destroys it — after the import and
-// after the submission, which is the order the server applied.
+// Existing drafts are never destroyed in a batch that may fail before sending.
 deepEqual(jmap.sendRequest("t", "blob1", "b", roles, "maaaaad"), [
-  importCall, submitCall, ["Email/set", { accountId: "t", destroy: ["maaaaad"] }, "2"]
+  importCall, submitCall
 ])
 
 // No envelope, ever. The server derives the sender from the identity and the
@@ -2162,8 +2111,7 @@ deepEqual(jmap.saveRequest("t", "blob2", roles, "buaaaaan"), [
   ["Email/import", {
     accountId: "t",
     emails: { m: { blobId: "blob2", mailboxIds: { d: true }, keywords: { $draft: true, $seen: true } } }
-  }, "0"],
-  ["Email/set", { accountId: "t", destroy: ["buaaaaan"] }, "1"]
+  }, "0"]
 ])
 
 // There is no update: an Email is immutable apart from its keywords and its

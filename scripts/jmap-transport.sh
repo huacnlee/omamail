@@ -60,8 +60,8 @@
 #
 # ## `stream` answers in raw lines
 #
-# The event stream is read line by line while it is open, so it cannot be
-# encoded or buffered. Its output is curl's own stdout followed by a trailer
+# The event stream is framed by jmap-stream.py into bounded LF-separated
+# events while it is open. Its output ends with curl's trailer
 # line `http <code>` that `--write-out` prints once the transfer has ended —
 # read after curl exits, it is what splits a `--fail` exit 22 into "the
 # credential was rejected" (401) and "the connection failed" (anything else).
@@ -273,8 +273,8 @@ build_config() {
     # is `Jmap.MAX_BLOB_BYTES` and the figure attachment.sh sends up to. A
     # session object or a method reply near it is not one this client could
     # use, and exceeding it is curl exit 63 rather than the process that draws
-    # the desktop holding 20 MB of base64. The stream is bounded by its
-    # rotation instead.
+    # the desktop holding 20 MB of base64. The stream has a per-event byte
+    # ceiling in jmap-stream.py rather than a lifetime transfer ceiling.
     printf 'max-filesize = 20971520\n'
     printf 'output = "%s"\n' "$(escape "$work/out")"
     printf 'write-out = "%%{http_code} %%{redirect_url}"\n'
@@ -282,23 +282,11 @@ build_config() {
 }
 
 if [ "$verb" = "stream" ]; then
-  # curl in the background, and a TERM trap that passes the signal on.
-  #
-  # A pipeline puts curl on the far side of a pipe from this shell, and the
-  # owner stops a stream by stopping the process it started — which is this
-  # shell. Measured: the shell dies, curl is reparented to init and keeps the
-  # authenticated connection open until its own `max-time` an hour later. Every
-  # stop here is one that matters: the watchdog giving up on a silent
-  # connection, the resume detector shedding one the server closed during
-  # suspend, a mailbox being removed. Each would leak a curl.
-  #
-  # `$!` after a background pipeline is the last command in it, which is curl.
-  # `wait` returns 128+15 when the trap interrupts it, and that is what the
-  # caller sees — a code its reconnect table reads as a failure, which is right:
-  # the connection is gone either way, and a stop the owner asked for is one it
-  # already knows it asked for.
+  # The helper owns curl and forwards only bounded, normalized SSE events.
+  # Stopping this shell stops the helper, which terminates and reaps curl;
+  # refusing an oversized event closes the connection in the same way.
   set +e
-  build_config | curl -q --globoff --config - &
+  build_config | python3 "$(dirname "$0")/jmap-stream.py" &
   streaming=$!
   trap 'kill -TERM "$streaming" 2>/dev/null; exit 143' TERM INT HUP
   wait "$streaming"

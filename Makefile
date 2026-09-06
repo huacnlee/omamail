@@ -124,7 +124,7 @@ test-shell-portable:
 	bash tests/test_mailto.sh
 	bash tests/test_transport.sh
 	bash tests/test_jmap_transport.sh
-	bash tests/test_jmap_srv.sh
+	python3 tests/test_jmap_stream.py
 	bash tests/test_attachment_open.sh
 	bash tests/test_attachment_save.sh
 	bash tests/test_attachment.sh

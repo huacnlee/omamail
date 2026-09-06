@@ -306,7 +306,8 @@ key. What matters while working:
   it base64-encoded on one line of stdin, so a password never reaches the
   process table and nothing needs escaping on the way; the config carrying it
   goes to curl's own stdin rather than to a file that would be on disk.
-- The JMAP transport is `scripts/jmap-transport.sh` beside it — the same curl and the same base64 stdin line, with five verbs and a four-line reply — except `stream`, which holds the event connection open and so writes raw lines and a trailing `http <code>` instead, because a base64 body cannot be read while it is still being written.
+- The JMAP transport is `scripts/jmap-transport.sh` beside it — the same curl and the same base64 stdin line, with five verbs and a four-line reply — except `stream`, which holds the event connection open. `scripts/jmap-stream.py` owns curl and bounds each event before forwarding it to the desktop, normalizing CR, LF and CRLF to LF. A QML size check after `SplitParser` is too late: the parser has already buffered the event. Stopping or refusing the stream must also terminate curl.
+- JMAP discovery starts at the address domain’s HTTPS well-known URL, or at the server URL the user supplied. An unauthenticated DNS SRV answer must never authorize a credential destination; an HTTPS probe of the target only authenticates that target, not its relationship to the mailbox domain.
 - **The response comes back base64 too, and that is load-bearing.** IMAP
   measures a literal in octets. Read as UTF-8 text, 2048 octets of a message
   with an accent in it is fewer than 2048 characters, and the parser walks off

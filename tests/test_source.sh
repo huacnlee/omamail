@@ -702,7 +702,7 @@ grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml
   || fail "paging membership must not follow the reader's keep-open decision"
 grep -q 'if (!service.act(acted, action)) return false' App.qml \
   || fail "a refused action must not move the keyboard cursor"
-grep -q 'queueAction(messageId, action, cacheKey, quiet === true)' account/MailAccount.qml \
+grep -q 'queueAction(messageId, action, cacheKey, quiet === true, oneMessage)' account/MailAccount.qml \
   || fail "automatic mark-read must wait rather than disappear behind another action"
 # Clearing a mailbox means pressing the same key down a list faster than any
 # server answers. Refusing the second press dropped it: the message stayed, the
@@ -711,7 +711,7 @@ grep -q 'queueAction(messageId, action, cacheKey, quiet === true)' account/MailA
 awk '
   /function act\(/ { in_act = 1 }
   in_act && /if \(pendingAction !== ""\)/ { in_guard = 1 }
-  in_guard && /queueAction\(messageId, action, cacheKey, quiet === true\)/ { queues = 1 }
+  in_guard && /queueAction\(messageId, action, cacheKey, quiet === true, oneMessage\)/ { queues = 1 }
   in_guard && /return true/ { exit !queues }
   END { exit !queues }
 ' account/MailAccount.qml \
@@ -731,7 +731,7 @@ awk '
 # trashed message on screen under the reader that deleted it.
 awk '
   /function runQueuedAction\(\)/ { in_queued = 1 }
-  in_queued && /act\(request\.id, request\.action, request\.quiet\)/ { forwards = 1 }
+  in_queued && /act\(request\.id, request\.action, request\.quiet, request\.memberOnly\)/ { forwards = 1 }
   /function refuseUnavailableAction\(/ { exit !forwards }
   END { exit !forwards }
 ' account/MailAccount.qml \

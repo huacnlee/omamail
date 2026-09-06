@@ -1398,11 +1398,13 @@ Item {
 
   // `quiet` rides along because it decides whether the row may be evicted from
   // under an open reader. A queued explicit trash that ran as if it were quiet
-  // would leave the message the user deleted still on screen.
-  function queueAction(messageId, action, actionQuery, quiet) {
+  // would leave the message the user deleted still on screen. A rail stop's
+  // single-message scope must survive the wait even when its id is also a row.
+  function queueAction(messageId, action, actionQuery, quiet, memberOnly) {
     queuedActions = Model.enqueueAction(queuedActions, {
       id: messageId, action: action, cacheKey: actionQuery,
-      sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true
+      sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true,
+      memberOnly: memberOnly === true
     })
   }
 
@@ -1420,7 +1422,7 @@ Item {
         && (hasLabels ? rawLabelId : "") === request.sourceLabelId
         && (Model.rowIndexForMember(messages, request.id) >= 0
         || Model.rowIndexForMember(previewMessages, request.id) >= 0)) {
-      act(request.id, request.action, request.quiet)
+      act(request.id, request.action, request.quiet, request.memberOnly)
       return
     }
 
@@ -1504,7 +1506,7 @@ Item {
     // failure the user had not caused, and — because `act` answered false —
     // stopped the cursor moving on. Queue it and run it when the slot frees.
     if (pendingAction !== "") {
-      queueAction(messageId, action, cacheKey, quiet === true)
+      queueAction(messageId, action, cacheKey, quiet === true, oneMessage)
       return true
     }
     var index = Model.indexById(messages, messageId)
@@ -1523,18 +1525,12 @@ Item {
     // has navigated away from or has already moved. There is nothing to move,
     // so the optimistic update is the member's own summary — which is what the
     // rail draws — and only a message-scoped label change goes out: the quiet
-    // mark-read through the queue, and star or unstar through the branch below.
+    // mark-read, star or unstar. Automatic reads also need rollback on failure.
     if (index < 0 && previewIndex < 0) {
       if (!Conversation.holdsMember(selectedThread, messageId)) return false
       var memberChange = Model.labelChangesFor(action)
       if (!memberChange) return false
-      if (quiet !== true) return actOnDetachedMember(messageId, action, memberChange)
-      applyMemberChange(messageId, action)
-      if (selectedId === messageId && selectedMessage)
-        selectedMessage = Model.applyLabelChange(selectedMessage, action)
-      queueQuietAction(messageId, action, cacheKey)
-      Qt.callLater(root.runQueuedQuietAction)
-      return true
+      return actOnDetachedMember(messageId, action, memberChange, quiet)
     }
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
@@ -1787,7 +1783,7 @@ Item {
   //
   // `unstar` from a row clears every counted member's star (the row's star
   // means "any member"); from the reader it clears the one message on screen.
-  function actOnDetachedMember(messageId, action, change) {
+  function actOnDetachedMember(messageId, action, change, quiet) {
     var beforeMember = memberSummaries[messageId] || null
     var beforeSelected = selectedMessage
     applyMemberChange(messageId, action)
@@ -1804,7 +1800,7 @@ Item {
         root.fail(error)
         return
       }
-      root.note(root.actionLabel(action))
+      if (quiet !== true) root.note(root.actionLabel(action))
       root.refreshCounts()
     })
     return true
