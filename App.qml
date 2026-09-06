@@ -379,9 +379,18 @@ Item {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
 
+  // Entered at the top. The page keeps its scroll for as long as it is in
+  // history — Back from a mailbox's form returns to the row that opened it —
+  // but a page that was left and entered again is a new visit, and one that
+  // opened where the last visit ended looked like the calendar had been
+  // opened instead of settings, because that is the section a scroll past
+  // Mailboxes lands in.
   function openSettings() {
     dismissHelp()
-    if (page !== "settings") pushEntry("settings")
+    if (page === "settings") return
+    settingsScroll.stop()
+    settingsFlick.contentY = 0
+    pushEntry("settings")
   }
 
   readonly property bool ready: !!service && service.ready

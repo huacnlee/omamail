@@ -534,6 +534,59 @@ Item {
       compare(kinds(), "list", "a mailbox becoming usable starts over on it")
     }
 
+    // "Manage accounts..." on the switcher is an entry into Settings, from
+    // whichever root the switcher was opened over, and the page is entered at
+    // its top. The page keeps its scroll while it is in history — Back from a
+    // mailbox's form returns to the Mailboxes row it left — but a page that
+    // was left and entered again is a new visit, and a new visit that opened
+    // on the Calendars section because that is where the last one ended
+    // looked like the calendar had been opened instead of settings.
+    function test_manage_accounts_on_the_switcher_enters_settings_at_the_top() {
+      app.openSettings()
+      waitForRendering(app)
+      var page = named(app, "settings-page")
+      var view = page
+      while (view && String(view.toString()).indexOf("QQuickFlickable") < 0) view = view.parent
+      verify(view, "the settings page scrolls inside a Flickable")
+      var calendars = -1
+      for (var i = 0; i < page.sections.length; i++)
+        if (page.sections[i].key === "calendars") calendars = page.sections[i].y
+      verify(calendars > 0, "the Calendars section is some way down the page")
+      view.contentY = calendars
+      compare(view.contentY, calendars, "the previous visit ended on Calendars")
+      app.back()
+      compare(kinds(), "list")
+
+      // The switcher opens over the calendar root as readily as over the list.
+      app.showCalendar()
+      compare(kinds(), "calendar")
+      var switcher = having(app, function(it) {
+        return typeof it.openCentered === "function" && typeof it.manageRequested === "function"
+      })
+      switcher.openCentered()
+      tryCompare(switcher, "opened", true)
+      var manage = having(switcher.menuRows, function(it) {
+        return it.text === "Manage accounts..." && typeof it.activated === "function"
+      })
+      verify(manage && manage.visible, "the switcher offers Manage accounts...")
+      mouseClick(manage)
+      tryCompare(switcher, "opened", false)
+      compare(app.page, "settings", "which opens Settings")
+      compare(kinds(), "calendar,settings", "over the root it was opened on")
+      compare(app.calendarVisible, false, "and the calendar stands down for it")
+      verify(named(app, "settings-sidebar").visible, "the settings rail is up")
+      compare(view.contentY, 0, "at the top of the page, not where the last visit ended")
+      compare(named(app, "settings-sidebar").activeKey, page.sections[0].key)
+
+      // Back from a page pushed over Settings returns to where Settings was.
+      view.contentY = calendars
+      app.editAccount(0)
+      compare(kinds(), "calendar,settings,setup")
+      app.back()
+      compare(kinds(), "calendar,settings")
+      compare(view.contentY, calendars, "a return keeps the scroll")
+    }
+
     function test_editing_an_account_from_settings_returns_to_settings() {
       app.openSettings()
       app.editAccount(0)

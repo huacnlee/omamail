@@ -8,9 +8,12 @@ QtObject {
     family: "monospace", title: 22, heading: 18, body: 14, bodySmall: 13, caption: 11,
     icon: 16, iconSmall: 14
   })
+  // `popupRowHeight` is the shell's 28. A stub without it gave every plain
+  // menu row a height of zero, so a click on "Manage accounts..." fell through
+  // the popup to whatever the window had underneath.
   readonly property var spacing: ({
     controlPaddingX: 8, controlPaddingY: 5, inputPaddingY: 5,
-    controlHeight: 30, controlGap: 6, sm: 3, md: 6
+    controlHeight: 30, controlGap: 6, sm: 3, md: 6, popupRowHeight: 28
   })
 
   // The shell's own `space` is `round(px * scale)`, and the rounding is the
