@@ -754,6 +754,29 @@ Item {
     return true
   }
 
+  // Acting on one member from its stop on the rail: the one message and not
+  // the conversation, whichever member it is. If it was the message on screen
+  // and the action takes it out of this view, the reader moves to the
+  // neighbouring stop — the newer one above, else the older below — rather
+  // than sitting on a message that has just left; a conversation with no other
+  // stop goes back to the list, as the list's own delete does.
+  function actOnMember(action, id) {
+    var member = String(id || "")
+    if (!service || member === "") return false
+    var wasOpen = currentView === "reader" && service.selectedId === member
+    // Worked out before the action, while the member is still a stop.
+    var next = Conversation.neighbourStop(service.selectedThread, member)
+    var members = service.memberSummaries
+    var summary = members && typeof members === "object" ? members[member] : null
+    var leaves = !Model.survivesAction(service.mailboxKey, action,
+      service.rawQuery, service.hasLabels, service.rawLabelId, summary || null)
+    if (!service.act(member, action, false, true)) return false
+    if (!leaves || !wasOpen) return true
+    if (next !== "") openMember(next)
+    else backToList()
+    return true
+  }
+
   function goMailbox(key) {
     if (!service) return
     service.selectMailbox(key)
@@ -1547,6 +1570,9 @@ Item {
           onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
           onBackRequested: root.back()
           onMemberRequested: function(id) { root.openMember(id) }
+          onMemberMenuRequested: function(id, sceneX, sceneY) {
+            rowMenu.openForMember(id, sceneX, sceneY)
+          }
           onComposeRequested: function(mode) { root.startCompose(mode) }
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
@@ -2144,6 +2170,7 @@ Item {
 
       MessageMenu {
         id: rowMenu
+        objectName: "rowMenu"
         service: root.service
         textColor: root.foreground
         urgentColor: root.urgent
@@ -2160,6 +2187,14 @@ Item {
           root.cursorId = id
           root.actOnCursor(action)
         }
+        // From a stop on the rail. A member is not a row, so the cursor stays
+        // where the list has it and the action reaches the one message.
+        onMemberComposeRequested: function(mode, id) {
+          root.pendingComposeReturnTo = Nav.depth(root.nav)
+          root.openMember(id)
+          root.startCompose(mode)
+        }
+        onMemberActionRequested: function(action, id) { root.actOnMember(action, id) }
       }
 
       ShortcutHelp {

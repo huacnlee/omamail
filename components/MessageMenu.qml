@@ -20,6 +20,11 @@ Item {
   required property string panelFontFamily
 
   property string messageId: ""
+  // Opened from a stop on the conversation rail rather than from a row. A stop
+  // is one message: its summary is among the account's member summaries, and
+  // what it asks for reaches that message alone, where a row's menu reaches
+  // every counted member of the conversation the row stands for.
+  property bool memberOnly: false
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
@@ -54,16 +59,33 @@ Item {
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === messageId) return list[i]
     }
+    // A member the list drew no row for: the rail's own summaries.
+    var members = service.memberSummaries
+    if (members && typeof members === "object" && members[messageId]) return members[messageId]
     return null
   }
 
   signal composeRequested(string mode, string id)
   signal actionRequested(string action, string id)
+  // The same two, from a menu opened on a rail stop, so the owner can keep the
+  // list cursor where it is and scope the action to the one message.
+  signal memberComposeRequested(string mode, string id)
+  signal memberActionRequested(string action, string id)
 
   anchors.fill: parent
   z: 50
 
   function openAt(id, sceneX, sceneY) {
+    root.memberOnly = false
+    openMenu(id, sceneX, sceneY)
+  }
+
+  function openForMember(id, sceneX, sceneY) {
+    root.memberOnly = true
+    openMenu(id, sceneX, sceneY)
+  }
+
+  function openMenu(id, sceneX, sceneY) {
     root.messageId = String(id || "")
     if (!root.summary) return
     var local = root.mapFromGlobal(sceneX, sceneY)
@@ -94,14 +116,18 @@ Item {
 
   function run(action) {
     var id = root.messageId
+    var member = root.memberOnly
     menu.close()
-    root.actionRequested(action, id)
+    if (member) root.memberActionRequested(action, id)
+    else root.actionRequested(action, id)
   }
 
   function compose(mode) {
     var id = root.messageId
+    var member = root.memberOnly
     menu.close()
-    root.composeRequested(mode, id)
+    if (member) root.memberComposeRequested(mode, id)
+    else root.composeRequested(mode, id)
   }
 
   QQC.Popup {

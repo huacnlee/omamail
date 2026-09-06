@@ -301,6 +301,21 @@ function caption(block, summaries) {
 // conversation has a first message and a last one; walking off either end and
 // arriving at the other says the thread is a ring, which it is not — and the
 // list cursor, which does wrap, is a different thing being moved.
+// The stop the reader moves to when this member leaves the rail: the newer
+// one above it, else the older one below, else "" for a conversation with no
+// other stop. Asked before the action, while the member is still a stop —
+// afterwards the block has been recomputed without it and there is nothing to
+// be beside.
+function neighbourStop(block, memberId) {
+  var thread = blockOf(block)
+  if (!thread || thread.count === 0) return ""
+  var ids = railOrder(thread)
+  var index = ids.indexOf(trimmed(memberId))
+  if (index < 0) return ""
+  if (index > 0) return ids[index - 1]
+  return ids.length > 1 ? ids[1] : ""
+}
+
 function memberStep(block, openId, delta) {
   var thread = blockOf(block)
   if (!thread || thread.count === 0) return ""

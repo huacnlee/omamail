@@ -34,6 +34,10 @@ Item {
   required property string panelFontFamily
 
   signal memberActivated(string id)
+  // A right-click on a stop: the member's own menu, the one a row opens, at
+  // the pointer. The rail reports the member and where; the reader passes it
+  // up, and the App opens the menu it already has for rows.
+  signal memberMenuRequested(string id, real sceneX, real sceneY)
 
   // About two hundred pixels: wide enough for a date, a name and a mailbox
   // under it, narrow enough that the reading measure beside it survives.
@@ -195,7 +199,15 @@ Item {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: root.memberActivated(stop.memberId)
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onClicked: function(event) {
+        if (event.button === Qt.RightButton) {
+          var scene = mapToGlobal(event.x, event.y)
+          root.memberMenuRequested(stop.memberId, scene.x, scene.y)
+        } else {
+          root.memberActivated(stop.memberId)
+        }
+      }
     }
 
     // The timeline itself, drawn per stop rather than once behind them: the

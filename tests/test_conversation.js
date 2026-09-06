@@ -248,6 +248,19 @@ assert.strictEqual(conversation.memberStep(block, "yaaaaag", -1), "maaaaad")
 assert.strictEqual(conversation.memberStep(null, "maaaaad", 1), "")
 assert.strictEqual(conversation.memberStep({ id: "t", memberIds: [] }, "", 1), "")
 
+// Where the reader goes when a member is taken off the rail from its own stop:
+// the newer neighbour, else the older, else nowhere.
+assert.strictEqual(conversation.neighbourStop(block, "maaaaae"), "maaaaaf",
+  "the newer stop above is preferred")
+assert.strictEqual(conversation.neighbourStop(block, "maaaaaf"), "maaaaae",
+  "the newest member has only an older neighbour")
+assert.strictEqual(conversation.neighbourStop(block, "maaaaad"), "maaaaae")
+assert.strictEqual(conversation.neighbourStop(block, "yaaaaag"), "",
+  "a message that is not a stop has no neighbour")
+assert.strictEqual(conversation.neighbourStop({ id: "t", memberIds: ["only"] }, "only"), "",
+  "a conversation of one has nowhere to go")
+assert.strictEqual(conversation.neighbourStop(null, "maaaaae"), "")
+
 assert.ok(conversation.holdsMember(block, "maaaaae"))
 assert.ok(!conversation.holdsMember(block, "yaaaaag"))
 assert.ok(!conversation.holdsMember(null, "maaaaae"))

@@ -1498,8 +1498,10 @@ Item {
     return true
   }
 
-  function act(id, action, quiet) {
+  // `memberOnly` is the rail's: a stop names its one message, not the row's.
+  function act(id, action, quiet, memberOnly) {
     var messageId = String(id || "")
+    var oneMessage = memberOnly === true
     if (!ready || messageId === "") return false
     // Before the optimistic update, not after it. A key is not a button: `e`
     // and `s` are bound in every mail context, so an action the provider cannot
@@ -1576,7 +1578,7 @@ Item {
     // message, and so does the quiet mark-read on opening — the reader shows
     // one message, so one has been read, and the other unread members keep
     // their accent nodes, which is what the rail is for.
-    var targets = memberAction || quiet === true
+    var targets = memberAction || oneMessage || quiet === true
       ? [messageId] : Model.actionTargets(before, action)
     if (targets.length === 0) return false
 
@@ -1605,7 +1607,7 @@ Item {
     // conversation. The quiet mark-read on opening is message-scoped even on a
     // representative — one message has been read, not the thread — so it takes
     // the recomputation below with the rest.
-    var conversationAction = !memberAction && quiet !== true
+    var conversationAction = !memberAction && !oneMessage && quiet !== true
       && Model.actionScope(action) === "conversation"
     var updated
     if (conversationAction) {

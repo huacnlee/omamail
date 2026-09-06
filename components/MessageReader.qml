@@ -45,6 +45,7 @@ Item {
 
   signal backRequested()
   signal memberRequested(string id)
+  signal memberMenuRequested(string id, real sceneX, real sceneY)
   signal bodyModeRequested(string mode)
   signal zoomRequested(real step)
   signal zoomResetRequested()
@@ -388,6 +389,9 @@ Item {
     dimmerColor: root.dimmerColor
     panelFontFamily: root.panelFontFamily
     onMemberActivated: function(id) { root.memberRequested(id) }
+    onMemberMenuRequested: function(id, sceneX, sceneY) {
+      root.memberMenuRequested(id, sceneX, sceneY)
+    }
   }
 
   // --------------------------------------------------------------- notices

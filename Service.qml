@@ -875,8 +875,8 @@ Item {
   function refuseUnavailableAction(action) {
     return current ? current.refuseUnavailableAction(action) : true
   }
-  function act(id, action, quiet) {
-    return current ? current.act(id, action, quiet) : false
+  function act(id, action, quiet, memberOnly) {
+    return current ? current.act(id, action, quiet, memberOnly) : false
   }
   function toggleStar(id) { if (current) current.toggleStar(id) }
   function markAllRead() { if (current) current.markAllRead() }

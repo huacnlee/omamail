@@ -188,7 +188,11 @@ Item {
     function saveDraft(fields, callback) { callback("draft-1", "") }
     function refresh() {}
     function toggleStar(id) {}
-    function act(id, action, quiet) { return true }
+    property var acted: []
+    function act(id, action, quiet, memberOnly) {
+      acted = acted.concat([[String(id), String(action), quiet === true, memberOnly === true]])
+      return true
+    }
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
   }
@@ -223,6 +227,124 @@ Item {
       mailService.memberSummaries = ({})
       app.cursorId = "maaaaaf"
       waitForRendering(app)
+    }
+
+    // The stop drawn for one member, found the way the rail itself finds it.
+    function stopFor(id) {
+      var rail = named(app, "conversationRail")
+      var column = rail ? named(rail, "conversationRailFlick") : null
+      if (!column) return null
+      var stack = [column]
+      while (stack.length > 0) {
+        var item = stack.pop()
+        if (item.memberId !== undefined && item.memberId === id) return item
+        var kids = item.children || []
+        for (var i = 0; i < kids.length; i++) stack.push(kids[i])
+      }
+      return null
+    }
+
+    function seedSummaries() {
+      mailService.memberSummaries = ({
+        maaaaad: memberSummary("maaaaad", false, ["INBOX"]),
+        maaaaae: memberSummary("maaaaae", true, ["INBOX", "UNREAD"]),
+        maaaaaf: memberSummary("maaaaaf", true, ["INBOX", "UNREAD"])
+      })
+    }
+
+    // A right-click on a stop opens the row's own menu for that one message:
+    // its summary is the member's, what it asks for reaches the member alone,
+    // and the list cursor stays where the list has it.
+    function test_a_right_click_on_a_stop_opens_the_message_menu_for_that_member() {
+      seedSummaries()
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      var menu = named(app, "rowMenu")
+      verify(!!menu, "the App holds the row menu")
+      compare(menu.opened, false)
+
+      var stop = stopFor("maaaaae")
+      verify(!!stop, "the middle member has a stop")
+      mailService.acted = []
+      mouseClick(stop, stop.width / 2, stop.height / 2, Qt.RightButton)
+      tryVerify(function() { return menu.opened }, 1000, "the menu opens")
+      compare(menu.memberOnly, true, "for a member")
+      compare(menu.messageId, "maaaaae")
+      verify(!!menu.summary, "and finds the member's summary, which no row carries")
+      compare(menu.summary.id, "maaaaae")
+      compare(menu.summary.unread, true, "read off the member, so the rows say the right thing")
+
+      menu.run("markRead")
+      compare(mailService.acted.length, 1, "one action went to the service")
+      compare(mailService.acted[0].join(","), "maaaaae,markRead,false,true",
+        "the member alone, and not quietly")
+      compare(mailService.selectedId, "maaaaaf", "reading a different member moves nothing")
+      compare(app.cursorId, "maaaaaf", "and the list cursor stays on the row")
+      compare(app.currentView, "reader")
+    }
+
+    // Taking the open member out of the view moves the reader to the stop
+    // beside it — the newer one above, else the older below — rather than
+    // leaving it on a message that has just gone.
+    function test_trashing_the_open_member_from_its_stop_opens_the_neighbour() {
+      seedSummaries()
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaae", "the middle member is open")
+      waitForRendering(app)
+      var menu = named(app, "rowMenu")
+
+      var stop = stopFor("maaaaae")
+      mailService.acted = []
+      mouseClick(stop, stop.width / 2, stop.height / 2, Qt.RightButton)
+      tryVerify(function() { return menu.opened }, 1000)
+      menu.run("trash")
+      compare(mailService.acted[0].join(","), "maaaaae,trash,false,true")
+      compare(mailService.selectedId, "maaaaaf",
+        "the reader moved to the newer neighbour above")
+      compare(app.currentView, "reader")
+      compare(app.cursorId, "maaaaaf", "the cursor never moved")
+
+      // The representative is a stop too, and from its stop it is one message.
+      waitForRendering(app)
+      stop = stopFor("maaaaaf")
+      mailService.acted = []
+      mouseClick(stop, stop.width / 2, stop.height / 2, Qt.RightButton)
+      tryVerify(function() { return menu.opened }, 1000)
+      compare(menu.summary.id, "maaaaaf", "the row's own summary serves the representative's stop")
+      menu.run("trash")
+      compare(mailService.acted[0].join(","), "maaaaaf,trash,false,true",
+        "scoped to the one message even though a row stands for it")
+      compare(mailService.selectedId, "maaaaae",
+        "the newest member has only an older neighbour, and the reader went there")
+      compare(app.currentView, "reader")
+    }
+
+    // A conversation of one other stop that goes: back to the list, as the
+    // list's own delete does.
+    function test_the_last_stop_going_returns_to_the_list() {
+      mailService.selectedThread = ({ id: "d", count: 2, unread: true, flagged: false,
+        memberIds: ["maaaaae", "maaaaaf"] })
+      seedSummaries()
+      app.openMessage("maaaaaf")
+      waitForRendering(app)
+      var menu = named(app, "rowMenu")
+      var stop = stopFor("maaaaaf")
+      verify(!!stop)
+      mouseClick(stop, stop.width / 2, stop.height / 2, Qt.RightButton)
+      tryVerify(function() { return menu.opened }, 1000)
+      menu.run("trash")
+      compare(mailService.selectedId, "maaaaae", "the one other stop is opened")
+      mailService.selectedThread = ({ id: "d", count: 1, unread: false, flagged: false,
+        memberIds: ["maaaaae"] })
+      mailService.showsRail = true
+      // Nothing beside it now.
+      app.actOnMember("trash", "maaaaae")
+      waitForRendering(app)
+      compare(app.currentView, "list", "with no neighbour, the reader closes")
+      mailService.selectedThread = ({ id: "d", count: 3, unread: true, flagged: false,
+        memberIds: ["maaaaad", "maaaaae", "maaaaaf"] })
     }
 
     // The rail is on screen with one stop per member, whether or not the
