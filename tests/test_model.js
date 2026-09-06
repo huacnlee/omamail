@@ -1028,3 +1028,33 @@ assert.strictEqual(model.readingStatusLine(true, "", ""), "All mailboxes")
 assert.strictEqual(model.UNIFIED_LABEL, "All mailboxes")
 
 assert.strictEqual(model.readingStatusLine(false, "", ""), "Not connected")
+
+// ------------------------------------------------ what a preview may do
+
+// Arrival marks an opened message read and leaves a previewed one alone.
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false), true)
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, true), false,
+  "stepping down a list would otherwise read every message it passed")
+assert.strictEqual(model.marksReadOnArrival({ unread: false }, false), false)
+assert.strictEqual(model.marksReadOnArrival(null, false), false)
+
+// Only `true` is a preview, so a call that forgot the argument opens rather
+// than silently previewing — the safe way round for the read mark.
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, undefined), true)
+
+// The sender learns nothing from a message nobody opened.
+assert.strictEqual(model.showsRemoteImages(true, false), true)
+assert.strictEqual(model.showsRemoteImages(true, true), false,
+  "the standing answer is about a message somebody chose to read")
+assert.strictEqual(model.showsRemoteImages(false, false), false)
+assert.strictEqual(model.showsRemoteImages(false, true), false)
+
+// A dwell has something to mark only while the message is still in the list
+// and still unread.
+const dwelt = [{ id: "m1", unread: true }, { id: "m2", unread: false }]
+assert.strictEqual(model.previewReadable(dwelt, "m1"), true)
+assert.strictEqual(model.previewReadable(dwelt, "m2"), false, "already read")
+assert.strictEqual(model.previewReadable(dwelt, "gone"), false,
+  "a search or a mailbox switch takes the row out from under the dwell")
+assert.strictEqual(model.previewReadable([], "m1"), false)
+assert.strictEqual(model.previewReadable(dwelt, ""), false)

@@ -1240,3 +1240,35 @@ function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
   }
   return -1
 }
+
+// Whether a message arriving in the reader should be marked read by the fact
+// of its arrival.
+//
+// A preview is not opening. Stepping down a list would otherwise mark every
+// message it passed read without any of them having been looked at, which is
+// the reason moving stopped opening in the first place — so the panel marks a
+// previewed message read once the cursor has stayed on it, and arrival leaves
+// it alone.
+function marksReadOnArrival(summary, isPreview) {
+  return !!summary && summary.unread === true && isPreview !== true
+}
+
+// Whether a dwell on a previewed message has anything to mark: it has to still
+// be in the list, and still be unread.
+function previewReadable(messages, id) {
+  var at = indexById(messages, id)
+  return at >= 0 && !!messages[at] && messages[at].unread === true
+}
+
+// Whether the sender's remote images may be fetched for the message now on
+// screen.
+//
+// The standing "always show images" answer is an answer about a message
+// somebody chose to read. Fetching one still tells its host that this address
+// opened this mail at this moment — which is what the notice in the reader
+// says out loud — and a cursor passing over a row has opened nothing. So a
+// preview keeps the pictures blocked however that answer stands, and opening
+// the message, or asking for them in the reader, loads them.
+function showsRemoteImages(alwaysShow, isPreview) {
+  return alwaysShow === true && isPreview !== true
+}

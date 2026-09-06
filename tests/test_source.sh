@@ -134,7 +134,7 @@ grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/
 # fetching a picture for one would tell the sender's host that this address
 # opened this mail at this moment — the very thing the reader's own notice
 # says out loud, and the reason the read mark waits for a dwell.
-grep -q 'remoteImagesAllowed = alwaysShowImages && !selectionIsPreview' account/MailAccount.qml \
+grep -q 'remoteImagesAllowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)' account/MailAccount.qml \
   || fail "a message the cursor merely previewed must not fetch the sender's images"
 grep -q 'property string bodyMode: "reader"' Service.qml \
   || fail "a message opens in reading mode"
@@ -1271,11 +1271,14 @@ from pathlib import Path
 
 source = Path("account/MailAccount.qml").read_text()
 
-# The read mark on arrival must ask whether this was a preview.
-mark = re.search(r"if \(summary\.unread[^)]*\)\s*\n?\s*root\.act\([^)]*markRead", source)
+# The read mark on arrival must ask whether this was a preview. The decision
+# itself lives in `Model.marksReadOnArrival`, where it is unit-tested; what is
+# guarded here is that the call site still asks it.
+mark = re.search(r"if \(Model\.marksReadOnArrival\([^)]*\)\)\s*\n?\s*root\.act\([^)]*markRead",
+                 source)
 if not mark:
     raise SystemExit("test_source.sh: MailAccount must mark an opened message read")
 if "selectionIsPreview" not in mark.group(0):
     raise SystemExit("test_source.sh: the read mark on arrival must skip a preview "
-                     "(`!root.selectionIsPreview`), or stepping a list reads it")
+                     "(`root.selectionIsPreview`), or stepping a list reads it")
 PREVIEWREAD

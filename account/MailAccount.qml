@@ -1034,13 +1034,9 @@ Item {
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
     sourceHtml = ""
-    // The standing "always show images" answer is an answer about a message
-    // somebody chose to read. Fetching one still tells its host that this
-    // address opened this mail at this moment — which is what the notice in
-    // the reader says out loud — and a cursor passing over a row has opened
-    // nothing. So a preview keeps the pictures blocked however that answer
-    // stands, and opening the message, or asking for them here, loads them.
-    remoteImagesAllowed = alwaysShowImages && !selectionIsPreview
+    // A preview never fetches them, whatever the standing answer is:
+    // `Model.showsRemoteImages` is where that is argued.
+    remoteImagesAllowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)
     remoteImagesLoading = false
     remoteImageData = ({})
     selectedRemoteImageSources = []
@@ -1175,26 +1171,19 @@ Item {
       root.loadMembers()
       // Opening a message is the one place Gmail's own clients mark it read
       // without being asked, and a reader that leaves it bold is confusing.
-      //
-      // A preview is not opening. Stepping down a list would otherwise mark
-      // every message it passed read without any of them having been looked
-      // at, which is the reason moving stopped opening in the first place —
-      // so the panel marks a previewed message read once the cursor has
-      // stayed on it, and this leaves it alone.
-      if (summary.unread && !root.selectionIsPreview)
+      // A preview is not opening: `Model.marksReadOnArrival` is where that
+      // is decided.
+      if (Model.marksReadOnArrival(summary, root.selectionIsPreview))
         root.act(messageId, "markRead", true)
     })
   }
 
   // What a dwell on a previewed message comes to. Asked of the message rather
-  // than of the selection, because the cursor may have moved on by the time
-  // the panel's timer fires and the one that was read is the one to mark.
+  // than of the selection: the cursor may have moved on by the time the
+  // panel's timer fires, and the one that was read is the one to mark.
   function markPreviewRead(id) {
-    var messageId = String(id || "")
-    if (messageId === "") return false
-    var index = Model.indexById(messages, messageId)
-    if (index < 0 || !messages[index].unread) return false
-    act(messageId, "markRead", true)
+    if (!Model.previewReadable(messages, id)) return false
+    act(String(id), "markRead", true)
     return true
   }
 
