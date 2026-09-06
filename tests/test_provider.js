@@ -10,7 +10,7 @@ const provider = load("providers/Registry.js")
 //
 // The order is the order the chooser lists them in: the two hosted mailboxes
 // with a service of their own, then the one that is every other mailbox.
-deepEqual(provider.ids(), ["gmail", "hey", "imap"])
+deepEqual(provider.ids(), ["gmail", "hey", "jmap", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
@@ -277,5 +277,57 @@ assert.strictEqual(provider.badge("imap"), "IMAP")
 assert.ok(provider.summary("imap").length > 0)
 assert.strictEqual(provider.DEFAULT_ID, "gmail",
   "an account written before providers existed is a Gmail account")
+
+
+// -------------------------------------------------------------------- jmap
+
+assert.ok(provider.ids().indexOf("jmap") >= 0, "the registry knows the provider")
+assert.strictEqual(provider.authKind("jmap"), "password")
+assert.ok(provider.usesPassword("jmap"))
+assert.ok(provider.isConnectable("jmap"))
+
+// The reason the provider exists: what IMAP has to fake, JMAP has.
+assert.strictEqual(provider.can("jmap", "threads"), true, "a server-side threadId")
+assert.strictEqual(provider.can("imap", "threads"), false)
+assert.strictEqual(provider.can("jmap", "search"), true)
+assert.strictEqual(provider.can("jmap", "batch"), true)
+assert.strictEqual(provider.can("jmap", "send"), true)
+assert.strictEqual(provider.can("jmap", "star"), true, "$flagged is a star")
+assert.strictEqual(provider.can("jmap", "move"), true)
+
+// A ceiling, not a guarantee. The provider says a JMAP mailbox *can* have a
+// junk verb; the client withdraws it for an account whose server does not
+// learn from its Junk mailbox, through `unsupported`. Same shape as
+// `Imap.js` declaring archive true and letting the client find out.
+assert.strictEqual(provider.can("jmap", "spam"), true)
+assert.strictEqual(provider.can("imap", "spam"), false,
+  "IMAP refuses outright: it has no host it could know this of")
+
+// Still false, and not for want of knowing the address: Registry.webMessageUrl
+// takes a provider id and a message id, with no account and so no host in
+// scope, so a generic provider cannot answer it for one host and not another.
+assert.strictEqual(provider.can("jmap", "web"), false,
+  "no web UI this provider can know the address of through this seam")
+assert.strictEqual(provider.can("jmap", "webBox"), false)
+assert.strictEqual(provider.can("jmap", "labels"), false)
+
+// Mailboxes are roles, so nothing here is a folder name a server may translate.
+assert.strictEqual(provider.mailboxes("jmap").length, 8)
+assert.strictEqual(provider.query("jmap", "inbox", "", ""), "role:inbox")
+assert.strictEqual(provider.unreadQuery("jmap"), "role:inbox unread")
+assert.strictEqual(provider.mailboxFor("jmap", "trash").query, "role:trash")
+
+// The inherited Gmail default must not reach a provider that cannot read it.
+assert.strictEqual(provider.query("jmap", "inbox", "", "in:inbox"), "role:inbox",
+  "the shipped Gmail default gives way to the provider's own inbox")
+
+assert.strictEqual(provider.query("jmap", "inbox", "quarterly report", ""),
+  'role:inbox text "quarterly report"')
+assert.strictEqual(provider.labelQuery("jmap", "Receipts 2026"), 'mailbox:"Receipts 2026"')
+assert.strictEqual(provider.labelQuery("jmap", ""), "")
+
+// It is listed before imap, which the registry reserves for last as the answer
+// for a server the list does not name.
+assert.ok(provider.ids().indexOf("jmap") < provider.ids().indexOf("imap"))
 
 console.log("Provider.js ok")

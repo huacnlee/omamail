@@ -77,7 +77,7 @@ function accountId(email, provider) {
 // anything written before providers existed — is Gmail: that is what every
 // account in an upgraded install actually is, and defaulting to it is what
 // stops an upgrade from presenting a working mailbox as unconfigured.
-var PROVIDERS = ["gmail", "hey", "imap"]
+var PROVIDERS = ["gmail", "hey", "jmap", "imap"]
 var DEFAULT_PROVIDER = "gmail"
 
 function normalizeProvider(value) {
@@ -122,6 +122,18 @@ function makeImapSettings(raw) {
 // Such an entry is kept — it holds the OAuth client or the server settings the
 // sign-in needs — but it is not addressable, and the guard in indexOfId is what
 // keeps it out of every lookup.
+// What a JMAP account needs, which is less than IMAP: one host, because the
+// session resource names the account, the API URL and the ports itself. The
+// token is the secret and lives in the keyring. A host here is not trusted —
+// `Jmap.isValidHost` checks it again before it can reach a URL.
+function makeJmapSettings(raw) {
+  var values = raw || {}
+  return {
+    host: trimmed(values.host),
+    username: trimmed(values.username)
+  }
+}
+
 function makeAccount(account) {
   var raw = account || {}
   var email = trimmed(raw.email)
@@ -133,6 +145,7 @@ function makeAccount(account) {
     clientId: trimmed(raw.clientId),
     clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
+    jmap: makeJmapSettings(raw.jmap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
     // Whether this row is the setup form's working state rather than a
@@ -433,7 +446,9 @@ function carriesData(entry) {
   var raw = entry || {}
   if (trimmed(raw.id) !== "") return true
   var imap = raw.imap || {}
+  var jmap = raw.jmap || {}
   return trimmed(imap.username) !== "" || trimmed(imap.imapHost) !== ""
+    || trimmed(jmap.host) !== "" || trimmed(jmap.username) !== ""
     || trimmed(raw.clientId) !== "" || trimmed(raw.clientSecret) !== ""
 }
 

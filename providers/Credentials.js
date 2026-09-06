@@ -382,12 +382,26 @@ function legacyKeyringAttributes(clientId) {
 // are two entries rather than one overwriting the other.
 var IMAP_KEYRING_KIND = "imap-password"
 
+// A JMAP account keeps a bearer token rather than a password. Kept under a
+// kind of its own so a mailbox that is moved from IMAP to JMAP does not read
+// the old password back as a token.
+var JMAP_KEYRING_KIND = "jmap-token"
+
 function imapKeyringAttributes(accountId) {
   var id = accountKey(accountId)
   // As above: an empty attribute value is a wildcard to secret-tool, which
   // would hand back some other account's password. An account with no name yet
   // gets the literal placeholder, which no address can collide with.
   return ["service", KEYRING_SERVICE, "kind", IMAP_KEYRING_KIND,
+    "account", id || UNNAMED_ACCOUNT]
+}
+
+function jmapKeyringAttributes(accountId) {
+  var id = accountKey(accountId)
+  // As above: an empty attribute value is a wildcard to secret-tool, which
+  // would hand back some other account's password. An account with no name yet
+  // gets the literal placeholder, which no address can collide with.
+  return ["service", KEYRING_SERVICE, "kind", JMAP_KEYRING_KIND,
     "account", id || UNNAMED_ACCOUNT]
 }
 

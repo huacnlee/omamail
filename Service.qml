@@ -1083,6 +1083,7 @@ Item {
       // account's provider in the file rebuilds it as that provider.
       providerId: entry ? entry.provider : Provider.DEFAULT_ID
       imapSettings: entry ? entry.imap : null
+      jmapSettings: entry ? entry.jmap : null
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")

@@ -50,6 +50,7 @@ Item {
   // Server settings for an IMAP account, straight off the account entry. Unused
   // by the others, and normalised before anything can dial one.
   property var imapSettings: null
+  property var jmapSettings: null
   // Only the mailbox that predates multi-account may claim the old
   // client-keyed refresh token. See AuthManager.mayAdoptLegacyToken.
   property bool mayAdoptLegacyToken: true
@@ -105,8 +106,19 @@ Item {
   // What the panel may offer for this account. A button the service cannot
   // honour is worse than a missing one: it fails after the user has committed
   // to it, with the row already moved.
+  // A provider states what its kind of mailbox can do; an account may still be
+  // less than that — a token scoped without send, a server with no Archive. A
+  // client that knows says so in `unsupported`; one that does not refuses
+  // nothing, so this reads the same on every provider.
+  function accountRefuses(capability) {
+    var refused = api && api.unsupported ? api.unsupported : []
+    return refused.indexOf(String(capability)) >= 0
+  }
+
   readonly property bool canArchive: Provider.can(providerId, "archive")
+    && !accountRefuses("archive")
   readonly property bool canReportSpam: Provider.can(providerId, "spam")
+    && !accountRefuses("spam")
   readonly property bool canStar: Provider.can(providerId, "star")
   readonly property bool hasLabels: Provider.can(providerId, "labels")
   readonly property bool canOpenOnWeb: Provider.can(providerId, "web")
@@ -114,6 +126,7 @@ Item {
   // filtered right now, has an address in the provider's web app at all.
   readonly property bool canOpenWebInbox: Provider.can(providerId, "webBox")
   readonly property bool canSend: Provider.can(providerId, "send")
+    && !accountRefuses("send")
   // The key-bound actions this mailbox cannot honour, for the hint row. The
   // buttons are hidden by the three properties above; the keys are bound
   // whatever provider is open, so the row that says what the keyboard does here
@@ -2471,7 +2484,8 @@ Item {
   Loader {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
-      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)
+      : (root.providerId === "jmap" ? jmapAuthComponent
+      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -2480,7 +2494,8 @@ Item {
     id: apiLoader
     active: !!authLoader.item
     sourceComponent: root.providerId === "imap" ? imapClientComponent
-      : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
+      : (root.providerId === "jmap" ? jmapClientComponent
+      : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))
   }
 
   Component {
@@ -2525,6 +2540,24 @@ Item {
   }
 
   Component {
+    id: jmapAuthComponent
+
+    JmapAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      configuredHost: root.jmapSettings ? String(root.jmapSettings.host || "") : ""
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: heyAuthComponent
 
     HeyAuth {
@@ -2549,6 +2582,11 @@ Item {
   Component {
     id: heyClientComponent
     HeyClient { auth: authLoader.item }
+  }
+
+  Component {
+    id: jmapClientComponent
+    JmapClient { auth: authLoader.item }
   }
 
   Component {
@@ -2617,6 +2655,16 @@ Item {
 
   // The unread count is one label read — cheap enough to keep running while
   // the panel is closed, which is the only way the bar badge stays honest.
+  // A client that can be told when the mailbox moved says so. Nothing here
+  // asks which provider that is: `ignoreUnknownSignals` means the clients with
+  // no such signal simply never fire it, and the poll timer below is what
+  // covers them — and covers this one whenever its connection is down.
+  Connections {
+    target: root.api
+    ignoreUnknownSignals: true
+    function onMailboxChanged() { root.refresh() }
+  }
+
   Timer {
     id: pollTimer
     interval: root.refreshIntervalSec * 1000
