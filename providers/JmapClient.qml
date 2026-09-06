@@ -209,7 +209,14 @@ Item {
       // well-known GET carries none and is *expected* to be refused, and
       // reading that as a rejected app password would draw the re-entry card
       // over a server the user has not been asked about yet.
-      if (status === 401 && credentials.scheme !== Jmap.AUTH_NONE)
+      //
+      // Nor during the scheme detection, whose handle says so. Its first 401 is
+      // the question "not Basic, then?" rather than an answer, and recording it
+      // emptied the secret field, drew the card and tore the event stream down
+      // on every re-verify against a token-only server — while the second
+      // attempt went on to succeed. Detection records the rejection itself,
+      // once every scheme has been refused.
+      if (status === 401 && credentials.scheme !== Jmap.AUTH_NONE && owner.detecting !== true)
         root.credentialsRejected = true
       callback({ exit: exit, status: status, redirect: redirect, body: body, stderr: stderr }, "")
     })
@@ -219,11 +226,11 @@ Item {
 
   // ------------------------------------------------------------- sign-in
 
-  // The three lines the setup page draws while the check runs, named here
-  // because this is what is actually happening rather than what the page
-  // guesses is.
+  // The three lines the setup page draws while the check runs, reported to the
+  // auth object as the check goes — it is the one that shows them, and this is
+  // what is actually happening rather than what the page guesses is.
   function announce(step) {
-    if (auth) auth.progressStep = step
+    if (auth && typeof auth.reportProgress === "function") auth.reportProgress(step)
   }
 
   // Verifies an app password or an API token by using it, which is the only
@@ -243,8 +250,15 @@ Item {
   function verifyCredentials(settings, address, secret, callback) {
     var values = settings || {}
     var handle = newHandle()
+    // The one handle whose 401s `request` leaves unrecorded: a refused scheme
+    // is a question here, and only the last one refused is an answer.
+    handle.detecting = true
     var username = String(values.username || "") !== ""
       ? String(values.username) : String(address || "")
+    // The scheme the account recorded first, when it has one. A re-verify
+    // against a token-only server otherwise buys a 401 for the Basic try on
+    // every "Save changes".
+    var schemes = Jmap.schemeOrder(values.authScheme)
 
     // `needsServer` is the one refusal the page acts on rather than only
     // prints: nothing answered for the domain, so the server field is the way
@@ -294,13 +308,15 @@ Item {
       })
     }
 
-    // Basic first, Bearer only on a 401. Two requests with two credentials
-    // from this page and nowhere else — it is a detection, not a retry, and
-    // the rule that a 401 retries nothing is unchanged for everything after
-    // sign-in.
+    // One scheme, then the other only on a 401. Two requests with two
+    // credentials from this page and nowhere else — it is a detection, not a
+    // retry, and the rule that a 401 retries nothing is unchanged for
+    // everything after sign-in. A 401 from every scheme is the rejected state,
+    // and it is recorded here rather than by `request`, which would otherwise
+    // record the first refusal while the second try was about to succeed.
     function attempt(url, order, next) {
       announce(2)
-      request("session", url, credential(Jmap.AUTH_SCHEME_ORDER[order]), null, handle,
+      request("session", url, credential(schemes[order]), null, handle,
         function(reply) {
           if (handle.aborted) return
           if (reply.exit !== 0) {
@@ -312,10 +328,11 @@ Item {
             return
           }
           if (reply.status === 401) {
-            if (order + 1 < Jmap.AUTH_SCHEME_ORDER.length) {
+            if (order + 1 < schemes.length) {
               attempt(url, order + 1, next)
               return
             }
+            root.credentialsRejected = true
             done(null, "The server rejected that app password or API token")
             return
           }
@@ -332,7 +349,7 @@ Item {
             done(null, check.error)
             return
           }
-          readMailboxes(url, Jmap.AUTH_SCHEME_ORDER[order], reply.body, check.accountId, done)
+          readMailboxes(url, schemes[order], reply.body, check.accountId, done)
         })
     }
 

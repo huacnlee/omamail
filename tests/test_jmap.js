@@ -491,6 +491,16 @@ assert.strictEqual(
 // password is RFC 8620's Basic credential, and only a 401 buys the second try.
 deepEqual(jmap.AUTH_SCHEME_ORDER, ["basic", "bearer"])
 
+// An account that has signed in before starts from the scheme it recorded, so a
+// re-verify on a token-only server does not buy a 401 before the token is
+// tried. Nothing recorded, or a scheme that is not a credential, is the default.
+deepEqual(jmap.schemeOrder("bearer"), ["bearer", "basic"])
+deepEqual(jmap.schemeOrder("basic"), ["basic", "bearer"])
+deepEqual(jmap.schemeOrder("Bearer "), ["bearer", "basic"], "matched like every other scheme value")
+deepEqual(jmap.schemeOrder(""), ["basic", "bearer"])
+deepEqual(jmap.schemeOrder("none"), ["basic", "bearer"])
+deepEqual(jmap.schemeOrder(undefined), ["basic", "bearer"])
+
 // Where every method call goes, read from the session rather than assumed: on
 // the reference account the session is on one host and this URL is on another.
 assert.strictEqual(jmap.apiUrl(session()), "https://mx2.depodra.com/jmap/")

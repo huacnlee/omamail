@@ -70,11 +70,18 @@ Item {
   property string lastError: ""
 
   // Which of the check's three waits is happening, 1 to 3, or 0 when nothing
-  // is. The client sets it as it goes, because the client is what knows —
+  // is. The client reports it as it goes, because the client is what knows —
   // finding the server, checking the secret and reading the mailboxes are
   // three requests that look identical from outside, and naming which one is
-  // running is the difference between "it is working" and "it is stuck".
+  // running is the difference between "it is working" and "it is stuck". It
+  // reports through `reportProgress` rather than writing here: this object
+  // owns the value and is the one that clears it when the check ends.
   property int progressStep: 0
+
+  function reportProgress(step) {
+    var value = Math.floor(Number(step))
+    progressStep = isFinite(value) && value > 0 ? value : 0
+  }
 
   // Whether the last check ran out of places to look. The page opens its
   // server field on this rather than by reading the sentence it printed:
@@ -84,9 +91,9 @@ Item {
 
   // Whether the credential that signed in may submit mail. A missing
   // submission capability does not fail sign-in — the mailbox reads perfectly
-  // well — so the account signs in and the page says what it cannot do.
-  // Ticket 11 makes this a standing refusal read from the session; here it is
-  // only what the last check found out.
+  // well — so the account signs in and the page says what it cannot do. The
+  // standing refusal is the client's, read from the session (`Jmap.refusals`);
+  // this is only what the last check found out, for the page's one sentence.
   property bool sendingOffered: true
 
   // secret-tool holds the credential and curl carries every request. Neither

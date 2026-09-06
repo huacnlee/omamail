@@ -373,6 +373,21 @@ function fillTemplate(template, key, value) {
 // 401 from both is the rejected state.
 var AUTH_SCHEME_ORDER = [AUTH_BASIC, AUTH_BEARER]
 
+// The same order for an account that has signed in before: the scheme it
+// recorded first, then the rest. "Save changes" on a signed-in page re-verifies,
+// and starting at Basic on a token-only server would buy a 401 before the
+// scheme that has been working all along is tried. A scheme that is not one of
+// the two — nothing recorded yet, or `none` — is the default order.
+function schemeOrder(recorded) {
+  var first = trimmed(recorded).toLowerCase()
+  var out = []
+  if (first === AUTH_BASIC || first === AUTH_BEARER) out.push(first)
+  for (var i = 0; i < AUTH_SCHEME_ORDER.length; i++) {
+    if (out.indexOf(AUTH_SCHEME_ORDER[i]) < 0) out.push(AUTH_SCHEME_ORDER[i])
+  }
+  return out
+}
+
 // What a discovery step is. `typed` is the URL built from what the user wrote,
 // and it is the only step there is when they wrote something; `srv` is the
 // `_jmap._tcp` record for the address's domain, which has to be looked up
