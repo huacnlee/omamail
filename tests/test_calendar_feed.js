@@ -470,4 +470,55 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
+// A week is five days or seven, and it is the same week either way. Saturday
+// 12 September 2026 belongs to the week beginning Monday the 7th, so asking
+// for five days from it answers with that Monday to Friday rather than the
+// next week's — the anchor resolves before the span is cut.
+const saturday = new Date(2026, 8, 12, 15).getTime()
+const wholeWeek = feed.weekDays(saturday, 1)
+assert.strictEqual(wholeWeek.length, 7)
+assert.strictEqual(wholeWeek[0].isoDate, "2026-09-07")
+assert.strictEqual(wholeWeek[6].isoDate, "2026-09-13")
+
+const workingWeek = feed.weekDays(saturday, 1, 5)
+assert.strictEqual(workingWeek.length, 5)
+assert.strictEqual(workingWeek[0].isoDate, "2026-09-07")
+assert.strictEqual(workingWeek[4].isoDate, "2026-09-11")
+assert.strictEqual(JSON.stringify(workingWeek),
+  JSON.stringify(wholeWeek.slice(0, 5)),
+  "the shorter week is the front of the same week, not a different one")
+
+// The span fetched for a week stays seven days whichever is drawn, so the
+// range cache holds one entry across the toggle instead of two.
+assert.strictEqual(JSON.stringify(feed.weekSpan(saturday, 1)),
+  JSON.stringify(wholeWeek))
+
+// Only the two widths the interface offers are answers. Every other value is
+// a whole week — including the ones that would otherwise produce a grid with
+// no heading and no button to get back out of it.
+assert.strictEqual(feed.weekDayCount(5), 5)
+assert.strictEqual(feed.weekDayCount("5"), 5)
+assert.strictEqual(feed.weekDayCount(5.9), 5, "a fractional five is still five")
+assert.strictEqual(feed.weekDayCount(7), 7)
+for (const rejected of [0, 1, 2, 3, 4, 6, 8, 9, -5, null, undefined, true, false, "", "nonsense", NaN]) {
+  assert.strictEqual(feed.weekDayCount(rejected), 7,
+    `weekDayCount(${String(rejected)}) should fall back to a whole week`)
+}
+assert.strictEqual(feed.weekDays(saturday, 1, 0).length, 7)
+assert.strictEqual(feed.weekDays(saturday, 1, 3).length, 7,
+  "a width nothing offers draws the whole week rather than an untitleable one")
+
+// Every width this can return has a heading, which is what the clamp is for.
+assert.notStrictEqual(feed.weekTitle(feed.weekDays(saturday, 1, feed.weekDayCount(3))), "")
+assert.notStrictEqual(feed.weekTitle(feed.weekDays(saturday, 1, feed.weekDayCount(5))), "")
+
+// The title names the span drawn. A working week ends on the Friday it shows,
+// not on the Sunday it does not.
+assert.strictEqual(feed.weekTitle(wholeWeek), "7–13 September 2026")
+assert.strictEqual(feed.weekTitle(workingWeek), "7–11 September 2026")
+
+// A five-day week straddling a month keeps both month names.
+const straddling = feed.weekDays(new Date(2026, 8, 30).getTime(), 1, 5)
+assert.strictEqual(feed.weekTitle(straddling), "28 September–2 October 2026")
+
 console.log("test_calendar_feed.js ok")
