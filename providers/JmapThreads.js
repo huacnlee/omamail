@@ -134,8 +134,9 @@ function representativeThreads(responses) {
 }
 
 // Thread id to its member ids, oldest first — which is the order `Thread/get`
-// answers in (RFC 8621 section 3, `receivedAt` ascending) and the order the
-// conversation rail draws.
+// answers in (RFC 8621 section 3, `receivedAt` ascending). The conversation
+// rail draws them the other way up; that is `Conversation.railOrder`'s
+// decision, not this list's.
 function threadMembers(responses) {
   var list = getList(argumentsAt(responses, CALL_THREADS))
   var out = {}

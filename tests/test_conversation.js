@@ -144,11 +144,12 @@ assert.strictEqual(conversation.mailboxNameFor({ labelIds: ["SPAM"] }, "inbox", 
 {
   const drawn = conversation.stops(block, known, "maaaaaf", "inbox", mailboxes)
   assert.strictEqual(drawn.length, 3, "one stop per member")
-  deepEqual(drawn.map(s => s.id), ["maaaaad", "maaaaae", "maaaaaf"], "oldest first")
-  deepEqual(drawn.map(s => s.open), [false, false, true],
+  deepEqual(drawn.map(s => s.id), ["maaaaaf", "maaaaae", "maaaaad"],
+    "newest first, the other way up from Thread/get's own order")
+  deepEqual(drawn.map(s => s.open), [true, false, false],
     "the open message keeps its place in the timeline")
-  deepEqual(drawn.map(s => s.unread), [false, false, true])
-  deepEqual(drawn.map(s => s.mailbox), ["Drafts", "", ""],
+  deepEqual(drawn.map(s => s.unread), [true, false, false])
+  deepEqual(drawn.map(s => s.mailbox), ["", "", "Drafts"],
     "only the member outside the Inbox names where it is")
   assert.strictEqual(drawn[1].sender, "Ada Lovelace")
   assert.strictEqual(drawn[1].time, "4d")
@@ -159,7 +160,7 @@ assert.strictEqual(conversation.mailboxNameFor({ labelIds: ["SPAM"] }, "inbox", 
   // The Sent view: this account sent none of these, so all three are elsewhere
   // and all three say so.
   const drawn = conversation.stops(block, known, "maaaaaf", "sent", mailboxes)
-  deepEqual(drawn.map(s => s.mailbox), ["Drafts", "Inbox", "Inbox"])
+  deepEqual(drawn.map(s => s.mailbox), ["Inbox", "Inbox", "Drafts"])
 }
 
 {
@@ -171,7 +172,7 @@ assert.strictEqual(conversation.mailboxNameFor({ labelIds: ["SPAM"] }, "inbox", 
   deepEqual(drawn.map(s => s.sender), ["", "", ""])
   deepEqual(drawn.map(s => s.unread), [false, false, false],
     "an unknown member is never drawn unread")
-  deepEqual(drawn.map(s => s.open), [false, false, true],
+  deepEqual(drawn.map(s => s.open), [true, false, false],
     "and the open one is still marked")
 }
 
@@ -197,9 +198,9 @@ deepEqual(conversation.stops(null, known, "", "inbox", mailboxes), [])
   })
   const withRow = Object.assign({}, known, { maaaaad: representative })
   const drawn = conversation.stops(block, withRow, "maaaaaf", "inbox", mailboxes)
-  assert.strictEqual(drawn[0].unread, false, "the representative's own labels say read")
-  assert.strictEqual(drawn[0].flagged, false, "and unstarred")
-  assert.strictEqual(drawn[2].unread, true, "the reply is the unread one")
+  assert.strictEqual(drawn[2].unread, false, "the representative's own labels say read")
+  assert.strictEqual(drawn[2].flagged, false, "and unstarred")
+  assert.strictEqual(drawn[0].unread, true, "the reply is the unread one")
   assert.strictEqual(conversation.caption(block, withRow), "3 messages · 1 unread",
     "the row's OR does not count as a second unread")
   // A summary with no label list at all falls back to the flag, which is the
@@ -215,7 +216,7 @@ deepEqual(conversation.stops(null, known, "", "inbox", mailboxes), [])
 // A sender with no display name falls back to the address, the way a row does.
 assert.strictEqual(
   conversation.stops(block, { maaaaad: summary("maaaaad", { from: { display: "", email: "ada@example.org" } }) },
-    "maaaaad", "inbox", mailboxes)[0].sender,
+    "maaaaad", "inbox", mailboxes)[2].sender,
   "ada@example.org")
 
 // -------------------------------------------------------------- the caption
@@ -233,15 +234,17 @@ assert.strictEqual(conversation.caption(null, known), "")
 
 // ----------------------------------------------------------------- moving
 
-assert.strictEqual(conversation.memberStep(block, "maaaaad", 1), "maaaaae")
-assert.strictEqual(conversation.memberStep(block, "maaaaae", -1), "maaaaad")
-assert.strictEqual(conversation.memberStep(block, "maaaaaf", 1), "",
-  "n stops at the newest member rather than wrapping to the first")
-assert.strictEqual(conversation.memberStep(block, "maaaaad", -1), "",
-  "and p stops at the oldest")
-assert.strictEqual(conversation.memberStep(block, "yaaaaag", 1), "maaaaad",
+assert.strictEqual(conversation.memberStep(block, "maaaaaf", 1), "maaaaae",
+  "n goes down the rail, to the older message")
+assert.strictEqual(conversation.memberStep(block, "maaaaae", -1), "maaaaaf",
+  "p goes up it, to the newer")
+assert.strictEqual(conversation.memberStep(block, "maaaaad", 1), "",
+  "n stops at the oldest member rather than wrapping to the newest")
+assert.strictEqual(conversation.memberStep(block, "maaaaaf", -1), "",
+  "and p stops at the newest")
+assert.strictEqual(conversation.memberStep(block, "yaaaaag", 1), "maaaaaf",
   "a rail whose open message left it starts from the end the move came from")
-assert.strictEqual(conversation.memberStep(block, "yaaaaag", -1), "maaaaaf")
+assert.strictEqual(conversation.memberStep(block, "yaaaaag", -1), "maaaaad")
 assert.strictEqual(conversation.memberStep(null, "maaaaad", 1), "")
 assert.strictEqual(conversation.memberStep({ id: "t", memberIds: [] }, "", 1), "")
 

@@ -234,10 +234,10 @@ Item {
       var rail = named(app, "conversationRail")
       verify(rail, "the reader draws a rail for a conversation of three")
       compare(rail.stops.length, 3, "one stop per member id, summaries or not")
-      compare(rail.stops[0].id, "maaaaad", "oldest first, Thread/get's own order")
-      compare(rail.stops[2].id, "maaaaaf")
-      verify(!rail.stops[0].known, "and a member with no summary is a skeleton")
-      verify(rail.stops[2].open, "the open message keeps its place in the timeline")
+      compare(rail.stops[0].id, "maaaaaf", "newest first, the other way up from Thread/get")
+      compare(rail.stops[2].id, "maaaaad")
+      verify(!rail.stops[2].known, "and a member with no summary is a skeleton")
+      verify(rail.stops[0].open, "the open message keeps its place in the timeline")
       compare(rail.caption, "3 messages", "the length is known before any summary")
 
       // The summaries land. The stops do not move: same ids, same order, same
@@ -254,8 +254,8 @@ Item {
       })
       waitForRendering(app)
       compare(rail.stops.map(function(s) { return s.id }).join(","), before.join(","))
-      verify(rail.stops[0].known, "and now every stop is settled")
-      compare(rail.stops[0].mailbox, "Drafts",
+      verify(rail.stops[2].known, "and now every stop is settled")
+      compare(rail.stops[2].mailbox, "Drafts",
         "the member outside the mailbox on screen says where it is")
       compare(rail.stops[1].mailbox, "", "and one inside it says nothing")
       compare(rail.caption, "3 messages · 1 unread")
@@ -274,24 +274,24 @@ Item {
       compare(app.currentView, "reader")
       compare(app.cursorId, "maaaaaf", "opening a row put the cursor on it")
 
-      keyClick(Qt.Key_P)
-      compare(mailService.selectedId, "maaaaae", "p opens the previous member")
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaae", "n opens the stop below: the older member")
       compare(app.cursorId, "maaaaaf", "and leaves the list cursor where it was")
 
-      keyClick(Qt.Key_P)
-      compare(mailService.selectedId, "maaaaad", "p again, to the oldest member")
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaad", "n again, to the oldest member at the bottom")
       compare(app.cursorId, "maaaaaf")
 
-      keyClick(Qt.Key_P)
+      keyClick(Qt.Key_N)
       compare(mailService.selectedId, "maaaaad",
         "and stops there rather than wrapping to the newest")
 
-      keyClick(Qt.Key_N)
-      compare(mailService.selectedId, "maaaaae", "n walks back up the rail")
-      keyClick(Qt.Key_N)
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaae", "p walks back up the rail")
+      keyClick(Qt.Key_P)
       compare(mailService.selectedId, "maaaaaf")
-      keyClick(Qt.Key_N)
-      compare(mailService.selectedId, "maaaaaf", "and stops at the newest")
+      keyClick(Qt.Key_P)
+      compare(mailService.selectedId, "maaaaaf", "and stops at the newest, at the top")
       compare(app.cursorId, "maaaaaf", "the cursor never moved at all")
 
       // The other half: the list keys still move the list, from inside the
@@ -311,9 +311,9 @@ Item {
       waitForRendering(app)
       compare(app.navKinds.join(","), "list,reader")
 
-      keyClick(Qt.Key_P)
-      keyClick(Qt.Key_P)
-      compare(mailService.selectedId, "maaaaad")
+      keyClick(Qt.Key_N)
+      keyClick(Qt.Key_N)
+      compare(mailService.selectedId, "maaaaad", "n twice, to the oldest member at the bottom")
       compare(app.navKinds.join(","), "list,reader",
         "walking the rail lengthens nothing")
 

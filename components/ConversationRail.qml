@@ -7,7 +7,7 @@ import "../account/Model.js" as Model
 // reader.
 //
 // A row stands for a conversation and opens one member of it; this is the rest
-// of the conversation, oldest first, every member a stop that opens in the same
+// of the conversation, newest first, every member a stop that opens in the same
 // reader. It takes width from the body and never height: the message keeps its
 // reading measure and the rail scrolls in a viewport of its own, the way the
 // list scrolls beside the reader.
@@ -17,7 +17,7 @@ import "../account/Model.js" as Model
 Item {
   id: root
 
-  // `Conversation.stops`: one entry per member, oldest first, each carrying
+  // `Conversation.stops`: one entry per member, newest first, each carrying
   // whether its summary has arrived, whether it is the open message, and the
   // mailbox name it needs when it sits outside the one on screen.
   required property var stops

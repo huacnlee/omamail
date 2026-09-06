@@ -6,7 +6,7 @@
 //
 // A row stands for a conversation and opens its representative in the
 // single-message reader; the rail beside the body is the rest of it — every
-// counted member, oldest first, as a stop that opens in the same reader. What a
+// counted member, newest first, as a stop that opens in the same reader. What a
 // stop shows, which stops are still owed a summary, where `n` and `p` land, and
 // which conversation survives a move between members are all decisions rather
 // than drawing, so they live here and the view binds to them.
@@ -226,9 +226,18 @@ function senderOf(summary) {
   return display !== "" ? display : trimmed(from.email)
 }
 
-// Every member as a stop, oldest first in `memberIds` order — `Thread/get`'s
-// own, `receivedAt` ascending — with the open message in its place rather than
-// lifted out of the timeline.
+// The rail's order: newest at the top. `memberIds` is `Thread/get`'s own
+// order, `receivedAt` ascending, and stays that way as data; the rail reads it
+// the other way up, because the newest message is the one a long conversation
+// is opened for and the oldest are the ones worth a scroll to reach.
+function railOrder(thread) {
+  var ids = thread.memberIds.slice()
+  ids.reverse()
+  return ids
+}
+
+// Every member as a stop, newest first, with the open message in its place
+// rather than lifted out of the timeline.
 //
 // A stop whose summary has not arrived is `known` false and carries nothing
 // else: the view draws a skeleton in the date and sender lanes, in a stop of
@@ -239,8 +248,9 @@ function stops(block, summaries, openId, viewKey, mailboxes) {
   if (!thread) return []
   var open = trimmed(openId)
   var out = []
-  for (var i = 0; i < thread.memberIds.length; i++) {
-    var id = thread.memberIds[i]
+  var ids = railOrder(thread)
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i]
     var summary = summaryFor(summaries, id)
     out.push({
       id: id,
@@ -283,6 +293,10 @@ function caption(block, summaries) {
 
 // Where `n` and `p` land, and "" when there is nowhere to go.
 //
+// `n` is the next stop down the rail as it is drawn, which is the older
+// message, and `p` the one above, which is the newer: the keys follow the
+// picture, the way `j` and `k` follow the list.
+//
 // Stops at the ends rather than wrapping. The rail is a timeline and a
 // conversation has a first message and a last one; walking off either end and
 // arriving at the other says the thread is a ring, which it is not — and the
@@ -291,13 +305,14 @@ function memberStep(block, openId, delta) {
   var thread = blockOf(block)
   if (!thread || thread.count === 0) return ""
   var step = Math.floor(Number(delta) || 0)
-  var index = thread.memberIds.indexOf(trimmed(openId))
+  var ids = railOrder(thread)
+  var index = ids.indexOf(trimmed(openId))
   // The open message is not a member of this conversation, which is a rail
-  // drawn for a message that left it. `n` takes the first stop and `p` the
-  // last, the way a list cursor with nowhere to be starts from the end the move
-  // came from.
-  if (index < 0) return step < 0 ? thread.memberIds[thread.count - 1] : thread.memberIds[0]
+  // drawn for a message that left it. `n` takes the top stop and `p` the
+  // bottom, the way a list cursor with nowhere to be starts from the end the
+  // move came from.
+  if (index < 0) return step < 0 ? ids[ids.length - 1] : ids[0]
   var next = index + step
-  if (next < 0 || next > thread.count - 1) return ""
-  return thread.memberIds[next]
+  if (next < 0 || next > ids.length - 1) return ""
+  return ids[next]
 }
