@@ -3,10 +3,12 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	account/MailAccount.qml \
 	cache/CacheStore.qml cache/BodyCache.qml \
 	providers/AuthManager.qml providers/GmailApiClient.qml \
+	providers/OutlookAuth.qml \
 	providers/ImapAuth.qml providers/ImapClient.qml \
 	providers/HeyAuth.qml providers/HeyClient.qml \
 	providers/JmapAuth.qml providers/JmapClient.qml providers/JmapPush.qml \
 	components/ImapSetupPage.qml \
+	components/OutlookSetupPage.qml \
 	components/JmapSetupPage.qml \
 	components/HeySetupPage.qml \
 	components/ProviderPicker.qml \
@@ -73,6 +75,7 @@ test-js:
 	node tests/test_recipients.js
 	node tests/test_senders.js
 	node tests/test_oauth.js
+	node tests/test_microsoft_oauth.js
 	node tests/test_credentials.js
 	node tests/test_secrets.js
 	node tests/test_gmail_api.js
@@ -161,6 +164,7 @@ test-qml:
 		exit 1; }
 	QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 		$(QMLTESTRUNNER) -import $(CURDIR)/tests/qml/imports -input tests/qml
+	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine

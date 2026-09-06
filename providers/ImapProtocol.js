@@ -85,7 +85,7 @@ var PRESETS = [
     imapHost: "outlook.office365.com", imapPort: 993,
     smtpHost: "smtp-mail.outlook.com", smtpPort: 587,
     note: "Microsoft has withdrawn password sign-in for personal accounts; "
-      + "a work or school account may still allow it."
+      + "go back and pick Outlook to sign in with Microsoft instead."
   },
   {
     id: "yahoo",

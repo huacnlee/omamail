@@ -156,7 +156,7 @@ function from(listHeader, postHeader) {
   return result
 }
 
-// The Gmail message resource shape, which is what both providers hand back.
+// The Gmail message resource shape, which is what every provider hands back.
 function fromMessage(message) {
   var headers = message && message.payload && Array.isArray(message.payload.headers)
     ? message.payload.headers

@@ -189,6 +189,16 @@ deepEqual(credentials.legacyKeyringAttributes(sharedClient), [
 ])
 assert.strictEqual(credentials.legacyKeyringAttributes(sharedClient).indexOf("account"), -1)
 
+deepEqual(credentials.outlookKeyringAttributes(
+  "12345678-1234-4abc-9def-1234567890ab", "outlook:one@hotmail.com"), [
+  "service", "omamail",
+  "kind", "outlook-refresh-token",
+  "client-id", "12345678-1234-4abc-9def-1234567890ab",
+  "account", "outlook:one@hotmail.com"
+])
+deepEqual(credentials.outlookKeyringAttributes("", "outlook:one@hotmail.com"), [])
+deepEqual(credentials.outlookKeyringAttributes(sharedClient, ""), [])
+
 deepEqual(credentials.renamedKeyringAttributes(sharedClient, "one@gmail.com"), [
   "service", "omarchy-gmail",
   "kind", "refresh-token",

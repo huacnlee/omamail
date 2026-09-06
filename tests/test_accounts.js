@@ -61,6 +61,8 @@ assert.strictEqual(accounts.accountId("  Ada@Example.COM "), "ada@example.com")
 assert.strictEqual(accounts.accountId("nobody"), "")
 assert.strictEqual(accounts.accountId(""), "")
 assert.strictEqual(accounts.accountId(null), "")
+assert.strictEqual(accounts.accountId("Ada@Hotmail.com", "outlook"),
+  "outlook:ada@hotmail.com")
 
 // ------------------------------------------------------------------ labels
 

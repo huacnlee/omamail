@@ -12,8 +12,9 @@ const provider = load("providers/Registry.js")
 // with a service of their own, then the two that are every other mailbox. IMAP
 // is last because it is the catch-all, and JMAP goes in front of it because a
 // server that speaks both is better read over JMAP.
-deepEqual(provider.ids(), ["gmail", "hey", "jmap", "imap"])
+deepEqual(provider.ids(), ["gmail", "outlook", "hey", "jmap", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
+assert.strictEqual(provider.get("outlook").name, "Outlook")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
 assert.strictEqual(provider.get("jmap").name, "JMAP")
@@ -35,12 +36,14 @@ assert.strictEqual(provider.exists("imap"), true)
 
 assert.strictEqual(provider.can("gmail", "labels"), true)
 assert.strictEqual(provider.can("imap", "labels"), false)
+assert.strictEqual(provider.can("outlook", "labels"), false)
 // Separate questions. `labels` is whether a message can carry several at once,
 // which is what the reader's strip draws; `move` is whether the user gets to
 // say where it goes. IMAP answers no and yes -- one folder per message is the
 // very thing that makes a move the plain operation there.
 assert.strictEqual(provider.can("gmail", "move"), true)
 assert.strictEqual(provider.can("imap", "move"), true)
+assert.strictEqual(provider.can("outlook", "move"), true)
 assert.strictEqual(provider.can("hey", "move"), false, "HEY's destinations are its own")
 assert.strictEqual(provider.can("gmail", "spam"), true)
 assert.strictEqual(provider.can("imap", "spam"), false, "IMAP has no junk verb worth offering")
@@ -58,6 +61,7 @@ assert.strictEqual(provider.can("gmail", "webBox"), true)
 assert.strictEqual(provider.can("hey", "web"), true)
 assert.strictEqual(provider.can("hey", "webBox"), false)
 assert.strictEqual(provider.can("imap", "webBox"), false)
+assert.strictEqual(provider.can("outlook", "webBox"), false)
 
 // And the address builders agree with the capabilities, so a caller that asked
 // anyway gets nothing rather than somewhere else's mailbox.
@@ -142,6 +146,7 @@ assert.strictEqual(provider.refusal("hey", "archive", { archive: "not this way" 
 assert.strictEqual(provider.isConnectable("gmail"), true)
 assert.strictEqual(provider.isConnectable("imap"), true)
 assert.strictEqual(provider.isConnectable("hey"), true)
+assert.strictEqual(provider.isConnectable("outlook"), true)
 
 assert.strictEqual(provider.unavailableReason("gmail"), "")
 assert.strictEqual(provider.unavailableReason("imap"), "")
@@ -238,6 +243,7 @@ assert.strictEqual(provider.query("imap", "inbox", "", ""), "folder:INBOX")
 assert.strictEqual(provider.query("imap", "unread", "", ""), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.query("imap", "sent", "", ""), "folder:\\Sent")
 assert.strictEqual(provider.query("imap", "drafts", "", ""), "folder:\\Drafts")
+assert.strictEqual(provider.query("outlook", "unread", "", ""), "folder:INBOX UNSEEN")
 
 // A typed search wins over everything, and is shaped by the provider.
 assert.strictEqual(provider.query("gmail", "trash", "from:jane", ""), "from:jane",
@@ -262,6 +268,7 @@ assert.strictEqual(provider.query("gmail", "inbox", "   ", ""), "in:inbox",
 // request is rejected and the mailbox stays empty.
 assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBOX")
 assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
+assert.strictEqual(provider.query("outlook", "inbox", "", "in:inbox"), "folder:INBOX")
 
 // HEY's own queries, which the client reads back as commands.
 assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
@@ -290,6 +297,7 @@ assert.strictEqual(provider.cachedSummaryInSearch("hey", "label:4711", {}), true
 assert.strictEqual(provider.unreadQuery("gmail"),
   "in:inbox is:unread -category:promotions -category:social -category:forums")
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
+assert.strictEqual(provider.unreadQuery("outlook"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
 
 // Named by exclusion on purpose, and the reason is which way it fails. Asking
@@ -330,6 +338,7 @@ assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u/0/")
 assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
 assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
+assert.strictEqual(provider.webHomeUrl("outlook"), "https://outlook.live.com/mail/")
 
 // ------------------------------------------------------------------ logos
 
@@ -345,10 +354,12 @@ assert.strictEqual(provider.mark("hey"), "hey-mark.png")
 assert.strictEqual(provider.logo("hey"), "hey.png")
 assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
+assert.strictEqual(provider.logo("outlook"), "")
 
 // ------------------------------------------------------------------- auth
 
 assert.strictEqual(provider.authKind("gmail"), "oauth")
+assert.strictEqual(provider.authKind("outlook"), "oauth")
 assert.strictEqual(provider.authKind("imap"), "password")
 // A sign-in this plugin does not perform itself: `hey` owns the browser, the
 // token and the keyring entry it lives in.
@@ -358,6 +369,7 @@ assert.strictEqual(provider.usesCli("gmail"), false)
 assert.strictEqual(provider.usesOAuth("hey"), false)
 assert.strictEqual(provider.usesPassword("hey"), false)
 assert.strictEqual(provider.usesOAuth("gmail"), true)
+assert.strictEqual(provider.usesOAuth("outlook"), true)
 assert.strictEqual(provider.usesOAuth("imap"), false)
 assert.strictEqual(provider.usesPassword("imap"), true)
 assert.strictEqual(provider.usesPassword("gmail"), false)

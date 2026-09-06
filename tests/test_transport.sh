@@ -101,6 +101,12 @@ check "the credentials reach curl" "$config" 'user = "jane@example.org:hunter2"'
 check "the command reaches curl" "$config" 'request = "UID SEARCH UNSEEN"'
 check "mail transport bypasses desktop HTTP/SOCKS proxies" "$config" 'noproxy = "*"'
 
+oauth_request="imap-oauth $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 'jane@hotmail.com') $(b64 'access-token') $(b64 'UID SEARCH UNSEEN')"
+oauth_config=$(config_for "$oauth_request")
+check "OAuth keeps the username separate" "$oauth_config" 'user = "jane@hotmail.com"'
+check "the bearer token reaches curl's OAuth option" "$oauth_config" 'oauth2-bearer = "access-token"'
+check_absent "OAuth does not turn the token into a password" "$oauth_config" 'user = "jane@hotmail.com:access-token"'
+
 # libcurl puts a custom multi-UID FETCH in its protocol-header callback rather
 # than stdout. The transport returns that channel when present, or the client
 # sees a successful request with an empty message list.

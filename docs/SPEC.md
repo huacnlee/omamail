@@ -1,8 +1,6 @@
 # Omamail — Spec
 
-A native Gmail client for Omarchy, built as a Quickshell plugin on the official
-Gmail REST API. Same technology as Omarchy-Spotify: QML views over plain-JS
-logic, running inside the existing `omarchy-shell` process.
+A native mail client for Omarchy, built as a Quickshell plugin over the official Gmail API, Microsoft OAuth plus IMAP/SMTP, the HEY CLI, and standard IMAP/SMTP. Same technology as Omarchy-Spotify: QML views over plain-JS logic, running inside the existing `omarchy-shell` process.
 
 ## Product shape
 
@@ -50,6 +48,13 @@ guided by an in-app four-step walkthrough.
 - Client id/secret → `~/.config/omamail/credentials.json`, mode 0600.
   Not plugin settings: `shell.json` is world-readable.
 - Access token → process memory only
+
+Outlook.com and Hotmail use Microsoft's OAuth device-code flow for delegated IMAP and SMTP access. The user supplies a public-client Application ID until the project has a maintainer-owned registration to ship.
+
+- Tenant: `consumers`; scopes: `offline_access`, `https://outlook.office.com/IMAP.AccessAsUser.All`, `https://outlook.office.com/SMTP.Send`
+- Refresh token → GNOME Keyring, keyed by provider, client and account
+- Application ID → the account entry; it is public configuration and there is no client secret
+- Access token → process memory, handed to curl over stdin and used through its OAuth bearer option
 
 ## Features
 

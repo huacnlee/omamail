@@ -160,7 +160,7 @@ Item {
 
   onAccountIdChanged: {
     // One HEY login serves whichever account row is on screen, so unlike the
-    // other two providers there is nothing keyed by account to drop here.
+    // other providers there is nothing keyed by account to drop here.
   }
 
   // Asked again after the user has installed the program. The setup page has a

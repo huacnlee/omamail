@@ -30,6 +30,12 @@ assert.strictEqual(model.setupHeadline("no_credentials", "IMAP", "password"),
   "Add this mailbox", "only one of the two sends anyone to a Cloud console")
 assert.strictEqual(model.setupHeadline("no_credentials", "Gmail", "oauth"),
   "Connect a Google Cloud project")
+assert.strictEqual(model.setupHeadline("no_credentials", "Outlook", "oauth"),
+  "Add this Outlook mailbox")
+assert.strictEqual(model.setupHeadline("signing_in", "Outlook", "oauth"),
+  "Waiting for Microsoft…")
+assert.ok(model.setupDetail("no_credentials", [], "", "Outlook", "oauth")
+  .indexOf("Microsoft") >= 0)
 // The unavailable detail comes from the provider, because only it knows why.
 assert.strictEqual(model.setupDetail("unavailable", [], "no API yet", "HEY"), "no API yet")
 assert.strictEqual(model.setupActionLabel("unavailable", "HEY"), "",

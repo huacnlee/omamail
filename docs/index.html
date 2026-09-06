@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Omamail — mail as a native Omarchy window</title>
-<meta name="description" content="Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages and answers Gmail, HEY and any IMAP mailbox in a native window.">
+<meta name="description" content="Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages and answers Gmail, Outlook, HEY and any IMAP mailbox in a native window.">
 <link rel="icon" type="image/svg+xml" href="images/omamail.svg">
 <meta property="og:title" content="Omamail — mail as a native Omarchy window">
-<meta property="og:description" content="Read, triage and answer Gmail, HEY and any IMAP mailbox inside the omarchy-shell process you already have.">
+<meta property="og:description" content="Read, triage and answer Gmail, Outlook, HEY and any IMAP mailbox inside the omarchy-shell process you already have.">
 <meta property="og:image" content="https://huacnlee.github.io/omamail/images/og-preview.jpg">
 <meta property="og:url" content="https://huacnlee.github.io/omamail/">
 <meta name="twitter:card" content="summary_large_image">
@@ -430,7 +430,7 @@ figcaption {
 
 .boxes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid var(--muted);
 }
 .box {
@@ -762,7 +762,7 @@ footer p:last-child { margin-bottom: 0; }
 █   █ █   █ █   █ █   █ █   █   █   █
  ███  █   █ █   █ █   █ █   █ █████ █████</pre>
     <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">Native mail app special design for Omarchy</h1>
-    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。">Omamail reads, triages and answers your mail over the official Gmail API, over the HEY CLI 37signals publish, or over IMAP and SMTP for every other mailbox.</p>
+    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、Microsoft OAuth、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。">Omamail reads, triages and answers your mail over the official Gmail API, Microsoft OAuth for Outlook, the HEY CLI 37signals publish, or IMAP and SMTP for every other mailbox.</p>
 
     <div class="command">
       <pre><span class="prompt">$ </span><span class="cmd">omarchy plugin add https://github.com/huacnlee/omamail.git --enable</span></pre>
@@ -815,12 +815,17 @@ footer p:last-child { margin-bottom: 0; }
 <section>
   <div class="wrap">
     <h2><span class="idx">02</span> <span data-zh="它能打开的邮箱">Mailboxes it can open</span></h2>
-    <p class="lede" data-zh="三种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Three kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
+    <p class="lede" data-zh="四种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Four kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
     <div class="boxes">
       <div class="box">
         <h3><img class="mark" src="images/gmail.png" width="20" alt="" loading="lazy">Gmail</h3>
         <span class="kind" data-zh="用 GOOGLE 账号登录">SIGN IN WITH GOOGLE</span>
         <p data-zh="标签、会话、Gmail 自己的搜索语法，以及一个 Google 真的会拿去学习的“报告垃圾邮件”。">Labels, conversations, Gmail's own search syntax, and a report-spam that Google actually learns from.</p>
+      </div>
+      <div class="box">
+        <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>Outlook</h3>
+        <span class="kind" data-zh="用 MICROSOFT 账号登录">SIGN IN WITH MICROSOFT</span>
+        <p data-zh="Outlook.com、Hotmail、Live 和 MSN，使用 OAuth；Omamail 不会看到你的密码。">Outlook.com, Hotmail, Live and MSN over OAuth — Omamail never sees the account password.</p>
       </div>
       <div class="box">
         <h3><img class="mark" src="images/hey.png" width="20" alt="" loading="lazy">HEY</h3>
@@ -830,7 +835,7 @@ footer p:last-child { margin-bottom: 0; }
       <div class="box">
         <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>IMAP</h3>
         <span class="kind" data-zh="一个地址和一个应用密码">AN ADDRESS AND AN APP PASSWORD</span>
-        <p data-zh="Fastmail、iCloud、Outlook、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。">Fastmail, iCloud, Outlook, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own.</p>
+        <p data-zh="Fastmail、iCloud、Yahoo、Zoho、GMX、通过 Bridge 的 Proton，或者你自己的服务器。">Fastmail, iCloud, Yahoo, Zoho, GMX, Proton through its Bridge, or a server of your own.</p>
       </div>
     </div>
   </div>
@@ -849,7 +854,7 @@ footer p:last-child { margin-bottom: 0; }
       <li><span class="n">06</span><span class="t"><b data-zh="一键退订">Off a list in one click</b><span data-zh="支持一键退订的邮件不必离开窗口就能退掉。在你开口之前，绝不会去请求发件人的地址。">A newsletter that supports one-click unsubscribing is unsubscribed from without leaving the window. Nothing is ever fetched from a sender's address until you ask.</span></span></li>
       <li><span class="n">07</span><span class="t"><b data-zh="图片默认拦下">Images stay blocked</b><span data-zh="加载发件人的图片等于告诉对方这封信被读了、用的哪个地址、什么时候。要加载得你开口，而且只对那一封生效。">Loading a sender's pictures tells them the mail was read, from which address and when. They load when you ask, for that one message.</span></span></li>
       <li><span class="n">08</span><span class="t"><b data-zh="你的主题">Your theme</b><span data-zh="每一个颜色都来自当前的 Omarchy 主题，桌面一换，邮箱立刻跟着换。">Every colour comes from the active Omarchy theme, so the mailbox changes the moment the desktop does.</span></span></li>
-      <li><span class="n">09</span><span class="t"><b data-zh="凭据在钥匙串里">Keyring-backed</b><span data-zh="Gmail 刷新令牌和每一个 IMAP 密码都放在 GNOME Keyring 里：不在配置文件里，也不在命令行上。">The Gmail refresh token and every IMAP password live in GNOME Keyring — never in a config file, never on a command line.</span></span></li>
+      <li><span class="n">09</span><span class="t"><b data-zh="凭据在钥匙串里">Keyring-backed</b><span data-zh="Gmail 和 Outlook 刷新令牌以及每一个 IMAP 密码都放在 GNOME Keyring 里：不在配置文件里，也不在命令行上。">Gmail and Outlook refresh tokens and every IMAP password live in GNOME Keyring — never in a config file, never on a command line.</span></span></li>
       <li><span class="n">10</span><span class="t"><b data-zh="多个邮箱">Several mailboxes</b><span data-zh="每个账号有自己的收件箱、缓存和未读数；列表、标签和头像按账号缓存，所以切换从不等网络。">Each with its own inbox, cache and unread count. List, labels and profile are cached per account, so switching never waits on the network.</span></span></li>
       <li><span class="n">11</span><span class="t"><b data-zh="mailto: 链接">mailto: links</b><span data-zh="插件启用之后，桌面上任何地方点一个地址——浏览器、PDF、通知——都在这里打开撰写。">Once the plugin is enabled, clicking an address anywhere on the desktop opens compose here.</span></span></li>
       <li><span class="n">12</span><span class="t"><b data-zh="撤销发送">Undo send</b><span data-zh="出站邮件默认延迟十秒，够你反悔。设成 0 就立即发送。">Outgoing mail is delayed by ten seconds so you can cancel it. Set it to 0 to send immediately.</span></span></li>
@@ -942,7 +947,7 @@ footer p:last-child { margin-bottom: 0; }
 
 <footer>
   <div class="wrap">
-    <p data-zh="Omamail 是一个独立项目，与 Google 和 37signals 均无关联。Gmail 是 Google LLC 的商标；HEY 是 37signals, LLC 的商标。">Omamail is an independent project and is not affiliated with Google or 37signals. Gmail is a trademark of Google LLC; HEY is a trademark of 37signals, LLC.</p>
+    <p data-zh="Omamail 是一个独立项目，与 Google、Microsoft 和 37signals 均无关联。Gmail 是 Google LLC 的商标；Outlook 是 Microsoft Corporation 的商标；HEY 是 37signals, LLC 的商标。">Omamail is an independent project and is not affiliated with Google, Microsoft or 37signals. Gmail is a trademark of Google LLC; Outlook is a trademark of Microsoft Corporation; HEY is a trademark of 37signals, LLC.</p>
     <p><span data-zh="作者">By</span> <a href="https://github.com/huacnlee">Jason Lee</a> · <a href="https://github.com/huacnlee/omamail/blob/main/LICENSE">MIT</a> · <a href="https://github.com/huacnlee/omamail">github.com/huacnlee/omamail</a> · <a href="https://omarchy.org">omarchy.org</a></p>
   </div>
 </footer>

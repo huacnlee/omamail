@@ -15,6 +15,7 @@
 #   imap-id <b64 root url> <b64 url> <b64 user:password> <b64 preamble> <b64 command> ...
 #   imap-append <b64 url> <b64 user:password> <b64 message> <b64 flags>
 #   smtp <b64 url> <b64 user:password> <b64 from> <b64 message> <b64 rcpt> ...
+#   *-oauth uses <b64 username> <b64 bearer token> in place of <b64 user:password>
 #
 # base64 rather than the values themselves, for three reasons that each bite
 # once during this script's life:
@@ -74,14 +75,20 @@ set -- $line
 [ $# -ge 4 ] || fail 'mail-transport.sh: usage: <mode> <url> <credentials> <arg>...'
 
 mode=$1
+case "$mode" in
+  imap-oauth) [ $# -ge 5 ] || fail 'mail-transport.sh: imap-oauth needs a URL, a username, a bearer token and a command' ;;
+  imap-id-oauth) [ $# -ge 7 ] || fail 'mail-transport.sh: imap-id-oauth needs two URLs, a username, a bearer token, a preamble and a command' ;;
+  imap-append-oauth) [ $# -eq 6 ] || fail 'mail-transport.sh: imap-append-oauth needs a URL, a username, a bearer token, a message and flags' ;;
+  smtp-oauth) [ $# -ge 7 ] || fail 'mail-transport.sh: smtp-oauth needs a URL, a username, a bearer token, a sender, a message and a recipient' ;;
+esac
 # Validate ALL config fields before curl can see even the first command. Only
 # message bodies bypass this check: they are uploaded as files, never config.
-# APPEND flags (field 5) remain protected, just like URLs and credentials.
+# APPEND flags remain protected, just like URLs and credentials.
 field_number=0
 for field in "$@"; do
   field_number=$((field_number + 1))
   case "$mode:$field_number" in
-    *:1|smtp:5|imap-append:4) continue ;;
+    *:1|smtp:5|imap-append:4|smtp-oauth:6|imap-append-oauth:5) continue ;;
   esac
   validate_config_fields "$field"
 done
@@ -91,12 +98,29 @@ done
 # and some servers refuse SELECT until the client has sent RFC 2971's ID. The
 # connection is reused across the sections, so a command sent by the first one
 # still applies to the mailbox the next one opens.
-if [ "$mode" = imap-id ]; then
+case "$mode" in
+  imap-oauth|imap-id-oauth|imap-append-oauth|smtp-oauth) oauth=1 ;;
+  *) oauth=0 ;;
+esac
+
+case "$mode" in
+  imap-id|imap-id-oauth) identified=1 ;;
+  *) identified=0 ;;
+esac
+
+if [ "$identified" = 1 ]; then
   [ $# -ge 6 ] || fail 'mail-transport.sh: imap-id needs a root url, a url, credentials, a preamble and a command'
   root_url=$(decode "$2")
   url=$(decode "$3")
-  credentials=$(decode "$4")
-  shift 4
+  if [ "$oauth" = 1 ]; then
+    [ $# -ge 7 ] || fail 'mail-transport.sh: imap-id-oauth needs a root url, a url, a username, a bearer token, a preamble and a command'
+    username=$(decode "$4")
+    bearer=$(decode "$5")
+    shift 5
+  else
+    credentials=$(decode "$4")
+    shift 4
+  fi
   case "$root_url" in
     imaps://*|imap://*) ;;
     *) fail 'mail-transport.sh: refusing a root URL that is not imap(s)' ;;
@@ -104,13 +128,19 @@ if [ "$mode" = imap-id ]; then
   escaped_root_url=$(escape "$root_url")
 else
   url=$(decode "$2")
-  credentials=$(decode "$3")
-  shift 3
+  if [ "$oauth" = 1 ]; then
+    username=$(decode "$3")
+    bearer=$(decode "$4")
+    shift 4
+  else
+    credentials=$(decode "$3")
+    shift 3
+  fi
 fi
 
 case "$mode" in
-  imap|imap-id|imap-append|smtp) ;;
-  *) fail 'mail-transport.sh: mode must be imap, imap-id, imap-append or smtp' ;;
+  imap|imap-id|imap-append|smtp|imap-oauth|imap-id-oauth|imap-append-oauth|smtp-oauth) ;;
+  *) fail 'mail-transport.sh: unsupported mode' ;;
 esac
 
 # The URL is built and validated by Imap.js, which has already refused anything
@@ -124,25 +154,33 @@ case "$url" in
 esac
 
 escaped_url=$(escape "$url")
-escaped_credentials=$(escape "$credentials")
+if [ "$oauth" = 1 ]; then
+  escaped_username=$(escape "$username")
+  escaped_bearer=$(escape "$bearer")
+else
+  escaped_credentials=$(escape "$credentials")
+fi
 
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/omamail.XXXXXX") || fail 'mail-transport.sh: no temporary directory'
 trap 'rm -rf "$work"' EXIT INT TERM HUP
+
+case "$mode" in smtp|smtp-oauth) sending=1 ;; *) sending=0 ;; esac
+case "$mode" in imap-append|imap-append-oauth) appending=1 ;; *) appending=0 ;; esac
 
 # The config is written to curl's own stdin rather than to a file: it carries
 # the password, and a file holding one would be on disk for as long as curl
 # took to read it. `build_config` prints it; the pipeline below is what feeds
 # it in without it ever being written down.
 build_config() {
-if [ "$mode" = "smtp" ]; then
+if [ "$sending" = 1 ]; then
   [ $# -ge 3 ] || fail 'mail-transport.sh: smtp needs a sender, a message and a recipient'
   sender=$(decode "$1")
   shift 2
 
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  print_authentication
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -157,10 +195,10 @@ if [ "$mode" = "smtp" ]; then
   # from a file rather than from a string — stdin is already carrying this
   # config. It lands in the 0700 directory the trap removes on any exit.
   printf 'upload-file = "%s"\n' "$(escape "$work/message")"
-elif [ "$mode" = "imap-append" ]; then
+elif [ "$appending" = 1 ]; then
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  print_authentication
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -188,7 +226,7 @@ else
     # In imap-id the opening command runs against the server rather than a
     # mailbox, so that it lands in front of the SELECT curl derives from the
     # path. Every later section names the mailbox as usual.
-    if [ "$mode" = imap-id ] && [ "$first" = "1" ]; then
+    if [ "$identified" = 1 ] && [ "$first" = "1" ]; then
       printf 'url = "%s"\n' "$escaped_root_url"
       # The opening command's own reply is of no interest, and leaving it on
       # stdout would be worse than useless: the test below reads a non-empty
@@ -207,7 +245,7 @@ else
     # keeps account credentials from being offered through an unrelated proxy.
     # Repeated because `next` resets this curl option with the rest.
     printf 'noproxy = "*"\n'
-    printf 'user = "%s"\n' "$escaped_credentials"
+    print_authentication
     # These are per-transfer options too. Keeping them in every section makes
     # every command give up eventually, rather than only the final one.
     printf 'max-time = 60\n'
@@ -221,12 +259,21 @@ else
 fi
 }
 
+print_authentication() {
+  if [ "$oauth" = 1 ]; then
+    printf 'user = "%s"\n' "$escaped_username"
+    printf 'oauth2-bearer = "%s"\n' "$escaped_bearer"
+  else
+    printf 'user = "%s"\n' "$escaped_credentials"
+  fi
+}
+
 # The SMTP body has to be on disk before curl starts, because the config it is
 # named in is what stdin is carrying.
-if [ "$mode" = "smtp" ]; then
+if [ "$sending" = 1 ]; then
   [ $# -ge 3 ] || fail 'mail-transport.sh: smtp needs a sender, a message and a recipient'
   decode "$2" > "$work/message"
-elif [ "$mode" = "imap-append" ]; then
+elif [ "$appending" = 1 ]; then
   [ $# -eq 2 ] || fail 'mail-transport.sh: imap-append needs one message and its flags'
   decode "$1" > "$work/message"
 fi
@@ -274,7 +321,8 @@ while :; do
 done
 
 printf '%s\n' "$status"
-if { [ "$mode" = "imap" ] || [ "$mode" = "imap-id" ]; } \
+if { [ "$mode" = "imap" ] || [ "$mode" = "imap-id" ] \
+  || [ "$mode" = "imap-oauth" ] || [ "$mode" = "imap-id-oauth" ]; } \
   && [ ! -s "$work/out" ] && [ -s "$work/headers" ]; then
   # libcurl recognises only a single numeric UID as a BODY FETCH. A legal IMAP
   # sequence-set is treated as a generic custom request, whose response is

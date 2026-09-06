@@ -11,7 +11,7 @@
 
 var ID = "imap"
 var NAME = "IMAP"
-var SUMMARY = "Any standard mailbox — Fastmail, iCloud, Outlook, Zoho, your own server."
+var SUMMARY = "Any standard mailbox — Fastmail, iCloud, Zoho, your own server."
 var AUTH = "password"
 
 var CAPABILITIES = {

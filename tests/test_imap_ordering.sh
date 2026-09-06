@@ -37,21 +37,33 @@ log_path, id_reply = sys.argv[1], sys.argv[2]
 
 def handle(conn):
     f = conn.makefile("rwb", buffering=0)
-    f.write(b"* OK [CAPABILITY IMAP4rev1 ID] fake ready\r\n")
+    f.write(b"* OK [CAPABILITY IMAP4rev1 ID AUTH=XOAUTH2] fake ready\r\n")
+    auth_tag = None
     while True:
         line = f.readline()
         if not line:
             break
         text = line.decode("latin1").rstrip("\r\n")
+        if auth_tag is not None:
+            with open(log_path, "a") as fh:
+                fh.write("OAUTH-RESPONSE\n")
+            f.write(("%s OK authenticated\r\n" % auth_tag).encode())
+            auth_tag = None
+            continue
         with open(log_path, "a") as fh:
             # The password is never interesting here and must not be written down.
-            fh.write(re.sub(r"(?i)^(\S+\s+LOGIN)\s+.*$", r"\1", text) + "\n")
+            safe = re.sub(r"(?i)^(\S+\s+LOGIN)\s+.*$", r"\1", text)
+            safe = re.sub(r"(?i)^(\S+\s+AUTHENTICATE)\s+.*$", r"\1", safe)
+            fh.write(safe + "\n")
         parts = text.split(" ", 2)
         if len(parts) < 2:
             continue
         tag, cmd = parts[0], parts[1].upper()
         rest = parts[2].upper() if len(parts) > 2 else ""
-        if cmd == "ID" and id_reply == "bad":
+        if cmd == "AUTHENTICATE":
+            auth_tag = tag
+            f.write(b"+ \r\n")
+        elif cmd == "ID" and id_reply == "bad":
             f.write(("%s BAD Unknown command\r\n" % tag).encode())
         elif cmd == "ID":
             # Untagged, as a real server answers. curl treats this section as a
@@ -62,7 +74,7 @@ def handle(conn):
             f.write(b'* ID ("name" "fake" "version" "1")\r\n')
             f.write(("%s OK done\r\n" % tag).encode())
         elif cmd == "CAPABILITY":
-            f.write(b"* CAPABILITY IMAP4rev1 ID\r\n")
+            f.write(b"* CAPABILITY IMAP4rev1 ID AUTH=XOAUTH2\r\n")
             f.write(("%s OK done\r\n" % tag).encode())
         elif cmd == "SELECT":
             f.write(b"* 2 EXISTS\r\n")
@@ -138,6 +150,19 @@ transport() {
 
 commands() { sed -E 's/^[A-Za-z0-9]+ //' "$work/log" | tr '\n' '|'; }
 fetch_rows() { grep -c '^\* [0-9]* FETCH' "$work/reply" || true; }
+
+# The same real curl must turn the bearer option into XOAUTH2 rather than a
+# password LOGIN. The server log redacts the initial response, so a failure
+# cannot print the synthetic token either.
+start_server ok
+printf 'imap-oauth %s %s %s %s\n' \
+  "$(b64 "imap://127.0.0.1:$port")" "$(b64 'jane@example.com')" \
+  "$(b64 'synthetic-access-token')" "$(b64 'NOOP')" \
+  | ./scripts/mail-transport.sh > "$work/out" 2>/dev/null || true
+stop_server
+[ "$(head -1 "$work/out")" = "0" ] || fail "OAuth IMAP should have succeeded, curl exited $(head -1 "$work/out")"
+[ "$(commands)" = 'CAPABILITY|AUTHENTICATE|OAUTH-RESPONSE|NOOP|LOGOUT|' ] \
+  || fail "the bearer token must select XOAUTH2, saw: $(commands)"
 
 # The mode that carries the fix: the opening command runs against the server,
 # the mailbox is opened after it, and the answer still reaches the caller.
@@ -242,7 +267,7 @@ if not gate:
     sys.exit("test_imap_ordering.sh: ID must be sent only to a server that advertised it")
 if block.index("Imap.idCommand()") < gate.start():
     sys.exit("test_imap_ordering.sh: the ID command must sit behind the capability check")
-if "imap-id " not in block:
+if 'transportMode(opening === "" ? "imap" : "imap-id")' not in block:
     sys.exit("test_imap_ordering.sh: the ID command must travel in the transport's imap-id mode")
 SRC
 

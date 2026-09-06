@@ -18,7 +18,7 @@ import "../message/Message.js" as Mail
 // `HeyCli.js`. This file is the part in between — which invocation a given
 // request becomes, and how HEY's answer is rebuilt as a message.
 //
-// One difference from the other two is worth stating, because it shapes the
+// One difference from the other providers is worth stating, because it shapes the
 // rest of the file: **HEY is thread-shaped, and there is no RFC 822 anywhere.**
 // A row is a posting, a body is a conversation, and neither arrives as a
 // message with headers — so this client composes the resource rather than
@@ -72,7 +72,7 @@ Item {
   // ------------------------------------------------------------- transport
 
   // One invocation, one answer. `hey` holds the token and refreshes it itself,
-  // so unlike the other two clients there is no credential to fetch first and
+  // so unlike the other clients there is no credential to fetch first and
   // nothing to retry on a 401: a command that failed because the session ended
   // tells the auth object to look again, and the user is asked to sign in.
   function run(args, stdinText, callback, existingHandle) {

@@ -35,6 +35,8 @@ Item {
   // shape rather than as whatever was in the file.
   property var settings: Imap.normalizeSettings(null)
 
+  readonly property string authMode: "password"
+
   readonly property bool configured: Imap.validateSettings(settings).ok
 
   // The password, once the keyring has answered. Held in this process for as

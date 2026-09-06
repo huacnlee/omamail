@@ -412,6 +412,23 @@ function jmapKeyringAttributes(accountId) {
     "account", id || UNNAMED_ACCOUNT]
 }
 
+// An Outlook refresh token belongs to both the public OAuth client and the
+// mailbox that granted it. Keeping a separate kind prevents a Hotmail address
+// also added through Gmail or generic IMAP from sharing a secret by accident.
+var OUTLOOK_KEYRING_KIND = "outlook-refresh-token"
+
+function outlookKeyringAttributes(clientId, accountId) {
+  var client = trimmed(clientId)
+  var id = accountKey(accountId)
+  if (!client || !id) return []
+  return [
+    "service", KEYRING_SERVICE,
+    "kind", OUTLOOK_KEYRING_KIND,
+    "client-id", client,
+    "account", id
+  ]
+}
+
 // Entries from before the Omamail rename also predate Calendar permission.
 // Their exact old shape lets the upgrade identify them without using them.
 function renamedKeyringAttributes(clientId, accountId) {

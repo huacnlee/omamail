@@ -31,6 +31,10 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
         ("mail-transport.sh", ["smtp"], [b"smtps://example.com/", b"user:secret", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com", b"next@example.com"], [0, 1, 2, 4, 5]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Drafts", b"user:secret", b"Subject: Draft\r\n\r\nBody\r\n", b"draft"], [0, 1, 3]),
         ("mail-transport.sh", ["imap-append"], [b"imaps://example.com/Sent", b"user:secret", b"Subject: Sent\r\n\r\nBody\r\n", b"seen"], [0, 1, 3]),
+        ("mail-transport.sh", ["imap-oauth"], [b"imaps://example.com/INBOX", b"user@example.com", b"bearer-token", b"NOOP"], [0, 1, 2, 3]),
+        ("mail-transport.sh", ["imap-id-oauth"], [b"imaps://example.com/", b"imaps://example.com/INBOX", b"user@example.com", b"bearer-token", b"ID NIL", b"NOOP"], [0, 1, 2, 3, 4, 5]),
+        ("mail-transport.sh", ["smtp-oauth"], [b"smtps://example.com/", b"user@example.com", b"bearer-token", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com"], [0, 1, 2, 3, 5]),
+        ("mail-transport.sh", ["imap-append-oauth"], [b"imaps://example.com/Sent", b"user@example.com", b"bearer-token", b"Subject: Sent\r\n\r\nBody\r\n", b"seen"], [0, 1, 2, 4]),
         # JMAP: the URL, the scheme, the username and the secret are config
         # fields for every verb; a call's JSON body is one too, and an upload's
         # message is the one field that goes to a file instead.

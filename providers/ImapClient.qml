@@ -33,6 +33,21 @@ Item {
 
   readonly property string transport: auth ? auth.pluginDir + "/scripts/mail-transport.sh" : ""
 
+  readonly property bool oauthTransport: !!auth && String(auth.authMode || "") === "oauth2"
+
+  function addCredentialFields(fields, credential) {
+    if (oauthTransport) {
+      fields.push(Mail.encodeBase64(String(auth.settings.username || "")))
+      fields.push(Mail.encodeBase64(credential))
+    } else {
+      fields.push(Mail.encodeBase64(credential))
+    }
+  }
+
+  function transportMode(name) {
+    return String(name || "") + (oauthTransport ? "-oauth" : "")
+  }
+
   // What the server said its folders are, learned once per session with a
   // single LIST. Everything that names a folder goes through here: "\\Sent" is
   // "Sent Items" on Exchange and "[Gmail]/Sent Mail" on Gmail, and a client
@@ -123,14 +138,16 @@ Item {
       // a space or a backslash needs no escaping anywhere along the way — and
       // none of it reaches the process table.
       var fields = opening === ""
-        ? [Mail.encodeBase64(url), Mail.encodeBase64(credentials)]
-        : [Mail.encodeBase64(Imap.imapUrl(auth.settings, "")), Mail.encodeBase64(url),
-           Mail.encodeBase64(credentials), Mail.encodeBase64(opening)]
+        ? [Mail.encodeBase64(url)]
+        : [Mail.encodeBase64(Imap.imapUrl(auth.settings, "")), Mail.encodeBase64(url)]
+      root.addCredentialFields(fields, credentials)
+      if (opening !== "") fields.push(Mail.encodeBase64(opening))
       for (var j = 0; j < wanted.length; j++) fields.push(Mail.encodeBase64(wanted[j]))
 
       var process = transportComponent.createObject(root, {
         command: [root.transport],
-        requestLine: (opening === "" ? "imap " : "imap-id ") + fields.join(" ")
+        requestLine: root.transportMode(opening === "" ? "imap" : "imap-id")
+          + " " + fields.join(" ")
       })
       if (!process) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -750,11 +767,12 @@ Item {
         return
       }
       var url = Imap.imapUrl(auth.settings, folder)
-      var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
-        Mail.encodeBase64(message), Mail.encodeBase64(flagWords)]
+      var fields = [Mail.encodeBase64(url)]
+      root.addCredentialFields(fields, credentials)
+      fields.push(Mail.encodeBase64(message), Mail.encodeBase64(flagWords))
       var process = transportComponent.createObject(root, {
         command: [root.transport],
-        requestLine: "imap-append " + fields.join(" ")
+        requestLine: root.transportMode("imap-append") + " " + fields.join(" ")
       })
       if (!process) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -877,13 +895,14 @@ Item {
       var sender = (fromAddresses.length > 0 && fromAddresses[0].email)
         ? fromAddresses[0].email
         : (settings ? String(settings.username || "") : "") || root.email
-      var fields = [Mail.encodeBase64(smtp), Mail.encodeBase64(credentials),
-        Mail.encodeBase64(sender), Mail.encodeBase64(message)]
+      var fields = [Mail.encodeBase64(smtp)]
+      root.addCredentialFields(fields, credentials)
+      fields.push(Mail.encodeBase64(sender), Mail.encodeBase64(message))
       for (var k = 0; k < recipients.length; k++) fields.push(Mail.encodeBase64(recipients[k]))
 
       var process = transportComponent.createObject(root, {
         command: [root.transport],
-        requestLine: "smtp " + fields.join(" ")
+        requestLine: root.transportMode("smtp") + " " + fields.join(" ")
       })
       if (!process) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -943,16 +962,19 @@ Item {
   // password down and finding out later — leaves the user on a panel that says
   // it is signed in and never loads.
   function verifyCredentials(settings, credentials, callback) {
+    var owner = auth
+    var generation = oauthTransport ? owner.sessionGeneration : undefined
     var url = Imap.imapUrl(settings, "")
     if (url === "") {
       if (typeof callback === "function") callback(false, "This mailbox has no usable server address")
       return
     }
-    var fields = [Mail.encodeBase64(url), Mail.encodeBase64(credentials),
-      Mail.encodeBase64(Imap.capabilityCommand()), Mail.encodeBase64(Imap.listCommand())]
+    var fields = [Mail.encodeBase64(url)]
+    root.addCredentialFields(fields, credentials)
+    fields.push(Mail.encodeBase64(Imap.capabilityCommand()), Mail.encodeBase64(Imap.listCommand()))
     var process = transportComponent.createObject(root, {
       command: [root.transport],
-      requestLine: "imap " + fields.join(" ")
+      requestLine: root.transportMode("imap") + " " + fields.join(" ")
     })
     if (!process) {
       if (typeof callback === "function") callback(false, "Could not start the mail transport")
@@ -961,6 +983,7 @@ Item {
     process.finished.connect(function(status, out, err) {
       if (!root) return
       process.destroy()
+      if (root.auth !== owner || (root.oauthTransport && owner.sessionGeneration !== generation)) return
       if (typeof callback !== "function") return
       var text = Imap.decodeResponse(out, Mail.base64ToBytes, Mail.bytesToLatin1)
       var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
@@ -985,8 +1008,10 @@ Item {
   Connections {
     target: root.auth
     function onVerifyRequested(settings, credentials) {
+      var owner = root.auth
+      var generation = root.oauthTransport ? owner.sessionGeneration : undefined
       root.verifyCredentials(settings, credentials, function(ok, error) {
-        if (root.auth) root.auth.completeSignIn(ok, error)
+        if (root.auth === owner) owner.completeSignIn(ok, error, generation)
       })
     }
     // A mailbox whose server settings changed is a different mailbox: the

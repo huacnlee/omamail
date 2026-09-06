@@ -38,6 +38,7 @@ Item {
 
   required property string pluginDir
   property string configuredEmail: ""
+  property string oauthClientId: ""
 
   // Which mailbox this is, and whether it is the one on screen. An inactive
   // account still counts its unread mail; it just does not fetch lists or
@@ -104,16 +105,13 @@ Item {
   readonly property alias cache: cacheStore
 
   // What *this account* takes back from what its provider declares, and the
-  // rail rows it has no mailbox for. Two accounts of one kind can honestly
-  // differ — one server has an Archive folder and trains on its Junk, the next
-  // has neither — so the provider list is a ceiling and the client withdraws
-  // from it. A client that exposes neither, which is all three of Gmail, HEY
-  // and IMAP, leaves every answer below exactly the ceiling's.
+  // rail rows it has no mailbox for: two servers of one kind can differ, so the
+  // provider list is a ceiling the client withdraws from. A client exposing
+  // neither (Gmail, HEY, IMAP) leaves every answer at the ceiling.
   //
-  // Both are null while the loader is between clients and until the client has
-  // read its mailboxes, which is what makes the ceiling the right default: a
-  // button reflects the last known list, and a press against a mailbox that
-  // has since gone lands on the client's own refusal at request time.
+  // Both are null between clients and until the mailboxes are read, so the
+  // ceiling is the default: a press against a mailbox since gone lands on the
+  // client's own refusal at request time.
   readonly property var capabilityRefusals: api ? api.refusals : null
   readonly property var absentMailboxes: api ? api.absentMailboxes : null
 
@@ -392,15 +390,15 @@ Item {
   property string pendingAction: ""
   property string pendingActionQuery: ""
   property var deferredListLoad: null
-  property var queuedQuietActions: []
+  property var queuedActions: []
   property bool sending: false
   property var pendingSend: null
   property int sendSecondsRemaining: 0
   readonly property bool sendPending: pendingSend !== null
 
   onPendingActionChanged: {
-    if (pendingAction === "" && queuedQuietActions.length > 0)
-      Qt.callLater(root.runQueuedQuietAction)
+    if (pendingAction === "" && queuedActions.length > 0)
+      Qt.callLater(root.runQueuedAction)
   }
 
   // Notifications only start once the first successful load has established
@@ -1045,18 +1043,11 @@ Item {
     detailLoading = true
     detailPainted = false
 
-    // The reader opens on what the list already knows — sender, subject, date,
-    // flags — rather than on a skeleton. The row *is* a summary, and it is the
-    // same shape the live read produces.
-    //
-    // Without this the body cache was invisible: a message opened before had
-    // its body painted from disk in a few milliseconds, and then sat behind the
-    // loading state until the network answered, because the skeleton was gated
-    // on there being no summary and only the live payload ever set one.
-    //
-    // A member of the open conversation is not a row — the list is one row per
-    // conversation — but the rail has its summary, and that is a summary all
-    // the same: the header paints from it at once rather than after the read.
+    // The reader opens on what the list already knows rather than a skeleton:
+    // the row *is* a summary of the shape the live read produces. Without this
+    // a body painted from the disk cache in milliseconds sat behind the
+    // loading state until the network answered. A conversation member is not a
+    // row, but the rail holds its summary, and the header paints from that.
     var knownSummary = summaryOf(messageId)
     if (knownSummary) selectedMessage = knownSummary
     // Which conversation the reader is now inside, and the stops it draws.
@@ -1191,15 +1182,11 @@ Item {
   }
 
   // The summaries the open conversation still owes, asked for in one read.
-  //
-  // Seeded first from what is already on hand: the representative is a row the
-  // list drew and needs no request, and a member opened before is still in the
-  // store. Only what is left goes to the server, so moving along a rail costs
-  // nothing after the first stop.
-  //
-  // Every client answers this; only a provider that collapses its listing ever
-  // has anything to say, and one that does not reports a count of 0, which
-  // never gets here.
+  // Seeded from what is on hand — the representative is a row the list drew,
+  // a member opened before is still in the store — so only the rest goes to
+  // the server and moving along a rail costs nothing after the first stop.
+  // Only a provider that collapses its listing has anything to say here; the
+  // others report a count of 0, which never gets this far.
   function loadMembers() {
     if (!showsRail || !api) return
     var ids = Conversation.blockOf(selectedThread).memberIds
@@ -1409,34 +1396,37 @@ Item {
 
   // -------------------------------------------------------------- actions
 
-  function queueQuietAction(messageId, action, actionQuery) {
-    var queued = queuedQuietActions.slice()
-    for (var i = 0; i < queued.length; i++) {
-      if (queued[i].id === messageId && queued[i].action === action) return
-    }
-    queued.push({ id: messageId, action: action, cacheKey: actionQuery })
-    queuedQuietActions = queued
+  // `quiet` rides along because it decides whether the row may be evicted from
+  // under an open reader. A queued explicit trash that ran as if it were quiet
+  // would leave the message the user deleted still on screen.
+  function queueAction(messageId, action, actionQuery, quiet) {
+    queuedActions = Model.enqueueAction(queuedActions, {
+      id: messageId, action: action, cacheKey: actionQuery,
+      sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true
+    })
   }
 
-  function runQueuedQuietAction() {
-    if (pendingAction !== "" || queuedQuietActions.length === 0) return
-    var queued = queuedQuietActions.slice()
+  function runQueuedAction() {
+    if (pendingAction !== "" || queuedActions.length === 0) return
+    var queued = queuedActions.slice()
     var request = queued.shift()
-    queuedQuietActions = queued
+    queuedActions = queued
 
     // Prefer the normal optimistic path while the row is still in either
-    // account view. Navigation may have removed it meanwhile; marking a
-    // message read because it was opened is still owed to the server then.
+    // account view with the same label context. A typed search may have the
+    // same cache key as a label view but no source label to remove. Navigation
+    // does not change the operation already accepted for the original view.
     if (cacheKey === request.cacheKey
+        && (hasLabels ? rawLabelId : "") === request.sourceLabelId
         && (Model.rowIndexForMember(messages, request.id) >= 0
         || Model.rowIndexForMember(previewMessages, request.id) >= 0)) {
-      act(request.id, request.action, true)
+      act(request.id, request.action, request.quiet)
       return
     }
 
-    var change = Model.labelChangesFor(request.action)
+    var change = Model.labelChangesFor(request.action, request.sourceLabelId)
     if (request.action !== "trash" && request.action !== "untrash" && !change) {
-      if (queuedQuietActions.length > 0) Qt.callLater(root.runQueuedQuietAction)
+      if (queuedActions.length > 0) Qt.callLater(root.runQueuedAction)
       return
     }
     // The prior action may just have resumed this query's deferred list before
@@ -1483,13 +1473,10 @@ Item {
   // for Google before the row moves makes the panel feel broken on a slow
   // connection, and the failure path puts the row back.
   //
-  // The booleans the buttons were drawn from are what is read, rather than
-  // the registry a second time: an account may refuse what its provider
-  // declares, and the two halves of that rule stay together only while both
-  // come from one answer. The account's own reason is what a user is told
-  // when it has one — "This account has no Archive mailbox" says more than
-  // the provider's "IMAP has no archive" ever could about an account whose
-  // neighbour of the same kind archives fine.
+  // Read from the booleans the buttons were drawn from, not the registry
+  // again: an account may refuse what its provider declares. The account's own
+  // reason is preferred — "This account has no Archive mailbox" says more than
+  // "IMAP has no archive" when a neighbour of the same kind archives fine.
   function refuseUnavailableAction(action) {
     var needs = Model.actionCapability(action)
     if (needs === "" || actionCapabilities[needs] === true) return false
@@ -1509,13 +1496,16 @@ Item {
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
     if (refuseUnavailableAction(action)) return false
+    // One mutation is in flight at a time, because the rollback below restores
+    // a row by the index it held when the action was taken. That is a reason to
+    // make the next action wait, not a reason to drop it: a mailbox is cleared
+    // by pressing the same key down a list faster than any server answers, and
+    // refusing the second press lost the keystroke, left the note explaining a
+    // failure the user had not caused, and — because `act` answered false —
+    // stopped the cursor moving on. Queue it and run it when the slot frees.
     if (pendingAction !== "") {
-      if (quiet === true) {
-        queueQuietAction(messageId, action, cacheKey)
-        return true
-      }
-      note("Another action is still finishing")
-      return false
+      queueAction(messageId, action, cacheKey, quiet === true)
+      return true
     }
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
@@ -1789,20 +1779,14 @@ Item {
     return true
   }
 
-  // A member whose row is not in either list, acted on deliberately.
+  // A member whose row is not in either list, acted on deliberately: the
+  // reader can outlive the row it was opened from, and star and unstar still
+  // belong to the message on screen. With no row to move, the optimistic
+  // update is the member's summary and the reader's copy, and the restore puts
+  // back exactly those two. Only a message-scoped label change reaches here.
   //
-  // The reader can outlive the row it was opened from — a conversation that has
-  // left the Unread view, a mailbox navigated away from — and star and unstar
-  // still belong to the message on screen. There is no row to move, so the
-  // optimistic update is the member's own summary and the reader's copy of it,
-  // and the restore behind it puts back exactly those two. Only a message-scoped
-  // label change reaches here: trash and untrash carry no label change, and
-  // every conversation verb is sent for the row rather than for a member.
-  //
-  // One id whatever the verb's scope on a row: `unstar` from a row clears
-  // every counted member's star, because the row's star means "any member";
-  // from the reader it clears the one message on screen, because that is the
-  // star the button beside it drew.
+  // `unstar` from a row clears every counted member's star (the row's star
+  // means "any member"); from the reader it clears the one message on screen.
   function actOnDetachedMember(messageId, action, change) {
     var beforeMember = memberSummaries[messageId] || null
     var beforeSelected = selectedMessage
@@ -2765,7 +2749,7 @@ Item {
       "https://console.cloud.google.com/apis/library/gmail.googleapis.com"])
   }
 
-  // What both providers do once they are signed in. Named rather than repeated
+  // What every provider does once it is signed in. Named rather than repeated
   // in each component, because the two sign-ins differ in everything except
   // what has to happen afterwards.
   function afterSignIn() {
@@ -2881,7 +2865,8 @@ Item {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
       : (root.providerId === "jmap" ? jmapAuthComponent
-        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))
+      : (root.providerId === "outlook" ? outlookAuthComponent
+        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -2889,7 +2874,8 @@ Item {
   Loader {
     id: apiLoader
     active: !!authLoader.item
-    sourceComponent: root.providerId === "imap" ? imapClientComponent
+    sourceComponent: root.providerId === "imap" || root.providerId === "outlook"
+      ? imapClientComponent
       : (root.providerId === "jmap" ? jmapClientComponent
         : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))
   }
@@ -2982,6 +2968,24 @@ Item {
   }
 
   Component {
+    id: outlookAuthComponent
+
+    OutlookAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      configuredClientId: root.oauthClientId
+      configuredEmail: root.configuredEmail
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: gmailClientComponent
     GmailApiClient { auth: authLoader.item }
   }
@@ -3009,16 +3013,12 @@ Item {
       // accounts.json.
       cache: cacheStore
 
-      // The one provider that is told rather than asked. The plan says which
-      // of the two doors to knock on, and both are the ones the poll already
-      // uses: `loadLabels()` re-reads the mailbox list, which is what moves the
-      // rail rows and re-binds this account's refusals; `refresh()` is the
-      // poll's own door, so the counts, the badge, the notification and — only
-      // for the account on screen with the window open — the list all follow
-      // exactly as they do on a tick.
-      //
-      // Labels first: a message that arrived in a mailbox this rail has never
-      // heard of should not be counted against a row that is about to appear.
+      // The one provider that is told rather than asked. The plan names which
+      // of the poll's own doors to knock on: `loadLabels()` re-reads the
+      // mailbox list and re-binds the refusals; `refresh()` brings the counts,
+      // badge, notification and list exactly as on a tick. Labels first, so a
+      // message in a mailbox the rail has never heard of is not counted
+      // against a row that is about to appear.
       onRemoteChanged: function(plan) {
         if (!root.ready || !plan) return
         if (plan.mailboxes) root.loadLabels()
