@@ -140,6 +140,13 @@ Item {
       handle.process.running = false
       handle.process = null
     }
+    // The slot a killed request held, given back here rather than left to a
+    // callback that an abandoned request never reaches. Every reselect
+    // abandons the previous body read and member read, so four of them in
+    // flight used to fill the server's four slots for good: every later call
+    // waited on a queue that nothing would ever drain, and the reader and the
+    // rail sat on their skeletons with no error to show.
+    releaseSlot(handle)
     var children = handle.children || []
     for (var i = 0; i < children.length; i++) abortRequest(children[i])
     handle.children = []
@@ -187,6 +194,7 @@ Item {
       binaryBody: verb === "download"
     })
     if (!process) {
+      releaseSlot(owner)
       if (typeof callback === "function")
         callback({ exit: 1, status: 0, redirect: "", body: "", stderr: "" },
           "Could not start the mail transport")
@@ -200,6 +208,10 @@ Item {
       if (owner.process === process) owner.process = null
       process.destroy()
       root.inFlight = Math.max(0, root.inFlight - 1)
+      // Before the abandoned check, not after it: a request nobody is waiting
+      // for any more still held a slot, and the callback below is the one
+      // place that used to give it back.
+      root.releaseSlot(owner)
       if (owner.aborted || typeof callback !== "function") return
       // A 401 is the one status this object records rather than only reports
       // — but only where a credential was actually sent. Discovery's
@@ -565,39 +577,54 @@ Item {
     if (next) next.start()
   }
 
+  // The slot this handle holds, if it holds one, given back exactly once.
+  // `dispatch` marks the handle when its entry is admitted; the mark is
+  // cleared here, so the three places a request can end — its process
+  // finishing, a refusal before curl, or `abortRequest` — can each call this
+  // and only the first one counts.
+  function releaseSlot(owner) {
+    if (!owner || owner.slot === undefined) return
+    var uploading = owner.slot === "upload"
+    owner.slot = undefined
+    releaseFrom(uploading)
+  }
+
   // One request through one of the two queues: admitted now or started when a
   // slot frees, and then the same three refusals before curl — withdrawn,
   // signed out, nowhere to send it — each of which gives the slot back.
   // `urlFor` answers the address once the entry runs, because the session
   // that names it may arrive while the entry waits, and `send(url, credential,
-  // error)` is the caller's own request or its refusal; the caller releases
-  // the slot when its process ends.
+  // error)` is the caller's own request or its refusal; the slot is given back
+  // by `releaseSlot` when the process ends, however it ends.
   function dispatch(owner, uploading, urlFor, send) {
     var entry = { owner: owner }
     entry.start = function() {
+      // Started means admitted: from here the handle holds a slot, and
+      // `releaseSlot` is how every way out of it gives that slot back.
+      owner.slot = uploading ? "upload" : "call"
       if (!root || owner.aborted) {
-        if (root) root.releaseFrom(uploading)
+        if (root) root.releaseSlot(owner)
         return
       }
       if (!root.auth) {
-        root.releaseFrom(uploading)
+        root.releaseSlot(owner)
         send("", null, "Sign in to this mailbox first")
         return
       }
       var url = urlFor()
       if (url === "") {
-        root.releaseFrom(uploading)
+        root.releaseSlot(owner)
         send("", null, "Sign in to this mailbox again")
         return
       }
       root.auth.withCredentials(function(credential, error) {
         if (!root) return
         if (owner.aborted) {
-          root.releaseFrom(uploading)
+          root.releaseSlot(owner)
           return
         }
         if (error || !credential) {
-          root.releaseFrom(uploading)
+          root.releaseSlot(owner)
           send("", null, error || "Sign in to this mailbox first")
           return
         }
@@ -736,9 +763,7 @@ Item {
           methodCalls: methodCalls
         })
         root.request("call", url, credential, body, owner, function(reply) {
-          if (!root) return
-          root.releaseFrom(false)
-          if (owner.aborted) return
+          if (!root || owner.aborted) return
           root.readCall(reply, callback)
         })
       })
@@ -1550,9 +1575,7 @@ Item {
           return
         }
         root.request("upload", url, credential, message, owner, function(reply) {
-          if (!root) return
-          root.releaseFrom(true)
-          if (owner.aborted) return
+          if (!root || owner.aborted) return
           // RFC 8620 answers an upload with 201; a server that says 200 has
           // still taken it, and the blob id is what either answer is read for.
           if (reply.exit !== 0 || (reply.status !== 200 && reply.status !== 201)) {
