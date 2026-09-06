@@ -1053,7 +1053,11 @@ Item {
     // its body painted from disk in a few milliseconds, and then sat behind the
     // loading state until the network answered, because the skeleton was gated
     // on there being no summary and only the live payload ever set one.
-    var knownSummary = Model.messageById(messages, previewMessages, messageId)
+    //
+    // A member of the open conversation is not a row — the list is one row per
+    // conversation — but the rail has its summary, and that is a summary all
+    // the same: the header paints from it at once rather than after the read.
+    var knownSummary = summaryOf(messageId)
     if (knownSummary) selectedMessage = knownSummary
     // Which conversation the reader is now inside, and the stops it draws.
     // Decided from the row rather than from the read, because `memberIds` is
@@ -1169,13 +1173,21 @@ Item {
 
   // ---------------------------------------------------------- the rail
 
+  // Summaries into the store the rail draws from, bounded — and the members of
+  // the conversation on screen kept through the bound's reset, because the read
+  // that tips the store over is usually the one for the rail being drawn.
+  function mergeMembers(additions) {
+    var open = Conversation.blockOf(selectedThread)
+    memberSummaries = Conversation.mergedSummaries(memberSummaries, additions,
+      Conversation.MAX_REMEMBERED, open ? open.memberIds : [])
+  }
+
   // One summary the rail can draw a stop from, kept by its own id.
   function rememberMember(summary) {
     if (!summary || !summary.id) return
     var added = ({})
     added[summary.id] = summary
-    memberSummaries = Conversation.mergedSummaries(memberSummaries, added,
-      Conversation.MAX_REMEMBERED)
+    mergeMembers(added)
   }
 
   // The summaries the open conversation still owes, asked for in one read.
@@ -1197,8 +1209,7 @@ Item {
       var known = Model.messageById(messages, previewMessages, ids[i])
       if (known) seeded[ids[i]] = known
     }
-    memberSummaries = Conversation.mergedSummaries(memberSummaries, seeded,
-      Conversation.MAX_REMEMBERED)
+    mergeMembers(seeded)
 
     var wanted = Conversation.missingMemberIds(selectedThread, memberSummaries)
     if (wanted.length === 0) return
@@ -1216,8 +1227,7 @@ Item {
         var summary = Mail.summarize(payloads[j], now)
         if (summary.id !== "") arrived[summary.id] = summary
       }
-      root.memberSummaries = Conversation.mergedSummaries(root.memberSummaries, arrived,
-        Conversation.MAX_REMEMBERED)
+      root.mergeMembers(arrived)
     })
   }
 
@@ -1629,9 +1639,7 @@ Item {
       rememberBefore(rowId, memberSummaries[rowId])
       memberAfter[rowId] = updated
     }
-    if (changedMembers.length > 0)
-      memberSummaries = Conversation.mergedSummaries(memberSummaries, memberAfter,
-        Conversation.MAX_REMEMBERED)
+    if (changedMembers.length > 0) mergeMembers(memberAfter)
 
     // The recomputed row is what decides whether it stays: a mark-read in the
     // Unread view keeps the row while any member is still unread.
@@ -1944,8 +1952,7 @@ Item {
     for (var r = 0; r < next.length; r++) {
       if (memberSummaries[next[r].id]) memberAfter[next[r].id] = next[r]
     }
-    memberSummaries = Conversation.mergedSummaries(memberSummaries, memberAfter,
-      Conversation.MAX_REMEMBERED)
+    mergeMembers(memberAfter)
     var selectedBefore = selectedMessage
     var selectedWas = selectedId
     if (selectedMessage && ids.indexOf(selectedId) >= 0) {

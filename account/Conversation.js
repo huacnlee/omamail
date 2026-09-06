@@ -57,11 +57,17 @@ function blockOf(value) {
 // not is still an unread row. A stop in the rail is one message, and asking
 // the row's flag drew a dot on the representative for every unread reply and
 // counted it in the caption. The label list is the member's own; the flag is
-// only the fallback for a summary that carries none.
-function memberHasLabel(summary, label, fallbackKey) {
+// only the fallback for a summary that carries none, and the flag's name is
+// the label's — `UNREAD` is `unread`, `STARRED` is `starred` — so the label
+// alone says which.
+var FLAG_OF_LABEL = { UNREAD: "unread", STARRED: "starred" }
+
+function memberHasLabel(summary, label) {
   if (!summary || typeof summary !== "object") return false
-  if (Array.isArray(summary.labelIds)) return summary.labelIds.indexOf(label) >= 0
-  return summary[fallbackKey] === true
+  var wanted = trimmed(label).toUpperCase()
+  if (Array.isArray(summary.labelIds)) return summary.labelIds.indexOf(wanted) >= 0
+  var flag = FLAG_OF_LABEL[wanted]
+  return flag !== undefined && summary[flag] === true
 }
 
 function threadOfSummary(summary) {
@@ -104,7 +110,13 @@ function threadAfterSelect(current, id, summary) {
 // the client's own thread maps are: past the ceiling the store is dropped
 // whole, because an entry old enough to be evicted belongs to a conversation
 // closed long ago.
-function mergedSummaries(existing, additions, limit) {
+//
+// Except the conversation on screen. `kept` is its member ids, and they
+// survive the reset: the read that tips the store over the ceiling is usually
+// the one for the rail being drawn, and dropping the stops it had already
+// seeded — the representative's, a member opened before — redrew them as
+// skeletons that nothing would ever fill in again.
+function mergedSummaries(existing, additions, limit, kept) {
   var source = existing && typeof existing === "object" ? existing : {}
   var extra = additions && typeof additions === "object" ? additions : {}
   var cap = Math.floor(Number(limit))
@@ -114,7 +126,15 @@ function mergedSummaries(existing, additions, limit) {
       held = held + 1
       if (held >= cap) break
     }
-    if (held >= cap) source = {}
+    if (held >= cap) {
+      var survivors = {}
+      var ids = Array.isArray(kept) ? kept : []
+      for (var k = 0; k < ids.length; k++) {
+        var wanted = trimmed(ids[k])
+        if (wanted !== "" && source[wanted]) survivors[wanted] = source[wanted]
+      }
+      source = survivors
+    }
   }
   var out = {}
   for (var key in source) out[key] = source[key]
@@ -221,7 +241,8 @@ function senderOf(summary) {
 //
 // A stop whose summary has not arrived is `known` false and carries nothing
 // else: the view draws a skeleton in the date and sender lanes, in a stop of
-// the same height, so the rail does not move when the read answers.
+// the same height — the mailbox name shares the date's line for that reason —
+// so the rail does not move when the read answers.
 function stops(block, summaries, openId, viewKey, mailboxes) {
   var thread = blockOf(block)
   if (!thread) return []
@@ -237,8 +258,8 @@ function stops(block, summaries, openId, viewKey, mailboxes) {
       sender: summary ? senderOf(summary) : "",
       time: summary ? String(summary.time || "") : "",
       fullTime: summary ? String(summary.fullTime || "") : "",
-      unread: memberHasLabel(summary, "UNREAD", "unread"),
-      flagged: memberHasLabel(summary, "STARRED", "starred"),
+      unread: memberHasLabel(summary, "UNREAD"),
+      flagged: memberHasLabel(summary, "STARRED"),
       mailbox: summary ? mailboxNameFor(summary, viewKey, mailboxes) : ""
     })
   }
@@ -260,7 +281,7 @@ function caption(block, summaries) {
   if (!thread || thread.count < MINIMUM_MEMBERS) return ""
   var unread = 0
   for (var i = 0; i < thread.memberIds.length; i++) {
-    if (memberHasLabel(summaryFor(summaries, thread.memberIds[i]), "UNREAD", "unread"))
+    if (memberHasLabel(summaryFor(summaries, thread.memberIds[i]), "UNREAD"))
       unread = unread + 1
   }
   var text = pluralize(thread.count, "message", "messages")

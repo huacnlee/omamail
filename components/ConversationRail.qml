@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import "../account/Model.js" as Model
 
 // The conversation beside the message, as a timeline down the right edge of the
 // reader.
@@ -58,18 +59,29 @@ Item {
     return false
   }
 
-  // Bring one stop on screen with the smallest scroll — the list cursor's own
-  // rule, `Model.contentYToReveal`, reached through the row's own geometry
-  // rather than through an index, because this is a Column in a Flickable for
-  // the same reason the list is.
-  function reveal(id) {
+  // Where one stop sits in the rail's own content, `{ y, height }`, or null for
+  // an id that is not a stop. The same question `MessageList.boundsFor` answers
+  // for a row, for the same reason: this is a Column in a Flickable, so there
+  // is no index to position by and geometry is what a reveal has to go on.
+  function boundsFor(id) {
     var wanted = String(id || "")
     for (var i = 0; i < stopColumn.children.length; i++) {
       var stop = stopColumn.children[i]
       if (!stop || stop.memberId !== wanted) continue
-      railFlick.revealItem(stop.y, stop.height)
-      return
+      return { y: stop.y, height: stop.height }
     }
+    return null
+  }
+
+  // Bring one stop on screen with the smallest scroll, and no scroll at all
+  // while it is already there — the list cursor's own rule, called rather than
+  // copied, because recentring on every step would drag the rail under
+  // somebody walking one stop down it exactly as it would drag the list.
+  function reveal(id) {
+    var bounds = boundsFor(id)
+    if (!bounds) return
+    railFlick.contentY = Model.contentYToReveal(railFlick.contentY, railFlick.height,
+      bounds.y, bounds.height, railFlick.contentHeight, Style.space(8))
   }
 
   // The rule separating the rail from the message, the full height of the pane.
@@ -118,22 +130,6 @@ Item {
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-    // The smallest scroll that puts this much of the content on screen, and no
-    // scroll at all while it is already there — recentring on every step would
-    // drag the rail under somebody walking one stop down it.
-    function revealItem(itemY, itemHeight) {
-      var pad = Style.space(8)
-      var furthest = Math.max(0, contentHeight - height)
-      var next = contentY
-      if (itemHeight + pad + pad > height) next = itemY - pad
-      else if (itemY - pad < contentY) next = itemY - pad
-      else if (itemY + itemHeight + pad > contentY + height)
-        next = itemY + itemHeight + pad - height
-      if (next < 0) next = 0
-      if (next > furthest) next = furthest
-      contentY = next
-    }
-
     Column {
       id: stopColumn
       width: railFlick.width
@@ -175,8 +171,8 @@ Item {
 
     // The timeline itself, drawn per stop rather than once behind them: the
     // rail scrolls, and a single rule sized to the content would have to be
-    // kept in step with a Column whose stops change height as the summaries
-    // land. One segment per stop is the same line and needs nothing kept true.
+    // kept in step with the Column. One segment per stop is the same line and
+    // needs nothing kept true.
     Rectangle {
       x: node.x + (node.width - width) / 2
       y: 0
@@ -213,11 +209,14 @@ Item {
       // The date leads, because the rail is a timeline and the date is where a
       // stop sits on it. The flag rides beside it: it belongs to the message
       // rather than to the person, and it is state the sender's own line must
-      // not be able to imitate.
+      // not be able to imitate. The mailbox name, when the member has one to
+      // show, takes the rest of this line rather than a line of its own — a
+      // line that appeared when the summary landed moved every stop below it,
+      // and in a search that was every stop.
       Item {
         width: parent.width
         implicitHeight: Math.max(dateText.implicitHeight, flagIcon.height,
-          dateBar.visible ? dateBar.height : 0)
+          mailboxText.implicitHeight, dateBar.visible ? dateBar.height : 0)
 
         Text {
           id: dateText
@@ -251,6 +250,27 @@ Item {
           color: root.accentColor
           iconSize: Style.font.iconSmall
           fontFamily: root.panelFontFamily
+        }
+
+        // Where to find this member, when it is not where the reader is
+        // looking. The account's own name for the mailbox, the one the sidebar
+        // draws, against the right edge and elided rather than the date: the
+        // date is where the stop sits and always fits.
+        Text {
+          id: mailboxText
+          visible: stop.modelData.mailbox !== ""
+          anchors.left: flagIcon.visible ? flagIcon.right
+            : (stop.modelData.known ? dateText.right : dateBar.right)
+          anchors.leftMargin: Style.space(8)
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          horizontalAlignment: Text.AlignRight
+          textFormat: Text.PlainText
+          text: stop.modelData.mailbox
+          color: root.dimmerColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
         }
       }
 
@@ -299,19 +319,6 @@ Item {
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
         }
-      }
-
-      // Where to find this member, when it is not where the reader is looking.
-      // The account's own name for the mailbox, the one the sidebar draws.
-      Text {
-        width: parent.width
-        visible: stop.modelData.mailbox !== ""
-        textFormat: Text.PlainText
-        text: stop.modelData.mailbox
-        color: root.dimmerColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
       }
     }
   }

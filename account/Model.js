@@ -202,22 +202,18 @@ function rowIndexForMember(messages, id) {
   return -1
 }
 
-// A member's own flag, read from its labels rather than from `unread` and
-// `starred`.
-//
-// Those two are `Message.summarize`'s OR with the conversation — true on the
-// representative whenever *any* member is unread — so recomputing a block from
-// them would never clear it. The labels are the one message's own answer.
-function memberHasLabel(summary, label, fallbackKey) {
-  return Conversation.memberHasLabel(summary, label, fallbackKey)
-}
-
 // The row's block after one of its members changed.
 //
 // "Any known member has it, or an unknown member exists and the row already
 // said so." A member whose summary has not arrived says nothing either way, so
 // an unknown member never flips a flag off: a row leaves a view on evidence,
 // and the next load or push settles what the rail could not see.
+//
+// A member's flag is read from its labels, `Conversation.memberHasLabel`,
+// rather than from its `unread` and `starred`: those two are
+// `Message.summarize`'s OR with the conversation — true on the representative
+// whenever *any* member is unread — so recomputing a block from them would
+// never clear it.
 function threadAfterMemberChange(row, memberSummaries) {
   var block = Conversation.blockOf(row ? row.thread : null)
   if (!block) return null
@@ -232,8 +228,8 @@ function threadAfterMemberChange(row, memberSummaries) {
       unknown = true
       continue
     }
-    if (memberHasLabel(summary, "UNREAD", "unread")) unread = true
-    if (memberHasLabel(summary, "STARRED", "starred")) flagged = true
+    if (Conversation.memberHasLabel(summary, "UNREAD")) unread = true
+    if (Conversation.memberHasLabel(summary, "STARRED")) flagged = true
   }
   block.unread = unread || (unknown && block.unread)
   block.flagged = flagged || (unknown && block.flagged)

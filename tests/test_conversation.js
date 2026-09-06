@@ -107,6 +107,10 @@ deepEqual(conversation.mergedSummaries({ a: 1 }, { a: 2 }, 10), { a: 2 },
   "and the newer answer wins")
 deepEqual(conversation.mergedSummaries({ a: 1, b: 2 }, { c: 3 }, 2), { c: 3 },
   "past the ceiling the store is dropped whole rather than evicted from")
+deepEqual(conversation.mergedSummaries({ a: 1, b: 2, d: 4 }, { c: 3 }, 2, ["a", "d", "zz"]),
+  { a: 1, d: 4, c: 3 },
+  "except the conversation on screen, whose members survive the reset")
+deepEqual(conversation.mergedSummaries({ a: 1, b: 2 }, { c: 3 }, 2, null), { c: 3 })
 
 // ------------------------------------------------------ where a member sits
 
@@ -200,9 +204,12 @@ deepEqual(conversation.stops(null, known, "", "inbox", mailboxes), [])
     "the row's OR does not count as a second unread")
   // A summary with no label list at all falls back to the flag, which is the
   // only answer it has.
-  assert.strictEqual(conversation.memberHasLabel({ unread: true }, "UNREAD", "unread"), true)
-  assert.strictEqual(conversation.memberHasLabel({ labelIds: [] , unread: true }, "UNREAD", "unread"), false)
-  assert.strictEqual(conversation.memberHasLabel(null, "UNREAD", "unread"), false)
+  assert.strictEqual(conversation.memberHasLabel({ unread: true }, "UNREAD"), true)
+  assert.strictEqual(conversation.memberHasLabel({ starred: true }, "STARRED"), true)
+  assert.strictEqual(conversation.memberHasLabel({ labelIds: [] , unread: true }, "UNREAD"), false)
+  assert.strictEqual(conversation.memberHasLabel({ unread: true }, "INBOX"), false,
+    "a label with no flag of its own has no fallback")
+  assert.strictEqual(conversation.memberHasLabel(null, "UNREAD"), false)
 }
 
 // A sender with no display name falls back to the address, the way a row does.

@@ -241,8 +241,12 @@ Item {
       compare(rail.caption, "3 messages", "the length is known before any summary")
 
       // The summaries land. The stops do not move: same ids, same order, same
-      // count — only the lanes inside them fill in.
+      // count, and the same place on the rail — only the lanes inside them
+      // fill in. The first member sits in Drafts, so it gains a mailbox name
+      // on settling, which is the one thing that used to add a line.
       var before = rail.stops.map(function(s) { return s.id })
+      var placed = members.map(function(id) { return rail.boundsFor(id) })
+      verify(placed[0] && placed[0].height > 0, "a skeleton stop has a place and a height")
       mailService.memberSummaries = ({
         maaaaad: memberSummary("maaaaad", false, ["INBOX", "DRAFT"]),
         maaaaae: memberSummary("maaaaae", false, ["INBOX"]),
@@ -255,6 +259,11 @@ Item {
         "the member outside the mailbox on screen says where it is")
       compare(rail.stops[1].mailbox, "", "and one inside it says nothing")
       compare(rail.caption, "3 messages · 1 unread")
+      for (var i = 0; i < members.length; i++) {
+        var after = rail.boundsFor(members[i])
+        compare(after.y, placed[i].y, "the stop for " + members[i] + " did not move")
+        compare(after.height, placed[i].height, "nor change height")
+      }
     }
 
     // The claim. Both keys move the reader along the rail and neither moves the
