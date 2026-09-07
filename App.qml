@@ -164,7 +164,14 @@ Item {
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
   readonly property color calendarBorder: Style.normalBorderColor
-  readonly property color calendarTodayBackground: Style.selectedAccentFill
+  // A wash across a whole day is the wrong thing to carry "today" on. At the
+  // selected alpha it is a field of accent behind the event chips, which are
+  // what the cell is for; quieter, it is a wash a theme could turn off
+  // entirely. So the weight moves off the wash and onto the date: the month
+  // grid's number is bold and accent-coloured, and the fill drops to the
+  // hover alpha. Two marks, and the one that survives a theme with no fills
+  // is not the one lying over the events.
+  readonly property color calendarTodayBackground: Util.alpha(accent, Style.hoverFillAlpha)
   readonly property int calendarBorderWidth: Style.normalBorderWidth
   // Mixed toward the ground rather than Qt.darker: on a light theme darkening
   // an almost-black foreground makes secondary text heavier than body text.

@@ -423,6 +423,7 @@ for name in ("create-event-button", "compose-button"):
         raise SystemExit("test_source.sh: " + name + " must not carry an icon")
 PY
 python3 - <<'PY'
+import re
 from pathlib import Path
 
 sidebar = Path("components/MailboxSidebar.qml").read_text()
@@ -458,8 +459,19 @@ if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
     raise SystemExit("test_source.sh: App must pass the system Today background token")
 if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
     raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
-if "readonly property color calendarTodayBackground: Style.selectedAccentFill" not in app:
-    raise SystemExit("test_source.sh: Today must use the quieter system accent fill token")
+# The theme's accent at one of the kit's own alphas, composed by the kit's own
+# helper. What this catches is a hand-picked number: the literal-colour greps
+# above only see quoted hex and named colours, so an alpha typed into a
+# `Qt.rgba` here would pass everything else.
+today_fill = re.search(
+    r"readonly property color calendarTodayBackground:\s*(.+)", app)
+if today_fill is None:
+    raise SystemExit("test_source.sh: App must define calendarTodayBackground")
+if not re.fullmatch(r"Util\.alpha\(\s*accent\s*,\s*Style\.[A-Za-z]+Alpha\s*\)",
+                    today_fill.group(1).strip()):
+    raise SystemExit(
+        "test_source.sh: Today's fill must be Util.alpha(accent, Style.<name>Alpha), "
+        "not a hand-picked alpha")
 if "calendarBorderWidth: root.calendarBorderWidth" not in app:
     raise SystemExit("test_source.sh: App must pass the system calendar border width")
 if "border.color: root.calendarBorderColor" not in calendar or "border.width: root.calendarBorderWidth" not in calendar:

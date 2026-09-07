@@ -373,6 +373,7 @@ Item {
         delegate: Rectangle {
           id: dayCell
           required property var modelData
+          objectName: "calendarDayCell:" + modelData.isoDate
           readonly property var dayEvents: Calendar.eventsOnDay(
             root.controller ? root.controller.events : [], modelData)
           width: monthGrid.width / 7
@@ -395,8 +396,13 @@ Item {
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.margins: Style.space(6)
+            objectName: "calendarDayNumber:" + dayCell.modelData.isoDate
             text: dayCell.modelData.day
-            color: dayCell.modelData.inMonth ? root.textColor : root.dimColor
+            // Today is named twice over, and neither sign is the cell's fill:
+            // weight carries it where a theme's accent sits close to the
+            // foreground, colour where the grid is scanned rather than read.
+            color: dayCell.modelData.isoDate === root.todayIso ? root.accentColor
+              : dayCell.modelData.inMonth ? root.textColor : root.dimColor
             opacity: dayCell.modelData.inMonth ? 1 : 0.55
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption
