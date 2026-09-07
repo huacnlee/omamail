@@ -349,6 +349,23 @@ function anyLoading(states) {
   return false
 }
 
+// A unified search asks every mailbox, so its status stays busy until all
+// server-side searches have settled.
+function anyServerSearchLoading(states) {
+  var values = Array.isArray(states) ? states : []
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].serverSearchLoading === true) return true
+  }
+  return false
+}
+
+// Conversation support belongs to the row's source. A mixed unified list may
+// contain collapsed conversation rows beside ordinary message rows.
+function rowIsConversation(row) {
+  var thread = row && row.thread
+  return !!thread && Number(thread.count) >= 2
+}
+
 // Loaded only once all of them are: "nothing here" is a claim about every
 // mailbox, and one that has not answered is enough to make it wrong.
 // Whether the list is done, which is what decides between a skeleton, an

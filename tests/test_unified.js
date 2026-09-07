@@ -200,6 +200,17 @@ assert.strictEqual(unified.anyLoading([{ loading: false }, { loading: true }]), 
 assert.strictEqual(unified.anyLoading([{ loading: false }]), false)
 assert.strictEqual(unified.anyLoading([]), false)
 
+assert.strictEqual(unified.anyServerSearchLoading([
+  { serverSearchLoading: false }, { serverSearchLoading: true }
+]), true, "a search in any mailbox keeps the unified search busy")
+assert.strictEqual(unified.anyServerSearchLoading([{ serverSearchLoading: false }]), false)
+assert.strictEqual(unified.anyServerSearchLoading([]), false)
+
+assert.strictEqual(unified.rowIsConversation({ thread: { count: 2 } }), true,
+  "a collapsed row keeps its own conversation count")
+assert.strictEqual(unified.rowIsConversation({ thread: { count: 0 } }), false,
+  "a message row does not inherit a conversation capability from another mailbox")
+
 // Loaded only once all of them are: "nothing here" is a claim about every
 // mailbox, and one that has not answered makes it wrong.
 assert.strictEqual(unified.allLoaded([{ loaded: true }, { loaded: true }]), true)

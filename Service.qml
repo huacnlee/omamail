@@ -803,6 +803,7 @@ Item {
         label: Accounts.label(accounts[i]),
         loading: !!(host && host.listLoading),
         loaded: !!(host && host.listLoaded),
+        serverSearchLoading: !!(host && host.serverSearchLoading),
         hasMore: !!(host && host.hasMore),
         error: host ? String(host.lastError || "") : ""
       })
@@ -1074,10 +1075,11 @@ Item {
   // signed-out account holding the placeholder blank indefinitely.
   readonly property bool listLoaded: unified
     ? Unified.allLoaded(unifiedStates) : (!!current && current.listLoaded)
-  // Still coming from the server. Not intersected, because it drives a
-  // spinner beside the search box rather than the list's own state — which
-  // `listLoading` answers for every mailbox.
-  readonly property bool serverSearchLoading: !!current && current.serverSearchLoading
+  // Still coming from any server. A unified search asks every mailbox, so the
+  // spinner must remain visible while any of them is still answering.
+  readonly property bool serverSearchLoading: unified
+    ? Unified.anyServerSearchLoading(unifiedStates)
+    : (!!current && current.serverSearchLoading)
   readonly property bool hasMore: unified
     ? Unified.anyHasMore(unifiedStates) : (!!current && current.hasMore)
   // "12 results" for the visible mailbox. Left alone deliberately rather than

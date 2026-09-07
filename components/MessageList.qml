@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
+import "../account/Unified.js" as Unified
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
@@ -56,7 +57,7 @@ Column {
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
       canArchive: root.service.canArchive
-      conversations: root.service.showsConversations
+      conversations: Unified.rowIsConversation(modelData)
       contentDirection: root.service.contentDirection
       onActivated: root.messageActivated(modelData.id)
       onStarToggled: root.service.toggleStar(modelData.id)
