@@ -19,6 +19,8 @@ Item {
 
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   property date visibleWeek: new Date()
+  property date visibleDay: new Date()
+  // "day", "week" or "month".
   property string viewMode: "month"
   property string selectedEventId: ""
   property var detailEvent: null
@@ -26,6 +28,15 @@ Item {
   readonly property var days: Calendar.monthDays(
     visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
   readonly property var weekDays: Calendar.weekDays(visibleWeek.getTime(), 1)
+  readonly property var dayDays: Calendar.singleDay(visibleDay.getTime())
+  // The days on screen in the current mode.
+  readonly property var periodDays: viewMode === "day" ? dayDays
+    : viewMode === "week" ? weekDays : days
+  // The range fetched for them. A day asks for its whole week: the cache is
+  // keyed by range, so stepping day by day then reads the week already
+  // held instead of fetching each day as its own entry.
+  readonly property var fetchDays: viewMode === "day"
+    ? Calendar.weekDays(visibleDay.getTime(), 1) : periodDays
   readonly property var monthNames: ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"]
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -39,7 +50,7 @@ Item {
   Binding {
     target: root.controller
     property: "clockRunning"
-    value: root.visible && root.viewMode === "week"
+    value: root.visible && root.viewMode !== "month"
     when: root.controller !== null
   }
 
@@ -63,7 +74,7 @@ Item {
   }
 
   function visibleEvents() {
-    var range = viewMode === "week" ? weekDays : days
+    var range = periodDays
     var values = controller && Array.isArray(controller.events) ? controller.events : []
     if (range.length === 0) return []
     var start = range[0].startMs, end = range[range.length - 1].endMs
@@ -106,7 +117,7 @@ Item {
   }
 
   function refresh() {
-    var range = viewMode === "week" ? weekDays : days
+    var range = fetchDays
     if (!controller || range.length === 0) return
     controller.refresh(range[0].startMs, range[range.length - 1].endMs)
   }
@@ -120,11 +131,16 @@ Item {
     var now = new Date()
     visibleMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     visibleWeek = now
+    visibleDay = now
     refresh()
   }
 
   function movePeriod(offset) {
-    if (viewMode === "week") {
+    if (viewMode === "day") {
+      visibleDay = new Date(visibleDay.getFullYear(), visibleDay.getMonth(),
+        visibleDay.getDate() + offset)
+      refresh()
+    } else if (viewMode === "week") {
       visibleWeek = new Date(visibleWeek.getFullYear(), visibleWeek.getMonth(),
         visibleWeek.getDate() + offset * 7)
       refresh()
@@ -132,7 +148,7 @@ Item {
   }
 
   function setView(mode) {
-    viewMode = mode === "week" ? "week" : "month"
+    viewMode = mode === "week" ? "week" : mode === "day" ? "day" : "month"
     refresh()
   }
 
@@ -143,9 +159,16 @@ Item {
       var date = new Date(Number(startMs))
       visibleMonth = new Date(date.getFullYear(), date.getMonth(), 1)
       visibleWeek = date
+      visibleDay = date
     }
     refresh()
   }
+
+  readonly property string periodTitle: viewMode === "day" ? Calendar.dayTitle(dayDays)
+    : viewMode === "week" ? Calendar.weekTitle(weekDays)
+    : monthNames[visibleMonth.getMonth()] + " " + visibleMonth.getFullYear()
+  readonly property string periodNoun: viewMode === "day" ? "day"
+    : viewMode === "week" ? "week" : "month"
 
   Component.onCompleted: refresh()
 
@@ -165,8 +188,7 @@ Item {
 
         Text {
           anchors.verticalCenter: parent.verticalCenter
-          text: root.viewMode === "week" ? Calendar.weekTitle(root.weekDays)
-            : root.monthNames[root.visibleMonth.getMonth()] + " " + root.visibleMonth.getFullYear()
+          text: root.periodTitle
           color: root.textColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.heading
@@ -217,6 +239,16 @@ Item {
         }
 
         IconTextButton {
+          objectName: "calendarViewDay"
+          text: "Day"
+          foreground: root.viewMode === "day" ? root.textColor : root.dimColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          selected: root.viewMode === "day"
+          onClicked: root.setView("day")
+        }
+
+        IconTextButton {
           text: "Week"
           foreground: root.viewMode === "week" ? root.textColor : root.dimColor
           fontFamily: root.panelFontFamily
@@ -236,7 +268,7 @@ Item {
 
         IconButton {
           iconName: "chevronLeft"
-          tooltipText: root.viewMode === "week" ? "Previous week" : "Previous month"
+          tooltipText: "Previous " + root.periodNoun
           foreground: root.dimColor
           hoverColor: root.textColor
           fontFamily: root.panelFontFamily
@@ -245,7 +277,7 @@ Item {
 
         IconButton {
           iconName: "chevronRight"
-          tooltipText: root.viewMode === "week" ? "Next week" : "Next month"
+          tooltipText: "Next " + root.periodNoun
           foreground: root.dimColor
           hoverColor: root.textColor
           fontFamily: root.panelFontFamily
@@ -479,13 +511,15 @@ Item {
       }
     }
 
+    // The week grid draws the day too: one column instead of seven.
     WeekCalendarView {
+      objectName: "calendarWeekGrid"
       width: parent.width
       height: parent.height - y
-      visible: root.viewMode === "week"
+      visible: root.viewMode !== "month"
       controller: root.controller
       nowMs: root.controller ? root.controller.nowMs : 0
-      days: root.weekDays
+      days: root.viewMode === "day" ? root.dayDays : root.weekDays
       textColor: root.textColor
       backgroundColor: root.backgroundColor
       accentColor: root.accentColor
@@ -496,6 +530,7 @@ Item {
       calendarBorderWidth: root.calendarBorderWidth
       panelFontFamily: root.panelFontFamily
       selectedEventId: root.selectedEventId
+      highlightToday: root.viewMode !== "day"
       onCreateAt: function(startMs) { root.createAt(startMs) }
       onEventActivated: function(event) { root.activateEvent(event) }
     }

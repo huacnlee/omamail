@@ -19,12 +19,17 @@ Item {
   required property int calendarBorderWidth
   required property string panelFontFamily
   required property string selectedEventId
+  // Whether today's column is tinted. On a day view it is not: there is one
+  // column, it is the day the heading names, and shading all of it marks
+  // nothing off against anything. The date in the header is still bold.
+  property bool highlightToday: true
 
   signal createAt(double startMs)
   signal eventActivated(var event)
 
   readonly property real timeRailWidth: Style.space(52)
-  readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  // Seven for a week, one for a day: the columns divide whatever is given.
+  readonly property int dayCount: Math.max(1, Array.isArray(days) ? days.length : 0)
   readonly property var hourRange: Calendar.weekHourRange(
     controller ? controller.events : [], days, 7, 19)
   readonly property int firstHour: hourRange.first
@@ -56,12 +61,11 @@ Item {
       model: root.days
       delegate: Item {
         required property var modelData
-        required property int index
-        width: (dayHeaders.width - root.timeRailWidth) / 7
+        width: (dayHeaders.width - root.timeRailWidth) / root.dayCount
         height: parent.height
         Text {
           anchors.centerIn: parent
-          text: root.weekdayNames[index] + " " + modelData.day
+          text: Calendar.weekdayShort(modelData) + " " + modelData.day
           color: modelData.isoDate === Calendar.isoDate(new Date())
             ? root.textColor : root.dimColor
           font.family: root.panelFontFamily
@@ -110,12 +114,13 @@ Item {
           required property var modelData
           readonly property var events: Calendar.allDayEventsOnDay(
             root.controller ? root.controller.events : [], modelData)
-          width: (allDayLane.width - root.timeRailWidth) / 7
+          width: (allDayLane.width - root.timeRailWidth) / root.dayCount
           height: parent.height
 
           Rectangle {
             anchors.fill: parent
-            color: allDayColumn.modelData.isoDate === Calendar.isoDate(new Date())
+            color: root.highlightToday
+              && allDayColumn.modelData.isoDate === Calendar.isoDate(new Date())
               ? root.calendarTodayBackgroundColor : "transparent"
             border.width: root.calendarBorderWidth
             border.color: root.calendarBorderColor
@@ -254,12 +259,13 @@ Item {
               root.controller ? root.controller.events : [], modelData).filter(function(event) {
                 return event && event.start && !event.start.allDay
               })
-            width: (timeline.width - root.timeRailWidth) / 7
+            width: (timeline.width - root.timeRailWidth) / root.dayCount
             height: parent.height
 
             Rectangle {
               anchors.fill: parent
-              color: dayColumn.modelData.isoDate === Calendar.isoDate(new Date())
+              color: root.highlightToday
+                && dayColumn.modelData.isoDate === Calendar.isoDate(new Date())
                 ? root.calendarTodayBackgroundColor : "transparent"
               border.width: root.calendarBorderWidth
               border.color: root.calendarBorderColor

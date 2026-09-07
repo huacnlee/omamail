@@ -470,4 +470,22 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
+// The day view is the week view with one column: the same day shape, so
+// every helper that takes `days` works on it unchanged.
+const monday = new Date(2026, 8, 7) // a Monday, local time
+const oneDay = feed.singleDay(monday.getTime())
+assert.strictEqual(oneDay.length, 1)
+assert.strictEqual(oneDay[0].isoDate, "2026-09-07")
+assert.strictEqual(oneDay[0].startMs, monday.getTime())
+assert.strictEqual(oneDay[0].endMs, new Date(2026, 8, 8).getTime())
+assert.strictEqual(oneDay[0].weekday, 1)
+assert.strictEqual(feed.dayTitle(oneDay), "Monday 7 September 2026")
+assert.strictEqual(feed.weekdayShort(oneDay[0]), "Mon")
+assert.strictEqual(feed.weekdayShort(feed.weekDays(monday.getTime(), 1)[6]), "Sun")
+assert.strictEqual(feed.weekdayShort({ startMs: new Date(2026, 8, 9).getTime() }), "Wed",
+  "a day from an older cache without a weekday still names itself")
+assert.strictEqual(feed.weekTitle(oneDay), "", "a single day is not a week")
+assert.strictEqual(feed.dayTitle([]), "")
+assert.strictEqual(feed.monthDays(2026, 8, 1)[0].weekday, 1, "the month grid carries the weekday too")
+
 console.log("test_calendar_feed.js ok")

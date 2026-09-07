@@ -652,13 +652,24 @@ function monthDays(year, monthIndex, weekStart) {
   var out = []
   for (var i = 0; i < 42; i++) {
     var day = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + i)
-    out.push({
-      isoDate: isoDate(day), day: day.getDate(), month: day.getMonth(), year: day.getFullYear(),
-      startMs: day.getTime(), endMs: new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime(),
-      inMonth: day.getMonth() === first.getMonth()
-    })
+    out.push(dayInfo(day, day.getMonth() === first.getMonth()))
   }
   return out
+}
+
+var MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"]
+var WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+// One calendar day in the shape the month grid and the week columns share.
+function dayInfo(date, inMonth) {
+  return {
+    isoDate: isoDate(date), day: date.getDate(), month: date.getMonth(), year: date.getFullYear(),
+    weekday: date.getDay(),
+    startMs: date.getTime(),
+    endMs: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime(),
+    inMonth: inMonth !== false
+  }
 }
 
 function weekDays(anchorMs, weekStart) {
@@ -668,22 +679,38 @@ function weekDays(anchorMs, weekStart) {
   var offset = (anchor.getDay() - startDay + 7) % 7
   var start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - offset)
   var out = []
-  for (var i = 0; i < 7; i++) {
-    var day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
-    out.push({
-      isoDate: isoDate(day), day: day.getDate(), month: day.getMonth(), year: day.getFullYear(),
-      startMs: day.getTime(), endMs: new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime(),
-      inMonth: true
-    })
-  }
+  for (var i = 0; i < 7; i++)
+    out.push(dayInfo(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), true))
   return out
+}
+
+// The day view is the week view with one column: the same list shape, so
+// every helper that takes `days` works on it unchanged.
+function singleDay(anchorMs) {
+  var anchor = new Date(Number(anchorMs) || Date.now())
+  return [dayInfo(new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate()), true)]
+}
+
+function weekdayShort(day) {
+  var index = day && isFinite(Number(day.weekday)) ? Number(day.weekday)
+    : new Date(Number(day && day.startMs) || 0).getDay()
+  return WEEKDAY_NAMES[((index % 7) + 7) % 7].substring(0, 3)
+}
+
+function dayTitle(days) {
+  var values = Array.isArray(days) ? days : []
+  if (values.length === 0) return ""
+  var day = values[0]
+  var weekday = day && isFinite(Number(day.weekday)) ? Number(day.weekday)
+    : new Date(Number(day && day.startMs) || 0).getDay()
+  return WEEKDAY_NAMES[((weekday % 7) + 7) % 7] + " " + day.day + " "
+    + MONTH_NAMES[day.month] + " " + day.year
 }
 
 function weekTitle(days) {
   var values = Array.isArray(days) ? days : []
   if (values.length < 7) return ""
-  var months = ["January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"]
+  var months = MONTH_NAMES
   var first = values[0]
   var last = values[6]
   if (first.year === last.year && first.month === last.month)
