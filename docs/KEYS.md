@@ -105,9 +105,10 @@ used to exist, and they had.
 | `calendarNext` | `j`, `Down` | calendar | Select the next event |
 | `calendarPrevious` | `k`, `Up` | calendar | Select the previous event |
 | `openCalendarEvent` | `Return`, `o` | calendar | Open the selected event |
-| `calendarPreviousPeriod` | `h`, `Left` | calendar | Previous week or month |
-| `calendarNextPeriod` | `l`, `Right` | calendar | Next week or month |
+| `calendarPreviousPeriod` | `h`, `Left` | calendar | Previous day, week or month |
+| `calendarNextPeriod` | `l`, `Right` | calendar | Next day, week or month |
 | `calendarToday` | `t` | calendar | Go to today |
+| `calendarDay` | `d` | calendar | Show day view |
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return` | compose | Send |

@@ -1006,6 +1006,7 @@ Item {
     if (id === "calendarPreviousPeriod") return calendarView.movePeriod(-1)
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
+    if (id === "calendarDay") return calendarView.setView("day")
     if (id === "calendarWeek") return calendarView.setView("week")
     if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
