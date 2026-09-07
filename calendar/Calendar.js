@@ -713,12 +713,72 @@ function eventTop(event, day, firstHour, hourHeight) {
   return Math.max(0, minutes / 60 * Number(hourHeight))
 }
 
+// The least a timed block is drawn as, in hours: a five-minute event still
+// needs room for its title. `overlapLayout` measures with the same floor, so
+// two short events drawn touching are also laid side by side.
+var MIN_BLOCK_HOURS = 0.42
+
 function eventHeight(event, day, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
   var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
-  return Math.max(Number(hourHeight) * 0.42,
+  return Math.max(Number(hourHeight) * MIN_BLOCK_HOURS,
     (dayMinutes(end, day) - dayMinutes(start, day)) / 60 * Number(hourHeight))
+}
+
+// Side-by-side columns for the timed events of one day column, so events at
+// the same time sit next to each other instead of on top of one another.
+// Returns one `{ column, columns }` per input event, in input order: the
+// event's column and how many columns its cluster of overlapping events was
+// split into. A cluster is every event joined by a chain of overlaps — an
+// event overlapping only the second of two overlapping events still shares
+// their split, or the three would not line up — and inside it each event
+// takes the first column free by the time it starts.
+//
+// Every span is clipped to the day before it is compared, so an event that
+// began yesterday is measured by the part of it drawn here, and stretched to
+// the minimum block, so two events drawn touching are split rather than
+// overlapping on screen while the clock says they do not.
+function overlapLayout(events, day) {
+  var values = Array.isArray(events) ? events : []
+  var spans = []
+  for (var i = 0; i < values.length; i++) {
+    var event = values[i]
+    if (!event || !event.start || event.start.allDay) continue
+    var start = Math.max(Number(event.start.ms), Number(day.startMs))
+    var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
+    end = Math.max(end, start + MIN_BLOCK_HOURS * 3600000)
+    spans.push({ index: i, start: start, end: end })
+  }
+  spans.sort(function(left, right) {
+    return left.start - right.start || right.end - left.end || left.index - right.index
+  })
+  var out = []
+  for (var o = 0; o < values.length; o++) out.push({ column: 0, columns: 1 })
+  var cluster = []
+  var columnEnds = []
+  var clusterEnd = -Infinity
+  function flush() {
+    for (var c = 0; c < cluster.length; c++)
+      out[cluster[c].index] = { column: cluster[c].column, columns: columnEnds.length }
+    cluster = []
+    columnEnds = []
+    clusterEnd = -Infinity
+  }
+  for (var s = 0; s < spans.length; s++) {
+    var span = spans[s]
+    if (cluster.length > 0 && span.start >= clusterEnd) flush()
+    var column = -1
+    for (var k = 0; k < columnEnds.length; k++) {
+      if (columnEnds[k] <= span.start) { column = k; break }
+    }
+    if (column < 0) { column = columnEnds.length; columnEnds.push(0) }
+    columnEnds[column] = span.end
+    cluster.push({ index: span.index, column: column })
+    clusterEnd = Math.max(clusterEnd, span.end)
+  }
+  flush()
+  return out
 }
 
 // Where "now" sits in a day column, or -1 when it does not belong on the grid:

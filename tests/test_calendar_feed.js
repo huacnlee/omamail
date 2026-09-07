@@ -470,4 +470,61 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
+// Overlapping timed events are laid side by side: every event joined by a
+// chain of overlaps shares one split, and an event takes the first column
+// free by the time it starts.
+const gridDay = feed.weekDays(new Date(2026, 8, 7).getTime(), 1)[0]
+function clock(hour, minute) { return new Date(2026, 8, 7, hour, minute || 0).getTime() }
+function block(uid, startMs, endMs) { return { uid, start: { ms: startMs }, end: { ms: endMs } } }
+
+assert.strictEqual(gridDay.isoDate, "2026-09-07")
+const laid = feed.overlapLayout([
+  block("a", clock(9), clock(10)),
+  block("b", clock(9, 30), clock(10, 30)),
+  block("c", clock(10), clock(11)),
+  block("d", clock(13), clock(14)),
+  block("e", clock(15), clock(16)),
+  block("f", clock(15), clock(16)),
+  block("g", clock(15), clock(16))
+], gridDay)
+assert.strictEqual(JSON.stringify(laid), JSON.stringify([
+  { column: 0, columns: 2 }, { column: 1, columns: 2 }, { column: 0, columns: 2 },
+  { column: 0, columns: 1 },
+  { column: 0, columns: 3 }, { column: 1, columns: 3 }, { column: 2, columns: 3 }
+]), "a chained cluster shares its columns; a lone event keeps the width")
+
+assert.strictEqual(JSON.stringify(feed.overlapLayout([], gridDay)), "[]")
+
+assert.strictEqual(JSON.stringify(feed.overlapLayout([
+  { uid: "all", start: { ms: clock(0), allDay: true }, end: { ms: new Date(2026, 8, 8).getTime() } },
+  block("x", clock(9), clock(10))
+], gridDay)), JSON.stringify([{ column: 0, columns: 1 }, { column: 0, columns: 1 }]),
+  "an all-day event is not part of the timed grid")
+
+assert.strictEqual(JSON.stringify(feed.overlapLayout([
+  block("short", clock(9), clock(9, 5)),
+  block("next", clock(9, 10), clock(9, 15))
+], gridDay)), JSON.stringify([{ column: 0, columns: 2 }, { column: 1, columns: 2 }]),
+  "two events drawn at the minimum block height would touch, so they split too")
+
+assert.strictEqual(JSON.stringify(feed.overlapLayout([
+  block("late", clock(10), clock(11)),
+  block("early", clock(9), clock(10, 30))
+], gridDay)), JSON.stringify([{ column: 1, columns: 2 }, { column: 0, columns: 2 }]),
+  "input order does not decide the column; start time does")
+
+assert.strictEqual(JSON.stringify(feed.overlapLayout([
+  block("overnight", new Date(2026, 8, 6, 23).getTime(), clock(1)),
+  block("morning", clock(0, 30), clock(1, 30))
+], gridDay)), JSON.stringify([{ column: 0, columns: 2 }, { column: 1, columns: 2 }]),
+  "an event that started yesterday is clipped to this day before comparing")
+
+// Back to back is not overlapping: an event starting exactly when the last
+// one ends takes the column that just came free rather than a new one.
+assert.strictEqual(JSON.stringify(feed.overlapLayout([
+  block("first", clock(9), clock(10)),
+  block("second", clock(10), clock(11))
+], gridDay)), JSON.stringify([{ column: 0, columns: 1 }, { column: 0, columns: 1 }]),
+  "consecutive events each keep the full width")
+
 console.log("test_calendar_feed.js ok")
