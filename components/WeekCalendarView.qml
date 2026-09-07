@@ -254,6 +254,10 @@ Item {
               root.controller ? root.controller.events : [], modelData).filter(function(event) {
                 return event && event.start && !event.start.allDay
               })
+            // Events at the same time share the column's width side by side
+            // rather than being painted over one another.
+            readonly property var layout: Calendar.overlapLayout(dayEvents, modelData)
+            readonly property real lanePadding: Style.space(3)
             width: (timeline.width - root.timeRailWidth) / 7
             height: parent.height
 
@@ -276,10 +280,15 @@ Item {
               delegate: Rectangle {
                 id: eventBlock
                 required property var modelData
+                required property int index
                 readonly property color eventColor: calendarPalette.colorFor(
                   root.controller ? root.controller.colorKeyFor(modelData.sourceId) : "")
-                x: Style.space(3)
-                width: dayColumn.width - Style.space(6)
+                readonly property var slot: dayColumn.layout[index] || ({ column: 0, columns: 1 })
+                readonly property int columns: Math.max(1, Number(slot.columns) || 1)
+                readonly property real laneWidth: (dayColumn.width - dayColumn.lanePadding * 2) / columns
+                x: dayColumn.lanePadding + laneWidth * Number(slot.column)
+                width: Math.max(Style.space(8),
+                  laneWidth - (Number(slot.column) < columns - 1 ? Style.space(2) : 0))
                 y: Calendar.eventTop(modelData, dayColumn.modelData,
                   root.firstHour, timeline.hourHeight)
                 height: Calendar.eventHeight(modelData, dayColumn.modelData, timeline.hourHeight)
