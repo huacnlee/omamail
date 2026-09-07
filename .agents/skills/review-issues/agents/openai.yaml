@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Issues"
+  short_description: "Triage issues against PR history and label pending fixes"
+  default_prompt: "Use $review-issues to review up to three oldest pending issues, check historical PR fixes, label confirmed existing-functionality bugs, ask whether to fix them in worktrees with goals and PRs, and close verified resolved reports."

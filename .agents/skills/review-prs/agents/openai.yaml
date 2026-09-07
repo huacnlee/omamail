@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review PRs"
+  short_description: "Review PRs sequentially with a strict security gate"
+  default_prompt: "Use $review-prs to review the specified PRs in separate worktrees, fix small issues, update release-note metadata, and publish the review outcomes."
