@@ -222,6 +222,7 @@ Item {
         : (badge.visible ? badge.left : parent.right)
       anchors.rightMargin: Style.space(6)
       anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
       text: entry.label
       color: entry.selected ? root.textColor : root.dimColor
       font.family: root.panelFontFamily

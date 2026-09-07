@@ -27,6 +27,8 @@ UNTRUSTED = re.compile(
     # name, a caption and a count all written by the server or the message,
     # and the mailbox row's detail line, which names the server.
     r"|\.sender\b|\.mailbox\b|\.caption\b|\.detail\b|threadCount\b"
+    # Sidebar Entry forwards the server's label name through a local alias.
+    r"|entry\s*\.\s*label\b"
     # A row that works out its own two lines and hands them over as strings.
     # The address goes in there, so the guard has to follow the value: read
     # from the element, the reference to `.email` is no longer visible and

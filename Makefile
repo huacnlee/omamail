@@ -167,6 +167,7 @@ test-qml:
 	QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 		$(QMLTESTRUNNER) -import $(CURDIR)/tests/qml/imports -input tests/qml
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
+	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine
