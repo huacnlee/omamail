@@ -51,6 +51,7 @@ QML_FILES := Service.qml BarWidget.qml App.qml \
 	components/SettingsPage.qml \
 	components/SettingsSidebar.qml \
 	components/CalendarSettings.qml \
+	components/CalendarFilterMenu.qml \
 	components/CalendarEventComposer.qml \
 	components/CalendarEventDetail.qml \
 	components/CalendarPalette.qml \

@@ -416,6 +416,31 @@ Item {
     sourceWriter.running = true
   }
 
+  // Every hidden calendar in the current scope shown again, in one write.
+  // A row at a time would only ever bring the first one back: `savingSource`
+  // turns the next call away while the first is still in flight.
+  function showAllSources() {
+    if (savingSource) return
+    var values = contextSources && Array.isArray(contextSources.sources)
+      ? contextSources.sources : []
+    var next = sourceList
+    var changed = false
+    for (var i = 0; i < values.length; i++) {
+      var source = values[i]
+      if (!source || source.enabled !== false) continue
+      next = Sources.setEnabled(Sources.add(next, source), source.id, true)
+      changed = true
+    }
+    if (!changed) return
+    sourceBeingSaved = null
+    sourceSecret = ""
+    sourceWritePayload = Sources.serialize(next)
+    refreshAfterSourceWrite = true
+    savingSource = true
+    sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
+    sourceWriter.running = true
+  }
+
   function colorKeyFor(sourceId) {
     var values = availableSources && Array.isArray(availableSources.sources)
       ? availableSources.sources : []

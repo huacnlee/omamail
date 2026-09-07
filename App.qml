@@ -1867,6 +1867,8 @@ Item {
             dimColor: root.dim
             calendarBorderColor: root.calendarBorder
             calendarTodayBackgroundColor: root.calendarTodayBackground
+            popupBackgroundColor: root.popupBackground
+            popupBorderColor: root.popupBorder
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
             // An event opened for reading is a place, so Back closes it before

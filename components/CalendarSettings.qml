@@ -175,7 +175,10 @@ Column {
           foreground: root.textColor
           fontFamily: root.panelFontFamily
           enabled: existingPassword.text !== "" && !root.controller.savingSource
-          onClicked: root.controller.updateCalendarPassword(modelData, existingPassword.text)
+          onClicked: {
+            root.awaitingSave = true
+            root.controller.updateCalendarPassword(modelData, existingPassword.text)
+          }
         }
         IconTextButton {
           id: cancelExisting
@@ -271,6 +274,7 @@ Column {
 
   function saveCalendar() {
     resultText.text = ""
+    root.awaitingSave = true
     root.controller.addCalDavCalendar({
       name: calendarName.text,
       url: calendarUrl.text,
@@ -278,9 +282,18 @@ Column {
     }, calendarPassword.text)
   }
 
+  // `calendarSaved` is the controller's, not this page's, and every write to
+  // `calendars.json` raises it — including one started from the calendar
+  // header, which this page can now be sitting behind. Answering those too
+  // stamped "Calendar saved" over a half-typed form and threw the fields
+  // away. This answers only a save it asked for.
+  property bool awaitingSave: false
+
   Connections {
     target: root.controller
     function onCalendarSaved(ok, error) {
+      if (!root.awaitingSave) return
+      root.awaitingSave = false
       if (!ok) { resultText.text = error; return }
       resultText.text = "Calendar saved"
       calendarName.text = ""
