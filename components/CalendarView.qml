@@ -16,6 +16,15 @@ Item {
   required property color calendarTodayBackgroundColor
   required property int calendarBorderWidth
   required property string panelFontFamily
+  // How wide the week view is, and where that answer is kept. The setting
+  // lives on the service so it outlasts the window; the view reads it and
+  // asks for the change rather than holding a second copy of it.
+  property int weekDayCount: 7
+  signal weekDayCountRequested(int count)
+  // Which day a week starts on, said once: the week drawn and the week
+  // fetched are two calls that have to agree, and they did not when each
+  // carried its own literal.
+  readonly property int weekStart: 1
 
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   property date visibleWeek: new Date()
@@ -25,7 +34,8 @@ Item {
   readonly property bool detailOpen: detailEvent !== null
   readonly property var days: Calendar.monthDays(
     visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
-  readonly property var weekDays: Calendar.weekDays(visibleWeek.getTime(), 1)
+  readonly property var weekDays: Calendar.weekDays(
+    visibleWeek.getTime(), root.weekStart, root.weekDayCount)
   readonly property var monthNames: ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"]
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -105,8 +115,13 @@ Item {
     moveSelection(1)
   }
 
+  // A week fetches all seven days whichever width is drawn. The range cache is
+  // keyed by range, so a five-day week that asked only for its own five would
+  // open a second entry beside the seven-day one and refetch the same events
+  // every time the toggle moved.
   function refresh() {
-    var range = viewMode === "week" ? weekDays : days
+    var range = viewMode === "week"
+      ? Calendar.weekSpan(visibleWeek.getTime(), root.weekStart) : days
     if (!controller || range.length === 0) return
     controller.refresh(range[0].startMs, range[range.length - 1].endMs)
   }
@@ -129,6 +144,29 @@ Item {
         visibleWeek.getDate() + offset * 7)
       refresh()
     } else moveMonth(offset)
+  }
+
+  // A width, and nothing else. The view mode is not changed here: the buttons
+  // are only drawn in week mode, and a setter named for a day count that also
+  // navigated would be a surprise to the next caller.
+  function setWeekDayCount(count) {
+    var wanted = Calendar.weekDayCount(count)
+    if (wanted === root.weekDayCount) return
+    root.weekDayCountRequested(wanted)
+  }
+
+  // A narrower week takes two days off the end of it, and the selection or
+  // the open event may have been standing on one of them. Dropping both is
+  // what stops the keyboard walking from an event that is no longer drawn
+  // and a detail sheet outliving its day.
+  onWeekDaysChanged: {
+    if (viewMode !== "week" || selectedEventId === "") return
+    var visible = visibleEvents()
+    for (var i = 0; i < visible.length; i++) {
+      if (String(visible[i].uid || "") === selectedEventId) return
+    }
+    selectedEventId = ""
+    detailEvent = null
   }
 
   function setView(mode) {
@@ -217,6 +255,7 @@ Item {
         }
 
         IconTextButton {
+          objectName: "calendarViewWeek"
           text: "Week"
           foreground: root.viewMode === "week" ? root.textColor : root.dimColor
           fontFamily: root.panelFontFamily
@@ -225,6 +264,7 @@ Item {
           onClicked: root.setView("week")
         }
 
+
         IconTextButton {
           text: "Month"
           foreground: root.viewMode === "month" ? root.textColor : root.dimColor
@@ -232,6 +272,35 @@ Item {
           fontSize: Style.font.caption
           selected: root.viewMode === "month"
           onClicked: root.setView("month")
+        }
+
+        // How wide that week is. After Month rather than beside Week: these
+        // appear and disappear with the week view, and between the two mode
+        // buttons they shoved Month sideways by their own width every time —
+        // the control you go back with moving out from under the pointer at
+        // the moment you switch. The numerals are named by their tooltips.
+        IconTextButton {
+          objectName: "calendarWeekDays5"
+          visible: root.viewMode === "week"
+          text: "5"
+          tooltipText: "Show the working week"
+          foreground: root.weekDayCount === 5 ? root.textColor : root.dimColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          selected: root.weekDayCount === 5
+          onClicked: root.setWeekDayCount(5)
+        }
+
+        IconTextButton {
+          objectName: "calendarWeekDays7"
+          visible: root.viewMode === "week"
+          text: "7"
+          tooltipText: "Show the whole week"
+          foreground: root.weekDayCount === 7 ? root.textColor : root.dimColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          selected: root.weekDayCount === 7
+          onClicked: root.setWeekDayCount(7)
         }
 
         IconButton {
@@ -480,6 +549,7 @@ Item {
     }
 
     WeekCalendarView {
+      objectName: "calendarWeekGrid"
       width: parent.width
       height: parent.height - y
       visible: root.viewMode === "week"

@@ -661,7 +661,21 @@ function monthDays(year, monthIndex, weekStart) {
   return out
 }
 
-function weekDays(anchorMs, weekStart) {
+// A week is the seven days from `weekStart`, or the first five of them. It is
+// the same week either way: the anchor resolves before the span is cut, so a
+// Saturday asked for five days answers with that Saturday's own week rather
+// than the next one's. `weekSpan` is the whole seven whatever is drawn,
+// because the range fetched for a week has to stay one cache key across the
+// toggle.
+//
+// The five are the first five from `weekStart`, which is the working week
+// only when the week starts on Monday. Both callers start there; a caller
+// that did not would be asking for a different five days, not for Mon-Fri.
+function weekDays(anchorMs, weekStart, dayCount) {
+  return weekSpan(anchorMs, weekStart).slice(0, weekDayCount(dayCount))
+}
+
+function weekSpan(anchorMs, weekStart) {
   var anchor = new Date(Number(anchorMs) || Date.now())
   var startDay = Math.floor(Number(weekStart))
   if (!isFinite(startDay) || startDay < 0 || startDay > 6) startDay = 1
@@ -679,13 +693,27 @@ function weekDays(anchorMs, weekStart) {
   return out
 }
 
+// How many days a week view draws: the working week, or all of it. Only the
+// two widths the interface offers are answers — a settings file asking for
+// three gets a week rather than a grid `weekTitle` cannot name and no button
+// can get back out of.
+var WORKING_WEEK_DAYS = 5
+var WEEK_DAYS = 7
+
+function weekDayCount(value) {
+  return Math.floor(Number(value)) === WORKING_WEEK_DAYS ? WORKING_WEEK_DAYS : WEEK_DAYS
+}
+
+// Titled for the span it draws, which is no longer always seven days: the last
+// day is read off the end of the list rather than off index 6, or a working
+// week is named for the Sunday it does not show.
 function weekTitle(days) {
   var values = Array.isArray(days) ? days : []
-  if (values.length < 7) return ""
+  if (values.length < 2) return ""
   var months = ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"]
   var first = values[0]
-  var last = values[6]
+  var last = values[values.length - 1]
   if (first.year === last.year && first.month === last.month)
     return first.day + "–" + last.day + " " + months[first.month] + " " + first.year
   if (first.year === last.year)

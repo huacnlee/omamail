@@ -24,6 +24,10 @@ Item {
   signal eventActivated(var event)
 
   readonly property real timeRailWidth: Style.space(52)
+  // The columns divide by however many days were handed over, not by seven.
+  // A working week is five of them, and dividing by seven regardless left the
+  // last two columns' worth of grid empty beside them.
+  readonly property int dayCount: Math.max(1, Array.isArray(days) ? days.length : 0)
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   readonly property var hourRange: Calendar.weekHourRange(
     controller ? controller.events : [], days, 7, 19)
@@ -57,7 +61,7 @@ Item {
       delegate: Item {
         required property var modelData
         required property int index
-        width: (dayHeaders.width - root.timeRailWidth) / 7
+        width: (dayHeaders.width - root.timeRailWidth) / root.dayCount
         height: parent.height
         Text {
           anchors.centerIn: parent
@@ -110,7 +114,7 @@ Item {
           required property var modelData
           readonly property var events: Calendar.allDayEventsOnDay(
             root.controller ? root.controller.events : [], modelData)
-          width: (allDayLane.width - root.timeRailWidth) / 7
+          width: (allDayLane.width - root.timeRailWidth) / root.dayCount
           height: parent.height
 
           Rectangle {
@@ -250,11 +254,12 @@ Item {
           delegate: Item {
             id: dayColumn
             required property var modelData
+            objectName: "calendarDayColumn:" + modelData.isoDate
             readonly property var dayEvents: Calendar.eventsOnDay(
               root.controller ? root.controller.events : [], modelData).filter(function(event) {
                 return event && event.start && !event.start.allDay
               })
-            width: (timeline.width - root.timeRailWidth) / 7
+            width: (timeline.width - root.timeRailWidth) / root.dayCount
             height: parent.height
 
             Rectangle {

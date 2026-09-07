@@ -46,6 +46,7 @@
       "oauthPort": 9481,
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
+      "calendarWeekDays": 7,
       "openOnClick": "Window",
       "showBarIcon": true
     },
@@ -136,6 +137,17 @@
         "step": 1,
         "defaultValue": 10,
         "description": "Delays outgoing mail so you can cancel it. Set this to 0 to send immediately."
+      },
+      {
+        "key": "calendarWeekDays",
+        "type": "enum",
+        "label": "Week view shows",
+        "options": [
+          "5 days",
+          "7 days"
+        ],
+        "defaultValue": "7 days",
+        "description": "How wide the week view is. The working week, or all of it. The calendar's own header changes this too."
       },
       {
         "key": "unifiedCalendarView",

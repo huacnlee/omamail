@@ -11,6 +11,7 @@ import "compose/Senders.js" as Senders
 import "providers/Registry.js" as Provider
 import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
+import "calendar/Calendar.js" as Calendar
 import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
 import "message/Direction.js" as Direction
@@ -65,6 +66,7 @@ Item {
     oauthPort: 9481,
     undoSendSeconds: 10,
     unifiedCalendarView: false,
+    calendarWeekDays: 7,
     showBarIcon: true
   })
   property var settings: defaultSettingValues
@@ -80,6 +82,13 @@ Item {
     settings ? settings.contentDirection : null)
   readonly property bool unifiedCalendarView: !!settings
     && settings.unifiedCalendarView === true
+
+  // How wide a week is: five days for the working week, seven for all of it.
+  // Kept here rather than on the view so it outlasts the window, and
+  // normalised on the way out so a hand-edited `shell.json` cannot ask for a
+  // week of nine days.
+  readonly property int calendarWeekDays: Calendar.weekDayCount(
+    settings ? settings.calendarWeekDays : null)
 
   // Whether the bar draws an envelope for this.
   //
@@ -150,6 +159,10 @@ Item {
 
   function setUnifiedCalendarView(value) {
     persistSetting("unifiedCalendarView", value === true)
+  }
+
+  function setCalendarWeekDays(value) {
+    persistSetting("calendarWeekDays", Calendar.weekDayCount(value))
   }
 
   function setShowBarIcon(value) {

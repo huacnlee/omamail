@@ -66,5 +66,21 @@ Item {
       verify(shellStore.updatedEntry !== null)
       compare(shellStore.updatedEntry.unifiedCalendarView, true)
     }
+
+    // The week's width outlives the window, and a settings file asking for a
+    // week of nine days still shows a week.
+    function test_the_week_width_defaults_to_seven_and_persists_changes() {
+      mailService.applySettings({})
+      compare(mailService.calendarWeekDays, 7)
+
+      mailService.setCalendarWeekDays(5)
+      compare(mailService.calendarWeekDays, 5)
+      compare(shellStore.updatedEntry.calendarWeekDays, 5)
+
+      mailService.applySettings({ calendarWeekDays: 9 })
+      compare(mailService.calendarWeekDays, 7)
+      mailService.applySettings({ calendarWeekDays: "5" })
+      compare(mailService.calendarWeekDays, 5)
+    }
   }
 }

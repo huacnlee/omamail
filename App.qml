@@ -1686,6 +1686,10 @@ Item {
             calendarTodayBackgroundColor: root.calendarTodayBackground
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
+            weekDayCount: root.service ? root.service.calendarWeekDays : 7
+            onWeekDayCountRequested: function(count) {
+              if (root.service) root.service.setCalendarWeekDays(count)
+            }
             // An event opened for reading is a place, so Back closes it before
             // it leaves the calendar. The view owns the open state; the stack
             // follows it.
