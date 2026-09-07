@@ -174,7 +174,7 @@ var BINDINGS = [
   { id: "zoomReset", keys: ["Ctrl+Shift+0"], contexts: ["reader"],
     group: "Reading", label: "Reset the zoom" },
 
-  { id: "refresh", keys: ["F5"], contexts: ANY,
+  { id: "refresh", keys: ["F5", "Ctrl+R"], contexts: ANY,
     group: "Mailbox", label: "Check for mail" },
   { id: "settings", keys: ["Ctrl+,"], contexts: ANY,
     group: "Mailbox", label: "Open settings" },

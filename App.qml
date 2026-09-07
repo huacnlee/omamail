@@ -1522,9 +1522,9 @@ Item {
             iconName: "refresh"
             tooltipText: root.calendarVisible
               ? (root.service && root.service.calendarController.loading
-                ? "Loading calendars" : "Refresh calendars · F5")
+                ? "Loading calendars" : "Refresh calendars · F5 / Ctrl+R")
               : (root.service && root.service.listLoading
-                ? "Checking for mail" : "Check mail · F5")
+                ? "Checking for mail" : "Check mail · F5 / Ctrl+R")
             foreground: root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily

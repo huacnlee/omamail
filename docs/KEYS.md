@@ -123,7 +123,7 @@ used to exist, and they had.
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+Shift+0` | reader | Reset the zoom |
-| `refresh` | `F5` | all | Check for mail |
+| `refresh` | `F5`, `Ctrl+R` | all | Check for mail |
 | `settings` | `Ctrl+,` | all | Open settings |
 | `help` | `?` | mail | Toggle all keybindings |
 | `back` | `Escape` | all | Back, or close the window |
