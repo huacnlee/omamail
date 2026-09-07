@@ -1122,15 +1122,7 @@ Item {
   // one that is honest about being one mailbox's.
   readonly property bool selectionIsPreview: !!reading && reading.selectionIsPreview
 
-  // Whether the message on screen got there because the cursor passed over it
-  // rather than because somebody opened it.
-  //
-  // Above `MailAccount` because two decisions in the window turn on it and
-  // neither can be made from `selectedId` alone: a previewed message satisfies
-  // "is this the selected one" while not being open, which made an archive
-  // open its neighbour and a reply skip the open it needs.
-  readonly property bool selectionIsPreview: !!current && current.selectionIsPreview
-  
+
   readonly property string resultSummary: current ? current.resultSummary : ""
   // ------------------------------------------------------- the open message
   //
@@ -1247,7 +1239,7 @@ Item {
   }
   function select(id, previewOnly) {
     if (!unified) {
-      if (current) current.select(id)
+      if (current) current.select(id, previewOnly)
       return
     }
     var host = hostForId(id)

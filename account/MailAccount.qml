@@ -1008,9 +1008,7 @@ Item {
 
   // --------------------------------------------------------------- detail
 
-  // Whether the message on screen got there because the cursor passed over it
-  // rather than because somebody opened it. A preview is drawn the same and
-  // marked read differently, and the detail callback is where that is decided.
+  // True when the selected message is only a cursor preview.
   property bool selectionIsPreview: false
 
   function select(id, previewOnly) {
@@ -1034,8 +1032,6 @@ Item {
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
     sourceHtml = ""
-    // A preview never fetches them, whatever the standing answer is:
-    // `Model.showsRemoteImages` is where that is argued.
     remoteImagesAllowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)
     remoteImagesLoading = false
     remoteImageData = ({})
@@ -1169,18 +1165,13 @@ Item {
         Conversation.threadAfterSelect(root.selectedThread, messageId, summary)
       root.rememberMember(summary)
       root.loadMembers()
-      // Opening a message is the one place Gmail's own clients mark it read
-      // without being asked, and a reader that leaves it bold is confusing.
-      // A preview is not opening: `Model.marksReadOnArrival` is where that
-      // is decided.
+      // A preview is not opening; only an opened message is marked read here.
       if (Model.marksReadOnArrival(summary, root.selectionIsPreview))
         root.act(messageId, "markRead", true)
     })
   }
 
-  // What a dwell on a previewed message comes to. Asked of the message rather
-  // than of the selection: the cursor may have moved on by the time the
-  // panel's timer fires, and the one that was read is the one to mark.
+  // Mark the message the dwell started on, if it is still unread.
   function markPreviewRead(id) {
     if (!Model.previewReadable(messages, id)) return false
     act(String(id), "markRead", true)
