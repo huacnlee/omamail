@@ -341,8 +341,7 @@ function survivesAction(mailboxKey, action, rawQuery, labels, sourceLabelId, row
 }
 
 // Only the most recent intent for a message may be coalesced. Searching past
-// an opposite action would turn read/unread/read into read/unread. Explicit
-// intent wins over an automatic read because it may evict the open row.
+// an opposite action would turn read/unread/read into read/unread.
 function enqueueAction(requests, request) {
   var queued = requests.slice()
   for (var i = queued.length - 1; i >= 0; i--) {
@@ -350,12 +349,16 @@ function enqueueAction(requests, request) {
     if (previous.id !== request.id) continue
     if (previous.action === request.action && previous.cacheKey === request.cacheKey
         && previous.sourceLabelId === request.sourceLabelId
-        && (previous.memberOnly === true) === (request.memberOnly === true)) {
+        && (previous.memberOnly === true) === (request.memberOnly === true)
+        && (previous.quiet === true) === (request.quiet === true)) {
+      // A true repeat keeps the first send and its rollback. A quiet press and
+      // an explicit one differ in scope and note, so they queue in turn.
       queued[i] = {
         id: request.id, action: request.action, cacheKey: request.cacheKey,
         sourceLabelId: request.sourceLabelId,
         memberOnly: request.memberOnly === true,
-        quiet: previous.quiet === true && request.quiet === true
+        quiet: request.quiet === true,
+        dispatch: previous.dispatch
       }
       return queued
     }
@@ -713,6 +716,20 @@ function removeById(list, id) {
     out.push(source[i])
   }
   return out
+}
+
+// A failed row goes back before the first of its old followers still listed.
+// Its index is stale once the rows queued behind it have gone.
+function restoreRow(list, row, beforeList, index) {
+  var source = Array.isArray(list) ? list : []
+  var beforeRows = Array.isArray(beforeList) ? beforeList : []
+  var held = Number(index) || 0
+  for (var i = held + 1; i < beforeRows.length; i++) {
+    var at = indexById(source, beforeRows[i] ? beforeRows[i].id : "")
+    if (at >= 0) return source.slice(0, at).concat([row], source.slice(at))
+  }
+  var clamped = Math.max(0, Math.min(held, source.length))
+  return source.slice(0, clamped).concat([row], source.slice(clamped))
 }
 
 function replaceById(list, summary) {

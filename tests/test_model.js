@@ -16,6 +16,29 @@ assert.strictEqual(memberAgain.length, 1)
 assert.strictEqual(memberAgain[0].memberOnly, true)
 deepEqual(model.enqueueAction([memberRead], rowRead), [memberRead, rowRead])
 
+// A repeat keeps the first send; an explicit press behind a quiet one is its own.
+const firstSend = () => {}
+const secondSend = () => {}
+const coalesced = model.enqueueAction([{ ...rowRead, dispatch: firstSend }],
+  { ...rowRead, dispatch: secondSend })
+assert.strictEqual(coalesced.length, 1)
+assert.strictEqual(coalesced[0].dispatch, firstSend)
+const inTurn = model.enqueueAction([{ ...rowRead, quiet: true, dispatch: firstSend }],
+  { ...rowRead, dispatch: secondSend })
+assert.strictEqual(inTurn.length, 2)
+assert.strictEqual(inTurn[1].dispatch, secondSend)
+
+// A failed row is anchored by its surviving neighbour, not its stale index.
+const listBefore = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]
+deepEqual(model.restoreRow([{ id: "a" }, { id: "d" }], listBefore[2], listBefore, 2),
+  [{ id: "a" }, listBefore[2], { id: "d" }], "the first surviving follower anchors the row")
+deepEqual(model.restoreRow([{ id: "x" }, { id: "a" }, { id: "d" }], listBefore[1], listBefore, 1),
+  [{ id: "x" }, { id: "a" }, listBefore[1], { id: "d" }],
+  "a row that arrived above since does not push it past its follower")
+deepEqual(model.restoreRow([{ id: "a" }], listBefore[2], listBefore, 2),
+  [{ id: "a" }, listBefore[2]], "with no follower left the index is clamped")
+deepEqual(model.restoreRow([], listBefore[0], listBefore, 0), [listBefore[0]])
+
 // ------------------------------------------------------------ setup state
 
 assert.strictEqual(model.setupState({ toolsPresent: false }), "tools_missing")

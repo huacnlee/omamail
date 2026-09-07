@@ -396,11 +396,6 @@ Item {
   property int sendSecondsRemaining: 0
   readonly property bool sendPending: pendingSend !== null
 
-  onPendingActionChanged: {
-    if (pendingAction === "" && queuedActions.length > 0)
-      Qt.callLater(root.runQueuedAction)
-  }
-
   // Notifications only start once the first successful load has established
   // what was already there.
   property var seenIds: ({})
@@ -1413,79 +1408,24 @@ Item {
 
   // -------------------------------------------------------------- actions
 
-  // `quiet` rides along because it decides whether the row may be evicted from
-  // under an open reader. A queued explicit trash that ran as if it were quiet
-  // would leave the message the user deleted still on screen. A rail stop's
-  // single-message scope must survive the wait even when its id is also a row.
-  function queueAction(messageId, action, actionQuery, quiet, memberOnly) {
+  // The row already moved; `dispatch` carries the send and its rollback. The
+  // other fields are what `Model.enqueueAction` coalesces a repeat on.
+  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch) {
     queuedActions = Model.enqueueAction(queuedActions, {
       id: messageId, action: action, cacheKey: actionQuery,
       sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true,
-      memberOnly: memberOnly === true
+      memberOnly: memberOnly === true, dispatch: dispatch
     })
   }
 
+  // Called before the freeing callback acts on its answer, so no revalidation
+  // starts while a row still waits for its server.
   function runQueuedAction() {
     if (pendingAction !== "" || queuedActions.length === 0) return
     var queued = queuedActions.slice()
     var request = queued.shift()
     queuedActions = queued
-
-    // Prefer the normal optimistic path while the row is still in either
-    // account view with the same label context. A typed search may have the
-    // same cache key as a label view but no source label to remove. Navigation
-    // does not change the operation already accepted for the original view.
-    if (cacheKey === request.cacheKey
-        && (hasLabels ? rawLabelId : "") === request.sourceLabelId
-        && (Model.rowIndexForMember(messages, request.id) >= 0
-        || Model.rowIndexForMember(previewMessages, request.id) >= 0)) {
-      act(request.id, request.action, request.quiet, request.memberOnly)
-      return
-    }
-
-    var change = Model.labelChangesFor(request.action, request.sourceLabelId)
-    if (request.action !== "trash" && request.action !== "untrash" && !change) {
-      if (queuedActions.length > 0) Qt.callLater(root.runQueuedAction)
-      return
-    }
-    // The prior action may just have resumed this query's deferred list before
-    // the queued quiet mutation got its callLater turn. That stream still owns
-    // pre-mutation summaries, so serialize it exactly like the visible action
-    // path and revalidate deliberately after the mutation finishes.
-    if (cacheKey === request.cacheKey && listLoading) {
-      listSerial++
-      abortRequest(listHandle)
-      listHandle = null
-      listLoading = false
-      nextPageToken = ""
-    }
-    pendingActionQuery = request.cacheKey
-    pendingAction = request.action
-    var done = function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      if (error) root.fail(error)
-      else {
-        // The detached row is not available for an optimistic cache edit, but
-        // its provider offset is certainly no longer safe after the mutation.
-        var entry = root.cacheStore.loaded ? root.cacheStore.get(request.cacheKey) : null
-        if (entry) root.cacheStore.putQuery(request.cacheKey, ({
-          summaries: entry.summaries,
-          estimate: entry.estimate,
-          nextPageToken: ""
-        }))
-        root.refreshCounts()
-      }
-      if (root.resumeDeferredListLoad(request.cacheKey, String(error || ""))) return
-      // The message may also be visible in the mailbox navigated to while it
-      // waited. Its list was allowed to load during the A-scoped mutation, so
-      // replace any pre-mutation summary there as soon as the server answers.
-      if (root.active)
-        root.loadMessages(false, true, String(error || ""))
-    }
-    if (request.action === "trash") api.trashMessage(request.id, done)
-    else if (request.action === "untrash") api.untrashMessage(request.id, done)
-    else api.modifyMessage(request.id, change.add, change.remove, done)
+    request.dispatch()
   }
 
   // Every action moves the list immediately and reconciles afterwards. Waiting
@@ -1515,17 +1455,9 @@ Item {
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
     if (refuseUnavailableAction(action)) return false
-    // One mutation is in flight at a time, because the rollback below restores
-    // a row by the index it held when the action was taken. That is a reason to
-    // make the next action wait, not a reason to drop it: a mailbox is cleared
-    // by pressing the same key down a list faster than any server answers, and
-    // refusing the second press lost the keystroke, left the note explaining a
-    // failure the user had not caused, and — because `act` answered false —
-    // stopped the cursor moving on. Queue it and run it when the slot frees.
-    if (pendingAction !== "") {
-      queueAction(messageId, action, cacheKey, quiet === true, oneMessage)
-      return true
-    }
+    // Only the send waits for the slot; the row moves now. A server that takes
+    // seconds over a move (Proton Bridge does) emptied the list at its pace.
+    var slotTaken = pendingAction !== ""
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
     // A counted member is not a row, and it is still found by one. The list is
@@ -1547,29 +1479,32 @@ Item {
       if (!Conversation.holdsMember(selectedThread, messageId)) return false
       var memberChange = Model.labelChangesFor(action)
       if (!memberChange) return false
-      return actOnDetachedMember(messageId, action, memberChange, quiet)
+      return actOnDetachedMember(messageId, action, memberChange, quiet, oneMessage, slotTaken)
     }
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
     var beforeMessages = messages.slice()
+    var beforePreview = previewMessages.slice()
     // A live list owns snapshots taken before this action. Letting it finish
     // would rebuild and persist those stale rows over the optimistic edit — a
     // trashed search hit visibly came back when the slowest metadata request
     // answered. Stop that load, then revalidate this same query after the
-    // mutation succeeds.
+    // mutation succeeds. Asked again when a queued send goes out.
     var interruptedQuery = ""
-    if (index >= 0 && listLoading) {
+    function stopLiveList() {
+      if (index < 0 || root.cacheKey !== actionQuery || !root.listLoading) return
       interruptedQuery = actionQuery
-      listSerial++
-      abortRequest(listHandle)
-      listHandle = null
-      listLoading = false
+      root.listSerial++
+      root.abortRequest(root.listHandle)
+      root.listHandle = null
+      root.listLoading = false
       // A provisional streamed offset can cross ids the interrupted search
       // never settled. No Load-more action is safer than one that skips them.
-      nextPageToken = ""
+      root.nextPageToken = ""
       actionToken = ""
     }
+    stopLiveList()
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var rowId = String(before.id || "")
     var sourceLabelId = hasLabels ? rawLabelId : ""
@@ -1584,6 +1519,8 @@ Item {
     var targets = memberAction || oneMessage || quiet === true
       ? [messageId] : Model.actionTargets(before, action)
     if (targets.length === 0) return false
+    var change = Model.labelChangesFor(action, sourceLabelId)
+    if (!change && action !== "trash" && action !== "untrash") return false
 
     // Every summary the update touches besides the row's own, and what it was.
     // The rail draws from these, so a conversation action asserts the whole
@@ -1697,7 +1634,7 @@ Item {
           && !root.deferredLoadCleared(actionQuery)) {
         root.nextPageToken = actionToken
         root.messages = removed
-          ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
+          ? Model.restoreRow(root.messages, before, beforeMessages, index)
           : Model.replaceById(root.messages, before)
         if (interruptedQuery === "") root.rememberList()
       } else if (index >= 0 && root.cacheStore.loaded) {
@@ -1714,8 +1651,7 @@ Item {
         var previewKnown = Model.indexById(root.previewMessages, messageId)
         root.previewMessages = previewKnown >= 0
           ? Model.replaceById(root.previewMessages, before)
-          : root.previewMessages.slice(0, previewIndex).concat(
-              [before], root.previewMessages.slice(previewIndex))
+          : Model.restoreRow(root.previewMessages, before, beforePreview, previewIndex)
       }
       // Both halves go back: the row the list drew and every member summary
       // the optimistic update asserted the conversation across.
@@ -1727,11 +1663,10 @@ Item {
       root.fail(error)
     }
 
-    pendingActionQuery = actionQuery
-    pendingAction = action
     var done = function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
+      root.runQueuedAction()
       if (error) {
         restore(error)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
@@ -1773,22 +1708,21 @@ Item {
         root.loadMessages(false, true, "")
     }
 
-    // One id or many, and the interface keeps its fifteen names: `trashMessage`
-    // and `untrashMessage` take either on every client, and a list of more than
-    // one goes to `batchModify` rather than to a call per message.
-    var sent = targets.length > 1 ? targets : targets[0]
-    if (action === "trash") api.trashMessage(sent, done)
-    else if (action === "untrash") api.untrashMessage(sent, done)
-    else {
-      var change = Model.labelChangesFor(action, sourceLabelId)
-      if (!change) {
-        pendingAction = ""
-        pendingActionQuery = ""
-        return false
-      }
-      if (targets.length > 1) api.batchModify(targets, change.add, change.remove, done)
-      else api.modifyMessage(targets[0], change.add, change.remove, done)
+    function dispatch() {
+      stopLiveList()
+      root.pendingActionQuery = actionQuery
+      root.pendingAction = action
+      // One id or many, and the interface keeps its fifteen names: `trashMessage`
+      // and `untrashMessage` take either on every client, and a list of more than
+      // one goes to `batchModify` rather than to a call per message.
+      var sent = targets.length > 1 ? targets : targets[0]
+      if (action === "trash") root.api.trashMessage(sent, done)
+      else if (action === "untrash") root.api.untrashMessage(sent, done)
+      else if (targets.length > 1) root.api.batchModify(targets, change.add, change.remove, done)
+      else root.api.modifyMessage(targets[0], change.add, change.remove, done)
     }
+    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, oneMessage, dispatch)
+    else dispatch()
     return true
   }
 
@@ -1800,26 +1734,32 @@ Item {
   //
   // `unstar` from a row clears every counted member's star (the row's star
   // means "any member"); from the reader it clears the one message on screen.
-  function actOnDetachedMember(messageId, action, change, quiet) {
+  function actOnDetachedMember(messageId, action, change, quiet, memberOnly, slotTaken) {
     var beforeMember = memberSummaries[messageId] || null
     var beforeSelected = selectedMessage
     applyMemberChange(messageId, action)
     if (selectedId === messageId && selectedMessage)
       selectedMessage = Model.applyLabelChange(selectedMessage, action)
-    pendingActionQuery = cacheKey
-    pendingAction = action
-    api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      if (error) {
-        if (beforeMember) root.rememberMember(beforeMember)
-        if (root.selectedId === messageId) root.selectedMessage = beforeSelected
-        root.fail(error)
-        return
-      }
-      if (quiet !== true) root.note(root.actionLabel(action))
-      root.refreshCounts()
-    })
+    var actionQuery = cacheKey
+    function dispatch() {
+      root.pendingActionQuery = actionQuery
+      root.pendingAction = action
+      root.api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
+        root.pendingAction = ""
+        root.pendingActionQuery = ""
+        root.runQueuedAction()
+        if (error) {
+          if (beforeMember) root.rememberMember(beforeMember)
+          if (root.selectedId === messageId) root.selectedMessage = beforeSelected
+          root.fail(error)
+          return
+        }
+        if (quiet !== true) root.note(root.actionLabel(action))
+        root.refreshCounts()
+      })
+    }
+    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, memberOnly, dispatch)
+    else dispatch()
     return true
   }
 
@@ -1972,6 +1912,7 @@ Item {
     api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
+      root.runQueuedAction()
       if (error) {
         if (root.cacheKey === actionQuery
             && !root.deferredLoadCleared(actionQuery)) {

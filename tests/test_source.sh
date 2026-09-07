@@ -674,7 +674,12 @@ grep -q 'streamedSummaryBatch' providers/ImapClient.qml \
   || fail "streamed IMAP results must fetch headers in visible batches"
 grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
   || fail "streamed metadata reads need one shared queue"
-grep -q 'if (index >= 0 && listLoading)' account/MailAccount.qml \
+awk '
+  /function act\(/ { in_act = 1 }
+  in_act && /^    stopLiveList\(\)/ { stopped = 1 }
+  in_act && /if \(removed\) messages = Model\.removeById\(messages, rowId\)/ { exit !stopped }
+  END { exit !stopped }
+' account/MailAccount.qml \
   || fail "an action must stop a live list before stale snapshots can settle"
 grep -q 'pendingAction !== "" && cacheKey === pendingActionQuery' account/MailAccount.qml \
   || fail "an action may only suppress refreshes for its own query"
@@ -684,11 +689,11 @@ grep -q 'resumeDeferredListLoad(actionQuery' account/MailAccount.qml \
   || fail "an action callback must resume a deferred navigation load"
 awk '
   /function act\(/ { in_act = 1 }
-  in_act && /if \(pendingAction !== ""\)/ { guarded = 1 }
-  in_act && /pendingAction = action/ { exit !guarded }
-  END { exit !guarded }
+  in_act && /function dispatch\(\)/ { in_dispatch = 1 }
+  in_act && /pendingAction = action/ { exit !in_dispatch }
+  END { exit !in_dispatch }
 ' account/MailAccount.qml \
-  || fail "a second row action must not overwrite the pending action slot"
+  || fail "only the send may take the pending action slot; a queued action must not"
 awk '
   /function markAllRead\(\)/ { in_mark_all = 1 }
   in_mark_all && /if \(pendingAction !== ""\)/ { guarded = 1 }
@@ -712,20 +717,18 @@ grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml
   || fail "paging membership must not follow the reader's keep-open decision"
 grep -q 'if (!service.act(acted, action)) return false' App.qml \
   || fail "a refused action must not move the keyboard cursor"
-grep -q 'queueAction(messageId, action, cacheKey, quiet === true, oneMessage)' account/MailAccount.qml \
-  || fail "automatic mark-read must wait rather than disappear behind another action"
 # Clearing a mailbox means pressing the same key down a list faster than any
 # server answers. Refusing the second press dropped it: the message stayed, the
 # note blamed the user for a failure they had not caused, and the false return
-# held the keyboard cursor on a row the user had already left behind.
+# held the keyboard cursor on a row the user had already left behind. Queueing
+# the whole action was not enough either: the row moves at the keystroke.
 awk '
   /function act\(/ { in_act = 1 }
-  in_act && /if \(pendingAction !== ""\)/ { in_guard = 1 }
-  in_guard && /queueAction\(messageId, action, cacheKey, quiet === true, oneMessage\)/ { queues = 1 }
-  in_guard && /return true/ { exit !queues }
-  END { exit !queues }
+  in_act && /if \(removed\) messages = Model\.removeById\(messages, rowId\)/ { moved = 1 }
+  in_act && /if \(slotTaken\) queueAction\(messageId, action, actionQuery, quiet === true, oneMessage, dispatch\)/ { exit !moved }
+  END { exit !moved }
 ' account/MailAccount.qml \
-  || fail "an action taken while one is pending must queue rather than be refused"
+  || fail "an action taken while one is pending must move its row before its send waits"
 # Scoped to `act`. `markAllRead` still refuses on purpose: it reads the unread
 # set at the moment it runs, so one queued behind a mutation would send a list
 # the mailbox had already moved past.
@@ -736,24 +739,36 @@ awk '
   END { exit refuses }
 ' account/MailAccount.qml \
   || fail "a queued action must not report a failure the user did not cause"
-# The reader keeps a quiet row that the same explicit action would evict, so the
-# flag has to survive the wait. Draining every request as quiet would leave a
-# trashed message on screen under the reader that deleted it.
+# A queued request is a send, not a verb to run through `act` again: its row
+# has already left.
 awk '
   /function runQueuedAction\(\)/ { in_queued = 1 }
-  in_queued && /act\(request\.id, request\.action, request\.quiet, request\.memberOnly\)/ { forwards = 1 }
-  /function refuseUnavailableAction\(/ { exit !forwards }
-  END { exit !forwards }
+  in_queued && /request\.dispatch\(\)/ { dispatches = 1 }
+  /function refuseUnavailableAction\(/ { exit !dispatches }
+  END { exit !dispatches }
 ' account/MailAccount.qml \
-  || fail "a queued action must run with the quietness it was taken with"
+  || fail "a queued action must run the send it was taken with"
+grep -q 'dispatch: previous.dispatch' account/Model.js \
+  || fail "coalescing a repeated action must keep the send that carries its rollback"
+# A queued send runs inside the callback that freed the slot, which may just
+# have resumed this query's list.
 awk '
-  /function runQueuedAction\(\)/ { in_quiet = 1 }
-  in_quiet && /listSerial\+\+/ { interrupts = 1 }
-  in_quiet && /root\.loadMessages\(false, true/ { reloads = 1 }
-  /function act\(/ { exit !(interrupts && reloads) }
-  END { exit !(interrupts && reloads) }
+  /function dispatch\(\)/ { in_dispatch = 1 }
+  in_dispatch && /stopLiveList\(\)/ { interrupts = 1 }
+  in_dispatch && /if \(slotTaken\)/ { exit !interrupts }
+  END { exit !interrupts }
 ' account/MailAccount.qml \
-  || fail "a detached quiet action must stop and revalidate its query stream"
+  || fail "a queued send must stop a live list before stale snapshots can settle"
+# The slot is retaken before the freeing answer is acted on, so no reload
+# settles a state the next edit is not in yet.
+awk '
+  /function act\(/ { in_act = 1 }
+  in_act && /var done = function/ { in_done = 1 }
+  in_done && /root\.runQueuedAction\(\)/ { drains = 1 }
+  in_done && /resumeDeferredListLoad\(actionQuery/ { exit !drains }
+  END { exit !drains }
+' account/MailAccount.qml \
+  || fail "an action callback must send the next queued action before it revalidates"
 test "$(grep -c 'root.active && root.cacheKey !== actionQuery' account/MailAccount.qml)" -ge 2 \
   || fail "successful actions must revalidate a mailbox opened while they were pending"
 awk '
