@@ -1618,9 +1618,10 @@ function mailboxPath(box, byId) {
 // is what goes back in a filter, and only the printed name is a path — which is
 // why nothing here has to be taken apart again on the way out.
 //
-// Ordered by the server's own `sortOrder` and then by the printed path, which
-// puts a parent's children directly under it while a server that sorts nothing
-// still comes back in a stable order rather than in hash order.
+// Ordered by the server's own `sortOrder` and then by the printed path, so a
+// server that sorts nothing still comes back in a stable order rather than in
+// hash order. This is the order the list is cached in, not the order it is
+// drawn in: the rail and the move picker sort by name in `Model.railLabels`.
 function mailboxLabels(mailboxes, roles) {
   var list = mailboxArray(mailboxes)
   var map = roles || {}

@@ -6,7 +6,7 @@ import "../account/Model.js" as Model
 import "../providers/Registry.js" as Provider
 
 // The left column: the mailboxes this account's provider has, then whatever
-// labels or folders the server reported.
+// labels or folders the server reported, A to Z.
 //
 // Icon-first, and narrow enough to leave open: the longest mailbox name is
 // "All mail". Collapsing it to a strip of icons is one click away, and the
@@ -31,14 +31,7 @@ Item {
   property var slots: []
   property bool numbersVisible: false
 
-  readonly property var userLabels: {
-    var all = root.service ? root.service.labels : []
-    var out = []
-    for (var i = 0; i < all.length; i++) {
-      if (!all[i].system) out.push(all[i])
-    }
-    return out
-  }
+  readonly property var userLabels: Model.railLabels(root.service ? root.service.labels : [])
 
   // The rail's own edge. The list already draws one on its far side, so
   // without this the icons sit on the same surface as the messages.

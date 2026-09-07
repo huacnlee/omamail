@@ -419,12 +419,41 @@ function movableLabels(labels, query, currentLabelId) {
     if (typed !== "" && labelName.toLowerCase().indexOf(typed) < 0) continue
     destinations.push(label)
   }
-  destinations.sort(function(left, right) {
-    var leftName = String(left.name || "").toLowerCase()
-    var rightName = String(right.name || "").toLowerCase()
-    return leftName < rightName ? -1 : (leftName > rightName ? 1 : 0)
-  })
+  destinations.sort(compareLabelNames)
   return destinations
+}
+
+// A to Z by the name on screen, case folded so "bills" does not sort after
+// "Work". Shared by the rail and the move picker, so a label sits in the same
+// place in both lists. Two labels that print the same — "Work" and "work" on a
+// case-sensitive IMAP server — fall back to the id, because Qt's sort is not
+// stable and without a total order the pair swapped rows whenever an unrelated
+// label came or went.
+function compareLabelNames(left, right) {
+  var leftName = String(left && left.name || "").toLowerCase()
+  var rightName = String(right && right.name || "").toLowerCase()
+  if (leftName !== rightName) return leftName < rightName ? -1 : 1
+  var leftId = String(left && left.id || "")
+  var rightId = String(right && right.id || "")
+  return leftId < rightId ? -1 : (leftId > rightId ? 1 : 0)
+}
+
+// The labels or folders the rail draws under the provider's mailboxes: the
+// user's own, sorted by name. Providers hand them over in whatever order the
+// server keeps them — Gmail in creation order, IMAP as LIST answered, JMAP by
+// a sortOrder the server may or may not have set — which is no order a person
+// scanning a column can use. A path such as "Work/Invoices" sorts after "Work",
+// so a nested folder follows its parent, though a sibling such as "Work (old)"
+// can sit between them: this is one alphabet, not a tree.
+function railLabels(labels) {
+  var all = Array.isArray(labels) ? labels : []
+  var out = []
+  for (var i = 0; i < all.length; i++) {
+    if (!all[i] || all[i].system === true) continue
+    out.push(all[i])
+  }
+  out.sort(compareLabelNames)
+  return out
 }
 
 // Which capability an action needs, or "" for the ones every provider has.
@@ -738,10 +767,10 @@ function messageById(primary, fallback, id) {
 }
 
 // The rail as one numbered list, in the order it is drawn: the provider's
-// mailboxes first, then the labels or folders the server reported. Both the
-// sidebar's badges and the keys that jump read this, so the number beside a row
-// and the row a number opens cannot disagree — describing the order twice is
-// how they would.
+// mailboxes first, then the user's labels or folders as `railLabels` orders
+// them. Both the sidebar's badges and the keys that jump read this, so the
+// number beside a row and the row a number opens cannot disagree — describing
+// the order twice is how they would.
 //
 // Ten because the keys are digits. Past that a row simply has no number: a
 // mailbox nobody can reach by keyboard is honest, and renumbering the rail
@@ -754,9 +783,8 @@ function sidebarSlots(mailboxes, labels, limit) {
     if (!boxes[i] || !boxes[i].key) continue
     out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || "") })
   }
-  var all = Array.isArray(labels) ? labels : []
+  var all = railLabels(labels)
   for (var j = 0; j < all.length && out.length < max; j++) {
-    if (!all[j] || all[j].system) continue
     out.push({ kind: "label", id: String(all[j].id || ""),
       name: String(all[j].rawName || all[j].name || "") })
   }

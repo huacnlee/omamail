@@ -100,7 +100,7 @@ The sidebar is a compound component with four roles:
 
 - application identity and collapse trigger;
 - primary mailboxes;
-- provider labels or folders;
+- provider labels or folders, A to Z;
 - account identity and account menu trigger.
 
 Expanded rows contain an icon, label, and optional suffix such as an unread count or visible key. Collapsed rows keep the icon and active state, while the label moves to a tooltip. The active mailbox uses fill plus persistent shape and text/icon treatment; unread additionally uses a dot and stronger weight.

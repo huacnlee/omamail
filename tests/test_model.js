@@ -577,8 +577,37 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     "an empty mailbox has no row to sit on")
 }
 
-// One numbered list over the rail: mailboxes first, then the labels the server
-// reported, and no number at all past the tenth row.
+// ------------------------------------------------------------- rail labels
+//
+// The rail draws the user's labels A to Z, whatever order the server keeps them
+// in: Gmail answers in creation order, and a column in creation order can only
+// be read by somebody who remembers when each label was made.
+{
+  const reported = [
+    { id: "L2", name: "zebra", rawName: "zebra" },
+    { id: "S1", name: "Inbox", rawName: "INBOX", system: true },
+    { id: "L4", name: "Work/Invoices", rawName: "Work/Invoices" },
+    { id: "L1", name: "Bills", rawName: "Bills" },
+    { id: "L3", name: "Work", rawName: "Work" },
+    { id: "L5", name: "archive notes", rawName: "archive notes" }
+  ]
+  deepEqual(model.railLabels(reported).map(l => l.id), ["L5", "L1", "L3", "L4", "L2"],
+    "A to Z, case folded, a nested folder under its parent, and no system label")
+  const twins = [
+    { id: "b", name: "Work" }, { id: "c", name: "Bills" }, { id: "a", name: "work" }
+  ]
+  deepEqual(model.railLabels(twins).map(l => l.id), ["c", "a", "b"],
+    "two labels that print the same are ordered by id, so the pair never swaps")
+  deepEqual(model.railLabels(twins.slice().reverse()).map(l => l.id), ["c", "a", "b"],
+    "whatever order the server handed them over in")
+  deepEqual(reported.map(l => l.id), ["L2", "S1", "L4", "L1", "L3", "L5"],
+    "the provider's own list is not reordered underneath it")
+  deepEqual(model.railLabels(null), [])
+  deepEqual(model.railLabels([null, { id: "L9", name: "x" }]).map(l => l.id), ["L9"])
+}
+
+// One numbered list over the rail: mailboxes first, then the labels A to Z,
+// and no number at all past the tenth row.
 {
   const boxes = [
     { key: "inbox", label: "Inbox" },
@@ -595,12 +624,13 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
   assert.strictEqual(slots[0].kind, "mailbox")
   assert.strictEqual(slots[0].key, "inbox")
   assert.strictEqual(slots[3].kind, "label")
-  assert.strictEqual(slots[3].id, "L1")
-  assert.strictEqual(slots[3].name, "Work", "the name a provider selects a label by")
+  assert.strictEqual(slots[3].id, "L2",
+    "Bills is numbered before Work: the digits follow the rail, and the rail is A to Z")
+  assert.strictEqual(slots[3].name, "Bills", "the name a provider selects a label by")
 
   assert.strictEqual(model.slotNumberOf(slots, "mailbox", "inbox"), 1)
   assert.strictEqual(model.slotNumberOf(slots, "mailbox", "sent"), 3)
-  assert.strictEqual(model.slotNumberOf(slots, "label", "L2"), 5)
+  assert.strictEqual(model.slotNumberOf(slots, "label", "L1"), 5)
   assert.strictEqual(model.slotNumberOf(slots, "label", "SYS"), 0)
   assert.strictEqual(model.slotNumberOf(slots, "mailbox", "L1"), 0,
     "a key and an id are not the same handle")
