@@ -55,4 +55,26 @@ fi
 [ ! -e "$work/opened" ] \
   || { echo "test_attachment_open.sh: malformed attachment data reached xdg-open" >&2; exit 1; }
 
+rm -f "$work/opened"
+html_name=$(printf '%s' 'invoice.html' | base64 | tr -d '\n')
+if printf '%s\n%s\n' "$html_name" "$body" \
+  | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \
+    PATH="$work/bin:$PATH" "$script" >/dev/null 2>&1; then
+  echo "test_attachment_open.sh: an HTML attachment was opened" >&2
+  exit 1
+fi
+[ ! -e "$work/opened" ] \
+  || { echo "test_attachment_open.sh: an HTML attachment reached xdg-open" >&2; exit 1; }
+
+rm -f "$work/opened"
+desktop_name=$(printf '%s' 'invoice.pdf.desktop' | base64 | tr -d '\n')
+if printf '%s\n%s\n' "$desktop_name" "$body" \
+  | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \
+    PATH="$work/bin:$PATH" "$script" >/dev/null 2>&1; then
+  echo "test_attachment_open.sh: a desktop entry was opened" >&2
+  exit 1
+fi
+[ ! -e "$work/opened" ] \
+  || { echo "test_attachment_open.sh: a desktop entry reached xdg-open" >&2; exit 1; }
+
 printf 'test_attachment_open.sh ok\n'

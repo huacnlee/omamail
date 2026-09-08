@@ -25,6 +25,26 @@ def decode(value: bytes) -> bytes:
     return base64.b64decode(compact, altchars=b"-_", validate=True)
 
 
+# Opening these hands the desktop a document that can run code or fetch
+# further resources. Saving them is still allowed; opening them is not.
+OPEN_REFUSED_SUFFIXES = (
+    ".html", ".htm", ".xhtml", ".shtml",
+    ".svg", ".svgz",
+    ".xml",
+    ".desktop", ".url", ".lnk",
+    ".js", ".mjs", ".cjs",
+    ".hta",
+    ".exe", ".bat", ".cmd", ".com", ".msi", ".scr",
+    ".sh", ".bash", ".zsh",
+    ".ps1", ".vbs", ".vbe", ".wsf", ".wsh",
+)
+
+
+def openable_filename(name: str) -> bool:
+    lowered = str(name).lower()
+    return not any(lowered.endswith(suffix) for suffix in OPEN_REFUSED_SUFFIXES)
+
+
 def safe_filename(value: bytes) -> str:
     """The sender's name, with everything that could leave the folder removed.
 
