@@ -634,6 +634,44 @@ function redirectHop(status, redirectUrl) {
   return url
 }
 
+function hostBelongsToDomain(host, domain) {
+  var name = bareHost(String(host || "").replace(/:\d+$/, ""))
+  var site = bareHost(domain)
+  if (name === "" || site === "") return false
+  if (name === site) return true
+  return name.length > site.length
+    && name.substring(name.length - site.length - 1) === "." + site
+}
+
+function discoveryHop(status, redirectUrl, domain) {
+  var url = redirectHop(status, redirectUrl)
+  if (url === "") return ""
+  return hostBelongsToDomain(sessionHost(url), domain) ? url : ""
+}
+
+function looksLikeSessionDocument(body) {
+  var doc = parseJson(body)
+  if (!doc) return false
+  return hasCapability(doc.capabilities, CAPABILITY_CORE)
+}
+
+function looksLikeJmapChallenge(body) {
+  var text = trimmed(body)
+  if (text === "") return true
+  var doc = parseJson(text)
+  if (!doc) return false
+  var type = trimmed(doc.type).toLowerCase()
+  if (type.indexOf("jmap") >= 0) return true
+  return Number(doc.status) === 401
+}
+
+function sessionProbeAccepts(status, body) {
+  var code = Number(status)
+  if (code === 200) return looksLikeSessionDocument(body)
+  if (code === 401) return looksLikeJmapChallenge(body)
+  return false
+}
+
 // ------------------------------------------------------------ the session
 
 // The two capabilities a mailbox needs the server to have, and the key

@@ -341,6 +341,25 @@ assert.strictEqual(jmap.redirectHop(200, "https://mail.example.org/jmap/session"
   "an answer is not a hop")
 assert.strictEqual(jmap.redirectHop(307, ""), "")
 assert.strictEqual(jmap.redirectHop(0, "https://mail.example.org/"), "")
+assert.strictEqual(jmap.discoveryHop(307, "https://mail.example.org/jmap/session", "example.org"),
+  "https://mail.example.org/jmap/session")
+assert.strictEqual(jmap.discoveryHop(307, "https://evil.example/jmap/session", "example.org"), "",
+  "an unauthenticated hop cannot leave the address domain")
+assert.strictEqual(jmap.discoveryHop(307, "https://example.org.evil.example/jmap", "example.org"), "")
+
+assert.strictEqual(jmap.sessionProbeAccepts(200, "<html>Sign in</html>"), false,
+  "a web page is not a session")
+assert.strictEqual(jmap.sessionProbeAccepts(200, JSON.stringify({
+  capabilities: { "urn:ietf:params:jmap:core": {} },
+  accounts: {}
+})), true, "an unauthenticated session document is a candidate")
+assert.strictEqual(jmap.sessionProbeAccepts(401, ""), true,
+  "an empty 401 is the hosted-server challenge")
+assert.strictEqual(jmap.sessionProbeAccepts(401, "<html>Sign in</html>"), false,
+  "an HTML 401 is not a JMAP challenge")
+assert.strictEqual(jmap.sessionProbeAccepts(401, JSON.stringify({
+  type: "urn:ietf:params:jmap:error:limit", status: 401
+})), true)
 
 // --------------------------------------------------------- session object
 //
