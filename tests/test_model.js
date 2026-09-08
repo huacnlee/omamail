@@ -38,6 +38,87 @@ deepEqual(model.restoreRow([{ id: "x" }, { id: "a" }, { id: "d" }], listBefore[1
 deepEqual(model.restoreRow([{ id: "a" }], listBefore[2], listBefore, 2),
   [{ id: "a" }, listBefore[2]], "with no follower left the index is clamped")
 deepEqual(model.restoreRow([], listBefore[0], listBefore, 0), [listBefore[0]])
+// The order is the settled list, not the list the failed edit saw. Two rows
+// removed in turn and refused in turn: the second saw a list the first had
+// already left, and anchored to that it went back above the first.
+deepEqual(model.restoreRow([listBefore[0]], listBefore[1], listBefore, 0).map(r => r.id),
+  ["a", "b"], "with no follower left, the last surviving predecessor anchors the row")
+deepEqual(model.restoreRow([listBefore[0]], listBefore[1], [listBefore[1]], 0).map(r => r.id),
+  ["b", "a"], "which the failed edit's own snapshot could not have said")
+deepEqual(model.restoreRow([listBefore[3]], { id: "n" }, listBefore, 1).map(r => r.id),
+  ["d", "n"], "a row the settled list never held falls back to its index, clamped")
+
+const sendA = () => {}
+const sendB = () => {}
+assert.strictEqual(model.holdsDispatch([{ dispatch: sendA }], sendA), true)
+assert.strictEqual(model.holdsDispatch([{ dispatch: sendA }], sendB), false,
+  "a coalesced repeat's send is not in the queue")
+assert.strictEqual(model.holdsDispatch(null, sendA), false)
+
+const previews = [{ id: "a", unread: true }, { id: "c", unread: true }]
+deepEqual(model.previewAfterRestore(previews, { id: "b", unread: true }, true, listBefore, 1).map(r => r.id),
+  ["a", "b", "c"], "an unread row goes back into the preview where the order says")
+deepEqual(model.previewAfterRestore(previews, { id: "a", unread: true, starred: true }, true, listBefore, 0)[0].starred,
+  true, "a row still listed is replaced")
+deepEqual(model.previewAfterRestore(previews, { id: "a" }, false, listBefore, 0).map(r => r.id),
+  ["c"], "a row that should not be there comes out")
+deepEqual(model.previewAfterRestore(previews, { id: "b" }, false, listBefore, 1), previews)
+
+// ------------------------------------------------------------------ intents
+//
+// One row, two edits taken at the keystroke, the first refused: what stays is
+// the second edit applied to the state the first started from.
+{
+  const star = s => ({ ...s, starred: true })
+  const read = s => ({ ...s, unread: false })
+  const held = [
+    { token: 1, before: { id: "m", unread: true, starred: false }, apply: star },
+    { token: 2, before: { id: "m", unread: true, starred: true }, apply: read, removed: false }
+  ]
+  const rebased = model.rebaseIntents(held, 1)
+  deepEqual(rebased.summary, { id: "m", unread: false, starred: false },
+    "the star comes off and the read stays")
+  assert.strictEqual(rebased.entries.length, 1)
+  assert.strictEqual(rebased.entries[0].token, 2)
+  deepEqual(rebased.entries[0].before, { id: "m", unread: true, starred: false },
+    "the edit behind now starts from where the failed one did")
+  deepEqual(held[1].before, { id: "m", unread: true, starred: true }, "the held entry is not written to")
+  deepEqual(model.rebaseIntents(held, 2).summary, { id: "m", unread: true, starred: true },
+    "the last edit failing leaves the first")
+  assert.strictEqual(model.rebaseIntents(held, 9), null, "an answer nobody waited for")
+  deepEqual(model.withoutIntent(held, 1).map(e => e.token), [2])
+  deepEqual(model.withoutIntent(null, 1), [])
+  assert.strictEqual(model.anyIntentRemoved(held), false)
+  assert.strictEqual(model.anyIntentRemoved(held.concat([{ token: 3, removed: true }])), true)
+
+  let intents = model.intentsWith({}, "m", held[0])
+  intents = model.intentsWith(intents, "m", held[1])
+  assert.strictEqual(intents.m.length, 2)
+  const failed = model.intentsSettled(intents, "m", 1, true, null)
+  deepEqual(failed.outcome.summary, { id: "m", unread: false, starred: false })
+  assert.strictEqual(failed.intents.m.length, 1, "the failed intent is gone, the other is held")
+  const kept = model.intentsSettled(failed.intents, "m", 2, false, null)
+  assert.strictEqual(kept.intents.m, undefined, "nothing held once every edit is answered")
+  assert.strictEqual(kept.outcome.summary, null)
+  const unknown = model.intentsSettled({}, "m", 7, true, { id: "m" })
+  deepEqual(unknown.outcome.summary, { id: "m" }, "an id nothing was held for answers with the fallback")
+  deepEqual(unknown.intents, {})
+}
+
+// The settled lists are taken at the first edit in flight on a query and held
+// through the rest, so a later edit cannot re-take a list an earlier one has
+// already shortened.
+{
+  let lists = model.settledListsHeld({}, "q", [{ id: "a" }, { id: "b" }], [])
+  lists = model.settledListsHeld(lists, "q", [{ id: "b" }], [])
+  deepEqual(lists.q.messages.map(r => r.id), ["a", "b"], "the second hold keeps the first list")
+  assert.strictEqual(lists.q.pending, 2)
+  lists = model.settledListsReleased(lists, "q")
+  assert.strictEqual(lists.q.pending, 1)
+  lists = model.settledListsReleased(lists, "q")
+  assert.strictEqual(lists.q, undefined, "released once nothing is in flight")
+  deepEqual(model.settledListsReleased({}, "q"), {})
+}
 
 // ------------------------------------------------------------ setup state
 

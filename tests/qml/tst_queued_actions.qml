@@ -40,6 +40,19 @@ Item {
   }
   TestCase {
     name: "QueuedActions"
+    // Rows as a provider reports them, with the label the unread flag mirrors,
+    // since an action recomputes the flags from the labels.
+    function unreadRows() {
+      return [
+        { id: "one", labelIds: ["INBOX", "UNREAD"], unread: true, inInbox: true },
+        { id: "two", labelIds: ["INBOX", "UNREAD"], unread: true, inInbox: true }
+      ]
+    }
+    function keys(held) {
+      var out = []
+      for (var key in held) out.push(key)
+      return out.sort()
+    }
     function ready() {
       var account = createTemporaryObject(accountFactory, parent)
       verify(account !== null)
@@ -166,6 +179,138 @@ Item {
       account.api.finish()
       compare(account.messages.map(function(m) { return m.id }), ["two", "three"])
       compare(account.pendingAction, "")
+    }
+    // An edit ahead of another fails: only its own change comes off, and the
+    // edit taken a keystroke later stays, whichever order the two were in.
+    function test_failed_star_keeps_the_read_taken_after_it() {
+      var account = ready()
+      account.messages = unreadRows()
+      verify(account.act("one", "star"))
+      verify(account.act("one", "markRead"))
+      compare(account.messages[0].starred, true)
+      compare(account.messages[0].unread, false)
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.messages[0].starred, false, "the star the server refused comes off")
+      compare(account.messages[0].unread, false, "the read behind it stays")
+      account.api.finish()
+      compare(account.messages[0].starred, false)
+      compare(account.messages[0].unread, false, "and the accepted read is what the row says")
+      compare(account.pendingAction, "")
+    }
+    function test_failed_read_keeps_the_star_taken_after_it() {
+      var account = ready()
+      account.messages = unreadRows()
+      verify(account.act("one", "markRead"))
+      verify(account.act("one", "star"))
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.messages[0].unread, true, "the read the server refused comes off")
+      compare(account.messages[0].starred, true, "the star behind it stays")
+      account.api.finish()
+      compare(account.messages[0].unread, true)
+      compare(account.messages[0].starred, true)
+      compare(account.pendingAction, "")
+    }
+    // The rail's summary and the reader's copy follow the same rule.
+    function test_failed_star_keeps_the_read_in_the_rail_and_the_reader() {
+      var account = ready()
+      account.messages = unreadRows()
+      account.memberSummaries = ({ one: account.messages[0] })
+      account.selectedId = "one"
+      account.selectedMessage = account.messages[0]
+      verify(account.act("one", "star"))
+      verify(account.act("one", "markRead"))
+      compare(account.selectedMessage.starred, true)
+      compare(account.selectedMessage.unread, false)
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.memberSummaries.one.starred, false)
+      compare(account.memberSummaries.one.unread, false, "the rail keeps the read")
+      compare(account.selectedMessage.starred, false)
+      compare(account.selectedMessage.unread, false, "so does the reader")
+      account.api.finish()
+      compare(account.pendingAction, "")
+    }
+    // Two removals refused in turn come back in the order they left. The
+    // second saw a list the first had already shortened, so its own snapshot
+    // could not say where it belonged.
+    function test_two_failed_removals_come_back_in_order() {
+      var account = ready()
+      verify(account.act("one", "trash"))
+      verify(account.act("two", "trash"))
+      compare(account.messages.length, 0)
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.messages.map(function(m) { return m.id }), ["one"])
+      account.api.finish("Synthetic failure")
+      compare(account.messages.map(function(m) { return m.id }), ["one", "two"],
+        "the second row goes back under the first, not above it")
+      compare(account.pendingAction, "")
+    }
+    // A true repeat while another send holds the slot is coalesced into the
+    // first send, and what the repeat held goes with it: an intent nobody
+    // answers would be replayed over every failure after it.
+    function test_coalesced_repeat_lets_go_of_what_it_held() {
+      var account = ready()
+      verify(account.act("two", "trash"))
+      verify(account.act("one", "star"))
+      verify(account.act("one", "star"))
+      compare(account.queuedActions.length, 1, "the repeat was coalesced")
+      compare(account.actionIntents.one.length, 1, "and holds nothing of its own")
+      account.api.finish()
+      tryVerify(function() { return account.api.calls.length === 2 })
+      account.api.finish("Synthetic failure")
+      verify(!account.messages[0].starred, "the star the server refused comes off")
+      compare(keys(account.actionIntents), [], "nothing held once every send is answered")
+      compare(keys(account.settledLists), [], "no list held once nothing is in flight")
+    }
+    // A conversation on screen: the row `R` and its member `a`, the reader on
+    // `a`. Two rail actions on `a`, the first refused: the rail, the reader
+    // and the row's block all say the same thing afterwards.
+    function conversation(account) {
+      var rep = { id: "R", labelIds: ["INBOX"], unread: true, inInbox: true,
+        thread: { id: "T", memberIds: ["R", "a"], count: 2, unread: true, flagged: false } }
+      var a = { id: "a", labelIds: ["INBOX", "UNREAD"], unread: true, inInbox: true }
+      account.messages = [rep, unreadRows()[1]]
+      account.memberSummaries = ({ R: rep, a: a })
+      account.selectedThread = rep.thread
+      account.selectedId = "a"
+      account.selectedMessage = a
+    }
+    function test_failed_member_read_keeps_the_row_in_step_with_the_rail() {
+      var account = ready()
+      conversation(account)
+      verify(account.act("a", "markRead", false, true))
+      compare(account.messages[0].unread, false, "a read, so the block is read")
+      verify(account.act("a", "star", false, true))
+      compare(account.messages[0].starred, true)
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.memberSummaries.a.unread, true, "the rail says a is unread again")
+      compare(account.memberSummaries.a.starred, true, "and keeps the star")
+      compare(account.selectedMessage.unread, true, "so does the reader")
+      compare(account.messages[0].starred, true)
+      compare(account.messages[0].unread, true, "and the row's block agrees with the rail")
+      account.api.finish()
+      compare(account.messages[0].unread, true, "still, once the star lands")
+      compare(keys(account.actionIntents), [])
+    }
+    // The failure comes after the view has moved on. The row is not put into
+    // the list now on screen, and nothing stays held.
+    function test_failure_after_navigation_lets_go_of_what_it_held() {
+      var account = ready()
+      var home = account.cacheKey
+      verify(account.act("one", "star"))
+      account.rawQuery = "label:C"
+      account.rawLabelId = "Label_C"
+      verify(account.cacheKey !== home)
+      account.messages = [{ id: "nine", labelIds: ["INBOX"], unread: false, inInbox: true }]
+      account.api.finish("Synthetic failure")
+      compare(account.messages.map(function(m) { return m.id }), ["nine"])
+      compare(account.pendingAction, "")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
     }
     function test_failure_restores_first_row_before_next_action() {
       var account = ready()

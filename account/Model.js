@@ -368,6 +368,15 @@ function enqueueAction(requests, request) {
   return queued
 }
 
+// Whether a queue still carries this send, or coalesced it into an earlier one.
+function holdsDispatch(requests, dispatch) {
+  var queued = Array.isArray(requests) ? requests : []
+  for (var i = 0; i < queued.length; i++) {
+    if (queued[i] && queued[i].dispatch === dispatch) return true
+  }
+  return false
+}
+
 function labelChangesFor(action, sourceLabelId) {
   if (action === "markRead") return { add: [], remove: ["UNREAD"] }
   if (action === "markUnread") return { add: ["UNREAD"], remove: [] }
@@ -514,6 +523,29 @@ function rowWithThread(summary, thread) {
   next.unread = labels.indexOf("UNREAD") >= 0 || (!!block && block.unread)
   next.starred = labels.indexOf("STARRED") >= 0 || (!!block && block.flagged)
   return next
+}
+
+// A row after one of its messages changed — its own labels already applied
+// in `ownLabels`, or the row untouched when the message is a member. The block
+// is recomputed from the members rather than asserted. An unknown member never
+// flips a flag off, which is what keeps a row in the Unread view while a reply
+// nobody has read is still in it — and what stops the quiet mark-read on
+// opening a thread from clearing the dot of every other member with it. The
+// representative's own state is evidence whether or not the rail ever drew it,
+// so it goes in rather than counting as an unknown member.
+//
+// `after` is the edit on a member; it is applied to each target the rail
+// holds as the rail holds it now, so a replay after a failure reads the
+// members already put right rather than the state the failed edit left.
+function rowAfterMemberEdit(row, ownLabels, rowId, memberSummaries, targets, after) {
+  var nextMembers = {}
+  for (var held in memberSummaries) nextMembers[held] = memberSummaries[held]
+  var ids = Array.isArray(targets) ? targets : []
+  for (var i = 0; i < ids.length; i++) {
+    if (ids[i] !== rowId && memberSummaries[ids[i]]) nextMembers[ids[i]] = after(memberSummaries[ids[i]])
+  }
+  nextMembers[rowId] = ownLabels
+  return rowWithThread(ownLabels, threadAfterMemberChange(row, nextMembers))
 }
 
 // The summary an action leaves behind. `sourceLabelId` is the label whose
@@ -718,18 +750,141 @@ function removeById(list, id) {
   return out
 }
 
-// A failed row goes back before the first of its old followers still listed.
-// Its index is stale once the rows queued behind it have gone.
-function restoreRow(list, row, beforeList, index) {
+// A failed row goes back where the settled order says: before the first of
+// its followers still listed, else after the last of its predecessors, else at
+// the index it held. The order is the list as it stood before the first edit
+// still in flight — not the list this edit saw. With two removals queued, the
+// second saw a list the first had already shortened, and a row anchored to
+// that had no neighbour left to name: the pair came back reversed.
+function restoreRow(list, row, order, index) {
   var source = Array.isArray(list) ? list : []
-  var beforeRows = Array.isArray(beforeList) ? beforeList : []
-  var held = Number(index) || 0
-  for (var i = held + 1; i < beforeRows.length; i++) {
-    var at = indexById(source, beforeRows[i] ? beforeRows[i].id : "")
+  var settled = Array.isArray(order) ? order : []
+  var pos = indexById(settled, row ? row.id : "")
+  var at
+  for (var after = pos + 1; pos >= 0 && after < settled.length; after++) {
+    at = indexById(source, settled[after] ? settled[after].id : "")
     if (at >= 0) return source.slice(0, at).concat([row], source.slice(at))
   }
+  for (var ahead = pos - 1; ahead >= 0; ahead--) {
+    at = indexById(source, settled[ahead] ? settled[ahead].id : "")
+    if (at >= 0) return source.slice(0, at + 1).concat([row], source.slice(at + 1))
+  }
+  var held = pos >= 0 ? pos : (Number(index) || 0)
   var clamped = Math.max(0, Math.min(held, source.length))
   return source.slice(0, clamped).concat([row], source.slice(clamped))
+}
+
+// ----------------------------------------------------------------- intents
+//
+// An optimistic edit is an intent: what a summary should say if the server
+// agrees. Edits are taken at the keystroke, so one row can carry several
+// before the first is answered, and the answer to one must not undo the
+// others. Each summary an edit touched — the row, a member the rail draws,
+// the reader's copy — keeps its intents in the order they were taken, each
+// with the summary as it stood before it and the function that made the edit.
+//
+// A success drops its intent and nothing else: the summary the later ones
+// started from already holds it. A failure drops its intent and replays the
+// later ones from the state the failed one started from, so what stays on
+// screen is exactly the edits still waiting for an answer — a star that
+// failed comes off, and the read taken a keystroke later stays.
+
+function withoutIntent(entries, token) {
+  var list = Array.isArray(entries) ? entries : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i] || list[i].token === token) continue
+    out.push(list[i])
+  }
+  return out
+}
+
+// The intents left after `token` failed, rebased, and the summary they add up
+// to. Null when no such intent is held.
+function rebaseIntents(entries, token) {
+  var list = Array.isArray(entries) ? entries : []
+  var at = -1
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].token === token) { at = i; break }
+  }
+  if (at < 0) return null
+  var out = list.slice(0, at)
+  var summary = list[at].before
+  for (var j = at + 1; j < list.length; j++) {
+    var entry = {}
+    for (var key in list[j]) entry[key] = list[j][key]
+    entry.before = summary
+    summary = typeof entry.apply === "function" ? entry.apply(summary) : summary
+    out.push(entry)
+  }
+  return { entries: out, summary: summary }
+}
+
+// The held intents with one more, by the id of the summary it changed.
+function intentsWith(intents, id, entry) {
+  var all = {}
+  for (var key in intents) all[key] = intents[key]
+  all[id] = (all[id] || []).concat([entry])
+  return all
+}
+
+// The held intents after `token` on `id` is answered, and what that answer
+// leaves: a success drops the intent; a failure replays the rest. `fallback`
+// is the summary when nothing was held for this id.
+function intentsSettled(intents, id, token, failed, fallback) {
+  var all = {}
+  for (var key in intents) all[key] = intents[key]
+  var held = all[id] || []
+  var outcome = failed ? rebaseIntents(held, token) : null
+  if (!outcome) outcome = { entries: withoutIntent(held, token), summary: fallback }
+  if (outcome.entries.length === 0) delete all[id]
+  else all[id] = outcome.entries
+  return { intents: all, outcome: outcome }
+}
+
+// Whether an edit still waiting has taken the row off the list, in which case
+// a failure ahead of it puts the row back nowhere.
+function anyIntentRemoved(entries) {
+  var list = Array.isArray(entries) ? entries : []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].removed === true) return true
+  }
+  return false
+}
+
+// The lists as they stood before the first edit still in flight on a query,
+// held while any is. This is the order a failed row goes back into; the list
+// the failed edit itself saw may already have been shortened by the edits
+// ahead of it.
+function settledListsHeld(lists, query, messages, previews) {
+  var all = {}
+  for (var key in lists) all[key] = lists[key]
+  var held = all[query]
+  all[query] = {
+    messages: held ? held.messages : (Array.isArray(messages) ? messages.slice() : []),
+    previews: held ? held.previews : (Array.isArray(previews) ? previews.slice() : []),
+    pending: (held ? held.pending : 0) + 1
+  }
+  return all
+}
+
+function settledListsReleased(lists, query) {
+  var all = {}
+  for (var key in lists) all[key] = lists[key]
+  var held = all[query]
+  if (!held) return all
+  if (held.pending <= 1) delete all[query]
+  else all[query] = { messages: held.messages, previews: held.previews, pending: held.pending - 1 }
+  return all
+}
+
+// The preview list after a failed edit: the row back in, where the settled
+// order says, if it should still be there; out if it should not.
+function previewAfterRestore(list, row, present, order, index) {
+  var source = Array.isArray(list) ? list : []
+  var at = indexById(source, row ? row.id : "")
+  if (present) return at >= 0 ? replaceById(source, row) : restoreRow(source, row, order, index)
+  return at >= 0 ? removeById(source, row.id) : source
 }
 
 function replaceById(list, summary) {

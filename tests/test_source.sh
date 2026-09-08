@@ -725,7 +725,7 @@ grep -q 'if (!service.act(acted, action)) return false' App.qml \
 awk '
   /function act\(/ { in_act = 1 }
   in_act && /if \(removed\) messages = Model\.removeById\(messages, rowId\)/ { moved = 1 }
-  in_act && /if \(slotTaken\) queueAction\(messageId, action, actionQuery, quiet === true, oneMessage, dispatch\)/ { exit !moved }
+  in_act && /if \(slotTaken\) queueAction\(messageId, action, actionQuery, quiet === true, oneMessage, dispatch, discard\)/ { exit !moved }
   END { exit !moved }
 ' account/MailAccount.qml \
   || fail "an action taken while one is pending must move its row before its send waits"
