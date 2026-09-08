@@ -580,11 +580,13 @@ assert.strictEqual(html.sanitize("<p style=\"display:&#110;one\">secret</p><p>re
   "<p>real</p>")
 // CSS escapes and comments are the same smuggle after entities are gone.
 // A hex escape is at most six digits; the space form is the other spelling.
-for (const hidden of ["\\000075rl", "\\75 rl", "url/**/"]) {
-  const out = html.sanitize("<div style=\"background-image:" + hidden
-    + "(https://x.example.com/a.png)\">t</div>", { keepColors: true }).html
-  assert.ok(out.indexOf("x.example.com") < 0,
-    hidden + " reached the renderer: " + out)
+for (const hidden of ["\\000075rl", "\\75 rl", "url/**/", "\\\\75rl", "url/\\*\\*/", "url/\\2a\\2a/"]) {
+  for (const options of [{}, { keepColors: true }]) {
+    const out = html.sanitize("<div style=\"background-image:" + hidden
+      + "(https://x.example.com/a.png)\">t</div>", options).html
+    assert.ok(out.indexOf("x.example.com") < 0,
+      hidden + " reached the renderer " + JSON.stringify(options) + ": " + out)
+  }
 }
 // Duplicate src: only the first is judged, so the second must not survive.
 assert.ok(html.sanitize(

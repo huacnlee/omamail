@@ -745,7 +745,7 @@ function cssUnescape(text) {
     }
     if (hex !== "") {
       out += String.fromCharCode(parseInt(hex, 16))
-      if (input.charAt(j) === " ") j++
+      if (/[\t\n\r\f ]/.test(input.charAt(j))) j++
       i = j - 1
       continue
     }
@@ -755,10 +755,22 @@ function cssUnescape(text) {
   return out
 }
 
+function resolvedStyle(style) {
+  var current = String(style === undefined || style === null ? "" : style)
+  var previous = ""
+  var n = 0
+  while (current !== previous && n < 8) {
+    previous = current
+    current = cssUnescape(stripCssComments(current))
+    n++
+  }
+  return current
+}
+
 function splitDeclarations(style) {
   var text = String(style === undefined || style === null ? "" : style)
   if (text.indexOf("&") >= 0) text = decodeReferences(decodeReferences(text))
-  text = cssUnescape(stripCssComments(text))
+  text = resolvedStyle(text)
   var out = []
   var current = ""
   var quote = ""
@@ -898,7 +910,8 @@ function stripColorsFrom(node) {
 // policy lives.
 function stripStyleUrlsFrom(node) {
   rewriteStyle(node, function(declaration) {
-    return /url\s*\(/i.test(declaration.value) ? null : declaration
+    return /url/i.test(declaration.value) || declaration.value.indexOf("\\") >= 0
+      ? null : declaration
   })
 }
 
@@ -1099,7 +1112,7 @@ function cleanAttributes(node, keepColors, declarations) {
     if (uncentre && declaration.name === "text-align" && CENTRED.test(declaration.value)) continue
     // No test for a reference here: `splitDeclarations` has already taken them
     // out, so this reads the same value Qt would.
-    if (/url\s*\(/i.test(declaration.value)) continue
+    if (/url/i.test(declaration.value) || declaration.value.indexOf("\\") >= 0) continue
     survivors.push(declaration)
   }
   setStyle(node, survivors)
