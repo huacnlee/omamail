@@ -745,6 +745,28 @@ Item {
     return handle
   }
 
+  // The folder list, changed. No mailbox is selected for these — the URL is
+  // the server alone — and the cached listing is dropped so the next read
+  // sees the server's answer rather than this client's memory of it.
+  function createLabel(name, callback) {
+    return changeFolders([Imap.createCommand(name)], callback)
+  }
+
+  function renameLabel(id, name, callback) {
+    return changeFolders([Imap.renameCommand(id, name)], callback)
+  }
+
+  function deleteLabel(id, callback) {
+    return changeFolders([Imap.deleteCommand(id)], callback)
+  }
+
+  function changeFolders(commands, callback) {
+    return root.run("", commands, function(text, error) {
+      if (!error) root.foldersLoaded = false
+      if (typeof callback === "function") callback(null, error)
+    })
+  }
+
   // One id or a list of them, the way every other verb here already takes one.
   // A row that stands for a conversation is trashed as its members, and the
   // list arrives here flat — `applyPlan` groups by folder either way, so a
@@ -878,6 +900,35 @@ Item {
           if (handle.aborted || typeof callback !== "function") return
           callback(Imap.draftSaveResult(replaceError), "")
         }, handle)
+      }, handle)
+    })
+    return handle
+  }
+
+  // The draft a sent message was opened from, taken away with the same
+  // commands a save uses to remove the copy it replaced.
+  function deleteDraft(messageId, callback) {
+    var handle = newHandle()
+    ensureFolders(function(folderError) {
+      if (handle.aborted) return
+      if (folderError) {
+        if (typeof callback === "function") callback(null, folderError)
+        return
+      }
+      var groups = Imap.groupByFolder([String(messageId || "")])
+      if (groups.length === 0) {
+        if (typeof callback === "function") callback(null, "")
+        return
+      }
+      var folder = groups[0].folder
+      var plan = Imap.draftReplacementPlan(String(messageId || ""), folder)
+      if (plan.commands.length === 0) {
+        if (typeof callback === "function") callback(null, plan.warning)
+        return
+      }
+      root.run(folder, plan.commands, function(text, error) {
+        if (handle.aborted) return
+        if (typeof callback === "function") callback(null, error)
       }, handle)
     })
     return handle

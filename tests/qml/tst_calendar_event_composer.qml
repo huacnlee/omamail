@@ -13,13 +13,19 @@ Item {
     property int createCalls: 0
     property int updateCalls: 0
     property string accountId: ""
+    property bool composerHeld: false
     property var writableSourceGroups: [{
       id: "google:me@example.com", providerLabel: "Google", accountLabel: "me@example.com",
       calendars: [{ id: "google:me@example.com", name: "me@example.com", colorKey: "accent" }]
+    }, {
+      id: "account:imap:bob@example.com", providerLabel: "CalDAV", accountLabel: "bob@example.com",
+      calendars: [{ id: "caldav:bob-home", name: "Home", colorKey: "accent" }]
     }]
 
     signal eventCreated(bool ok, string error)
     signal eventUpdated(bool ok, string error)
+    signal composeRequested(var prefill)
+    signal composeEnded()
 
     function createEvent(_sourceId, _fields) {
       if (creatingEvent || eventWriting) return false
@@ -59,6 +65,44 @@ Item {
       eventController.updateCalls = 0
       composer.close()
       composer.writePending = false
+    }
+
+    // A suggestion from a message opens the form filled in, on the
+    // calendar the reading mailbox prefers, with nothing written yet.
+    function test_begin_with_fills_the_fields_and_writes_nothing() {
+      var start = new Date(2026, 8, 12, 19, 0).getTime()
+      eventController.composeRequested({ title: "Dinner with Bob", startMs: start, endMs: start + 7200000,
+        location: "Luigi's", description: "Table for four" })
+      compare(composer.opened, true)
+      compare(composer.titleText(), "Dinner with Bob")
+      compare(composer.whenText(), "2026-09-12 19:00 21:00")
+      compare(composer.locationText(), "Luigi's")
+      compare(composer.notesText(), "Table for four")
+      compare(eventController.createCalls, 0, "nothing is written until the owner says so")
+      composer.submit()
+      compare(eventController.createCalls, 1)
+    }
+
+    // A form the owner is in the middle of is not replaced by a suggestion;
+    // an empty one is. The suggestion's own mailbox chooses the calendar.
+    function test_a_suggestion_does_not_clobber_a_form_in_use() {
+      composer.beginAt(new Date(2026, 7, 25, 9, 0).getTime())
+      compare(composer.pristine, true)
+      compare(eventController.composerHeld, false)
+      compare(composer.beginWith({ title: "Dinner", startMs: new Date(2026, 8, 12, 19, 0).getTime(),
+        endMs: new Date(2026, 8, 12, 20, 0).getTime(), accountId: "imap:bob@example.com" }), true,
+        "an empty form gives way")
+      compare(composer.titleText(), "Dinner")
+      compare(composer.selectedSourceId, "caldav:bob-home", "on the mailbox's own calendar")
+      compare(eventController.composerHeld, true, "and now the form is in use")
+      compare(composer.beginWith({ title: "Other", startMs: new Date(2026, 8, 13, 19, 0).getTime(),
+        endMs: new Date(2026, 8, 13, 20, 0).getTime() }), false, "a second suggestion does not replace it")
+      compare(composer.titleText(), "Dinner")
+      var ended = 0
+      eventController.composeEnded.connect(function() { ended++ })
+      composer.close()
+      compare(ended, 1, "closing says so")
+      compare(eventController.composerHeld, false)
     }
 
     function test_old_update_completion_does_not_close_a_new_create_form() {

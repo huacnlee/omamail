@@ -308,6 +308,52 @@ Item {
       compare(mailService.count("discard"), 1, "and only that once")
     }
 
+    // Settings opens over Drafts, whether a draft is being previewed or the
+    // list is showing, and stays open: nothing in the draft path resets the
+    // stack under it.
+    function test_settings_opens_over_the_drafts_folder() {
+      mailService.mailboxKey = "drafts"
+      app.cursorId = "draft-7"
+      app.openMessage("draft-7")
+      compare(app.currentView, "reader")
+      app.openSettings()
+      wait(30)
+      compare(app.page, "settings", "settings over a previewed draft")
+      compare(app.showSettings, true)
+      app.back()
+      wait(30)
+      compare(app.currentView, "reader")
+      app.backToList()
+      app.openSettings()
+      wait(30)
+      compare(app.page, "settings", "settings over the drafts list")
+      app.back()
+      mailService.mailboxKey = "inbox"
+    }
+
+    // The menu's Settings row goes where the key goes. The row is activated
+    // rather than clicked: the runner delivers no press into a popup's
+    // overlay, so a click here would prove nothing either way.
+    function test_the_menu_settings_row_opens_settings() {
+      mailService.mailboxKey = "drafts"
+      var menu = named(app, "app-menu")
+      verify(menu, "the app menu is there")
+      menu.openAt(40, 40)
+      wait(60)
+      verify(menu.opened)
+      var row = null
+      for (var i = 0; i < menu.menuRows.length; i++)
+        if (menu.menuRows[i].objectName === "app-menu-settings") row = menu.menuRows[i]
+      verify(row && row.visible, "the Settings row is drawn")
+      row.activated()
+      wait(60)
+      compare(menu.opened, false, "the menu closed")
+      compare(app.page, "settings", "and Settings opened")
+      compare(mailService.mailboxKey, "drafts", "the mailbox was left alone")
+      app.back()
+      mailService.mailboxKey = "inbox"
+    }
+
     function test_a_draft_over_the_reader_returns_to_the_reader() {
       app.openMessage("message-1")
       compare(kinds(), "list,reader")

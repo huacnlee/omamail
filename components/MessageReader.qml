@@ -52,6 +52,14 @@ Item {
   signal composeRequested(string mode)
   signal mailtoRequested(string url)
   signal actionRequested(string action)
+  // A right-click on the From line or the To line: the addresses on it, and
+  // where the menu goes. What is done with them is the window's decision.
+  signal addressMenuRequested(var addresses, real sceneX, real sceneY)
+  // Whether the agent popup is up for this message, and whether a job is
+  // running on it — passed down like every other fact the reader draws.
+  property bool agentOpen: false
+  property bool agentWorking: false
+  property bool agentAttention: false
 
   // ------------------------------------------------------- the conversation
 
@@ -338,6 +346,7 @@ Item {
       }
 
       Text {
+        id: fromLine
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
@@ -348,9 +357,20 @@ Item {
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideRight
         horizontalAlignment: root.headerAlignment
+
+        TapHandler {
+          acceptedButtons: Qt.RightButton
+          onTapped: function(eventPoint) {
+            var scene = fromLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
+            root.addressMenuRequested(root.summary ? [root.summary.from] : [], scene.x, scene.y)
+          }
+        }
       }
 
+      // Everyone the message went to — To, Cc and Bcc, which a sent message
+      // carries — so a right-click on the line can name any of them.
       Text {
+        id: toLine
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
@@ -361,6 +381,16 @@ Item {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
         horizontalAlignment: root.headerAlignment
+
+        TapHandler {
+          acceptedButtons: Qt.RightButton
+          onTapped: function(eventPoint) {
+            if (!root.summary) return
+            var all = (root.summary.to || []).concat(root.summary.cc || [], root.summary.bcc || [])
+            var scene = toLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
+            root.addressMenuRequested(all, scene.x, scene.y)
+          }
+        }
       }
     }
   }
@@ -560,12 +590,32 @@ Item {
       onOpenRequested: function(url) { Qt.openUrlExternally(url) }
     }
 
+    // What the agent found in the message, if the owner asked it to look:
+    // a card per event, with the calendar's composer one press away.
+    EventSuggestionCard {
+      id: suggestionCard
+      objectName: "eventSuggestions"
+      x: root.bodyInset
+      y: inviteCard.visible ? inviteCard.y + inviteCard.height + Style.space(14) : Style.space(24)
+      width: root.bodyWidth
+      suggestions: root.service && root.service.eventSuggestions ? root.service.eventSuggestions : []
+      textColor: root.textColor
+      accentColor: root.accentColor
+      dimColor: root.dimColor
+      dimmerColor: root.dimmerColor
+      panelFontFamily: root.panelFontFamily
+      onAddRequested: function(suggestion) { if (root.service) root.service.addSuggestedEvent(suggestion) }
+      onDismissRequested: function(key) { if (root.service) root.service.dismissSuggestion(key) }
+    }
+
     TextEdit {
       id: bodyText
       x: root.bodyInset + root.bodyOffset
-      y: inviteCard.visible
-        ? inviteCard.y + inviteCard.height + Style.space(14)
-        : Style.space(24)
+      y: suggestionCard.visible
+        ? suggestionCard.y + suggestionCard.height + Style.space(14)
+        : (inviteCard.visible
+          ? inviteCard.y + inviteCard.height + Style.space(14)
+          : Style.space(24))
       width: root.preferredBodyWidth
       readOnly: true
       selectByMouse: true
@@ -821,6 +871,23 @@ Item {
           iconName: "trash"; tooltipText: "Move to trash · d"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("trash")
+        }
+        // The agent, only where one is configured: a button that could not
+        // act is the button the capability rule exists to keep off the panel.
+        // Lit while its popup is up, like every trigger, and lit in the accent
+        // while a job is running so the reader says so without being asked.
+        IconButton {
+          id: agentButton
+          objectName: "reader-agent-button"
+          x: trashButton.x + trashButton.width + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
+          visible: !!root.service && root.service.hasAgent
+          iconName: "agent"; tooltipText: "Ask the agent · Alt+G"
+          foreground: root.agentWorking ? root.accentColor : root.dimColor
+          hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          selected: root.agentOpen
+          attention: root.agentAttention
+          onClicked: root.actionRequested("agent")
         }
 
       }

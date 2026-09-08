@@ -21,11 +21,16 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property bool agentSelected: false
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
   signal folderToggled(string path)
+  // A right-click on a label row: the label's id ("" for an ancestor no label
+  // names), its path, and where the menu goes.
+  signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   signal calendarRequested()
+  signal agentRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -123,12 +128,18 @@ Item {
           // label is not written in the Latin alphabet — a Chinese label would
           // put a single hanzi in a 16px slot, which is neither an icon nor a
           // readable name. The tooltip carries the name instead.
-          icon: "label"
+          icon: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0 ? "eye" : "label"
           depth: modelData.depth
           foldable: modelData.hasChildren
           expanded: modelData.expanded
           selectable: modelData.selectable
           fullPath: modelData.path
+          monitored: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0
+          onMenuRequested: function(sceneX, sceneY) {
+            root.labelMenuRequested(modelData.selectable ? modelData.id : "", modelData.path, sceneX, sceneY)
+          }
           slotNumber: modelData.selectable ? Model.slotNumberOf(root.slots, "label", modelData.id) : 0
           count: modelData.unread
           selected: modelData.selectable && !root.calendarSelected && !!root.service
@@ -160,6 +171,17 @@ Item {
       onActivated: root.calendarRequested()
     }
 
+    // Only where an agent is set: the pane with no agent is a page saying so.
+    Entry {
+      x: Style.space(6)
+      visible: !!root.service && root.service.hasAgent === true
+      label: "Agent"
+      icon: "agent"
+      selected: root.agentSelected
+      attention: !!root.service && root.service.agentAttention === true
+      onActivated: root.agentRequested()
+    }
+
     Item {
       width: parent.width
       height: Style.space(6)
@@ -186,6 +208,12 @@ Item {
     property string fullPath: ""
     signal activated()
     signal foldRequested()
+    signal menuRequested(real sceneX, real sceneY)
+    // Watched for new mail: the row keeps its count in the accent even while
+    // it is not the one open, and the glyph says so.
+    property bool monitored: false
+    // The agent wants the owner: the glyph breathes in the accent.
+    property bool attention: false
 
     // The badge names the key, not the position: the tenth row is opened by
     // Alt+0, so it says 0. A row past the tenth has no key and no badge.
@@ -198,6 +226,27 @@ Item {
     color: entry.selected
       ? Style.selectedFillFor(root.textColor, root.accentColor)
       : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+
+    Rectangle {
+      id: entryHalo
+      anchors.centerIn: glyph
+      width: glyph.width + Style.space(10)
+      height: width
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.18)
+      border.width: Style.normalBorderWidth
+      border.color: root.accentColor
+      visible: entry.attention
+      opacity: 0
+
+      SequentialAnimation on opacity {
+        running: entry.attention
+        loops: Animation.Infinite
+        NumberAnimation { from: 0.15; to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 1.0; to: 0.15; duration: 900; easing.type: Easing.InOutSine }
+        onRunningChanged: if (!running) entryHalo.opacity = 0
+      }
+    }
 
     ActionIcon {
       id: glyph
@@ -316,6 +365,13 @@ Item {
         if (fold.visible && at.x >= fold.x && at.x < fold.x + fold.width
             && at.y >= fold.y && at.y < fold.y + fold.height) return
         entry.activated()
+      }
+    }
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      onTapped: {
+        var scene = entry.mapToGlobal(0, entry.height)
+        entry.menuRequested(scene.x, scene.y)
       }
     }
 

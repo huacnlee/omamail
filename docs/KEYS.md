@@ -30,6 +30,7 @@ readonly property string keyContext:
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
+  : root.agentVisible ? "agent"
   : root.currentView === "reader" ? "reader"
   : "list"
 ```
@@ -42,6 +43,7 @@ readonly property string keyContext:
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `agent` | The agent pane, an ask being typed | `Escape`, and the modified keys |
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
@@ -87,7 +89,7 @@ used to exist, and they had.
 |---|---|---|---|
 | `cursorDown` | `j`, `Down` | mail | Move down |
 | `cursorUp` | `k`, `Up` | mail | Move up |
-| `open` | `Return`, `o` | mail | Open the selected message |
+| `open` | `Return`, `Enter`, `o` | mail | Open the selected message |
 | `backToList` | `u` | reader | Back to the list |
 | `nextMember` | `n` | reader | Next message in the conversation |
 | `previousMember` | `p` | reader | Previous message in the conversation |
@@ -112,15 +114,17 @@ used to exist, and they had.
 | `calendarToday` | `t` | calendar | Go to today |
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
-| `send` | `Ctrl+Return` | compose | Send |
+| `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
+| `askAgent` | `Alt+G` | mail | Ask the agent about the message |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
-| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
-| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar+agent | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar+agent | Go to calendar |
+| `agentView` | `Ctrl+Shift+G` | mail+calendar+agent | Go to the agent pane |
 | `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
@@ -134,7 +138,7 @@ used to exist, and they had.
 The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
-In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
+In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with what was written in it; a click previews it, as in every other mailbox. Leaving the composer saves the draft back over the one it came from; sending it takes that draft away. In every other mailbox, `c` starts a new message.
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 

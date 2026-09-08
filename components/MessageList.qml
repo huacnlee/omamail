@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "../account/Unified.js" as Unified
+import "../agent/Agent.js" as Agent
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
@@ -21,6 +22,7 @@ Column {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  required property color urgentColor
   required property string panelFontFamily
   property string cursorId: ""
   // The rows ticked for a bulk action, by id. Held above the list, like the
@@ -31,6 +33,7 @@ Column {
   signal messageActivated(string id)
   signal checkToggled(string id)
   signal checkRangeRequested(string id)
+  signal agentRequested(string id, real sceneX, real sceneY)
   // A row's own star, archive and trash buttons. Routed up rather than
   // straight to the service so a ticked row's button means the selection.
   signal rowActionRequested(string id, string action)
@@ -62,7 +65,11 @@ Column {
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
+      urgentColor: root.urgentColor
       panelFontFamily: root.panelFontFamily
+      agentState: Agent.glyphState(root.service.agentJobs[modelData.id])
+      agentProgress: Agent.progressText(root.service.agentJobs[modelData.id])
+      agentAttention: root.service.agentAttentionByMessage[modelData.id] === true
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
       checked: root.checkedIds.indexOf(modelData.id) >= 0
@@ -74,6 +81,7 @@ Column {
       onActivated: root.messageActivated(modelData.id)
       onCheckToggled: root.checkToggled(modelData.id)
       onCheckRangeRequested: root.checkRangeRequested(modelData.id)
+      onAgentRequested: function(sceneX, sceneY) { root.agentRequested(modelData.id, sceneX, sceneY) }
       onStarToggled: root.rowActionRequested(modelData.id, "star")
       onArchiveRequested: root.rowActionRequested(modelData.id, "archive")
       onTrashRequested: root.rowActionRequested(modelData.id, "trash")

@@ -196,6 +196,13 @@ function makeAccount(account) {
     jmap: makeJmapSettings(raw.jmap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
+    // The signature as markup, imported from a file and rebuilt by
+    // `Signature.js` before it is stored: never the file's own bytes. Sent as
+    // the HTML alternative under the plain signature above.
+    signatureHtml: trimmed(raw.signatureHtml),
+    // The labels watched for new mail, by id. A fact about the mailbox, so
+    // it lives beside its name rather than in the window's file.
+    monitored: idList(raw.monitored),
     // Whether this row is the setup form's working state rather than a
     // mailbox. It used to be inferred from the id being empty, and that read
     // a mailbox whose address had been corrupted as a draft and dropped it at
@@ -469,6 +476,54 @@ function discardDraftAt(list, index) {
 // Empty is not a name and clears it, which is what puts the address back:
 // `label()` falls through to the local part, so there is no state in which a
 // mailbox has nothing to be called.
+// What to call this mailbox.
+//
+// Two of these can differ only in their domain, and be elided to the same
+// handful of characters in a list, so a name is the one thing that reliably
+// tells them apart at a glance. The field has been on an account entry and
+// preferred by `label()` since accounts were a list; nothing ever offered a
+// way to set it.
+//
+// Empty is not a name and clears it, which is what puts the address back:
+// `label()` falls through to the local part, so there is no state in which a
+// mailbox has nothing to be called.
+function idList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = trimmed(list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
+// The watched list replaced whole: what a rename or a move leaves it as,
+// once the ids it held have followed the folders they named.
+function setMonitored(list, id, labelIds) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  entry.monitored = idList(labelIds)
+  next.accounts[at] = entry
+  return next
+}
+
+// A label watched, or no longer: the id toggled in the account's list.
+function toggleMonitored(list, id, labelId) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  var key = trimmed(labelId)
+  if (key === "") return next
+  var index = entry.monitored.indexOf(key)
+  if (index >= 0) entry.monitored.splice(index, 1)
+  else entry.monitored.push(key)
+  next.accounts[at] = entry
+  return next
+}
+
 function setLabel(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)
@@ -490,6 +545,25 @@ function setLabel(list, id, text) {
 // Stored as typed, with no separator added. A client that inserts "-- " turns
 // every signature into two decisions — what it says, and whether the line it
 // grew is wanted — and the user who wants one can type it.
+// The sign-off belongs to the mailbox rather than to the window. Two accounts
+// are two identities, and one signature under both is wrong for whichever it
+// was not written for — so it sits beside the label, which is the other thing
+// here the user chose and the server did not. Nothing about it is secret; the
+// keyring holds what is.
+//
+// Stored as typed, with no separator added. A client that inserts "-- " turns
+// every signature into two decisions — what it says, and whether the line it
+// grew is wanted — and the user who wants one can type it.
+function setSignatureHtml(list, id, html) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  entry.signatureHtml = trimmed(html)
+  next.accounts[at] = entry
+  return next
+}
+
 function setSignature(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)

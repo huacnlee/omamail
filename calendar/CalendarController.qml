@@ -117,6 +117,14 @@ Item {
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
   signal eventCreated(bool ok, string error)
+  // Somebody wants the composer open with these fields — the reader's
+  // suggested event, say. The composer listens; the controller only relays.
+  signal composeRequested(var prefill)
+  // Whether the composer is open on something the owner has typed or is
+  // editing, which a request to open it with other fields must not clobber;
+  // and the word that it closed, written or not.
+  property bool composerHeld: false
+  signal composeEnded()
   signal eventUpdated(bool ok, string error)
   signal eventDeleted(bool ok, string error)
 

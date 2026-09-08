@@ -15,6 +15,7 @@ Rectangle {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  property color urgentColor: accentColor
   required property string panelFontFamily
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
@@ -32,6 +33,13 @@ Rectangle {
   // Ticked for a bulk action. Not `selected`: that is the message the reader
   // shows, and the two are different things for the same reason the cursor is.
   property bool checked: false
+  // What the agent is doing with this message, if anything: "", "running",
+  // "question", "done", "failed" or "cancelled". State, so it shows whether
+  // or not the row is hot, like the star.
+  property string agentState: ""
+  // The agent's last line while it works on this message, for the tooltip.
+  property string agentProgress: ""
+  property bool agentAttention: false
   property bool selectionActive: false
   property bool ctrlHeld: false
   readonly property bool selectionMode: selectionActive || checked || ctrlHeld
@@ -43,6 +51,7 @@ Rectangle {
   signal checkToggled()
   signal checkRangeRequested()
   signal starToggled()
+  signal agentRequested(real sceneX, real sceneY)
   signal archiveRequested()
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
@@ -269,7 +278,32 @@ Rectangle {
     anchors.rightMargin: Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(1)
-    visible: root.hot || root.summary.starred || root.selectionMode
+    visible: root.hot || root.summary.starred || root.selectionMode || root.agentState !== ""
+
+    // The agent's glyph: a question waiting is the one state that asks for
+    // the eye, so it is the urgent colour; running is the accent; the rest
+    // are quiet. Clicking opens the popup on this message.
+    IconButton {
+      objectName: "row-agent"
+      visible: root.agentState !== ""
+      iconName: "agent"
+      tooltipText: root.agentState === "running"
+        ? (root.agentProgress !== "" ? root.agentProgress : "The agent is working on this")
+        : root.agentState === "question" ? "The agent has a question"
+        : root.agentState === "failed" ? "The agent failed on this"
+        : root.agentState === "cancelled" ? "Agent actions were cancelled" : "The agent finished with this"
+      foreground: root.agentState === "question" ? root.urgentColor
+        : (root.agentState === "running" ? root.accentColor : root.dimColor)
+      hoverColor: root.textColor
+      iconSize: Style.font.iconSmall
+      size: Style.space(24)
+      fontFamily: root.panelFontFamily
+      attention: root.agentAttention
+      onClicked: {
+        var scene = mapToGlobal(0, height)
+        root.agentRequested(scene.x, scene.y)
+      }
+    }
 
     IconButton {
       visible: !root.selectionMode

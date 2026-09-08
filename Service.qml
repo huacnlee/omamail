@@ -4,6 +4,8 @@ import Quickshell.Io
 import qs.Commons
 import "account"
 import "calendar"
+import "agent"
+import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
@@ -63,6 +65,9 @@ Item {
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
     defaultQuery: "in:inbox",
+    agentCommand: "",
+    suggestEvents: false,
+    lookCommand: "",
     notifyNewMail: "On",
     oauthPort: 9481,
     undoSendSeconds: 10,
@@ -78,6 +83,192 @@ Item {
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  // The default agent's command line, or "" for no agent — in which case no
+  // agent button is drawn anywhere. docs/AGENT.md.
+  readonly property string agentCommand: String(settings ? settings.agentCommand || "" : "").trim()
+  readonly property bool hasAgent: Agent.hasAgent(agentCommand)
+  // Whether a message opened in the reader is handed to the agent to look
+  // for calendar events in. Off until the owner turns it on: the message
+  // text leaves the window for the agent command.
+  readonly property bool suggestEvents: !!settings && settings.suggestEvents === true
+  function setSuggestEvents(value) { persistSetting("suggestEvents", value === true) }
+  // What a look runs: the owner's own line for looks, or the default
+  // agent's preset at its cheapest model, or the default agent as it is.
+  readonly property string lookCommand: Agent.lookCommand(agentCommand, settings ? settings.lookCommand : "")
+  readonly property string lookCommandOwn: String(settings && settings.lookCommand ? settings.lookCommand : "").trim()
+  function setLookCommand(value) { persistSetting("lookCommand", String(value || "").trim()) }
+  readonly property bool agentStarting: agentRunner.starting
+  readonly property var eventSuggestions: eventSuggester.suggestions
+  function dismissSuggestion(key) { eventSuggester.dismiss(key) }
+  function addSuggestedEvent(suggestion) { return eventSuggester.compose(suggestion) }
+
+  // A look for events in the message an account is reading, started by the
+  // suggester once its gates are passed. Whose it is travels with it.
+  function startEventsJob(account, summary, text) {
+    if (!account || !summary || !hasAgent) return false
+    var id = String(summary.id || "")
+    var line = Agent.eventsPayload(summary, String(text || ""), account.accountEmail,
+      Agent.folderOf(id, account.mailboxKey, account.providerId), lookCommand, account.accountId)
+    return agentRunner.start(line)
+  }
+  // The open account's jobs by message id — another account's job about
+  // the same id is not this row's, however the id reads.
+  readonly property var agentJobs: agentRunner.byMessage
+  // Whether any job wants the owner, and which messages' jobs do: what the
+  // agent buttons pulse for. Opening a job's popup or card is what stops it.
+  readonly property bool agentAttention: agentRunner.attention
+  readonly property var agentAttentionByMessage: agentRunner.attentionByMessage
+  function acknowledgeAgentJob(jobId) { agentRunner.acknowledge(jobId) }
+  readonly property bool agentBusy: agentRunner.anyActive
+
+  function agentJobFor(messageId, accountId) {
+    var target = agentTarget(messageId, accountId)
+    return target.owner ? agentRunner.jobFor(target.id, target.owner.accountId) : null
+  }
+
+  // Which harness binaries are on PATH, so Settings can say which presets
+  // will actually run. Looked up once per service; a newly installed CLI
+  // shows up after the next shell restart, which is when PATH changes anyway.
+  property var agentToolsFound: []
+  readonly property var agentPresetOptions: Agent.presetOptions(agentToolsFound)
+
+  function findAgentTools() {
+    if (agentToolFinder.running) return
+    var names = Agent.presetBinaries()
+    var script = ""
+    for (var i = 0; i < names.length; i++) script += "command -v " + names[i] + " 2>/dev/null; "
+    agentToolFinder.command = ["/bin/sh", "-c", script]
+    agentToolFinder.running = true
+  }
+
+  // The message as the list knows it plus the text the reader has, handed to
+  // the runner on one line. The body is only there when the message is the
+  // open one; the agent can read the rest itself.
+  // Whose message an ask or a cancel is about: the account the popup was
+  // opened on, by id, or the one a unified row's id names — never simply
+  // the account open when the answer arrives, which may hold a different
+  // message under the same id. No id at all means the open account.
+  function agentOwner(accountId) {
+    var id = String(accountId || "")
+    if (id === "") return current
+    var owner = findAccount(id)
+    if (!owner && current) current.fail("That mailbox is no longer set up, so the agent was not asked")
+    return owner
+  }
+
+  // A row in the merged view carries its account in its id; a row in one
+  // mailbox does not. Either way: the account, and the id it knows.
+  function agentTarget(messageId, accountId) {
+    var split = Unified.splitUnifiedId(messageId)
+    if (split.accountId !== "") return { owner: agentOwner(split.accountId), id: split.id }
+    return { owner: agentOwner(accountId), id: String(messageId || "") }
+  }
+
+  function askAgent(messageId, prompt, accountId) {
+    if (!hasAgent) return false
+    var target = agentTarget(messageId, accountId)
+    var owner = target.owner
+    var id = target.id
+    if (!owner) return false
+    var index = Model.indexById(owner.messages, id)
+    var summary = index >= 0 ? owner.messages[index]
+      : (owner.selectedId === id ? owner.selectedMessage : null)
+    if (!summary) return false
+    var body = owner.selectedId === id && owner.selectedBody ? String(owner.selectedBody.text || "") : ""
+    var line = Agent.payload(summary, body, owner.accountEmail,
+      Agent.folderOf(id, owner.mailboxKey, owner.providerId), agentCommand, prompt, owner.accountId)
+    if (!agentRunner.start(line)) return false
+    owner.note("Asked the agent")
+    return true
+  }
+
+  // The pane's jobs and the one it is reading, forwarded so a view never
+  // reaches past `service`.
+  readonly property var agentPaneJobs: agentRunner.jobs
+  readonly property string agentShownId: agentRunner.shownId
+  readonly property string agentShownOutput: agentRunner.shownOutput
+
+  function showAgentJob(jobId) { agentRunner.show(jobId) }
+
+  // An ask across the open account, or every account. No message crosses;
+  // the agent is told the addresses and does its own reading.
+  function askAgentScope(prompt, everyAccount) {
+    if (!current || !hasAgent) return false
+    var addresses = []
+    var list = sendIdentities || []
+    for (var i = 0; i < list.length; i++) if (list[i].email) addresses.push(String(list[i].email))
+    var scope = Agent.scopeOf(everyAccount === true, current.accountEmail)
+    var line = Agent.scopePayload(prompt, scope, current.accountEmail, addresses, agentCommand, current.accountId)
+    if (!agentRunner.start(line)) return false
+    return true
+  }
+
+  // The answer to a question, or a follow-up: a new job that continues the
+  // one named, with the runner rebuilding the prompt from it.
+  function answerAgent(jobId, answer) {
+    if (!hasAgent) return false
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || String(answer || "").trim() === "") return false
+    if (!agentRunner.start(Agent.continuationPayload(job, answer, agentCommand))) return false
+    if (current) current.note("Answered the agent")
+    return true
+  }
+
+  // One job over several messages, as the list knows them.
+  function askAgentMany(ids, prompt, accountId) {
+    if (!hasAgent) return false
+    // One job is one account's: rows ticked across the merged view are
+    // handed over only when they all come from the same mailbox.
+    var list = Array.isArray(ids) ? ids : []
+    var owner = null
+    var own = []
+    for (var i = 0; i < list.length; i++) {
+      var target = agentTarget(list[i], accountId)
+      if (!target.owner) return false
+      if (owner && target.owner !== owner) {
+        owner.fail("Hand the agent messages from one mailbox at a time")
+        return false
+      }
+      owner = target.owner
+      own.push(target.id)
+    }
+    if (!owner) return false
+    var summaries = Model.summariesById(owner.messages, own)
+    if (summaries.length === 0) return false
+    var line = Agent.selectionPayload(summaries, owner.accountEmail, owner.mailboxKey, agentCommand, prompt, owner.accountId)
+    if (!agentRunner.start(line)) return false
+    owner.note("Asked the agent about " + Agent.pluralizeMessages(summaries.length))
+    return true
+  }
+
+  function forgetAgentJob(jobId) { return agentRunner.forget(jobId) }
+  function forgetFinishedAgentJobs() { return agentRunner.forgetFinished() }
+
+  // The composer's asks: the draft as it stands and what to do with it.
+  readonly property var agentDraftJobs: Agent.draftJobs(agentRunner.jobs, current ? current.accountId : "")
+
+  function askAgentDraft(fields, ask) {
+    if (!current || !hasAgent) return false
+    var line = Agent.draftPayload(fields, ask, current.accountEmail, agentCommand, current.accountId)
+    if (!agentRunner.start(line)) return false
+    return true
+  }
+
+  function cancelAgentJob(jobId) {
+    var job = agentRunner.jobFor2(jobId)
+    if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false
+    return agentRunner.cancelById(jobId)
+  }
+
+  function cancelAgent(messageId, accountId) {
+    var target = agentTarget(messageId, accountId)
+    if (!target.owner) return false
+    if (!agentRunner.cancel(target.id, target.owner.accountId)) return false
+    target.owner.note("Cancelling the agent's actions")
+    return true
+  }
+
+  function refreshAgentJobs() { agentRunner.refresh() }
   // Which way a message's own text is read: worked out from the text, or fixed
   // by the reader. The window's chrome is not affected either way — this is a
   // fact about the mail, not about the interface around it.
@@ -179,6 +370,11 @@ Item {
     persistSetting("unifiedCalendarView", value === true)
   }
 
+  // The default agent's command line, from Settings. Empty is no agent.
+  function setAgentCommand(value) {
+    persistSetting("agentCommand", String(value || "").trim())
+  }
+
   function setShowBarIcon(value) {
     persistSetting("showBarIcon", value === true)
   }
@@ -235,6 +431,10 @@ Item {
   function accountEmailFor(accountId) {
     var entry = Accounts.find(accountList, String(accountId || ""))
     return entry ? String(entry.email || "") : ""
+  }
+  readonly property string activeSignatureHtml: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry ? String(entry.signatureHtml || "") : ""
   }
   readonly property string calendarAccountId: current && String(current.accountId || "") !== ""
     ? String(current.accountId) : "__no_google_account__"
@@ -529,8 +729,42 @@ Item {
   // rather than on every keystroke, but it is also rebuilt by the write it
   // causes — so the value it hands back on the way out is routinely the one
   // already on disk, and a file round trip for it would be pure cost.
+  // The labels the open mailbox watches, and the switch for one of them.
+  readonly property var monitoredLabelIds: {
+    var entry = Accounts.find(accountList, activeAccountId)
+    return entry && Array.isArray(entry.monitored) ? entry.monitored : []
+  }
+
+  function toggleMonitored(labelId, accountId) {
+    var owner = labelOwner(accountId)
+    if (!owner) return
+    var next = Accounts.toggleMonitored(accountList, owner.accountId, labelId)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+    owner.labelActions.refreshMonitored()
+  }
+
+  // The watched ids an account's rename or move left behind, written to its
+  // entry: a watch follows the folder it named to that folder's new id.
+  function setMonitoredIds(index, ids) {
+    var account = accountAt(index)
+    if (!account) return
+    var next = Accounts.setMonitored(accountList, account.accountId, ids)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
   function setAccountLabel(id, text) {
     var next = Accounts.setLabel(accountList, id, text)
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+    accountList = next
+    saveAccounts()
+  }
+
+  function setAccountSignatureHtml(id, html) {
+    var next = Accounts.setSignatureHtml(accountList, id, html)
     if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
     accountList = next
     saveAccounts()
@@ -821,7 +1055,8 @@ Item {
         // The name as it was typed, empty when none was, so a field editing
         // it shows what is there rather than the address standing in for it.
         label: String(accounts[i].label || ""),
-        signature: String(accounts[i].signature || "")
+        signature: String(accounts[i].signature || ""),
+        signatureHtml: String(accounts[i].signatureHtml || "")
       })
     }
     return out
@@ -1372,6 +1607,61 @@ Item {
     }
     eachHost(function(host) { host.search(text) })
   }
+  readonly property bool canManageLabels: !!current && current.labelActions.canManageLabels
+
+  // A label change is dispatched to the account that owned the menu or
+  // dialog it was asked in, named by its id — not to whichever account is
+  // open when the answer arrives. A label id is a folder name on IMAP and
+  // two accounts can hold the same one, so the open account is no guide;
+  // and an account removed in the meantime gets nothing, with a word about
+  // it. No id at all means the open account, for a caller with no menu.
+  function labelOwner(accountId, mustBeReady) {
+    var id = String(accountId || "")
+    var owner = id === "" ? current : findAccount(id)
+    if (!owner) {
+      if (current) current.fail("That mailbox is no longer set up, so nothing was changed")
+      return null
+    }
+    if (mustBeReady === true && !owner.ready) {
+      owner.fail("That mailbox is signed out, so nothing was changed")
+      return null
+    }
+    return owner
+  }
+  function labelById(id, accountId) {
+    var owner = String(accountId || "") === "" ? current : findAccount(accountId)
+    return owner ? owner.labelActions.labelById(id) : null
+  }
+  function labelsOf(accountId) {
+    var owner = String(accountId || "") === "" ? current : findAccount(accountId)
+    return owner ? owner.labels : []
+  }
+  function createLabel(parentPath, leaf, accountId) {
+    var owner = labelOwner(accountId, true)
+    return owner ? owner.labelActions.createLabel(parentPath, leaf) : false
+  }
+  function renameLabel(id, leaf, accountId) {
+    var owner = labelOwner(accountId, true)
+    return owner ? owner.labelActions.renameLabel(id, leaf) : false
+  }
+  function moveLabel(id, parentPath, accountId) {
+    var owner = labelOwner(accountId, true)
+    return owner ? owner.labelActions.moveLabel(id, parentPath) : false
+  }
+  function deleteLabel(id, accountId) {
+    var owner = labelOwner(accountId, true)
+    return owner ? owner.labelActions.deleteLabel(id) : false
+  }
+
+  // An address search is built in one provider's words, so a merged list
+  // — several providers at once — is refused the way a move is.
+  function searchAddress(query, text) {
+    if (unified) {
+      fail("Searching by address needs one mailbox on screen")
+      return
+    }
+    if (current) current.search(text, query)
+  }
   // Labels belong to one service and one mailbox within it, so a unified view
   // draws none and this cannot be reached from one. `main`'s second argument
   // is kept: dropping it would have left #83's picker unable to say which
@@ -1432,7 +1722,7 @@ Item {
     // routing it was missing.
     var values = fields || ({})
     var host = sendHostFor(values)
-    return host ? host.send(withSourceDraftId(values)) : false
+    return host ? host.send(withSignatures(withSourceDraftId(values), host)) : false
   }
 
   // The mailbox a submission is sent from.
@@ -1500,6 +1790,21 @@ Item {
     }
     return null
   }
+
+  // The signatures ride with the fields rather than being read by the
+  // account: the account holds no copy of its own entry, and the window
+  // holds no signature. Both readings — text and markup — go, because the
+  // message carries both.
+  function withSignatures(fields, host) {
+    var values = {}
+    var source = fields || ({})
+    for (var key in source) values[key] = source[key]
+    var entry = Accounts.find(accountList, host ? String(host.accountId || "") : activeAccountId)
+    values.signature = entry ? String(entry.signature || "") : ""
+    values.signatureHtml = entry ? String(entry.signatureHtml || "") : ""
+    return values
+  }
+
   function saveDraft(fields, callback) {
     var values = fields || ({})
     var target = draftOwner(values)
@@ -1508,7 +1813,7 @@ Item {
       if (typeof callback === "function") callback(null, "The mailbox for this draft is unavailable")
       return null
     }
-    return host.saveDraft(withSourceDraftId(values), callback)
+    return host.saveDraft(withSignatures(withSourceDraftId(values), host), callback)
   }
   function fail(text) { if (current) current.fail(text) }
   function note(text) { if (current) current.note(text) }
@@ -1770,6 +2075,8 @@ Item {
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
       settings: root.settings
       bodyMode: root.bodyMode
+      // The labels this mailbox watches for new mail, off its own entry.
+      monitoredIds: entry ? entry.monitored : []
       // Every mailbox obeys the one answer: it is about what the reader is
       // willing to tell a sender, not about which account the mail came to.
       alwaysShowImages: root.alwaysShowImages
@@ -1786,6 +2093,7 @@ Item {
       onInboxUnreadChanged: root.recount()
       onReplySent: root.replySent()
       onReplyFailed: root.forwardReplyFailure(index)
+      onMonitoredMigrated: function(ids) { root.setMonitoredIds(index, ids) }
 
       // What a merged list is made of, and everything a merged list says
       // about itself. `recount` is not enough and is deliberately not used:
@@ -1828,6 +2136,34 @@ Item {
     interval: 200
     repeat: false
     onTriggered: root.reopenWindow()
+  }
+
+  Process {
+    id: agentToolFinder
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.agentToolsFound = Agent.foundBinaries(String(stdout.text || ""))
+  }
+
+  EventSuggester {
+    id: eventSuggester
+    service: root
+  }
+
+  AgentRunner {
+    id: agentRunner
+    pluginDir: root.pluginDir
+    // The open account owns what the rows show and cancel: an IMAP id is
+    // only unique inside one account, and two accounts can share an address.
+    accountId: root.current ? root.current.accountId : ""
+    onJobFinished: function(job) {
+      var text = Agent.finishedNote(job)
+      // On the account the job was about; the open one only for a job that
+      // named none.
+      var owner = findAccount(String(job && job.accountId || "")) || root.current
+      if (text !== "" && owner) owner.note(text)
+    }
+    onFailed: function(text) { if (root.current) root.current.fail(text) }
   }
 
   Process {
@@ -1893,6 +2229,7 @@ Item {
   }
 
   Component.onCompleted: {
+    Qt.callLater(root.findAgentTools)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
   }

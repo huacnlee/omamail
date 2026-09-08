@@ -830,3 +830,29 @@ assert.strictEqual(nothingActive.activeId, "eve@example.com")
 // Out of range is no edit.
 assert.strictEqual(frozen(accounts.replaceAt(cidActive, 3, account("x@example.com"))), beforeReplace)
 assert.strictEqual(frozen(accounts.replaceAt(cidActive, -1, account("x@example.com"))), beforeReplace)
+// Monitored labels ride with the mailbox and survive its other edits.
+{
+  const watched = accounts.toggleMonitored(named, "me@gmail.com", "Label_7")
+  deepEqual(watched.accounts[0].monitored, ["Label_7"])
+  deepEqual(accounts.toggleMonitored(watched, "me@gmail.com", "Label_7").accounts[0].monitored, [],
+    "toggling again stops watching")
+  const two = accounts.toggleMonitored(watched, "me@gmail.com", "Label_9")
+  deepEqual(two.accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.setLabel(two, "me@gmail.com", "Work").accounts[0].monitored, ["Label_7", "Label_9"],
+    "naming the mailbox keeps what it watches")
+  deepEqual(accounts.toggleMonitored(two, "nobody@example.org", "x").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.toggleMonitored(two, "me@gmail.com", "  ").accounts[0].monitored, ["Label_7", "Label_9"])
+  deepEqual(accounts.load(accounts.serialize(two)).accounts[0].monitored, ["Label_7", "Label_9"],
+    "and it is written to disk and read back")
+}
+
+
+// An HTML signature sits beside the plain one and survives its edits.
+{
+  const rich = accounts.setSignatureHtml(named, "me@gmail.com", " <p>Ada</p> ")
+  assert.strictEqual(rich.accounts[0].signatureHtml, "<p>Ada</p>")
+  assert.strictEqual(accounts.setSignature(rich, "me@gmail.com", "Ada").accounts[0].signatureHtml, "<p>Ada</p>")
+  assert.strictEqual(accounts.setSignatureHtml(rich, "me@gmail.com", "").accounts[0].signatureHtml, "")
+  assert.strictEqual(accounts.load(accounts.serialize(rich)).accounts[0].signatureHtml, "<p>Ada</p>")
+}
+

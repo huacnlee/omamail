@@ -25,6 +25,18 @@ Rectangle {
   property var editingEvent: null
   property string editingSourceId: ""
   readonly property bool editing: editingEvent !== null
+  // Nothing typed and nothing being edited: a form that can be replaced
+  // without losing anyone anything.
+  readonly property bool pristine: !editing && !writePending
+    && String(titleField.text || "") === "" && String(locationField.text || "") === ""
+    && String(notesField.text || "") === ""
+  onOpenedChanged: if (!opened && controller) controller.composeEnded()
+  Binding {
+    target: root.controller
+    property: "composerHeld"
+    value: root.opened && !root.pristine
+    when: !!root.controller
+  }
   // Set when this form's own write is in flight. A completion is answered only
   // while it is: a write the user cancelled out of — Escape, then a newer
   // edit — must not close or report into this one.
@@ -119,6 +131,43 @@ Rectangle {
   }
 
   function begin() { beginAt(0) }
+
+  // What the form holds, for a test to read without reaching into fields.
+  function titleText() { return String(titleField.text || "") }
+  function whenText() { return dateField.text + " " + startField.text + " " + endField.text }
+  function locationText() { return String(locationField.text || "") }
+  function notesText() { return String(notesField.text || "") }
+
+  // Open with fields already filled — a suggestion from a message — for the
+  // owner to look over and put on the calendar of their choice. Nothing is
+  // written until they say so, which is the point of opening here.
+  function beginWith(prefill) {
+    var fields = prefill || {}
+    // A form the owner is in the middle of is not replaced.
+    if (opened && !pristine) return false
+    beginAt(Number(fields.startMs) || 0)
+    var start = Number(fields.startMs) || 0
+    var end = Number(fields.endMs) || 0
+    if (start > 0 && end > start) endField.text = localTime(new Date(end))
+    titleField.text = String(fields.title || "")
+    locationField.text = String(fields.location || "")
+    notesField.text = String(fields.description || "")
+    // The calendar of the mailbox the message was read in, when it has
+    // one: under the merged view that is not always the open account.
+    var owner = calendarOf(String(fields.accountId || ""))
+    if (owner !== "") selectedSourceId = owner
+    return true
+  }
+
+  function calendarOf(accountId) {
+    var groups = controller ? controller.writableSourceGroups : []
+    if (!accountId || !groups) return ""
+    for (var i = 0; i < groups.length; i++) {
+      if (String(groups[i].id || "") !== "account:" + accountId) continue
+      if (groups[i].calendars && groups[i].calendars.length) return String(groups[i].calendars[0].id)
+    }
+    return ""
+  }
 
   function close() {
     opened = false
@@ -483,6 +532,7 @@ Rectangle {
     // A completion is answered only while this form's own write is in flight:
     // one the user cancelled out of belongs to no edit, and its failure is
     // already on the view's banner.
+    function onComposeRequested(prefill) { root.beginWith(prefill) }
     function onEventCreated(ok, error) {
       if (!root.writePending) return
       root.writePending = false

@@ -1356,3 +1356,97 @@ const deep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
 const alsoDeep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
 assert.strictEqual(model.sameSummaries([deep], [alsoDeep]), false,
   "the comparison stops rather than following an unbounded structure")
+
+// ------------------------------------------------------------ label names
+{
+  assert.strictEqual(model.labelLeaf("Archive/2026/Q1", "/"), "Q1")
+  assert.strictEqual(model.labelLeaf("Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelParent("Archive/2026/Q1", "/"), "Archive/2026")
+  assert.strictEqual(model.labelParent("Receipts", "/"), "")
+  assert.strictEqual(model.labelPathJoin("Archive", " 2026 ", "/"), "Archive/2026")
+  assert.strictEqual(model.labelPathJoin("", "Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelPathJoin("a", "b", "."), "a.b")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "." }), ".")
+  assert.strictEqual(model.labelDelimiter({}), "/")
+  assert.strictEqual(model.labelNameProblem("  ", "/"), "A label needs a name")
+  assert.strictEqual(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") > 0, true)
+  assert.strictEqual(model.labelNameProblem("Receipts", "/"), "")
+
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive", rawName: "Archive" },
+    { id: "Archive/2026", rawName: "Archive/2026" },
+    { id: "Archive/2026/Q1", rawName: "Archive/2026/Q1" },
+    { id: "Receipts", rawName: "Receipts" }]
+  deepEqual(model.labelMoveTargets(labels, "Archive/2026", "/").map(function (t) { return t.path }),
+    ["", "Receipts"], "not itself, not its children, not its current parent, never a system label")
+  deepEqual(model.labelMoveTargets(labels, "Receipts", "/").map(function (t) { return t.path }),
+    ["", "Archive", "Archive/2026", "Archive/2026/Q1"])
+  assert.strictEqual(model.labelMoveTargets(labels, "Receipts", "/")[0].name, "Top level")
+}
+
+assert.strictEqual(model.monitoredNote([{ name: "Receipts", delta: 3 }]), "3 new in Receipts")
+assert.strictEqual(model.monitoredNote([{ name: "A", delta: 1 }, { name: "B", delta: 4 }, { name: "C", delta: 2 }]),
+  "4 new in B, 2 new in C and 1 more")
+assert.strictEqual(model.monitoredNote([]), "")
+
+// ------------------------------------------------------------ label paths
+{
+  // A server with no hierarchy — IMAP's NIL delimiter, passed on as "" —
+  // has leaves only: nothing has a parent and nothing goes under anything.
+  assert.strictEqual(model.labelLeaf("a/b", ""), "a/b")
+  assert.strictEqual(model.labelParent("a/b", ""), "")
+  assert.strictEqual(model.labelPathJoin("", "a/b", ""), "a/b")
+  assert.strictEqual(model.labelNameProblem("a/b", ""), "", "a slash is only a slash")
+  assert.ok(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") >= 0)
+  assert.strictEqual(model.labelNestProblem("", ""), "")
+  assert.strictEqual(model.labelNestProblem("Work", "/"), "")
+  assert.ok(model.labelNestProblem("Work", "").indexOf("flat list") >= 0)
+  deepEqual(model.labelMoveTargets([{ id: "a", name: "a" }, { id: "b", name: "b" }], "a", ""),
+    [{ id: "", name: "Top level", path: "" }], "nowhere to move to but where it is")
+  assert.strictEqual(model.labelLeaf("a.b", "."), "b")
+  assert.strictEqual(model.labelParent("a.b", "."), "a")
+  assert.strictEqual(model.labelLeaf("a.b", undefined), "a.b", "no word from the provider means a slash")
+  assert.strictEqual(model.labelPathJoin("a", "b", undefined), "a/b")
+}
+
+// ------------------------------------------------------------ watched ids
+{
+  // On IMAP a folder's id is its wire name: a rename changes it, and every
+  // folder beneath it. The watch follows to the id the fresh listing gives
+  // the same path.
+  const before = [
+    { id: "Work", name: "Work", delimiter: "/" }, { id: "Work/2026", name: "Work/2026", delimiter: "/" },
+    { id: "Work/2026/Q1", name: "Work/2026/Q1", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  const after = [
+    { id: "Jobs", name: "Jobs", delimiter: "/" }, { id: "Jobs/2026", name: "Jobs/2026", delimiter: "/" },
+    { id: "Jobs/2026/Q1", name: "Jobs/2026/Q1", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Receipts", "Work/2026/Q1"], before, after, "Work", "Jobs", "/"),
+    ["Jobs", "Receipts", "Jobs/2026/Q1"])
+  deepEqual(model.migrateMonitoredIds(["Work/2026"], before, after, "Work", "Jobs", "/"), ["Jobs/2026"])
+  // A move: the same, with the new path under another parent.
+  const moved = [
+    { id: "Archive", name: "Archive", delimiter: "/" }, { id: "Archive/Work", name: "Archive/Work", delimiter: "/" },
+    { id: "Archive/Work/2026", name: "Archive/Work/2026", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work/2026", "Receipts"], before, moved, "Work", "Archive/Work", "/"),
+    ["Archive/Work/2026", "Receipts"])
+  // A watch on a folder the listing no longer has is dropped, deleted
+  // parent and children alike; the rest stay.
+  const gone = [{ id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Work/2026", "Receipts"], before, gone, "Work", "", "/"), ["Receipts"])
+  // The same array back when nothing it held was touched: Gmail keeps its
+  // ids across a rename, and a watch on a folder beside the renamed one is
+  // not a change either.
+  const same = ["Receipts"]
+  assert.strictEqual(model.migrateMonitoredIds(same, before, after, "Work", "Jobs", "/"), same)
+  const gmail = [{ id: "Label_1", name: "Work" }, { id: "Label_2", name: "Work/2026" }]
+  const gmailAfter = [{ id: "Label_1", name: "Jobs" }, { id: "Label_2", name: "Jobs/2026" }]
+  const kept = ["Label_2"]
+  assert.strictEqual(model.migrateMonitoredIds(kept, gmail, gmailAfter, "Work", "Jobs", "/"), kept)
+  // With no hierarchy only the folder itself is renamed; "Work/2026" is
+  // another folder and stays watched under its own id.
+  const flatBefore = [{ id: "Work", name: "Work", delimiter: "" }, { id: "Work/2026", name: "Work/2026", delimiter: "" }]
+  const flatAfter = [{ id: "Jobs", name: "Jobs", delimiter: "" }, { id: "Work/2026", name: "Work/2026", delimiter: "" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Work/2026"], flatBefore, flatAfter, "Work", "Jobs", ""), ["Jobs", "Work/2026"])
+  deepEqual(model.migrateMonitoredIds(null, before, after, "Work", "Jobs", "/"), [])
+}

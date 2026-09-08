@@ -49,7 +49,10 @@
       "openOnClick": "Window",
       "showBarIcon": true,
       "previewOnCursor": false,
-      "markReadDelaySec": 2
+      "markReadDelaySec": 2,
+      "agentCommand": "",
+      "suggestEvents": false,
+      "lookCommand": ""
     },
     "schema": [
       {
@@ -124,6 +127,27 @@
         "label": "Default search",
         "defaultValue": "in:inbox",
         "description": "Applies to the inbox only, and to Gmail and IMAP accounts. Gmail takes any Gmail search operator, for example `in:inbox -category:promotions`; IMAP takes IMAP SEARCH criteria. HEY accounts always open their Imbox."
+      },
+      {
+        "key": "agentCommand",
+        "type": "string",
+        "label": "Default agent",
+        "defaultValue": "",
+        "description": "A command that reads a prompt on stdin and answers on stdout, for example `claude -p` or `codex exec`. With one set, every message gains an agent button that hands the message and your question to it in the background; mail is read and written through himalaya. Leave empty for no agent."
+      },
+      {
+        "key": "suggestEvents",
+        "type": "boolean",
+        "label": "Suggest calendar events from mail",
+        "defaultValue": false,
+        "description": "With a default agent set, a message you open that mentions a date is handed to the agent, which reads it and proposes the calendar events it finds. Each shows as a card above the message with Add and Dismiss; Add opens the event composer for you to check and choose a calendar. The message text leaves this window for the agent command, once per message."
+      },
+      {
+        "key": "lookCommand",
+        "type": "string",
+        "label": "Agent for background looks",
+        "defaultValue": "",
+        "description": "The command a background look runs — the search for calendar events in a message you open. Empty runs the default agent's harness at its cheapest model with no tools, where a preset knows it (Claude Code at claude-haiku-4-5-20251001; Codex at gpt-5.1-codex-mini, read-only; Gemini at gemini-2.5-flash), or the default agent as it is."
       },
       {
         "key": "notifyNewMail",

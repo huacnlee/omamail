@@ -17,7 +17,7 @@
 // The two places a stack can start. Switching between them is `replaceRoot`,
 // never a push: the calendar is not somewhere the user went from the list, it
 // is the other thing the window is for.
-var ROOTS = ["list", "calendar"]
+var ROOTS = ["list", "calendar", "agent"]
 
 // Drawn over a page rather than instead of it. The page underneath is still
 // the page — `page` skips these, and `overlay` reports them — so the reader
@@ -27,7 +27,7 @@ var OVERLAYS = ["compose", "eventComposer", "help"]
 // Every place there is. `entry` refuses anything else and lands on the list,
 // because an unknown kind on the stack would be a screen nothing knows how
 // to draw.
-var KINDS = ["list", "calendar", "reader", "calendarDetail", "settings",
+var KINDS = ["list", "calendar", "agent", "reader", "calendarDetail", "settings",
   "picker", "setup", "compose", "eventComposer", "help"]
 
 var DEFAULT_KIND = "list"
@@ -195,8 +195,10 @@ function overlay(stack) {
 // answered wrongly, whatever the form does or does not offer.
 function rootFor(state) {
   var value = isObject(state) ? state : {}
-  if (value.anyReady === true)
-    return [entry(trimmed(value.view) === "calendar" ? "calendar" : "list")]
+  if (value.anyReady === true) {
+    var view = trimmed(value.view)
+    return [entry(view === "calendar" || view === "agent" ? view : "list")]
+  }
   if (value.hasSavedAccounts === true && value.setupUnderway === true)
     return [entry("picker"), entry("setup", { provider: trimmed(value.provider), draft: false })]
   return [entry("picker")]

@@ -50,6 +50,7 @@ function draft(value) {
     to: text(row.to),
     cc: text(row.cc),
     bcc: text(row.bcc),
+    replyTo: text(row.replyTo),
     subject: text(row.subject),
     body: text(row.body),
     // What the compose window placed in the body rather than what was typed
@@ -65,6 +66,7 @@ function draft(value) {
     inReplyTo: text(row.inReplyTo),
     ccVisible: row.ccVisible === true,
     bccVisible: row.bccVisible === true,
+    replyToVisible: row.replyToVisible === true,
     fromEmail: text(row.fromEmail),
     replyRecipients: people(row.replyRecipients),
     fromWasChosen: row.fromWasChosen === true,

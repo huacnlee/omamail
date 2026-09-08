@@ -1,7 +1,11 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../agent/Agent.js" as Agent
+import "../message/Signature.js" as Signature
+import "../message/Html.js" as Html
 
 // Where mailboxes are managed.
 //
@@ -42,11 +46,24 @@ Column {
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
+    { key: "agent", title: "Agent", y: agentHeading.y },
     { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
     { key: "calendars", title: "Calendars", y: calendarsSection.y },
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+
+  function saveAgentCommand() {
+    if (!root.service) return
+    var next = String(agentEdit.text || "").trim()
+    if (next !== root.service.agentCommand) root.service.setAgentCommand(next)
+  }
+
+  function saveLookCommand() {
+    if (!root.service) return
+    var next = String(lookEdit.text || "").trim()
+    if (next !== root.service.lookCommandOwn) root.service.setLookCommand(next)
+  }
 
   function signatureAccount(id) {
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -95,6 +112,77 @@ Column {
     var next = signatureAccount(activeId) || signatureAccounts[0]
     selectedNameAccountId = String(next.id || "")
     nameEdit.text = String(next.label || "")
+  }
+
+  // The imported markup for the selected mailbox, and the import in flight.
+  readonly property string selectedSignatureHtml: {
+    var entry = signatureAccount(selectedSignatureAccountId)
+    return entry ? String(entry.signatureHtml || "") : ""
+  }
+  property bool importing: false
+  property string importNote: ""
+  property bool importFailed: false
+  property string importStage: ""
+
+  function importSignature() {
+    if (importing || !service) return
+    importing = true
+    importNote = ""
+    importFailed = false
+    importStage = "pick"
+    signatureImporter.command = [root.attachScript, "pick"]
+    signatureImporter.running = true
+  }
+
+  function finishImport(text) {
+    var result = null
+    try { result = JSON.parse(String(text || "")) } catch (e) { result = null }
+    if (!result || result.ok !== true) {
+      var reason = result && result.error ? String(result.error) : ""
+      importing = false
+      if (reason !== "" && reason !== "cancelled") { importNote = reason; importFailed = true }
+      return
+    }
+    if (importStage === "pick") {
+      var paths = Array.isArray(result.paths) ? result.paths : []
+      if (paths.length === 0) { importing = false; return }
+      importStage = "read"
+      signatureImporter.command = [root.attachScript, "read", String(paths[0])]
+      signatureImporter.running = true
+      return
+    }
+    importing = false
+    var mime = String(result.mimeType || "").toLowerCase()
+    var name = String(result.filename || "").toLowerCase()
+    var imported
+    if (mime.indexOf("image/") === 0) {
+      imported = Signature.importImage(String(result.data || ""))
+    } else if (mime === "text/html" || mime === "application/xhtml+xml" || /\.x?html?$/.test(name)) {
+      imported = Signature.importHtml(Qt.atob(String(result.data || "")))
+    } else {
+      imported = { problem: "Choose a PNG, JPEG, GIF or WebP picture, or an HTML file" }
+    }
+    importNote = Signature.importNote(imported)
+    importFailed = String(imported.problem || "") !== ""
+    if (importFailed) return
+    service.setAccountSignatureHtml(selectedSignatureAccountId, imported.html)
+    // The words for a text-only client, unless the editor already has some.
+    if (String(imported.plain || "") !== "" && String(signatureEdit.text || "").trim() === "") {
+      signatureEdit.text = imported.plain
+      saveSignature()
+    }
+  }
+
+  readonly property string attachScript: {
+    var url = String(Qt.resolvedUrl("../scripts/attachment.sh"))
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
+  Process {
+    id: signatureImporter
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.finishImport(String(stdout.text || ""))
   }
 
   function saveSignature() {
@@ -711,6 +799,82 @@ Column {
       }
     }
 
+    // A signature from a file: a picture, or markup another tool wrote. What
+    // is imported is rebuilt by Signature.js — scripts, styles, handlers,
+    // frames, forms, remote images and unknown attributes do not survive —
+    // and the preview draws what was stored, so it is the sent thing that is
+    // shown. The words go into the plain editor above for text-only clients.
+    Row {
+      width: parent.width
+      spacing: Style.space(8)
+
+      Button {
+        objectName: "settings-signature-import"
+        text: root.importing ? "Importing" : "Import from file..."
+        tooltipText: "A PNG, JPEG, GIF or WebP picture, or an HTML file"
+        foreground: root.textColor
+        bordered: true
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        enabled: !root.importing && root.selectedSignatureAccountId !== ""
+        onClicked: root.importSignature()
+      }
+
+      Button {
+        objectName: "settings-signature-remove-html"
+        visible: root.selectedSignatureHtml !== ""
+        text: "Remove imported markup"
+        foreground: root.dimColor
+        bordered: false
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: {
+          if (root.service) root.service.setAccountSignatureHtml(root.selectedSignatureAccountId, "")
+          root.importNote = ""
+        }
+      }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.importNote !== ""
+      textFormat: Text.PlainText
+      text: root.importNote
+      color: root.importFailed ? root.urgentColor : root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Rectangle {
+      objectName: "settings-signature-preview"
+      width: parent.width
+      visible: root.selectedSignatureHtml !== ""
+      implicitHeight: Math.min(Style.space(220), signaturePreview.implicitHeight + Style.space(20))
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+      clip: true
+
+      TextEdit {
+        id: signaturePreview
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: Style.space(10)
+        readOnly: true
+        selectByMouse: false
+        wrapMode: TextEdit.Wrap
+        textFormat: TextEdit.RichText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        // The stored markup, and nothing else: the same string that is sent.
+        text: Html.documentFor(root.selectedSignatureHtml, {
+          foreground: root.textColor, background: "transparent", link: root.accentColor })
+      }
+    }
+
     Text {
       width: parent.width
       text: "Sits under a new message, and above the quoted text in a reply. "
@@ -722,6 +886,208 @@ Column {
     }
 
     Component.onDestruction: root.saveSignature()
+  }
+
+  // ----------------------------------------------------------------- agent
+
+  Text {
+    id: agentHeading
+    text: "AGENT"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  // The default agent: a command line, and nothing else. With it empty there
+  // is no agent button anywhere; docs/AGENT.md says what the command is
+  // handed and what it is expected to do.
+  Column {
+    objectName: "settings-agent-section"
+    width: parent.width
+    spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      text: "Harness"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // A starting line for each harness, and "Custom" for one of your own.
+    // Choosing one writes its command into the field below, which stays
+    // editable; an edited line reads back as Custom, honestly.
+    Dropdown {
+      objectName: "settings-agent-preset"
+      width: parent.width
+      showLabel: false
+      value: Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom"
+      options: root.service ? root.service.agentPresetOptions : Agent.presetOptions([])
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) {
+        var preset = Agent.presetById(next)
+        if (!preset || !root.service) return
+        if (preset.command === "") return
+        agentEdit.text = preset.command
+        root.saveAgentCommand()
+      }
+    }
+
+    Text {
+      id: presetNote
+      width: parent.width
+      readonly property var preset: Agent.presetById(
+        Agent.presetFor(root.service ? root.service.agentCommand : "") || "custom")
+      visible: !!preset && preset.note !== ""
+      textFormat: Text.PlainText
+      text: preset ? preset.note : ""
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Text {
+      width: parent.width
+      text: "Command"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    TextField {
+      id: agentEdit
+      objectName: "settings-agent-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "claude -p"
+      text: root.service ? root.service.agentCommand : ""
+      onActiveFocusChanged: if (!activeFocus) root.saveAgentCommand()
+      onAccepted: root.saveAgentCommand()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "Runs in the background as a systemd user unit with the prompt on "
+        + "stdin, and reads and writes mail through himalaya, so the command "
+        + "must be able to run himalaya without stopping to ask. With one set, "
+        + "every message gains an agent button and Alt+G, and the rail gains the "
+        + "agent pane. Leave it empty for no agent."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    // A look is small and frequent, so it runs at the harness's cheapest
+    // model where the preset knows one; a line typed here runs instead.
+    Text {
+      width: parent.width
+      text: "Agent for background looks"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    TextField {
+      id: lookEdit
+      objectName: "settings-look-editor"
+      width: parent.width
+      foreground: root.textColor
+      accent: root.accentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: root.service && root.service.lookCommand !== "" ? root.service.lookCommand : "the default agent"
+      text: root.service ? root.service.lookCommandOwn : ""
+      onActiveFocusChanged: if (!activeFocus) root.saveLookCommand()
+      onAccepted: root.saveLookCommand()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: "What the search for calendar events in a message you open runs. "
+        + "Empty runs the default agent's harness at its cheapest model with no "
+        + "tools, where a preset knows it — Claude Code at claude-haiku-4-5, "
+        + "Codex at gpt-5.1-codex-mini read-only, Gemini at gemini-2.5-flash — "
+        + "or the default agent as it is."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    // A look at every message opened, on the owner's behalf. Off until it
+    // is turned on, because the message text leaves the window for the
+    // agent command; the switch says in a word which way it stands.
+    Item {
+      objectName: "settings-suggest-events"
+      width: parent.width
+      implicitHeight: suggestText.implicitHeight + Style.space(12)
+
+      Column {
+        id: suggestText
+        anchors.left: parent.left
+        anchors.right: suggestState.left
+        anchors.rightMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(2)
+
+        Text {
+          width: parent.width
+          text: "Suggest calendar events from mail"
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          textFormat: Text.PlainText
+        }
+
+        Text {
+          width: parent.width
+          text: "A message you open that mentions a date is handed to the agent "
+            + "once, in the background; the events it finds show above the "
+            + "message with Add and Dismiss, and Add opens the event composer "
+            + "for you to check and choose a calendar. The message text leaves "
+            + "this window for the agent command."
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+        }
+      }
+
+      Text {
+        id: suggestState
+        objectName: "suggestEventsState"
+        anchors.right: suggestSwitch.left
+        anchors.rightMargin: Style.space(8)
+        anchors.verticalCenter: parent.verticalCenter
+        text: suggestSwitch.checked ? "On" : "Off"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      ToggleSwitch {
+        id: suggestSwitch
+        objectName: "suggestEventsSwitch"
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        checked: !!root.service && root.service.suggestEvents === true
+        foreground: root.textColor
+        accent: root.accentColor
+        onToggled: if (root.service) root.service.setSuggestEvents(!root.service.suggestEvents)
+      }
+    }
   }
 
   // ------------------------------------------------------------- mailboxes

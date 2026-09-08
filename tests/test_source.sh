@@ -125,7 +125,7 @@ grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
 grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/MailAccount.qml \
   || fail "remote images must use the public-IP-checked Python transport"
-grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
+grep -q 'command: \["python3", account.pluginDir + "/scripts/unsubscribe.py"\]' account/Unsubscribe.qml \
   || fail "one-click unsubscribe must use the public-IP-checked Python transport"
 # Redirect and DNS policy require behavioral tests, not a matching config line.
 

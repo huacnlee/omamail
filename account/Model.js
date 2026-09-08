@@ -1700,3 +1700,128 @@ function labelDelimiter(label) {
 function togglePath(paths, path) {
   return toggleId(paths, path)
 }
+
+// ------------------------------------------------------------ label names
+
+// A label's path taken apart and put together with the delimiter its
+// provider nests with: "/" for Gmail, whatever the server said for IMAP.
+// The path helpers take the delimiter `labelDelimiter` gives: a separator
+// to split on, or "" for a server with no hierarchy, where every path is a
+// leaf, nothing has a parent, and nothing can be put under anything.
+function labelLeaf(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep === "") return text
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? text : text.slice(at + sep.length)
+}
+
+function labelParent(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep === "") return ""
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? "" : text.slice(0, at)
+}
+
+function labelPathJoin(parent, leaf, delimiter) {
+  var head = String(parent || "")
+  var tail = String(leaf || "").trim()
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (head === "" || sep === "") return tail
+  return head + sep + tail
+}
+
+// Whether a name typed for a label is one the provider can take: not empty,
+// and not carrying the delimiter, which would make two labels of one.
+function labelNameProblem(name, delimiter) {
+  var text = String(name || "").trim()
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (text === "") return "A label needs a name"
+  if (sep !== "" && text.indexOf(sep) >= 0) return "A name cannot contain " + sep + "; use New sub-label to nest"
+  return ""
+}
+
+// What a server with no hierarchy says to a label asked to go under
+// another, or "" where nesting is possible.
+function labelNestProblem(parentPath, delimiter) {
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep !== "" || String(parentPath || "") === "") return ""
+  return "This server keeps its folders in one flat list, so nothing can go under " + String(parentPath)
+}
+
+// Where a label may be moved: every other label that is not beneath it, plus
+// the top level. Moving a label under its own descendant would swallow it.
+function labelMoveTargets(labels, movingPath, delimiter) {
+  var all = Array.isArray(labels) ? labels : []
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  var moving = String(movingPath || "")
+  var out = [{ id: "", name: "Top level", path: "" }]
+  // No hierarchy: the top level is the only place, and the label is there.
+  if (sep === "") return out
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var path = String(label.name || label.rawName || "")
+    if (path === "" || path === moving) continue
+    if (moving !== "" && path.indexOf(moving + sep) === 0) continue
+    if (path === labelParent(moving, sep)) continue
+    out.push({ id: String(label.id || ""), name: path, path: path })
+  }
+  return out
+}
+
+// The watched ids after a folder was renamed or moved, or deleted. An IMAP
+// folder's id is its wire name, so a rename changes the id of the folder
+// and of every folder beneath it; a watch on any of them follows to the id
+// the fresh listing gives that path. A Gmail id survives a rename and is
+// kept as it is. A watch on a folder the listing no longer has — deleted,
+// or gone with its parent — is dropped rather than polled forever. The
+// same array comes back when nothing changed, so a caller can tell.
+function migrateMonitoredIds(monitored, before, after, oldPath, newPath, delimiter) {
+  var ids = Array.isArray(monitored) ? monitored : []
+  var was = Array.isArray(before) ? before : []
+  var now = Array.isArray(after) ? after : []
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  var from = String(oldPath || "")
+  var to = String(newPath || "")
+  function pathOf(label) { return label ? String(label.name || label.rawName || "") : "" }
+  function byPath(list, path) {
+    for (var i = 0; i < list.length; i++) if (pathOf(list[i]) === path) return list[i]
+    return null
+  }
+  var out = []
+  var changed = false
+  for (var k = 0; k < ids.length; k++) {
+    var id = String(ids[k] || "")
+    if (id === "") { changed = true; continue }
+    var still = indexById(now, id)
+    var old = indexById(was, id)
+    var path = old >= 0 ? pathOf(was[old]) : ""
+    var under = from !== "" && path !== "" && (path === from || (sep !== "" && path.indexOf(from + sep) === 0))
+    if (under && to !== "") {
+      var moved = byPath(now, to + path.slice(from.length))
+      if (moved && String(moved.id || "") !== "") {
+        if (String(moved.id) !== id) changed = true
+        if (out.indexOf(String(moved.id)) < 0) out.push(String(moved.id))
+        continue
+      }
+    }
+    if (still >= 0 && !(under && to === "")) { out.push(id); continue }
+    changed = true
+  }
+  return changed ? out : ids
+}
+
+// "3 new in Receipts", or the two labels with the most, for the status line.
+function monitoredNote(grown) {
+  var list = Array.isArray(grown) ? grown.slice() : []
+  if (list.length === 0) return ""
+  list.sort(function(a, b) { return Number(b.delta || 0) - Number(a.delta || 0) })
+  var parts = []
+  for (var i = 0; i < list.length && i < 2; i++)
+    parts.push(Math.max(1, Math.floor(Number(list[i].delta) || 1)) + " new in " + String(list[i].name || ""))
+  var more = list.length - parts.length
+  return parts.join(", ") + (more > 0 ? " and " + more + " more" : "")
+}
+
