@@ -135,7 +135,9 @@ Item {
     width: Style.space(200)
     implicitHeight: rows.implicitHeight + Style.space(8)
     padding: Style.space(4)
-    modal: false
+    // Modal and undimmed; see AGENTS.md, "Popups and their triggers".
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()

@@ -37,5 +37,13 @@ Rectangle {
   }
 
   HoverHandler { id: hover }
-  TapHandler { onTapped: root.activated() }
+  // A `MouseArea` rather than a `TapHandler`, and the difference is what the
+  // press does to everything under it. A handler takes a passive grab and
+  // leaves the press to carry on down the stack, so a row in a menu drawn over
+  // the rail chose from the menu *and* activated the rail row beneath it in the
+  // same click. A `MouseArea` grabs exclusively, which ends the press here.
+  MouseArea {
+    anchors.fill: parent
+    onClicked: root.activated()
+  }
 }

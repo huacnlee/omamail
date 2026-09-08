@@ -161,6 +161,24 @@ different features and only one of them is here.
   bug this rule exists to prevent.
 - A popup that would overflow flips to the other side of its trigger, then
   clamps to the window edge, then clamps to zero. All three, in that order.
+- A popup is `modal: true` with `dim: false`. Modality is what makes a press
+  outside it end at the overlay: a non-modal popup closes on that press *and*
+  lets it through, so putting a menu away also acted on whatever the menu was
+  covering. `dim` is off because the modality is there for the grab and not for
+  a scrim — the window behind a menu does not darken.
+- A clickable row inside a popup is a `MouseArea`, and so is anything the popup
+  may be drawn over. A `TapHandler` takes a *passive* grab: it answers the
+  press and lets it carry on down, so two of them stacked one over the other
+  both fire on the same release — choosing from a menu drawn over the mailbox
+  rail chose from the menu and switched the mailbox under it. Modality does not
+  help here, because an open popup does not stop a handler beneath it from
+  answering a press; only the exclusive grab a `MouseArea` takes does.
+  `tests/qml/tst_menu_over_rail.qml` holds both halves.
+- A control can both open and close its own popup, because the press that
+  closes a modal one never reaches the control. A non-modal popup needed a
+  "closed a moment ago" timestamp to tell the two apart; there is no such
+  timestamp any more, and reintroducing one would be the second mechanism for
+  something modality already does.
 
 ## Keys and focus
 

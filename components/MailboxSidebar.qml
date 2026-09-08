@@ -257,7 +257,15 @@ Item {
     }
 
     HoverHandler { id: hover }
-    TapHandler { onTapped: entry.activated() }
+    // A `MouseArea` rather than a `TapHandler`: a handler takes a passive grab
+    // and answers a press that was never meant for it, so pressing a rail row
+    // to dismiss a menu drawn over the rail both closed the menu and switched
+    // the mailbox underneath. A `MouseArea` grabs exclusively, and the menu
+    // above it is what the press reaches.
+    MouseArea {
+      anchors.fill: parent
+      onClicked: entry.activated()
+    }
 
     // The tooltip is how the rail stays usable while collapsed, and it carries
     // the count too, which the dot can only hint at.

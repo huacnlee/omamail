@@ -82,7 +82,9 @@ Item {
     width: Math.min(Style.space(340), root.width - Style.space(24))
     implicitHeight: card.implicitHeight + Style.space(16)
     padding: Style.space(8)
-    modal: false
+    // Modal and undimmed; see AGENTS.md, "Popups and their triggers".
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
@@ -200,8 +202,9 @@ Item {
 
           HoverHandler { id: rowHover }
 
-          TapHandler {
-            onTapped: {
+          MouseArea {
+            anchors.fill: parent
+            onClicked: {
               root.cursorIndex = labelRow.index
               root.chooseCursor()
             }

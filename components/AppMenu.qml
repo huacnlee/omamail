@@ -100,7 +100,9 @@ Item {
     width: Style.space(210)
     implicitHeight: menuItems.implicitHeight + Style.space(8)
     padding: Style.space(4)
-    modal: false
+    // Modal and undimmed; see AGENTS.md, "Popups and their triggers".
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
@@ -200,8 +202,8 @@ Item {
     }
   }
 
-  // `enabled` is Item's own, and it already stops the handlers below from
-  // firing, so a disabled row only has to look disabled.
+  // `enabled` is Item's own, and a disabled item does not deliver a press to
+  // anything it contains, so a disabled row only has to look disabled.
   component MenuRow: MenuActionRow {
     width: menu.width - menu.leftPadding - menu.rightPadding
     textColor: root.textColor

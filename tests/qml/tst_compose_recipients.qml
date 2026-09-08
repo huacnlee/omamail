@@ -71,6 +71,19 @@ Item {
       return null
     }
 
+    // Popup content is not in the compose view's child tree until the popup
+    // has been opened, and the pills are named by what they say.
+    function havingText(item, wanted) {
+      if (!item) return null
+      if (item.text === wanted && item.width > 0) return item
+      var values = item.children || []
+      for (var i = 0; i < values.length; i++) {
+        var found = havingText(values[i], wanted)
+        if (found) return found
+      }
+      return null
+    }
+
     function init() {
       mailService.sendPending = false
       mailService.sending = false
@@ -283,6 +296,50 @@ Item {
       picker.contactChosen({ name: "Bob", email: "bob@example.com" }, "cc")
       compare(compose.ccVisible, true)
       compare(named(compose, "compose-cc-field").text, "Bob <bob@example.com>")
+    }
+
+    // A contact row is "+ To" over its whole width, which is why it carries a
+    // `MouseArea` — one that takes the press exclusively, so it cannot reach
+    // past the menu. That area has to stop at the pills. Filling the row
+    // covered them, and because it grabs rather than passes the press on, Cc
+    // and Bcc became unreachable: every pill added the contact to To.
+    function test_the_cc_pill_adds_to_cc_and_not_to_to() {
+      compose.begin("new", null, "", [])
+      var picker = named(compose, "compose-contacts-picker")
+      verify(picker)
+      picker.open()
+      // A popup builds and places its contents on the first open, so a press
+      // aimed at a row before that lands nowhere.
+      waitForRendering(compose)
+
+      var pill = havingText(picker.pickerContent, "+ Cc")
+      verify(pill, "the row offers a Cc pill")
+      mouseClick(pill, pill.width / 2, pill.height / 2)
+
+      compare(compose.ccVisible, true, "the Cc field is shown")
+      verify(named(compose, "compose-cc-field").text.indexOf("@") >= 0,
+        "the address went to Cc")
+      compare(named(compose, "compose-to-field").text, "",
+        "and not to To, which is what covering the pill did")
+    }
+
+    // The picker is modal, so that a press outside it closes it without also
+    // landing in the compose field underneath. Modality moves the keyboard,
+    // though, and picking an address is the middle of typing one: the field
+    // has to be ready for the next name the moment the picker goes.
+    function test_picking_leaves_the_keyboard_in_the_field() {
+      compose.begin("new", null, "", [])
+      var picker = named(compose, "compose-contacts-picker")
+      verify(picker)
+
+      picker.open()
+      verify(compose.contactsPickerOpened, "the picker is open")
+      picker.contactChosen({ name: "Alice", email: "alice@example.com" }, "to")
+      picker.close()
+
+      var field = named(compose, "compose-to-field")
+      compare(field.text, "Alice <alice@example.com>")
+      verify(field.activeFocus, "the field the address went into is the one that types")
     }
   }
 }

@@ -312,24 +312,18 @@ DropArea {
     if (typeof root.service.switchTo === "function") root.service.switchTo(accountId)
   }
 
-  // When a control opens a popup that closes on a press outside itself, the
-  // press that reaches the control has already closed it — so by the time the
-  // release becomes a click, `opened` reads false and the toggle opens it
-  // straight back up. The control could never be used to put its own popup
-  // away, and it flickers instead. The moment it closed is what tells "the
-  // user wants this open" apart from "this just closed under the same press".
-  property double fromMenuClosedAt: 0
-
-  function reopeningAfterOutsidePress(closedAt) {
-    return Date.now() - closedAt < 250
-  }
-
+  // The button both opens and closes the menu, and it can, because the menu is
+  // modal: the press that closes it is taken by the overlay and never reaches
+  // the button, so the click that follows finds the menu already shut and
+  // opens it again. A non-modal popup could not be toggled by its own control
+  // — the press closed it before the release became a click, and the toggle
+  // opened it straight back up — which is what the timestamp this replaces was
+  // for. One mechanism now, and it is the one the menus already needed.
   function toggleFromMenu() {
     if (fromMenu.opened) {
       fromMenu.close()
       return
     }
-    if (reopeningAfterOutsidePress(fromMenuClosedAt)) return
     fromMenu.open()
   }
 
@@ -1459,13 +1453,16 @@ DropArea {
     width: Math.min(Style.space(360), root.width - Style.space(36))
     implicitHeight: Math.min(fromRows.implicitHeight + Style.space(8), Style.space(260))
     padding: Style.space(4)
-    modal: false
+    // Modal, for the same reason the other menus in this window are: a press
+    // outside a non-modal popup closes it and lands in whatever it was drawn
+    // over, and this one is drawn over the recipient fields.
+    modal: true
+    dim: false
     focus: opened
     z: 50
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.placeFromMenu()
     onOpened: root.placeFromMenu()
-    onClosed: root.fromMenuClosedAt = Date.now()
     background: Rectangle {
       radius: Style.cornerRadius
       color: Qt.rgba(root.popupBackgroundColor.r, root.popupBackgroundColor.g,
@@ -1527,7 +1524,10 @@ DropArea {
         }
 
         HoverHandler { id: fromHover }
-        TapHandler { onTapped: root.chooseFrom(fromRow.modelData) }
+        MouseArea {
+          anchors.fill: parent
+          onClicked: root.chooseFrom(fromRow.modelData)
+        }
       }
     }
   }

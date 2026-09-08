@@ -27,10 +27,14 @@ Item {
   Shortcut { sequence: "j"; onActivated: host.windowShortcut = "j" }
   Shortcut { sequence: "Alt+A"; onActivated: host.windowShortcut = "alt-a" }
 
+  // Modal and undimmed, which is what every popup in this window is: the rule
+  // being held to here is about keys, and it has to be held to on the shape
+  // the app actually ships.
   QQC.Popup {
     id: focusedPopup
     width: 100; height: 80
-    modal: false
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     contentItem: Item {
@@ -46,7 +50,8 @@ Item {
   QQC.Popup {
     id: unfocusedPopup
     width: 100; height: 80
-    modal: false
+    modal: true
+    dim: false
     focus: false
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
   }

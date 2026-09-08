@@ -131,7 +131,9 @@ Item {
     width: Style.space(250)
     implicitHeight: rows.implicitHeight + Style.space(8)
     padding: Style.space(4)
-    modal: false
+    // Modal and undimmed; see AGENTS.md, "Popups and their triggers".
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
@@ -246,8 +248,9 @@ Item {
         }
 
         HoverHandler { id: unifiedHover }
-        TapHandler {
-          onTapped: {
+        MouseArea {
+          anchors.fill: parent
+          onClicked: {
             menu.close()
             root.unifiedChosen()
           }
@@ -377,8 +380,9 @@ Item {
           }
 
           HoverHandler { id: rowHover }
-          TapHandler {
-            onTapped: {
+          MouseArea {
+            anchors.fill: parent
+            onClicked: {
               menu.close()
               root.accountChosen(row.index)
             }
@@ -441,6 +445,9 @@ Item {
     }
 
     HoverHandler { id: plainHover }
-    TapHandler { onTapped: plainRow.activated() }
+    MouseArea {
+      anchors.fill: parent
+      onClicked: plainRow.activated()
+    }
   }
 }

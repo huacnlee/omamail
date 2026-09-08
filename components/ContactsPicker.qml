@@ -25,6 +25,12 @@ Item {
 
   signal contactChosen(var contact, string target)
 
+  // The popup's own content, which is not in this item's children: a
+  // `QQC.Popup` puts it under the window's overlay. `AccountSwitcher` exposes
+  // its rows the same way and for the same reason — a test has no other route
+  // to a row it means to press.
+  readonly property alias pickerContent: contentColumn
+
   anchors.fill: parent
   z: 60
 
@@ -56,18 +62,15 @@ Item {
     menu.close()
   }
 
-  // The popup closes on a press outside itself, and the control that opens it
-  // is outside it — so the press that looks like "close this" has already done
-  // so, and a plain `opened ? close() : openAt()` would reopen it on the
-  // release every time. The moment it closed is what separates the two.
-  property double closedAt: 0
-
+  // The control both opens and closes this, and it can, because the popup is
+  // modal: the press that closes it is taken by the overlay and never reaches
+  // the control. See `ComposeView.toggleFromMenu` for what a non-modal popup
+  // needed instead.
   function toggleAt(sceneX, sceneY) {
     if (menu.opened) {
       close()
       return
     }
-    if (Date.now() - closedAt < 250) return
     openAt(sceneX, sceneY)
   }
 
@@ -84,12 +87,13 @@ Item {
     width: Math.min(Style.space(340), root.width - Style.space(24))
     implicitHeight: Math.min(contentColumn.implicitHeight + Style.space(16), Style.space(420))
     padding: Style.space(8)
-    modal: false
+    // Modal and undimmed; see AGENTS.md, "Popups and their triggers".
+    modal: true
+    dim: false
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
     onOpened: root.place()
-    onClosed: root.closedAt = Date.now()
 
     background: Rectangle {
       radius: Style.cornerRadius
@@ -254,8 +258,17 @@ Item {
           }
 
           HoverHandler { id: contactHover }
-          TapHandler {
-            onTapped: {
+
+          // The rest of the row is "+ To" with a bigger target, so it stops
+          // short of the pills: filling the row would cover them, and taking
+          // the press exclusively — which is the point of using a `MouseArea`
+          // here at all — would leave Cc and Bcc unreachable.
+          MouseArea {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: actionPills.left
+            onClicked: {
               root.contactChosen(contactRow.modelData, "to")
               menu.close()
             }

@@ -28,6 +28,15 @@ Item {
       unread: 2, active: true, signedIn: true, busy: false, error: "" }
   ]
 
+  // What sits behind the menu. A press that reaches this has gone through an
+  // open popup, which is the thing a menu exists to stop.
+  MouseArea {
+    id: behind
+    anchors.fill: parent
+    property int presses: 0
+    onClicked: presses += 1
+  }
+
   Omamail.AccountSwitcher {
     id: switcher
     anchors.fill: parent
@@ -231,6 +240,36 @@ Item {
       keyClick(Qt.Key_O)
       compare(chosenSpy.count, 1)
       compare(chosenSpy.signalArguments[0][0], 1)
+    }
+
+    // Putting the menu away is putting the menu away, and nothing else. A
+    // non-modal popup closes on an outside press and lets that same press
+    // through: the click that dismissed the menu also landed on whatever the
+    // menu had been covering — a row selected, a mailbox switched, by somebody
+    // who was only trying to get rid of it.
+    function test_a_press_outside_closes_the_menu_and_stops_there() {
+      behind.presses = 0
+      switcher.openCentered()
+      verify(switcher.opened, "the menu is open")
+
+      mouseClick(behind, behind.width - 10, behind.height - 10)
+
+      compare(switcher.opened, false, "the press outside closes it")
+      compare(behind.presses, 0, "and does not reach what it was covering")
+    }
+
+    // The other half: modality must not cost the menu its own mouse.
+    function test_a_row_still_answers_the_mouse() {
+      behind.presses = 0
+      switcher.openCentered()
+      var rows = accountRows()
+      verify(rows.length > 1, "the menu drew its rows")
+
+      mouseClick(rows[1], rows[1].width / 2, rows[1].height / 2)
+
+      compare(chosenSpy.count, 1, "the row under the pointer was chosen")
+      compare(switcher.opened, false, "and choosing closes the menu")
+      compare(behind.presses, 0, "with nothing reaching past it")
     }
   }
 }
