@@ -660,7 +660,8 @@ Item {
     for (var i = 0; i < restored.length; i++)
       restored[i].time = Mail.relativeTime(restored[i].date, now)
 
-    messages = restored
+    // Only when a row differs; see `Model.sameSummaries`.
+    if (!Model.sameSummaries(messages, restored)) messages = restored
     resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
     nextPageToken = entry ? entry.nextPageToken : ""
     listLoaded = true

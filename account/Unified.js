@@ -32,17 +32,38 @@ function messageTime(item) {
   return Number(item && item.internalDate) || 0
 }
 
-// Newest first, with ties broken by account and id so the order is total.
-// Without that second term two rows sharing a timestamp could swap places
+// What breaks a tie between two rows that arrived at the same instant: the
+// account and the id together. Without it such a pair could swap places
 // between one merge and the next and the cursor would move on its own, which
-// is not hypothetical: one message copied to two of these mailboxes arrives
-// with the same date in both.
-function compareRows(left, right) {
-  var difference = messageTime(right) - messageTime(left)
-  if (difference !== 0) return difference
+// is not hypothetical — one message copied to two of these mailboxes arrives
+// with the same date in both. `mergeMessages` has already dropped a repeat of
+// that pair, so this never answers 0 for two rows that are actually different,
+// and the order it completes is total whatever `Array.prototype.sort` does
+// with equal keys.
+function compareTiebreak(left, right) {
   var leftKey = String(left && left.accountId || "") + " " + String(left && left.id || "")
   var rightKey = String(right && right.accountId || "") + " " + String(right && right.id || "")
   return leftKey < rightKey ? -1 : (leftKey > rightKey ? 1 : 0)
+}
+
+// Newest first, over rows whose time has already been read.
+//
+// The time is read on the way into the sort rather than inside it, because
+// `messageTime` is not a cheap read: the date it reaches for has crossed from
+// the account that owns the row into this engine, and converting it back costs
+// about a third of a millisecond. Once per row that is nothing; inside a
+// comparator it was the most expensive thing the merged view did, because a
+// sort asks several times as many questions as it has rows — a merge of two
+// 25-row mailboxes spent 244ms in `sort` and 1ms building the rows it was
+// sorting, and spent it again on every list change, of which opening one
+// mailbox makes several.
+//
+// The rows themselves are handed on unchanged: a sort key is this file's
+// business and has no place in the shape the panel reads.
+function compareTimedRows(left, right) {
+  var difference = right.at - left.at
+  if (difference !== 0) return difference
+  return compareTiebreak(left.row, right.row)
 }
 
 // ------------------------------------------------------------------- row ids
@@ -194,21 +215,22 @@ function mergeMessages(sources) {
       // that carries the mailbox.
       if (item.thread) copy.thread = composeThread(accountId, item.thread)
       copy.sourceLabel = String(source.label || "Mailbox")
-      out.push(copy)
+      // Read off the copy, whose fields the loop above has already pulled
+      // across, rather than reaching into the row a second time.
+      out.push({ at: messageTime(copy), row: copy })
     }
   }
-  out.sort(compareRows)
+  out.sort(compareTimedRows)
   // Truncated at the shallowest watermark, so the list has no hole in the
   // middle of it. A merge of one source, or of sources that have all run out,
   // keeps everything.
   var floor = pageWatermark(values)
-  if (floor <= 0) return out
-  var complete = []
+  var rows = []
   for (var k = 0; k < out.length; k++) {
-    if (messageTime(out[k]) < floor) break
-    complete.push(out[k])
+    if (floor > 0 && out[k].at < floor) break
+    rows.push(out[k].row)
   }
-  return complete
+  return rows
 }
 
 // Which account a row belongs to. Read out of the id rather than looked up:

@@ -635,6 +635,76 @@ function showListFooter(messageCount) {
   return Math.max(0, Number(messageCount) || 0) > 0
 }
 
+// Whether two summaries carry the same values, one field at a time.
+//
+// Rows arrive rebuilt rather than reused: `Cache.hydrate` copies every entry
+// out of the store on every read, so two paints of an unchanged mailbox share
+// no object and `===` on the rows themselves always says "different". The
+// comparison has to look at what a row says, not at which object says it.
+//
+// Depth-limited rather than open-ended, and the bound is what keeps a cycle —
+// or a provider payload nobody anticipated — from hanging the list. A summary
+// reaches three levels down at its deepest, a thread's member ids and a
+// recipient's own fields, and the bound is four: one level of headroom, not a
+// snug fit. A structure deeper than that reads as changed, which repaints a
+// list that may not have needed it; the opposite default would hide real mail.
+function sameSummaryValue(left, right, depth) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (typeof left !== "object" || typeof right !== "object") return false
+  // A date is a value here, not a structure: `Cache.hydrate` builds a new one
+  // out of `dateMs` on every read, so only the instant it names can be equal.
+  if (typeof left.getTime === "function" || typeof right.getTime === "function") {
+    return typeof left.getTime === "function" && typeof right.getTime === "function"
+      && left.getTime() === right.getTime()
+  }
+  if (depth <= 0) return false
+  var leftIsList = Array.isArray(left)
+  if (leftIsList !== Array.isArray(right)) return false
+  if (leftIsList) {
+    if (left.length !== right.length) return false
+    for (var i = 0; i < left.length; i++) {
+      if (!sameSummaryValue(left[i], right[i], depth - 1)) return false
+    }
+    return true
+  }
+  // Both key sets, and a field holding `undefined` counts as one the row does
+  // not have. That is what a round trip through the cache does to it —
+  // `JSON.stringify` drops the key — so a live row carrying one and the
+  // restored copy of it are the same row, and reading only the left side's
+  // keys would have made this answer differently depending on which list was
+  // handed in first.
+  for (var key in left) {
+    if (!Object.prototype.hasOwnProperty.call(left, key)) continue
+    if (!sameSummaryValue(left[key], right[key], depth - 1)) return false
+  }
+  for (var extra in right) {
+    if (!Object.prototype.hasOwnProperty.call(right, extra)) continue
+    if (Object.prototype.hasOwnProperty.call(left, extra)) continue
+    if (right[extra] !== undefined) return false
+  }
+  return true
+}
+
+// Whether a list of summaries says what the list already on screen says.
+//
+// Cache-first painting runs on every visit to a query, and what it restores is
+// usually exactly what is already drawn — the service keeps running while the
+// window is shut, so reopening it, or stepping back to a mailbox, restores the
+// rows that never went away. Assigning them anyway is not free: every consumer
+// of the list recomputes, which on this list is measured in tenths of a
+// second. So the assignment is made only when a row actually differs.
+function sameSummaries(previous, next) {
+  var before = Array.isArray(previous) ? previous : []
+  var after = Array.isArray(next) ? next : []
+  if (before === after) return true
+  if (before.length !== after.length) return false
+  for (var i = 0; i < after.length; i++) {
+    if (!sameSummaryValue(before[i], after[i], 4)) return false
+  }
+  return true
+}
+
 function removeById(list, id) {
   var source = Array.isArray(list) ? list : []
   var out = []

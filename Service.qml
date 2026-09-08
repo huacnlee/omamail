@@ -876,6 +876,12 @@ Item {
   // What the merge reads: one entry per mailbox, labelled so a row can say
   // where it came from.
   readonly property var unifiedSources: {
+    // Nothing reads this list unless the merged view is on — every consumer
+    // is `unified ? Unified.something(...) : the account's own answer` — and
+    // building it is not free: a list change bumps `listEpoch` several times
+    // for every mailbox opened, and each bump walked every account's rows for
+    // a list nobody was looking at.
+    if (!unified) return []
     var _epoch = listEpoch
     var out = []
     var accounts = accountList ? accountList.accounts : []
@@ -898,6 +904,7 @@ Item {
   // What the merge reads for everything that is not a row: whether each
   // mailbox is still working, has more to offer, or has something to say.
   readonly property var unifiedStates: {
+    if (!unified) return []
     var _epoch = listEpoch
     var out = []
     var accounts = accountList ? accountList.accounts : []
@@ -924,6 +931,7 @@ Item {
   // mailboxes that turned out not to be there, and those arrive while the app
   // is running. Reading them here is what makes the intersection follow them.
   readonly property var unifiedAbilities: {
+    if (!unified) return []
     var _epoch = listEpoch
     var out = []
     var accounts = accountList ? accountList.accounts : []
@@ -945,7 +953,8 @@ Item {
   }
 
 
-  readonly property var unifiedMessages: Unified.mergeMessages(unifiedSources)
+  readonly property var unifiedMessages: unified
+    ? Unified.mergeMessages(unifiedSources) : []
 
   // The mailbox every account is showing. A unified view puts them all on the
   // same rail row, so this is the row rather than one account's idea of it —

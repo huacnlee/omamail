@@ -1261,3 +1261,98 @@ assert.strictEqual(model.previewReadable(dwelt, ""), false)
   deepEqual(slashed.map(function (r) { return [r.path, r.depth] }), [["a", 0], ["a.b", 0]],
     "a slash server does not nest on a dot")
 }
+
+// A cache-first paint restores rows the list is usually already showing, and
+// `Cache.hydrate` rebuilds every one of them, so the rows are never the same
+// objects. Only their values can say whether anything changed.
+function summaryRows() {
+  return [
+    { id: "m1", subject: "One", unread: true, from: { email: "a@x", display: "A" },
+      to: [{ name: "Me", email: "me@x", display: "Me" }],
+      thread: { id: "t1", count: 2, memberIds: ["m1", "m0"] }, date: new Date(3000) },
+    { id: "m2", subject: "Two", unread: false, from: { email: "b@x", display: "B" },
+      to: [], thread: { id: "t2", count: 0, memberIds: [] }, date: new Date(2000) }
+  ]
+}
+
+const painted = summaryRows()
+assert.strictEqual(model.sameSummaries(painted, summaryRows()), true,
+  "rebuilt rows carrying the same values are the same list")
+assert.strictEqual(model.sameSummaries(painted, painted), true)
+assert.strictEqual(model.sameSummaries([], []), true)
+assert.strictEqual(model.sameSummaries(null, undefined), true, "neither list has rows")
+
+// Anything a row says differently is a change, however deep it sits. The
+// deepest a summary actually goes is a thread's member ids and a recipient's
+// own fields, so the comparison has to reach both.
+const markedRead = summaryRows()
+markedRead[0].unread = false
+assert.strictEqual(model.sameSummaries(painted, markedRead), false, "a row was read")
+
+const renamed = summaryRows()
+renamed[0].from.display = "Someone else"
+assert.strictEqual(model.sameSummaries(painted, renamed), false,
+  "a nested field is still a field")
+
+const addressed = summaryRows()
+addressed[0].to[0].email = "someone@else"
+assert.strictEqual(model.sameSummaries(painted, addressed), false,
+  "a recipient's own field, two levels down")
+
+const grown = summaryRows()
+grown[0].to.push({ email: "cc@x" })
+assert.strictEqual(model.sameSummaries(painted, grown), false, "a recipient arrived")
+
+const answered = summaryRows()
+answered[0].thread.memberIds.push("m3")
+assert.strictEqual(model.sameSummaries(painted, answered), false,
+  "a conversation gained a member, three levels down")
+
+// A field the new row carries and the old one does not is a change the
+// comparison has to see, which reading only the old row's keys would miss.
+const tagged = summaryRows()
+tagged[0].pinned = true
+assert.strictEqual(model.sameSummaries(painted, tagged), false, "a field appeared")
+
+// Where a row sits is part of what the list says: the cursor steps by index.
+const reordered = summaryRows()
+reordered.reverse()
+assert.strictEqual(model.sameSummaries(painted, reordered), false,
+  "the same rows in another order are another list")
+
+// A date is the instant it names: hydrate builds a new Date on every read.
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: new Date(1000) }]), true)
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: new Date(2000) }]), false)
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: null }]), false, "a row that lost its date changed")
+
+// The answer cannot depend on which list was handed in first. A field holding
+// `undefined` is a field the row does not have — `JSON.stringify` drops the key
+// on the way to the cache, so a live row carrying one and the copy restored
+// from disk are the same row — and a field that holds a value is a difference
+// read from either side.
+const withUndefined = [{ id: "m1", subject: "One", snippet: undefined }]
+const withoutKey = [{ id: "m1", subject: "One" }]
+assert.strictEqual(model.sameSummaries(withUndefined, withoutKey), true,
+  "a key the cache drops is not a change")
+assert.strictEqual(model.sameSummaries(withoutKey, withUndefined), true,
+  "and it is not a change the other way round either")
+
+const withValue = [{ id: "m1", subject: "One", snippet: "new" }]
+assert.strictEqual(model.sameSummaries(withValue, withoutKey), false)
+assert.strictEqual(model.sameSummaries(withoutKey, withValue), false,
+  "a field that arrived is a change read from either side")
+
+// A shorter or longer list is a different list without looking at a row.
+assert.strictEqual(model.sameSummaries(painted, [painted[0]]), false)
+assert.strictEqual(model.sameSummaries([painted[0]], painted), false)
+
+// Deeper than the bound reads as changed rather than as equal: repainting a
+// list that did not need it is recoverable, hiding mail that did is not. A
+// summary nests three deep at most, so the bound is not in a row's way.
+const deep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
+const alsoDeep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
+assert.strictEqual(model.sameSummaries([deep], [alsoDeep]), false,
+  "the comparison stops rather than following an unbounded structure")

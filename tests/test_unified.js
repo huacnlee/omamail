@@ -98,7 +98,51 @@ assert.strictEqual(unified.mergeMessages([
 ]).length, 1)
 
 deepEqual(unified.mergeMessages(null), [])
+
 deepEqual(unified.mergeMessages([]), [])
+
+// The merge reads each row's time once, not once per comparison.
+//
+// It used to sort with `messageTime` inside the comparator, and a sort asks
+// several times as many questions as it has rows. The time is not a cheap read
+// — the date has crossed from the account that owns the row into the panel's
+// engine, and converting it back costs about a third of a millisecond — so a
+// merge of two 25-row mailboxes spent 244ms in `sort` alone, paid again on
+// every list change. The count is what keeps that from coming back.
+let timeReads = 0
+function countingTime(at) {
+  return { getTime: function() { timeReads += 1; return at } }
+}
+const unsorted = []
+for (let i = 0; i < 8; i++) {
+  unsorted.push({ id: String(i), subject: "s" + i, date: countingTime(1000 + (i % 3) * 1000) })
+}
+const timed = unified.mergeMessages([{ id: "a@x", label: "A", messages: unsorted }])
+assert.strictEqual(timed.length, 8)
+assert.strictEqual(timeReads, 8,
+  "one read per row, not one per comparison: " + timeReads + " reads for 8 rows")
+
+// Newest first, and the tie broken by id, with the times read that way.
+deepEqual(timed.map(function(row) { return row.sourceId }), ["2", "5", "1", "4", "7", "0", "3", "6"])
+
+// A row out of the merge carries no sort key of its own: the order is this
+// file's business and the panel reads the row's own fields.
+assert.strictEqual(timed[0].at, undefined)
+assert.strictEqual(timed[0].row, undefined)
+
+// A source with more to come is asked for one more time than its rows: the
+// watermark reads the oldest row it reported, to find where the merge has to
+// stop. That is the one read on top of the per-row one, and naming it here is
+// what keeps the count above from being read as "the merge never reads a time
+// anywhere else".
+timeReads = 0
+const paging = []
+for (let i = 0; i < 4; i++) {
+  paging.push({ id: String(i), subject: "s" + i, date: countingTime(4000 - i * 100) })
+}
+unified.mergeMessages([{ id: "a@x", label: "A", messages: paging, hasMore: true }])
+assert.strictEqual(timeReads, 5,
+  "one per row, plus the watermark's read of the oldest: " + timeReads)
 
 // Providers disagree about which field carries the time, and all of them have
 // to sort against each other.
