@@ -1350,6 +1350,10 @@ Item {
   // The notice's own button, which is the switch: what it turns on is every
   // message, and it says so.
   function showRemoteImages() { setAlwaysShowImages(true) }
+  function fetchDisplayImage(source, callback) {
+    if (reading) return reading.fetchDisplayImage(source, callback)
+    if (typeof callback === "function") callback("")
+  }
   function rsvp(response) { if (reading) reading.rsvp(response) }
   function unsubscribe() { if (reading) reading.unsubscribe() }
   function cursorOffset(cursorId, delta) {

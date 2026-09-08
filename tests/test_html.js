@@ -475,13 +475,17 @@ assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example
     ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"])
 }
 
-// What the plain-text reader may hand to an Image element.
-assert.strictEqual(html.isDisplayableImageUrl("https://cdn.example.com/a.png"), true)
+// What the plain-text reader may hand to an Image element. Qt fetches a
+// remote src itself, so only prepared raster bytes qualify.
+assert.strictEqual(html.isDisplayableImageUrl("https://cdn.example.com/a.png"), false)
 assert.strictEqual(html.isDisplayableImageUrl("http://127.0.0.1/a.png"), false)
 assert.strictEqual(html.isDisplayableImageUrl("file:///etc/hostname"), false)
 assert.strictEqual(html.isDisplayableImageUrl("data:image/png;base64,AAA"), true)
+assert.strictEqual(html.isDisplayableImageUrl("data:image/svg+xml;base64,AAA"), false)
 assert.strictEqual(html.isDisplayableImageUrl("cid:logo"), false)
 assert.strictEqual(html.isDisplayableImageUrl(""), false)
+assert.strictEqual(html.isRasterDataImage("data:image/png;base64,AAA"), true)
+assert.strictEqual(html.isRasterDataImage("data:image/svg+xml;base64,AAA"), false)
 
 assert.strictEqual(html.hasRemoteImages(tracked), true)
 assert.strictEqual(html.hasRemoteImages("<p>none</p>"), false)
@@ -574,6 +578,18 @@ assert.strictEqual(
 // ...and to hide the thing that says it is hidden.
 assert.strictEqual(html.sanitize("<p style=\"display:&#110;one\">secret</p><p>real</p>").html,
   "<p>real</p>")
+// CSS escapes and comments are the same smuggle after entities are gone.
+// A hex escape is at most six digits; the space form is the other spelling.
+for (const hidden of ["\\000075rl", "\\75 rl", "url/**/"]) {
+  const out = html.sanitize("<div style=\"background-image:" + hidden
+    + "(https://x.example.com/a.png)\">t</div>", { keepColors: true }).html
+  assert.ok(out.indexOf("x.example.com") < 0,
+    hidden + " reached the renderer: " + out)
+}
+// Duplicate src: only the first is judged, so the second must not survive.
+assert.ok(html.sanitize(
+  "<img src=\"data:image/png;base64,AAA\" src=\"https://x.example.com/a.png\" width=\"90\">"
+).html.indexOf("x.example.com") < 0)
 
 // A `src` is an image's attribute and is checked as one. Anywhere else it is
 // the same address with none of that checking behind it.
@@ -583,13 +599,13 @@ for (const source of ["<input type=\"image\" src=\"https://x.example.com/a.png\"
     "a src survived on " + source)
 }
 
-// A data: URL is the message's own bytes only when it is a picture. Anything
-// else is a document with references of its own, and whether Qt follows them
-// depends on which image plugins happen to be installed.
+// A data: URL is the message's own bytes only when it is a raster picture.
+// SVG is a document with references of its own; the fetch worker refuses it
+// and so does the sanitiser, even with remote images off.
 assert.ok(html.sanitize("<img src=\"data:image/png;base64,AAA\">").html.indexOf("data:image/png") > 0)
 assert.strictEqual(html.sanitize("<img src=\"data:text/html,<b>x\">").html, "")
-assert.strictEqual(html.sanitize("<img src=\"data:image/svg+xml;base64,AAA\">").html,
-  "<img src=\"data:image/svg+xml;base64,AAA\">")
+assert.strictEqual(html.sanitize("<img src=\"data:image/svg+xml;base64,AAA\">").html, "")
+assert.strictEqual(html.imageSourceKind("data:image/svg+xml;base64,AAA"), "unsafe")
 
 // The host is the one question where reading an address twice is not the safe
 // direction: a second decoding can turn up a "@" and hand the authority to a

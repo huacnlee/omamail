@@ -125,6 +125,12 @@ grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
 grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/MailAccount.qml \
   || fail "remote images must use the public-IP-checked Python transport"
+grep -q 'function isDisplayableImageUrl(value) {' message/Html.js \
+  || fail "isDisplayableImageUrl must remain the Image-element gate"
+grep -q 'return isRasterDataImage(value)' message/Html.js \
+  || fail "the reader may hand Qt only prepared raster bytes, never a remote URL"
+grep -q 'function fetchDisplayImage' account/MailAccount.qml \
+  || fail "a plain-text image marker must fetch through the public-host worker"
 grep -q 'command: \["python3", pluginDir + "/scripts/unsubscribe.py"\]' account/MailAccount.qml \
   || fail "one-click unsubscribe must use the public-IP-checked Python transport"
 # Redirect and DNS policy require behavioral tests, not a matching config line.
