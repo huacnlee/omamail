@@ -248,14 +248,14 @@ Item {
     checkedAccountId = owner
   }
 
-  // Shift+click: everything from the cursor to here joins the selection, and
-  // the cursor moves here so the next stretch starts where this one ended.
+  // Shift+click applies the endpoint's next checked state across the range.
+  // The cursor moves here so the next stretch starts where this one ended.
   function checkRange(id) {
     if (!service) return false
     var key = String(id || "")
     if (key === "") return false
     claimChecks()
-    checkedIds = Model.unionIds(checkedIds, Model.idsBetween(service.messages, cursorId, key))
+    checkedIds = Model.toggleRange(checkedIds, service.messages, cursorId, key)
     cursorId = key
     return true
   }
@@ -1078,17 +1078,6 @@ Item {
   readonly property var sidebarSlots: service
     ? Model.sidebarSlots(service.mailboxes, service.visibleLabels, 10) : []
 
-  // What the header names: the mailbox open, or the label. Derived from the
-  // same facts the rail draws its selected row from.
-  readonly property var scope: service
-    ? Model.currentScope(service.mailboxKey, service.mailboxes, service.labels,
-        service.rawQuery, service.rawLabelId,
-        function(name) { return Provider.labelQuery(service.providerId, name) })
-    : Model.currentScope("inbox", [], [], "", "", null)
-
-  readonly property var switcherRows: service
-    ? Model.switcherRows(sidebarSlots, service.visibleLabels, scope) : []
-
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
     var slot = sidebarSlots[index]
@@ -1166,7 +1155,6 @@ Item {
       return
     }
     if (id === "switchAccount") return accountSwitcher.openCentered()
-    if (id === "switchMailbox") return mailboxSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
       else {
@@ -1595,61 +1583,13 @@ Item {
             brand: true
           }
 
-          // What this window is looking at, said where the eye lands first:
-          // the account, then the mailbox or label open in it. Each half is
-          // the control that changes it, so the line is the switcher as much
-          // as the title. The rail says the same thing further down and only
-          // when it is expanded; the status line carries the address.
-          ScopeButton {
-            id: accountScope
-            objectName: "scope-account"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
-            text: root.ready ? root.service.accountLabel : "No account"
-            tooltipText: "Switch account · Alt+A"
-            foreground: root.foreground
-            hoverColor: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.body
-            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
-            selected: accountSwitcher.opened
-            enabled: root.ready
-            onClicked: {
-              var scene = mapToGlobal(0, height)
-              accountSwitcher.openAt(scene.x, scene.y)
-            }
-          }
-
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: accountScope.visible && mailboxScope.visible
-            text: "\u203A"
-            color: root.dim
+            visible: !root.compact
+            text: "Omamail"
+            color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-
-          ScopeButton {
-            id: mailboxScope
-            objectName: "scope-mailbox"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
-            iconName: root.scope.icon
-            text: root.scope.name
-            tooltipText: "Go to a mailbox · Alt+M"
-            foreground: root.foreground
-            hoverColor: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.body
-            maxTextWidth: root.compact ? Style.space(110) : Style.space(180)
-            selected: mailboxSwitcher.opened
-            enabled: root.ready
-            onClicked: {
-              var scene = mapToGlobal(0, height)
-              mailboxSwitcher.openAt(scene.x, scene.y)
-            }
+            font.pixelSize: Style.font.title
           }
 
           // Next to the mark: this is the window's own menu, not an action on
@@ -1893,8 +1833,9 @@ Item {
 
         Item {
           id: listColumn
-          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
-            : (sidebar.visible ? sidebar.right : parent.left)
+          // The splitter's drag target overlays the edge instead of leaving
+          // an empty strip before the row's selection control.
+          anchors.left: sidebar.visible ? sidebar.right : parent.left
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
@@ -1907,7 +1848,6 @@ Item {
             ? (root.currentView === "list" ? parent.width : 0)
             : Math.max(Style.space(100),
                 Math.min(parent.width - (sidebar.visible ? sidebar.width : 0)
-                  - (sidebarSplitter.visible ? sidebarSplitter.width : 0)
                   - listSplitter.width - Style.space(200),
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
@@ -1923,14 +1863,15 @@ Item {
             WheelScroller { view: listFlick }
             anchors.fill: parent
             contentWidth: width
-            contentHeight: list.implicitHeight + Style.space(16)
+            contentHeight: list.implicitHeight + Style.space(12)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             MessageList {
               id: list
-              y: Style.space(8)
+              // Match the sidebar's first row inset below the header.
+              y: Style.space(6)
               // Full width, so selected and hovered rows meet the splitter.
               // Text and action breathing room belongs inside MessageRow;
               // shrinking the whole list leaves a conspicuous dead strip.
@@ -1942,6 +1883,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              ctrlHeld: focusScope.ctrlHeld
               onMessageActivated: function(id) { root.openMessage(id) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
@@ -2619,20 +2561,6 @@ Item {
         onManageRequested: {
           root.openSettings()
         }
-      }
-
-      MailboxSwitcher {
-        id: mailboxSwitcher
-        objectName: "mailbox-switcher"
-        anchors.fill: parent
-        textColor: root.foreground
-        accentColor: root.accent
-        dimColor: root.dim
-        popupBackgroundColor: root.popupBackground
-        popupBorderColor: root.popupBorder
-        panelFontFamily: root.fontFamily
-        rows: root.switcherRows
-        onRowChosen: function(index) { root.goSlot(index) }
       }
 
       LabelPicker {

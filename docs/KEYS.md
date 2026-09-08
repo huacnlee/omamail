@@ -97,7 +97,7 @@ used to exist, and they had.
 | `moveToLabel` | `v` | mail | Move to |
 | `markRead` | `Shift+I` | mail | Mark read |
 | `markUnread` | `Shift+U` | mail | Mark unread |
-| `toggleCheck` | `x` | list | Select or deselect the message |
+| `toggleCheck` | `x`, `Space` | mail | Select or deselect the message |
 | `checkAll` | `Ctrl+A` | list | Select every message loaded, or none |
 | `reply` | `r` | mail | Reply |
 | `replyAll` | `a` | mail | Reply to all |
@@ -118,7 +118,6 @@ used to exist, and they had.
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
-| `switchMailbox` | `Alt+M` | mail | Go to a mailbox |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
@@ -136,6 +135,8 @@ The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
 In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
+
+`Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
 `n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else: `j` and `k` go on moving the list cursor underneath, because the cursor and the open message are two different things. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
 
@@ -197,9 +198,7 @@ read with a mouse would be the one screen here that contradicts the rest.
 `focus` true or false, bare key or modified. So `Alt+A` opens it through the
 table like any other key, and from there `j`, `k`, `Enter` and `o` come from a
 `Keys` handler on the popup's own `contentItem`: the one place in this window
-where the rule at the top of this document runs backwards. The mailbox switcher
-(`Alt+M`) is the same popup over the rail's rows, and inside it a bare digit is
-the Ctrl digit: `4` opens the fourth row, `0` the tenth.
+where the rule at the top of this document runs backwards.
 `tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.

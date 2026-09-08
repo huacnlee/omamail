@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "../providers/Registry.js" as Provider
+import "../keys/Keymap.js" as Keymap
 
 // What the reader shows before a message is picked.
 //
@@ -46,7 +47,7 @@ Item {
     { key: "Enter or o", action: "Open the selected message" },
     { key: "e", action: "Archive" },
     { key: "d", action: "Move to trash" },
-    { key: "x", action: "Select; the keys above then act on every selected message" },
+    { key: Keymap.hintKeyFor(Keymap.byId("toggleCheck")), action: "Select or deselect a message" },
     { key: "r", action: "Reply" },
     { key: "c", action: "Compose" }
   ]

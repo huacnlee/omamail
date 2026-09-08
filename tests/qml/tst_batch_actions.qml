@@ -205,6 +205,91 @@ Item {
       ]
     }
 
+    function test_selection_toggles_and_shift_clears_a_range() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX"), row("2:INBOX"), row("3:INBOX")]
+      app.open()
+      app.cursorId = "1:INBOX"
+      app.runShortcut("toggleCheck", "Space")
+      compare(app.checkedIds.join(","), "1:INBOX")
+      app.runShortcut("toggleCheck", "Space")
+      compare(app.checkedIds.length, 0)
+      app.checkRange("3:INBOX")
+      compare(app.checkedIds.join(","), "1:INBOX,2:INBOX,3:INBOX")
+      app.checkRange("1:INBOX")
+      compare(app.checkedIds.length, 0)
+      app.close()
+    }
+
+    function test_ctrl_click_toggles_without_opening_data() {
+      return [{ tag: "list", reading: false }, { tag: "reader", reading: true }]
+    }
+
+    function test_ctrl_temporarily_replaces_actions_with_checkboxes() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX")]
+      app.open()
+      app.cursorId = "1:INBOX"
+      var keyboard = having(app, function(item) { return item.ctrlDown !== undefined })
+      verify(keyboard !== null)
+      keyboard.parkKeyboard()
+      wait(20)
+      var target = having(app, function(item) {
+        return item.summary && item.summary.id === "1:INBOX"
+          && item.checkToggled !== undefined
+      })
+      verify(target !== null)
+      var check = findChild(target, "message-check")
+      var star = having(target, function(item) { return item.iconName === "star" })
+      verify(check !== null && star !== null)
+      compare(check.visible, false)
+      compare(star.visible, true)
+      keyPress(Qt.Key_Control)
+      tryCompare(check, "visible", true)
+      compare(star.visible, false)
+      keyRelease(Qt.Key_Control)
+      tryCompare(check, "visible", false)
+      compare(star.visible, true)
+      mouseClick(target, 32, target.height / 2, Qt.LeftButton, Qt.ControlModifier)
+      compare(check.visible, true, "selection mode survives releasing Ctrl")
+      compare(star.visible, false)
+      mouseClick(check, check.width / 2, check.height / 2)
+      compare(check.visible, false, "clearing the last check restores actions")
+      compare(star.visible, true)
+      app.close()
+    }
+
+    function test_ctrl_click_toggles_without_opening(data) {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX"), row("2:INBOX")]
+      app.open()
+      if (data.reading) {
+        account.selectedId = "1:INBOX"
+        app.pushEntry("reader", { id: account.selectedId })
+      }
+      app.toggleCheck("1:INBOX")
+      wait(0)
+      var target = having(app, function(item) {
+        return item.summary && item.summary.id === "2:INBOX"
+          && item.checkToggled !== undefined
+      })
+      verify(target !== null)
+      var opened = account.selectedId
+      var view = app.currentView
+      mouseClick(target, 32, target.height / 2, Qt.LeftButton, Qt.ControlModifier)
+      compare(app.checkedIds.join(","), "1:INBOX,2:INBOX")
+      compare(account.selectedId, opened)
+      compare(app.currentView, view)
+      mouseClick(target, 32, target.height / 2, Qt.LeftButton, Qt.ControlModifier)
+      compare(app.checkedIds.join(","), "1:INBOX")
+      compare(account.selectedId, opened)
+      compare(app.currentView, view)
+      app.close()
+    }
+
     function test_reader_star_uses_the_visible_selection(data) {
       seed([entry(ada)], "imap:" + ada)
       var account = mailService.accountAt(0)

@@ -207,9 +207,8 @@ key. What matters while working:
   place the rule above inverts. It takes the key before the shortcut map sees
   it — `focus` true or false, bare or modified — so inside a popup a `KeyRouter`
   binding is what looks live and never runs, and a `Keys` handler on the
-  popup's `contentItem` is the only thing that works. The account switcher and
-  the mailbox switcher are the two components that answer keys themselves, for
-  this reason.
+  popup's `contentItem` is the only thing that works. The account switcher is
+  the one component that answers keys itself, for this reason.
   `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
   be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when
@@ -519,6 +518,8 @@ key. What matters while working:
   banned paths.
 
 ## Commits and pull requests
+
+- **Every PR that changes UI must include before-and-after screenshots in its description and explain the visible differences.** Label the screenshots clearly and capture the same view, state, window size, theme and scale so reviewers can compare them directly. Cover each changed view or interaction state; update the screenshots when later commits change the UI. Use synthetic or redacted mail data and upload images to GitHub's attachment host, never to the repository. A UI PR without this evidence is not ready for approval; passing tests do not replace the visual comparison.
 
 - **No scope prefix, and this is where the project departs from GPUI Component on purpose.** A title is the imperative outcome and nothing in front of it: `Read a message at a readable size`, not `reader: Read a message at a readable size`.
 

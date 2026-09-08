@@ -1355,84 +1355,6 @@ function showsRemoteImages(alwaysShow, isPreview) {
   return alwaysShow === true && isPreview !== true
 }
 
-// ------------------------------------------------------------ the scope
-
-// What the window is looking at, named the way the rail names it: the mailbox
-// whose key is open, or the label or folder whose query is. A label is matched
-// by the id the rail selected it with first, and by its query second, because
-// a folder restored from the store carries the query and nothing else.
-//
-// The answer is never empty. A key the provider does not list — a cache from an
-// older version, a mailbox removed from the provider's table — still names
-// itself, capitalised, rather than leaving the header with nothing to say.
-function currentScope(mailboxKey, mailboxes, labels, rawQuery, rawLabelId, labelQueryOf) {
-  var query = String(rawQuery || "")
-  var labelId = String(rawLabelId || "")
-  var all = Array.isArray(labels) ? labels : []
-  if (query !== "") {
-    var i
-    for (i = 0; i < all.length; i++) {
-      if (!all[i] || all[i].system) continue
-      if (labelId !== "" && String(all[i].id || "") === labelId)
-        return { kind: "label", id: String(all[i].id || ""),
-          name: String(all[i].name || all[i].rawName || ""), icon: "label" }
-    }
-    for (i = 0; i < all.length; i++) {
-      if (!all[i] || all[i].system) continue
-      var name = String(all[i].rawName || all[i].name || "")
-      if (typeof labelQueryOf === "function" && labelQueryOf(name) === query)
-        return { kind: "label", id: String(all[i].id || ""),
-          name: String(all[i].name || name), icon: "label" }
-    }
-    return { kind: "label", id: labelId, name: query, icon: "label" }
-  }
-  var key = String(mailboxKey || "inbox")
-  var boxes = Array.isArray(mailboxes) ? mailboxes : []
-  for (var j = 0; j < boxes.length; j++) {
-    if (boxes[j] && String(boxes[j].key) === key)
-      return { kind: "mailbox", key: key, name: String(boxes[j].label || key),
-        icon: String(boxes[j].icon || "mail") }
-  }
-  return { kind: "mailbox", key: key,
-    name: key.charAt(0).toUpperCase() + key.slice(1), icon: "mail" }
-}
-
-// The rows the mailbox switcher draws: the rail's own numbered list, each row
-// told whether it is the scope on screen. Same slots as the badges and the
-// Ctrl digits, so the number a row shows here is the key that opens it from
-// the list too.
-function switcherRows(slots, labels, scope) {
-  var list = Array.isArray(slots) ? slots : []
-  var all = Array.isArray(labels) ? labels : []
-  var current = scope || {}
-  var out = []
-  for (var i = 0; i < list.length; i++) {
-    var slot = list[i]
-    if (!slot) continue
-    var row = { kind: slot.kind, name: String(slot.name || ""), number: i + 1,
-      count: 0, icon: "mail", selected: false }
-    if (slot.kind === "mailbox") {
-      row.key = String(slot.key || "")
-      row.icon = String(slot.icon || "mail")
-      row.selected = current.kind === "mailbox" && current.key === row.key
-    } else {
-      row.id = String(slot.id || "")
-      row.icon = "label"
-      row.selected = current.kind === "label" && current.id !== "" && current.id === row.id
-      for (var j = 0; j < all.length; j++) {
-        if (all[j] && String(all[j].id || "") === row.id) {
-          row.count = Math.max(0, Math.floor(Number(all[j].unread) || 0))
-          if (!row.selected && current.kind === "label" && current.id === "")
-            row.selected = String(all[j].rawName || all[j].name || "") === current.name
-          break
-        }
-      }
-    }
-    out.push(row)
-  }
-  return out
-}
-
 // ------------------------------------------------------------ selection
 
 // The rows checked for a bulk action. A list of ids rather than a flag on the
@@ -1469,6 +1391,20 @@ function unionIds(ids, more) {
   var extra = Array.isArray(more) ? more : []
   for (var i = 0; i < extra.length; i++) {
     if (out.indexOf(extra[i]) < 0) out.push(extra[i])
+  }
+  return out
+}
+
+// Shift-click applies the endpoint's next checked state to the whole range.
+// Clearing a range never adds its unchecked gaps or touches rows outside it.
+function toggleRange(ids, list, fromId, toId) {
+  var checked = Array.isArray(ids) ? ids : []
+  if (indexById(list, toId) < 0) return checked.slice()
+  var range = idsBetween(list, fromId, toId)
+  if (checked.indexOf(toId) < 0) return unionIds(checked, range)
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (range.indexOf(checked[i]) < 0) out.push(checked[i])
   }
   return out
 }

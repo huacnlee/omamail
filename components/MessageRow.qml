@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
 import "../account/Model.js" as Model
+import "../keys/Keymap.js" as Keymap
 
 // One message in the list. Unread is carried by weight and by the dot on the
 // left, never by colour alone — the accent is a theme value that some themes
@@ -31,9 +32,9 @@ Rectangle {
   // Ticked for a bulk action. Not `selected`: that is the message the reader
   // shows, and the two are different things for the same reason the cursor is.
   property bool checked: false
-  // Whether any row in the list is ticked. While one is, every row shows its
-  // box, so the lane the boxes sit in is the same on every row being compared.
   property bool selectionActive: false
+  property bool ctrlHeld: false
+  readonly property bool selectionMode: selectionActive || checked || ctrlHeld
   // How the direction of this message's own text is arrived at. Passed down
   // like every other fact a row draws, because a row decides nothing.
   property string contentDirection: Direction.MODE_DEFAULT
@@ -85,13 +86,10 @@ Rectangle {
   width: parent ? parent.width : 0
   implicitHeight: body.implicitHeight + Style.space(14)
   radius: Style.cornerRadius
-  // A ticked row is filled from the accent, but the tick is what says it is
-  // ticked: some themes put the accent close to the foreground.
-  color: selected
+  // The checkbox identifies bulk selection independently of the reader fill.
+  color: selected || hasCursor || checked
     ? Style.selectedFillFor(textColor, accentColor)
-    : (checked
-      ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, hot ? 0.22 : 0.14)
-      : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent"))
+    : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent")
 
   MouseArea {
     id: mouse
@@ -108,8 +106,8 @@ Rectangle {
         // moving the pointer to a button.
         root.archiveRequested()
       } else if (event.modifiers & Qt.ShiftModifier) {
-        // Shift extends the selection from the cursor to here; Ctrl ticks
-        // this row on its own. Both are the file manager's meaning of them.
+        // Shift selects or clears the range from the cursor to here;
+        // Ctrl toggles this row on its own.
         root.checkRangeRequested()
       } else if (event.modifiers & Qt.ControlModifier) {
         root.checkToggled()
@@ -127,63 +125,15 @@ Rectangle {
     width: Style.space(5)
     height: width
     radius: width / 2
-    // The box takes the dot's place while it is shown; unread is still
-    // carried by the weight and the brighter subject.
-    visible: root.summary.unread && !checkBox.visible
+    visible: root.summary.unread
     color: root.accentColor
-  }
-
-  // The tick, in the lane the unread dot lives in so the text never moves.
-  // Shown under the pointer or the cursor, and on every row while any row is
-  // ticked, so a selection being built can be read down the column.
-  Rectangle {
-    id: checkBox
-    objectName: "message-check"
-    anchors.left: parent.left
-    anchors.leftMargin: Style.space(1)
-    anchors.top: parent.top
-    anchors.topMargin: Style.space(10)
-    width: Style.space(10)
-    height: width
-    radius: Style.space(2)
-    visible: root.hot || root.checked || root.selectionActive
-    color: root.checked ? Style.selectedFillFor(root.textColor, root.accentColor) : "transparent"
-    border.width: Style.normalBorderWidth
-    border.color: root.checked ? root.accentColor
-      : (checkMouse.containsMouse ? root.textColor : root.dimColor)
-
-    ActionIcon {
-      anchors.centerIn: parent
-      visible: root.checked
-      name: "check"
-      iconSize: Style.space(8)
-      color: root.textColor
-    }
-
-    MouseArea {
-      id: checkMouse
-      anchors.fill: parent
-      anchors.margins: -Style.space(3)
-      hoverEnabled: true
-      onClicked: function(event) {
-        if (event.modifiers & Qt.ShiftModifier) root.checkRangeRequested()
-        else root.checkToggled()
-      }
-    }
-
-    PanelToolTip {
-      visible: checkMouse.containsMouse
-      text: (root.checked ? "Deselect" : "Select") + " · x (Shift+click a range, Ctrl+A all)"
-      fontFamily: root.panelFontFamily
-    }
   }
 
   Column {
     id: body
     anchors.left: parent.left
     anchors.right: actions.visible ? actions.left : parent.right
-    // Matches the reader's content inset and the header's logo, so all three
-    // columns start their text on one vertical line.
+    // Align message text with the reader and header content.
     anchors.leftMargin: Style.space(14)
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
@@ -319,9 +269,10 @@ Rectangle {
     anchors.rightMargin: Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(1)
-    visible: root.hot || root.summary.starred
+    visible: root.hot || root.summary.starred || root.selectionMode
 
     IconButton {
+      visible: !root.selectionMode
       iconName: "star"
       filled: root.summary.starred
       tooltipText: (root.summary.starred ? "Unstar" : "Star") + " · s"
@@ -337,7 +288,7 @@ Rectangle {
       // No archive button where the account has nowhere to archive to. On IMAP
       // that is a move to a folder, and a server without one would have this
       // quietly do nothing.
-      visible: root.hot && root.canArchive
+      visible: root.hot && root.canArchive && !root.selectionMode
       iconName: "archive"
       tooltipText: "Archive · e"
       foreground: root.dimColor
@@ -349,7 +300,7 @@ Rectangle {
     }
 
     IconButton {
-      visible: root.hot
+      visible: root.hot && !root.selectionMode
       iconName: "trash"
       tooltipText: "Move to trash · d"
       foreground: root.dimColor
@@ -358,6 +309,62 @@ Rectangle {
       size: Style.space(24)
       fontFamily: root.panelFontFamily
       onClicked: root.trashRequested()
+    }
+
+    // The selection target stays on the same right edge, even while the
+    // other actions make room for a selection being built across rows.
+    Item {
+      id: checkControl
+      objectName: "message-check"
+      width: Style.space(24)
+      height: width
+      visible: root.selectionMode
+      Accessible.role: Accessible.CheckBox
+      Accessible.name: "Select message"
+      Accessible.checkable: true
+      Accessible.checked: root.checked
+      Accessible.onPressAction: root.checkToggled()
+
+      BorderSurface {
+        id: checkBox
+        anchors.centerIn: parent
+        width: Style.space(12)
+        height: width
+        radius: 0
+        color: checkMouse.pressed ? Style.pressedFillFor(root.textColor, root.accentColor)
+          : (root.checked ? Style.selectedFillFor(root.textColor, root.accentColor)
+            : (checkMouse.containsMouse ? Style.hoverFillFor(root.textColor, root.accentColor)
+              : "transparent"))
+        borderSpec: root.checked
+          ? Border.controlSpec("selected", root.textColor, root.accentColor)
+          : Border.controlSpec("normal", root.textColor, root.accentColor)
+
+        ActionIcon {
+          anchors.centerIn: parent
+          visible: root.checked
+          name: "check"
+          iconSize: Math.round(checkBox.height * 0.85)
+          color: Style.selectedStateColor(root.textColor, root.accentColor)
+        }
+      }
+
+      MouseArea {
+        id: checkMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        onClicked: function(event) {
+          if (event.modifiers & Qt.ShiftModifier) root.checkRangeRequested()
+          else root.checkToggled()
+        }
+      }
+
+      PanelToolTip {
+        visible: checkMouse.containsMouse
+        text: (root.checked ? "Deselect" : "Select") + " · "
+          + Keymap.displayFor(Keymap.byId("toggleCheck"))
+          + " · Ctrl+click toggles; Shift+click selects or clears a range"
+        fontFamily: root.panelFontFamily
+      }
     }
   }
 }

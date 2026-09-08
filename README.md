@@ -238,12 +238,13 @@ and the client itself are console-only; there is no CLI for them.
 | `/` | Search |
 | `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
-| `Alt+M` | Go to a mailbox or label from a list |
-| `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
+| `Space` / `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
 | `Ctrl+A` | Select every message loaded, or none |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` / `Ctrl+R` | Check for mail |
 | `?` | Every shortcut |
+
+To act on several messages, hold Ctrl to replace the row actions with checkboxes, or Ctrl+click a row to select or deselect it without opening it. Checkboxes stay visible while any message is selected; releasing Ctrl with no selection restores the usual actions. `Space` or `x` toggles the keyboard cursor's row. Shift+click selects the range from the cursor to an unchecked row, or clears that range when the clicked row is already checked; other selections stay as they are. In the list, `Ctrl+A` selects every loaded message or clears the selection, and `Esc` clears an active selection before going back. The status bar shows how many messages are selected; archive, trash, star, move and read/unread actions apply to that selection while the list is visible.
 
 Search paints matching cached rows first and adds server results as they arrive. It takes Gmail's own operator syntax straight through — `from:jane`, `has:attachment`, `older_than:7d`. The Unread mailbox leaves Promotions, Social and Forums out rather than asking for Primary: Gmail's categories do not remove the `INBOX` label, so an unread filter without that exclusion comes back as the whole promotional backlog rather than the mail you have not read — while one that asks for Primary comes back empty on any account where Gmail is not applying the category labels, which is unread mail with nothing left to say so. Updates stays in, because receipts, deliveries and notifications land there. Right-click any row in the list for archive, trash, spam, star and read/unread without leaving the keyboard cursor behind.
 

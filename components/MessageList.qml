@@ -26,6 +26,7 @@ Column {
   // The rows ticked for a bulk action, by id. Held above the list, like the
   // cursor, because a reload rebuilds every row.
   property var checkedIds: []
+  property bool ctrlHeld: false
 
   signal messageActivated(string id)
   signal checkToggled(string id)
@@ -66,6 +67,7 @@ Column {
       selected: root.service.selectedId === modelData.id
       checked: root.checkedIds.indexOf(modelData.id) >= 0
       selectionActive: root.checkedIds.length > 0
+      ctrlHeld: root.ctrlHeld
       canArchive: root.service.canArchive
       conversations: Unified.rowIsConversation(modelData)
       contentDirection: root.service.contentDirection
