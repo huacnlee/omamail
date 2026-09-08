@@ -196,7 +196,7 @@ function recurrenceUntil(value) {
     Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)).getTime()
 }
 
-function recurrenceStarts(event, rangeEnd) {
+function recurrenceStarts(event, rangeStart, rangeEnd) {
   if (!event || !event.start || !event.recurrenceRule) return []
   var parts = recurrenceParts(event.recurrenceRule)
   var frequency = String(parts.FREQ || "").toUpperCase()
@@ -220,6 +220,22 @@ function recurrenceStarts(event, rangeEnd) {
   var rangeLimit = Number(rangeEnd) || base.getTime()
   var limit = zoned ? rangeLimit + 86400000
     : Math.min(rangeLimit, until > 0 ? until + 1 : rangeLimit)
+
+  // Every test below is a delta from `base`, so the walk can begin on any day
+  // and still match the same ones. Begin it two days short of the range rather
+  // than at DTSTART: the two days cover the zone offset a zoned cursor carries
+  // (no zone sits more than 14 hours from UTC), and a rule from years back no longer pays for every day since it started
+  // on each refresh — nor runs into the ceiling below before reaching the
+  // range at all. COUNT is the one rule that counts from the start, so it is
+  // still walked from there.
+  var from = Number(rangeStart) || 0
+  if (countLimit === 0 && from > 0) {
+    var skipped = Math.floor((from - 2 * 86400000 - base.getTime()) / 86400000)
+    if (skipped > 0) {
+      if (utc) cursor.setUTCDate(cursor.getUTCDate() + skipped)
+      else cursor.setDate(cursor.getDate() + skipped)
+    }
+  }
 
   for (var scanned = 0; scanned < 10000 && cursor.getTime() < limit; scanned++) {
     var cursorYear = datePart(cursor, "getFullYear", "getUTCFullYear", utc)
@@ -319,7 +335,7 @@ function expandRecurringEvents(events, startMs, endMs) {
     var excluded = {}
     var exclusions = Array.isArray(master.excludedMs) ? master.excludedMs : []
     for (var x = 0; x < exclusions.length; x++) excluded[Number(exclusions[x])] = true
-    var starts = recurrenceStarts(master, endMs)
+    var starts = recurrenceStarts(master, startMs, endMs)
     for (var o = 0; o < starts.length; o++) {
       var key = String(master.uid) + "\n" + Number(starts[o])
       var replacement = overrides[key]
