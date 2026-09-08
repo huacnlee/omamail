@@ -91,6 +91,12 @@ Item {
     Qt.openUrlExternally(url)
   }
 
+  function scrollBy(steps) {
+    var maximum = Math.max(0, bodyFlick.contentHeight - bodyFlick.height)
+    bodyFlick.contentY = Math.max(0, Math.min(maximum,
+      bodyFlick.contentY + steps * Style.space(20)))
+  }
+
   readonly property var summary: service ? service.selectedMessage : null
 
   // The id the service answers to, which is not always the one on the summary.
@@ -513,6 +519,7 @@ Item {
 
   Flickable {
     id: bodyFlick
+    objectName: "messageBodyScroller"
 
     WheelScroller { view: bodyFlick }
     anchors.top: notices.bottom

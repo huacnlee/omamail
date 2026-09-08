@@ -619,7 +619,7 @@ Item {
   }
 
   // The list, fresh: what a mailbox switch, a search, a queued send and the
-  // reader's own "back to list" key all mean. Not a Back — the history is
+  // reader's own "back to list" keys all mean. Not a Back — the history is
   // dropped because the list under it has changed.
   function backToList() {
     pendingComposeMode = ""
@@ -1098,10 +1098,15 @@ Item {
     if (shortcutHelpVisible) {
       if (id === "cursorDown") return shortcutHelp.scrollBy(1)
       if (id === "cursorUp") return shortcutHelp.scrollBy(-1)
+      if (id === "scrollDown") return shortcutHelp.scrollBy(1)
+      if (id === "scrollUp") return shortcutHelp.scrollBy(-1)
     }
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
+    if (id === "scrollDown") return reader.scrollBy(1)
+    if (id === "scrollUp") return reader.scrollBy(-1)
     if (id === "open") return openMessage(cursorId)
+    if (id === "openReader") return openMessage(cursorId)
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
@@ -1180,7 +1185,7 @@ Item {
     }
     if (id === "settings") return openSettings()
     if (id === "help") return toggleHelp()
-    if (id === "back") return goBack()
+    if (id === "back") return currentView === "reader" ? backToList() : goBack()
   }
 
   // Escape. The row menu, the app menu and the account switcher are absent on

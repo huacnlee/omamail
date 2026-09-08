@@ -138,8 +138,8 @@ Item {
       compare(host.lastId, "undoSend")
       host.lastId = ""
       keyClick(Qt.Key_Down)
-      compare(host.lastId, "cursorDown",
-        "the undo window must not stand mailbox navigation down")
+      compare(host.lastId, "scrollDown",
+        "the undo window must not stand reader scrolling down")
     }
 
     function test_escape_is_the_way_out_of_every_context() {
