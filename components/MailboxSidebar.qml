@@ -24,7 +24,6 @@ Item {
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
-  signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -51,7 +50,7 @@ Item {
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.top: parent.top
-    anchors.bottom: footer.top
+    anchors.bottom: parent.bottom
     contentWidth: width
     contentHeight: column.implicitHeight + Style.space(12)
     clip: true
@@ -129,28 +128,6 @@ Item {
         }
       }
     }
-  }
-
-  // Calendar stays fixed at the foot of the rail while mailbox labels scroll.
-  Column {
-    id: footer
-    anchors.left: parent.left
-    anchors.right: edge.left
-    anchors.bottom: parent.bottom
-
-    Entry {
-      x: Style.space(6)
-      label: "Calendar"
-      icon: "calendar"
-      selected: root.calendarSelected
-      onActivated: root.calendarRequested()
-    }
-
-    Item {
-      width: parent.width
-      height: Style.space(6)
-    }
-
   }
 
   // One row: an icon that is always there, a name that appears when there is

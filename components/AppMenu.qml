@@ -7,6 +7,7 @@ import "Menu.js" as Menu
 // Links out, plus the handful of actions that have no natural home on screen.
 Item {
   id: root
+  objectName: "app-menu"
 
   required property color textColor
   required property color popupBackgroundColor
@@ -79,6 +80,11 @@ Item {
   signal switchAccountRequested()
   signal projectRequested()
   signal authorRequested()
+
+  // Exposed for the window's integration test. Popup content lives in its own
+  // visual hierarchy, so walking down from App cannot otherwise reach the row
+  // a real pointer clicks.
+  readonly property alias settingsAction: settingsRow
 
   anchors.fill: root.showTrigger ? undefined : parent
   implicitWidth: root.showTrigger ? Style.space(24) : 0
@@ -174,6 +180,7 @@ Item {
       }
       MenuRow {
         id: settingsRow
+        objectName: "app-menu-settings"
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }

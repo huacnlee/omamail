@@ -329,6 +329,34 @@ Item {
       tryCompare(rail, "activeKey", "mailboxes")
     }
 
+    function test_header_buttons_switch_directly_between_mail_and_calendar() {
+      var mail = named(app, "mail-view-button")
+      var calendar = named(app, "calendar-view-button")
+      verify(mail && calendar, "the header exposes both direct view buttons")
+      mouseClick(calendar)
+      compare(app.currentView, "calendar")
+      compare(calendar.selected, true)
+      mouseClick(mail)
+      compare(app.currentView, "list")
+      compare(mail.selected, true)
+    }
+
+    function test_hamburger_settings_row_opens_settings() {
+      app.backToList()
+      waitForRendering(app)
+      var menu = named(app, "menu-button")
+      var appMenu = named(app, "app-menu")
+      verify(menu && appMenu, "the hamburger and its menu exist")
+      var settingsRow = appMenu.settingsAction
+      verify(settingsRow, "the menu exposes its Settings row")
+      mouseClick(menu)
+      tryVerify(function() { return settingsRow.visible }, 1000,
+        "the Settings row is visible in the open menu")
+      mouseClick(settingsRow)
+      tryCompare(app, "showSettings", true)
+      compare(app.currentView, "list", "Settings is a page over mail")
+    }
+
     // Narrow, the rail has no room; the page keeps the whole width and its
     // own scroll, which is all it ever had.
     function test_a_narrow_window_has_no_rail() {

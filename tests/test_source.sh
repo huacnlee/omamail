@@ -426,20 +426,19 @@ python3 - <<'PY'
 from pathlib import Path
 
 sidebar = Path("components/MailboxSidebar.qml").read_text()
-footer = sidebar[sidebar.index("id: footer"):sidebar.index("component Entry:")]
-if 'label: "Calendar"' not in footer or "calendarRequested" not in footer:
-    raise SystemExit("test_source.sh: Calendar must stay fixed at the foot of the sidebar")
-calendar = footer.index('label: "Calendar"')
-if "Style.space(6)" not in footer[calendar:]:
-    raise SystemExit("test_source.sh: Calendar must keep breathing room at the sidebar foot")
+if 'label: "Calendar"' in sidebar or "calendarRequested" in sidebar:
+    raise SystemExit("test_source.sh: Calendar navigation must not be duplicated in the sidebar")
+if "anchors.bottom: parent.bottom" not in sidebar:
+    raise SystemExit("test_source.sh: mailbox labels must use the space freed below the sidebar")
 
 app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
 if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
     raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
-header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]
-if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
-    raise SystemExit("test_source.sh: Calendar navigation belongs in the sidebar, not the header")
+header = app[app.index("id: headerLeft"):app.index("id: searchSlot")]
+for button in ('objectName: "mail-view-button"', 'objectName: "calendar-view-button"'):
+    if button not in header:
+        raise SystemExit("test_source.sh: Mail and Calendar navigation must stay in the header")
 
 calendar = Path("components/CalendarView.qml").read_text()
 if "CalendarSidebar {" in calendar:

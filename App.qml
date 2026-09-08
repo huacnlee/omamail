@@ -387,9 +387,15 @@ Item {
   // Mailboxes lands in.
   function openSettings() {
     dismissHelp()
-    if (page === "settings") return
     settingsScroll.stop()
     settingsFlick.contentY = 0
+    // A second request is useful recovery, not a no-op: if the page was
+    // already selected while its popup was still relinquishing focus, bring
+    // its viewport home and focus it again.
+    if (page === "settings") {
+      Qt.callLater(function() { focusScope.applyContextFocus() })
+      return
+    }
     pushEntry("settings")
   }
 
@@ -1443,6 +1449,7 @@ Item {
           // same place however the control was pressed.
           IconButton {
             id: menuButton
+            objectName: "menu-button"
             anchors.verticalCenter: parent.verticalCenter
             iconName: "menu"
             tooltipText: "Menu"
@@ -1453,6 +1460,39 @@ Item {
             onClicked: {
               var scene = mapToGlobal(0, height)
               appMenu.openAt(scene.x, scene.y)
+            }
+          }
+
+          IconButton {
+            id: mailViewButton
+            objectName: "mail-view-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.composing
+            iconName: "mail"
+            tooltipText: "Mail · Ctrl+Shift+M"
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            selected: !root.showPage && !root.calendarVisible
+            enabled: root.ready
+            onClicked: root.backToList()
+          }
+
+          IconButton {
+            id: calendarViewButton
+            objectName: "calendar-view-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.composing
+            iconName: "calendar"
+            tooltipText: "Calendar · Ctrl+Shift+C"
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            selected: !root.showPage && root.calendarVisible
+            enabled: root.ready
+            onClicked: {
+              root.showCalendar()
+              calendarView.refresh()
             }
           }
         }
@@ -1605,10 +1645,6 @@ Item {
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
           onMailboxSelected: function(key) { root.goMailbox(key) }
-          onCalendarRequested: {
-            root.showCalendar()
-            calendarView.refresh()
-          }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
@@ -2294,7 +2330,10 @@ Item {
           root.showCalendar()
           calendarView.refresh()
         }
-        onSetupRequested: root.openSettings()
+        // Let the Popup finish closing before replacing everything below it.
+        // On the live shell, doing both in the row's release handler could
+        // restore the old focus/navigation state over the newly opened page.
+        onSetupRequested: Qt.callLater(root.openSettings)
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
