@@ -23,6 +23,12 @@ Column {
   required property color dimColor
   required property string panelFontFamily
   property string cursorId: ""
+  property bool systemThemeStyling: false
+  property color selectedSurfaceColor: Style.selectedFillFor(textColor, accentColor)
+  property color hoverSurfaceColor: Style.hoverFillFor(textColor, accentColor)
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color sourceColor: accentColor
 
   signal messageActivated(string id)
   signal menuRequested(string id, real sceneX, real sceneY)
@@ -53,6 +59,12 @@ Column {
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
+      systemThemeStyling: root.systemThemeStyling
+      selectedSurfaceColor: root.selectedSurfaceColor
+      hoverSurfaceColor: root.hoverSurfaceColor
+      unreadColor: root.unreadColor
+      starColor: root.starColor
+      sourceColor: root.sourceColor
       panelFontFamily: root.panelFontFamily
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id

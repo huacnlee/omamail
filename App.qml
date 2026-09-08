@@ -184,6 +184,14 @@ Item {
     Math.min(accent.hslSaturation, 0.55),
     accent.hslLightness, 1.0)
 
+  MailPalette {
+    id: mailPalette
+    enabled: root.systemThemeStyling
+    baseBackground: root.background
+    baseText: root.foreground
+    baseUrgent: root.urgent
+  }
+
   readonly property string fontFamily: Style.font.family
 
   function copyText(text) {
@@ -215,6 +223,11 @@ Item {
   // service holds it because it is written to disk: a size somebody reached for
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
+  readonly property bool systemThemeStyling: !!service
+    && service.systemThemeStyling === true
+  readonly property color labelsPaneBackground: mailPalette.sidebarSurface
+  readonly property color inboxPaneBackground: mailPalette.listSurface
+  readonly property color readerPaneBackground: mailPalette.readerSurface
   // 0 means "proportional"; anything else is a width somebody dragged to.
   property real listWidth: 0
 
@@ -1601,6 +1614,18 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           dimColor: root.dim
+          backgroundColor: root.labelsPaneBackground
+          systemThemeStyling: root.systemThemeStyling
+          selectedSurfaceColor: mailPalette.selectedSurface
+          hoverSurfaceColor: mailPalette.hoverSurface
+          activeTextColor: mailPalette.activeText
+          unreadColor: mailPalette.unread
+          starColor: mailPalette.starred
+          sentColor: mailPalette.sent
+          draftColor: mailPalette.drafts
+          labelColor: mailPalette.labels
+          calendarColor: mailPalette.calendar
+          dangerColor: mailPalette.danger
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
@@ -1628,6 +1653,12 @@ Item {
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           accentColor: root.accent
+          systemThemeStyling: root.systemThemeStyling
+          unreadColor: mailPalette.unread
+          starColor: mailPalette.starred
+          sentColor: mailPalette.sent
+          draftColor: mailPalette.drafts
+          dangerColor: mailPalette.danger
           panelFontFamily: root.fontFamily
           // The account's own mailboxes, not a fixed set: this row and the
           // sidebar it replaces on a narrow window must offer the same ones.
@@ -1657,6 +1688,11 @@ Item {
           visible: width > 0 && !root.showPage && !root.composing
             && !root.calendarVisible
 
+          Rectangle {
+            anchors.fill: parent
+            color: root.inboxPaneBackground
+          }
+
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
           // viewport, which would push the bar inward with it.
@@ -1682,6 +1718,12 @@ Item {
               textColor: root.foreground
               accentColor: root.accent
               dimColor: root.dim
+              systemThemeStyling: root.systemThemeStyling
+              selectedSurfaceColor: mailPalette.selectedSurface
+              hoverSurfaceColor: mailPalette.hoverSurface
+              unreadColor: mailPalette.unread
+              starColor: mailPalette.starred
+              sourceColor: mailPalette.labels
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1747,11 +1789,13 @@ Item {
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
-          backgroundColor: root.background
+          backgroundColor: root.readerPaneBackground
           accentColor: root.accent
           linkColor: root.link
           dimColor: root.dim
           dimmerColor: root.dimmer
+          systemThemeStyling: root.systemThemeStyling
+          starColor: mailPalette.starred
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
@@ -2049,6 +2093,11 @@ Item {
               dimColor: root.dim
               accentColor: root.accent
               urgentColor: root.urgent
+              unreadColor: mailPalette.unread
+              starColor: mailPalette.starred
+              draftColor: mailPalette.drafts
+              labelColor: mailPalette.labels
+              calendarColor: mailPalette.calendar
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
               // Which kind first, then the form for it.

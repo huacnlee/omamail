@@ -77,6 +77,7 @@ Item {
     property int accountCount: 1
     property int inboxUnread: 0
     property real bodyZoom: 1
+    property bool systemThemeStyling: false
     property string bodyMode: "reader"
     property string providerId: "imap"
     property string pluginDir: ""
@@ -147,6 +148,7 @@ Item {
     }
     function preferredSendAs(_recipients) { return null }
     function refreshRecipientContacts() {}
+    function setSystemThemeStyling(value) { systemThemeStyling = value === true }
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {
       selectedId = ""
@@ -237,6 +239,7 @@ Item {
     function init() {
       mailService.anyAccountReady = true
       mailService.hasSavedAccounts = true
+      mailService.systemThemeStyling = false
       app.opened = true
       window().width = 980
       app.backToList()
@@ -278,7 +281,7 @@ Item {
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "bar,reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "appearance,bar,reading,notifications,writing,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
@@ -293,7 +296,7 @@ Item {
       var view = flick()
       verify(view, "the page scrolls inside a Flickable")
       compare(view.contentY, 0)
-      compare(rail.activeKey, "bar",
+      compare(rail.activeKey, "appearance",
         "the top of the page is the first section, whichever that is")
       compare(app.navKinds.join(","), "list,settings")
 
@@ -324,9 +327,20 @@ Item {
       // Scrolled by other means — the wheel, say — the highlight still
       // follows the page, because the page is what it describes.
       view.contentY = 0
-      tryCompare(rail, "activeKey", "bar")
+      tryCompare(rail, "activeKey", "appearance")
       view.contentY = sectionY(page, "mailboxes") + 5
       tryCompare(rail, "activeKey", "mailboxes")
+    }
+
+    function test_system_theme_styling_reaches_the_service_and_panes() {
+      var theme = named(app, "systemThemeStylingSwitch")
+      verify(theme, "the settings page exposes system theme styling")
+      theme.toggled()
+      compare(mailService.systemThemeStyling, true)
+      verify(String(app.labelsPaneBackground) !== String(app.background),
+        "turning styling on adds a muted labels surface")
+      verify(String(app.inboxPaneBackground) !== String(app.background),
+        "and a restrained accent surface behind the list")
     }
 
     // Narrow, the rail has no room; the page keeps the whole width and its

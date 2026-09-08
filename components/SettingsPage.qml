@@ -21,6 +21,11 @@ Column {
   required property color accentColor
   required property color urgentColor
   required property string panelFontFamily
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color draftColor: accentColor
+  property color labelColor: accentColor
+  property color calendarColor: accentColor
 
   signal clientSetupRequested()
   signal addRequested()
@@ -38,6 +43,7 @@ Column {
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
   readonly property var sections: [
+    { key: "appearance", title: "Appearance", y: appearanceHeading.y },
     { key: "bar", title: "Bar", y: barHeading.y },
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
@@ -47,6 +53,8 @@ Column {
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+  readonly property bool colorful: !!root.service
+    && root.service.systemThemeStyling === true
 
   function signatureAccount(id) {
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -140,6 +148,65 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.heading
     font.bold: true
+  }
+
+  // ------------------------------------------------------------ appearance
+
+  Text {
+    id: appearanceHeading
+    text: "APPEARANCE"
+    color: root.colorful ? root.draftColor : root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(themeText.implicitHeight, themeSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: themeText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: themeSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "System theme styling"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Use the terminal palette for subtle surfaces and accent selected mail"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: themeSwitch
+      objectName: "systemThemeStylingSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.systemThemeStyling === true
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setSystemThemeStyling(!root.service.systemThemeStyling)
+    }
   }
 
   // ------------------------------------------------------------------- bar

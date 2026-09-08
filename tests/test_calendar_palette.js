@@ -11,11 +11,13 @@ const parsed = palette.parse([
   'yellow = "#c9b26d"',
   'color4 = "#5fa2d5"',
   'magenta = "#b07aa1"',
-  'color6 = "#7ec0ae"'
+  'color6 = "#7ec0ae"',
+  'orange = "#de8f67"'
 ].join("\n"))
 deepEqual(parsed, {
   accent: "#ff7a00", red: "#d45941", green: "#578c60",
-  yellow: "#c9b26d", blue: "#5fa2d5", magenta: "#b07aa1", cyan: "#7ec0ae"
+  yellow: "#c9b26d", blue: "#5fa2d5", magenta: "#b07aa1", cyan: "#7ec0ae",
+  orange: "#de8f67"
 })
 
 assert.strictEqual(palette.normalizeKey("blue"), "blue")

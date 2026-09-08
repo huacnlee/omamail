@@ -13,6 +13,12 @@ Flickable {
   required property color textColor
   required property color accentColor
   required property string panelFontFamily
+  property bool systemThemeStyling: false
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color sentColor: accentColor
+  property color draftColor: accentColor
+  property color dangerColor: accentColor
   property string current: "inbox"
   // Provider-specific, and handed down rather than looked up: this row must
   // never offer a mailbox the account on screen does not have.
@@ -22,6 +28,15 @@ Flickable {
 
   signal selected(string key)
   signal chipHovered(int index, bool isHovered)
+
+  function mailboxColor(key) {
+    if (key === "inbox" || key === "unread") return root.unreadColor
+    if (key === "starred" || key === "flagged") return root.starColor
+    if (key === "sent") return root.sentColor
+    if (key === "drafts") return root.draftColor
+    if (key === "trash" || key === "spam") return root.dangerColor
+    return root.accentColor
+  }
 
   // Scrolling a six-segment control in a narrow window is worse than not
   // offering two of the segments: All mail and Trash are places you go looking
@@ -114,7 +129,9 @@ Flickable {
             text: segment.modelData.key === "unread" && root.unread > 0
               ? segment.modelData.label + " " + root.unread
               : segment.modelData.label
-            foreground: root.textColor
+            foreground: root.systemThemeStyling
+              && root.current === segment.modelData.key
+              ? root.mailboxColor(segment.modelData.key) : root.textColor
             bordered: false
             selected: root.current === segment.modelData.key
             hasCursor: root.cursorIndex === segment.index

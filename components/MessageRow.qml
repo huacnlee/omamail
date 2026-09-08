@@ -28,6 +28,12 @@ Rectangle {
   property bool conversations: false
   property bool hasCursor: false
   property bool selected: false
+  property bool systemThemeStyling: false
+  property color selectedSurfaceColor: Style.selectedFillFor(textColor, accentColor)
+  property color hoverSurfaceColor: Style.hoverFillFor(textColor, accentColor)
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color sourceColor: accentColor
   // How the direction of this message's own text is arrived at. Passed down
   // like every other fact a row draws, because a row decides nothing.
   property string contentDirection: Direction.MODE_DEFAULT
@@ -70,8 +76,10 @@ Rectangle {
   implicitHeight: body.implicitHeight + Style.space(14)
   radius: Style.cornerRadius
   color: selected
-    ? Style.selectedFillFor(textColor, accentColor)
-    : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent")
+    ? (systemThemeStyling ? selectedSurfaceColor
+      : Style.selectedFillFor(textColor, accentColor))
+    : (hot ? (systemThemeStyling ? hoverSurfaceColor
+      : Style.hoverFillFor(textColor, accentColor)) : "transparent")
 
   MouseArea {
     id: mouse
@@ -102,7 +110,7 @@ Rectangle {
     height: width
     radius: width / 2
     visible: root.summary.unread
-    color: root.accentColor
+    color: root.systemThemeStyling ? root.unreadColor : root.accentColor
   }
 
   Column {
@@ -197,7 +205,7 @@ Rectangle {
         width: Math.min(implicitWidth, Math.floor(parent.width / 3))
         textFormat: Text.PlainText
         text: root.sourceLabel
-        color: root.accentColor
+        color: root.systemThemeStyling ? root.sourceColor : root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
@@ -252,8 +260,10 @@ Rectangle {
       iconName: "star"
       filled: root.summary.starred
       tooltipText: (root.summary.starred ? "Unstar" : "Star") + " · s"
-      foreground: root.summary.starred ? root.accentColor : root.dimColor
-      hoverColor: root.accentColor
+      foreground: root.summary.starred
+        ? (root.systemThemeStyling ? root.starColor : root.accentColor)
+        : root.dimColor
+      hoverColor: root.systemThemeStyling ? root.starColor : root.accentColor
       iconSize: Style.font.iconSmall
       size: Style.space(24)
       fontFamily: root.panelFontFamily

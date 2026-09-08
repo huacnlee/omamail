@@ -19,6 +19,18 @@ Item {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
+  property color backgroundColor: "transparent"
+  property bool systemThemeStyling: false
+  property color selectedSurfaceColor: Style.selectedFillFor(textColor, accentColor)
+  property color hoverSurfaceColor: Style.hoverFillFor(textColor, accentColor)
+  property color activeTextColor: accentColor
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color sentColor: accentColor
+  property color draftColor: accentColor
+  property color labelColor: accentColor
+  property color calendarColor: accentColor
+  property color dangerColor: accentColor
   property bool collapsed: false
   property bool calendarSelected: false
 
@@ -31,7 +43,25 @@ Item {
   property var slots: []
   property bool numbersVisible: false
 
+  function mailboxColor(key) {
+    if (key === "inbox" || key === "unread") return root.unreadColor
+    if (key === "starred" || key === "flagged") return root.starColor
+    if (key === "sent") return root.sentColor
+    if (key === "drafts") return root.draftColor
+    if (key === "trash" || key === "spam") return root.dangerColor
+    return root.activeTextColor
+  }
+
+  function stateSurface(color, amount) {
+    return Qt.rgba(color.r, color.g, color.b, amount)
+  }
+
   readonly property var userLabels: Model.railLabels(root.service ? root.service.labels : [])
+
+  Rectangle {
+    anchors.fill: parent
+    color: root.backgroundColor
+  }
 
   // The rail's own edge. The list already draws one on its far side, so
   // without this the icons sit on the same surface as the messages.
@@ -84,6 +114,7 @@ Item {
             && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
           slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
+          semanticColor: root.mailboxColor(modelData.key)
           onActivated: root.mailboxSelected(modelData.key)
         }
       }
@@ -122,6 +153,7 @@ Item {
           icon: "label"
           slotNumber: Model.slotNumberOf(root.slots, "label", modelData.id)
           count: modelData.unread
+          semanticColor: root.labelColor
           selected: !root.calendarSelected && !!root.service && root.service.rawQuery !== ""
             && root.service.rawQuery
               === Provider.labelQuery(root.service.providerId, modelData.rawName)
@@ -143,6 +175,7 @@ Item {
       label: "Calendar"
       icon: "calendar"
       selected: root.calendarSelected
+      semanticColor: root.calendarColor
       onActivated: root.calendarRequested()
     }
 
@@ -162,6 +195,7 @@ Item {
     property int count: 0
     property bool selected: false
     property int slotNumber: 0
+    property color semanticColor: root.activeTextColor
     signal activated()
 
     // The badge names the key, not the position: the tenth row is opened by
@@ -173,8 +207,12 @@ Item {
     implicitHeight: Style.space(28)
     radius: Style.cornerRadius
     color: entry.selected
-      ? Style.selectedFillFor(root.textColor, root.accentColor)
-      : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+      ? (root.systemThemeStyling ? root.stateSurface(entry.semanticColor, 0.15)
+        : Style.selectedFillFor(root.textColor, root.accentColor))
+      : (hover.hovered
+        ? (root.systemThemeStyling ? root.hoverSurfaceColor
+          : Style.hoverFillFor(root.textColor, root.accentColor))
+        : "transparent")
 
     ActionIcon {
       id: glyph
@@ -184,7 +222,8 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       name: entry.icon
       iconSize: Style.font.icon
-      color: entry.selected ? root.textColor : root.dimColor
+      color: entry.selected && root.systemThemeStyling
+        ? entry.semanticColor : (entry.selected ? root.textColor : root.dimColor)
       visible: !(entry.showsNumber && root.collapsed)
     }
 
@@ -224,7 +263,8 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
       text: entry.label
-      color: entry.selected ? root.textColor : root.dimColor
+      color: entry.selected && root.systemThemeStyling
+        ? entry.semanticColor : (entry.selected ? root.textColor : root.dimColor)
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       font.bold: entry.selected
@@ -238,7 +278,7 @@ Item {
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
       text: Model.badgeText(entry.count, 999)
-      color: root.accentColor
+      color: root.systemThemeStyling ? entry.semanticColor : root.accentColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
@@ -253,7 +293,7 @@ Item {
       width: Style.space(5)
       height: width
       radius: width / 2
-      color: root.accentColor
+      color: root.systemThemeStyling ? entry.semanticColor : root.accentColor
     }
 
     HoverHandler { id: hover }

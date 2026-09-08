@@ -62,6 +62,7 @@ Item {
     maxMessages: 25,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
+    systemThemeStyling: false,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -87,6 +88,8 @@ Item {
     && settings.unifiedCalendarView === true
   readonly property bool unifiedMailboxes: !!settings
     && settings.unifiedMailboxes === true
+  readonly property bool systemThemeStyling: !!settings
+    && settings.systemThemeStyling === true
 
   // Whether the bar draws an envelope for this.
   //
@@ -173,6 +176,10 @@ Item {
 
   function setContentDirection(value) {
     persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setSystemThemeStyling(value) {
+    persistSetting("systemThemeStyling", value === true)
   }
 
   function setUnifiedCalendarView(value) {
