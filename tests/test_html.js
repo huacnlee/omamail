@@ -407,7 +407,12 @@ for (const source of localSources) {
   assert.strictEqual(asked.images, 0, source + " must never be fetched")
   assert.ok(asked.html.indexOf("img") < 0, source + " must not reach the renderer")
   assert.strictEqual(asked.remoteImages, 0, source + " is not something to offer")
+  assert.strictEqual(html.publicHttpUrl(source), "", source + " must not open in a browser")
 }
+assert.strictEqual(html.publicHttpUrl("https://meet.google.com/abc-defg-hij"),
+  "https://meet.google.com/abc-defg-hij")
+assert.strictEqual(html.publicHttpUrl("javascript:alert(1)"), "")
+assert.strictEqual(html.publicHttpUrl("file:///etc/passwd"), "")
 
 // A public address in a URL is fine, however it is written.
 assert.strictEqual(html.sanitize("<img src=\"https://93.184.216.34/x.png\" width=\"90\">",

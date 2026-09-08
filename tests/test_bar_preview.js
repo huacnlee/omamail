@@ -46,5 +46,9 @@ assert.strictEqual(JSON.stringify(events.map(function (item) { return item.uid }
 assert.strictEqual(events[0].sourceLabel, "Team")
 assert.strictEqual(events[0].callUrl, "https://meet.google.com/abc")
 assert.strictEqual(events[1].callUrl, "https://zoom.us/j/123")
+assert.strictEqual(preview.upcomingEvents([
+  { uid: "lan", summary: "LAN", start: { ms: now + 1000 },
+    location: "http://192.168.1.1/join" }
+], now, 1)[0].callUrl, "")
 
 console.log("test_bar_preview.js ok")

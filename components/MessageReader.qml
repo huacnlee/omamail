@@ -88,7 +88,9 @@ Item {
       root.mailtoRequested(url)
       return
     }
-    Qt.openUrlExternally(url)
+    var opened = Html.publicHttpUrl(url)
+    if (opened === "") return
+    Qt.openUrlExternally(opened)
   }
 
   readonly property var summary: service ? service.selectedMessage : null
@@ -557,7 +559,7 @@ Item {
       }
       // The same rule the body's own links obey: this leaves the app, and it
       // leaves it through the desktop's browser rather than anything here.
-      onOpenRequested: function(url) { Qt.openUrlExternally(url) }
+      onOpenRequested: function(url) { root.openLink(url) }
     }
 
     TextEdit {

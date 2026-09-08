@@ -3,6 +3,7 @@ import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
+import "../message/Html.js" as Html
 
 Rectangle {
   id: root
@@ -53,8 +54,7 @@ Rectangle {
   color: root.backgroundColor
 
   function httpLink(value) {
-    var candidate = String(value || "").trim()
-    return /^https?:\/\//i.test(candidate) ? candidate : ""
+    return Html.publicHttpUrl(value)
   }
 
   function dateSummary() {
