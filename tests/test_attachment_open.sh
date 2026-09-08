@@ -56,6 +56,39 @@ fi
   || { echo "test_attachment_open.sh: malformed attachment data reached xdg-open" >&2; exit 1; }
 
 rm -f "$work/opened"
+mixed_name=$(printf '%s' 'invoice.HTML' | base64 | tr -d '\n')
+if printf '%s\n%s\n' "$mixed_name" "$body" \
+  | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \
+    PATH="$work/bin:$PATH" "$script" >/dev/null 2>&1; then
+  echo "test_attachment_open.sh: a mixed-case HTML attachment was opened" >&2
+  exit 1
+fi
+[ ! -e "$work/opened" ] \
+  || { echo "test_attachment_open.sh: a mixed-case HTML attachment reached xdg-open" >&2; exit 1; }
+
+rm -f "$work/opened"
+wide_name=$(python3 -c 'import base64,sys; sys.stdout.write(base64.b64encode("invoice．html".encode()).decode())')
+if printf '%s\n%s\n' "$wide_name" "$body" \
+  | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \
+    PATH="$work/bin:$PATH" "$script" >/dev/null 2>&1; then
+  echo "test_attachment_open.sh: a fullwidth-dot HTML attachment was opened" >&2
+  exit 1
+fi
+[ ! -e "$work/opened" ] \
+  || { echo "test_attachment_open.sh: a fullwidth-dot HTML attachment reached xdg-open" >&2; exit 1; }
+
+rm -f "$work/opened"
+dot_name=$(printf '%s' 'invoice.html.' | base64 | tr -d '\n')
+if printf '%s\n%s\n' "$dot_name" "$body" \
+  | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \
+    PATH="$work/bin:$PATH" "$script" >/dev/null 2>&1; then
+  echo "test_attachment_open.sh: a trailing-dot HTML attachment was opened" >&2
+  exit 1
+fi
+[ ! -e "$work/opened" ] \
+  || { echo "test_attachment_open.sh: a trailing-dot HTML attachment reached xdg-open" >&2; exit 1; }
+
+rm -f "$work/opened"
 html_name=$(printf '%s' 'invoice.html' | base64 | tr -d '\n')
 if printf '%s\n%s\n' "$html_name" "$body" \
   | XDG_RUNTIME_DIR="$work/runtime" OPEN_CAPTURE="$work/opened" \

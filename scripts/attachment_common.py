@@ -9,6 +9,7 @@ be fixed once.
 
 import base64
 import os
+import unicodedata
 
 # A name longer than this is refused by ext4 and by every filesystem the app is
 # likely to land on, which measures bytes rather than characters.
@@ -41,7 +42,12 @@ OPEN_REFUSED_SUFFIXES = (
 
 
 def openable_filename(name: str) -> bool:
-    lowered = str(name).lower()
+    normalized = unicodedata.normalize("NFKC", str(name)).replace("\u2024", ".")
+    cleaned = "".join(
+        character for character in normalized
+        if unicodedata.category(character) not in ("Cf", "Cc", "Zl", "Zp")
+    )
+    lowered = cleaned.rstrip("._ \t").lower()
     return not any(lowered.endswith(suffix) for suffix in OPEN_REFUSED_SUFFIXES)
 
 

@@ -87,6 +87,9 @@ check "and is measured in bytes, not characters" \
 
 # ------------------------------------------------- a name from a stranger
 
+html_saved=$(save "$downloads" 'invoice.html' "$work/bytes")
+check "saving still keeps an HTML name" "$html_saved" "$downloads/invoice.html"
+
 escape=$(save "$downloads" '../../etc/passwd' "$work/bytes")
 check "a path cannot leave the folder" "$escape" "$downloads/passwd"
 
