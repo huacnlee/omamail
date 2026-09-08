@@ -455,6 +455,18 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
   { href: "//dav.example/cal/me/a.ics" }),
   "https://dav.example/cal/me/a.ics",
   "a scheme-relative href on the same host resolves")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example:443@evil.example/steal.ics" }), "",
+  "userinfo is not the collection host")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://user@dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics",
+  "userinfo on the collection host is dropped, not sent as the user")
+assert.strictEqual(feed.urlOrigin("https://[2001:db8::1]/cal/"),
+  "https://[2001:db8::1]:443")
+assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]/cal/",
+  { href: "https://[2001:db8::2]/cal/a.ics" }), "",
+  "a different IPv6 host is another origin")
 
 // Raw whitespace is refused: a URL's spaces arrive percent-encoded, and the
 // resolved address becomes one quoted line of the transport's curl config,

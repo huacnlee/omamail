@@ -35,6 +35,7 @@ build_config() {
   printf 'data = "%s"\n' "$(escape "$report")"
   printf 'proto = "=https"\n'
   printf 'proto-redir = "=https"\n'
+  printf 'max-redirs = 0\n'
 }
 
 set +e
