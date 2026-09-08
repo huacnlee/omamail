@@ -680,9 +680,10 @@ assert.strictEqual(model.actionUnavailable("spam", "IMAP"),
   "IMAP has no junk verb to report to")
 assert.strictEqual(model.actionUnavailable("trash", "HEY"), "")
 
-deepEqual(model.unavailableActions({ archive: true, star: true, spam: true }), [])
-deepEqual(model.unavailableActions({ archive: false, star: false }), ["archive", "star"])
-deepEqual(model.unavailableActions(null), ["archive", "star"],
+deepEqual(model.unavailableActions({ archive: true, star: true, spam: true, move: true }), [])
+deepEqual(model.unavailableActions({ archive: false, star: false, move: false }),
+  ["archive", "star", "move"])
+deepEqual(model.unavailableActions(null), ["archive", "star", "move"],
   "an unknown provider offers nothing it cannot prove")
 
 // The number a row's badge shows, and the floor under it: two or more on a

@@ -78,7 +78,9 @@ var BINDINGS = [
   // "Move to" rather than "Move to a label" because the destination is a label
   // on Gmail and a folder on IMAP, and the sheet has no provider to ask.
   { id: "moveToLabel", keys: ["v"], contexts: MAIL,
-    group: "Acting", label: "Move to" },
+    group: "Acting", label: "Move to",
+    hint: { list: "move to", reader: "move to" },
+    hintNeedsSelection: true, hintUnavailableId: "move" },
   { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
@@ -342,16 +344,19 @@ function helpGroups() {
 // What the status bar offers from where the user is standing.
 //
 // `unavailable` is the ids the active provider cannot honour — a mailbox with
-// no archive and no star should not be offering `e` and `s` in the row that
-// says what the keyboard does here. The table itself stays whole: what a key
-// means is a property of the application, and only whether it is on offer
-// depends on which mailbox is open.
-function hintsFor(context, unavailable) {
+// no archive, star, or named destination should not offer those actions in the
+// row that says what the keyboard does here. The table itself stays whole:
+// what a key means is a property of the application, and only whether it is on
+// offer depends on which mailbox is open. `hasSelection` makes the few hints
+// that act on a particular row contextual without changing their bindings.
+function hintsFor(context, unavailable, hasSelection) {
   var out = []
   var rows = bindingsFor(context)
   var missing = Array.isArray(unavailable) ? unavailable : []
   for (var i = 0; i < rows.length; i++) {
-    if (missing.indexOf(rows[i].id) >= 0) continue
+    if (rows[i].hintNeedsSelection && hasSelection !== true) continue
+    var unavailableId = rows[i].hintUnavailableId || rows[i].id
+    if (missing.indexOf(unavailableId) >= 0) continue
     var text = hintTextFor(rows[i], context)
     if (text !== "") out.push(({ key: hintKeyFor(rows[i]), label: text }))
   }

@@ -244,6 +244,13 @@ const listHints = keymap.hintsFor("list")
 deepEqual(listHints.map(function (h) { return h.key + " " + h.label }),
   ["j / k move", "o open", "e archive", "c compose"],
   "the status bar offers what the list can do, in its short form")
+const selectedListHints = keymap.hintsFor("list", [], true)
+deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
+  ["j / k move", "o open", "e archive", "v move to", "c compose"],
+  "the move hint joins the row only while a message is selected")
+assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
+  return h.key === "v"
+}), "a provider without move does not offer the move hint")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],

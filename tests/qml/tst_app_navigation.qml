@@ -106,6 +106,7 @@ Item {
     property var calendarController: null
     property var selectedBody: ({ text: "Original body", source: "plain" })
     property var selectedMessage: null
+    property var unavailableActions: []
 
     property var log: []
     property var lastSavedDraft: null
@@ -259,6 +260,7 @@ Item {
       mailService.mailboxKey = "inbox"
       mailService.selectedId = ""
       mailService.selectedMessage = null
+      mailService.unavailableActions = []
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       fakeAuth.credentialsPresent = false
       fakeShell.hidden = []
@@ -426,6 +428,25 @@ Item {
       mailService.actionStatus = ""
       mailService.syncedLabel = ""
       waitForRendering(app)
+    }
+
+    function test_the_move_hint_only_appears_for_a_selected_message() {
+      var hints = named(app, "status-key-hints")
+      verify(hints)
+      verify(!hints.hints.some(function(hint) { return hint.key === "v" }),
+        "an empty list selection must not offer move")
+
+      app.cursorId = "message-1"
+      tryVerify(function() {
+        return hints.hints.some(function(hint) {
+          return hint.key === "v" && hint.label === "move to"
+        })
+      }, 1000, "v offers move to once a message is selected")
+
+      mailService.unavailableActions = ["move"]
+      tryVerify(function() {
+        return !hints.hints.some(function(hint) { return hint.key === "v" })
+      }, 1000, "a mailbox that cannot move must not advertise the shortcut")
     }
 
     // The box around the address pads it by one number and measures itself by

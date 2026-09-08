@@ -1025,13 +1025,14 @@ Item {
     ? Unified.everyMailboxCan(unifiedAbilities, "web")
     : (!current || current.canOpenOnWeb)
   readonly property bool canOpenWebInbox: !unified && !!current && current.canOpenWebInbox
-  // A key is not a button: `e` and `s` are bound whatever mailbox is open, so
+  // A key is not a button: `e`, `s`, and `v` are bound whatever mailbox is open, so
   // the status row's hints are filtered by this. In a merged list the answer
   // has to come from the same intersection the buttons use — one account's
   // own list would offer an archive the mailbox the cursor is on refuses.
   readonly property var unavailableActions: unified
     ? Model.unavailableActions({
-        archive: canArchive, star: canStar, spam: canReportSpam })
+        archive: canArchive, star: canStar, spam: canReportSpam,
+        move: canMoveToLabel })
     : (current ? current.unavailableActions : [])
 
   // #91's set of attachments being saved, keyed the way the panel addresses a

@@ -493,6 +493,7 @@ function unavailableActions(capabilities) {
   var out = []
   if (caps.archive !== true) out.push("archive")
   if (caps.star !== true) out.push("star")
+  if (caps.move !== true) out.push("move")
   return out
 }
 
