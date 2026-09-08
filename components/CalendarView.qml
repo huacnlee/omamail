@@ -16,6 +16,7 @@ Item {
   required property color calendarTodayBackgroundColor
   required property int calendarBorderWidth
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   property date visibleWeek: new Date()
@@ -495,6 +496,7 @@ Item {
       calendarTodayBackgroundColor: root.calendarTodayBackgroundColor
       calendarBorderWidth: root.calendarBorderWidth
       panelFontFamily: root.panelFontFamily
+      scrollSpeedMultiplier: root.scrollSpeedMultiplier
       selectedEventId: root.selectedEventId
       onCreateAt: function(startMs) { root.createAt(startMs) }
       onEventActivated: function(event) { root.activateEvent(event) }
@@ -516,6 +518,7 @@ Item {
     urgentColor: root.urgentColor
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily
+    scrollSpeedMultiplier: root.scrollSpeedMultiplier
     onClosed: root.closeDetail()
     // Editing replaces the detail: the composer covers the view, and the
     // event it rewrites is not the one these labels would go on showing.

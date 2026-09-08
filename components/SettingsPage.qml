@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../account/Model.js" as Model
 
 // Where mailboxes are managed.
 //
@@ -47,6 +48,10 @@ Column {
     { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
   ]
   readonly property var auth: service ? service.auth : null
+  readonly property int scrollSpeedPercent: root.service
+    && Number(root.service.scrollSpeedPercent) > 0
+    ? Number(root.service.scrollSpeedPercent) : 160
+  readonly property int scrollSpeedLevel: Model.scrollSpeedLevel(scrollSpeedPercent)
 
   function signatureAccount(id) {
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -228,6 +233,114 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(scrollText.implicitHeight, scrollControls.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: scrollText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: scrollControls.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Pane scroll speed"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Applies to mouse wheels and touchpad scrolling"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Row {
+      id: scrollControls
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(8)
+
+      Button {
+        objectName: "scrollSpeedSlower"
+        anchors.verticalCenter: parent.verticalCenter
+        text: "−"
+        tooltipText: "Slower scrolling"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        enabled: root.scrollSpeedLevel > 0
+        onClicked: if (root.service)
+          root.service.setScrollSpeedPercent(
+            Model.scrollSpeedPercentForLevel(root.scrollSpeedLevel - 1))
+      }
+
+      PanelSlider {
+        id: scrollSlider
+        objectName: "scrollSpeedSlider"
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(150)
+        minimum: 0
+        maximum: 4
+        step: 1
+        tickCount: 5
+        integer: true
+        value: root.scrollSpeedLevel
+        trackColor: Style.normalFillFor(root.textColor, root.accentColor)
+        fillColor: root.accentColor
+        knobColor: root.textColor
+        tickColor: root.dimColor
+        function chooseLevel(next) {
+          if (root.service)
+            root.service.setScrollSpeedPercent(Model.scrollSpeedPercentForLevel(next))
+        }
+        onReleased: function(next) { chooseLevel(next) }
+      }
+
+      Button {
+        objectName: "scrollSpeedFaster"
+        anchors.verticalCenter: parent.verticalCenter
+        text: "+"
+        tooltipText: "Faster scrolling"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        enabled: root.scrollSpeedLevel < 4
+        onClicked: if (root.service)
+          root.service.setScrollSpeedPercent(
+            Model.scrollSpeedPercentForLevel(root.scrollSpeedLevel + 1))
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(62)
+        horizontalAlignment: Text.AlignRight
+        text: Model.WHEEL_SPEED_LABELS[Math.round(scrollSlider.dragging
+          ? scrollSlider.liveValue : root.scrollSpeedLevel)]
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
   }
 
   Rectangle {

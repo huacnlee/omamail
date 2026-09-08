@@ -62,6 +62,7 @@ Item {
     maxMessages: 25,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
+    scrollSpeedPercent: Model.WHEEL_SPEED_DEFAULT_PERCENT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -87,6 +88,9 @@ Item {
     && settings.unifiedCalendarView === true
   readonly property bool unifiedMailboxes: !!settings
     && settings.unifiedMailboxes === true
+  readonly property int scrollSpeedPercent: Model.scrollSpeedPercent(
+    settings ? settings.scrollSpeedPercent : null)
+  readonly property real scrollSpeedMultiplier: scrollSpeedPercent / 100
 
   // Whether the bar draws an envelope for this.
   //
@@ -173,6 +177,10 @@ Item {
 
   function setContentDirection(value) {
     persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setScrollSpeedPercent(value) {
+    persistSetting("scrollSpeedPercent", Model.scrollSpeedPercent(value))
   }
 
   function setUnifiedCalendarView(value) {

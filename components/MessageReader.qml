@@ -25,6 +25,7 @@ Item {
   required property color popupBorderColor
   required property real leadingBoundaryOverlap
   required property color dimmerColor
+  property real scrollSpeedMultiplier: 1
   required property string panelFontFamily
   // Which of the three ways of reading a message this window is set to. The
   // window's preference, not this message's: it may not be the one on screen,
@@ -514,7 +515,10 @@ Item {
   Flickable {
     id: bodyFlick
 
-    WheelScroller { view: bodyFlick }
+    WheelScroller {
+      view: bodyFlick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     anchors.top: notices.bottom
     anchors.left: parent.left
     // The rail takes its width out of the body's, which is what keeps the

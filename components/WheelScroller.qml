@@ -23,6 +23,9 @@ WheelHandler {
   id: root
 
   required property Flickable view
+  // One keeps the upstream Chromium-like distance; the mail window defaults
+  // to the Quick preset and updates this binding live from Settings.
+  property real speedMultiplier: 1
 
   blocking: true
   grabPermissions: PointerHandler.CanTakeOverFromAnything
@@ -31,12 +34,15 @@ WheelHandler {
 
   onWheel: function(event) {
     if (!root.view) return
+    var previous = root.view.contentY
     root.view.contentY = Model.wheelScrollByPixels(root.view.contentY,
-      Model.wheelPixels(event.angleDelta.y, event.pixelDelta.y),
+      Model.wheelPixels(event.angleDelta.y, event.pixelDelta.y,
+        root.speedMultiplier),
       root.view.contentHeight, root.view.height,
       root.view.originY, root.view.topMargin, root.view.bottomMargin)
     // Not dead despite `blocking`: a flick already in flight from a drag
     // goes on decelerating from where it was and fights every turn after.
     root.view.cancelFlick()
+    event.accepted = Math.abs(root.view.contentY - previous) > 0.01
   }
 }

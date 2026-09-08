@@ -7,6 +7,7 @@ PanelActionButton 1.0 PanelActionButton.qml
 PanelSeparator 1.0 PanelSeparator.qml
 PanelSectionHeader 1.0 PanelSectionHeader.qml
 PanelToolTip 1.0 PanelToolTip.qml
+PanelSlider 1.0 PanelSlider.qml
 ToggleSwitch 1.0 ToggleSwitch.qml
 Dropdown 1.0 Dropdown.qml
 BarWidget 1.0 BarWidget.qml

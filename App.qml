@@ -215,6 +215,12 @@ Item {
   // service holds it because it is written to disk: a size somebody reached for
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
+  // Read the setting itself. Keeping an intermediate multiplier on a service
+  // made the control look updated while a long-lived pane could retain the old
+  // derived value.
+  readonly property real scrollSpeedMultiplier: service
+    && Number(service.scrollSpeedPercent) > 0
+    ? Number(service.scrollSpeedPercent) / 100 : 1.6
   // 0 means "proportional"; anything else is a width somebody dragged to.
   property real listWidth: 0
 
@@ -1601,6 +1607,7 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           dimColor: root.dim
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
@@ -1663,7 +1670,10 @@ Item {
           Flickable {
             id: listFlick
 
-            WheelScroller { view: listFlick }
+            WheelScroller {
+              view: listFlick
+              speedMultiplier: root.scrollSpeedMultiplier
+            }
             anchors.fill: parent
             contentWidth: width
             contentHeight: list.implicitHeight + Style.space(16)
@@ -1757,6 +1767,7 @@ Item {
           leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
           showBack: root.compact
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
@@ -1810,6 +1821,7 @@ Item {
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
           contentDirection: root.service ? root.service.contentDirection : ""
           // The stack follows the view: opening pushes, closing pops — and
           // the pop is here rather than on `closed`, because a draft parked
@@ -1845,6 +1857,7 @@ Item {
           urgentColor: root.urgent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
         }
 
         Rectangle {
@@ -1869,6 +1882,7 @@ Item {
             calendarTodayBackgroundColor: root.calendarTodayBackground
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
+            scrollSpeedMultiplier: root.scrollSpeedMultiplier
             // An event opened for reading is a place, so Back closes it before
             // it leaves the calendar. The view owns the open state; the stack
             // follows it.
@@ -1912,7 +1926,10 @@ Item {
         Flickable {
           id: setupFlick
 
-          WheelScroller { view: setupFlick }
+          WheelScroller {
+            view: setupFlick
+            speedMultiplier: root.scrollSpeedMultiplier
+          }
           anchors.fill: parent
           anchors.margins: Style.space(18)
           anchors.topMargin: parent.pageTop
@@ -2017,7 +2034,10 @@ Item {
         Flickable {
           id: settingsFlick
 
-          WheelScroller { view: settingsFlick }
+          WheelScroller {
+            view: settingsFlick
+            speedMultiplier: root.scrollSpeedMultiplier
+          }
           // The whole width, rail included: the wheel scrolls the page from
           // anywhere in the block, and the scrollbar keeps the window's edge.
           anchors.left: parent.left
@@ -2339,6 +2359,7 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
         onLabelChosen: function(labelId) {
@@ -2407,6 +2428,7 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         onDismissed: root.dismissHelp()
       }
 

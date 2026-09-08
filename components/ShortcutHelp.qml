@@ -24,6 +24,7 @@ Rectangle {
   required property color backgroundColor
   required property color dimColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   signal dismissed()
 
@@ -68,7 +69,10 @@ Rectangle {
   Flickable {
     id: scroller
 
-    WheelScroller { view: scroller }
+    WheelScroller {
+      view: scroller
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     // Filling the sheet rather than hugging the content is the whole of the
     // scrollbar fix: a Flickable sized to its column puts the bar at that
     // column's edge, which on a wide window is the middle of the screen.

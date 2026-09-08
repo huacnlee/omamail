@@ -14,6 +14,7 @@ Rectangle {
   required property color urgentColor
   required property color dimColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   property bool opened: false
   property string selectedSourceId: ""
@@ -171,7 +172,10 @@ Rectangle {
   Flickable {
     id: composerFlick
 
-    WheelScroller { view: composerFlick }
+    WheelScroller {
+      view: composerFlick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
 
     anchors.fill: parent
     anchors.margins: Style.space(18)

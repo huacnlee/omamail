@@ -19,6 +19,7 @@ Item {
   required property color accentColor
   required property color dimColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
   property bool collapsed: false
   property bool calendarSelected: false
 
@@ -47,7 +48,10 @@ Item {
   Flickable {
     id: flick
 
-    WheelScroller { view: flick }
+    WheelScroller {
+      view: flick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.top: parent.top

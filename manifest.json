@@ -41,6 +41,7 @@
       "maxMessages": 25,
       "heavyMessageRendering": "Show plain text first",
       "contentDirection": "Auto",
+      "scrollSpeedPercent": 160,
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
       "oauthPort": 9481,

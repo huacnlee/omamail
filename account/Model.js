@@ -1240,21 +1240,71 @@ var WHEEL_PIXELS_PER_NOTCH = 120
 // stays 120 so the arithmetic is still "a notch is a notch"; the gain is how
 // far that notch moves on screen.
 var WHEEL_GAIN = 2
+var WHEEL_SPEED_DEFAULT_PERCENT = 160
+// Five deliberate stops keep the control legible: the setting describes how
+// scrolling feels rather than exposing an implementation percentage. The
+// stored number stays compatible with settings written by older builds.
+var WHEEL_SPEED_PRESETS = [75, 100, 160, 250, 400]
+var WHEEL_SPEED_LABELS = ["Gentle", "Standard", "Quick", "Fast", "Rapid"]
+var WHEEL_SPEED_MIN_PERCENT = WHEEL_SPEED_PRESETS[0]
+var WHEEL_SPEED_MAX_PERCENT = WHEEL_SPEED_PRESETS[WHEEL_SPEED_PRESETS.length - 1]
+
+function scrollSpeedLevel(value) {
+  var speed = Number(value)
+  if (!isFinite(speed)) speed = WHEEL_SPEED_DEFAULT_PERCENT
+  var closest = 0
+  for (var i = 1; i < WHEEL_SPEED_PRESETS.length; i++) {
+    if (Math.abs(WHEEL_SPEED_PRESETS[i] - speed)
+        < Math.abs(WHEEL_SPEED_PRESETS[closest] - speed)) closest = i
+  }
+  return closest
+}
+
+function scrollSpeedPercentForLevel(level) {
+  var index = Math.max(0, Math.min(WHEEL_SPEED_PRESETS.length - 1,
+    Math.round(Number(level) || 0)))
+  return WHEEL_SPEED_PRESETS[index]
+}
+
+function scrollSpeedLabel(value) {
+  return WHEEL_SPEED_LABELS[scrollSpeedLevel(value)]
+}
+
+function scrollSpeedPercent(value) {
+  if (value === null || value === undefined || value === "")
+    return WHEEL_SPEED_DEFAULT_PERCENT
+  var speed = Number(value)
+  if (!isFinite(speed)) return WHEEL_SPEED_DEFAULT_PERCENT
+  return scrollSpeedPercentForLevel(scrollSpeedLevel(speed))
+}
+
+function scrollSpeedMultiplier(value) {
+  return scrollSpeedPercent(value) / 100
+}
 
 // Numerically the identity at these two values, and written as a ratio anyway:
 // the constant that matters is "a notch moves 120 pixels", and it is the one a
 // reader changes.
-function wheelDistance(angleDelta) {
-  return (Number(angleDelta) || 0) / WHEEL_UNITS_PER_NOTCH * WHEEL_PIXELS_PER_NOTCH
+function wheelDistance(angleDelta, speedMultiplier) {
+  var speed = Number(speedMultiplier)
+  if (!isFinite(speed) || speed <= 0) speed = 1
+  return (Number(angleDelta) || 0) / WHEEL_UNITS_PER_NOTCH
+    * WHEEL_PIXELS_PER_NOTCH * speed
+}
+
+function wheelDistanceForDeltas(pixelDelta, angleDelta, speedMultiplier) {
+  var pixels = Number(pixelDelta) || 0
+  var speed = Number(speedMultiplier)
+  if (!isFinite(speed) || speed <= 0) speed = 1
+  return pixels !== 0 ? pixels * speed : wheelDistance(angleDelta, speed)
 }
 
 // Pixels to move the view. `pixelDelta` wins when the device reports it
 // (touchpad, high-res wheel); otherwise the notch mapping. The gain is
 // applied here so QML cannot forget it.
-function wheelPixels(angleDelta, pixelDelta) {
-  var pixels = Number(pixelDelta) || 0
-  if (pixels === 0) pixels = wheelDistance(angleDelta)
-  return pixels * WHEEL_GAIN
+function wheelPixels(angleDelta, pixelDelta, speedMultiplier) {
+  return wheelDistanceForDeltas(pixelDelta, angleDelta, speedMultiplier)
+    * WHEEL_GAIN
 }
 
 // Where the view lands after a movement already expressed in pixels —
@@ -1268,8 +1318,16 @@ function wheelScrollByPixels(contentY, pixels, contentHeight, viewportHeight,
 
 // Where the view lands, inside what it can actually reach.
 function wheelScrollTarget(contentY, angleDelta, contentHeight, viewportHeight,
-                           originY, topMargin, bottomMargin) {
-  return wheelScrollByPixels(contentY, wheelDistance(angleDelta), contentHeight,
+                           originY, topMargin, bottomMargin, speedMultiplier) {
+  return wheelScrollByPixels(contentY, wheelPixels(angleDelta, 0, speedMultiplier), contentHeight,
+    viewportHeight, originY, topMargin, bottomMargin)
+}
+
+function wheelScrollTargetForDeltas(contentY, pixelDelta, angleDelta,
+                                    contentHeight, viewportHeight, originY,
+                                    topMargin, bottomMargin, speedMultiplier) {
+  return wheelScrollByPixels(contentY,
+    wheelPixels(angleDelta, pixelDelta, speedMultiplier), contentHeight,
     viewportHeight, originY, topMargin, bottomMargin)
 }
 

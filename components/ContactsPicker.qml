@@ -14,6 +14,7 @@ Item {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   readonly property bool opened: menu.opened
   property string searchQuery: ""
@@ -139,7 +140,10 @@ Item {
       ListView {
         id: contactsList
 
-        WheelScroller { view: contactsList }
+        WheelScroller {
+          view: contactsList
+          speedMultiplier: root.scrollSpeedMultiplier
+        }
         width: parent.width
         implicitHeight: Math.min(contentHeight, Style.space(280))
         clip: true

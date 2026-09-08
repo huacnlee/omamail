@@ -11,6 +11,7 @@ Rectangle {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   property int currentIndex: -1
 
@@ -50,7 +51,10 @@ Rectangle {
   ListView {
     id: suggestions
 
-    WheelScroller { view: suggestions }
+    WheelScroller {
+      view: suggestions
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     anchors.fill: parent
     anchors.margins: Style.space(2)
     clip: true

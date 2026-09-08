@@ -77,6 +77,8 @@ Item {
     property int accountCount: 1
     property int inboxUnread: 0
     property real bodyZoom: 1
+    property real scrollSpeedMultiplier: 1.6
+    property int scrollSpeedPercent: 160
     property string bodyMode: "reader"
     property string providerId: "imap"
     property string pluginDir: ""
@@ -147,6 +149,7 @@ Item {
     }
     function preferredSendAs(_recipients) { return null }
     function refreshRecipientContacts() {}
+    function setScrollSpeedPercent(value) { scrollSpeedPercent = Math.round(value) }
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {
       selectedId = ""
@@ -237,6 +240,8 @@ Item {
     function init() {
       mailService.anyAccountReady = true
       mailService.hasSavedAccounts = true
+      mailService.scrollSpeedPercent = 160
+      mailService.scrollSpeedMultiplier = 1.6
       app.opened = true
       window().width = 980
       app.backToList()
@@ -267,10 +272,31 @@ Item {
       view.contentY = 0
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
-      compare(view.contentY, 240, "one notch, in the real hierarchy")
+      compare(view.contentY, 384, "the Quick preset, in the real hierarchy")
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, 120)
       compare(view.contentY, 0)
+    }
+
+    function test_scroll_controls_reach_the_service() {
+      var slider = named(app, "scrollSpeedSlider")
+      verify(slider, "the settings page exposes the pane-speed slider")
+      compare(slider.value, 2)
+      var faster = named(app, "scrollSpeedFaster")
+      var slower = named(app, "scrollSpeedSlower")
+      verify(faster && slower, "keyboard-reachable step buttons flank the slider")
+      faster.clicked()
+      compare(mailService.scrollSpeedPercent, 250)
+      slower.clicked()
+      compare(mailService.scrollSpeedPercent, 160)
+      slider.released(4)
+      compare(mailService.scrollSpeedPercent, 400)
+
+      var view = flick()
+      view.contentY = 0
+      mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
+      compare(view.contentY, 960,
+        "the changed setting immediately changes this pane's distance")
     }
 
     function test_the_rail_lists_the_pages_sections_in_order() {

@@ -23,7 +23,7 @@ Item {
     contentHeight: 5000
     boundsBehavior: Flickable.StopAtBounds
 
-    Omamail.WheelScroller { view: view }
+    Omamail.WheelScroller { id: speedHandler; view: view; speedMultiplier: 1.6 }
   }
 
   Flickable {
@@ -65,6 +65,7 @@ Item {
 
     function init() {
       view.contentY = 0
+      speedHandler.speedMultiplier = 1.6
       margined.contentY = -margined.topMargin
       headed.contentY = headed.originY
       bare.contentY = 0
@@ -74,7 +75,7 @@ Item {
 
     function test_one_notch_moves_three_lines_worth() {
       mouseWheel(view, 200, 150, 0, -120)
-      compare(view.contentY, 240)
+      compare(view.contentY, 384)
     }
 
     // The whole point. A high-resolution wheel reports one notch as many
@@ -82,7 +83,7 @@ Item {
     // where a bare Flickable is eight times short.
     function test_a_finely_reporting_wheel_moves_the_same_distance() {
       for (var i = 0; i < 8; i++) mouseWheel(view, 200, 150, 0, -15)
-      compare(view.contentY, 240, "eight fractions of a notch are still one notch")
+      compare(view.contentY, 384, "eight fractions of a notch are still one notch")
 
       for (var j = 0; j < 8; j++) mouseWheel(bare, 200, 150, 0, -15)
       wait(400)
@@ -92,24 +93,30 @@ Item {
 
     function test_three_notches_move_three_notches() {
       mouseWheel(view, 200, 150, 0, -360)
-      compare(view.contentY, 720)
+      compare(view.contentY, 1152)
+    }
+
+    function test_a_live_speed_change_reaches_the_same_pane() {
+      speedHandler.speedMultiplier = 2.4
+      mouseWheel(view, 200, 150, 0, -120)
+      compare(view.contentY, 576)
     }
 
     // Uncapped: ten notches as one event and as ten events agree. A per-event
     // cap put the chunking dependence back at the coarse end.
     function test_a_free_spinning_wheel_is_not_capped() {
       mouseWheel(view, 200, 150, 0, -1200)
-      compare(view.contentY, 2400)
+      compare(view.contentY, 3840)
 
       view.contentY = 0
       for (var i = 0; i < 10; i++) mouseWheel(view, 200, 150, 0, -120)
-      compare(view.contentY, 2400, "however the ten notches arrive")
+      compare(view.contentY, 3840, "however the ten notches arrive")
     }
 
     function test_it_scrolls_back_up() {
       view.contentY = 500
       mouseWheel(view, 200, 150, 0, 120)
-      compare(view.contentY, 260)
+      compare(view.contentY, 116)
     }
 
     // ------------------------------------------------------- the bounds

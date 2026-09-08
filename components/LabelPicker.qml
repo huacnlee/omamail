@@ -20,6 +20,7 @@ Item {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   // [{ id, name, system, unread, total }], as the provider reported them.
   property var labels: []
@@ -157,7 +158,10 @@ Item {
       ListView {
         id: labelList
 
-        WheelScroller { view: labelList }
+        WheelScroller {
+          view: labelList
+          speedMultiplier: root.scrollSpeedMultiplier
+        }
         width: parent.width
         implicitHeight: Math.min(contentHeight, Style.space(280))
         clip: true
