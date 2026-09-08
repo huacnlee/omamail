@@ -1264,6 +1264,15 @@ if re.search(r"Unified\.(sharedCapability|sharedMailboxes|hasSharedMailbox)\b", 
                      "use `Unified.everyMailboxCan` / `sharedMailboxRows`")
 UNIFIEDCAPS
 
+python3 - <<'PLUGINDIR'
+from pathlib import Path
+source = Path("Service.qml").read_text()
+if "Qt.resolvedUrl(\"Service.qml\")" not in source:
+    raise SystemExit("test_source.sh: Service must resolve its own directory when Omarchy hides __sourceDir")
+if "replace(/\\/Service\\.qml$/, \"\")" not in source:
+    raise SystemExit("test_source.sh: Service must strip Service.qml from its resolved URL")
+PLUGINDIR
+
 printf 'test_source.sh ok\n'
 
 # A preview is drawn the same as an open and must be marked read differently.

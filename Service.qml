@@ -45,8 +45,17 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
-  readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+  readonly property string pluginDir: {
+    if (manifest && manifest.__sourceDir)
+      return String(manifest.__sourceDir)
+    // Omarchy scopes third-party manifests and strips __sourceDir. Resolve
+    // the directory from this QML file so bundled helper scripts still work.
+    if (manifest)
+      return String(Qt.resolvedUrl("Service.qml"))
+        .replace(/^file:\/\//, "")
+        .replace(/\/Service\.qml$/, "")
+    return ""
+  }
   // Shown in the empty reader, so a screenshot in a bug report says which build
   // it came from. The shell's manifest validation requires both fields, so a
   // loaded plugin always has them; the fallbacks are for a harness that
