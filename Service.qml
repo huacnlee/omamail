@@ -62,6 +62,8 @@ Item {
     maxMessages: 25,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
+    scrollSpeedPercent: Model.WHEEL_SPEED_DEFAULT_PERCENT,
+    systemThemeStyling: false,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -87,6 +89,11 @@ Item {
     && settings.unifiedCalendarView === true
   readonly property bool unifiedMailboxes: !!settings
     && settings.unifiedMailboxes === true
+  readonly property int scrollSpeedPercent: Model.scrollSpeedPercent(
+    settings ? settings.scrollSpeedPercent : null)
+  readonly property real scrollSpeedMultiplier: scrollSpeedPercent / 100
+  readonly property bool systemThemeStyling: !!settings
+    && settings.systemThemeStyling === true
 
   // Whether the bar draws an envelope for this.
   //
@@ -173,6 +180,14 @@ Item {
 
   function setContentDirection(value) {
     persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setScrollSpeedPercent(value) {
+    persistSetting("scrollSpeedPercent", Model.scrollSpeedPercent(value))
+  }
+
+  function setSystemThemeStyling(value) {
+    persistSetting("systemThemeStyling", value === true)
   }
 
   function setUnifiedCalendarView(value) {
@@ -587,6 +602,8 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  property real sidebarWidth: 0
+  property real listWidth: 0
   // Somebody who needed the text bigger needs it bigger for their mail, not for
   // the message that made them reach for it. The same goes for `bodyMode`:
   // both of these are ways of reading mail, not ways of reading one message.
@@ -615,6 +632,8 @@ Item {
     bodyZoom = prefs.bodyZoom
     bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
+    sidebarWidth = prefs.sidebarWidth
+    listWidth = prefs.listWidth
     restoreWindow = prefs.windowOpen
     restoreAttempts = 0
     windowPrefsLoaded = true
@@ -651,6 +670,8 @@ Item {
       bodyZoom: bodyZoom,
       bodyMode: bodyMode,
       alwaysShowImages: alwaysShowImages,
+      sidebarWidth: sidebarWidth,
+      listWidth: listWidth,
       windowOpen: windowOpen || restoreWindow
     })
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
@@ -661,6 +682,20 @@ Item {
     var next = value === true
     if (next === sidebarCollapsed) return
     sidebarCollapsed = next
+    saveWindowPrefs()
+  }
+
+  function setSidebarWidth(value) {
+    var next = Model.paneWidth(value)
+    if (next === sidebarWidth) return
+    sidebarWidth = next
+    saveWindowPrefs()
+  }
+
+  function setListWidth(value) {
+    var next = Model.paneWidth(value)
+    if (next === listWidth) return
+    listWidth = next
     saveWindowPrefs()
   }
 

@@ -25,6 +25,9 @@ Item {
   required property color popupBorderColor
   required property real leadingBoundaryOverlap
   required property color dimmerColor
+  property bool systemThemeStyling: false
+  property color starColor: accentColor
+  property real scrollSpeedMultiplier: 1
   required property string panelFontFamily
   // Which of the three ways of reading a message this window is set to. The
   // window's preference, not this message's: it may not be the one on screen,
@@ -52,6 +55,11 @@ Item {
   signal composeRequested(string mode)
   signal mailtoRequested(string url)
   signal actionRequested(string action)
+
+  Rectangle {
+    anchors.fill: parent
+    color: root.backgroundColor
+  }
 
   // ------------------------------------------------------- the conversation
 
@@ -307,8 +315,10 @@ Item {
       iconName: "star"
       filled: !!root.summary && root.summary.starred
       tooltipText: (root.summary && root.summary.starred ? "Unstar" : "Star") + " · s"
-      foreground: root.summary && root.summary.starred ? root.accentColor : root.dimColor
-      hoverColor: root.accentColor
+      foreground: root.summary && root.summary.starred
+        ? (root.systemThemeStyling ? root.starColor : root.accentColor)
+        : root.dimColor
+      hoverColor: root.systemThemeStyling ? root.starColor : root.accentColor
       fontFamily: root.panelFontFamily
       onClicked: if (root.service && root.summary) root.service.toggleStar(root.selectedId)
     }
@@ -514,7 +524,10 @@ Item {
   Flickable {
     id: bodyFlick
 
-    WheelScroller { view: bodyFlick }
+    WheelScroller {
+      view: bodyFlick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     anchors.top: notices.bottom
     anchors.left: parent.left
     // The rail takes its width out of the body's, which is what keeps the

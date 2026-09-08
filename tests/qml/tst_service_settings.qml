@@ -68,6 +68,25 @@ Item {
       compare(shellStore.updatedEntry.unifiedCalendarView, true)
     }
 
+    function test_scroll_speed_defaults_faster_and_persists_a_clamped_value() {
+      mailService.applySettings({})
+      compare(mailService.scrollSpeedPercent, 160)
+      compare(mailService.scrollSpeedMultiplier, 1.6)
+
+      mailService.setScrollSpeedPercent(237)
+      compare(mailService.scrollSpeedPercent, 250)
+      compare(shellStore.updatedEntry.scrollSpeedPercent, 250)
+    }
+
+    function test_system_theme_styling_defaults_off_and_persists() {
+      mailService.applySettings({})
+      compare(mailService.systemThemeStyling, false)
+
+      mailService.setSystemThemeStyling(true)
+      compare(mailService.systemThemeStyling, true)
+      compare(shellStore.updatedEntry.systemThemeStyling, true)
+    }
+
     function test_unified_mailboxes_setting_defaults_off_and_persists_changes() {
       mailService.applySettings({})
       compare(mailService.unifiedMailboxes, false)

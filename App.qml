@@ -184,6 +184,14 @@ Item {
     Math.min(accent.hslSaturation, 0.55),
     accent.hslLightness, 1.0)
 
+  MailPalette {
+    id: mailPalette
+    enabled: root.systemThemeStyling
+    baseBackground: root.background
+    baseText: root.foreground
+    baseUrgent: root.urgent
+  }
+
   readonly property string fontFamily: Style.font.family
 
   function copyText(text) {
@@ -215,8 +223,24 @@ Item {
   // service holds it because it is written to disk: a size somebody reached for
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
-  // 0 means "proportional"; anything else is a width somebody dragged to.
-  property real listWidth: 0
+  // Read the setting itself. Keeping an intermediate multiplier on a service
+  // made the control look updated while a long-lived pane could retain the old
+  // derived value.
+  readonly property real scrollSpeedMultiplier: service
+    && Number(service.scrollSpeedPercent) > 0
+    ? Number(service.scrollSpeedPercent) / 100 : 1.6
+  readonly property bool systemThemeStyling: !!service
+    && service.systemThemeStyling === true
+  // Zero means "responsive default"; a positive value is the last grip
+  // position and is clamped again against the live window below.
+  readonly property real sidebarWidth: service && Number(service.sidebarWidth) > 0
+    ? Number(service.sidebarWidth) : 0
+  readonly property real listWidth: service && Number(service.listWidth) > 0
+    ? Number(service.listWidth) : 0
+
+  readonly property color labelsPaneBackground: mailPalette.sidebarSurface
+  readonly property color inboxPaneBackground: mailPalette.listSurface
+  readonly property color readerPaneBackground: mailPalette.readerSurface
 
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
@@ -387,9 +411,15 @@ Item {
   // Mailboxes lands in.
   function openSettings() {
     dismissHelp()
-    if (page === "settings") return
     settingsScroll.stop()
     settingsFlick.contentY = 0
+    // A second request is useful recovery, not a no-op: if the page was
+    // already selected while its popup was still relinquishing focus, bring
+    // its viewport home and focus it again.
+    if (page === "settings") {
+      Qt.callLater(function() { focusScope.applyContextFocus() })
+      return
+    }
     pushEntry("settings")
   }
 
@@ -1443,6 +1473,7 @@ Item {
           // same place however the control was pressed.
           IconButton {
             id: menuButton
+            objectName: "menu-button"
             anchors.verticalCenter: parent.verticalCenter
             iconName: "menu"
             tooltipText: "Menu"
@@ -1453,6 +1484,41 @@ Item {
             onClicked: {
               var scene = mapToGlobal(0, height)
               appMenu.openAt(scene.x, scene.y)
+            }
+          }
+
+          IconButton {
+            id: mailViewButton
+            objectName: "mail-view-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.composing
+            iconName: "mail"
+            tooltipText: "Mail · Ctrl+Shift+M"
+            foreground: root.systemThemeStyling && !root.showPage
+              && !root.calendarVisible ? mailPalette.unread : root.dim
+            hoverColor: root.systemThemeStyling ? mailPalette.unread : root.foreground
+            fontFamily: root.fontFamily
+            selected: !root.showPage && !root.calendarVisible
+            enabled: root.ready
+            onClicked: root.backToList()
+          }
+
+          IconButton {
+            id: calendarViewButton
+            objectName: "calendar-view-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.composing
+            iconName: "calendar"
+            tooltipText: "Calendar · Ctrl+Shift+C"
+            foreground: root.systemThemeStyling && !root.showPage
+              && root.calendarVisible ? mailPalette.calendar : root.dim
+            hoverColor: root.systemThemeStyling ? mailPalette.calendar : root.foreground
+            fontFamily: root.fontFamily
+            selected: !root.showPage && root.calendarVisible
+            enabled: root.ready
+            onClicked: {
+              root.showCalendar()
+              calendarView.refresh()
             }
           }
         }
@@ -1593,7 +1659,9 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
+          width: root.sidebarCollapsed ? Style.space(44)
+            : Math.max(Style.space(100), Math.min(parent.width - Style.space(480),
+                root.sidebarWidth > 0 ? root.sidebarWidth : Style.space(148)))
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
@@ -1601,6 +1669,20 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           dimColor: root.dim
+          backgroundColor: root.labelsPaneBackground
+          systemThemeStyling: root.systemThemeStyling
+          selectedSurfaceColor: mailPalette.selectedSurface
+          hoverSurfaceColor: mailPalette.hoverSurface
+          activeTextColor: mailPalette.activeText
+          unreadColor: mailPalette.unread
+          starColor: mailPalette.starred
+          sentColor: mailPalette.sent
+          draftColor: mailPalette.drafts
+          labelColor: mailPalette.labels
+          calendarColor: mailPalette.calendar
+          dangerColor: mailPalette.danger
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
+          showTrailingSeparator: root.sidebarCollapsed || root.calendarVisible
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
@@ -1617,6 +1699,50 @@ Item {
           }
         }
 
+
+        // Labels/inbox grip. It draws the same one-pixel rule as the
+        // inbox/reader divider; the remaining width is only a transparent hit
+        // target, so both dividers look alike without becoming hard to catch.
+        Item {
+          id: sidebarSplitter
+          objectName: "labels-inbox-splitter"
+          anchors.left: sidebar.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          visible: sidebar.visible && !root.sidebarCollapsed
+            && !root.calendarVisible
+          z: 5
+
+          PanelSeparator {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            foreground: root.foreground
+          }
+
+          MouseArea {
+            id: sidebarGrip
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = sidebar.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed || !root.service) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.service.setSidebarWidth(grabbedWidth + moved)
+            }
+            onDoubleClicked: if (root.service) root.service.setSidebarWidth(0)
+          }
+        }
+
         // Narrow windows lose the sidebar; the same mailboxes come back as a
         // scrolling strip above the list.
         MailboxTabs {
@@ -1628,6 +1754,12 @@ Item {
           visible: root.compact && !root.showPage && !root.composing && root.currentView === "list"
           textColor: root.foreground
           accentColor: root.accent
+          systemThemeStyling: root.systemThemeStyling
+          unreadColor: mailPalette.unread
+          starColor: mailPalette.starred
+          sentColor: mailPalette.sent
+          draftColor: mailPalette.drafts
+          dangerColor: mailPalette.danger
           panelFontFamily: root.fontFamily
           // The account's own mailboxes, not a fixed set: this row and the
           // sidebar it replaces on a narrow window must offer the same ones.
@@ -1639,7 +1771,8 @@ Item {
 
         Item {
           id: listColumn
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
@@ -1651,11 +1784,17 @@ Item {
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
             : Math.max(Style.space(100),
-                Math.min(parent.width - Style.space(360),
+                Math.min(parent.width - x - Style.space(280),
                   root.listWidth > 0 ? root.listWidth
-                    : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
+                    : Math.min(Style.space(460),
+                        Math.round((parent.width - x) * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
             && !root.calendarVisible
+
+          Rectangle {
+            anchors.fill: parent
+            color: root.inboxPaneBackground
+          }
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -1663,7 +1802,10 @@ Item {
           Flickable {
             id: listFlick
 
-            WheelScroller { view: listFlick }
+            WheelScroller {
+              view: listFlick
+              speedMultiplier: root.scrollSpeedMultiplier
+            }
             anchors.fill: parent
             contentWidth: width
             contentHeight: list.implicitHeight + Style.space(16)
@@ -1682,6 +1824,12 @@ Item {
               textColor: root.foreground
               accentColor: root.accent
               dimColor: root.dim
+              systemThemeStyling: root.systemThemeStyling
+              selectedSurfaceColor: mailPalette.selectedSurface
+              hoverSurfaceColor: mailPalette.hoverSurface
+              unreadColor: mailPalette.unread
+              starColor: mailPalette.starred
+              sourceColor: mailPalette.labels
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1729,11 +1877,11 @@ Item {
             onPositionChanged: function(mouse) {
               if (!pressed) return
               var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
-              root.listWidth = grabbedWidth + moved
+              if (root.service) root.service.setListWidth(grabbedWidth + moved)
             }
             // Back to the proportional default, which is what most people
             // want after one bad drag.
-            onDoubleClicked: root.listWidth = 0
+            onDoubleClicked: if (root.service) root.service.setListWidth(0)
           }
         }
 
@@ -1747,16 +1895,19 @@ Item {
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
-          backgroundColor: root.background
+          backgroundColor: root.readerPaneBackground
           accentColor: root.accent
           linkColor: root.link
           dimColor: root.dim
           dimmerColor: root.dimmer
+          systemThemeStyling: root.systemThemeStyling
+          starColor: mailPalette.starred
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
           panelFontFamily: root.fontFamily
           zoom: root.bodyZoom
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
           showBack: root.compact
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
@@ -1810,6 +1961,7 @@ Item {
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
           contentDirection: root.service ? root.service.contentDirection : ""
           // The stack follows the view: opening pushes, closing pops — and
           // the pop is here rather than on `closed`, because a draft parked
@@ -1845,6 +1997,7 @@ Item {
           urgentColor: root.urgent
           dimColor: root.dim
           panelFontFamily: root.fontFamily
+          scrollSpeedMultiplier: root.scrollSpeedMultiplier
         }
 
         Rectangle {
@@ -1869,6 +2022,7 @@ Item {
             calendarTodayBackgroundColor: root.calendarTodayBackground
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
+            scrollSpeedMultiplier: root.scrollSpeedMultiplier
             // An event opened for reading is a place, so Back closes it before
             // it leaves the calendar. The view owns the open state; the stack
             // follows it.
@@ -1912,7 +2066,10 @@ Item {
         Flickable {
           id: setupFlick
 
-          WheelScroller { view: setupFlick }
+            WheelScroller {
+              view: setupFlick
+              speedMultiplier: root.scrollSpeedMultiplier
+            }
           anchors.fill: parent
           anchors.margins: Style.space(18)
           anchors.topMargin: parent.pageTop
@@ -2017,7 +2174,10 @@ Item {
         Flickable {
           id: settingsFlick
 
-          WheelScroller { view: settingsFlick }
+          WheelScroller {
+            view: settingsFlick
+            speedMultiplier: root.scrollSpeedMultiplier
+          }
           // The whole width, rail included: the wheel scrolls the page from
           // anywhere in the block, and the scrollbar keeps the window's edge.
           anchors.left: parent.left
@@ -2049,6 +2209,11 @@ Item {
               dimColor: root.dim
               accentColor: root.accent
               urgentColor: root.urgent
+              unreadColor: mailPalette.unread
+              starColor: mailPalette.starred
+              draftColor: mailPalette.drafts
+              labelColor: mailPalette.labels
+              calendarColor: mailPalette.calendar
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
               // Which kind first, then the form for it.
@@ -2294,7 +2459,10 @@ Item {
           root.showCalendar()
           calendarView.refresh()
         }
-        onSetupRequested: root.openSettings()
+        // Let the Popup finish closing before replacing everything below it.
+        // On the live shell, doing both in the row's release handler could
+        // restore the old focus/navigation state over the newly opened page.
+        onSetupRequested: Qt.callLater(root.openSettings)
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
@@ -2339,6 +2507,7 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
         onLabelChosen: function(labelId) {
@@ -2407,6 +2576,7 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         onDismissed: root.dismissHelp()
       }
 

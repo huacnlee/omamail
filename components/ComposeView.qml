@@ -30,6 +30,7 @@ DropArea {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   readonly property int formInset: Style.space(18)
   readonly property int formLabelWidth: Style.space(52)
@@ -1142,6 +1143,7 @@ DropArea {
         popupBackgroundColor: root.popupBackgroundColor
         popupBorderColor: root.popupBorderColor
         panelFontFamily: root.panelFontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         onChosen: function(contact) { root.acceptTo(contact) }
       }
 
@@ -1224,6 +1226,7 @@ DropArea {
         popupBackgroundColor: root.popupBackgroundColor
         popupBorderColor: root.popupBorderColor
         panelFontFamily: root.panelFontFamily
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         onChosen: function(contact) { root.acceptCc(contact) }
       }
 
@@ -1302,6 +1305,7 @@ DropArea {
         accentColor: root.accentColor
         popupBackgroundColor: root.popupBackgroundColor
         popupBorderColor: root.popupBorderColor
+        scrollSpeedMultiplier: root.scrollSpeedMultiplier
         panelFontFamily: root.panelFontFamily
         onChosen: function(contact) { root.acceptBcc(contact) }
       }
@@ -1477,7 +1481,10 @@ DropArea {
     contentItem: ListView {
       id: fromRows
 
-      WheelScroller { view: fromRows }
+      WheelScroller {
+        view: fromRows
+        speedMultiplier: root.scrollSpeedMultiplier
+      }
       implicitHeight: contentHeight
       clip: true
       model: root.fromIdentities
@@ -1542,6 +1549,7 @@ DropArea {
     popupBackgroundColor: root.popupBackgroundColor
     popupBorderColor: root.popupBorderColor
     panelFontFamily: root.panelFontFamily
+    scrollSpeedMultiplier: root.scrollSpeedMultiplier
     onContactChosen: function(contact, target) {
       if (target === "cc") {
         root.ccVisible = true
@@ -1565,7 +1573,10 @@ DropArea {
   Flickable {
     id: bodyFlick
 
-    WheelScroller { view: bodyFlick }
+    WheelScroller {
+      view: bodyFlick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     objectName: "compose-body"
     anchors.top: fields.bottom
     anchors.left: parent.left
@@ -1627,7 +1638,10 @@ DropArea {
     Flickable {
       id: attachFlick
 
-      WheelScroller { view: attachFlick }
+      WheelScroller {
+        view: attachFlick
+        speedMultiplier: root.scrollSpeedMultiplier
+      }
       anchors.fill: parent
       anchors.leftMargin: Style.space(18)
       anchors.rightMargin: Style.space(18)

@@ -719,7 +719,7 @@ assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
   sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
-  alwaysShowImages: false, windowOpen: false
+  alwaysShowImages: false, sidebarWidth: 0, listWidth: 0, windowOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
   "the old two-mode preference migrates to the three-mode setting")
@@ -727,6 +727,10 @@ assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "origi
 assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":222.4}').sidebarWidth, 222)
+assert.strictEqual(model.windowPrefs('{"listWidth":481}').listWidth, 481)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-5,"listWidth":"bad"}').sidebarWidth, 0)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-5,"listWidth":"bad"}').listWidth, 0)
 
 // ------------------------------------------------- what a detail read carries
 //
@@ -926,8 +930,26 @@ for (let i = 0; i < 8; i++) fine += model.wheelDistance(-NOTCH / 8)
 assert.strictEqual(fine, -120, "eight fractions of a notch are still one notch")
 
 assert.strictEqual(model.wheelDistance(-3 * NOTCH), -360, "three notches")
+assert.strictEqual(model.wheelDistance(-NOTCH, 1.6), -192,
+  "the configured multiplier changes the distance")
+assert.strictEqual(model.wheelDistanceForDeltas(-24, -NOTCH, 2), -48,
+  "a physical pixel delta wins and follows the configured multiplier")
+assert.strictEqual(model.wheelDistanceForDeltas(0, -NOTCH, 2), -240,
+  "an angle delta remains the fallback")
 assert.strictEqual(model.wheelDistance(0), 0)
 assert.strictEqual(model.wheelDistance(null), 0)
+
+assert.strictEqual(model.scrollSpeedPercent(undefined), 160)
+assert.strictEqual(model.scrollSpeedPercent(237), 250)
+assert.strictEqual(model.scrollSpeedPercent(10), 75)
+assert.strictEqual(model.scrollSpeedPercent(900), 400)
+assert.strictEqual(model.scrollSpeedMultiplier(160), 1.6)
+assert.strictEqual(model.scrollSpeedLevel(75), 0)
+assert.strictEqual(model.scrollSpeedLevel(160), 2)
+assert.strictEqual(model.scrollSpeedLevel(400), 4)
+assert.strictEqual(model.scrollSpeedPercentForLevel(4), 400)
+assert.strictEqual(model.scrollSpeedLabel(75), "Gentle")
+assert.strictEqual(model.scrollSpeedLabel(400), "Rapid")
 
 // Nothing is capped. A cap on one event would put the chunking dependence
 // straight back at the coarse end: a free-spinning wheel delivers ten notches
@@ -940,8 +962,12 @@ assert.strictEqual(asTen, model.wheelDistance(-10 * NOTCH),
   "ten notches move the same distance however they arrive")
 
 // Where the view lands, inside what it can actually reach.
-assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300), 120)
-assert.strictEqual(model.wheelScrollTarget(500, NOTCH, 5000, 300), 380)
+assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300), 240)
+assert.strictEqual(model.wheelScrollTarget(500, NOTCH, 5000, 300), 260)
+assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300,
+  0, 0, 0, 1.6), 384)
+assert.strictEqual(model.wheelScrollTargetForDeltas(0, -30, -NOTCH,
+  5000, 300, 0, 0, 0, 2), 120)
 assert.strictEqual(model.wheelScrollTarget(0, 2 * NOTCH, 5000, 300), 0,
   "there is nothing above the first row")
 assert.strictEqual(model.wheelScrollTarget(4700, -2 * NOTCH, 5000, 300), 4700)
@@ -951,12 +977,12 @@ assert.strictEqual(model.wheelScrollTarget(0, -2 * NOTCH, 100, 300), 0,
 // A margined view scrolled up at the top stays in its margin. With a floor of
 // 0 this moved *down* to 0 in answer to a scroll up.
 assert.strictEqual(model.wheelScrollTarget(-50, NOTCH, 5000, 300, 0, 50, 70), -50)
-assert.strictEqual(model.wheelScrollTarget(-50, -NOTCH, 5000, 300, 0, 50, 70), 70)
+assert.strictEqual(model.wheelScrollTarget(-50, -NOTCH, 5000, 300, 0, 50, 70), 190)
 assert.strictEqual(model.wheelScrollTarget(4770, -NOTCH, 5000, 300, 0, 50, 70), 4770,
   "and the bottom margin is reachable rather than cut off")
 
 // A ListView with a header: one notch is one notch, not a jump to 0.
-assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), -80)
+assert.strictEqual(model.wheelScrollTarget(-200, -NOTCH, 4200, 300, -200, 0, 0), 40)
 assert.strictEqual(model.wheelScrollTarget(-200, NOTCH, 4200, 300, -200, 0, 0), -200,
   "and the header stays reachable")
 
@@ -967,7 +993,7 @@ assert.strictEqual(model.wheelScrollByPixels(500, 40, 5000, 300), 460)
 assert.strictEqual(model.wheelScrollByPixels(0, 40, 5000, 300), 0,
   "there is nothing above the first row")
 assert.strictEqual(model.wheelScrollTarget(0, -NOTCH, 5000, 300),
-  model.wheelScrollByPixels(0, model.wheelDistance(-NOTCH), 5000, 300),
+  model.wheelScrollByPixels(0, model.wheelPixels(-NOTCH, 0), 5000, 300),
   "a notch is the pixel helper fed a notch's worth")
 
 assert.strictEqual(model.WHEEL_GAIN, 2)

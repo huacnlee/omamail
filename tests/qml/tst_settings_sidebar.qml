@@ -77,6 +77,11 @@ Item {
     property int accountCount: 1
     property int inboxUnread: 0
     property real bodyZoom: 1
+    property real scrollSpeedMultiplier: 1.6
+    property int scrollSpeedPercent: 160
+    property bool systemThemeStyling: false
+    property real sidebarWidth: 0
+    property real listWidth: 0
     property string bodyMode: "reader"
     property string providerId: "imap"
     property string pluginDir: ""
@@ -147,6 +152,10 @@ Item {
     }
     function preferredSendAs(_recipients) { return null }
     function refreshRecipientContacts() {}
+    function setScrollSpeedPercent(value) { scrollSpeedPercent = Math.round(value) }
+    function setSystemThemeStyling(value) { systemThemeStyling = value === true }
+    function setSidebarWidth(value) { sidebarWidth = Number(value) || 0 }
+    function setListWidth(value) { listWidth = Number(value) || 0 }
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {
       selectedId = ""
@@ -237,6 +246,9 @@ Item {
     function init() {
       mailService.anyAccountReady = true
       mailService.hasSavedAccounts = true
+      mailService.scrollSpeedPercent = 160
+      mailService.scrollSpeedMultiplier = 1.6
+      mailService.systemThemeStyling = false
       app.opened = true
       window().width = 980
       app.backToList()
@@ -267,10 +279,61 @@ Item {
       view.contentY = 0
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
-      compare(view.contentY, 240, "one notch, in the real hierarchy")
+      compare(view.contentY, 384, "the Quick preset, in the real hierarchy")
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, 120)
       compare(view.contentY, 0)
+    }
+
+    function test_appearance_and_scroll_controls_reach_the_service() {
+      var slider = named(app, "scrollSpeedSlider")
+      verify(slider, "the settings page exposes the pane-speed slider")
+      var view = flick()
+      verify(slider.mapToItem(view, 0, 0).y < view.height,
+        "the speed control is in the initial settings viewport")
+      compare(slider.value, 2)
+      var faster = named(app, "scrollSpeedFaster")
+      var slower = named(app, "scrollSpeedSlower")
+      verify(faster && slower, "keyboard-reachable step buttons flank the slider")
+      faster.clicked()
+      compare(mailService.scrollSpeedPercent, 250,
+        "the faster button chooses the next named speed preset")
+      slower.clicked()
+      compare(mailService.scrollSpeedPercent, 160)
+      slider.released(4)
+      compare(mailService.scrollSpeedPercent, 400)
+      view.contentY = 0
+      mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
+      compare(view.contentY, 960,
+        "the changed setting immediately changes this pane's distance")
+
+      var theme = named(app, "systemThemeStylingSwitch")
+      verify(theme, "the settings page exposes system theme styling")
+      theme.toggled()
+      compare(mailService.systemThemeStyling, true)
+      verify(String(app.labelsPaneBackground) !== String(app.background),
+        "turning styling on adds a muted labels surface")
+      verify(String(app.inboxPaneBackground) !== String(app.background),
+        "and a restrained accent surface behind the list")
+
+      var labelsWider = named(app, "labelsPaneWider")
+      var inboxWider = named(app, "inboxPaneWider")
+      var resetWidths = named(app, "paneWidthsReset")
+      verify(labelsWider && inboxWider && resetWidths,
+        "keyboard-reachable controls provide a splitter alternative")
+      verify(labelsWider.focusable,
+        "labels width controls participate in keyboard traversal")
+      verify(inboxWider.focusable,
+        "inbox width controls participate in keyboard traversal")
+      verify(resetWidths.focusable,
+        "reset participates in keyboard traversal")
+      labelsWider.clicked()
+      inboxWider.clicked()
+      verify(mailService.sidebarWidth > 0)
+      verify(mailService.listWidth > 0)
+      resetWidths.clicked()
+      compare(mailService.sidebarWidth, 0)
+      compare(mailService.listWidth, 0)
     }
 
     function test_the_rail_lists_the_pages_sections_in_order() {
@@ -278,7 +341,7 @@ Item {
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "bar,reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "appearance,reading,bar,notifications,writing,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
@@ -293,7 +356,7 @@ Item {
       var view = flick()
       verify(view, "the page scrolls inside a Flickable")
       compare(view.contentY, 0)
-      compare(rail.activeKey, "bar",
+      compare(rail.activeKey, "appearance",
         "the top of the page is the first section, whichever that is")
       compare(app.navKinds.join(","), "list,settings")
 
@@ -324,9 +387,48 @@ Item {
       // Scrolled by other means — the wheel, say — the highlight still
       // follows the page, because the page is what it describes.
       view.contentY = 0
-      tryCompare(rail, "activeKey", "bar")
+      tryCompare(rail, "activeKey", "appearance")
       view.contentY = sectionY(page, "mailboxes") + 5
       tryCompare(rail, "activeKey", "mailboxes")
+    }
+
+    function test_header_buttons_switch_directly_between_mail_and_calendar() {
+      var mail = named(app, "mail-view-button")
+      var calendar = named(app, "calendar-view-button")
+      verify(mail && calendar, "the header exposes both direct view buttons")
+      mouseClick(calendar)
+      compare(app.currentView, "calendar")
+      compare(calendar.selected, true)
+      mouseClick(mail)
+      compare(app.currentView, "list")
+      compare(mail.selected, true)
+    }
+
+    function test_hamburger_settings_row_opens_settings() {
+      app.backToList()
+      waitForRendering(app)
+      var menu = named(app, "menu-button")
+      var appMenu = named(app, "app-menu")
+      verify(menu && appMenu, "the hamburger and its menu exist")
+      var settingsRow = appMenu.settingsAction
+      verify(settingsRow, "the menu exposes its Settings row")
+      mouseClick(menu)
+      tryVerify(function() { return settingsRow.visible }, 1000,
+        "the Settings row is visible in the open menu")
+      mouseClick(settingsRow)
+      tryCompare(app, "showSettings", true)
+      compare(app.currentView, "list", "Settings is a page over mail")
+    }
+
+    function test_labels_inbox_divider_has_a_working_drag_target() {
+      app.backToList()
+      waitForRendering(app)
+      var divider = named(app, "labels-inbox-splitter")
+      verify(divider && divider.visible, "the labels divider is visible in mail")
+      var before = mailService.sidebarWidth
+      mouseDrag(divider, divider.width / 2, divider.height / 2, 60, 0)
+      verify(mailService.sidebarWidth > before,
+        "dragging right expands the labels pane")
     }
 
     // Narrow, the rail has no room; the page keeps the whole width and its

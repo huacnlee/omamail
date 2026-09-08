@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../account/Model.js" as Model
 
 // Where mailboxes are managed.
 //
@@ -21,6 +22,11 @@ Column {
   required property color accentColor
   required property color urgentColor
   required property string panelFontFamily
+  property color unreadColor: accentColor
+  property color starColor: accentColor
+  property color draftColor: accentColor
+  property color labelColor: accentColor
+  property color calendarColor: accentColor
 
   signal clientSetupRequested()
   signal addRequested()
@@ -38,8 +44,9 @@ Column {
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
   readonly property var sections: [
-    { key: "bar", title: "Bar", y: barHeading.y },
+    { key: "appearance", title: "Appearance", y: appearanceHeading.y },
     { key: "reading", title: "Reading", y: readingHeading.y },
+    { key: "bar", title: "Bar", y: barHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
     { key: "writing", title: "Writing", y: writingHeading.y },
     { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
@@ -53,6 +60,33 @@ Column {
       if (String(signatureAccounts[i].id || "") === String(id || ""))
         return signatureAccounts[i]
     return null
+  }
+
+  readonly property int scrollSpeedPercent: root.service
+    && Number(root.service.scrollSpeedPercent) > 0
+    ? Number(root.service.scrollSpeedPercent) : 160
+  readonly property int scrollSpeedLevel: Model.scrollSpeedLevel(scrollSpeedPercent)
+  readonly property bool colorful: !!root.service
+    && root.service.systemThemeStyling === true
+
+  function adjustPaneWidth(pane, direction) {
+    if (!root.service) return
+    var step = Style.space(20) * (direction < 0 ? -1 : 1)
+    if (pane === "labels") {
+      var labels = Number(root.service.sidebarWidth) > 0
+        ? Number(root.service.sidebarWidth) : Style.space(148)
+      root.service.setSidebarWidth(labels + step)
+    } else {
+      var inbox = Number(root.service.listWidth) > 0
+        ? Number(root.service.listWidth) : Style.space(460)
+      root.service.setListWidth(inbox + step)
+    }
+  }
+
+  function resetPaneWidths() {
+    if (!root.service) return
+    root.service.setSidebarWidth(0)
+    root.service.setListWidth(0)
   }
 
   function signatureOptions() {
@@ -142,12 +176,12 @@ Column {
     font.bold: true
   }
 
-  // ------------------------------------------------------------------- bar
+  // ------------------------------------------------------------ appearance
 
   Text {
-    id: barHeading
-    text: "BAR"
-    color: root.dimColor
+    id: appearanceHeading
+    text: "APPEARANCE"
+    color: root.colorful ? root.draftColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
@@ -155,67 +189,148 @@ Column {
 
   Rectangle {
     width: parent.width
-    implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
+    implicitHeight: Math.max(themeText.implicitHeight, themeSwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
     color: Style.normalFillFor(root.textColor, root.accentColor)
 
     Column {
-      id: barIconText
+      id: themeText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(12)
-      anchors.right: barIconSwitch.left
+      anchors.right: themeSwitch.left
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(2)
 
       Text {
         width: parent.width
-        text: "Show the icon in the bar"
+        text: "System theme styling"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        textFormat: Text.PlainText
       }
 
-      // Says what turning it off costs, and what it does not: mail is still
-      // checked and still notifies. The keybinding is the part worth naming,
-      // because without one the window is only reachable from a terminal —
-      // which is true, and is why this does not claim there is no way back.
       Text {
         width: parent.width
-        text: "Mail is still checked and still notifies; only the envelope goes. "
-          + "With it off the window opens from a keybinding or a terminal and "
-          + "nowhere else, so bind a key before turning this off:"
+        text: "Use the terminal palette for subtle surfaces and accent selected mail"
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-      }
-
-      Text {
-        width: parent.width
-        text: "o.bind(\"SUPER + SHIFT + G\", \"Omamail\", "
-          + "\"omarchy shell shell toggle omamail '\{}'\")"
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WrapAnywhere
-        textFormat: Text.PlainText
       }
     }
 
     ToggleSwitch {
-      id: barIconSwitch
-      objectName: "showBarIconSwitch"
+      id: themeSwitch
+      objectName: "systemThemeStylingSwitch"
       anchors.right: parent.right
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
-      checked: !root.service || root.service.showBarIcon !== false
+      checked: !!root.service && root.service.systemThemeStyling === true
       foreground: root.textColor
       accent: root.accentColor
-      onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+      onToggled: if (root.service)
+        root.service.setSystemThemeStyling(!root.service.systemThemeStyling)
+    }
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(paneWidthText.implicitHeight,
+      paneWidthControls.implicitHeight) + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: paneWidthText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: paneWidthControls.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Pane widths"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Resize the labels and inbox panes without a pointer"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Row {
+      id: paneWidthControls
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(6)
+
+      Button {
+        objectName: "labelsPaneNarrower"
+        text: "Labels −"
+        tooltipText: "Narrower labels pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("labels", -1)
+      }
+      Button {
+        objectName: "labelsPaneWider"
+        text: "Labels +"
+        tooltipText: "Wider labels pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("labels", 1)
+      }
+      Button {
+        objectName: "inboxPaneNarrower"
+        text: "Inbox −"
+        tooltipText: "Narrower inbox pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("inbox", -1)
+      }
+      Button {
+        objectName: "inboxPaneWider"
+        text: "Inbox +"
+        tooltipText: "Wider inbox pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("inbox", 1)
+      }
+      Button {
+        objectName: "paneWidthsReset"
+        text: "Reset"
+        tooltipText: "Reset pane widths"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.resetPaneWidths()
+      }
     }
   }
 
@@ -224,10 +339,120 @@ Column {
   Text {
     id: readingHeading
     text: "READING"
-    color: root.dimColor
+    color: root.colorful ? root.unreadColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(scrollText.implicitHeight, scrollControls.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: scrollText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: scrollControls.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Pane scroll speed"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Applies to mouse wheels and touchpad scrolling"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Row {
+      id: scrollControls
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(8)
+
+      Button {
+        objectName: "scrollSpeedSlower"
+        anchors.verticalCenter: parent.verticalCenter
+        text: "−"
+        tooltipText: "Slower scrolling"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        enabled: root.scrollSpeedLevel > 0
+        onClicked: if (root.service)
+          root.service.setScrollSpeedPercent(
+            Model.scrollSpeedPercentForLevel(root.scrollSpeedLevel - 1))
+      }
+
+      PanelSlider {
+        id: scrollSlider
+        objectName: "scrollSpeedSlider"
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(150)
+        minimum: 0
+        maximum: 4
+        step: 1
+        tickCount: 5
+        integer: true
+        value: root.scrollSpeedLevel
+        trackColor: Style.normalFillFor(root.textColor, root.accentColor)
+        fillColor: root.accentColor
+        knobColor: root.textColor
+        tickColor: root.dimColor
+        function chooseLevel(next) {
+          if (root.service)
+            root.service.setScrollSpeedPercent(Model.scrollSpeedPercentForLevel(next))
+        }
+        onReleased: function(next) {
+          chooseLevel(next)
+        }
+      }
+
+      Button {
+        objectName: "scrollSpeedFaster"
+        anchors.verticalCenter: parent.verticalCenter
+        text: "+"
+        tooltipText: "Faster scrolling"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        enabled: root.scrollSpeedLevel < 4
+        onClicked: if (root.service)
+          root.service.setScrollSpeedPercent(
+            Model.scrollSpeedPercentForLevel(root.scrollSpeedLevel + 1))
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(62)
+        horizontalAlignment: Text.AlignRight
+        text: Model.WHEEL_SPEED_LABELS[Math.round(scrollSlider.dragging
+          ? scrollSlider.liveValue : root.scrollSpeedLevel)]
+        color: root.colorful ? root.unreadColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
   }
 
   Rectangle {
@@ -508,12 +733,85 @@ Column {
     }
   }
 
+  // ------------------------------------------------------------------- bar
+
+  Text {
+    id: barHeading
+    text: "BAR"
+    color: root.colorful ? root.starColor : root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: barIconText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: barIconSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Show the icon in the bar"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Mail is still checked and still notifies; only the envelope goes. "
+          + "With it off the window opens from a keybinding or a terminal and "
+          + "nowhere else, so bind a key before turning this off:"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "o.bind(\"SUPER + SHIFT + G\", \"Omamail\", "
+          + "\"omarchy shell shell toggle omamail '\{}'\")"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WrapAnywhere
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: barIconSwitch
+      objectName: "showBarIconSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.showBarIcon !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
+  }
+
   // -------------------------------------------------------- notifications
 
   Text {
     id: notificationsHeading
     text: "NOTIFICATIONS"
-    color: root.dimColor
+    color: root.colorful ? root.unreadColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
@@ -571,7 +869,7 @@ Column {
   Text {
     id: writingHeading
     text: "WRITING"
-    color: root.dimColor
+    color: root.colorful ? root.draftColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
@@ -729,7 +1027,7 @@ Column {
   Text {
     id: mailboxesHeading
     text: "MAILBOXES"
-    color: root.dimColor
+    color: root.colorful ? root.labelColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
@@ -954,7 +1252,7 @@ Column {
     controller: root.calendarController
     textColor: root.textColor
     dimColor: root.dimColor
-    accentColor: root.accentColor
+    accentColor: root.colorful ? root.calendarColor : root.accentColor
     urgentColor: root.urgentColor
     panelFontFamily: root.panelFontFamily
   }
@@ -969,7 +1267,7 @@ Column {
   Text {
     id: oauthHeading
     text: "GOOGLE OAUTH CLIENT"
-    color: root.dimColor
+    color: root.colorful ? root.calendarColor : root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1

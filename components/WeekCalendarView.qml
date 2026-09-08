@@ -19,6 +19,7 @@ Item {
   required property int calendarBorderWidth
   required property string panelFontFamily
   required property string selectedEventId
+  property real scrollSpeedMultiplier: 1
 
   signal createAt(double startMs)
   signal eventActivated(var event)
@@ -168,7 +169,10 @@ Item {
   Flickable {
     id: timeline
 
-    WheelScroller { view: timeline }
+    WheelScroller {
+      view: timeline
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: root.allDayCount > 0 ? allDayLane.bottom : dayHeaders.bottom

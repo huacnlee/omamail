@@ -15,6 +15,7 @@ Rectangle {
   required property color urgentColor
   required property color dimColor
   required property string panelFontFamily
+  property real scrollSpeedMultiplier: 1
 
   signal closed()
   signal editRequested(string sourceId, var event)
@@ -87,7 +88,10 @@ Rectangle {
   Flickable {
     id: detailFlick
 
-    WheelScroller { view: detailFlick }
+    WheelScroller {
+      view: detailFlick
+      speedMultiplier: root.scrollSpeedMultiplier
+    }
 
     anchors.fill: parent
     anchors.margins: Style.space(18)

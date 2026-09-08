@@ -33,5 +33,9 @@ function parse(raw) {
     var value = values[key] || values[ANSI_KEYS[key]] || ""
     if (value !== "") result[key] = value
   }
+  // Mail chrome uses terminal orange for labels. It is intentionally not a
+  // calendar slot, so this exposes the value without changing that UI's
+  // stable choices or ordering.
+  if (values.orange) result.orange = values.orange
   return result
 }
