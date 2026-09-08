@@ -624,7 +624,10 @@ function httpsAuthority(url) {
 
 function urlAuthority(url) {
   var parts = httpsAuthority(url)
-  return parts ? "https://" + parts.host : ""
+  if (!parts) return ""
+  return parts.port === "443"
+    ? "https://" + parts.host
+    : "https://" + parts.host + ":" + parts.port
 }
 
 // scheme://host:port with the port made explicit and the case-insensitive
@@ -647,20 +650,22 @@ function caldavEventUrl(sourceUrl, event) {
   if (origin === "") return ""
   var href = String(event && event.href || "")
   if (/\s/.test(href)) return ""
+  var resolved = ""
   if (/^https:\/\//i.test(href) || href.substring(0, 2) === "//") {
     var candidate = href.substring(0, 2) === "//" ? "https:" + href : href
-    if (urlOrigin(candidate) !== origin) return ""
-    return candidate.replace(/^(https:\/\/)[^\/?#]*@/i, "$1")
-  }
-  if (href.charAt(0) === "/") return urlAuthority(base) + href
-  if (href !== "") {
+    resolved = candidate.replace(/^(https:\/\/)[^\/?#]*@/i, "$1")
+  } else if (href.charAt(0) === "/") {
+    resolved = urlAuthority(base) + href
+  } else if (href !== "") {
     var collection = base.charAt(base.length - 1) === "/" ? base : base + "/"
-    return collection + href
+    resolved = collection + href
+  } else {
+    var uid = String(event && event.uid || "")
+    if (uid === "") return ""
+    var root = base.charAt(base.length - 1) === "/" ? base : base + "/"
+    resolved = root + encodeURIComponent(uid) + ".ics"
   }
-  var uid = String(event && event.uid || "")
-  if (uid === "") return ""
-  var root = base.charAt(base.length - 1) === "/" ? base : base + "/"
-  return root + encodeURIComponent(uid) + ".ics"
+  return urlOrigin(resolved) === origin ? resolved : ""
 }
 
 function compareEvents(left, right) {

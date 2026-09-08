@@ -444,6 +444,13 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
 assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
   { href: "https://dav.example/cal/me/a.ics" }), "",
   "a different port is a different origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+  { href: "/cal/me/a.ics" }),
+  "https://dav.example:8443/cal/me/a.ics",
+  "a path-absolute href keeps the collection port")
+assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]:8443/cal/",
+  { href: "/cal/a.ics" }),
+  "https://[2001:db8::1]:8443/cal/a.ics")
 assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
   { href: "https://dav.example:443/cal/me/a.ics" }),
   "https://dav.example:443/cal/me/a.ics",
