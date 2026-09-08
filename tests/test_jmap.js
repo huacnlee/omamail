@@ -353,13 +353,17 @@ assert.strictEqual(jmap.sessionProbeAccepts(200, JSON.stringify({
   capabilities: { "urn:ietf:params:jmap:core": {} },
   accounts: {}
 })), true, "an unauthenticated session document is a candidate")
-assert.strictEqual(jmap.sessionProbeAccepts(401, ""), true,
-  "an empty 401 is the hosted-server challenge")
+assert.strictEqual(jmap.sessionProbeAccepts(401, ""), false,
+  "an empty 401 is not a JMAP challenge")
 assert.strictEqual(jmap.sessionProbeAccepts(401, "<html>Sign in</html>"), false,
   "an HTML 401 is not a JMAP challenge")
+assert.strictEqual(jmap.sessionProbeAccepts(401, JSON.stringify({ status: 401 })), false,
+  "generic JSON 401 is not a JMAP challenge")
 assert.strictEqual(jmap.sessionProbeAccepts(401, JSON.stringify({
   type: "urn:ietf:params:jmap:error:limit", status: 401
 })), true)
+assert.strictEqual(jmap.sessionProbeAccepts(401, "No Authorization header"), true,
+  "Fastmail's session challenge is text/plain")
 
 // --------------------------------------------------------- session object
 //

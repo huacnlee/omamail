@@ -117,6 +117,16 @@ Item {
         "a web page must not receive the app password")
       verify(error !== "")
     }
+    function test_discovery_empty_401_never_sends_the_secret() {
+      var f = setup()
+      var before = Transports.transports(f.api)
+      f.api.verifyCredentials({}, "ada@example.org", "synthetic-secret", function () {})
+      var probe = Transports.newSince(f.api, before)[0]
+      var after = Transports.transports(f.api)
+      Transports.answerText(probe, 401, "")
+      compare(Transports.newSince(f.api, after).length, 0,
+        "an empty 401 must not receive the app password")
+    }
     function test_failed_import_never_deletes_existing_draft() {
       var f = setup()
       var initial = Transports.transports(f.api)

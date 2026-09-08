@@ -657,12 +657,13 @@ function looksLikeSessionDocument(body) {
 
 function looksLikeJmapChallenge(body) {
   var text = trimmed(body)
-  if (text === "") return true
   var doc = parseJson(text)
-  if (!doc) return false
-  var type = trimmed(doc.type).toLowerCase()
-  if (type.indexOf("jmap") >= 0) return true
-  return Number(doc.status) === 401
+  if (doc) {
+    var type = trimmed(doc.type)
+    return type.indexOf("urn:ietf:params:jmap:error:") === 0
+  }
+  // Fastmail's session 401 is text/plain, not a problem document.
+  return text === "No Authorization header"
 }
 
 function sessionProbeAccepts(status, body) {
