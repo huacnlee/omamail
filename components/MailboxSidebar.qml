@@ -21,6 +21,7 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property bool showTrailingSeparator: true
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
@@ -37,6 +38,7 @@ Item {
   // without this the icons sit on the same surface as the messages.
   PanelSeparator {
     id: edge
+    visible: root.showTrailingSeparator
     anchors.right: parent.right
     anchors.top: parent.top
     anchors.bottom: parent.bottom

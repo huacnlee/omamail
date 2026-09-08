@@ -77,6 +77,8 @@ Item {
     property int accountCount: 1
     property int inboxUnread: 0
     property real bodyZoom: 1
+    property real sidebarWidth: 0
+    property real listWidth: 0
     property string bodyMode: "reader"
     property string providerId: "imap"
     property string pluginDir: ""
@@ -147,6 +149,8 @@ Item {
     }
     function preferredSendAs(_recipients) { return null }
     function refreshRecipientContacts() {}
+    function setSidebarWidth(value) { sidebarWidth = Number(value) || 0 }
+    function setListWidth(value) { listWidth = Number(value) || 0 }
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {
       selectedId = ""
@@ -237,6 +241,8 @@ Item {
     function init() {
       mailService.anyAccountReady = true
       mailService.hasSavedAccounts = true
+      mailService.sidebarWidth = 0
+      mailService.listWidth = 0
       app.opened = true
       window().width = 980
       app.backToList()
@@ -283,6 +289,35 @@ Item {
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
         verify(named(rail, "settings-section-" + keys[j]), "the rail has a row for " + keys[j])
+    }
+
+    function test_pane_width_controls_reach_the_service() {
+      var labelsWider = named(app, "labelsPaneWider")
+      var inboxWider = named(app, "inboxPaneWider")
+      var resetWidths = named(app, "paneWidthsReset")
+      verify(labelsWider && inboxWider && resetWidths,
+        "keyboard-reachable controls provide a splitter alternative")
+      verify(labelsWider.focusable)
+      verify(inboxWider.focusable)
+      verify(resetWidths.focusable)
+      labelsWider.clicked()
+      inboxWider.clicked()
+      verify(mailService.sidebarWidth > 0)
+      verify(mailService.listWidth > 0)
+      resetWidths.clicked()
+      compare(mailService.sidebarWidth, 0)
+      compare(mailService.listWidth, 0)
+    }
+
+    function test_labels_inbox_divider_has_a_working_drag_target() {
+      app.backToList()
+      waitForRendering(app)
+      var divider = named(app, "labels-inbox-splitter")
+      verify(divider && divider.visible, "the labels divider is visible in mail")
+      var before = mailService.sidebarWidth
+      mouseDrag(divider, divider.width / 2, divider.height / 2, 60, 0)
+      verify(mailService.sidebarWidth > before,
+        "dragging right expands the labels pane")
     }
 
     // A click scrolls the page to the section rather than opening another

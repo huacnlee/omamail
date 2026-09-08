@@ -562,6 +562,18 @@ var ZOOM_MIN = 0.6
 var ZOOM_MAX = 2.5
 var ZOOM_STEPS_PER_UNIT = 20
 
+// Pane widths are saved as physical pixels because the window itself is saved
+// in physical pixels. Zero means "use the responsive default"; positive
+// values are still clamped against the live window by App.qml.
+var PANE_WIDTH_MAX = 1600
+
+function paneWidth(value) {
+  if (value === null || value === undefined || value === "") return 0
+  var width = Number(value)
+  if (!isFinite(width) || width <= 0) return 0
+  return Math.min(PANE_WIDTH_MAX, Math.round(width))
+}
+
 // What a zoom read back off disk means. Anything that is not a number is a
 // file that was hand-edited or never written, and the answer to both is the
 // size it shipped at.
@@ -582,6 +594,8 @@ function windowPrefs(raw) {
       bodyZoom: 1,
       bodyMode: "reader",
       alwaysShowImages: false,
+      sidebarWidth: 0,
+      listWidth: 0,
       windowOpen: false
     }
   }
@@ -593,6 +607,8 @@ function windowPrefs(raw) {
     bodyZoom: clampZoom(parsed.bodyZoom),
     bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
+    sidebarWidth: paneWidth(parsed.sidebarWidth),
+    listWidth: paneWidth(parsed.listWidth),
     windowOpen: parsed.windowOpen === true
   }
 }

@@ -719,7 +719,7 @@ assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
   sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
-  alwaysShowImages: false, windowOpen: false
+  alwaysShowImages: false, sidebarWidth: 0, listWidth: 0, windowOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
   "the old two-mode preference migrates to the three-mode setting")
@@ -727,6 +727,10 @@ assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "origi
 assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":222.4}').sidebarWidth, 222)
+assert.strictEqual(model.windowPrefs('{"listWidth":481}').listWidth, 481)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-5,"listWidth":"bad"}').sidebarWidth, 0)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-5,"listWidth":"bad"}').listWidth, 0)
 
 // ------------------------------------------------- what a detail read carries
 //

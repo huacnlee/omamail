@@ -434,7 +434,7 @@ if "Style.space(6)" not in footer[calendar:]:
     raise SystemExit("test_source.sh: Calendar must keep breathing room at the sidebar foot")
 
 app = Path("App.qml").read_text()
-sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
+sidebar_use = app[app.index("id: sidebar"):app.index("// Labels/inbox grip")]
 if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
     raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
 header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]

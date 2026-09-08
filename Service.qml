@@ -587,6 +587,8 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  property real sidebarWidth: 0
+  property real listWidth: 0
   // Somebody who needed the text bigger needs it bigger for their mail, not for
   // the message that made them reach for it. The same goes for `bodyMode`:
   // both of these are ways of reading mail, not ways of reading one message.
@@ -615,6 +617,8 @@ Item {
     bodyZoom = prefs.bodyZoom
     bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
+    sidebarWidth = prefs.sidebarWidth
+    listWidth = prefs.listWidth
     restoreWindow = prefs.windowOpen
     restoreAttempts = 0
     windowPrefsLoaded = true
@@ -651,6 +655,8 @@ Item {
       bodyZoom: bodyZoom,
       bodyMode: bodyMode,
       alwaysShowImages: alwaysShowImages,
+      sidebarWidth: sidebarWidth,
+      listWidth: listWidth,
       windowOpen: windowOpen || restoreWindow
     })
     windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
@@ -661,6 +667,20 @@ Item {
     var next = value === true
     if (next === sidebarCollapsed) return
     sidebarCollapsed = next
+    saveWindowPrefs()
+  }
+
+  function setSidebarWidth(value) {
+    var next = Model.paneWidth(value)
+    if (next === sidebarWidth) return
+    sidebarWidth = next
+    saveWindowPrefs()
+  }
+
+  function setListWidth(value) {
+    var next = Model.paneWidth(value)
+    if (next === listWidth) return
+    listWidth = next
     saveWindowPrefs()
   }
 

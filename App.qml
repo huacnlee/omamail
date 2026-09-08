@@ -215,8 +215,12 @@ Item {
   // service holds it because it is written to disk: a size somebody reached for
   // is theirs until they change it, not until they close the window.
   readonly property real bodyZoom: service ? service.bodyZoom : 1.0
-  // 0 means "proportional"; anything else is a width somebody dragged to.
-  property real listWidth: 0
+  // Zero means "responsive default"; a positive value is the last grip
+  // position and is clamped again against the live window below.
+  readonly property real sidebarWidth: service && Number(service.sidebarWidth) > 0
+    ? Number(service.sidebarWidth) : 0
+  readonly property real listWidth: service && Number(service.listWidth) > 0
+    ? Number(service.listWidth) : 0
 
   function zoomBy(step) {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
@@ -1593,7 +1597,9 @@ Item {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.sidebarCollapsed ? Style.space(44) : Style.space(148)
+          width: root.sidebarCollapsed ? Style.space(44)
+            : Math.max(Style.space(100), Math.min(parent.width - Style.space(480),
+                root.sidebarWidth > 0 ? root.sidebarWidth : Style.space(148)))
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
@@ -1601,6 +1607,7 @@ Item {
           textColor: root.foreground
           accentColor: root.accent
           dimColor: root.dim
+          showTrailingSeparator: root.sidebarCollapsed || root.calendarVisible
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
@@ -1614,6 +1621,48 @@ Item {
           onLabelSelected: function(labelId, name) {
             root.service.selectLabel(name, labelId)
             root.backToList()
+          }
+        }
+
+        // Labels/inbox grip. It draws the same one-pixel rule as the
+        // inbox/reader divider; the remaining width is only a transparent hit
+        // target, so both dividers look alike without becoming hard to catch.
+        Item {
+          id: sidebarSplitter
+          objectName: "labels-inbox-splitter"
+          anchors.left: sidebar.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          visible: sidebar.visible && !root.sidebarCollapsed
+            && !root.calendarVisible
+          z: 5
+
+          PanelSeparator {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            foreground: root.foreground
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SplitHCursor
+            property real grabbedAt: 0
+            property real grabbedWidth: 0
+
+            onPressed: function(mouse) {
+              grabbedAt = mapToItem(body, mouse.x, mouse.y).x
+              grabbedWidth = sidebar.width
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed || !root.service) return
+              var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
+              root.service.setSidebarWidth(grabbedWidth + moved)
+            }
+            onDoubleClicked: if (root.service) root.service.setSidebarWidth(0)
           }
         }
 
@@ -1639,7 +1688,8 @@ Item {
 
         Item {
           id: listColumn
-          anchors.left: sidebar.visible ? sidebar.right : parent.left
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
           anchors.top: tabs.visible ? tabs.bottom : parent.top
           anchors.bottom: parent.bottom
           anchors.topMargin: tabs.visible ? Style.space(8) : 0
@@ -1651,9 +1701,10 @@ Item {
           width: root.compact
             ? (root.currentView === "list" ? parent.width : 0)
             : Math.max(Style.space(100),
-                Math.min(parent.width - Style.space(360),
+                Math.min(parent.width - x - Style.space(280),
                   root.listWidth > 0 ? root.listWidth
-                    : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
+                    : Math.min(Style.space(460),
+                        Math.round((parent.width - x) * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
             && !root.calendarVisible
 
@@ -1729,11 +1780,11 @@ Item {
             onPositionChanged: function(mouse) {
               if (!pressed) return
               var moved = mapToItem(body, mouse.x, mouse.y).x - grabbedAt
-              root.listWidth = grabbedWidth + moved
+              if (root.service) root.service.setListWidth(grabbedWidth + moved)
             }
             // Back to the proportional default, which is what most people
             // want after one bad drag.
-            onDoubleClicked: root.listWidth = 0
+            onDoubleClicked: if (root.service) root.service.setListWidth(0)
           }
         }
 

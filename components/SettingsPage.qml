@@ -55,6 +55,26 @@ Column {
     return null
   }
 
+  function adjustPaneWidth(pane, direction) {
+    if (!root.service) return
+    var step = Style.space(20) * (direction < 0 ? -1 : 1)
+    if (pane === "labels") {
+      var labels = Number(root.service.sidebarWidth) > 0
+        ? Number(root.service.sidebarWidth) : Style.space(148)
+      root.service.setSidebarWidth(labels + step)
+    } else {
+      var inbox = Number(root.service.listWidth) > 0
+        ? Number(root.service.listWidth) : Style.space(460)
+      root.service.setListWidth(inbox + step)
+    }
+  }
+
+  function resetPaneWidths() {
+    if (!root.service) return
+    root.service.setSidebarWidth(0)
+    root.service.setListWidth(0)
+  }
+
   function signatureOptions() {
     var out = []
     for (var i = 0; i < signatureAccounts.length; i++)
@@ -228,6 +248,105 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
+  }
+
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(paneWidthText.implicitHeight,
+      paneWidthControls.implicitHeight) + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: paneWidthText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: paneWidthControls.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Pane widths"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Resize the labels and inbox panes without a pointer"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Row {
+      id: paneWidthControls
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(6)
+
+      Button {
+        objectName: "labelsPaneNarrower"
+        text: "Labels −"
+        tooltipText: "Narrower labels pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("labels", -1)
+      }
+      Button {
+        objectName: "labelsPaneWider"
+        text: "Labels +"
+        tooltipText: "Wider labels pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("labels", 1)
+      }
+      Button {
+        objectName: "inboxPaneNarrower"
+        text: "Inbox −"
+        tooltipText: "Narrower inbox pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("inbox", -1)
+      }
+      Button {
+        objectName: "inboxPaneWider"
+        text: "Inbox +"
+        tooltipText: "Wider inbox pane"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.adjustPaneWidth("inbox", 1)
+      }
+      Button {
+        objectName: "paneWidthsReset"
+        text: "Reset"
+        tooltipText: "Reset pane widths"
+        foreground: root.dimColor
+        bordered: true
+        focusable: true
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: root.resetPaneWidths()
+      }
+    }
   }
 
   Rectangle {
