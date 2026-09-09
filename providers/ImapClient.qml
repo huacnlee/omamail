@@ -59,6 +59,8 @@ Item {
   property int foldersGeneration: 0
   property var folderWaiters: []
 
+  signal sentCopyWarning(string warning)
+
   // What the server said it can do, asked for alongside the folder listing so
   // it costs nothing extra. Only one answer is acted on: a server with MOVE
   // archives in one command, and one without it needs three.
@@ -207,14 +209,14 @@ Item {
 
     // No folder in the URL: both of these are asked of the server rather than
     // of a mailbox, and they share the one connection.
-    run("", [Imap.capabilityCommand(), Imap.listCommand()], function(text, error) {
+    function finish(text, error) {
       root.foldersLoading = false
       if (generation !== root.foldersGeneration) {
         root.ensureFolders()
         return
       }
       if (!error) {
-        // This LIST is authoritative even when the last folder was deleted.
+        // An empty LIST is authoritative when the last folder was deleted.
         root.folders = Imap.parseList(text)
         root.special = Imap.specialFolders(root.folders)
         root.adoptServerAnswer(text)
@@ -223,6 +225,20 @@ Item {
       var waiting = root.folderWaiters.slice()
       root.folderWaiters = []
       for (var i = 0; i < waiting.length; i++) waiting[i](error)
+    }
+
+    run("", [Imap.capabilityCommand(), Imap.listCommand()], function(text, error) {
+      if (error || generation !== root.foldersGeneration) {
+        finish(text, error)
+        return
+      }
+      var capabilities = Imap.parseCapabilities(text)
+      if (capabilities.length > 0) root.serverCapabilities = capabilities
+      if (!Imap.hasCapability(root.serverCapabilities, "SPECIAL-USE")) {
+        finish(text, "")
+        return
+      }
+      root.run("", [Imap.listCommand(true)], finish)
     })
   }
 
@@ -1029,39 +1045,32 @@ Item {
           callback(null, Imap.responseError(status, detail, "The message could not be sent"))
           return
         }
-        // The copy the mailbox keeps is filed by the client, not the server:
-        // a message handed to SMTP submission lands nowhere on its own. The
-        // send has answered by the time the copy is asked for, so whatever
-        // becomes of the copy, a sent message is what comes back from here —
-        // the filing is a footnote on the success, never a failure of it.
-        fileSentCopy(message, callback, handle)
+        callback({}, "")
+        root.saveSentCopy(message)
       })
       process.running = true
     })
     return handle
   }
 
-  // Where the sent copy goes is what the server said in LIST, resolved the
-  // way every folder name is. A server that named no Sent folder holds no
-  // copy: making a folder up would create one rather than find one, and the
-  // callback's warning is where the caller says so.
-  function fileSentCopy(message, callback, handle) {
+  // Delivery is complete before this independent, best-effort copy starts.
+  function saveSentCopy(message) {
+    if (Imap.serverFilesSentCopy(auth ? auth.settings : null)) return
     ensureFolders(function(folderError) {
       if (!root) return
-      if (handle.aborted) return
-      var folder = folderError ? "" : Imap.sentFolder(root.special)
+      if (folderError) {
+        root.sentCopyWarning("Sent, but the Sent folder could not be found: " + folderError)
+        return
+      }
+      var folder = Imap.sentFolder(root.special)
       if (folder === "") {
-        callback(Imap.sentCopyResult("", false), "")
+        root.sentCopyWarning("Sent, but this server did not report a Sent folder")
         return
       }
       appendMessage(folder, message, Imap.appendFlagWords(true),
-        "The message was sent, but the copy for the Sent folder could not be saved",
-        function(filed, appendError) {
-        if (!root) return
-        if (appendError)
-          console.warn("omamail: the sent copy could not be filed:", appendError)
-        callback(Imap.sentCopyResult(folder, !appendError), "")
-      }, handle)
+        "the Sent copy could not be saved", function(filed, appendError) {
+        if (root && appendError) root.sentCopyWarning("Sent, but " + appendError)
+      })
     })
   }
 

@@ -157,6 +157,16 @@ Item {
       compare(app.composeRecovery.draft.body, "Keep every word")
     }
 
+    function test_background_sent_copy_warning_reaches_the_account_status() {
+      seed([entry(ada)], adaId)
+      var account = mailService.accountAt(0)
+      account.note("Sent")
+
+      account.api.sentCopyWarning("Sent, but the Sent copy could not be saved")
+
+      compare(account.actionStatus, "Sent, but the Sent copy could not be saved")
+    }
+
     function test_keyboard_send_cannot_replace_another_accounts_parked_draft() {
       seed([entry(ada), entry(bob)], adaId)
       var compose = composeView()
