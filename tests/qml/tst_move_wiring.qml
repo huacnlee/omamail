@@ -17,7 +17,9 @@ Item {
   Omamail.Service {
     id: mailService
     shell: fakeShell
-    manifest: ({ id: "omamail", __sourceDir: "" })
+    // A directory that does not exist, so every scripts/ helper this test
+    // drives fails to start rather than writing to the real config.
+    manifest: ({ id: "omamail", __sourceDir: "/nonexistent/omamail" })
   }
 
   Omamail.App {

@@ -82,6 +82,7 @@ test-js:
 	node tests/test_oauth.js
 	node tests/test_microsoft_oauth.js
 	node tests/test_credentials.js
+	node tests/test_plugin_path.js
 	node tests/test_secrets.js
 	node tests/test_gmail_api.js
 	node tests/test_message.js

@@ -9,7 +9,26 @@ fail() { printf 'test_service_source.sh: %s\n' "$1" >&2; exit 1; }
 
 grep -q 'property var shell' Service.qml || fail "Service.qml must accept an injected shell"
 grep -q 'property var manifest' Service.qml || fail "Service.qml must accept an injected manifest"
-grep -q '__sourceDir' Service.qml || fail "pluginDir must come from manifest.__sourceDir"
+# Comments are stripped first: a guard a comment can satisfy guards nothing.
+code() { grep -vE '^[[:space:]]*(//|\*|/\*)' "$1"; }
+# Process substitution, not a pipe: grep -q exits at the first match and would
+# leave the stripper dead of SIGPIPE, which pipefail reports as a failed guard.
+grep -q 'PluginPath.resolve(manifest' <(code Service.qml) \
+  || fail "pluginDir must come from PluginPath.resolve, which falls back when the shell withholds the source directory"
+grep -q 'Qt.resolvedUrl' <(code Service.qml) \
+  || fail "PluginPath needs this component's own URL to fall back to"
+grep -q '__sourceDir' <(code PluginPath.js) \
+  || fail "PluginPath must still prefer the manifest's source directory"
+# Qt.resolvedUrl(".") is the directory of Service.qml, so a nested service entry
+# point would make pluginDir a wrong directory rather than an empty one, and a
+# wrong one fails as silently as the bug this replaced.
+python3 - <<'ENTRY'
+import json, sys
+entry = json.load(open("manifest.json"))["entryPoints"]["service"]
+if "/" in entry:
+    sys.exit("test_service_source.sh: entryPoints.service must stay at the plugin root, "
+             "because PluginPath derives the directory from Service.qml's own URL; got " + entry)
+ENTRY
 grep -q 'function applySettings' Service.qml || fail "the bar widget pushes settings in via applySettings"
 grep -q 'function setUndoSendSeconds' Service.qml \
   || fail "the in-app settings page must be able to change the undo window"
