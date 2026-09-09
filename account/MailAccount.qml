@@ -1071,14 +1071,32 @@ Item {
     selectedThread = Conversation.threadAfterSelect(selectedThread, messageId, knownSummary)
     loadMembers()
 
-    // A message that has been opened before opens from its file, usually well
-    // before Gmail answers. The read is asynchronous, so the live copy can win
-    // the race — in which case the cached one is simply dropped rather than
-    // painted over what is already correct.
+    // Live mail contains the original invitation, without our later response.
+    // Wait for the cache before writing, and retain its invitation while the
+    // live calendar attachment is still loading.
     detailLive = false
+    var cacheRead = false
+    var cachedInvite = null
+    var liveRecord = null
+    function persistRecord(record) {
+      liveRecord = record
+      if (!cacheRead) return
+      bodyCache.put(messageId, record)
+    }
     bodyCache.read(messageId, function(cached) {
       if (serial !== root.detailSerial) return
-      if (root.detailLive || !cached) return
+      cacheRead = true
+      cachedInvite = cached ? cached.invite : null
+      if (root.detailLive) {
+        root.selectedInvite = Calendar.preserveResponse(root.selectedInvite,
+          cachedInvite, root.receivedAsAddress) || cachedInvite
+        if (liveRecord) {
+          liveRecord.invite = root.selectedInvite
+          persistRecord(liveRecord)
+        }
+        return
+      }
+      if (!cached) return
       // The text is read out of the cached markup rather than taken off the
       // disk beside it, on the same grounds the document is: what the cache
       // holds is the sender's HTML, so a fix to how a message reads reaches
@@ -1139,7 +1157,9 @@ Item {
         root.selectedImages = ready.plainText ? ready.plainText.images : []
       }
       root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedInvite = Calendar.fromPayload(payload.payload)
+      root.selectedInvite = Calendar.preserveResponse(
+        Calendar.fromPayload(payload.payload), root.selectedInvite,
+        root.receivedAsAddress) || cachedInvite
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
       // What the reader is showing, which is not `decoded` when the cache had
       // already painted this markup: that text came from `Mail.extractBody`'s
@@ -1154,13 +1174,13 @@ Item {
         invite: root.selectedInvite,
         unsubscribe: root.selectedUnsubscribe
       })
-      bodyCache.put(messageId, record)
+      persistRecord(record)
       // Gmail describes the calendar part rather than sending it whenever the
       // organiser's calendar named the file, which Google's own does — so the
       // meeting is one request away, and the card lands a moment after the
       // message it belongs to. The cache is written again with it, so it is
       // there at once the next time this message is opened.
-      root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
+      root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record, persistRecord)
       root.messages = Model.replaceById(root.messages, summary)
       root.previewMessages = Model.replaceById(root.previewMessages, summary)
       // A message opened from somewhere other than its own row — a notification,
@@ -1251,18 +1271,20 @@ Item {
   // that are not one — `pendingPart` is null unless a calendar part arrived
   // with an id in place of its octets — and the file is asked for once, at the
   // size the part already declared.
-  function loadInvite(messageId, serial, part, record) {
+  function loadInvite(messageId, serial, part, record, persistRecord) {
     if (!part) return
     inviteHandle = api.getAttachment(messageId, String(part.body.attachmentId),
       function(data, error) {
         if (serial !== root.detailSerial) return
         root.inviteHandle = null
         if (error || !data) return
-        var invite = Calendar.fromAttachment(part, data)
+        var invite = Calendar.preserveResponse(
+          Calendar.fromAttachment(part, data), root.selectedInvite,
+          root.receivedAsAddress)
         if (!invite) return
         root.selectedInvite = invite
         record.invite = invite
-        bodyCache.put(messageId, record)
+        persistRecord(record)
       })
   }
 

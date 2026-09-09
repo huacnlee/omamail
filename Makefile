@@ -91,6 +91,7 @@ test-js:
 	node tests/test_gmail_api.js
 	node tests/test_message.js
 	node tests/test_calendar.js
+	node tests/test_invite_refresh.js
 	node tests/test_calendar_cache.js
 	node tests/test_calendar_feed.js
 	node tests/test_calendar_sources.js
