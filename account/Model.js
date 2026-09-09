@@ -774,6 +774,20 @@ function restoreRow(list, row, order, index) {
   return source.slice(0, clamped).concat([row], source.slice(clamped))
 }
 
+// A list after a refused edit on one of its rows: the row's replayed summary
+// in place while it is still listed; back where the settled order says if the
+// edit took it off and no edit still waiting behind it has; else untouched.
+// The same rule for the list on screen and for the cached copy of a query
+// navigated away from, so a refusal answered late repairs whichever one holds
+// the row now.
+function listAfterRestore(list, row, removed, stillRemoved, order, index) {
+  var source = Array.isArray(list) ? list : []
+  if (!row) return source
+  if (indexById(source, row.id) >= 0) return replaceById(source, row)
+  if (removed === true && stillRemoved !== true) return restoreRow(source, row, order, index)
+  return source
+}
+
 // ----------------------------------------------------------------- intents
 //
 // An optimistic edit is an intent: what a summary should say if the server

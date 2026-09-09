@@ -22,18 +22,24 @@ Item {
     id: apiFactory
     QtObject {
       property var calls: []
-      property var completion: null
+      // Answered oldest first: a batch trash sends one request per row at
+      // once, and each is answered on its own.
+      property var completions: []
       function modifyMessage(id, add, remove, callback) {
         calls = calls.concat([{ id: id, add: add, remove: remove }])
-        completion = callback
+        completions = completions.concat([callback])
+      }
+      function batchModify(ids, add, remove, callback) {
+        calls = calls.concat([{ ids: ids, add: add, remove: remove }])
+        completions = completions.concat([callback])
       }
       function trashMessage(id, callback) {
         calls = calls.concat([{ id: id, action: "trash" }])
-        completion = callback
+        completions = completions.concat([callback])
       }
       function finish(error) {
-        var callback = completion
-        completion = null
+        var callback = completions[0]
+        completions = completions.slice(1)
         callback({}, error || "")
       }
     }
@@ -309,6 +315,140 @@ Item {
       account.api.finish("Synthetic failure")
       compare(account.messages.map(function(m) { return m.id }), ["nine"])
       compare(account.pendingAction, "")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
+    }
+    function ids(list) { return list.map(function(m) { return m.id }) }
+    // Mark-all holds an intent per row like any edit, so a refusal takes off
+    // only what it changed: the star pressed while the server was deciding
+    // stays, where a snapshot of the list put back would have lost it.
+    function test_refused_mark_all_keeps_the_star_taken_after_it() {
+      var account = ready()
+      account.messages = unreadRows()
+      verify(account.markAllRead())
+      compare(account.messages[0].unread, false)
+      verify(account.act("one", "star"))
+      compare(account.queuedActions.length, 1, "the star waits for the slot")
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.messages[0].unread, true, "the read the server refused comes off")
+      compare(account.messages[0].starred, true, "the star behind it stays")
+      compare(account.messages[1].unread, true)
+      account.api.finish()
+      compare(account.messages[0].unread, true)
+      compare(account.messages[0].starred, true, "and the accepted star is what the row says")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
+      compare(account.pendingAction, "")
+    }
+    // In the Unread view every row leaves at once, and a refusal puts them
+    // all back in the order they held.
+    function test_refused_mark_all_puts_the_unread_view_back_in_order() {
+      var account = ready()
+      account.mailboxKey = "unread"
+      account.messages = unreadRows().concat([
+        { id: "three", labelIds: ["INBOX", "UNREAD"], unread: true, inInbox: true }])
+      verify(account.markAllRead())
+      compare(account.messages.length, 0)
+      account.api.finish("Synthetic failure")
+      compare(ids(account.messages), ["one", "two", "three"])
+      compare(account.messages[1].unread, true)
+      compare(keys(account.actionIntents), [])
+    }
+    // Two removals refused after the view has moved on repair the cached
+    // copy of the query they were taken on — rebased, not replaced: the list
+    // the second edit saw had already lost the row the first refusal put back.
+    function test_refusals_after_navigation_repair_the_cached_list_in_order() {
+      var account = ready()
+      var home = account.cacheKey
+      verify(account.act("one", "trash"))
+      verify(account.act("two", "trash"))
+      // What `rememberList` wrote after the second keystroke.
+      account.cache.loaded = true
+      account.cache.putQuery(home, ({ summaries: [], estimate: 0, nextPageToken: "" }))
+      account.rawQuery = "label:C"
+      account.rawLabelId = "Label_C"
+      verify(account.cacheKey !== home)
+      account.messages = [{ id: "nine", labelIds: ["INBOX"], unread: false, inInbox: true }]
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(ids(account.cache.get(home).summaries), ["one"])
+      account.api.finish("Synthetic failure")
+      compare(ids(account.cache.get(home).summaries), ["one", "two"],
+        "the second refusal keeps the row the first put back")
+      compare(ids(account.messages), ["nine"], "and the view on screen is untouched")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
+    }
+    // The batch is one more producer on the same queue: taken while a send
+    // holds the slot, its rows leave now and its send goes out when the slot
+    // frees, in the callback that freed it.
+    function test_batch_queued_behind_an_action_sends_when_the_slot_frees() {
+      var account = ready()
+      verify(account.act("one", "star"))
+      verify(account.actMany(["two"], "trash"))
+      compare(ids(account.messages), ["one"], "the batch's row leaves at the keystroke")
+      compare(account.api.calls.length, 1, "and its send waits")
+      account.api.finish()
+      compare(account.api.calls.length, 2, "the star's answer sent the batch")
+      compare(account.api.calls[1], { id: "two", action: "trash" })
+      account.api.finish()
+      compare(account.pendingAction, "")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
+    }
+    // And one more completion that drains it: an action taken behind a batch
+    // is sent when the batch answers.
+    function test_action_queued_behind_a_batch_sends_when_the_slot_frees() {
+      var account = ready()
+      verify(account.actMany(["one"], "markRead"))
+      verify(account.act("two", "star"))
+      compare(account.messages[1].starred, true)
+      compare(account.api.calls.length, 1, "the star waits behind the batch")
+      account.api.finish()
+      compare(account.api.calls.length, 2, "the batch's answer sent the star")
+      compare(account.api.calls[1].id, "two")
+      account.api.finish()
+      compare(account.pendingAction, "")
+      compare(account.messages[0].unread, false)
+      compare(account.messages[1].starred, true)
+      compare(keys(account.actionIntents), [])
+    }
+    // A queued batch answered per row: the refused row goes back where the
+    // settled order says, beside rows that left before and after it.
+    function test_refused_row_of_a_queued_batch_goes_back_in_order() {
+      var account = ready()
+      account.messages = unreadRows().concat([
+        { id: "three", labelIds: ["INBOX", "UNREAD"], unread: true, inInbox: true }])
+      verify(account.act("one", "trash"))
+      verify(account.actMany(["two", "three"], "trash"))
+      compare(account.messages.length, 0)
+      account.api.finish()
+      compare(account.api.calls.length, 3, "one request per row of the batch")
+      account.api.finish("Synthetic failure")
+      account.api.finish()
+      compare(ids(account.messages), ["two"], "the refused row is back; the accepted ones are gone")
+      verify(account.lastError.indexOf("1 of 2") >= 0, account.lastError)
+      compare(account.pendingAction, "")
+      compare(keys(account.actionIntents), [])
+      compare(keys(account.settledLists), [])
+    }
+    // A batch refused as a whole takes off its own edits and no other: the
+    // star pressed on one of its rows while it was in flight stays.
+    function test_refused_batch_keeps_the_edit_taken_after_it() {
+      var account = ready()
+      account.messages = unreadRows()
+      verify(account.actMany(["one", "two"], "markRead"))
+      verify(account.act("one", "star"))
+      compare(account.messages[0].unread, false)
+      compare(account.messages[0].starred, true)
+      account.api.finish("Synthetic failure")
+      tryVerify(function() { return account.api.calls.length === 2 })
+      compare(account.messages[0].unread, true, "the read the server refused comes off")
+      compare(account.messages[0].starred, true, "the star behind it stays")
+      compare(account.messages[1].unread, true)
+      account.api.finish()
+      compare(account.messages[0].starred, true)
       compare(keys(account.actionIntents), [])
       compare(keys(account.settledLists), [])
     }

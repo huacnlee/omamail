@@ -64,6 +64,25 @@ deepEqual(model.previewAfterRestore(previews, { id: "a" }, false, listBefore, 0)
   ["c"], "a row that should not be there comes out")
 deepEqual(model.previewAfterRestore(previews, { id: "b" }, false, listBefore, 1), previews)
 
+// A refused edit's row goes back into whichever list holds the query now —
+// the screen or the cached copy — by the same rule: replaced while listed,
+// put back in the settled order when this edit took it off and no edit still
+// waiting has, else the list untouched.
+{
+  const order = [{ id: "a" }, { id: "b" }, { id: "c" }]
+  const row = { id: "b", unread: true }
+  deepEqual(model.listAfterRestore([{ id: "a" }, { id: "c" }], row, true, false, order, 1).map(r => r.id),
+    ["a", "b", "c"], "a removed row goes back where the settled order says")
+  deepEqual(model.listAfterRestore([{ id: "a" }, { id: "b", unread: false }], row, false, false, order, 1)[1],
+    row, "a row still listed is replaced by its replay")
+  deepEqual(model.listAfterRestore([{ id: "a" }], row, true, true, order, 1).map(r => r.id),
+    ["a"], "a row an edit behind this one took off stays off")
+  deepEqual(model.listAfterRestore([{ id: "a" }], row, false, false, order, 1).map(r => r.id),
+    ["a"], "a row this edit never removed is not put in")
+  deepEqual(model.listAfterRestore(null, row, true, false, order, 0).map(r => r.id), ["b"])
+  deepEqual(model.listAfterRestore([{ id: "a" }], null, true, false, order, 0).map(r => r.id), ["a"])
+}
+
 // ------------------------------------------------------------------ intents
 //
 // One row, two edits taken at the keystroke, the first refused: what stays is

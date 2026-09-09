@@ -773,12 +773,35 @@ test "$(grep -c 'root.active && root.cacheKey !== actionQuery' account/MailAccou
   || fail "successful actions must revalidate a mailbox opened while they were pending"
 awk '
   /function run\(/ { in_bulk = 1 }
-  in_bulk && /if \(interrupted\)/ { saw_interrupt = 1 }
-  in_bulk && /account\.loadMessages\(false, true, error\)/ { saw_retry = 1 }
+  in_bulk && /^    stopLiveList\(\)/ { saw_interrupt = 1 }
+  in_bulk && /account\.loadMessages\(false, true, note\)/ { saw_retry = 1 }
   in_bulk && /^  }/ { exit !(saw_interrupt && saw_retry) }
   END { exit !(saw_interrupt && saw_retry) }
 ' account/BatchAction.qml \
   || fail "a bulk action must stop and revalidate a live list too"
+# The batch is one more producer on the same queue and one more completion
+# that drains it: taken while a send holds the slot it moves its rows now and
+# queues its own send; answered, it sends the next queued action before it
+# acts on its answer, so an action taken behind it is never left waiting.
+grep -q 'if (slotTaken) account.queueAction(listed.join(","), action, actionQuery, false, false, dispatch, discard)' account/BatchAction.qml \
+  || fail "a batch taken while a send holds the slot must queue its send, not run through act"
+awk '
+  /var done = function/ { in_done = 1 }
+  in_done && /account\.runQueuedAction\(\)/ { drains = 1 }
+  in_done && /if \(error\)/ { exit !drains }
+  END { exit !drains }
+' account/BatchAction.qml \
+  || fail "a batch callback must send the next queued action before it acts on its answer"
+# A refused bulk edit comes off row by row through the same intents a single
+# edit holds, never as a snapshot of the list put back over the edits taken
+# behind it: a star pressed while mark-all was still deciding stays.
+for bulk in account/MailAccount.qml account/BatchAction.qml; do
+  grep -q 'intents\.restore(edits\[e\], lists)' "$bulk" \
+    || fail "$bulk must settle a refused bulk edit through its intents"
+done
+if awk '/function markAllRead\(\)/ { in_mark_all = 1 } in_mark_all && /root\.messages = before/ { found = 1 } END { exit !found }' account/MailAccount.qml; then
+  fail "mark-all must not put a snapshot of the list back over later edits"
+fi
 grep -q 'return batchAction.run(ids, action)' account/MailAccount.qml \
   || fail "the account must hand its batch to BatchAction"
 grep -q 'root\.loadMessages(false, true, error)' account/MailAccount.qml \

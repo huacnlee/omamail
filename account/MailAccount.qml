@@ -389,11 +389,10 @@ Item {
   property string actionStatus: ""
   property string pendingAction: ""
   property string pendingActionQuery: ""
-  // Edits waiting for their server, by summary id (`reader:` + id in the
-  // reader), and each list before the first of them.
-  property var actionIntents: ({})
-  property int actionSerial: 0
-  property var settledLists: ({})
+  // Edits waiting for their server, and each list as it stood before the
+  // first of them; `Intents.qml` holds both.
+  property alias actionIntents: intents.held
+  property alias settledLists: intents.settledLists
   property var deferredListLoad: null
   property var queuedActions: []
   property bool sending: false
@@ -1425,21 +1424,6 @@ Item {
     if (!Model.holdsDispatch(queuedActions, dispatch)) discard()
   }
 
-  function addIntent(id, entry) {
-    actionIntents = Model.intentsWith(actionIntents, id, entry)
-  }
-
-  // Dropped on either answer; a failure also replays the intents behind it.
-  function settleIntent(id, token, failed, fallback) {
-    var next = Model.intentsSettled(actionIntents, id, token, failed, fallback)
-    actionIntents = next.intents
-    return next.outcome
-  }
-
-  function releaseSettledLists(query) {
-    settledLists = Model.settledListsReleased(settledLists, query)
-  }
-
   // Called before the freeing callback acts on its answer, so no revalidation
   // starts while a row still waits for its server.
   function runQueuedAction() {
@@ -1506,7 +1490,6 @@ Item {
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
-    var beforeMessages = messages.slice()
     // A live list owns snapshots taken before this action. Letting it finish
     // would rebuild and persist those stale rows over the optimistic edit — a
     // trashed search hit visibly came back when the slowest metadata request
@@ -1542,9 +1525,8 @@ Item {
     if (targets.length === 0) return false
     var change = Model.labelChangesFor(action, sourceLabelId)
     if (!change && action !== "trash" && action !== "untrash") return false
-    var token = ++root.actionSerial
-    settledLists = Model.settledListsHeld(settledLists, actionQuery, messages, previewMessages)
-    var settled = settledLists[actionQuery]
+    var token = intents.nextToken()
+    intents.holdLists(actionQuery)
 
     // Every summary the update touches besides the row's own, and what it was.
     // The rail draws from these, so a conversation action asserts the whole
@@ -1644,74 +1626,45 @@ Item {
           : (memberAfter[selectedId] || targets.indexOf(selectedId) >= 0 ? memberAfterOf : null)
         if (readerAfter && selectedMessage) {
           readerKey = "reader:" + selectedId
-          addIntent(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
+          intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
           selectedMessage = readerAfter(selectedMessage)
         }
       }
     }
     // Held until answered; the row's says whether it left the list.
-    addIntent(rowId, { token: token, before: before, apply: rowAfter, removed: removed })
+    intents.add(rowId, { token: token, before: before, apply: rowAfter, removed: removed })
     for (var c = 0; c < changedMembers.length; c++) {
       if (changedMembers[c] === rowId) continue
-      addIntent(changedMembers[c],
+      intents.add(changedMembers[c],
         { token: token, before: memberBefore[changedMembers[c]], apply: memberAfterOf })
     }
+    var edit = { token: token, query: actionQuery, rowId: rowId, before: before, removed: removed,
+      index: index, previewIndex: previewIndex, members: changedMembers, memberBefore: memberBefore }
     var optimisticMessages = messages.slice()
     var optimisticToken = nextPageToken
 
     // Only this edit comes off: the row, the members and the reader's copy are
-    // replayed over the edits still waiting behind it. The rail first, since
-    // the row's replay reads the members as they stand.
+    // replayed over the edits still waiting behind it — on screen, or in the
+    // cache of a query navigated away from, rather than a snapshot of the list
+    // this edit saw put over what a refusal ahead of it just restored.
     function restore(error) {
-      for (var m = 0; m < changedMembers.length; m++) {
-        if (changedMembers[m] === rowId) continue
-        root.rememberMember(root.settleIntent(changedMembers[m], token, true,
-          memberBefore[changedMembers[m]]).summary)
-      }
-      var outcome = root.settleIntent(rowId, token, true, before)
-      var row = outcome.summary
-      var stillRemoved = Model.anyIntentRemoved(outcome.entries)
-      if (index >= 0 && root.cacheKey === actionQuery
-          && !root.deferredLoadCleared(actionQuery)) {
+      intents.commit(actionQuery, intents.restore(edit, intents.listsOf(actionQuery)),
+        actionEstimate, actionToken)
+      if (index >= 0 && intents.showing(actionQuery)) {
         root.nextPageToken = actionToken
-        if (Model.indexById(root.messages, rowId) >= 0)
-          root.messages = Model.replaceById(root.messages, row)
-        else if (removed && !stillRemoved)
-          root.messages = Model.restoreRow(root.messages, row, settled.messages, index)
         if (interruptedQuery === "") root.rememberList()
-      } else if (index >= 0 && cacheStore.loaded) {
-        // Navigation may have replaced the visible list while the request was
-        // in flight. Repair the old query's optimistic cache without inserting
-        // its row into the newly selected mailbox.
-        cacheStore.putQuery(actionQuery, ({
-          summaries: beforeMessages,
-          estimate: actionEstimate,
-          nextPageToken: actionToken
-        }))
       }
-      if (previewIndex >= 0) {
-        root.previewMessages = Model.previewAfterRestore(root.previewMessages, row,
-          row.unread && !stillRemoved, settled.previews, previewIndex)
-      }
-      if (root.memberSummaries[rowId]) root.rememberMember(row)
-      if (readerKey !== "") {
-        var reader = root.settleIntent(readerKey, token, true, null)
-        if (readerKey === "reader:" + root.selectedId && reader.summary)
-          root.selectedMessage = reader.summary
-      }
+      intents.settleReader(readerKey, token, true)
       root.refreshCounts()
       root.fail(error)
     }
 
     // Agreed to, or a repeat took this send's place.
     function keep() {
-      root.settleIntent(rowId, token, false, null)
-      for (var m = 0; m < changedMembers.length; m++) {
-        if (changedMembers[m] !== rowId) root.settleIntent(changedMembers[m], token, false, null)
-      }
-      if (readerKey !== "") root.settleIntent(readerKey, token, false, null)
+      intents.keep(edit)
+      intents.settleReader(readerKey, token, false)
     }
-    function discard() { keep(); root.releaseSettledLists(actionQuery) }
+    function discard() { keep(); intents.releaseLists(actionQuery) }
 
     var done = function(payload, error) {
       root.pendingAction = ""
@@ -1719,14 +1672,14 @@ Item {
       root.runQueuedAction()
       if (error) {
         restore(error)
-        root.releaseSettledLists(actionQuery)
+        intents.releaseLists(actionQuery)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
         if (interruptedQuery !== "" && root.cacheKey === interruptedQuery)
           root.loadMessages(false, true, error)
         return
       }
       keep()
-      root.releaseSettledLists(actionQuery)
+      intents.releaseLists(actionQuery)
       if (!quiet) root.note(root.actionLabel(action))
       root.refreshCounts()
       if (interruptedQuery !== "" && root.deferredLoadCleared(actionQuery)
@@ -1788,22 +1741,22 @@ Item {
   // `unstar` from a row clears every counted member's star (the row's star
   // means "any member"); from the reader it clears the one message on screen.
   function actOnDetachedMember(messageId, action, change, quiet, memberOnly, slotTaken) {
-    var token = ++root.actionSerial
+    var token = intents.nextToken()
     function after(summary) { return Model.applyLabelChange(summary, action) }
     var beforeMember = memberSummaries[messageId] || null
-    if (beforeMember) addIntent(messageId, { token: token, before: beforeMember, apply: after })
+    if (beforeMember) intents.add(messageId, { token: token, before: beforeMember, apply: after })
     applyMemberChange(messageId, action)
     var readerKey = ""
     if (selectedId === messageId && selectedMessage) {
       readerKey = "reader:" + messageId
-      addIntent(readerKey, { token: token, before: selectedMessage, apply: after })
+      intents.add(readerKey, { token: token, before: selectedMessage, apply: after })
       selectedMessage = after(selectedMessage)
     }
     var actionQuery = cacheKey
     function settle(failed) {
       return {
-        member: beforeMember ? root.settleIntent(messageId, token, failed, beforeMember) : null,
-        reader: readerKey !== "" ? root.settleIntent(readerKey, token, failed, null) : null
+        member: beforeMember ? intents.settle(messageId, token, failed, beforeMember) : null,
+        reader: readerKey !== "" ? intents.settle(readerKey, token, failed, null) : null
       }
     }
     function dispatch() {
@@ -1926,7 +1879,6 @@ Item {
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
-    var before = messages.slice()
     var interrupted = listLoading
     if (interrupted) {
       listSerial++
@@ -1936,74 +1888,111 @@ Item {
       nextPageToken = ""
       actionToken = ""
     }
+    // One token for the lot and an intent per row, member and reader's copy
+    // under it, so a refusal takes off what this changed and nothing an edit
+    // taken since has: a star pressed while the server was still deciding
+    // stays. A snapshot of the list put back would have lost it.
+    var token = intents.nextToken()
+    intents.holdLists(actionQuery)
     // The block is asserted on every row for the same reason one action asserts
     // it: a row whose members were all sent the patch is a read conversation,
     // and a row that recomputed only its own labels would stay bold because its
     // block still said unread.
-    var next = []
-    for (var j = 0; j < messages.length; j++) {
-      next.push(Model.applyLabelChange(messages[j], "markRead", "",
-        Model.threadAfterAction(messages[j], "markRead")))
+    function rowRead(row) {
+      return Model.applyLabelChange(row, "markRead", "", Model.threadAfterAction(row, "markRead"))
     }
+    function memberRead(summary) { return Model.applyLabelChange(summary, "markRead") }
     // The rail draws from `memberSummaries` and the reader from
     // `selectedMessage`, and both are among what was just marked: every member
     // this holds a summary for takes the change, and a representative takes
     // its row's, block and all. Left alone, a stop kept its dot for the rest
     // of the session, because nothing later re-reads a member it already has.
-    var memberBefore = memberSummaries
+    var memberBefore = ({})
     var memberAfter = ({})
     for (var m = 0; m < ids.length; m++) {
       var held = memberSummaries[ids[m]]
-      if (held) memberAfter[ids[m]] = Model.applyLabelChange(held, "markRead")
-    }
-    for (var r = 0; r < next.length; r++) {
-      if (memberSummaries[next[r].id]) memberAfter[next[r].id] = next[r]
-    }
-    mergeMembers(memberAfter)
-    var selectedBefore = selectedMessage
-    var selectedWas = selectedId
-    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
-      selectedMessage = memberAfter[selectedId]
-        || Model.applyLabelChange(selectedMessage, "markRead")
+      if (!held) continue
+      memberBefore[ids[m]] = held
+      memberAfter[ids[m]] = memberRead(held)
     }
     var survives = Model.survivesAction(mailboxKey, "markRead")
+    var next = []
+    var edits = []
+    var rowIds = ({})
+    for (var r = 0; r < messages.length; r++) {
+      var row = messages[r]
+      if (!row.unread) {
+        next.push(row)
+        continue
+      }
+      var rowId = String(row.id)
+      rowIds[rowId] = true
+      var updated = rowRead(row)
+      if (memberSummaries[rowId]) {
+        memberBefore[rowId] = memberSummaries[rowId]
+        memberAfter[rowId] = updated
+      }
+      var members = []
+      var own = Model.actionTargets(row, "markRead")
+      for (var o = 0; o < own.length; o++) {
+        if (memberBefore[own[o]] !== undefined) members.push(own[o])
+      }
+      intents.add(rowId, { token: token, before: row, apply: rowRead, removed: !survives })
+      edits.push({ token: token, query: actionQuery, rowId: rowId, before: row, removed: !survives,
+        index: r, previewIndex: -1, members: members, memberBefore: memberBefore })
+      if (survives) next.push(updated)
+    }
+    for (var member in memberBefore) {
+      if (!rowIds[member])
+        intents.add(member, { token: token, before: memberBefore[member], apply: memberRead })
+    }
+    mergeMembers(memberAfter)
+    var readerKey = ""
+    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
+      var readerAfter = rowIds[selectedId] ? rowRead : memberRead
+      readerKey = "reader:" + selectedId
+      intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
+      selectedMessage = readerAfter(selectedMessage)
+    }
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
     var invalidatesPage = !survives || opaqueQuery
-    messages = survives ? next : []
+    messages = next
     if (invalidatesPage) nextPageToken = ""
     var optimistic = messages.slice()
     var optimisticToken = nextPageToken
     if (!interrupted) rememberList()
     pendingActionQuery = actionQuery
     pendingAction = "markRead"
+    // Answered edit by edit, on screen or in the cache of a query navigated
+    // away from; the list is built once and assigned once.
+    function settleAll(failed) {
+      var lists = failed ? intents.listsOf(actionQuery) : null
+      for (var e = 0; e < edits.length; e++) {
+        if (lists) lists = intents.restore(edits[e], lists)
+        else intents.keep(edits[e])
+      }
+      if (lists) intents.commit(actionQuery, lists, actionEstimate, actionToken)
+      intents.settleReader(readerKey, token, failed)
+      intents.releaseLists(actionQuery)
+    }
     api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
       root.runQueuedAction()
       if (error) {
-        if (root.cacheKey === actionQuery
-            && !root.deferredLoadCleared(actionQuery)) {
+        settleAll(true)
+        if (intents.showing(actionQuery)) {
           root.nextPageToken = actionToken
-          root.messages = before
           if (!interrupted) root.rememberList()
-        } else if (cacheStore.loaded) {
-          cacheStore.putQuery(actionQuery, ({
-            summaries: before,
-            estimate: actionEstimate,
-            nextPageToken: actionToken
-          }))
         }
-        // The rail and the reader go back with the rows, unless the reader
-        // has moved on to something this never touched.
-        root.memberSummaries = memberBefore
-        if (root.selectedId === selectedWas) root.selectedMessage = selectedBefore
         root.fail(error)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
         if (interrupted && root.cacheKey === actionQuery)
           root.loadMessages(false, true, error)
         return
       }
+      settleAll(false)
       root.note(Model.markAllReadNote(rows, expanded))
       root.refreshCounts()
       if (interrupted && root.deferredLoadCleared(actionQuery)
@@ -2038,6 +2027,12 @@ Item {
 
   BatchAction {
     id: batchAction
+    account: root
+    intents: intents
+  }
+
+  Intents {
+    id: intents
     account: root
   }
 

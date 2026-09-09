@@ -1,6 +1,6 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := Service.qml BarWidget.qml App.qml \
-	account/MailAccount.qml account/BatchAction.qml account/Rsvp.qml account/NewMailNotification.qml \
+	account/MailAccount.qml account/Intents.qml account/BatchAction.qml account/Rsvp.qml account/NewMailNotification.qml \
 	cache/CacheStore.qml cache/BodyCache.qml \
 	providers/AuthManager.qml providers/GmailApiClient.qml \
 	providers/OutlookAuth.qml \
