@@ -67,7 +67,7 @@ Outlook.com and Hotmail use Microsoft's OAuth device-code flow for delegated IMA
 - Actions: read/unread, star, archive, trash, untrash, report spam, mark all read
 - Compose, reply, reply-all, forward
 - Calendar invitations: full meeting detail, RSVP, and one-click Meet join
-- Calendar: month and week views over Google Calendar and CalDAV, with event create, edit and delete. Google calendars follow the current mailbox by default. A setting can combine every connected account in one view.
+- Calendar: month and week views over Google Calendar and CalDAV, with event create, edit and delete. Google calendars follow the current mailbox by default. A setting can combine every connected account in one view. A CalDAV account's server address can be discovered rather than added calendar by calendar: PROPFIND finds the signed-in principal, its calendar-home-set, and every calendar collection in it, and the ones chosen are added together under one password.
 - One-click unsubscribe from mailing lists that support it
 - Search using Gmail's own operator syntax
 - Unread badge in the bar; merged desktop notification for new mail

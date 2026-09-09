@@ -142,6 +142,7 @@ test-shell-portable:
 	bash tests/test_attachment_save.sh
 	bash tests/test_attachment.sh
 	bash tests/test_calendar_transport.sh
+	bash tests/test_calendar_propfind.sh
 	bash tests/test_calendar_write.sh
 	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh

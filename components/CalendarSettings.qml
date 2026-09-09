@@ -13,6 +13,9 @@ Column {
   required property color urgentColor
   required property string panelFontFamily
   property bool adding: false
+  property bool discovering: false
+  property var discoveryResults: []
+  property var discoverySelected: ({})
   property string passwordEditingId: ""
 
   width: parent ? parent.width : implicitWidth
@@ -189,13 +192,23 @@ Column {
     }
   }
 
-  IconTextButton {
-    visible: !root.adding
-    iconName: "plus"
-    text: "Add a calendar"
-    foreground: root.textColor
-    fontFamily: root.panelFontFamily
-    onClicked: root.adding = true
+  Row {
+    visible: !root.adding && !root.discovering
+    spacing: Style.space(6)
+    IconTextButton {
+      iconName: "plus"
+      text: "Add a calendar"
+      foreground: root.textColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.adding = true
+    }
+    IconTextButton {
+      text: "Discover calendars..."
+      bordered: false
+      foreground: root.textColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.discovering = true
+    }
   }
 
   Column {
@@ -258,6 +271,148 @@ Column {
     }
   }
 
+  Column {
+    width: parent.width
+    visible: root.discovering
+    spacing: Style.space(6)
+
+    TextField {
+      id: discoveryUrl
+      width: parent.width
+      visible: root.discoveryResults.length === 0
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "CalDAV server address"
+    }
+    TextField {
+      id: discoveryUsername
+      width: parent.width
+      visible: root.discoveryResults.length === 0
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "Username"
+    }
+    TextField {
+      id: discoveryPassword
+      width: parent.width
+      visible: root.discoveryResults.length === 0
+      password: true
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "Password or app password"
+      onAccepted: root.findCalendars()
+    }
+
+    Row {
+      visible: root.discoveryResults.length === 0
+      spacing: Style.space(6)
+      IconTextButton {
+        text: root.controller && root.controller.discovering ? "Searching" : "Find calendars"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: root.controller && !root.controller.discovering
+        onClicked: root.findCalendars()
+      }
+      IconTextButton {
+        text: "Cancel"
+        bordered: false
+        foreground: root.dimColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.cancelDiscovery()
+      }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.discoveryResults.length > 0
+      text: "Found " + root.discoveryResults.length + " calendar"
+        + (root.discoveryResults.length === 1 ? "" : "s") + ". Choose which to add:"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+
+    Column {
+      width: parent.width
+      visible: root.discoveryResults.length > 0
+      spacing: Style.space(4)
+
+      Repeater {
+        model: root.discoveryResults
+
+        Item {
+          width: root.width
+          height: Math.max(discoveredText.implicitHeight, discoveredSwitch.implicitHeight)
+
+          Column {
+            id: discoveredText
+            anchors.left: parent.left
+            anchors.right: discoveredSwitch.left
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+
+            Text {
+              width: parent.width
+              text: String(modelData.name || "Calendar")
+              color: root.textColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+            Text {
+              width: parent.width
+              text: String(modelData.url || "")
+              color: root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideMiddle
+            }
+          }
+
+          ToggleSwitch {
+            id: discoveredSwitch
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.discoverySelected[modelData.url] !== false
+            foreground: root.textColor
+            accent: root.accentColor
+            onToggled: root.toggleDiscovered(modelData.url)
+          }
+        }
+      }
+
+      Row {
+        spacing: Style.space(6)
+        IconTextButton {
+          text: root.controller && root.controller.savingSource ? "Adding"
+            : "Add " + root.selectedDiscoveredCalendars().length + " calendar"
+              + (root.selectedDiscoveredCalendars().length === 1 ? "" : "s")
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: root.controller && !root.controller.savingSource
+            && root.selectedDiscoveredCalendars().length > 0
+          onClicked: root.controller.addDiscoveredCalendars(
+            root.selectedDiscoveredCalendars(), discoveryUsername.text, discoveryPassword.text)
+        }
+        IconTextButton {
+          text: "Cancel"
+          bordered: false
+          foreground: root.dimColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.cancelDiscovery()
+        }
+      }
+    }
+  }
+
   Text {
     id: resultText
     width: parent.width
@@ -278,6 +433,43 @@ Column {
     }, calendarPassword.text)
   }
 
+  function findCalendars() {
+    resultText.text = ""
+    root.discoveryResults = []
+    root.discoverySelected = ({})
+    root.controller.discoverCalendars(discoveryUrl.text, discoveryUsername.text, discoveryPassword.text)
+  }
+
+  function toggleDiscovered(url) {
+    var next = {}
+    for (var key in root.discoverySelected) next[key] = root.discoverySelected[key]
+    next[url] = root.discoverySelected[url] === false
+    root.discoverySelected = next
+  }
+
+  function selectedDiscoveredCalendars() {
+    var out = []
+    for (var i = 0; i < root.discoveryResults.length; i++) {
+      var item = root.discoveryResults[i]
+      if (root.discoverySelected[item.url] !== false) out.push(item)
+    }
+    return out
+  }
+
+  function cancelDiscovery() {
+    // Stops the request itself, not only this panel's view of it — without
+    // this, an abandoned search kept running and could still land on
+    // whatever the panel shows next, including a search typed after it.
+    if (root.controller) root.controller.cancelDiscovery()
+    root.discovering = false
+    root.discoveryResults = []
+    root.discoverySelected = ({})
+    discoveryUrl.text = ""
+    discoveryUsername.text = ""
+    discoveryPassword.text = ""
+    resultText.text = ""
+  }
+
   Connections {
     target: root.controller
     function onCalendarSaved(ok, error) {
@@ -289,6 +481,18 @@ Column {
       calendarPassword.text = ""
       root.adding = false
       root.passwordEditingId = ""
+      root.discovering = false
+      root.discoveryResults = []
+      root.discoverySelected = ({})
+      discoveryUrl.text = ""
+      discoveryUsername.text = ""
+      discoveryPassword.text = ""
+    }
+    function onCalendarsDiscovered(ok, error, calendars) {
+      if (!ok) { resultText.text = error; return }
+      resultText.text = ""
+      root.discoveryResults = calendars
+      root.discoverySelected = ({})
     }
   }
 }

@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
         ("calendar-transport.sh", [], [b"https://example.com/dav", b"user:secret", b"<query/>"], [0, 1, 2]),
         ("calendar-write.sh", [], [b"https://example.com/dav", b"user:secret", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"], [0, 1]),
         ("calendar-delete.sh", [], [b"https://example.com/dav", b"user:secret"], [0, 1]),
+        ("calendar-propfind.sh", [], [b"https://example.com/dav", b"user:secret", b"0", b"<propfind/>"], [0, 1, 2, 3]),
         ("mail-transport.sh", ["imap"], [b"imaps://example.com/INBOX", b"user:secret", b"NOOP", b"UID SEARCH ALL"], [0, 1, 2, 3]),
         ("mail-transport.sh", ["imap-id"], [b"imaps://example.com/", b"imaps://example.com/INBOX", b"user:secret", b"ID NIL", b"NOOP"], [0, 1, 2, 3, 4]),
         ("mail-transport.sh", ["smtp"], [b"smtps://example.com/", b"user:secret", b"sender@example.com", b"Subject: Hello\r\n\r\nBody\r\n", b"to@example.com", b"next@example.com"], [0, 1, 2, 4, 5]),
