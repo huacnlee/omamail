@@ -5,7 +5,7 @@
 Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages, and answers your mail over the official Gmail API, through Microsoft OAuth for Outlook, over the HEY CLI client 37signals publish, over JMAP, or over IMAP and SMTP for every other mailbox. It runs inside the `omarchy-shell` process you already have, follows your active theme, and puts an unread count in the bar.
 
 
-<img width="800" alt="Omamail - Reading a message in the three-column window" src="docs/images/full-mail.webp" />
+<img width="800" alt="Omamail - Reading mail with AI assistance for selected messages" src="docs/images/full-mail.webp" />
 
 The calendar, a new message, and the question every new mailbox starts with:
 
@@ -221,6 +221,8 @@ and the client itself are console-only; there is no CLI for them.
 
 ## Using it
 
+Right-click does the rest. On a label in the rail: rename it, make a label beside or beneath it, move it under another, delete it, or watch it for new mail — a watched label counts its unread on every refresh and shows an eye. On the reader's From or To line: copy the address, or search the mailbox for mail from it or to it.
+
 | Key | What it does |
 | --- | --- |
 | `j` / `k` | Move down / up |
@@ -240,6 +242,7 @@ and the client itself are console-only; there is no CLI for them.
 | `Alt+A` | Switch account |
 | `Space` / `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
 | `Ctrl+A` | Select every message loaded, or none |
+| `Alt+G` | Open AI assistance for the message, selection, or draft in the right dock |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` / `Ctrl+R` | Check for mail |
 | `?` | Every shortcut |
@@ -247,6 +250,8 @@ and the client itself are console-only; there is no CLI for them.
 To act on several messages, hold Ctrl to replace the row actions with checkboxes, or Ctrl+click a row to select or deselect it without opening it. Checkboxes stay visible while any message is selected; releasing Ctrl with no selection restores the usual actions. `Space` or `x` toggles the keyboard cursor's row. Shift+click selects the range from the cursor to an unchecked row, or clears that range when the clicked row is already checked; other selections stay as they are. In the list, `Ctrl+A` selects every loaded message or clears the selection, and `Esc` clears an active selection before going back. The status bar shows how many messages are selected; archive, trash, star, move and read/unread actions apply to that selection while the list is visible.
 
 Search paints matching cached rows first and adds server results as they arrive. It takes Gmail's own operator syntax straight through — `from:jane`, `has:attachment`, `older_than:7d`. The Unread mailbox leaves Promotions, Social and Forums out rather than asking for Primary: Gmail's categories do not remove the `INBOX` label, so an unread filter without that exclusion comes back as the whole promotional backlog rather than the mail you have not read — while one that asks for Primary comes back empty on any account where Gmail is not applying the category labels, which is unread mail with nothing left to say so. Updates stays in, because receipts, deliveries and notifications land there. Right-click any row in the list for archive, trash, spam, star and read/unread without leaving the keyboard cursor behind.
+
+AI assistance uses the default AI selected in Omarchy, with no separate Omamail AI settings. Use the outline **AI icon** button beside Compose, the message menu, or `Alt+G`. Type a multiline question or use `/` for common commands, then Enter to send or Shift+Enter for a new line. The **…** menu opens new chats and conversation history. Results return to the right dock; draft suggestions can be inserted or replace the body after review. The panel streams the conversation and supports follow-up questions without opening a terminal. The background adapter currently supports Claude. See [AI assistance](docs/AGENT.md).
 
 A signature is set per mailbox on the settings page, under Writing. It is placed under a new message and above the quoted text in a reply, so a sign-off stays next to the words it signs rather than stranded below a screen of somebody else's message. It is sent exactly as typed — no `-- ` line is added in front of it, because a client that adds one turns a signature into two decisions, and the line is one keystroke away for anybody who wants it. Each mailbox keeps its own: two addresses are two identities, and one sign-off under both is wrong for whichever it was not written for. A saved draft is reopened as it was written, so resuming one never signs it twice.
 

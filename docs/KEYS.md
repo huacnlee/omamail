@@ -26,7 +26,8 @@ draft beats reading, a query being typed beats the list underneath it:
 
 ```qml
 readonly property string keyContext:
-    root.showPage  ? "page"
+    root.assistantEditing ? (root.activeAssistant.commandsOpen ? "assistantCommands" : "assistant")
+  : root.showPage  ? "page"
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
@@ -40,13 +41,38 @@ readonly property string keyContext:
 | `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the cursor; `o` or `Enter` opens what they landed on. With *Preview as the cursor moves* on, moving also shows the message, and it counts as read once the cursor has stayed on it |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
+| `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
+| `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+
+While an AI request is running, Escape interrupts it and keeps the dock open;
+otherwise Escape closes the dock. An open command menu or history view is left first.
+
+The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts
+a newline. Ctrl+Return/Enter also sends for compatibility.
+While `/` command candidates are visible, `assistantCommands` owns Up/Down and
+Return/Enter; choosing a command fills the input without sending it. Escape
+first dismisses those candidates, then closes the dock. Both contexts keep the
+keyboard in the AI text area.
+The `assistantSend` row's `sequenceContexts` restricts bare Return/Enter to
+`assistant`, so those keys choose a candidate in `assistantCommands` instead.
+Shift+Return/Enter remains ordinary text input in both contexts.
+
+Qt 6.11's native `TextArea` accepts `ShortcutOverride` for editing keys even
+after `Keys.onShortcutOverride` leaves the event unaccepted. This was measured
+with a focused text area and a window Down shortcut: the shortcut never fired.
+The AI text area therefore forwards its `Keys.onPressed` event unchanged to
+`KeyRouter.routeKeyEvent`. The router decodes the key and applies the same
+`Keymap.js` bindings and context as its window shortcuts. This is one router
+with two event entry points, not a second set of local bindings. An unbound
+event is left alone, preserving normal typing, IME input and line breaks.
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`.** That is the whole rule.
+**A text-entry context binds no bare key but `Escape`, except AI send and command
+selection described above.**
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
@@ -87,7 +113,7 @@ used to exist, and they had.
 |---|---|---|---|
 | `cursorDown` | `j`, `Down` | mail | Move down |
 | `cursorUp` | `k`, `Up` | mail | Move up |
-| `open` | `Return`, `o` | mail | Open the selected message |
+| `open` | `Return`, `Enter`, `o` | mail | Open the selected message |
 | `backToList` | `u` | reader | Back to the list |
 | `nextMember` | `n` | reader | Next message in the conversation |
 | `previousMember` | `p` | reader | Previous message in the conversation |
@@ -112,12 +138,17 @@ used to exist, and they had.
 | `calendarToday` | `t` | calendar | Go to today |
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
-| `send` | `Ctrl+Return` | compose | Send |
+| `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
+| `askAgent` | `Alt+G` | mail+compose | Ask AI about the message or draft |
+| `assistantSend` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | assistant+assistantCommands | Send the AI message |
+| `assistantCommandUp` | `Up` | assistantCommands | Previous AI command |
+| `assistantCommandDown` | `Down` | assistantCommands | Next AI command |
+| `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Fill the selected AI command |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
@@ -134,7 +165,7 @@ used to exist, and they had.
 The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
-In Drafts, `Enter` and `o` preview the selected draft. Press `c` to edit it. In every other mailbox, `c` starts a new message.
+In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with what was written in it; a click previews it, as in every other mailbox. Leaving the composer saves the draft back over the one it came from; sending it takes that draft away. In every other mailbox, `c` starts a new message.
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
@@ -299,3 +330,5 @@ it changed no behaviour.
 **User-configurable bindings.** The table makes it possible — the rows are data
 — but nothing has asked for it, and a config file for bindings needs a merge
 story and a conflict story this does not need.
+
+The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.

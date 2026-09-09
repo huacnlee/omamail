@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar"]
+var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar", "assistant", "assistantCommands"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -37,7 +37,7 @@ var BINDINGS = [
   // — stepping through with j used to mark half a mailbox read without anyone
   // looking at it — so with the reader up there has to be a key that says open,
   // or the only way to read the next message is to leave and come back.
-  { id: "open", keys: ["Return", "o"], contexts: MAIL,
+  { id: "open", keys: ["Return", "Enter", "o"], contexts: MAIL,
     group: "Moving", label: "Open the selected message",
     hintKey: "o", hint: { list: "open", reader: "open" } },
   { id: "backToList", keys: ["u"], contexts: ["reader"],
@@ -122,7 +122,9 @@ var BINDINGS = [
     group: "Calendar", label: "Show week view" },
   { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
-  { id: "send", keys: ["Ctrl+Return"], contexts: ["compose"],
+  // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
+  // a hand on the numpad expects the same thing of them.
+  { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
   { id: "undoSend", keys: ["Alt+Z"], contexts: ANY,
     survivesOverlay: true,
@@ -162,6 +164,19 @@ var BINDINGS = [
   // then walks: `j`/`k` to move, `Enter` or `o` to take one.
   { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
+  // The message agent, on the cursor row. A popup, so the same shape as the
+  // account switcher: opened through the table, then answering its own keys.
+  { id: "askAgent", keys: ["Alt+G"], contexts: ["list", "reader", "compose"],
+    group: "Acting", label: "Ask AI about the message or draft" },
+  { id: "assistantSend", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["assistant", "assistantCommands"],
+    sequenceContexts: { "Return": ["assistant"], "Enter": ["assistant"] },
+    group: "AI", label: "Send the AI message" },
+  { id: "assistantCommandUp", keys: ["Up"], contexts: ["assistantCommands"],
+    group: "AI", label: "Previous AI command" },
+  { id: "assistantCommandDown", keys: ["Down"], contexts: ["assistantCommands"],
+    group: "AI", label: "Next AI command" },
+  { id: "assistantChooseCommand", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
+    group: "AI", label: "Fill the selected AI command" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },
@@ -201,6 +216,7 @@ var BINDINGS = [
 // the toast offers Alt+Z and its button.
 function contextFor(state) {
   var value = state || ({})
+  if (value.assistantEditing) return value.assistantCommands ? "assistantCommands" : "assistant"
   if (value.showPage) return "page"
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
@@ -306,7 +322,12 @@ function displayFor(binding) {
   if (binding.display) return binding.display
   var keys = binding.keys || []
   var out = []
-  for (var i = 0; i < keys.length; i++) out.push(readableSequence(keys[i]))
+  // Return and the numpad's Enter are two keys with one keycap name; the
+  // sheet names the keycap once.
+  for (var i = 0; i < keys.length; i++) {
+    var readable = readableSequence(keys[i])
+    if (out.indexOf(readable) < 0) out.push(readable)
+  }
   return out.join(", ")
 }
 

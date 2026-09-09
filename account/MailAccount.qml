@@ -165,6 +165,7 @@ Item {
 
   property string mailboxKey: "inbox"
   property string searchQuery: ""
+  property string searchRaw: ""
   // A query picked from a list rather than typed: a Gmail label, an IMAP
   // folder. Kept apart from `searchQuery` because that one gets shaped into a
   // search — an IMAP folder wrapped in a TEXT search would go looking for the
@@ -440,6 +441,7 @@ Item {
   // are search operators, IMAP's name a folder. Opaque from here on — it is
   // handed back to the client that produced it, and used as a cache key.
   readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
+    : searchRaw !== "" ? searchRaw
     : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
   readonly property bool hasMore: nextPageToken !== ""
   // A cached search can already have rows on screen while this stays true.
@@ -515,8 +517,11 @@ Item {
   function refresh() {
     if (!ready) return
     refreshCounts()
+    labelActions.refreshMonitored()
     if (active && (windowOpen || !listLoaded)) loadMessages(false)
   }
+
+  property var monitoredIds: []
 
   function refreshCounts() {
     if (!ready || countLoading) return
@@ -2022,7 +2027,6 @@ Item {
     return true
   }
 
-  // The batch — several ticked rows at once — lives in `BatchAction.qml`.
   function actMany(ids, action) { return batchAction.run(ids, action) }
 
   BatchAction {
@@ -2243,9 +2247,31 @@ Item {
         return
       }
       root.reportSendSuccess(sentPayload)
+      if (payload && String(payload.draftId || "") !== "") root.forgetSentDraft(String(payload.draftId))
     })
     return true
   }
+
+  // The draft a sent message was opened from is done with: the server's copy
+  // goes, and so does its row. A failure here is a footnote on a message
+  // that was sent, so it is noted rather than reported as a failure.
+  function forgetSentDraft(draftId) {
+    if (!api || typeof api.deleteDraft !== "function") return
+    api.deleteDraft(draftId, function(payload, error) {
+      if (!root) return
+      if (error) {
+        root.note("Sent, but the draft it came from could not be removed: " + String(error))
+        return
+      }
+      if (Model.indexById(root.messages, draftId) >= 0) {
+        root.messages = Model.removeById(root.messages, draftId)
+        root.rememberList()
+      }
+      if (root.selectedId === draftId) root.clearSelection()
+      root.refreshCounts()
+    })
+  }
+
 
   function deliverPending() {
     if (!sendPending) return false
@@ -2267,8 +2293,34 @@ Item {
     return true
   }
 
+  // A mailbox whose token was just refused is not ready until the next
+  // lookup answers — and the next lookup is asked for by the next request.
+  // A save or a send that arrived in that window failed as "not ready" for
+  // a mailbox that was signed in a second ago. So the credentials are asked
+  // for first, which is what any other request does, and the work goes on
+  // once they are back; a mailbox with nothing to look up fails at once.
+  function whenReady(callback) {
+    if (ready) { callback(true); return }
+    if (!auth || !auth.configured || auth.loginBusy || typeof auth.withCredentials !== "function") {
+      callback(false)
+      return
+    }
+    auth.withCredentials(function(credentials, error) {
+      if (!root) return
+      callback(!!credentials && root.ready)
+    })
+  }
+
   function saveDraft(fields, callback) {
-    if (!ready || !api || typeof api.saveDraft !== "function") {
+    if (!ready) {
+      whenReady(function(ok) {
+        if (!root) return
+        if (ok) root.saveDraft(fields, callback)
+        else if (typeof callback === "function") callback(null, "The mailbox is not ready to save drafts")
+      })
+      return null
+    }
+    if (!api || typeof api.saveDraft !== "function") {
       if (typeof callback === "function") callback(null, "The mailbox is not ready to save drafts")
       return null
     }
@@ -2288,6 +2340,9 @@ Item {
       to: String(values.to || "").trim(),
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
+      replyTo: String(values.replyTo || "").trim(),
+      signature: String(values.signature || ""),
+      signatureHtml: String(values.signatureHtml || ""),
       subject: String(values.subject || ""),
       body: String(values.body || ""),
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
@@ -2298,11 +2353,33 @@ Item {
     })
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
+      // The Drafts list on screen is what the server had before the save: the
+      // copy replaced is gone there and the new one is not yet listed, so
+      // a list left as it was showed both — the old row until the next poll,
+      // and a second row for every save. Read it again from the server now.
+      if (!error && root && root.mailboxKey === "drafts") {
+        root.listSerial++
+        root.nextPageToken = ""
+        root.loadMessages(false, true, "")
+      } else if (!error && root) {
+        root.refreshCounts()
+      }
     })
   }
 
+
   function send(fields) {
-    if (!ready || sending || sendPending) return false
+    if (sending || sendPending) return false
+    if (!ready) {
+      // Asked for its credentials first, like a save: a token refused a
+      // moment ago is looked up again rather than the send refused.
+      whenReady(function(ok) {
+        if (!root) return
+        if (ok) root.send(fields)
+        else root.reportSendFailure("The mailbox is not ready to send")
+      })
+      return true
+    }
     var values = fields || ({})
     var files = Array.isArray(values.attachments) ? values.attachments : []
     var hasFiles = false
@@ -2337,6 +2414,9 @@ Item {
       to: to,
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
+      replyTo: String(values.replyTo || "").trim(),
+      signature: String(values.signature || ""),
+      signatureHtml: String(values.signatureHtml || ""),
       subject: String(values.subject || ""),
       body: body,
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
@@ -2348,6 +2428,9 @@ Item {
       // draft behind on every provider.
       draftId: String(values.draftId || "")
     })
+    // The draft this was opened from rides on the queued payload; the send
+    // itself carries only the raw message and the thread.
+    payload.draftId = String(values.draftId || "")
 
     var queued = Outbox.schedule(payload, Date.now(), undoSendSeconds)
     if (!queued) return deliver(payload)
@@ -2380,114 +2463,14 @@ Item {
 
   // ----------------------------------------------------------- unsubscribe
 
-  // Three ways off a list, and `Unsubscribe.plan` picks between them so that
-  // nothing here branches on a header. In order of how little the user has to
-  // do: a POST the sender has promised is enough, a message to the address
-  // they nominated, or their page in a browser.
-  function unsubscribe() {
-    if (unsubscribing || unsubscribeDone !== "") return
-    var info = selectedUnsubscribe
-    var how = Unsub.plan(info, canSend)
-    if (how === "") return
-    clearNotice()
+  // See `Unsubscribe.qml`: the account file is at its size ceiling.
+  function unsubscribe() { unsubscribeAction.run() }
 
-    if (how === "browser") {
-      Qt.openUrlExternally(info.url)
-      // What happened is that a page opened. Whether the list acted on it is
-      // between the user and that page, and saying "unsubscribed" here would
-      // be this panel taking credit for work it cannot see.
-      unsubscribeDone = "The unsubscribe page is open in your browser"
-      return
-    }
-
-    if (how === "mail") {
-      if (!ready) {
-        fail("Sign in before unsubscribing")
-        return
-      }
-      unsubscribing = true
-      api.sendMessage(Mail.buildSendPayload({
-        // The address the newsletter was sent to. A list that only ever knew
-        // an alias has no reason to act on a request from anywhere else.
-        from: receivedAsAddress,
-        fromName: receivedAsName,
-        accountAddress: ownAddress,
-        to: info.mail.to,
-        subject: info.mail.subject,
-        body: info.mail.body
-      }), function(payload, error) {
-        root.unsubscribing = false
-        if (error) {
-          root.fail(error)
-          return
-        }
-        root.unsubscribeDone = "Unsubscribe request sent to " + info.mail.to
-      })
-      return
-    }
-
-    postUnsubscribe(info.postUrl)
+  Unsubscribe {
+    id: unsubscribeAction
+    account: root
   }
 
-  // The RFC 8058 one-click request: a fixed body, to an https address on the
-  // public internet that this sender put in a header saying a single POST
-  // would do it. `Unsubscribe.isPostableUrl` is where both of those conditions
-  // are checked, and it borrows the judgement that decides whether a message
-  // may load a picture.
-  //
-  // Qt's XHR follows redirects without rechecking the destination. The Python
-  // worker instead resolves and checks every IP, connects to that exact answer
-  // while retaining the original TLS hostname, and never follows a redirect.
-  // URL bytes remain data throughout: there is no shell or curl config.
-  //
-  // The reply is never read beyond its status. It is a document from whoever
-  // sent the mail, and the only question being asked of it is whether the
-  // address is off the list.
-  function postUnsubscribe(url) {
-    if (!Unsub.isPostableUrl(url)) {
-      fail("That unsubscribe address is not one this can post to")
-      return
-    }
-    unsubscribing = true
-    var request = unsubscribeComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/unsubscribe.py"],
-      requestLine: [Mail.encodeBase64(String(url)),
-        Mail.encodeBase64(Unsub.postContentType()),
-        Mail.encodeBase64(Unsub.postBody())].join(" ")
-    })
-    if (!request) {
-      unsubscribing = false
-      fail("The unsubscribe request could not be sent")
-      return
-    }
-    request.finished.connect(function(exitCode, status) {
-      if (!root) return
-      request.destroy()
-      root.unsubscribing = false
-      root.unsubscribeDone = ""
-      if (exitCode !== 0 || status === 0) {
-        root.fail("The unsubscribe request could not be sent")
-        return
-      }
-      if (status >= 200 && status < 300) {
-        root.unsubscribeDone = "Unsubscribed from this list"
-        return
-      }
-      // A 3xx is a server answering a one-click request with "go and ask over
-      // there". It has not done what its own header promised, and the address
-      // it points at was never judged — so it is reported as a refusal rather
-      // than followed.
-      root.fail(status >= 300 && status < 400
-        ? "This list answered with a redirect instead of unsubscribing (" + status + ")"
-        : "This list refused the unsubscribe request (" + status + ")")
-    })
-    request.running = true
-  }
-
-  // One process per request, created and destroyed around it. The same shape
-  // the mail transport uses, for the same reason: the URL crosses on stdin
-  // base64-encoded, so a header a stranger wrote never reaches the process
-  // table and nothing has to be escaped on the way.
   Component {
     id: imageFetchComponent
 
@@ -2509,39 +2492,6 @@ Item {
     }
   }
 
-  Component {
-    id: unsubscribeComponent
-
-    Process {
-      id: unsubscribeProcess
-
-      property string requestLine: ""
-      signal finished(int exitCode, int status)
-
-      stdinEnabled: true
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-
-      onStarted: {
-        // One line, because Quickshell's Process.write() never closes stdin and
-        // the script would wait forever for an EOF that does not come.
-        write(requestLine + "\n")
-        requestLine = ""
-      }
-
-      onExited: function(exitCode) {
-        // "<transport error code> <http status>", and nothing else is read.
-        var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
-        var code = Math.floor(Number(parts[0]))
-        var status = Math.floor(Number(parts[1]))
-        if (exitCode !== 0 || parts.length < 2 || !isFinite(code) || !isFinite(status)) {
-          unsubscribeProcess.finished(exitCode === 0 ? 1 : exitCode, 0)
-          return
-        }
-        unsubscribeProcess.finished(code, status)
-      }
-    }
-  }
 
   Component {
     id: attachmentSaveComponent
@@ -2629,6 +2579,14 @@ Item {
   }
 
   function notify(arrivals) { newMailNotification.notify(arrivals) }
+  readonly property alias labelActions: labelActions
+  // The watched ids after a rename or move changed what they name.
+  signal monitoredMigrated(var ids)
+
+  LabelActions {
+    id: labelActions
+    account: root
+  }
 
   // ------------------------------------------------------------ navigation
 
@@ -2636,6 +2594,7 @@ Item {
     if (mailboxKey === key && searchQuery === "" && rawQuery === "") return
     mailboxKey = String(key || "inbox")
     searchQuery = ""
+    searchRaw = ""
     rawQuery = ""
     rawLabelId = ""
     clearSelection()
@@ -2645,10 +2604,13 @@ Item {
     loadMessages(false)
   }
 
-  function search(text) {
+  // `raw`: an app-built query in the provider's words, sent as it is.
+  function search(text, raw) {
     var query = String(text || "").trim()
-    if (query === searchQuery && rawQuery === "") return
+    var built = String(raw || "").trim()
+    if (query === searchQuery && built === searchRaw && rawQuery === "") return
     searchQuery = query
+    searchRaw = built
     // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
     rawLabelId = ""
@@ -2665,6 +2627,7 @@ Item {
     var id = String(labelId || "")
     if (query === "" || (query === rawQuery && id === rawLabelId)) return
     searchQuery = ""
+    searchRaw = ""
     rawQuery = query
     rawLabelId = id
     clearSelection()
@@ -2821,9 +2784,7 @@ Item {
 
   // The client takes the manager as a required property, so it cannot be built
   // until there is one.
-  // A test's stand-in for the provider: a component the loader prefers when
-  // set, so the account can be driven against a controlled client without a
-  // server or a credential. Never set outside a test.
+  // A test's stand-in for the provider.
   property Component clientOverride: null
 
   Loader {

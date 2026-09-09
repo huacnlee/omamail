@@ -331,6 +331,32 @@ Item {
     })
   }
 
+  // Labels, changed. A nested label is a name with "/" in it, so a move is a
+  // rename to the new path; Gmail renames the labels beneath it with it.
+  function createLabel(name, callback) {
+    return request("POST", Api.labelsPath(), null, {
+      name: String(name || ""),
+      labelListVisibility: "labelShow",
+      messageListVisibility: "show"
+    }, function(status, payload, error) {
+      if (typeof callback === "function") callback(payload, error)
+    })
+  }
+
+  function renameLabel(id, name, callback) {
+    return request("PATCH", Api.labelPath(id), null, { name: String(name || "") },
+      function(status, payload, error) {
+        if (typeof callback === "function") callback(payload, error)
+      })
+  }
+
+  function deleteLabel(id, callback) {
+    return request("DELETE", Api.labelPath(id), null, null,
+      function(status, payload, error) {
+        if (typeof callback === "function") callback(payload, error)
+      })
+  }
+
   // One id or a list of them: a row that stands for a conversation is trashed
   // as its members, and the list arrives here flat.
   //
@@ -418,6 +444,39 @@ Item {
 
   // The message list names Gmail's message id. The update endpoint names its
   // enclosing draft resource, so resolve that immutable id before replacing it.
+  // The draft a sent message was opened from, taken away: found the same way
+  // an update finds it, then deleted. Gmail's own drafts.send would do this
+  // itself; a message sent as raw leaves the draft behind.
+  function deleteDraft(messageId, callback) {
+    var handle = newHandle()
+    function find(pageToken) {
+      root.request("GET", Api.draftsPath(), Api.draftListQuery(pageToken), null,
+        function(status, body, error) {
+          if (handle.aborted) return
+          if (error) {
+            if (typeof callback === "function") callback(null, error)
+            return
+          }
+          var draftId = Api.draftIdForMessage(body, messageId)
+          if (draftId !== "") {
+            root.request("DELETE", Api.draftPath(draftId), null, null,
+              function(deleteStatus, gone, deleteError) {
+                if (typeof callback === "function") callback(gone, deleteError)
+              }, false, handle)
+            return
+          }
+          var next = String(body && body.nextPageToken || "")
+          if (next !== "") {
+            find(next)
+            return
+          }
+          if (typeof callback === "function") callback(null, "")
+        }, false, handle)
+    }
+    find("")
+    return handle
+  }
+
   function updateDraft(messageId, payload, callback) {
     var handle = newHandle()
 

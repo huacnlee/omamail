@@ -52,6 +52,21 @@ function byId(id) {
 })
 
 const undoSend = byId("undoSend")
+assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: true, composing: true }), "assistantCommands")
+assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: false, composing: true }), "assistant")
+assert.strictEqual(keymap.contextFor({ assistantEditing: false, assistantCommands: true, composing: true }), "compose")
+deepEqual(byId("assistantSend").keys, ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"])
+deepEqual(byId("assistantChooseCommand").keys, ["Return", "Enter"])
+assert.ok(!keymap.sequencesFor("assistant").some(entry => ["Up", "Down"].includes(entry.sequence)))
+for (const key of ["Return", "Enter"]) {
+  assert.strictEqual(keymap.sequencesFor("assistant").find(entry => entry.sequence === key).id, "assistantSend")
+  assert.strictEqual(keymap.sequencesFor("assistantCommands").find(entry => entry.sequence === key).id, "assistantChooseCommand")
+  for (const context of ["assistant", "assistantCommands"]) {
+    assert.ok(!keymap.sequencesFor(context).some(entry => entry.sequence === "Shift+" + key))
+  }
+}
+assert.ok(keymap.sequencesFor("assistantCommands").some(entry => entry.id === "assistantCommandDown" && entry.sequence === "Down"))
+assert.ok(!keymap.sequencesFor("compose").some(entry => entry.id === "assistantSend"))
 assert.ok(undoSend, "the delayed-send state offers an undo action")
 assert.strictEqual(keymap.displayFor(undoSend), "Alt+Z")
 keymap.CONTEXTS.forEach(function (context) {

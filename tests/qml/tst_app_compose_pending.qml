@@ -9,6 +9,27 @@ Item {
   QtObject {
     id: mailService
 
+    property bool hasAgent: true
+    property bool agentStarting: false
+    property string agentError: ""
+    property string agentShownId: ""
+    property string agentShownOutput: ""
+    property var agentShownTranscript: []
+    property int agentRequests: 0
+    property string lastAgentPrompt: ""
+    function askAgentDraft(fields, prompt) { agentRequests++; lastAgentPrompt = prompt; return true }
+    property var agentJobs: ({})
+    property var agentAttentionByMessage: ({})
+    property var draftAgentJobs: []
+    property string cancelledAgentId: ""
+    function agentJobsForDraft(fields) { return draftAgentJobs }
+    function cancelAgentJob(id) { cancelledAgentId=id; return true }
+    function showAgentJob(id) { agentShownId=id }
+    function acknowledgeAgentJob(id) {}
+    function agentJobWantsAttention(job) { return false }
+    function agentJobFor(id, owner) { return null }
+    function agentSelectionJob(ids, owner) { return null }
+    function refreshAgentJobs() {}
     property bool ready: true
     property bool anyAccountReady: true
     property bool sendPending: true
@@ -166,10 +187,21 @@ Item {
     }
 
     function init() {
+      var assistant = named(app, "compose-agent")
+      if (assistant) {
+        assistant.close()
+        named(assistant, "agent-prompt-field").text = ""
+      }
       app.opened = false
       app.loadComposeRecovery("")
       app.clearComposeRecovery()
       mailService.sendPending = false
+      var aiDock = named(app,"compose-agent")
+      if (aiDock) { aiDock.submittedPrompt=""; findChild(aiDock,"agent-pending-queue").messages=[] }
+      app.preferredAssistantWidth = 0
+      mailService.draftAgentJobs = []; mailService.cancelledAgentId = ""
+      mailService.agentRequests = 0
+      mailService.lastAgentPrompt = ""
       mailService.sending = false
       mailService.lastSavedDraft = null
       mailService.failDraftSave = false
@@ -203,6 +235,184 @@ Item {
         compose.reset()
         compose.opened = false
       }
+    }
+
+    function test_ai_dock_reserves_space_and_escape_keeps_the_draft() {
+      app.open("{}")
+      app.startCompose("new")
+      var compose=composeView()
+      var originalWidth=compose.width
+      var body=named(compose,"compose-body-editor")
+      body.text="Keep draft"
+      body.forceActiveFocus()
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"compose-agent")
+      tryCompare(dock,"opened",true)
+      verify(compose.width < originalWidth)
+      compare(compose.width + named(app,"assistant-dock").width, originalWidth)
+      tryCompare(app,"assistantEditing",true)
+      var field=named(dock,"agent-prompt-field")
+      tryCompare(field,"activeFocus",true)
+      keyClick(Qt.Key_E)
+      verify(field.text.indexOf("e") === 0)
+      keyClick(Qt.Key_Escape)
+      tryCompare(dock,"opened",false)
+      compare(app.composing,true)
+      compare(body.text,"Keep draft")
+      compare(compose.width,originalWidth)
+      tryCompare(body,"activeFocus",true)
+    }
+
+    function test_ai_dock_resizes_from_left_edge_and_keeps_width() {
+      app.open("{}")
+      app.startCompose("new")
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"assistant-dock")
+      var splitter=named(app,"assistant-splitter")
+      verify(waitForRendering(dock))
+      var before=dock.width
+      mouseDrag(splitter,2,100,-60,0)
+      verify(dock.width > before)
+      verify(dock.width <= app.assistantMaxWidth)
+      var resized=dock.width
+      named(app,"compose-agent").close()
+      app.runShortcut("askAgent", "Alt+G")
+      compare(dock.width,resized)
+      app.preferredAssistantWidth=9999
+      compare(dock.width,app.assistantMaxWidth)
+      mouseDoubleClickSequence(splitter,2,100)
+      compare(app.preferredAssistantWidth,0)
+    }
+    function test_escape_interrupts_running_ai_and_keeps_chat_open() {
+      app.open("{}")
+      app.startCompose("new")
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"compose-agent")
+      mailService.draftAgentJobs=[{id:"running",state:"running",created:1}]
+      tryCompare(dock,"working",true)
+      var field=named(dock,"agent-prompt-field")
+      tryCompare(field,"activeFocus",true)
+      keyClick(Qt.Key_Escape)
+      compare(mailService.cancelledAgentId,"running")
+      compare(dock.opened,true)
+    }
+    function test_enter_queues_multiple_messages_while_ai_is_running() {
+      app.open("{}")
+      app.startCompose("new")
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"compose-agent")
+      mailService.draftAgentJobs=[{id:"active",state:"running",created:1}]
+      var field=named(dock,"agent-prompt-field")
+      tryCompare(field,"activeFocus",true)
+      field.text="Second question"
+      keyClick(Qt.Key_Return)
+      field.text="Third question"
+      keyClick(Qt.Key_Return)
+      compare(field.text,"")
+      compare(mailService.agentRequests,0)
+      var queue=findChild(dock,"agent-pending-queue")
+      compare(queue.messages.length,2)
+      queue.messages=[]
+    }
+    function test_header_ai_toggle_and_multiline_send() {
+      app.open("{}")
+      app.startCompose("new")
+      var toggle = named(app, "header-ai-button")
+      verify(toggle)
+      verify(waitForRendering(toggle))
+      verify(toggle.x >= 0 && toggle.x + toggle.width <= toggle.parent.width)
+      mouseClick(toggle, toggle.width / 2, toggle.height / 2)
+      var dock = named(app, "compose-agent")
+      tryCompare(dock, "opened", true)
+      var field = named(dock, "agent-prompt-field")
+      tryCompare(field, "activeFocus", true)
+      field.text = "First line"
+      field.cursorPosition = field.length
+      keyClick(Qt.Key_Return, Qt.ShiftModifier)
+      compare(field.text, "First line\n")
+      keyClick(Qt.Key_X)
+      compare(mailService.agentRequests, 0)
+      keyClick(Qt.Key_Return)
+      compare(mailService.agentRequests, 1)
+      compare(mailService.lastAgentPrompt, "First line\nx")
+      compare(field.text, "")
+      keyClick(Qt.Key_Enter)
+      compare(mailService.agentRequests, 1)
+      field.text = "Next question"
+      keyClick(Qt.Key_Enter)
+      compare(mailService.agentRequests, 1)
+      field.text = "Another question"
+      keyClick(Qt.Key_Enter, Qt.ControlModifier)
+      compare(mailService.agentRequests, 1)
+      compare(findChild(dock,"agent-pending-queue").messages.length, 2)
+      findChild(dock,"agent-pending-queue").messages=[]
+      dock.submittedPrompt=""
+      compare(app.composing, true)
+      mouseClick(toggle, toggle.width / 2, toggle.height / 2)
+      tryCompare(dock, "opened", false)
+    }
+
+    function test_ai_command_keys_fill_without_sending_and_escape_in_order() {
+      app.open("{}")
+      app.startCompose("new")
+      app.runShortcut("askAgent", "Alt+G")
+      var dock = named(app, "compose-agent")
+      var field = named(dock, "agent-prompt-field")
+      tryCompare(field, "activeFocus", true)
+      field.text = "/"
+      field.cursorPosition = field.length
+      tryCompare(dock, "commandsOpen", true)
+      tryCompare(named(app, "key-router"), "context", "assistantCommands")
+      wait(0)
+      keyClick(Qt.Key_Down)
+      compare(dock.commandIndex, 1, "Down must route to command selection")
+      keyClick(Qt.Key_Up)
+      compare(dock.commandIndex, 0, "Up must route to command selection")
+      keyClick(Qt.Key_Return)
+      tryCompare(dock, "commandsOpen", false)
+      verify(field.text.length > 1)
+      verify(field.text.indexOf("/") !== 0)
+      compare(mailService.agentRequests, 0)
+      compare(field.activeFocus, true)
+      field.text = "/"
+      field.cursorPosition = field.length
+      tryCompare(dock, "commandsOpen", true)
+      keyClick(Qt.Key_Enter, Qt.ShiftModifier)
+      compare(field.text, "/\n")
+      compare(mailService.agentRequests, 0)
+      field.text = "/r"
+      tryCompare(dock, "commandsOpen", true)
+      keyClick(Qt.Key_Enter)
+      tryCompare(dock, "commandsOpen", false)
+      verify(field.text.indexOf("/") !== 0)
+      compare(mailService.agentRequests, 0)
+      field.text = "/"
+      tryCompare(dock, "commandsOpen", true)
+      wait(0)
+      keyClick(Qt.Key_Escape)
+      tryCompare(dock, "commandsOpen", false)
+      compare(dock.opened, true)
+      keyClick(Qt.Key_Escape)
+      tryCompare(dock, "opened", false)
+      compare(app.composing, true)
+    }
+
+    function test_ai_dock_allows_returning_to_draft_fields() {
+      app.open("{}")
+      app.startCompose("new")
+      var compose=composeView()
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"compose-agent")
+      tryCompare(dock,"opened",true)
+      var field=named(dock,"agent-prompt-field")
+      tryCompare(field,"activeFocus",true)
+      var subject=named(compose,"compose-subject-field")
+      subject.forceActiveFocus()
+      tryCompare(app,"assistantEditing",false)
+      wait(0)
+      compare(subject.activeFocus,true)
+      compare(dock.opened,true)
+      dock.close()
     }
 
     function test_shell_close_flushes_and_restores_the_current_draft() {
@@ -346,7 +556,23 @@ Item {
         "once the newer draft is durable, recovery follows the older failed draft")
     }
 
-    function test_open_previews_a_draft_and_compose_edits_it() {
+    // A click on a draft previews it, as a click does in every mailbox; the
+    // keys are what edit it.
+    function test_a_click_previews_a_draft() {
+      mailService.mailboxKey = "drafts"
+      app.openMessage("draft-7")
+      wait(30)
+      compare(mailService.selectedId, "draft-7")
+      compare(app.currentView, "reader")
+      compare(app.composing, false)
+      app.back()
+      mailService.mailboxKey = "inbox"
+    }
+
+    // In Drafts, opening a draft is editing it: `o` selects the draft and,
+    // once its body has loaded, the composer opens on it with what was
+    // written — no second key. `c` still does the same.
+    function test_open_edits_a_draft_once_its_body_has_loaded() {
       var compose = composeView()
       mailService.mailboxKey = "drafts"
       app.cursorId = "draft-7"
@@ -354,9 +580,7 @@ Item {
       app.runShortcut("open", "o")
 
       compare(mailService.selectedId, "draft-7")
-      compare(app.currentView, "reader",
-        "a draft opens in the same reader as every other message")
-      compare(app.composing, false)
+      compare(app.composing, false, "nothing to edit until the body is here")
 
       mailService.selectedMessage = ({
         id: "draft-7",
@@ -381,13 +605,7 @@ Item {
       mailService.detailLoading = false
       wait(30)
 
-      compare(app.composing, false,
-        "loading the draft body must not turn the preview into an editor")
-
-      app.runShortcut("compose", "c")
-      wait(30)
-
-      compare(app.composing, true)
+      compare(app.composing, true, "the loaded body opens the composer")
       compare(compose.mode, "draft")
       compare(compose.fromEmail, "me@example.com")
       compare(named(compose, "compose-to-field").text,
