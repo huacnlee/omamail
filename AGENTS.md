@@ -23,7 +23,7 @@ three directories away from the client that calls it.
 
 | Module | What it is |
 |-----------------|--------------------------------------------------------|
-| root | `Service.qml`, `BarWidget.qml`, `App.qml`, and nothing else. `manifest.json` names these three and the shell loads them at that path. |
+| root | `Service.qml`, `BarWidget.qml`, `App.qml`, and `PluginPath.js`. `manifest.json` names the three QML files and the shell loads them at that path. The one library here answers where the plugin is installed, which is a fact about this directory rather than about any module under it, and it reads that from `Service.qml`'s own URL: the service entry point stays at the root, or the answer becomes a wrong directory instead of none. `tests/test_service_source.sh` holds that. |
 | `providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
 | `account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
 | `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |

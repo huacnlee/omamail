@@ -5,6 +5,7 @@ import qs.Commons
 import "account"
 import "calendar"
 
+import "PluginPath.js" as PluginPath
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
 import "account/Unified.js" as Unified
@@ -45,8 +46,14 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
-  readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+  // Omarchy's shell deletes the source directory from a third-party plugin's
+  // manifest, so this cannot come from the manifest alone. PluginPath decides;
+  // see the reasons there. The shell assigns manifest after createObject, so
+  // during Component.onCompleted this already answers from the component's own
+  // URL rather than staying empty: an empty pluginDir is no longer what stops a
+  // helper running in that window, which is why both callers defer past it.
+  readonly property string pluginDir: PluginPath.resolve(manifest, Qt.resolvedUrl("."))
+
   // Shown in the empty reader, so a screenshot in a bug report says which build
   // it came from. The shell's manifest validation requires both fields, so a
   // loaded plugin always has them; the fallbacks are for a harness that
