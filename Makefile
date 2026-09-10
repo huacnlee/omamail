@@ -93,6 +93,7 @@ test-js:
 	node tests/test_calendar.js
 	node tests/test_calendar_cache.js
 	node tests/test_calendar_feed.js
+	node tests/test_calendar_providers.js
 	node tests/test_calendar_sources.js
 	node tests/test_calendar_palette.js
 	node tests/test_bar_preview.js

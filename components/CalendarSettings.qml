@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../calendar/Providers.js" as Providers
 
 Column {
   id: root
@@ -14,6 +15,12 @@ Column {
   required property string panelFontFamily
   property bool adding: false
   property string passwordEditingId: ""
+  // The provider card picked on the way in, and the form it starts.
+  property string presetId: ""
+  readonly property var preset: Providers.formFor(presetId)
+  // What the last "Find calendars" turned up, and which of them are ticked.
+  property var found: []
+  property var chosen: ({})
 
   width: parent ? parent.width : implicitWidth
   spacing: Style.space(8)
@@ -195,13 +202,105 @@ Column {
     text: "Add a calendar"
     foreground: root.textColor
     fontFamily: root.panelFontFamily
-    onClicked: root.adding = true
+    onClicked: {
+      root.presetId = ""
+      root.adding = true
+    }
+  }
+
+  // First, where the calendar lives: one card per provider. A card prefills
+  // what it can and says where the password is made; every CalDAV card ends
+  // in the same discovery.
+  Column {
+    width: parent.width
+    visible: root.adding && root.presetId === ""
+    spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      text: "Where is the calendar?"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(6)
+
+      Repeater {
+        model: Providers.LIST
+        delegate: IconTextButton {
+          required property var modelData
+          objectName: "calendar-provider-" + modelData.id
+          text: modelData.name
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.pickProvider(modelData.id)
+        }
+      }
+    }
+
+    IconTextButton {
+      text: "Cancel"
+      bordered: false
+      foreground: root.dimColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.adding = false
+    }
+  }
+
+  // A provider whose calendars arrive with a mailbox has nothing to type.
+  Column {
+    width: parent.width
+    visible: root.adding && root.presetId !== "" && root.preset.kind !== "caldav"
+    spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      text: root.preset.note
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+
+    IconTextButton {
+      text: "Back"
+      bordered: false
+      foreground: root.dimColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.presetId = ""
+    }
   }
 
   Column {
     width: parent.width
-    visible: root.adding
+    visible: root.adding && root.presetId !== "" && root.preset.kind === "caldav"
     spacing: Style.space(6)
+
+    Text {
+      width: parent.width
+      visible: root.preset.note !== ""
+      text: root.preset.note
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+
+    LinkLabel {
+      visible: root.preset.helpUrl !== "" && Providers.isHelpUrl(root.preset.helpUrl)
+      text: root.preset.helpText
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      tooltipText: root.preset.helpUrl
+      onActivated: if (Providers.isHelpUrl(tooltipText)) Qt.openUrlExternally(tooltipText)
+    }
 
     TextField {
       id: calendarName
@@ -209,6 +308,8 @@ Column {
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
+      // Used only when the address turns out to be one calendar; a list keeps
+      // the server's own names.
       placeholderText: "Calendar name"
     }
     TextField {
@@ -217,7 +318,9 @@ Column {
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
+      // The server is enough; one calendar's own address works as before.
       placeholderText: "CalDAV URL"
+      onTextChanged: root.found = []
     }
     TextField {
       id: calendarUsername
@@ -235,27 +338,116 @@ Column {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Password or app password"
-      onAccepted: root.saveCalendar()
+      onAccepted: root.findCalendars()
+    }
+
+    // The card's own words for the two fields, under them rather than in
+    // them: the guards above pin the placeholders, and a hint that stays
+    // visible while typing is the more useful one anyway.
+    Text {
+      width: parent.width
+      visible: root.preset.usernameHint !== "Username" || root.preset.passwordHint !== "Password or app password"
+      text: root.preset.usernameHint + " · " + root.preset.passwordHint
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+
+    // The calendars the address turned out to hold, each with a switch. A
+    // server address is where most people start, and it holds several.
+    Column {
+      width: parent.width
+      spacing: Style.space(4)
+      visible: root.found.length > 0
+
+      Text {
+        width: parent.width
+        text: root.found.length === 1 ? "One calendar found:" : root.found.length + " calendars found:"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Repeater {
+        model: root.found
+        delegate: Row {
+          required property var modelData
+          width: parent.width
+          spacing: Style.space(8)
+
+          ToggleSwitch {
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.chosen[modelData.url] !== false
+            foreground: root.textColor
+            accent: root.accentColor
+            onToggled: {
+              var next = {}
+              for (var key in root.chosen) next[key] = root.chosen[key]
+              next[modelData.url] = root.chosen[modelData.url] === false
+              root.chosen = next
+            }
+          }
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: String(modelData.name || "")
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+      }
     }
 
     Row {
       spacing: Style.space(6)
       IconTextButton {
-        text: root.controller && root.controller.savingSource ? "Adding" : "Add calendar"
+        objectName: "calendar-find"
+        visible: root.found.length === 0
+        text: root.controller && root.controller.discovering ? "Looking" : "Find calendars"
         foreground: root.textColor
         accent: root.accentColor
         fontFamily: root.panelFontFamily
-        enabled: root.controller && !root.controller.savingSource
+        enabled: root.controller && !root.controller.discovering && !root.controller.savingSource
+        onClicked: root.findCalendars()
+      }
+      IconTextButton {
+        objectName: "calendar-add"
+        visible: root.found.length > 0
+        text: root.controller && root.controller.savingSource ? "Adding"
+          : (root.chosenCount() === 1 ? "Add calendar" : "Add " + root.chosenCount() + " calendars")
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: root.controller && !root.controller.savingSource && root.chosenCount() > 0
         onClicked: root.saveCalendar()
       }
       IconTextButton {
-        text: "Cancel"
+        text: "Back"
         bordered: false
         foreground: root.dimColor
         fontFamily: root.panelFontFamily
-        onClicked: root.adding = false
+        onClicked: {
+          root.found = []
+          root.presetId = ""
+        }
       }
     }
+  }
+
+  function pickProvider(id) {
+    resultText.text = ""
+    root.found = []
+    root.chosen = ({})
+    root.presetId = String(id || "")
+    var form = Providers.formFor(root.presetId)
+    calendarUrl.text = form.url
+    calendarUrl.placeholderText = form.urlHint
+    calendarName.text = ""
+    calendarUsername.text = ""
+    calendarPassword.text = ""
   }
 
   Text {
@@ -269,17 +461,42 @@ Column {
     textFormat: Text.PlainText
   }
 
+  function findCalendars() {
+    resultText.text = ""
+    root.found = []
+    root.chosen = ({})
+    root.controller.discoverCalDav(calendarUrl.text, calendarUsername.text, calendarPassword.text)
+  }
+
+  function chosenCount() {
+    var count = 0
+    for (var i = 0; i < root.found.length; i++) {
+      if (root.chosen[root.found[i].url] !== false) count++
+    }
+    return count
+  }
+
   function saveCalendar() {
     resultText.text = ""
-    root.controller.addCalDavCalendar({
-      name: calendarName.text,
-      url: calendarUrl.text,
-      username: calendarUsername.text
-    }, calendarPassword.text)
+    var picked = []
+    for (var i = 0; i < root.found.length; i++) {
+      if (root.chosen[root.found[i].url] === false) continue
+      var entry = { name: root.found[i].name, url: root.found[i].url, username: root.found[i].username }
+      // A typed name wins for a single calendar; a list keeps the server's.
+      if (root.found.length === 1 && String(calendarName.text || "").trim() !== "")
+        entry.name = calendarName.text
+      picked.push(entry)
+    }
+    root.controller.addCalDavCalendars(picked, calendarPassword.text)
   }
 
   Connections {
     target: root.controller
+    function onCalendarsDiscovered(calendars, error) {
+      if (error !== "") { resultText.text = error; return }
+      root.found = calendars
+      root.chosen = ({})
+    }
     function onCalendarSaved(ok, error) {
       if (!ok) { resultText.text = error; return }
       resultText.text = "Calendar saved"
@@ -287,7 +504,10 @@ Column {
       calendarUrl.text = ""
       calendarUsername.text = ""
       calendarPassword.text = ""
+      root.found = []
+      root.chosen = ({})
       root.adding = false
+      root.presetId = ""
       root.passwordEditingId = ""
     }
   }

@@ -121,6 +121,107 @@ function caldavResponses(xml) {
   return out
 }
 
+// ------------------------------------------------------------ discovery
+//
+// A CalDAV server's calendars are found in three steps, each a PROPFIND: the
+// address the user typed says who they are (current-user-principal), the
+// principal says where their calendars live (calendar-home-set), and the home
+// lists them one level down. A typed address that is itself a calendar
+// answers the first step by saying so, and needs no other.
+
+function propfindPrincipalBody() {
+  return '<?xml version="1.0" encoding="utf-8"?>'
+    + '<d:propfind xmlns:d="DAV:"><d:prop>'
+    + '<d:current-user-principal/><d:resourcetype/><d:displayname/>'
+    + '</d:prop></d:propfind>'
+}
+
+function propfindHomeBody() {
+  return '<?xml version="1.0" encoding="utf-8"?>'
+    + '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop>'
+    + '<c:calendar-home-set/>'
+    + '</d:prop></d:propfind>'
+}
+
+function propfindCollectionsBody() {
+  return '<?xml version="1.0" encoding="utf-8"?>'
+    + '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop>'
+    + '<d:displayname/><d:resourcetype/><c:supported-calendar-component-set/>'
+    + '</d:prop></d:propfind>'
+}
+
+function davResponses(xml) {
+  var input = String(xml || "")
+  var pattern = /<(?:[A-Za-z0-9_-]+:)?response(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?response>/gi
+  var out = []
+  var match
+  while ((match = pattern.exec(input)) !== null) out.push(match[1])
+  return out
+}
+
+// An href the way the server wrote it, made absolute against the address it
+// was asked at: a full URL as it is, a path from that address's origin, and
+// anything else beside it.
+function resolveDavHref(baseUrl, href) {
+  var base = String(baseUrl || "").trim()
+  var value = String(href || "").trim()
+  if (value === "") return ""
+  if (/^https?:\/\//i.test(value)) return value
+  var origin = base.match(/^(https?:\/\/[^\/]+)/i)
+  if (!origin) return ""
+  if (value.charAt(0) === "/") return origin[1] + value
+  return base.replace(/[^\/]*$/, "") + value
+}
+
+// Whether a resourcetype block says "calendar": the CalDAV element, under any
+// prefix, self-closed or not. A subscribed feed or a reminder list is not one.
+function isCalendarResource(block) {
+  return /<(?:[A-Za-z0-9_-]+:)?calendar(?:\s[^>]*)?(?:\/>|>\s*<\/)/i.test(String(block || ""))
+}
+
+function davPrincipal(xml) {
+  return tagText(tagText(xml, "current-user-principal"), "href")
+}
+
+function davHome(xml) {
+  return tagText(tagText(xml, "calendar-home-set"), "href")
+}
+
+// What the typed address itself is: a calendar, in which case its name and no
+// further step; or a place that names a principal to go on from.
+function caldavSelf(xml, url) {
+  var blocks = davResponses(xml)
+  var first = blocks.length > 0 ? blocks[0] : String(xml || "")
+  return {
+    isCalendar: isCalendarResource(tagText(first, "resourcetype")),
+    name: tagText(first, "displayname").trim(),
+    principal: resolveDavHref(url, davPrincipal(first))
+  }
+}
+
+// The calendars a home lists: one entry per collection whose resourcetype is
+// a calendar, that has a name, and that holds events — a collection that
+// says it holds only tasks is a reminder list, and the home itself and the
+// server's own inbox and outbox carry no name.
+function caldavCollections(xml, homeUrl) {
+  var blocks = davResponses(xml)
+  var out = []
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i]
+    var name = tagText(block, "displayname").trim()
+    if (name === "" || !isCalendarResource(tagText(block, "resourcetype"))) continue
+    var comps = []
+    var pattern = /<(?:[A-Za-z0-9_-]+:)?comp\s+name="([A-Z]+)"/gi
+    var match
+    while ((match = pattern.exec(block)) !== null) comps.push(match[1].toUpperCase())
+    if (comps.length > 0 && comps.indexOf("VEVENT") < 0) continue
+    var url = resolveDavHref(homeUrl, tagText(block, "href"))
+    if (url === "") continue
+    out.push({ name: name, url: url })
+  }
+  return out
+}
+
 function recurrenceParts(value) {
   var out = {}
   var pieces = String(value || "").split(";")

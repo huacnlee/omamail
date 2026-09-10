@@ -36,4 +36,19 @@ if printf '%s\n' "$(b64 'http://calendar.example/') $(b64 'me:secret') $(b64 '<q
   exit 1
 fi
 
+# Finding a server's calendars is a PROPFIND at depth 0 or 1, named by a
+# fourth field that is one of three words and nothing curl is handed.
+request="$(b64 'https://calendar.example/') $(b64 'me:secret') $(b64 '<propfind/>') $(b64 'propfind-1')"
+reply=$(printf '%s\n' "$request" | PATH="$work/bin:$PATH" "$project_dir/scripts/calendar-transport.sh")
+grep -q 'request = "PROPFIND"' "$work/config"
+grep -q 'header = "Depth: 1"' "$work/config"
+test "$(printf '%s\n' "$reply" | sed -n '1p')" = 0
+request="$(b64 'https://calendar.example/') $(b64 'me:secret') $(b64 '<propfind/>') $(b64 'propfind-0')"
+printf '%s\n' "$request" | PATH="$work/bin:$PATH" "$project_dir/scripts/calendar-transport.sh" >/dev/null
+grep -q 'header = "Depth: 0"' "$work/config"
+if printf '%s\n' "$(b64 'https://calendar.example/') $(b64 'me:secret') $(b64 '<x/>') $(b64 'DELETE')" \
+  | PATH="$work/bin:$PATH" "$project_dir/scripts/calendar-transport.sh" >/dev/null 2>&1; then
+  echo 'an unknown method was accepted' >&2
+  exit 1
+fi
 echo 'calendar-transport.sh ok'
