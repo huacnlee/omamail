@@ -24,6 +24,7 @@ Item {
     property bool ready: true
     property bool anyAccountReady: true
     property bool previewOnCursor: true
+    property bool markReadAutomatically: true
     property bool selectionIsPreview: false
     property int markReadDelaySec: 2
     property bool sendPending: false
@@ -191,6 +192,7 @@ Item {
       app.resetNavigation()
       app.cursorId = ""
       mailService.previewOnCursor = true
+      mailService.markReadAutomatically = true
       mailService.markReadDelaySec = 2
       mailService.selectedId = ""
       mailService.selectCount = 0
@@ -271,6 +273,28 @@ Item {
       app.moveCursor(1)
       compare(app.cursorId, "m1")
       compare(mailService.selectCount, 0, "moving is not opening")
+    }
+
+    function test_manual_only_mode_leaves_a_preview_unread() {
+      mailService.markReadAutomatically = false
+      mailService.markReadDelaySec = 0
+      app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m1", 1000)
+      wait(500)
+      compare(mailService.markedRead.length, 0,
+        "manual-only mode never reads a preview")
+    }
+
+    // Turned off while a dwell is already counting down. The timer was armed
+    // under the old answer, so it has to ask again when it fires.
+    function test_manual_only_mode_set_mid_dwell_reads_nothing() {
+      mailService.markReadDelaySec = 1
+      app.moveCursor(1)
+      tryCompare(mailService, "selectedId", "m1", 1000)
+      mailService.markReadAutomatically = false
+      wait(1400)
+      compare(mailService.markedRead.length, 0,
+        "the answer when the dwell fires is the one that counts")
     }
 
     // ---------------------------------------------------------- the dwell

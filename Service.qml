@@ -74,6 +74,7 @@ Item {
     showBarIcon: true,
     unifiedMailboxes: false,
     previewOnCursor: false,
+    markReadAutomatically: true,
     markReadDelaySec: 2
   })
   property var settings: defaultSettingValues
@@ -260,6 +261,12 @@ Item {
   readonly property bool previewOnCursor: !!settings
     && settings.previewOnCursor === true
 
+  // Whether opening a message or dwelling on its cursor preview changes its
+  // read state. Missing and malformed values keep the existing behavior; only
+  // an explicit false opts into manual marking.
+  readonly property bool markReadAutomatically: !settings
+    || settings.markReadAutomatically !== false
+
   // How long the cursor has to stay before a previewed message counts as
   // read. Clamped rather than trusted: this is a hand-editable file, and a
   // negative interval on a Timer never fires at all.
@@ -354,6 +361,10 @@ Item {
 
   function setPreviewOnCursor(value) {
     persistSetting("previewOnCursor", value === true)
+  }
+
+  function setMarkReadAutomatically(value) {
+    persistSetting("markReadAutomatically", value === true)
   }
 
   // The same rule on the way in: what cannot be read as a count is written as
@@ -1538,7 +1549,7 @@ Item {
     selectionHost = null
   }
   function markPreviewRead(id) {
-    if (!id) return false
+    if (!markReadAutomatically || !id) return false
     if (unified) {
       var host = hostForId(id)
       return host ? host.markPreviewRead(sourceIdFor(id)) : false

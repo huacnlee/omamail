@@ -129,6 +129,23 @@ Item {
       compare(shellStore.updatedEntry.previewOnCursor, true)
     }
 
+    function test_automatic_read_defaults_on_and_can_be_disabled() {
+      mailService.applySettings({})
+      compare(mailService.markReadAutomatically, true)
+
+      mailService.applySettings({ markReadAutomatically: "no" })
+      compare(mailService.markReadAutomatically, true,
+        "only an explicit false opts out")
+
+      mailService.setMarkReadAutomatically(false)
+      compare(mailService.markReadAutomatically, false)
+      compare(shellStore.updatedEntry.markReadAutomatically, false)
+
+      mailService.setMarkReadAutomatically(true)
+      compare(mailService.markReadAutomatically, true)
+      compare(shellStore.updatedEntry.markReadAutomatically, true)
+    }
+
     // Zero is a real answer here — read it the instant it is previewed — so
     // nothing that merely coerces to zero may be read as somebody asking for
     // it. A file that lost the key, or holds a word, gets the default dwell.

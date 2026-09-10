@@ -577,8 +577,9 @@ Item {
   // override is a per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
-    // Opening marks it read itself, so a dwell still counting down for the
-    // same message has nothing left to do.
+    // Opening marks it read itself — or, with automatic marking off, leaves it
+    // for an explicit action — so a dwell still counting down for the same
+    // message has nothing left to do either way.
     markReadDwell.stop()
     pendingComposeMode = ""
     pendingDraftId = ""
@@ -774,6 +775,7 @@ Item {
   function armReadDwell() {
     if (!service || markReadDwell.dwelledOn === "") return
     if (!canPreview || !previewShowing) return
+    if (!service.markReadAutomatically) return
     // Still the message on screen: a search and a mailbox switch both drop the
     // selection without moving the cursor off the row.
     if (service.selectedId !== markReadDwell.dwelledOn) return
@@ -798,6 +800,7 @@ Item {
     onTriggered: {
       if (!root.service || dwelledOn === "") return
       if (!root.canPreview) return
+      if (!root.service.markReadAutomatically) return
       if (root.cursorId !== dwelledOn) return
       // And it has to still be the message on screen: a search and a mailbox
       // switch both drop the selection without moving the cursor off the row.

@@ -353,6 +353,57 @@ Column {
     }
   }
 
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(autoReadText.implicitHeight, autoReadSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: autoReadText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: autoReadSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Mark messages read automatically"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Opening a message or dwelling on a cursor preview marks it read. "
+          + "Turn this off to use Shift+I or the message menu instead"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    ToggleSwitch {
+      id: autoReadSwitch
+      objectName: "markReadAutomaticallySwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.markReadAutomatically !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.setMarkReadAutomatically(!root.service.markReadAutomatically)
+    }
+  }
+
   // Showing a message as the cursor reaches it, and the dwell that keeps that
   // from reading a mailbox by holding an arrow key down.
   Rectangle {
@@ -381,10 +432,14 @@ Column {
       }
 
       Text {
+        objectName: "previewOnCursorCaption"
         width: parent.width
         text: "Show a message as soon as j, k or an arrow reaches it, instead of "
-          + "waiting for Enter. A previewed message is marked read only once the "
-          + "cursor has stayed on it, so stepping through a list does not read it. "
+          + "waiting for Enter. "
+          + (!root.service || root.service.markReadAutomatically !== false
+            ? "A previewed message is marked read only once the cursor has stayed "
+              + "on it, so stepping through a list does not read it. "
+            : "A previewed message stays unread until you mark it read. ")
           + "Not applied in a narrow window, where the reader takes the list's place."
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -411,6 +466,7 @@ Column {
   Rectangle {
     width: parent.width
     visible: !!root.service && root.service.previewOnCursor
+      && root.service.markReadAutomatically !== false
     implicitHeight: Math.max(dwellText.implicitHeight, dwellSeconds.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
