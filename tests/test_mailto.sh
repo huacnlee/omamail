@@ -21,6 +21,10 @@ quoted=$(OMAMAIL_MAILTO_PRINT=1 sh "$script" 'mailto:jane@example.com?subject=Sa
 echo "$quoted" | grep -q '"mailto":"mailto:jane@example.com?subject=Say \\"hi\\""' \
   || fail "a quote in the URL must be JSON-escaped, got: $quoted"
 
+attached=$(OMAMAIL_MAILTO_PRINT=1 sh "$script" 'mailto:?attach=/tmp/scan.pdf')
+echo "$attached" | grep -q '"attachments":\["/tmp/scan.pdf"\]' \
+  || fail "xdg-email attach= must be a JSON file list, got: $attached"
+
 blank=$(OMAMAIL_MAILTO_PRINT=1 sh "$script")
 [ "$blank" = 'omarchy-shell shell summon omamail {}' ] \
   || fail "no URL must still summon the window, got: $blank"

@@ -572,6 +572,11 @@ DropArea {
       fromWasChosen = true
     }
     if (mode === "draft") loadDraftAttachments(messageId, attachments)
+    var files = Array.isArray(values.attachments) ? values.attachments : []
+    for (var a = 0; a < files.length; a++) {
+      var path = String(files[a] || "")
+      if (path !== "") enqueueAttach("read", path)
+    }
   }
 
   // Where the keyboard goes when composing becomes the context. A reply starts
