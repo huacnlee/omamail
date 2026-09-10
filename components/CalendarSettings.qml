@@ -15,8 +15,27 @@ Column {
   property bool adding: false
   property string passwordEditingId: ""
 
+  // Every calendar the app offers, not only the ones written to disk. A
+  // discovered Google calendar is persisted the first time it is toggled or
+  // coloured, and it has to be listed before either can happen — so a list of
+  // what is already on disk is a list that cannot reach a new calendar.
+  readonly property var offeredSources: {
+    var available = root.controller ? root.controller.availableSources : null
+    if (available && Array.isArray(available.sources)) return available.sources
+    var stored = root.controller ? root.controller.sourceList : null
+    return stored && Array.isArray(stored.sources) ? stored.sources : []
+  }
+
   width: parent ? parent.width : implicitWidth
   spacing: Style.space(8)
+
+  CalendarPalette {
+    id: calendarPalette
+    textColor: root.textColor
+    accentColor: root.accentColor
+    urgentColor: root.urgentColor
+    dimColor: root.dimColor
+  }
 
   Text {
     text: "CALENDARS"
@@ -86,22 +105,36 @@ Column {
   }
 
   Repeater {
-    model: root.controller && root.controller.sourceList
-      ? root.controller.sourceList.sources : []
+    model: root.offeredSources
 
     Item {
+      id: sourceItem
+      required property var modelData
+      readonly property string sourceId: String(modelData.id || "")
+      readonly property color sourceColor: calendarPalette.colorFor(modelData.colorKey)
       width: root.width
-      implicitHeight: sourceRow.height + (passwordRow.visible
-        ? passwordRow.implicitHeight + Style.space(6) : 0)
+      implicitHeight: sourceRow.height + Style.space(6) + swatchRow.implicitHeight
+        + (passwordRow.visible ? passwordRow.implicitHeight + Style.space(6) : 0)
 
       Item {
         id: sourceRow
         width: parent.width
         height: Math.max(sourceText.implicitHeight, sourceActions.implicitHeight)
 
+      Rectangle {
+        id: colorDot
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(10)
+        height: width
+        radius: width / 2
+        color: sourceItem.sourceColor
+      }
+
       Column {
         id: sourceText
-        anchors.left: parent.left
+        anchors.left: colorDot.right
+        anchors.leftMargin: Style.space(8)
         anchors.right: sourceActions.left
         anchors.rightMargin: Style.space(8)
         anchors.verticalCenter: parent.verticalCenter
@@ -109,7 +142,7 @@ Column {
 
         Text {
           width: parent.width
-          text: String(modelData.name || modelData.id || "Calendar")
+          text: String(sourceItem.modelData.name || sourceItem.modelData.id || "Calendar")
           color: root.textColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
@@ -117,7 +150,8 @@ Column {
         }
         Text {
           width: parent.width
-          text: modelData.kind === "google" ? "Google Calendar" : String(modelData.url || "CalDAV")
+          text: sourceItem.modelData.kind === "google"
+            ? "Google Calendar" : String(sourceItem.modelData.url || "CalDAV")
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
@@ -131,31 +165,78 @@ Column {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(4)
         IconTextButton {
-          visible: modelData.kind === "caldav"
+          visible: sourceItem.modelData.kind === "caldav"
           text: "Set password"
           bordered: false
           foreground: root.textColor
           fontFamily: root.panelFontFamily
-          onClicked: root.passwordEditingId = String(modelData.id)
+          onClicked: root.passwordEditingId = sourceItem.sourceId
         }
         IconTextButton {
-          visible: modelData.kind !== "google"
+          visible: sourceItem.modelData.kind !== "google"
           text: "Remove"
           bordered: false
           foreground: root.urgentColor
           fontFamily: root.panelFontFamily
-          onClicked: root.controller.removeCalendar(modelData.id)
+          onClicked: root.controller.removeCalendar(sourceItem.sourceId)
         }
       }
       }
 
+      // The palette a calendar can wear, as the colours themselves. A name
+      // ("cyan") is not what you are choosing between when four calendars are
+      // drawn over one another in a week; the swatch is.
+      Row {
+        id: swatchRow
+        anchors.top: sourceRow.bottom
+        anchors.topMargin: Style.space(6)
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(18)
+        spacing: Style.space(6)
+
+        Repeater {
+          model: calendarPalette.slots
+
+          Rectangle {
+            id: swatch
+            required property string modelData
+            readonly property bool current: modelData === String(sourceItem.modelData.colorKey || "")
+
+            objectName: "calendarColor:" + sourceItem.sourceId + ":" + modelData
+            width: Style.space(14)
+            height: width
+            radius: width / 2
+            color: calendarPalette.colorFor(swatch.modelData)
+            // The chosen one wears a ring rather than only being brighter: a
+            // theme can put two palette slots close together, and "which of
+            // these seven am I on" is the whole question this row answers.
+            border.width: swatch.current ? 2 : 0
+            border.color: root.textColor
+            opacity: swatch.current || swatchHover.containsMouse ? 1 : 0.6
+
+            function choose() {
+              if (root.controller && typeof root.controller.setSourceColor === "function")
+                root.controller.setSourceColor(sourceItem.sourceId, swatch.modelData)
+            }
+
+            MouseArea {
+              id: swatchHover
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: swatch.choose()
+            }
+          }
+        }
+      }
+
       Row {
         id: passwordRow
-        anchors.top: sourceRow.bottom
+        anchors.top: swatchRow.bottom
         anchors.topMargin: visible ? Style.space(6) : 0
         width: parent.width
-        visible: modelData.kind === "caldav"
-          && root.passwordEditingId === String(modelData.id)
+        visible: sourceItem.modelData.kind === "caldav"
+          && root.passwordEditingId === sourceItem.sourceId
         spacing: Style.space(6)
 
         TextField {
@@ -175,7 +256,7 @@ Column {
           foreground: root.textColor
           fontFamily: root.panelFontFamily
           enabled: existingPassword.text !== "" && !root.controller.savingSource
-          onClicked: root.controller.updateCalendarPassword(modelData, existingPassword.text)
+          onClicked: root.controller.updateCalendarPassword(sourceItem.modelData, existingPassword.text)
         }
         IconTextButton {
           id: cancelExisting
