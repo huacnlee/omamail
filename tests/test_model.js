@@ -1226,6 +1226,12 @@ assert.strictEqual(model.readingStatusLine(false, "", ""), "Not connected")
 assert.strictEqual(model.marksReadOnArrival({ unread: true }, false), true)
 assert.strictEqual(model.marksReadOnArrival({ unread: true }, true), false,
   "stepping down a list would otherwise read every message it passed")
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, false), false,
+  "manual-only mode leaves an opened message unread")
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, true, false), false,
+  "manual-only mode leaves a preview unread")
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, true), true,
+  "automatic mode still reads an opened message")
 assert.strictEqual(model.marksReadOnArrival({ unread: false }, false), false)
 assert.strictEqual(model.marksReadOnArrival(null, false), false)
 

@@ -388,5 +388,25 @@ Item {
       compare(ada().searchQuery, "invoice")
       compare(bob().searchQuery, "invoice")
     }
+
+    // ------------------------------------------------ reading on its own
+
+    // Turning automatic marking off is one answer for the merged list, so it
+    // has to reach every mailbox in it — and a dwell routed through the
+    // service to the mailbox that owns the row must mark nothing.
+    function test_manual_marking_reaches_every_mailbox() {
+      service.applySettings({ unifiedMailboxes: true, markReadAutomatically: false })
+      wait(20)
+      compare(ada().markReadAutomatically, false)
+      compare(bob().markReadAutomatically, false,
+        "not only the mailbox that happens to be active")
+      compare(service.markPreviewRead(Unified.unifiedId(bobId, "1")), false,
+        "an unread row in the other mailbox is left unread")
+      compare(bob().messages[0].unread, true)
+
+      service.applySettings({ unifiedMailboxes: true })
+      wait(20)
+      compare(bob().markReadAutomatically, true, "and a missing key is the default again")
+    }
   }
 }

@@ -49,6 +49,7 @@
       "openOnClick": "Window",
       "showBarIcon": true,
       "previewOnCursor": false,
+      "markReadAutomatically": true,
       "markReadDelaySec": 2
     },
     "schema": [
@@ -86,6 +87,13 @@
         "description": "Show a message as soon as the cursor reaches it, instead of waiting for Enter. Off by default because stepping through a list would otherwise mark every message it passed read; with this on, a previewed message is marked read only once the cursor has stayed on it. Not applied in a narrow window, where the reader takes the list's place."
       },
       {
+        "key": "markReadAutomatically",
+        "type": "boolean",
+        "label": "Mark messages read automatically",
+        "defaultValue": true,
+        "description": "Mark a message read when you open it or leave a cursor preview on it. Turn this off to mark messages read only with Shift+I or the message menu."
+      },
+      {
         "key": "markReadDelaySec",
         "type": "integer",
         "label": "Mark a previewed message read after (seconds)",
@@ -93,7 +101,7 @@
         "max": 30,
         "step": 1,
         "defaultValue": 2,
-        "description": "How long the cursor has to stay on a message before it counts as read. 0 marks it read as soon as it is previewed. Only applies while Preview as the cursor moves is on; Enter always marks it read."
+        "description": "How long the cursor has to stay on a message before it counts as read. 0 marks it read as soon as it is previewed. Only applies while Preview as the cursor moves and automatic marking are on; Enter marks it read when automatic marking is on."
       },
       {
         "key": "heavyMessageRendering",

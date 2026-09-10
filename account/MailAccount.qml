@@ -97,6 +97,8 @@ Item {
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     setting("undoSendSeconds", Outbox.DEFAULT_DELAY_SECONDS))
+  readonly property bool markReadAutomatically:
+    setting("markReadAutomatically", true) !== false
 
   // Built by the loaders at the bottom, so both are null for one frame while an
   // account switches provider. Every use guards for that rather than assuming.
@@ -1171,14 +1173,15 @@ Item {
       root.rememberMember(summary)
       root.loadMembers()
       // A preview is not opening; only an opened message is marked read here.
-      if (Model.marksReadOnArrival(summary, root.selectionIsPreview))
+      if (Model.marksReadOnArrival(summary, root.selectionIsPreview,
+          root.markReadAutomatically))
         root.act(messageId, "markRead", true)
     })
   }
 
   // Mark the message the dwell started on, if it is still unread.
   function markPreviewRead(id) {
-    if (!Model.previewReadable(messages, id)) return false
+    if (!markReadAutomatically || !Model.previewReadable(messages, id)) return false
     act(String(id), "markRead", true)
     return true
   }
