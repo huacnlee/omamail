@@ -15,9 +15,8 @@ Item {
   property color color: Color.foreground
   property color markColor: color
   property color badgeColor: Color.urgent
-  // A dot, not a count: the bar says "something arrived", the tooltip says
-  // how much, and the window says what.
-  property bool dot: false
+  // Digits on the corner of the envelope. Empty is no overlay.
+  property string badge: ""
   property bool crossed: false
 
   width: iconSize
@@ -91,17 +90,29 @@ Item {
   }
 
   // On the corner rather than beside the icon, so the bar slot stays one
-  // square whether or not anything is waiting.
+  // square whether or not anything is waiting. A count is a pill; a single
+  // digit still reads as a badge rather than a second icon.
   BorderSurface {
-    visible: root.dot
-    width: Math.max(Style.space(5), parent.width * 0.34)
-    height: width
-    radius: width / 2
+    visible: root.badge !== ""
+    width: Math.max(height, badgeLabel.implicitWidth + Style.space(4))
+    height: Math.max(Style.space(8), parent.height * 0.58)
+    radius: height / 2
     color: root.badgeColor
     anchors.right: parent.right
-    anchors.rightMargin: -parent.width * 0.06
+    anchors.rightMargin: -parent.width * 0.22
     anchors.top: parent.top
-    anchors.topMargin: -parent.height * 0.04
+    anchors.topMargin: -parent.height * 0.22
     borderSpec: Border.flat(Color.popups.background, 1)
+
+    Text {
+      id: badgeLabel
+      anchors.centerIn: parent
+      text: root.badge
+      textFormat: Text.PlainText
+      color: Color.popups.background
+      font.family: Style.font.family
+      font.pixelSize: Math.max(7, Math.round(root.iconSize * 0.42))
+      font.bold: true
+    }
   }
 }

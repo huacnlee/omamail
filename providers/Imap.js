@@ -41,6 +41,9 @@ var CAPABILITIES = {
   web: false
 }
 
+// SEARCH returns the whole unseen set; the page's estimate is that total.
+var UNREAD_ESTIMATE_EXACT = true
+
 // Folders, not queries. The `folder:` DSL is read by `ImapProtocol.parseQuery`
 // and by nothing else — everywhere above, these strings are opaque, handed
 // back to the client that produced them and used as a cache key.

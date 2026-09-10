@@ -560,6 +560,54 @@ assert.strictEqual(model.resultSummary(
 assert.strictEqual(model.resultSummary(
   [{ thread: { id: "t", memberIds: ["a"] } }, {}], 2, false), "2 messages")
 
+// The unread badge used Gmail's resultSizeEstimate as a total. A three-id
+// unread poll comes back with estimate 201 and a continuation token even
+// when four messages match; a complete page of those four is the real count.
+// Gmail does not mark the estimate exact, so 201 and 12 are both ignored.
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b", "c"], nextPageToken: "PAGE2", estimate: 201
+}, 0, false), 3, "Gmail's dummy 201 on a truncated page is not a total")
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b"], nextPageToken: "PAGE2", estimate: 12
+}, 0, false), 2, "any other Gmail dummy is also not a total")
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b", "c", "d"], nextPageToken: "", estimate: 201
+}, 0, false), 4, "a finished page is the ids, even if Gmail still said 201")
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b", "c", "d"], nextPageToken: "", estimate: 4
+}, 0, false), 4)
+assert.strictEqual(model.listedUnread({
+  ids: [], nextPageToken: "", estimate: 0
+}), 0)
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b", "c"], nextPageToken: "3", estimate: 10
+}, 0, true), 10, "IMAP's SEARCH total on a truncated page is real")
+assert.strictEqual(model.listedUnread({
+  ids: ["a", "b", "c"], nextPageToken: "3", estimate: 201
+}, 0, true), 201, "a real IMAP total of 201 is still a total")
+assert.strictEqual(model.listedUnread({
+  ids: ["d", "e"], nextPageToken: "", estimate: 0
+}, 100, false), 102, "a later Gmail page adds its ids to the ones already counted")
+assert.strictEqual(model.listedUnread(null), 0)
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["a", "b", "c"], nextPageToken: "PAGE2", estimate: 201
+}, 3, false), false, "keep listing when Gmail's estimate is not exact")
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["a", "b"], nextPageToken: "PAGE2", estimate: 12
+}, 2, false), false)
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["a", "b", "c"], nextPageToken: "3", estimate: 10
+}, 10, true), true, "IMAP already reported the SEARCH total")
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["a", "b", "c"], nextPageToken: "3", estimate: 201
+}, 201, true), true, "a real IMAP total of 201 finishes the poll")
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["a", "b", "c", "d"], nextPageToken: "", estimate: 4
+}, 4, false), true)
+assert.strictEqual(model.listedUnreadFinished({
+  ids: ["x"], nextPageToken: "more", estimate: 201
+}, 500, false), true, "stop once the badge has counted enough")
+
 // The foot of the window names the account and then its sync age, in a
 // form short enough to sit after an address.
 assert.strictEqual(model.syncedShort("Synced 1m ago"), "1m ago")

@@ -531,22 +531,27 @@ Item {
     // label. The label counts every categorised message too, which is how this
     // reached 2483 on a real account — a number that is never zero, can only be
     // reported as "999+", and cannot tell anyone whether something is waiting.
-    countHandle = api.listMessages(Provider.unreadQuery(providerId), 3, "", function(page, error) {
-      if (serial !== root.countSerial) return
-      if (error || !page) {
-        root.countLoading = false
-        root.countHandle = null
-        return
-      }
-      var before = root.inboxUnread
-      root.inboxUnread = page.estimate
+    //
+    // The total is the listed ids, not resultSizeEstimate. Gmail's estimate
+    // on a three-id truncated page is often 201 whether four messages match
+    // or twenty thousand, which is how the badge reported 201 against
+    // Gmail's own three. A finished page is exact; a truncated Gmail page
+    // keeps listing until it is.
+    var query = Provider.unreadQuery(providerId)
+    var pageSize = Provider.unreadCountPage(providerId)
+    var estimateExact = Provider.unreadEstimateExact(providerId)
+    var previewIds = []
+    var total = 0
+    var before = root.inboxUnread
 
-      if (page.ids.length === 0) {
+    function finishCount() {
+      root.inboxUnread = total
+      if (previewIds.length === 0) {
         root.previewMessages = []
         root.countLoading = false
         root.countHandle = null
       } else {
-        root.countHandle = root.api.getMessages(page.ids, false, function(payloads) {
+        root.countHandle = root.api.getMessages(previewIds, false, function(payloads) {
           if (serial !== root.countSerial) return
           var now = new Date()
           var summaries = []
@@ -579,9 +584,30 @@ Item {
       // nothing, because there is nothing to compare against.
       var first = !root.countPrimed
       root.countPrimed = true
-      if ((first || page.estimate > before) && !root.listLoading)
+      if ((first || total > before) && !root.listLoading)
         root.loadMessages(false)
-    })
+    }
+
+    function takePage(pageToken) {
+      root.countHandle = api.listMessages(query, pageSize, pageToken, function(page, error) {
+        if (serial !== root.countSerial) return
+        if (error || !page) {
+          root.countLoading = false
+          root.countHandle = null
+          return
+        }
+        if (previewIds.length === 0)
+          previewIds = (page.ids || []).slice(0, 3)
+        total = Model.listedUnread(page, total, estimateExact)
+        if (!Model.listedUnreadFinished(page, total, estimateExact)) {
+          takePage(page.nextPageToken)
+          return
+        }
+        finishCount()
+      })
+    }
+
+    takePage("")
   }
 
   function loadProfile() {

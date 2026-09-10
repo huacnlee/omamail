@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "components"
 import "bar"
+import "account/Model.js" as Model
 
 // The bar's job is one number and one click. Everything the widget knows comes
 // from the shared service, which keeps running whether or not the window is
@@ -86,6 +87,13 @@ BarWidget {
   implicitWidth: drawsIcon ? button.implicitWidth : 0
   implicitHeight: drawsIcon ? button.implicitHeight : 0
 
+  // The envelope stays; the number sits on its corner. Past 99 the exact
+  // value has stopped being information anyone acts on.
+  readonly property string unreadBadge: {
+    if (!root.gmail || !(root.gmail.unreadTotal > 0)) return ""
+    return Model.badgeText(root.gmail.unreadTotal)
+  }
+
   BarIconButton {
     id: button
     visible: root.drawsIcon
@@ -105,7 +113,7 @@ BarWidget {
     readonly property color glyphColor: connected
       ? root.foreground
       : Qt.darker(root.foreground, 1.55)
-    readonly property bool hasUnread: !!root.gmail && root.gmail.unreadTotal > 0
+    readonly property string unreadBadge: root.unreadBadge
 
     iconComponent: Component {
       Item {
@@ -114,13 +122,10 @@ BarWidget {
           iconSize: Style.space(12)
           color: button.glyphColor
           markColor: Color.accent
-          // The dot is simply whether unread mail is waiting. It used to mean
-          // "something arrived since you last looked", which was a different
-          // question from the one anyone asks of a mail icon, and it could not
-          // be answered honestly while the count included every categorised
-          // message. Now that the count is Primary-scoped it reaches zero, so
-          // the dot can just follow it.
-          dot: button.hasUnread
+          // The envelope stays; the unread total sits on its corner. An empty
+          // string is no overlay, which is how a zero count reaches "nothing
+          // waiting" without a permanent mark.
+          badge: button.unreadBadge
           crossed: !button.connected
         }
       }

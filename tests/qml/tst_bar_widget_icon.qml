@@ -117,5 +117,14 @@ Item {
       compare(widget.visible, true)
       verify(widget.implicitWidth > 0)
     }
+
+    function test_the_envelope_carries_the_unread_count() {
+      fakeService.unreadTotal = 0
+      compare(widget.unreadBadge, "")
+      fakeService.unreadTotal = 4
+      compare(widget.unreadBadge, "4")
+      fakeService.unreadTotal = 201
+      compare(widget.unreadBadge, "99+")
+    }
   }
 }

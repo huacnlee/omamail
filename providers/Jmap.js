@@ -64,6 +64,8 @@ var CAPABILITIES = {
   webBox: false
 }
 
+var UNREAD_ESTIMATE_EXACT = true
+
 // Roles, not folder names and not queries. The `role:`, `mailbox:` and `text:`
 // DSL is read by `JmapProtocol.parseQuery` and by nothing else — everywhere
 // above, these strings are opaque, handed back to the client that produced
