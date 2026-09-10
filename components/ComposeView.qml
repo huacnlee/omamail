@@ -125,6 +125,7 @@ DropArea {
   property int forwardLoadSerial: 0
   property var draftAttachments: []
   property var attachJobs: []
+  property int attachGeneration: 0
   property bool attaching: false
   property bool pasteInFlight: false
 
@@ -224,6 +225,8 @@ DropArea {
     forwardedAttachments = []
     forwardAttachmentsLoading = false
     forwardAttachmentError = ""
+    root.attachGeneration += 1
+    if (attacher.running) attacher.running = false
     var owned = draftAttachments
     draftAttachments = []
     attachJobs = []
@@ -845,6 +848,7 @@ DropArea {
       attacher.command = [root.attachScript, "forget", root.composeDir, job.path]
     else
       attacher.command = [root.attachScript, "read", job.path]
+    attacher.jobGeneration = root.attachGeneration
     attacher.running = true
   }
 
@@ -893,10 +897,12 @@ DropArea {
       filename: String(result.filename || "attachment"),
       mimeType: String(result.mimeType || "application/octet-stream"),
       size: Math.max(0, Math.floor(Number(result.size) || 0)),
-      data: String(result.data || ""),
       path: String(result.path || ""),
       owned: mode === "clipboard" || mode === "recover-owned"
     })
+    // The window only needs the path. Keeping the file bytes here is what
+    // made Back crash: leaving the draft copied the whole PDF through QML.
+    if (entry.path === "") entry.data = String(result.data || "")
     var next = root.draftAttachments.slice()
     next.push(entry)
     root.draftAttachments = next
@@ -1756,12 +1762,14 @@ DropArea {
             id: attachItem
             required property var modelData
             required property int index
+            readonly property var file: attachItem.modelData && typeof attachItem.modelData === "object"
+              ? attachItem.modelData : ({})
             width: attachList.width
             spacing: Style.space(4)
 
             Image {
-              visible: String(attachItem.modelData.mimeType || "").indexOf("image/") === 0
-                && String(attachItem.modelData.path || "") !== ""
+              visible: String(attachItem.file.mimeType || "").indexOf("image/") === 0
+                && String(attachItem.file.path || "") !== ""
               width: parent.width
               height: visible
                 ? Math.min(Math.max(sourceSize.height, Style.space(72)), Style.space(200))
@@ -1769,7 +1777,7 @@ DropArea {
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
-              source: visible ? ("file://" + String(attachItem.modelData.path || "")) : ""
+              source: visible ? ("file://" + String(attachItem.file.path || "")) : ""
             }
 
             Row {
@@ -1787,7 +1795,7 @@ DropArea {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.max(0, parent.width - Style.space(120))
                 textFormat: Text.PlainText
-                text: String(attachItem.modelData.filename || "attachment")
+                text: String(attachItem.file.filename || "attachment")
                 color: root.textColor
                 font.family: root.panelFontFamily
                 font.pixelSize: Style.font.caption
@@ -1796,7 +1804,7 @@ DropArea {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: Mail.formatSize(attachItem.modelData.size)
+                text: Mail.formatSize(attachItem.file.size)
                 color: root.dimmerColor
                 font.family: root.panelFontFamily
                 font.pixelSize: Style.font.caption
@@ -1875,10 +1883,12 @@ DropArea {
   Process {
     id: attacher
     property string jobMode: ""
+    property int jobGeneration: 0
     stdinEnabled: false
     stdout: StdioCollector { id: attachOut; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
+      if (jobGeneration !== root.attachGeneration) return
       root.finishAttach(jobMode, String(attachOut.text || ""))
     }
   }
