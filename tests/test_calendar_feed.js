@@ -471,3 +471,58 @@ assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
 console.log("test_calendar_feed.js ok")
+
+// ------------------------------------------------------------ discovery
+//
+// iCloud's answers, as it spells them: prefixed elements, a relative
+// principal, an absolute home on a per-user host, and a home listing that
+// mixes calendars with the reminder lists, the server's own boxes, and the
+// home itself.
+{
+  const principal = '<?xml version="1.0" encoding="UTF-8"?><multistatus xmlns="DAV:"><response><href>/</href>'
+    + '<propstat><prop><current-user-principal><href>/123456789/principal/</href></current-user-principal>'
+    + '<resourcetype><collection/></resourcetype></prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>'
+  const self = feed.caldavSelf(principal, "https://caldav.icloud.com/")
+  assert.strictEqual(self.isCalendar, false)
+  assert.strictEqual(self.principal, "https://caldav.icloud.com/123456789/principal/", "a path is resolved against the origin")
+
+  const home = '<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/123456789/principal/</href>'
+    + '<propstat><prop><C:calendar-home-set><href>https://p42-caldav.icloud.com:443/123456789/calendars/</href></C:calendar-home-set>'
+    + '</prop></propstat></response></multistatus>'
+  assert.strictEqual(feed.resolveDavHref("https://caldav.icloud.com/123456789/principal/", feed.davHome(home)),
+    "https://p42-caldav.icloud.com:443/123456789/calendars/", "an absolute home is kept as it is")
+
+  const listing = '<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/">'
+    + '<D:response><D:href>/123456789/calendars/</D:href><D:propstat><D:prop><D:displayname>Jack</D:displayname>'
+    + '<D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat></D:response>'
+    + '<D:response><D:href>/123456789/calendars/home/</D:href><D:propstat><D:prop><D:displayname>Home</D:displayname>'
+    + '<D:resourcetype><D:collection/><C:calendar/></D:resourcetype>'
+    + '<C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></D:prop></D:propstat></D:response>'
+    + '<D:response><D:href>/123456789/calendars/ABCD-EF/</D:href><D:propstat><D:prop><D:displayname>Reminders</D:displayname>'
+    + '<D:resourcetype><D:collection/><C:calendar/></D:resourcetype>'
+    + '<C:supported-calendar-component-set><C:comp name="VTODO"/></C:supported-calendar-component-set></D:prop></D:propstat></D:response>'
+    + '<D:response><D:href>/123456789/calendars/inbox/</D:href><D:propstat><D:prop><D:displayname/>'
+    + '<D:resourcetype><D:collection/><C:schedule-inbox/></D:resourcetype></D:prop></D:propstat></D:response>'
+    + '<D:response><D:href>/123456789/calendars/feed/</D:href><D:propstat><D:prop><D:displayname>School</D:displayname>'
+    + '<D:resourcetype><D:collection/><CS:subscribed/></D:resourcetype></D:prop></D:propstat></D:response>'
+    + '<D:response><D:href>/123456789/calendars/work/</D:href><D:propstat><D:prop><D:displayname>Work &amp; Travel</D:displayname>'
+    + '<D:resourcetype><D:collection/><C:calendar></C:calendar></D:resourcetype></D:prop></D:propstat></D:response>'
+    + '</D:multistatus>'
+  const found = feed.caldavCollections(listing, "https://p42-caldav.icloud.com:443/123456789/calendars/")
+  assert.strictEqual(JSON.stringify(found), JSON.stringify([
+    { name: "Home", url: "https://p42-caldav.icloud.com:443/123456789/calendars/home/" },
+    { name: "Work & Travel", url: "https://p42-caldav.icloud.com:443/123456789/calendars/work/" }
+  ]), "the home itself, a reminder list, the inbox and a subscribed feed are not calendars")
+
+  // An address that is one calendar answers the first step by saying so.
+  const one = '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/cal/home/</d:href>'
+    + '<d:propstat><d:prop><d:displayname>Home</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype>'
+    + '</d:prop></d:propstat></d:response></d:multistatus>'
+  const single = feed.caldavSelf(one, "https://dav.example/cal/home/")
+  assert.strictEqual(single.isCalendar, true)
+  assert.strictEqual(single.name, "Home")
+
+  assert.strictEqual(feed.resolveDavHref("https://dav.example/a/b/", "c/"), "https://dav.example/a/b/c/")
+  assert.strictEqual(feed.resolveDavHref("not a url", "/x/"), "", "no origin, no address")
+  assert.ok(feed.propfindCollectionsBody().indexOf("supported-calendar-component-set") >= 0)
+}

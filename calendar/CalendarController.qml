@@ -116,6 +116,8 @@ Item {
 
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
+  // The calendars found at an address, or why none were.
+  signal calendarsDiscovered(var calendars, string error)
   signal eventCreated(bool ok, string error)
   signal eventUpdated(bool ok, string error)
   signal eventDeleted(bool ok, string error)
@@ -366,23 +368,84 @@ Item {
   }
 
   function addCalDavCalendar(raw, secret) {
+    addCalDavCalendars([raw], secret)
+  }
+
+  // Several calendars found at one address, saved in one write and given the
+  // one password each, under its own id, one keyring store after another.
+  property var sourcesBeingSaved: []
+
+  function addCalDavCalendars(list, secret) {
     if (savingSource) return
-    var candidate = raw || {}
-    candidate.kind = "caldav"
-    candidate.id = Sources.sourceId(candidate)
-    candidate.enabled = true
-    var checked = Sources.validate(candidate)
-    if (!checked.ok) { calendarSaved(false, checked.error); return }
+    var given = Array.isArray(list) ? list : []
+    if (given.length === 0) { calendarSaved(false, "Choose a calendar to add"); return }
     if (String(secret || "") === "") {
       calendarSaved(false, "Add the calendar password")
       return
     }
-    sourceBeingSaved = checked.source
+    var next = sourceList
+    var accepted = []
+    for (var i = 0; i < given.length; i++) {
+      var candidate = {}
+      for (var key in given[i]) candidate[key] = given[i][key]
+      candidate.kind = "caldav"
+      candidate.id = Sources.sourceId(candidate)
+      candidate.enabled = true
+      var checked = Sources.validate(candidate)
+      if (!checked.ok) { calendarSaved(false, checked.error); return }
+      next = Sources.add(next, checked.source)
+      accepted.push(checked.source)
+    }
+    sourceBeingSaved = null
+    sourcesBeingSaved = accepted
     sourceSecret = String(secret)
-    sourceWritePayload = Sources.serialize(Sources.add(sourceList, checked.source))
+    sourceWritePayload = Sources.serialize(next)
     savingSource = true
     sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
     sourceWriter.running = true
+  }
+
+  // ------------------------------------------------------------ discovery
+
+  property bool discovering: false
+  property string discoveryUrl: ""
+  property string discoveryUsername: ""
+  // Held for the three requests and no longer.
+  property string discoveryCredentials: ""
+
+  function discoverCalDav(url, username, secret) {
+    if (discovering || savingSource) return
+    var address = String(url || "").trim()
+    var user = String(username || "").trim()
+    var password = String(secret || "")
+    if (!/^https:\/\//i.test(address)) { calendarsDiscovered([], "Add the calendar's HTTPS address"); return }
+    if (password === "") { calendarsDiscovered([], "Add the calendar password"); return }
+    discovering = true
+    discoveryUrl = address
+    discoveryUsername = user
+    discoveryCredentials = user + ":" + password
+    password = ""
+    discoveryStep("self", address)
+  }
+
+  function discoveryStep(step, url) {
+    var body = step === "self" ? Calendar.propfindPrincipalBody()
+      : step === "home" ? Calendar.propfindHomeBody() : Calendar.propfindCollectionsBody()
+    var method = step === "collections" ? "propfind-1" : "propfind-0"
+    discoveryTransport.step = step
+    discoveryTransport.url = url
+    discoveryTransport.command = [pluginDir + "/scripts/calendar-transport.sh"]
+    discoveryTransport.requestLine = [Mail.encodeBase64(url), Mail.encodeBase64(discoveryCredentials),
+      Mail.encodeBase64(body), Mail.encodeBase64(method)].join(" ") + "\n"
+    discoveryTransport.running = true
+  }
+
+  function finishDiscovery(list, error) {
+    discovering = false
+    discoveryCredentials = ""
+    var found = Array.isArray(list) ? list : []
+    for (var i = 0; i < found.length; i++) found[i].username = discoveryUsername
+    calendarsDiscovered(found, String(error || ""))
   }
 
   function removeCalendar(sourceId) {
@@ -662,7 +725,7 @@ Item {
         return
       }
       root.sourceList = Sources.load(root.sourceWritePayload)
-      if (!root.sourceBeingSaved) {
+      if (!root.sourceBeingSaved && root.sourcesBeingSaved.length === 0) {
         root.savingSource = false
         root.calendarSaved(true, "")
         if (root.refreshAfterSourceWrite && root.rangeStart && root.rangeEnd)
@@ -670,10 +733,24 @@ Item {
         root.refreshAfterSourceWrite = false
         return
       }
-      sourcePasswordStore.command = [root.pluginDir + "/scripts/keyring-store.sh"]
-        .concat(Sources.keyringAttributes(root.sourceBeingSaved.id))
-      sourcePasswordStore.running = true
+      root.storeNextSourcePassword()
     }
+  }
+
+  // One keyring store per calendar saved, the same password each time.
+  function storeNextSourcePassword() {
+    var source = sourceBeingSaved
+    if (!source && sourcesBeingSaved.length > 0) source = sourcesBeingSaved[0]
+    if (!source) {
+      sourceSecret = ""
+      savingSource = false
+      calendarSaved(true, "")
+      if (rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
+      return
+    }
+    sourcePasswordStore.command = [pluginDir + "/scripts/keyring-store.sh"]
+      .concat(Sources.keyringAttributes(source.id))
+    sourcePasswordStore.running = true
   }
 
   Process {
@@ -682,15 +759,56 @@ Item {
     stderr: StdioCollector { id: sourcePasswordError; waitForEnd: true }
     onStarted: write(root.sourceSecret + "\n")
     onExited: function(exitCode) {
-      root.sourceSecret = ""
-      root.sourceBeingSaved = null
-      root.savingSource = false
       if (exitCode !== 0) {
+        root.sourceSecret = ""
+        root.sourceBeingSaved = null
+        root.sourcesBeingSaved = []
+        root.savingSource = false
         root.calendarSaved(false, String(sourcePasswordError.text || "Could not save the password"))
         return
       }
-      root.calendarSaved(true, "")
-      if (root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
+      root.sourceBeingSaved = null
+      if (root.sourcesBeingSaved.length > 0) root.sourcesBeingSaved = root.sourcesBeingSaved.slice(1)
+      root.storeNextSourcePassword()
+    }
+  }
+
+  Process {
+    id: discoveryTransport
+    property string step: ""
+    property string url: ""
+    property string requestLine: ""
+    stdinEnabled: true
+    stdout: StdioCollector { id: discoveryOutput; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onStarted: {
+      write(requestLine)
+      requestLine = ""
+    }
+    onExited: function(exitCode) {
+      var lines = String(discoveryOutput.text || "").split("\n")
+      var status = Number(lines[0])
+      var body = lines.length > 1 ? Mail.decodeBase64Url(lines[1].replace(/\+/g, "-").replace(/\//g, "_")) : ""
+      if (exitCode !== 0 || status !== 0) { root.finishDiscovery([], "The calendar server could not be reached"); return }
+      if (!/multistatus/i.test(body)) {
+        root.finishDiscovery([], "The calendar server refused the sign-in, or has no calendars at that address")
+        return
+      }
+      if (step === "self") {
+        var self = Calendar.caldavSelf(body, url)
+        if (self.isCalendar) { root.finishDiscovery([{ name: self.name, url: url }], ""); return }
+        if (self.principal === "") { root.finishDiscovery([], "No calendars were found at that address"); return }
+        root.discoveryStep("home", self.principal)
+        return
+      }
+      if (step === "home") {
+        var home = Calendar.resolveDavHref(url, Calendar.davHome(body))
+        if (home === "") { root.finishDiscovery([], "The calendar server did not say where its calendars are"); return }
+        root.discoveryStep("collections", home)
+        return
+      }
+      var found = Calendar.caldavCollections(body, url)
+      root.finishDiscovery(found, found.length > 0 ? "" : "No calendars were found at that address")
     }
   }
 
