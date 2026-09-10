@@ -43,6 +43,12 @@ var CAPABILITIES = {
   send: true
 }
 
+// The unread poll asks for this many ids. Three is enough for the preview
+// but not for a total: Gmail's resultSizeEstimate on a truncated page is
+// often 201, which is how a mailbox with four unread messages reported 201
+// against Gmail's own three conversations.
+var UNREAD_COUNT_PAGE = 100
+
 // Search queries rather than label ids: `is:unread` and `in:anywhere` have no
 // label to point at, and a query keeps every entry on the same footing.
 var MAILBOXES = [
@@ -60,7 +66,7 @@ var MAILBOXES = [
   // and the web UI calls it `primary`. The API's `q` promises only "most of"
   // the web syntax and has never listed `category:` at all, so that one word
   // is the one with nothing holding it up — and on a real account it matched
-  // nothing at all while the inbox held 201 unread.
+  // nothing at all while unread mail was sitting in the inbox.
   //
   // Which way the query fails is why this is a negation rather than a
   // narrower scope. A positive scope that stops matching empties the mailbox

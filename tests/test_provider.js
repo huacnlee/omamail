@@ -327,6 +327,18 @@ assert.strictEqual(provider.unreadQuery("gmail"),
 assert.strictEqual(provider.unreadQuery("imap"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("outlook"), "folder:INBOX UNSEEN")
 assert.strictEqual(provider.unreadQuery("hey"), "box:imbox unseen")
+assert.strictEqual(provider.unreadCountPage("gmail"), 100,
+  "Gmail lists enough ids that a typical unread mailbox finishes in one page")
+assert.strictEqual(provider.unreadCountPage("imap"), 3)
+assert.strictEqual(provider.unreadCountPage("hey"), 3)
+assert.strictEqual(provider.unreadCountPage("outlook"), 3)
+assert.strictEqual(provider.unreadCountPage("jmap"), 3)
+assert.strictEqual(provider.unreadEstimateExact("gmail"), false,
+  "Gmail's resultSizeEstimate is never a total")
+assert.strictEqual(provider.unreadEstimateExact("imap"), true)
+assert.strictEqual(provider.unreadEstimateExact("outlook"), true)
+assert.strictEqual(provider.unreadEstimateExact("hey"), true)
+assert.strictEqual(provider.unreadEstimateExact("jmap"), true)
 
 // Named by exclusion on purpose, and the reason is which way it fails. Asking
 // for `category:primary` was a positive scope, and a positive scope that stops

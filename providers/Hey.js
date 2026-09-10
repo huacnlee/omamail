@@ -39,6 +39,8 @@ var CLIENT_URL = "https://github.com/basecamp/hey-cli"
 var MARK = "hey-mark.png"
 var LOGO = "hey.png"
 
+var UNREAD_ESTIMATE_EXACT = true
+
 var CAPABILITIES = {
   // HEY files a thread under any number of labels, and `hey labels` lists them.
   labels: true,

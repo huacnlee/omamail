@@ -133,7 +133,13 @@ function define(source) {
     // Most providers have nothing to add — the address already says which
     // service it is — so the default is silence, and a row draws this only
     // when it is not.
-    detail: typeof raw.detail === "function" ? raw.detail : function() { return "" }
+    detail: typeof raw.detail === "function" ? raw.detail : function() { return "" },
+    // How many ids the unread poll asks for. Three is enough for the bar
+    // preview, and is what every provider keeps unless it says otherwise.
+    unreadCountPage: Math.max(1, Math.min(100, Math.floor(Number(raw.UNREAD_COUNT_PAGE) || 3))),
+    // Whether a truncated listing's `estimate` is a real total. Default is
+    // no: Gmail's resultSizeEstimate is a dummy. IMAP, JMAP and HEY opt in.
+    unreadEstimateExact: raw.UNREAD_ESTIMATE_EXACT === true
   }
 }
 
@@ -310,6 +316,18 @@ function addressQuery(id, field, address) {
 // could drift from the first.
 function unreadQuery(id) {
   return mailboxFor(id, "unread").query
+}
+
+// How many ids the unread poll lists in one request. Gmail needs a full
+// page: its resultSizeEstimate on a three-id truncated listing is 201,
+// which is not a count. IMAP and HEY already put a real total on a short
+// page, so they keep the small preview-sized request.
+function unreadCountPage(id) {
+  return get(id).unreadCountPage
+}
+
+function unreadEstimateExact(id) {
+  return get(id).unreadEstimateExact === true
 }
 
 // ------------------------------------------------------------------ naming

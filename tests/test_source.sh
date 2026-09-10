@@ -834,6 +834,24 @@ grep -q 'progressTimerComponent' providers/GmailApiClient.qml \
 grep -q 'MAX_SUMMARIES_PER_QUERY' cache/Cache.js \
   || fail "each cached query needs a row cap"
 
+# Gmail's resultSizeEstimate on a truncated unread poll is often 201, which
+# is not a count. The badge must total listed ids through listedUnread.
+if grep -n 'inboxUnread = page.estimate' account/MailAccount.qml; then
+  fail "the unread badge must not treat a listing estimate as a total"
+fi
+grep -q 'Model.listedUnread' account/MailAccount.qml \
+  || fail "the unread badge must count listed ids, not Gmail's resultSizeEstimate"
+grep -q 'Provider.unreadCountPage' account/MailAccount.qml \
+  || fail "the unread poll's page size belongs to the provider"
+grep -q 'Provider.unreadEstimateExact' account/MailAccount.qml \
+  || fail "whether a listing estimate is exact belongs to the provider"
+grep -q 'previewIds = (page.ids || \[\]).slice(0, 3)' account/MailAccount.qml \
+  || fail "the unread poll must hydrate only the preview ids, not the whole count page"
+grep -q 'root.api.getMessages(previewIds,' account/MailAccount.qml \
+  || fail "the unread poll must fetch metadata for the preview ids, not the whole page"
+grep -q 'root.countHandle = api.listMessages' account/MailAccount.qml \
+  || fail "the unread poll must assign countHandle on the account, not a nested local"
+
 # New-mail notifications use the application's own mark, not the desktop's
 # generic unread-mail glyph.
 grep -q 'assets/omamail.svg' scripts/notify-mail.py \

@@ -1185,6 +1185,33 @@ function unreadCount(list) {
   return count
 }
 
+// How many unread the badge should report from a listing page.
+//
+// A finished page is the ids. A truncated page may carry a total, but only
+// the provider knows whether that number is exact: IMAP and JMAP put the
+// SEARCH / query size there, and Gmail's resultSizeEstimate is a dummy
+// that is often 201 on a three-id page whether four messages match or
+// twenty thousand. `estimateExact` is that answer, from the provider.
+var UNREAD_LIST_CAP = 500
+
+function listedUnread(page, already, estimateExact) {
+  var prior = Math.max(0, Math.floor(Number(already) || 0))
+  if (!page) return prior
+  var n = Array.isArray(page.ids) ? page.ids.length : 0
+  if (!String(page.nextPageToken || "")) return prior + n
+  if (estimateExact !== true) return prior + n
+  var estimate = Math.max(0, Math.floor(Number(page.estimate) || 0))
+  if (estimate > n) return Math.max(prior + n, estimate)
+  return prior + n
+}
+
+function listedUnreadFinished(page, total, estimateExact) {
+  if (!page) return true
+  if (Math.max(0, Math.floor(Number(total) || 0)) >= UNREAD_LIST_CAP) return true
+  if (!String(page.nextPageToken || "")) return true
+  return estimateExact === true
+}
+
 // The bar has room for a number, not for a number of digits. Past 99 the exact
 // value has stopped being information anyone acts on.
 function badgeText(count, cap) {

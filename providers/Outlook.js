@@ -15,6 +15,7 @@ var AUTH = "oauth"
 
 var CAPABILITIES = Imap.CAPABILITIES
 var MAILBOXES = Imap.MAILBOXES
+var UNREAD_ESTIMATE_EXACT = Imap.UNREAD_ESTIMATE_EXACT
 
 function searchQuery(text) {
   return Imap.searchQuery(text)
