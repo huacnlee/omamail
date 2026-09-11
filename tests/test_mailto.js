@@ -55,10 +55,37 @@ deepEqual(mailto.parse("mailto:jane@example.com#ignored"),
 // than keeping it as written.
 assert.strictEqual(mailto.parse("mailto:jane@example.com?subject=100%").subject, "100%")
 
+assert.strictEqual(mailto.parse("mailto:?attach=/tmp/scan.pdf").attachments,
+  undefined,
+  "attach= in a mailto URL is not a file; a message body can name one")
+assert.strictEqual(mailto.parse("mailto:?attach=/etc/passwd").attachments, undefined)
+assert.strictEqual(mailto.parse("mailto:jane@example.com").attachments, undefined)
+
 // --------------------------------------------------------- payload → draft
 
 deepEqual(mailto.draftFromPayload({ mailto: "mailto:jane@example.com?subject=Hi" }),
   draft("jane@example.com", "", "", "Hi", ""))
+deepEqual(mailto.draftFromPayload({
+  compose: true,
+  attachments: ["/tmp/scan.pdf"]
+}).attachments, ["/tmp/scan.pdf"],
+  "a summon payload can name files without a mailto URL")
+deepEqual(mailto.draftFromPayload({
+  compose: true,
+  attachments: ["file:///tmp/scan.pdf"]
+}).attachments, ["/tmp/scan.pdf"])
+deepEqual(mailto.draftFromPayload({
+  mailto: "mailto:?attach=/etc/passwd"
+}).attachments, undefined,
+  "attach= in the URL is not enough; the handler must list the file")
+assert.strictEqual(mailto.draftFromPayload({
+  compose: true,
+  attachments: ["https://example.com/x.pdf"]
+}).attachments, undefined)
+assert.strictEqual(mailto.draftFromPayload({
+  compose: true,
+  attachments: ["relative.pdf"]
+}).attachments, undefined)
 deepEqual(mailto.draftFromPayload({ compose: true }),
   draft("", "", "", "", ""),
   "compose:true is a blank draft")

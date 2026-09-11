@@ -370,6 +370,22 @@ Item {
       compare(app.currentView, "reader")
     }
 
+    function test_back_leaves_a_new_message_that_only_has_a_file() {
+      app.startCompose("new")
+      tryCompare(app, "composing", true)
+      var compose = having(app, function(it) {
+        return it && typeof it.hasMeaningfulDraft === "function" && it.draftAttachments !== undefined
+      })
+      verify(compose, "the compose view is on screen")
+      compose.draftAttachments = [{
+        filename: "scan.pdf", path: "/tmp/scan.pdf", size: 12
+      }]
+      verify(compose.hasMeaningfulDraft(), "a file on the draft is still a draft")
+      app.back()
+      tryCompare(app, "composing", false)
+      compare(kinds().indexOf("compose") >= 0, false, "Back left the new message")
+    }
+
     function test_a_reply_raised_from_the_list_leaves_the_message_with_it() {
       app.cursorId = "message-1"
       app.composeFromCursor("reply")

@@ -14,15 +14,32 @@ fail() {
   exit 1
 }
 
-json_string() {
-  command -v python3 >/dev/null 2>&1 || fail 'omamail: python3 is required to open a mailto link'
-  python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"
-}
-
 if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
   payload='{}'
 else
-  payload="{\"mailto\":$(json_string "$1")}"
+  command -v python3 >/dev/null 2>&1 || fail 'omamail: python3 is required to open a mailto link'
+  payload=$(python3 -c '
+import json, sys, urllib.parse
+url = sys.argv[1]
+payload = {"mailto": url}
+query = urllib.parse.urlparse(url).query
+files = []
+for key, values in urllib.parse.parse_qs(query).items():
+    if key.lower() not in ("attach", "attachment"):
+        continue
+    for raw in values:
+        text = raw.strip()
+        lower = text.lower()
+        if lower.startswith("file://localhost"):
+            text = text[16:]
+        elif lower.startswith("file://"):
+            text = text[7:]
+        if text.startswith("/") and "://" not in text:
+            files.append(text)
+if files:
+    payload["attachments"] = files
+sys.stdout.write(json.dumps(payload, separators=(",", ":")))
+' "$1") || fail 'omamail: could not encode the mailto link'
 fi
 
 if [ -n "${OMAMAIL_MAILTO_PRINT:-}" ]; then

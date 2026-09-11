@@ -80,12 +80,39 @@ function parse(entry) {
   }
 }
 
+// A file on a draft comes from the desktop handler's payload, not from
+// attach= in the URL. A mailto in a message body is untrusted; xdg-email
+// reaches us through mailto.sh, which lists the paths separately.
+// Only a local absolute path is a file we will put on a draft.
+function filePathFromAttach(raw) {
+  var text = headerSafe(raw)
+  if (/^file:/i.test(text)) {
+    text = text.replace(/^file:\/\/localhost/i, "")
+    text = text.replace(/^file:\/\//i, "")
+  }
+  if (text.indexOf("://") >= 0) return ""
+  if (text.charAt(0) !== "/") return ""
+  return text
+}
+
 // What App.open should put in the compose form. A mailto that is not one
 // leaves the window alone rather than opening a blank draft over a listing
 // the user already had.
 function draftFromPayload(payload) {
   if (!payload || typeof payload !== "object") return null
-  if (payload.mailto) return parse(payload.mailto)
-  if (payload.compose === true) return emptyDraft()
-  return null
+  var draft = null
+  if (payload.mailto) draft = parse(payload.mailto)
+  else if (payload.compose === true) draft = emptyDraft()
+  if (!draft) return null
+  var extra = payload.attachments
+  if (Array.isArray(extra) && extra.length) {
+    var files = []
+    var i
+    for (i = 0; i < extra.length; i++) {
+      var filePath = filePathFromAttach(String(extra[i] || ""))
+      if (filePath !== "") files.push(filePath)
+    }
+    if (files.length) draft.attachments = files
+  }
+  return draft
 }
