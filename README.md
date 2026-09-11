@@ -1,7 +1,5 @@
 # Omamail
 
-> 🎈 NOTE: I am working on refactor backend by use Rust for better experience, do not make PR waiting me to finish. 
-
 **Your mail as a native Omarchy window — not a browser tab.**
 
 Omamail is an Omarchy desktop email client: a Quickshell plugin
