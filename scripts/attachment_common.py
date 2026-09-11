@@ -51,6 +51,42 @@ def openable_filename(name: str) -> bool:
     return not any(lowered.endswith(suffix) for suffix in OPEN_REFUSED_SUFFIXES)
 
 
+ACTIVE_BINARY_PREFIXES = (
+    b"MZ", b"\x7fELF",
+    b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
+    b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    b"L\x00\x00\x00\x01\x14\x02\x00",
+)
+
+ACTIVE_TEXT_MARKERS = (
+    b"<!doctype", b"<html", b"<head", b"<body", b"<script",
+    b"<iframe", b"<meta", b"<svg", b"<?xml", b"[desktop entry]",
+)
+
+
+def openable_attachment(name: str, data: bytes) -> bool:
+    """Whether neither the sender's name nor the bytes describe active content."""
+    if not openable_filename(name):
+        return False
+    content = bytes(data)
+    if content.startswith(ACTIVE_BINARY_PREFIXES):
+        return False
+
+    sample = content[:65536]
+    if sample.startswith(b"\xef\xbb\xbf"):
+        sample = sample[3:]
+    elif sample.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            sample = sample.decode("utf-16").encode("utf-8")
+        except UnicodeError:
+            return False
+    folded = sample.replace(b"\x00", b"").lstrip().lower()
+    if folded.startswith(b"#!"):
+        return False
+    return not any(marker in folded for marker in ACTIVE_TEXT_MARKERS)
+
+
 def safe_filename(value: bytes) -> str:
     """The sender's name, with everything that could leave the folder removed.
 

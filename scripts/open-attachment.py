@@ -10,7 +10,7 @@ import tempfile
 
 # Beside this file, and shared with save-attachment.py so the name the
 # sender chose is made safe by one implementation rather than two.
-from attachment_common import decode, openable_filename, safe_filename
+from attachment_common import decode, openable_attachment, safe_filename
 
 
 def runtime_directory() -> str | None:
@@ -34,7 +34,7 @@ def main() -> int:
         print("The attachment data is not valid base64", file=sys.stderr)
         return 2
 
-    if not openable_filename(filename):
+    if not openable_attachment(filename, data):
         print("That attachment is not something this can open", file=sys.stderr)
         return 1
 
