@@ -19,12 +19,6 @@ import "message/Message.js" as Message
 import "components"
 import "calendar"
 
-// The application window. The shell loads this entry point when the plugin is
-// summoned and calls open()/close() on it; the FloatingWindow follows.
-//
-// Compose takes over the content area of this same window rather than opening
-// a second one; Omarchy's panel mechanism would give an extra window a region
-// of its own, which is not what a reply is.
 Item {
   id: root
 
@@ -65,20 +59,15 @@ Item {
     if (accountId !== "" && service
         && String(service.activeAccountId || "") !== accountId
         && typeof service.switchTo === "function") service.switchTo(accountId)
-    // The draft was raised over the reader if the file says so; otherwise it
-    // returns to the root, whichever root the window is on now.
     pendingComposeReturnTo = composeRecovery.returnView === "reader" ? Nav.depth(nav) : 1
     composeRecoveryRestoring = true
     compose.restoreDraft(composeRecovery.draft)
     composeRecoveryRestoring = false
-    // The others come back one at a time, each as the one before it closes.
     var parked = composeRecovery.parked || []
     if (parked.length > 0) compose.recoveryDrafts = compose.recoveryDrafts.concat(parked)
     return true
   }
 
-  // Every parked draft but the one named: they ride along in the recovery
-  // file so a restart inside several undo windows loses none of them.
   function parkedBesides(draft) {
     var out = []
     var parked = compose.parkedDrafts || []
@@ -177,17 +166,12 @@ Item {
   readonly property color background: Color.background
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
-  // Destructive controls consume a role named for their meaning. Omarchy's
-  // foundational palette currently calls that source `urgent`; keeping the
-  // mapping here stops account pages from confusing urgency with danger.
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
   readonly property color calendarBorder: Style.normalBorderColor
   readonly property color calendarTodayBackground: Style.selectedAccentFill
   readonly property int calendarBorderWidth: Style.normalBorderWidth
-  // Mixed toward the ground rather than Qt.darker: on a light theme darkening
-  // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
     foreground.g * 0.68 + background.g * 0.32,
@@ -196,10 +180,6 @@ Item {
     foreground.r * 0.45 + background.r * 0.55,
     foreground.g * 0.45 + background.g * 0.55,
     foreground.b * 0.45 + background.b * 0.55, 1)
-  // Omarchy's palette has no separate "primary": `accent` is it. This theme's
-  // accent is near fully saturated, which is right for a 5px unread dot and
-  // wrong for a link sitting inside a paragraph. Same hue, same lightness,
-  // capped saturation — calm enough to read past, still clearly a link.
   readonly property color link: Qt.hsla(accent.hslHue,
     Math.min(accent.hslSaturation, 0.55),
     accent.hslLightness, 1.0)
@@ -219,9 +199,6 @@ Item {
     readOnly: true
   }
 
-  // Two breakpoints, not a continuum: three columns, list-plus-reader with the
-  // sidebar collapsed to a strip, and a single column that swaps list for
-  // reader.
   readonly property bool assistantOpen: agentPrompt.opened || composeAgent.opened
   readonly property var activeAssistant: composeAgent.opened ? composeAgent : (agentPrompt.opened ? agentPrompt : null)
   property real preferredAssistantWidth: 0
@@ -354,18 +331,7 @@ Item {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
   }
   // ---------------------------------------------------------- navigation
-  //
-  // Where the window is, as a history: one entry per place, the newest last.
-  // Every `visible:` below is read off the top of it, and every Back — the
-  // bars on the pages, Escape, a draft closing — is one function, `back()`.
-  // The rules live in `account/Navigation.js`; this file only applies them.
-  //
-  // Overlays (a draft, the event form, the shortcut sheet) are entries too,
-  // but their open state is owned by the view that draws them, so the stack
-  // follows the view rather than the other way round: the view opening pushes,
-  // the view closing pops. `back()` on one asks the view to close and lets
-  // that pop happen, which is why a draft that refuses to close — because it
-  // is saving, or has a recovered draft to show next — stays on the stack.
+  // Views own overlay state; the navigation stack follows their open/close.
   property var nav: Nav.rootFor(({}))
   readonly property var navKinds: Nav.kinds(nav)
   readonly property var navPage: Nav.page(nav)
@@ -698,21 +664,7 @@ Item {
     previewCursor()
   }
 
-  // Whether there is a preview on screen to be talking about.
-  //
-  // Never in a narrow window: there the reader takes the list's place, so
-  // every press would navigate away from the list being moved through and
-  // there would be nothing left to move. Never over a page, a draft or the
-  // calendar either, for the same reason — the list is not what is on screen.
-  //
-  // Asked twice, when the cursor moves and again when the dwell fires, because
-  // every part of it can change in between: a page opens, a draft is started,
-  // the window is dragged across the breakpoint. A message that is no longer
-  // being shown is not a message being read, however long the cursor has sat
-  // on its row.
-  // #83's label picker is an `anchors.fill` overlay rather than a nav entry, so
-  // none of the state above notices it. Pressing `v` during a dwell otherwise
-  // let the timer mark read a message that was about to be moved.
+  // Rechecked after the dwell because the visible surface may have changed.
   readonly property bool canPreview: !!service && service.previewOnCursor
     && !compact && !showPage && !composing && !calendarVisible
     && !labelPicker.opened
@@ -953,14 +905,6 @@ Item {
     })
   }
 
-  // Put the parked draft back in front of the writer.
-  //
-  // Undo and a failed send want the same thing and used to be one of them:
-  // the message is in `pendingDraft` and nowhere else, so whatever reopens it
-  // has to also deal with the draft that was started on top of it during the
-  // undo window. `resumePendingSend` moves that newer one to
-  // `interruptedDraft`, and saving it is what keeps reopening the parked one
-  // from overwriting it.
   function restoreParkedDraft(sendId, oldest) {
     if (!compose.resumePendingSend(sendId, oldest)) return false
     var interrupted = compose.interruptedDraft
@@ -1311,31 +1255,11 @@ Item {
       if (compose.opened || compose.parkedForSend) root.scheduleComposeRecovery()
       else root.clearComposeRecovery()
     }
-    // The send did not happen, so the draft is still the only copy. Reopening
-    // it is the whole answer: the status bar already carries the reason, and a
-    // composer that stays shut leaves the writer with a sentence about a
-    // message they can no longer see. Recovery is scheduled rather than
-    // cleared for the same reason — the words are still unsent.
     function onReplyFailed(sendId) {
       if (!root.restoreParkedDraft(sendId, true)) return
       root.scheduleComposeRecovery()
     }
-    // Every time the list is replaced — first arrival, a mailbox switch, a
-    // search, a refresh that dropped things. A cursor whose message survived
-    // keeps its place; one whose message is gone would be unfindable, and an
-    // unfindable cursor sends the next j to the top of the list.
-    // The message a held draft was waiting for. Both halves have to have
-    // landed: the summary carries the addresses and the subject, and the body
-    // is what gets quoted — so whichever of them arrives last is what starts
-    // the draft, and `Qt.callLater` is what lets the fetch finish assigning the
-    // rest before either is believed.
-    //
-    // Watching the body alone was not enough, and the case it missed was every
-    // message that had been opened before. Those paint from the cache, so the
-    // body changes while the summary is still null; when the summary lands the
-    // markup has not changed, so the body is not written a second time and
-    // nothing fires again. Reply, reply-all and forward raised from the list
-    // opened the message and stopped there.
+    // A held reply needs both summary and body, whichever arrives last.
     function onSelectedBodyChanged() { Qt.callLater(function() {
       root.resumeHeldCompose()
       root.resumeHeldDraft()
