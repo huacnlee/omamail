@@ -13,17 +13,12 @@ import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
 import "providers/Registry.js" as Provider
+import "agent/Agent.js" as Agent
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
 import "calendar"
 
-// The application window. The shell loads this entry point when the plugin is
-// summoned and calls open()/close() on it; the FloatingWindow follows.
-//
-// Compose takes over the content area of this same window rather than opening
-// a second one; Omarchy's panel mechanism would give an extra window a region
-// of its own, which is not what a reply is.
 Item {
   id: root
 
@@ -64,20 +59,33 @@ Item {
     if (accountId !== "" && service
         && String(service.activeAccountId || "") !== accountId
         && typeof service.switchTo === "function") service.switchTo(accountId)
-    // The draft was raised over the reader if the file says so; otherwise it
-    // returns to the root, whichever root the window is on now.
     pendingComposeReturnTo = composeRecovery.returnView === "reader" ? Nav.depth(nav) : 1
     composeRecoveryRestoring = true
     compose.restoreDraft(composeRecovery.draft)
     composeRecoveryRestoring = false
+    var parked = composeRecovery.parked || []
+    if (parked.length > 0) compose.recoveryDrafts = compose.recoveryDrafts.concat(parked)
     return true
+  }
+
+  function parkedBesides(draft) {
+    var out = []
+    var parked = compose.parkedDrafts || []
+    for (var i = 0; i < parked.length; i++) {
+      if (parked[i].draft !== draft) out.push(parked[i].draft)
+    }
+    var recovered = compose.recoveryDrafts || []
+    for (var j = 0; j < recovered.length; j++) {
+      if (recovered[j] !== draft) out.push(recovered[j])
+    }
+    return out
   }
 
   function saveComposeRecovery(saved) {
     composeRecoveryTimer.stop()
     var draft = saved || (compose.opened ? compose.snapshotDraft()
       : (compose.parkedForSend ? compose.pendingDraft : null))
-    var raw = Recovery.serialize(composeReturnView(), draft)
+    var raw = Recovery.serialize(composeReturnView(), draft, parkedBesides(draft))
     if (raw === "") {
       clearComposeRecovery()
       return composeRecoveryRevision
@@ -158,17 +166,12 @@ Item {
   readonly property color background: Color.background
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
-  // Destructive controls consume a role named for their meaning. Omarchy's
-  // foundational palette currently calls that source `urgent`; keeping the
-  // mapping here stops account pages from confusing urgency with danger.
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
   readonly property color calendarBorder: Style.normalBorderColor
   readonly property color calendarTodayBackground: Style.selectedAccentFill
   readonly property int calendarBorderWidth: Style.normalBorderWidth
-  // Mixed toward the ground rather than Qt.darker: on a light theme darkening
-  // an almost-black foreground makes secondary text heavier than body text.
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
     foreground.g * 0.68 + background.g * 0.32,
@@ -177,10 +180,6 @@ Item {
     foreground.r * 0.45 + background.r * 0.55,
     foreground.g * 0.45 + background.g * 0.55,
     foreground.b * 0.45 + background.b * 0.55, 1)
-  // Omarchy's palette has no separate "primary": `accent` is it. This theme's
-  // accent is near fully saturated, which is right for a 5px unread dot and
-  // wrong for a link sitting inside a paragraph. Same hue, same lightness,
-  // capped saturation — calm enough to read past, still clearly a link.
   readonly property color link: Qt.hsla(accent.hslHue,
     Math.min(accent.hslSaturation, 0.55),
     accent.hslLightness, 1.0)
@@ -200,11 +199,17 @@ Item {
     readOnly: true
   }
 
-  // Two breakpoints, not a continuum: three columns, list-plus-reader with the
-  // sidebar collapsed to a strip, and a single column that swaps list for
-  // reader.
-  readonly property bool wide: window.width >= Style.space(1000)
-  readonly property bool compact: window.width < Style.space(760)
+  readonly property bool assistantOpen: agentPrompt.opened || composeAgent.opened
+  readonly property var activeAssistant: composeAgent.opened ? composeAgent : (agentPrompt.opened ? agentPrompt : null)
+  property real preferredAssistantWidth: 0
+  readonly property real assistantMaxWidth: Math.max(0, Math.min(window.width * 0.65, window.width - Style.space(320)))
+  readonly property real assistantMinWidth: Math.min(Style.space(280), assistantMaxWidth)
+  readonly property real assistantWidth: assistantOpen ? Math.max(assistantMinWidth, Math.min(assistantMaxWidth,
+    preferredAssistantWidth > 0 ? preferredAssistantWidth : Math.min(Style.space(420), window.width * 0.45))) : 0
+  property bool assistantEditing: false
+  readonly property real mailWidth: window.width - assistantWidth
+  readonly property bool wide: mailWidth >= Style.space(1000)
+  readonly property bool compact: mailWidth < Style.space(760)
 
   property string cursorId: ""
   // The rows ticked for a bulk action, by id. Like the cursor, a fact about
@@ -222,7 +227,7 @@ Item {
   // Ticked rows mean the selection whenever the list is on screen: alone, or
   // beside the reader in a wide window. A plain click opens a message and
   // puts the window in the reader view, so a click, a Shift+click and `d`
-  // would otherwise trash only the open message with the ticks ignored.
+  // used to trash only the open message — the ticks were there and ignored.
   readonly property bool listOnScreen: currentView === "list"
     || (currentView === "reader" && !compact)
   readonly property bool selectionActive: checkedIds.length > 0 && listOnScreen
@@ -326,18 +331,7 @@ Item {
     if (service) service.setBodyZoom(Model.zoomAfterStep(service.bodyZoom, step))
   }
   // ---------------------------------------------------------- navigation
-  //
-  // Where the window is, as a history: one entry per place, the newest last.
-  // Every `visible:` below is read off the top of it, and every Back — the
-  // bars on the pages, Escape, a draft closing — is one function, `back()`.
-  // The rules live in `account/Navigation.js`; this file only applies them.
-  //
-  // Overlays (a draft, the event form, the shortcut sheet) are entries too,
-  // but their open state is owned by the view that draws them, so the stack
-  // follows the view rather than the other way round: the view opening pushes,
-  // the view closing pops. `back()` on one asks the view to close and lets
-  // that pop happen, which is why a draft that refuses to close — because it
-  // is saving, or has a recovered draft to show next — stays on the stack.
+  // Views own overlay state; the navigation stack follows their open/close.
   property var nav: Nav.rootFor(({}))
   readonly property var navKinds: Nav.kinds(nav)
   readonly property var navPage: Nav.page(nav)
@@ -352,6 +346,8 @@ Item {
   readonly property bool showSetup: page === "setup"
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSettings || showPicker || showSetup
+  onComposingChanged: { if (!composing) composeAgent.close(); else agentPrompt.close() }
+  onShowPageChanged: if (showPage) { agentPrompt.close(); composeAgent.close() }
   readonly property bool composing: overlay === "compose" || overlay === "eventComposer"
   readonly property bool shortcutHelpVisible: overlay === "help"
   readonly property string editingProvider: page === "setup" ? String(navPage.provider || "") : ""
@@ -535,6 +531,8 @@ Item {
       sidebarWidth = service.sidebarWidth
       listWidth = service.listWidth
     }
+    // Jobs finish while the window is shut; the rows say so as soon as it opens.
+    if (service && typeof service.refreshAgentJobs === "function") service.refreshAgentJobs()
     Qt.callLater(function() { focusScope.applyContextFocus() })
   }
 
@@ -605,6 +603,11 @@ Item {
     if (next !== "" && next !== service.selectedId) openMember(next)
   }
 
+  function openOrEdit(id) {
+    if (service && service.mailboxKey === "drafts" && editDraft(id)) return true
+    return openMessage(id)
+  }
+
   function editDraft(id) {
     if (!service || service.mailboxKey !== "drafts") return false
     var draftId = String(id || "")
@@ -661,21 +664,7 @@ Item {
     previewCursor()
   }
 
-  // Whether there is a preview on screen to be talking about.
-  //
-  // Never in a narrow window: there the reader takes the list's place, so
-  // every press would navigate away from the list being moved through and
-  // there would be nothing left to move. Never over a page, a draft or the
-  // calendar either, for the same reason — the list is not what is on screen.
-  //
-  // Asked twice, when the cursor moves and again when the dwell fires, because
-  // every part of it can change in between: a page opens, a draft is started,
-  // the window is dragged across the breakpoint. A message that is no longer
-  // being shown is not a message being read, however long the cursor has sat
-  // on its row.
-  // #83's label picker is an `anchors.fill` overlay rather than a nav entry, so
-  // none of the state above notices it. Pressing `v` during a dwell otherwise
-  // let the timer mark read a message that was about to be moved.
+  // Rechecked after the dwell because the visible surface may have changed.
   readonly property bool canPreview: !!service && service.previewOnCursor
     && !compact && !showPage && !composing && !calendarVisible
     && !labelPicker.opened
@@ -916,16 +905,8 @@ Item {
     })
   }
 
-  // Put the parked draft back in front of the writer.
-  //
-  // Undo and a failed send want the same thing and used to be one of them:
-  // the message is in `pendingDraft` and nowhere else, so whatever reopens it
-  // has to also deal with the draft that was started on top of it during the
-  // undo window. `resumePendingSend` moves that newer one to
-  // `interruptedDraft`, and saving it is what keeps reopening the parked one
-  // from overwriting it.
-  function restoreParkedDraft() {
-    if (!compose.resumePendingSend()) return false
+  function restoreParkedDraft(sendId, oldest) {
+    if (!compose.resumePendingSend(sendId, oldest)) return false
     var interrupted = compose.interruptedDraft
     var fields = compose.interruptedFields()
     if (!interrupted || !fields || !service) return true
@@ -943,8 +924,10 @@ Item {
   }
 
   function undoPendingSend() {
-    if (!service || !service.undoSend()) return false
-    root.restoreParkedDraft()
+    if (!service) return false
+    var undone = service.undoSend()
+    if (!undone) return false
+    root.restoreParkedDraft(undone === true ? "" : String(undone), false)
     return true
   }
 
@@ -993,6 +976,45 @@ Item {
       return true
     }
     return actOnCursor(action, outside)
+  }
+
+  // The subject the popup names, from the row or the open message.
+  function agentSubjectFor(id) {
+    if (!service) return ""
+    var index = Model.indexById(service.messages, id)
+    if (index >= 0) return String(service.messages[index].subject || "")
+    if (service.selectedId === id && service.selectedMessage)
+      return String(service.selectedMessage.subject || "")
+    return ""
+  }
+
+  // With rows ticked, the ask is about all of them, one job with a count.
+  function openAgentAt(id, sceneX, sceneY) {
+    if (!service || !service.hasAgent) return false
+    if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
+      agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
+      return true
+    }
+    if (String(id || "") === "") return false
+    agentPrompt.openFor(id, agentSubjectFor(id), sceneX, sceneY)
+    return true
+  }
+
+  function openAgentCentered(id) {
+    if (!service || !service.hasAgent) return false
+    if (selectionActive) {
+      var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
+        Math.max(0, root.height / 2 - Style.space(90)))
+      agentPrompt.openForSelection(checkedIds, centre.x, centre.y)
+      return true
+    }
+    if (String(id || "") === "") return false
+    agentPrompt.openCenteredFor(id, agentSubjectFor(id))
+    return true
+  }
+
+  function openAgentFromRow(id, sceneX, sceneY) {
+    return openAgentAt(id, sceneX, sceneY)
   }
 
   // Acting on the open message closes it: it is about to leave this list.
@@ -1092,6 +1114,10 @@ Item {
   // row there and a case here, and nothing else. The sequence says which key of
   // a row fired, for the rows that bind more than one meaning.
   function runShortcut(id, sequence) {
+    if (id === "assistantSend") return activeAssistant ? activeAssistant.submitCurrent() : false
+    if (id === "assistantCommandUp") return activeAssistant ? activeAssistant.moveCommand(-1) : false
+    if (id === "assistantCommandDown") return activeAssistant ? activeAssistant.moveCommand(1) : false
+    if (id === "assistantChooseCommand") return activeAssistant ? activeAssistant.chooseCommand() : false
     // The sheet is on top, so moving moves it. It is a plain overlay rather
     // than a popup, which is why its keys can come from here at all — the
     // switcher's cannot, and answers them itself.
@@ -1101,7 +1127,10 @@ Item {
     }
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
-    if (id === "open") return openMessage(cursorId)
+    // In Drafts, opening a draft from the keyboard is editing it: the
+    // message is what was being written. A click still previews, so the
+    // list can be read through without a composer opening on every row.
+    if (id === "open") return openOrEdit(cursorId)
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
@@ -1124,6 +1153,11 @@ Item {
       return
     }
     if (id === "toggleCheck") return toggleCheck(cursorId)
+    if (id === "askAgent") {
+      if (root.composing) { composeAgent.open(); return true }
+      var target = currentView === "reader" && service ? service.selectedId : cursorId
+      return openAgentCentered(target)
+    }
     if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
     if (id === "markRead") return actOnCursor("markRead")
@@ -1187,6 +1221,11 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
+    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
+    if (activeAssistant && activeAssistant.interrupt()) return
+    if (composeAgent.opened) { composeAgent.close(); return }
+    if (agentPrompt.opened) { agentPrompt.close(); return }
     // A query being typed is the nearest thing to leave: clear it if there is
     // one, then hand the keyboard back. Parked directly rather than through
     // applyContextFocus, which would still read the context as "search" —
@@ -1210,36 +1249,17 @@ Item {
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onReplySent() {
-      if (!compose.completePendingSend()) return
-      if (compose.opened) root.scheduleComposeRecovery()
+    function onReplySent(sendId) {
+      if (!compose.completePendingSend(sendId)) return
+      // Other sends may still be parked: recovery keeps holding them.
+      if (compose.opened || compose.parkedForSend) root.scheduleComposeRecovery()
       else root.clearComposeRecovery()
     }
-    // The send did not happen, so the draft is still the only copy. Reopening
-    // it is the whole answer: the status bar already carries the reason, and a
-    // composer that stays shut leaves the writer with a sentence about a
-    // message they can no longer see. Recovery is scheduled rather than
-    // cleared for the same reason — the words are still unsent.
-    function onReplyFailed() {
-      if (!root.restoreParkedDraft()) return
+    function onReplyFailed(sendId) {
+      if (!root.restoreParkedDraft(sendId, true)) return
       root.scheduleComposeRecovery()
     }
-    // Every time the list is replaced — first arrival, a mailbox switch, a
-    // search, a refresh that dropped things. A cursor whose message survived
-    // keeps its place; one whose message is gone would be unfindable, and an
-    // unfindable cursor sends the next j to the top of the list.
-    // The message a held draft was waiting for. Both halves have to have
-    // landed: the summary carries the addresses and the subject, and the body
-    // is what gets quoted — so whichever of them arrives last is what starts
-    // the draft, and `Qt.callLater` is what lets the fetch finish assigning the
-    // rest before either is believed.
-    //
-    // Watching the body alone was not enough, and the case it missed was every
-    // message that had been opened before. Those paint from the cache, so the
-    // body changes while the summary is still null; when the summary lands the
-    // markup has not changed, so the body is not written a second time and
-    // nothing fires again. Reply, reply-all and forward raised from the list
-    // opened the message and stopped there.
+    // A held reply needs both summary and body, whichever arrives last.
     function onSelectedBodyChanged() { Qt.callLater(function() {
       root.resumeHeldCompose()
       root.resumeHeldDraft()
@@ -1255,6 +1275,10 @@ Item {
     function onActiveAccountIdChanged() {
       root.clearChecksIfForeign()
       root.cursorId = ""
+      root.closeLabelPopups()
+      // The agent popup is about one account's message too.
+      agentPrompt.close()
+      composeAgent.close()
     }
     function onSidebarWidthChanged() { root.sidebarWidth = root.service.sidebarWidth }
     function onListWidthChanged() { root.listWidth = root.service.listWidth }
@@ -1463,12 +1487,82 @@ Item {
     })
   }
 
+
   function confirmDelete(request) {
     if (!service) return
     if (request.kind === "event" && request.event) {
       service.calendarController.deleteEvent(request.sourceId, request.event)
       calendarView.closeDetail()
     }
+    if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId, request.accountId)
+  }
+
+  // ------------------------------------------------------------ labels
+
+  // Every label popup — the menu, the name prompt, the move picker, the
+  // delete confirmation — is opened for one account and answers to it by
+  // id, whatever the window has switched to since. An IMAP label id is a
+  // folder name, which another account may well have too, so the open
+  // account is no guide to whose folder was meant. And a switch closes
+  // them: a prompt about a mailbox no longer on screen is a trap.
+  function openLabelMenu(labelId, path, sceneX, sceneY) {
+    if (!service) return
+    labelMenu.accountId = service.activeAccountId
+    labelMenu.canManage = service.canManageLabels
+    labelMenu.monitored = service.monitoredLabelIds.indexOf(labelId) >= 0
+    labelMenu.openAt(labelId, path, sceneX, sceneY)
+  }
+
+  function closeLabelPopups() {
+    labelMenu.close()
+    namePrompt.close()
+    labelMovePicker.close()
+    if (confirmDeleteDialog.request && confirmDeleteDialog.request.kind === "label") confirmDeleteDialog.close()
+  }
+
+  function labelDelimiterFor(id, accountId) {
+    var label = service ? service.labelById(id, accountId) : null
+    return Model.labelDelimiter(label)
+  }
+
+  function labelPathFor(id, accountId) {
+    var label = service ? service.labelById(id, accountId) : null
+    return label ? String(label.name || label.rawName || "") : ""
+  }
+
+  // A name asked for, then handed to the service with what it was for. The
+  // prompt is one component serving three asks, told apart by `kind`.
+  function askLabelName(kind, subject, title, initial, hint, accountId) {
+    namePrompt.accountId = String(accountId || "")
+    namePrompt.openFor(kind, subject, title, initial, hint)
+  }
+
+  function labelNamed(kind, subject, text, accountId) {
+    if (!service) return
+    if (kind === "rename") service.renameLabel(subject, text, accountId)
+    else if (kind === "create") service.createLabel(subject, text, accountId)
+  }
+
+  function copyAddress(address) {
+    var text = String(address || "").trim()
+    // Straight to wl-copy as one argument: no shell, and an address that
+    // starts with a dash is not an address.
+    if (text === "" || text.charAt(0) === "-") return
+    Quickshell.execDetached(["wl-copy", text])
+    notice = "Copied " + text
+    noticeTimer.restart()
+  }
+
+  function searchAddress(field, address) {
+    if (!service) return
+    var query = Provider.addressQuery(service.providerId, field, address)
+    if (query === "") return
+    // In the provider's own words, so it must not pass through the typed
+    // search's wrapping a second time; the box shows the words for it.
+    var text = (field === "to" ? "to: " : "from: ") + String(address || "").trim()
+    service.searchAddress(query, text)
+    searchBar.setQuery(text)
+    backToList()
   }
 
   FloatingWindow {
@@ -1514,6 +1608,8 @@ Item {
       onActiveFocusChanged: if (!activeFocus) ctrlDown = false
 
       readonly property string keyContext: Keymap.contextFor(({
+        assistantEditing: root.assistantOpen && root.assistantEditing,
+        assistantCommands: !!root.activeAssistant && root.activeAssistant.commandsOpen,
         showPage: root.showPage,
         composing: root.composing,
         searchFocused: searchBar.fieldFocused,
@@ -1531,8 +1627,18 @@ Item {
       // and a closed compose field kept swallowing j and k. One mechanism now,
       // and there is nothing to keep in step.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
+      function focusWithin(container) {
+        var item = focusScope.Window.activeFocusItem
+        while (item) { if (item === container) return true; item = item.parent }
+        return false
+      }
       function applyContextFocus() {
-        if (keyContext === "compose") {
+        if (keyContext === "assistant" || keyContext === "assistantCommands") {
+          if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
+          else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
+        }
+        else if (keyContext === "compose") {
+          if (focusWithin(compose)) return
           if (eventComposer.opened) eventComposer.takeFocus()
           else compose.takeFocus()
         }
@@ -1710,6 +1816,7 @@ Item {
           }
 
           Button {
+            id: headerComposeButton
             objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
             visible: !root.showPage && !root.composing && !root.calendarVisible
@@ -1724,6 +1831,42 @@ Item {
             onClicked: root.startCompose("new")
           }
 
+          Button {
+            id: headerAgentButton
+            parent: root.composing ? composeAiSlot : headerRight
+            anchors.right: root.composing ? parent.right : undefined
+            objectName: "header-ai-button"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
+            width: headerComposeButton.implicitHeight
+            height: headerComposeButton.implicitHeight
+            Accessible.name: "AI"
+            tooltipText: "AI... · Alt+G"
+            ActionIcon {
+              anchors.centerIn: parent
+              // The antenna makes the robot visually bottom-heavy.
+              anchors.verticalCenterOffset: -Style.space(1)
+              name: "agent"
+              iconSize: Style.font.icon
+              color: headerAgentButton.foreground
+              fontFamily: root.fontFamily
+            }
+            foreground: root.assistantOpen ? root.foreground : root.dim
+            bordered: true
+            selected: root.assistantOpen
+            focusable: true
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            enabled: root.ready && (root.assistantOpen || compose.opened || root.selectionActive
+              || root.cursorId !== "" || (!!root.service && root.service.selectedId !== ""))
+            onClicked: {
+              if (root.assistantOpen) { agentPrompt.close(); composeAgent.close() }
+              else root.runShortcut("askAgent", "Alt+G")
+            }
+
+          }
+
         }
 
         PanelSeparator {
@@ -1733,10 +1876,24 @@ Item {
         }
       }
 
+      // The same global AI control stays at the window's top-right when the
+      // composer's own header replaces the mailbox header.
+      Item {
+        id: composeAiSlot
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(14)
+        height: Style.space(44)
+        width: headerAgentButton.width
+        visible: root.composing
+        z: 30
+      }
+
       // -------------------------------------------------------------- body
 
       Item {
         id: body
+        anchors.rightMargin: root.assistantWidth
         anchors.top: header.visible ? header.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -1754,6 +1911,8 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          menuLabelPath: labelMenu.opened && !!root.service
+            && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
           textColor: root.foreground
           accentColor: root.accent
@@ -1773,6 +1932,9 @@ Item {
             root.backToList()
           }
           onFolderToggled: function(path) { root.service.toggleFolder(path) }
+          onLabelMenuRequested: function(labelId, path, sceneX, sceneY) {
+            root.openLabelMenu(labelId, path, sceneX, sceneY)
+          }
         }
 
         // Narrow windows lose the sidebar; the same mailboxes come back as a
@@ -1884,10 +2046,12 @@ Item {
               cursorId: root.cursorId
               checkedIds: root.checkedIds
               ctrlHeld: focusScope.ctrlHeld
+              urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
+              onAgentRequested: function(id, sceneX, sceneY) { root.openAgentFromRow(id, sceneX, sceneY) }
+              onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onMenuRequested: function(id, sceneX, sceneY) {
                 root.cursorId = id
                 rowMenu.openAt(id, sceneX, sceneY)
@@ -1982,6 +2146,15 @@ Item {
           onMailtoRequested: function(url) {
             root.openDraft(Mailto.parse(url))
           }
+          onAgentRequested: function(sceneX, sceneY) { root.openAgentAt(root.service.selectedId, sceneX, sceneY) }
+          agentOpen: agentPrompt.opened && !!root.service && agentPrompt.messageId === root.service.selectedId
+          agentWorking: !!root.service && root.service.selectedId !== ""
+            && Agent.isActive((root.service.agentJobs || {})[root.service.selectedId])
+          agentAttention: !!root.service && root.service.selectedId !== ""
+            && (root.service.agentAttentionByMessage || {})[root.service.selectedId] === true
+          onAddressMenuRequested: function(addresses, sceneX, sceneY) {
+            addressMenu.openAt(addresses, sceneX, sceneY)
+          }
           onActionRequested: function(action) {
             if (!root.service || root.service.selectedId === "") return
             // The toolbar acts on the message it is under, which is normally
@@ -2016,6 +2189,11 @@ Item {
           id: compose
           anchors.fill: parent
           visible: opened && !root.showPage
+          agentOpen: composeAgent.opened
+          agentWorking: composeAgent.working
+          agentAttention: !!root.service && !!root.service.hasAgent
+            && root.service.agentJobWantsAttention(composeAgent.job) && !composeAgent.opened
+          onAgentRequested: function(sceneX, sceneY) { composeAgent.openAt(sceneX, sceneY) }
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
@@ -2061,6 +2239,7 @@ Item {
           dimColor: root.dim
           panelFontFamily: root.fontFamily
         }
+
 
         Rectangle {
           anchors.top: parent.top
@@ -2284,6 +2463,8 @@ Item {
         z: 80
         visible: !!root.service && root.service.sendPending && compose.parkedForSend
         secondsRemaining: root.service ? root.service.sendSecondsRemaining : 0
+        queuedCount: root.service && root.service.sendPendingCount !== undefined
+          ? root.service.sendPendingCount : 1
         textColor: root.foreground
         dimColor: root.dim
         accentColor: root.accent
@@ -2368,9 +2549,30 @@ Item {
           font.bold: true
         }
 
+        // What is still in flight — sends parked or going, actions running or
+        // waiting their turn — said once, here, while any of it is true.
+        Text {
+          id: activityLabel
+          objectName: "status-activity"
+          anchors.left: selectionLabel.visible ? selectionLabel.right
+            : (railToggle.visible ? railToggle.right : parent.left)
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          visible: text !== "" && !root.showPage
+          text: root.service && root.service.activityStatus !== undefined
+            ? root.service.activityStatus : ""
+          // Capped so a long line of it cannot push the address off the bar.
+          width: Math.min(implicitWidth, Style.space(360))
+          elide: Text.ElideRight
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
         Item {
           id: accountSlot
-          anchors.left: selectionLabel.visible ? selectionLabel.right
+          anchors.left: activityLabel.visible ? activityLabel.right
+            : selectionLabel.visible ? selectionLabel.right
             : (railToggle.visible ? railToggle.right : parent.left)
           // The rail's labels sit 9 after their glyph; the toggle's box runs
           // past its glyph by half its slack, so the text starts that much
@@ -2502,13 +2704,15 @@ Item {
           accentColor: root.accent
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
-            root.service ? root.service.unavailableActions : [])
+            root.service ? root.service.unavailableActions : [],
+            root.cursorId !== "")
         }
       }
 
       // The window menu is opened by the menu button beside the mark.
       AppMenu {
         id: appMenu
+        objectName: "app-menu"
         anchors.fill: parent
         textColor: root.foreground
         popupBackgroundColor: root.popupBackground
@@ -2563,6 +2767,163 @@ Item {
         }
       }
 
+      Item {
+        id: assistantDock
+        objectName: "assistant-dock"
+        anchors.right: parent.right
+        anchors.top: root.composing ? composeAiSlot.bottom : header.bottom
+        anchors.bottom: statusBar.top
+        width: root.assistantWidth
+        visible: root.assistantOpen
+        MouseArea {
+          objectName: "assistant-splitter"
+          anchors.left: parent.left
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(5)
+          z: 100
+          cursorShape: Qt.SplitHCursor
+          property real grabbedAt: 0
+          property real grabbedWidth: 0
+          onPressed: function(mouse) {
+            grabbedAt = mapToItem(focusScope, mouse.x, mouse.y).x
+            grabbedWidth = root.assistantWidth
+          }
+          onPositionChanged: function(mouse) {
+            if (!pressed) return
+            var moved = mapToItem(focusScope, mouse.x, mouse.y).x - grabbedAt
+            root.preferredAssistantWidth = Math.max(root.assistantMinWidth,
+              Math.min(root.assistantMaxWidth, grabbedWidth - moved))
+          }
+          onDoubleClicked: root.preferredAssistantWidth = 0
+        }
+        AgentPrompt {
+          id: agentPrompt
+          onOpenedChanged: if (opened) composeAgent.close()
+          objectName: "agent-prompt"
+          service: root.service
+          anchors.fill: parent
+          textColor: root.foreground
+          accentColor: root.accent
+          urgentColor: root.urgent
+          dimColor: root.dim
+          popupBackgroundColor: root.popupBackground
+          popupBorderColor: root.popupBorder
+          panelFontFamily: root.fontFamily
+          onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
+          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
+          onEditingChanged: function(editing) { root.assistantEditing = editing }
+          onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+        }
+
+        ComposeAgent {
+          id: composeAgent
+          onOpenedChanged: if (opened) agentPrompt.close()
+          objectName: "compose-agent"
+          anchors.fill: parent
+          service: root.service
+          composer: compose
+          textColor: root.foreground
+          accentColor: root.accent
+          urgentColor: root.urgent
+          dimColor: root.dim
+          popupBackgroundColor: root.popupBackground
+          popupBorderColor: root.popupBorder
+          panelFontFamily: root.fontFamily
+          onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
+          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
+          onEditingChanged: function(editing) { root.assistantEditing = editing }
+          onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+        }
+      }
+
+      LabelMenu {
+        id: labelMenu
+        objectName: "label-menu"
+        anchors.fill: parent
+        textColor: root.foreground
+        urgentColor: root.urgent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onRenameRequested: function(labelId) {
+          var owner = labelMenu.accountId
+          var path = root.labelPathFor(labelId, owner)
+          var delimiter = root.labelDelimiterFor(labelId, owner)
+          root.askLabelName("rename", labelId, "Rename " + path,
+            Model.labelLeaf(path, delimiter), "The new name for this label. Labels beneath it move with it.", owner)
+        }
+        onCreateRequested: function(path, beneath) {
+          var owner = labelMenu.accountId
+          var labels = root.service ? root.service.labelsOf(owner) : []
+          var delimiter = Model.labelDelimiter(labels.length > 0 ? labels[0] : null)
+          var parent = beneath ? path : Model.labelParent(path, delimiter)
+          root.askLabelName("create", parent,
+            parent === "" ? "New label" : "New label under " + parent, "",
+            "Its name at this level; nesting is the parent it goes under.", owner)
+        }
+        onMoveRequested: function(labelId) {
+          var owner = labelMenu.accountId
+          var delimiter = root.labelDelimiterFor(labelId, owner)
+          labelMovePicker.accountId = owner
+          labelMovePicker.openFor(labelId,
+            Model.labelMoveTargets(root.service ? root.service.labelsOf(owner) : [], root.labelPathFor(labelId, owner), delimiter))
+        }
+        onMonitorToggled: function(labelId) { if (root.service) root.service.toggleMonitored(labelId, labelMenu.accountId) }
+        onDeleteRequested: function(labelId) {
+          var owner = labelMenu.accountId
+          var path = root.labelPathFor(labelId, owner)
+          confirmDeleteDialog.openFor({
+            kind: "label", labelId: labelId, name: path, accountId: owner,
+            message: "The label and every label beneath it are removed from the server. "
+              + "On Gmail the messages keep their other labels; on IMAP the folder and its mail are deleted."
+          })
+        }
+      }
+
+      NamePrompt {
+        id: namePrompt
+        objectName: "name-prompt"
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onSubmitted: function(kind, subject, text) { root.labelNamed(kind, subject, text, namePrompt.accountId) }
+      }
+
+      LabelMovePicker {
+        id: labelMovePicker
+        objectName: "label-move-picker"
+        anchors.fill: parent
+        textColor: root.foreground
+        accentColor: root.accent
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onTargetChosen: function(labelId, parentPath) {
+          if (root.service) root.service.moveLabel(labelId, parentPath, labelMovePicker.accountId)
+        }
+      }
+
+      AddressMenu {
+        id: addressMenu
+        objectName: "address-menu"
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        canSearch: !!root.service && Provider.addressQuery(root.service.providerId, "from", "a@b.c") !== ""
+        onCopyRequested: function(address) { root.copyAddress(address) }
+        onSearchRequested: function(field, address) { root.searchAddress(field, address) }
+      }
+
       LabelPicker {
         id: labelPicker
         objectName: "label-picker"
@@ -2605,6 +2966,7 @@ Item {
       }
 
       MessageMenu {
+        onAgentRequested: function(id, sceneX, sceneY) { root.openAgentAt(id, sceneX, sceneY) }
         id: rowMenu
         objectName: "rowMenu"
         service: root.service
@@ -2652,6 +3014,8 @@ Item {
       // ---------------------------------------------------------- keyboard
 
       KeyRouter {
+        id: keyRouter
+        objectName: "key-router"
         context: focusScope.keyContext
         overlay: root.shortcutHelpVisible
         onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }

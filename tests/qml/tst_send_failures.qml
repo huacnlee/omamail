@@ -25,6 +25,12 @@ Item {
 
   Omamail.App { id: app; service: mailService }
 
+  SignalSpy {
+    id: failureSpy
+    target: mailService
+    signalName: "replyFailed"
+  }
+
   TestCase {
     name: "SendFailures"
     when: windowShown
@@ -104,6 +110,7 @@ Item {
     }
 
     function init() {
+      failureSpy.clear()
       stopSends()
       mailService.applySettings({ undoSendSeconds: 10 })
       resetApp()
@@ -128,8 +135,8 @@ Item {
       verify(mailService.switchToIndex(1))
       compare(mailService.activeAccountId, bobId)
       var failed = mailService.accountAt(0)
-      failed.pendingSend = null
-      failed.replyFailed()
+      failed.sendQueue.parked = []
+      failed.replyFailed("")
 
       compare(mailService.activeAccountId, adaId,
         "the failing account must be active before its draft is restored")
@@ -157,7 +164,7 @@ Item {
       compare(app.composeRecovery.draft.body, "Keep every word")
     }
 
-    function test_keyboard_send_cannot_replace_another_accounts_parked_draft() {
+    function test_a_second_send_parks_behind_the_first_and_undo_takes_back_the_newest() {
       seed([entry(ada), entry(bob)], adaId)
       var compose = composeView()
       app.startCompose("new")
@@ -174,13 +181,47 @@ Item {
 
       app.runShortcut("send", "Ctrl+Return")
 
-      compare(compose.opened, true,
-        "the keyboard route must obey the service-wide send guard")
-      compare(mailService.accountAt(1).sendPending, false)
-      compare(mailService.lastError, "Another message is waiting to be sent")
-      compare(compose.pendingDraft.body, "Ada's pending message",
-        "a second account cannot overwrite the one global parked draft")
+      compare(compose.opened, false, "a second send parks like the first")
+      compare(mailService.accountAt(1).sendPending, true)
+      compare(mailService.sendPendingCount, 2)
+      compare(compose.pendingDraft.body, "Bob's newer draft",
+        "the newest parked draft is the one Undo would take back")
+
+      verify(app.undoPendingSend())
       compare(named(compose, "compose-body-editor").text, "Bob's newer draft")
+      compare(mailService.accountAt(1).sendPending, false)
+      compare(mailService.accountAt(0).sendPending, true,
+        "undoing the newest send leaves the older one parked")
+      compare(compose.pendingDraft.body, "Ada's pending message")
+    }
+
+    function test_repeated_failures_preserve_every_parked_draft() {
+      var compose = composeView()
+      compose.parkedDrafts = [
+        { sendId: "send-1", draft: { body: "First" } },
+        { sendId: "send-2", draft: { body: "Second" } },
+        { sendId: "send-3", draft: { body: "Third" } }
+      ]
+
+      verify(compose.resumePendingSend("send-1", true))
+      verify(compose.resumePendingSend("send-2", true))
+      verify(compose.resumePendingSend("send-3", true))
+
+      compare(compose.snapshotDraft().body, "Third")
+      compare(compose.interruptedDraft.body, "First")
+      compare(compose.recoveryDrafts.length, 1)
+      compare(compose.recoveryDrafts[0].body, "Second")
+    }
+
+    function test_unified_failure_is_relayed_once_without_switching_account() {
+      seed([entry(ada), entry(bob)], adaId)
+      mailService.applySettings({ unifiedMailboxes: true, undoSendSeconds: 10 })
+      tryCompare(mailService, "unified", true)
+
+      mailService.forwardReplyFailure(1, "send-7")
+
+      compare(failureSpy.count, 1)
+      compare(mailService.activeAccountId, adaId)
     }
   }
 }

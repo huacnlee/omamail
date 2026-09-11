@@ -471,3 +471,63 @@ assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
 console.log("test_calendar_feed.js ok")
+
+// -------------------------------------------------------------- Microsoft
+{
+  const view = {
+    value: [
+      { id: "AAMk1", iCalUId: "040000008200E00074C5B7101A82E008", subject: "Standup", bodyPreview: "Daily",
+        location: { displayName: "Teams" }, isAllDay: false, isCancelled: false,
+        start: { dateTime: "2026-09-08T13:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-08T13:15:00.0000000", timeZone: "UTC" },
+        organizer: { emailAddress: { name: "Ada", address: "ada@contoso.com" } },
+        attendees: [{ emailAddress: { name: "Bob", address: "bob@contoso.com" }, status: { response: "accepted" } }],
+        onlineMeeting: { joinUrl: "https://teams.microsoft.com/l/meetup-join/x" },
+        webLink: "https://outlook.office365.com/owa/?itemid=AAMk1" },
+      { id: "AAMk2", subject: "Offsite", isAllDay: true, isCancelled: false,
+        start: { dateTime: "2026-09-10T00:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-11T00:00:00.0000000", timeZone: "UTC" } },
+      { id: "AAMk3", subject: "Gone", isCancelled: true,
+        start: { dateTime: "2026-09-12T09:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-12T10:00:00.0000000", timeZone: "UTC" } }
+    ]
+  }
+  const events = feed.eventsFromGraph(view, "microsoft:outlook:me@contoso.com")
+  assert.strictEqual(events.length, 2, "a cancelled event is left out")
+  assert.strictEqual(events[0].summary, "Standup")
+  assert.strictEqual(events[0].graphId, "AAMk1")
+  assert.strictEqual(events[0].uid, "040000008200E00074C5B7101A82E008")
+  assert.strictEqual(events[0].start.ms, Date.UTC(2026, 8, 8, 13, 0, 0), "a UTC moment without its Z still parses as UTC")
+  assert.strictEqual(events[0].end.ms - events[0].start.ms, 15 * 60 * 1000)
+  assert.strictEqual(events[0].location, "Teams")
+  assert.strictEqual(events[0].meetLink, "https://teams.microsoft.com/l/meetup-join/x")
+  assert.strictEqual(events[0].organizer.email, "ada@contoso.com")
+  assert.strictEqual(events[0].attendees[0].displayName, "Bob")
+  assert.strictEqual(events[0].href.indexOf("https://outlook.office365.com/"), 0)
+  assert.strictEqual(events[1].start.allDay, true)
+  assert.strictEqual(events[1].start.ms, new Date(2026, 8, 10).getTime(), "an all-day event is its local midnight")
+
+  const url = feed.graphEventsUrl(Date.UTC(2026, 8, 7), Date.UTC(2026, 8, 14))
+  assert.ok(url.indexOf("https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=2026-09-07T00%3A00%3A00.000Z") === 0)
+  assert.ok(url.indexOf("endDateTime=2026-09-14T00%3A00%3A00.000Z") > 0)
+  assert.strictEqual(feed.graphEventUrl("AAMk1/x"), "https://graph.microsoft.com/v1.0/me/events/AAMk1%2Fx", "an id is one path segment")
+
+  const timed = feed.graphEventBody({ title: "Call", description: "Notes", location: "Room 1",
+    start: Date.UTC(2026, 8, 9, 14, 30), end: Date.UTC(2026, 8, 9, 15, 0) }, false)
+  assert.strictEqual(timed.subject, "Call")
+  assert.strictEqual(timed.start.dateTime, "2026-09-09T14:30:00")
+  assert.strictEqual(timed.start.timeZone, "UTC")
+  assert.strictEqual(timed.isAllDay, false)
+  assert.strictEqual(timed.location.displayName, "Room 1")
+  const allDay = feed.graphEventBody({ title: "Day", start: new Date(2026, 8, 10).getTime(), end: new Date(2026, 8, 11).getTime() }, true)
+  assert.strictEqual(allDay.isAllDay, true)
+  assert.ok(/^2026-09-10T00:00:00$/.test(allDay.start.dateTime))
+
+  assert.strictEqual(feed.graphResponseError(401, "{}"), "Microsoft refused the calendar request. Sign in again")
+  assert.ok(feed.graphResponseError(400, JSON.stringify({ error: { code: "ErrorInvalidRequest", message: "Bad start" } })).indexOf("Bad start") > 0)
+  assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
+
+  const made = feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000)
+  assert.strictEqual(made.graph.subject, "Plan")
+  assert.strictEqual(made.recurring, false)
+}

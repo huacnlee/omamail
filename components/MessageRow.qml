@@ -15,6 +15,7 @@ Rectangle {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  property color urgentColor: accentColor
   required property string panelFontFamily
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
@@ -32,6 +33,13 @@ Rectangle {
   // Ticked for a bulk action. Not `selected`: that is the message the reader
   // shows, and the two are different things for the same reason the cursor is.
   property bool checked: false
+  // What the agent is doing with this message, if anything: "", "running",
+  // "question", "done", "failed" or "cancelled". State, so it shows whether
+  // or not the row is hot, like the star.
+  property string agentState: ""
+  // The agent's last line while it works on this message, for the tooltip.
+  property string agentProgress: ""
+  property bool agentAttention: false
   property bool selectionActive: false
   property bool ctrlHeld: false
   readonly property bool selectionMode: selectionActive || checked || ctrlHeld
@@ -43,6 +51,7 @@ Rectangle {
   signal checkToggled()
   signal checkRangeRequested()
   signal starToggled()
+  signal agentRequested(real sceneX, real sceneY)
   signal archiveRequested()
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
