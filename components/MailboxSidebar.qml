@@ -21,10 +21,14 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property string menuLabelPath: ""
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
   signal folderToggled(string path)
+  // A right-click on a label row: the label's id ("" for an ancestor no label
+  // names), its path, and where the menu goes.
+  signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
@@ -123,18 +127,25 @@ Item {
           // label is not written in the Latin alphabet — a Chinese label would
           // put a single hanzi in a 16px slot, which is neither an icon nor a
           // readable name. The tooltip carries the name instead.
-          icon: "label"
+          icon: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0 ? "eye" : "label"
           depth: modelData.depth
           foldable: modelData.hasChildren
           expanded: modelData.expanded
           selectable: modelData.selectable
           fullPath: modelData.path
+          monitored: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0
+          onMenuRequested: function(sceneX, sceneY) {
+            root.labelMenuRequested(modelData.selectable ? modelData.id : "", modelData.path, sceneX, sceneY)
+          }
           slotNumber: modelData.selectable ? Model.slotNumberOf(root.slots, "label", modelData.id) : 0
           count: modelData.unread
-          selected: modelData.selectable && !root.calendarSelected && !!root.service
-            && root.service.rawQuery !== ""
-            && root.service.rawQuery
-              === Provider.labelQuery(root.service.providerId, modelData.rawName)
+          selected: root.menuLabelPath === modelData.path
+            || (modelData.selectable && !root.calendarSelected && !!root.service
+              && root.service.rawQuery !== ""
+              && root.service.rawQuery
+                === Provider.labelQuery(root.service.providerId, modelData.rawName))
           onActivated: {
             if (modelData.selectable) root.labelSelected(modelData.id, modelData.rawName)
             else root.folderToggled(modelData.path)
@@ -186,6 +197,10 @@ Item {
     property string fullPath: ""
     signal activated()
     signal foldRequested()
+    signal menuRequested(real sceneX, real sceneY)
+    // Watched for new mail: the row keeps its count in the accent even while
+    // it is not the one open, and the glyph says so.
+    property bool monitored: false
 
     // The badge names the key, not the position: the tenth row is opened by
     // Alt+0, so it says 0. A row past the tenth has no key and no badge.
@@ -316,6 +331,13 @@ Item {
         if (fold.visible && at.x >= fold.x && at.x < fold.x + fold.width
             && at.y >= fold.y && at.y < fold.y + fold.height) return
         entry.activated()
+      }
+    }
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      onTapped: {
+        var scene = entry.mapToGlobal(0, entry.height)
+        entry.menuRequested(scene.x, scene.y)
       }
     }
 

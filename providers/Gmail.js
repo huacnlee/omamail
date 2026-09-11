@@ -29,6 +29,7 @@ var MARK = "gmail.png"
 
 var CAPABILITIES = {
   labels: true,
+  manageLabels: true,
   // Adding a label and taking INBOX away, which is archive with a destination.
   move: true,
   threads: true,
@@ -108,6 +109,14 @@ function cachedSummaryInSearch(sourceQuery, summary) {
 
 // Selecting a label in the sidebar. A Gmail label is a search operator, which
 // is why this is a different string from the one a typed search produces.
+// Mail from, or to, one address: Gmail's own operators, which the search
+// box already accepts verbatim.
+function addressQuery(field, address) {
+  var value = String(address === undefined || address === null ? "" : address).trim()
+  if (value === "" || /[\s"]/.test(value)) return ""
+  return (field === "to" ? "to:" : "from:") + value
+}
+
 function labelQuery(name) {
   var value = String(name === undefined || name === null ? "" : name).trim()
   return value === "" ? "" : "label:" + value

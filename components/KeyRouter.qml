@@ -34,6 +34,34 @@ Item {
   // mailboxes.
   signal triggered(string id, string sequence)
 
+  // Native TextArea accepts ShortcutOverride for editing keys before a window
+  // Shortcut can run. Decode those forwarded events, then use the same table
+  // and context as the Shortcut path. Unbound events remain normal text input.
+  function routeKeyEvent(event) {
+    var key = ""
+    if (event.key === Qt.Key_Up) key = "Up"
+    else if (event.key === Qt.Key_Down) key = "Down"
+    else if (event.key === Qt.Key_Return) key = "Return"
+    else if (event.key === Qt.Key_Enter) key = "Enter"
+    if (key === "") return false
+    var sequence = ""
+    if (event.modifiers & Qt.ControlModifier) sequence += "Ctrl+"
+    if (event.modifiers & Qt.AltModifier) sequence += "Alt+"
+    if (event.modifiers & Qt.ShiftModifier) sequence += "Shift+"
+    if (event.modifiers & Qt.MetaModifier) sequence += "Meta+"
+    sequence += key
+    var entries = Keymap.sequencesFor(root.context)
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i]
+      if (entry.sequence !== sequence || !Keymap.isSequenceEnabled(entry.binding,
+          sequence, root.context, root.overlay)) continue
+      event.accepted = true
+      root.triggered(entry.id, sequence)
+      return true
+    }
+    return false
+  }
+
   Instantiator {
     model: Keymap.sequencesFor(root.context)
 

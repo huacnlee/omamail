@@ -1,7 +1,10 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../message/Signature.js" as Signature
+import "../message/Html.js" as Html
 
 // Where mailboxes are managed.
 //
@@ -95,6 +98,77 @@ Column {
     var next = signatureAccount(activeId) || signatureAccounts[0]
     selectedNameAccountId = String(next.id || "")
     nameEdit.text = String(next.label || "")
+  }
+
+  // The imported markup for the selected mailbox, and the import in flight.
+  readonly property string selectedSignatureHtml: {
+    var entry = signatureAccount(selectedSignatureAccountId)
+    return entry ? String(entry.signatureHtml || "") : ""
+  }
+  property bool importing: false
+  property string importNote: ""
+  property bool importFailed: false
+  property string importStage: ""
+
+  function importSignature() {
+    if (importing || !service) return
+    importing = true
+    importNote = ""
+    importFailed = false
+    importStage = "pick"
+    signatureImporter.command = [root.attachScript, "pick"]
+    signatureImporter.running = true
+  }
+
+  function finishImport(text) {
+    var result = null
+    try { result = JSON.parse(String(text || "")) } catch (e) { result = null }
+    if (!result || result.ok !== true) {
+      var reason = result && result.error ? String(result.error) : ""
+      importing = false
+      if (reason !== "" && reason !== "cancelled") { importNote = reason; importFailed = true }
+      return
+    }
+    if (importStage === "pick") {
+      var paths = Array.isArray(result.paths) ? result.paths : []
+      if (paths.length === 0) { importing = false; return }
+      importStage = "read"
+      signatureImporter.command = [root.attachScript, "read", String(paths[0])]
+      signatureImporter.running = true
+      return
+    }
+    importing = false
+    var mime = String(result.mimeType || "").toLowerCase()
+    var name = String(result.filename || "").toLowerCase()
+    var imported
+    if (mime.indexOf("image/") === 0) {
+      imported = Signature.importImage(String(result.data || ""))
+    } else if (mime === "text/html" || mime === "application/xhtml+xml" || /\.x?html?$/.test(name)) {
+      imported = Signature.importHtml(Qt.atob(String(result.data || "")))
+    } else {
+      imported = { problem: "Choose a PNG, JPEG, GIF or WebP picture, or an HTML file" }
+    }
+    importNote = Signature.importNote(imported)
+    importFailed = String(imported.problem || "") !== ""
+    if (importFailed) return
+    service.setAccountSignatureHtml(selectedSignatureAccountId, imported.html)
+    // The words for a text-only client, unless the editor already has some.
+    if (String(imported.plain || "") !== "" && String(signatureEdit.text || "").trim() === "") {
+      signatureEdit.text = imported.plain
+      saveSignature()
+    }
+  }
+
+  readonly property string attachScript: {
+    var url = String(Qt.resolvedUrl("../scripts/attachment.sh"))
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
+  Process {
+    id: signatureImporter
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.finishImport(String(stdout.text || ""))
   }
 
   function saveSignature() {
@@ -708,6 +782,82 @@ Column {
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    // A signature from a file: a picture, or markup another tool wrote. What
+    // is imported is rebuilt by Signature.js — scripts, styles, handlers,
+    // frames, forms, remote images and unknown attributes do not survive —
+    // and the preview draws what was stored, so it is the sent thing that is
+    // shown. The words go into the plain editor above for text-only clients.
+    Row {
+      width: parent.width
+      spacing: Style.space(8)
+
+      Button {
+        objectName: "settings-signature-import"
+        text: root.importing ? "Importing" : "Import from file..."
+        tooltipText: "A PNG, JPEG, GIF or WebP picture, or an HTML file"
+        foreground: root.textColor
+        bordered: true
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        enabled: !root.importing && root.selectedSignatureAccountId !== ""
+        onClicked: root.importSignature()
+      }
+
+      Button {
+        objectName: "settings-signature-remove-html"
+        visible: root.selectedSignatureHtml !== ""
+        text: "Remove imported markup"
+        foreground: root.dimColor
+        bordered: false
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.caption
+        onClicked: {
+          if (root.service) root.service.setAccountSignatureHtml(root.selectedSignatureAccountId, "")
+          root.importNote = ""
+        }
+      }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.importNote !== ""
+      textFormat: Text.PlainText
+      text: root.importNote
+      color: root.importFailed ? root.urgentColor : root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Rectangle {
+      objectName: "settings-signature-preview"
+      width: parent.width
+      visible: root.selectedSignatureHtml !== ""
+      implicitHeight: Math.min(Style.space(220), signaturePreview.implicitHeight + Style.space(20))
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+      clip: true
+
+      TextEdit {
+        id: signaturePreview
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: Style.space(10)
+        readOnly: true
+        selectByMouse: false
+        wrapMode: TextEdit.Wrap
+        textFormat: TextEdit.RichText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        // The stored markup, and nothing else: the same string that is sent.
+        text: Html.documentFor(root.selectedSignatureHtml, {
+          foreground: root.textColor, background: "transparent", link: root.accentColor })
       }
     }
 

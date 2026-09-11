@@ -174,6 +174,7 @@ Item {
       }
       MenuRow {
         id: settingsRow
+        objectName: "app-menu-settings"
         text: "Settings..."
         onActivated: { menu.close(); root.setupRequested() }
       }

@@ -53,6 +53,14 @@ Item {
       compare(message.text, "Sending in 3s")
     }
 
+    function test_more_than_one_parked_send_is_said_and_undo_names_the_last() {
+      toast.queuedCount = 3
+      compare(named(toast, "undo-send-message").text, "3 queued \u00b7 newest in 7s")
+      compare(named(toast, "undo-send-button").text, "Undo last  Alt+Z")
+      toast.queuedCount = 1
+      compare(named(toast, "undo-send-message").text, "Sending in 7s")
+    }
+
     function test_button_requests_undo() {
       var button = named(toast, "undo-send-button")
       verify(button)

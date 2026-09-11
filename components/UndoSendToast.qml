@@ -6,6 +6,9 @@ Rectangle {
   id: root
 
   required property int secondsRemaining
+  // How many sends are parked. Past one, the countdown is the newest's and
+  // Undo says so.
+  property int queuedCount: 1
   required property color textColor
   required property color dimColor
   required property color accentColor
@@ -31,7 +34,9 @@ Rectangle {
     Text {
       objectName: "undo-send-message"
       anchors.verticalCenter: parent.verticalCenter
-      text: "Sending in " + root.secondsRemaining + "s"
+      text: root.queuedCount > 1
+        ? root.queuedCount + " queued \u00b7 newest in " + root.secondsRemaining + "s"
+        : "Sending in " + root.secondsRemaining + "s"
       textFormat: Text.PlainText
       color: root.textColor
       font.family: root.panelFontFamily
@@ -41,7 +46,7 @@ Rectangle {
     Button {
       objectName: "undo-send-button"
       anchors.verticalCenter: parent.verticalCenter
-      text: "Undo  Alt+Z"
+      text: root.queuedCount > 1 ? "Undo last  Alt+Z" : "Undo  Alt+Z"
       foreground: root.accentColor
       accent: root.accentColor
       bordered: true

@@ -667,25 +667,78 @@ function isRemoteSource(value) {
 //   local   no scheme. Qt resolves a relative source against the document's
 //           base URL, which for a TextEdit is the QML file's own directory —
 //           a read of whatever sits next to the plugin.
+// Raster bytes already in the message, or already fetched through
+// scripts/image_fetch.py. SVG is a document with its own hrefs, and Qt's
+// image plugins may follow them; the fetch worker refuses it for the same
+// reason. Anything else with a data: prefix is not a picture.
+var BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+function base64Prefix(payload, byteLimit) {
+  var text = String(payload || "")
+  if (text === "" || text.length % 4 !== 0
+      || !/^[A-Za-z0-9+/]*={0,2}$/.test(text)) return []
+  var padding = text.slice(-2) === "==" ? 2 : (text.slice(-1) === "=" ? 1 : 0)
+  if (padding === 2 && BASE64_ALPHABET.indexOf(text.charAt(text.length - 3)) % 16 !== 0)
+    return []
+  if (padding === 1 && BASE64_ALPHABET.indexOf(text.charAt(text.length - 2)) % 4 !== 0)
+    return []
+  var out = []
+  for (var i = 0; i < text.length && out.length < byteLimit; i += 4) {
+    var a = BASE64_ALPHABET.indexOf(text.charAt(i))
+    var b = BASE64_ALPHABET.indexOf(text.charAt(i + 1))
+    var c = text.charAt(i + 2) === "=" ? 0 : BASE64_ALPHABET.indexOf(text.charAt(i + 2))
+    var d = text.charAt(i + 3) === "=" ? 0 : BASE64_ALPHABET.indexOf(text.charAt(i + 3))
+    if (a < 0 || b < 0 || c < 0 || d < 0) return []
+    out.push((a << 2) | (b >> 4))
+    if (text.charAt(i + 2) !== "=" && out.length < byteLimit)
+      out.push(((b & 15) << 4) | (c >> 2))
+    if (text.charAt(i + 3) !== "=" && out.length < byteLimit)
+      out.push(((c & 3) << 6) | d)
+  }
+  return out
+}
+
+function bytesStartWith(bytes, expected) {
+  if (bytes.length < expected.length) return false
+  for (var i = 0; i < expected.length; i++) {
+    if (bytes[i] !== expected[i]) return false
+  }
+  return true
+}
+
+function isRasterDataImage(value) {
+  var match = String(value || "").match(
+    /^data:image\/(png|jpe?g|gif|webp|bmp);base64,([A-Za-z0-9+/]*={0,2})$/i)
+  if (!match) return false
+  var bytes = base64Prefix(match[2], 12)
+  var kind = match[1].toLowerCase()
+  if (kind === "png")
+    return bytesStartWith(bytes, [137, 80, 78, 71, 13, 10, 26, 10])
+  if (kind === "jpg" || kind === "jpeg")
+    return bytesStartWith(bytes, [255, 216, 255])
+  if (kind === "gif")
+    return bytesStartWith(bytes, [71, 73, 70, 56, 55, 97])
+      || bytesStartWith(bytes, [71, 73, 70, 56, 57, 97])
+  if (kind === "webp")
+    return bytesStartWith(bytes, [82, 73, 70, 70])
+      && bytes.length >= 12
+      && bytes[8] === 87 && bytes[9] === 69 && bytes[10] === 66 && bytes[11] === 80
+  return kind === "bmp" && bytesStartWith(bytes, [66, 77])
+}
+
 function imageSourceKind(value) {
   var url = normalizedUrl(value)
   if (url === "") return "none"
   if (/^cid:/i.test(url)) return "inline"
-  // Only a picture. A data: URL of any other type is not the message's own
-  // bytes drawn in place — an SVG is a document with its own references, and
-  // whether Qt follows them depends on which image plugins are installed.
-  if (/^data:image\//i.test(url)) return "inline"
-  if (/^data:/i.test(url)) return "unsafe"
+  if (/^data:/i.test(url)) return isRasterDataImage(url) ? "inline" : "unsafe"
   if (/^(https?:)?\/\//i.test(url)) return isPublicUrl(value) ? "remote" : "unsafe"
   return /^[a-z][a-z0-9+.-]*:/i.test(url) ? "unsafe" : "local"
 }
 
-// Whether the reader may hand a source straight to an Image element, which is
-// what opening an image marker in a plain-text body does.
+// Whether the reader may hand a source straight to an Image element. Qt
+// fetches a remote src itself, so only prepared raster bytes qualify.
 function isDisplayableImageUrl(value) {
-  var kind = imageSourceKind(value)
-  if (kind === "remote") return true
-  return kind === "inline" && /^data:image\//i.test(normalizedUrl(value))
+  return isRasterDataImage(value)
 }
 
 // Only http(s) and mailto survive. A javascript: href does nothing in Qt's
@@ -707,9 +760,66 @@ function safeHref(value) {
 // "&#117;" into two declarations that were nonsense to every test here, and
 // reassembled on the way out into the "url(" Qt decodes and fetches. Twice,
 // for the same reason an address is read twice.
+function stripCssComments(text) {
+  var input = String(text || "")
+  var out = ""
+  var i = 0
+  while (i < input.length) {
+    if (input.charAt(i) === "/" && input.charAt(i + 1) === "*") {
+      var end = input.indexOf("*/", i + 2)
+      if (end < 0) break
+      i = end + 2
+      continue
+    }
+    out += input.charAt(i)
+    i++
+  }
+  return out
+}
+
+function cssUnescape(text) {
+  var input = String(text || "")
+  var out = ""
+  for (var i = 0; i < input.length; i++) {
+    if (input.charAt(i) !== "\\") {
+      out += input.charAt(i)
+      continue
+    }
+    if (i + 1 >= input.length) break
+    var hex = ""
+    var j = i + 1
+    while (j < input.length && hex.length < 6 && /[0-9a-fA-F]/.test(input.charAt(j))) {
+      hex += input.charAt(j)
+      j++
+    }
+    if (hex !== "") {
+      out += String.fromCharCode(parseInt(hex, 16))
+      if (/[\t\n\r\f ]/.test(input.charAt(j))) j++
+      i = j - 1
+      continue
+    }
+    out += input.charAt(i + 1)
+    i++
+  }
+  return out
+}
+
+function resolvedStyle(style) {
+  var current = String(style === undefined || style === null ? "" : style)
+  var previous = ""
+  var n = 0
+  while (current !== previous && n < 8) {
+    previous = current
+    current = cssUnescape(stripCssComments(current))
+    n++
+  }
+  return current
+}
+
 function splitDeclarations(style) {
   var text = String(style === undefined || style === null ? "" : style)
   if (text.indexOf("&") >= 0) text = decodeReferences(decodeReferences(text))
+  text = resolvedStyle(text)
   var out = []
   var current = ""
   var quote = ""
@@ -849,7 +959,8 @@ function stripColorsFrom(node) {
 // policy lives.
 function stripStyleUrlsFrom(node) {
   rewriteStyle(node, function(declaration) {
-    return /url\s*\(/i.test(declaration.value) ? null : declaration
+    return /url/i.test(declaration.value) || declaration.value.indexOf("\\") >= 0
+      ? null : declaration
   })
 }
 
@@ -1040,6 +1151,7 @@ function cleanAttributes(node, keepColors, declarations) {
     }
   }
   if (dropped) node.attrs = kept
+  collapseAttributes(node)
   if (declarations === null) return
 
   var survivors = []
@@ -1049,10 +1161,23 @@ function cleanAttributes(node, keepColors, declarations) {
     if (uncentre && declaration.name === "text-align" && CENTRED.test(declaration.value)) continue
     // No test for a reference here: `splitDeclarations` has already taken them
     // out, so this reads the same value Qt would.
-    if (/url\s*\(/i.test(declaration.value)) continue
+    if (/url/i.test(declaration.value) || declaration.value.indexOf("\\") >= 0) continue
     survivors.push(declaration)
   }
   setStyle(node, survivors)
+}
+
+function collapseAttributes(node) {
+  var seen = {}
+  var kept = []
+  var attrs = node.attrs
+  for (var i = 0; i < attrs.length; i++) {
+    var name = attrs[i].name
+    if (seen[name] === true) continue
+    seen[name] = true
+    kept.push(attrs[i])
+  }
+  node.attrs = kept
 }
 
 // QTextDocument supports image dimensions as HTML attributes, but not as CSS
@@ -1214,7 +1339,7 @@ function sanitize(html, options) {
   function preparedImage(source) {
     if (imageData === null || !Object.prototype.hasOwnProperty.call(imageData, source)) return ""
     var value = String(imageData[source] || "")
-    return /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i.test(value) ? value : ""
+    return isRasterDataImage(value) ? value : ""
   }
 
   function keepImage(node) {
@@ -2051,7 +2176,7 @@ function readerAppendImage(state, node, ctx) {
   if (kind === "remote" && ctx.imageData !== null) {
     renderedSource = Object.prototype.hasOwnProperty.call(ctx.imageData, source)
       ? String(ctx.imageData[source] || "") : ""
-    if (!/^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i.test(renderedSource))
+    if (!isRasterDataImage(renderedSource))
       renderedSource = ""
   }
 
