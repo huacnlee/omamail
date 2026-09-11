@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 
-// `n` and `p` walk the conversation rail; `j` and `k` go on walking the list.
+// `n` and `p` walk the conversation rail; Shift+J and Shift+K scroll the open message.
 //
 // Why this needs Qt rather than a node test: the whole claim is that two
 // positions in one window move independently under real keystrokes. Three
@@ -128,7 +128,7 @@ Item {
     property var sendAsAliases: []
     property var sendIdentities: []
     property var calendarController: null
-    property var selectedBody: ({ text: "A body", source: "plain" })
+    property var selectedBody: ({ text: Array(101).join("A body line\n"), source: "plain" })
     property var selectedMessage: null
 
     // What this test is about. The list is one row per conversation, so the
@@ -423,8 +423,8 @@ Item {
     }
 
     // The claim. Both keys move the reader along the rail and neither moves the
-    // list cursor, which `j` still owns.
-    function test_n_and_p_move_along_the_rail_and_not_the_list_cursor() {
+    // list cursor, while Shift+J and Shift+K scroll the open message.
+    function test_n_and_p_move_along_the_rail_while_shift_j_and_k_scroll_the_message() {
       app.openMessage("maaaaaf")
       waitForRendering(app)
       compare(app.currentView, "reader")
@@ -450,13 +450,32 @@ Item {
       compare(mailService.selectedId, "maaaaaf", "and stops at the newest, at the top")
       compare(app.cursorId, "maaaaaf", "the cursor never moved at all")
 
-      // The other half: the list keys still move the list, from inside the
-      // reader, and moving it does not move the reader.
+      var body = named(app, "messageBodyScroller")
+      verify(body, "the reader exposes its body scroller")
+      var before = body.contentY
+      keyClick(Qt.Key_J, Qt.ShiftModifier)
+      verify(body.contentY > before, "Shift+J scrolls the open message down")
+      compare(app.cursorId, "maaaaaf", "and leaves the list cursor where it was")
+      compare(mailService.selectedId, "maaaaaf", "and does not open another message")
+      keyClick(Qt.Key_K, Qt.ShiftModifier)
+      compare(body.contentY, before, "Shift+K scrolls the open message back up")
+
       keyClick(Qt.Key_J)
-      compare(app.cursorId, "yaaaaag", "j still moves the list cursor")
-      compare(mailService.selectedId, "maaaaaf", "and moving is not opening")
-      keyClick(Qt.Key_K)
-      compare(app.cursorId, "maaaaaf")
+      compare(app.cursorId, "yaaaaag", "plain j still moves the mailbox cursor")
+      compare(mailService.selectedId, "maaaaaf", "moving the cursor is not opening")
+    }
+
+    function test_right_opens_the_cursor_and_left_returns_to_the_list() {
+      compare(app.currentView, "list")
+      keyClick(Qt.Key_Right)
+      compare(app.currentView, "reader", "Right opens the selected row")
+      compare(mailService.selectedId, "maaaaaf")
+      keyClick(Qt.Key_Left)
+      compare(app.currentView, "list", "Left returns to the list")
+      keyClick(Qt.Key_Right)
+      compare(app.currentView, "reader")
+      keyClick(Qt.Key_Escape)
+      compare(app.currentView, "list", "Escape also returns to the list")
     }
 
     // Opening a member replaces the reader entry rather than pushing one, so

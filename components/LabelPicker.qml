@@ -184,14 +184,16 @@ Item {
           border.width: labelRow.hasCursor ? Style.normalBorderWidth : 0
           border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
 
+          // A child steps in under its parent, and is named by its own
+          // leaf; a match to typed letters shows its whole path, flat.
           Text {
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(10)
+            anchors.leftMargin: Style.space(10) + Math.min(8, Number(labelRow.modelData.depth) || 0) * Style.space(12)
             anchors.right: parent.right
             anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: String(labelRow.modelData.name || "")
+            text: String(labelRow.modelData.leaf || labelRow.modelData.name || "")
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall

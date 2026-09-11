@@ -123,12 +123,17 @@ Column {
   // Pagination is the only thing this footer needs to say. A result estimate
   // promoted an unreliable server number into interface hierarchy it did not
   // deserve, and repeated it again in the window status line.
+  //
+  // The next page is asked for as the list is scrolled to its foot, so the
+  // button is for the page that did not come — a refusal, a slow server —
+  // rather than the way every page is reached.
   Item {
     width: parent.width
     visible: root.service.hasMore
     implicitHeight: Style.space(40)
 
     Button {
+      objectName: "load-more"
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
@@ -139,6 +144,56 @@ Column {
       fontSize: Style.font.caption
       enabled: !root.service.listLoading
       onClicked: root.service.loadMore()
+    }
+  }
+
+  // The scroller this list sits in, handed over by the panel that owns it:
+  // when its foot comes into view and there is more, the next page is asked
+  // for without a press, and never while a page is on its way, which is
+  // what keeps a slow server from being asked twice. A page that lands and
+  // still leaves the foot in view — a short mailbox, a merged list held
+  // back by a mailbox that has not caught up — is followed by the next
+  // once the list settles, until the foot is out of view or there is no
+  // more. Asked a moment later rather than in the signal itself: a cached
+  // page painted on the way into a live load can put the foot in view
+  // before that load has said it is running, and a page asked for from
+  // inside the load would race it.
+  property var scroller: null
+  property int loadStartCount: -1
+
+  function loadMoreIfAtFoot() {
+    if (!root.scroller || !root.service) return false
+    if (!root.scroller.atYEnd || !root.service.hasMore || root.service.listLoading) return false
+    root.service.loadMore()
+    return true
+  }
+
+  function loadMoreSoon() { Qt.callLater(root.loadMoreIfAtFoot) }
+
+  function continueAfterLoad(startCount) {
+    // MailAccount ends the loading state before it applies the summaries.
+    // Judge growth after that callback has finished, when the page is visible.
+    Qt.callLater(function() {
+      if (!root.service || root.service.messages.length <= startCount) return
+      root.loadMoreIfAtFoot()
+    })
+  }
+
+  Connections {
+    target: root.scroller
+    function onAtYEndChanged() { root.loadMoreSoon() }
+  }
+
+  Connections {
+    target: root.service
+    function onListLoadingChanged() {
+      if (root.service.listLoading) {
+        root.loadStartCount = root.service.messages.length
+        return
+      }
+      var startCount = root.loadStartCount
+      root.loadStartCount = -1
+      if (startCount >= 0) root.continueAfterLoad(startCount)
     }
   }
 }

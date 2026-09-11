@@ -20,8 +20,8 @@ var MAIL = ["list", "reader"]
 var ANY = ["*"]
 
 var BINDINGS = [
-  // These two survive the shortcut sheet, and they are the only mailbox keys
-  // that do: behind the sheet they scroll it. A reference sheet taller than the
+  // These survive the shortcut sheet, and they are the only mailbox keys that
+  // do: behind the sheet they scroll it. A reference sheet taller than the
   // window that could only be read with a mouse would be the one screen here
   // that contradicts the rest. The account switcher is not on this list — it is
   // a popup, and a popup takes every key before the shortcut map sees it, so it
@@ -33,6 +33,13 @@ var BINDINGS = [
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move up" },
+  { id: "scrollDown", keys: ["Shift+J"], contexts: ["reader"],
+    survivesOverlay: true,
+    group: "Moving", label: "Scroll down",
+    hintKey: "Shift+J / Shift+K", hint: { reader: "scroll" } },
+  { id: "scrollUp", keys: ["Shift+K"], contexts: ["reader"],
+    survivesOverlay: true,
+    group: "Moving", label: "Scroll up" },
   // Live in the reader as well as the list. Moving is deliberately not opening
   // — stepping through with j used to mark half a mailbox read without anyone
   // looking at it — so with the reader up there has to be a key that says open,
@@ -40,7 +47,9 @@ var BINDINGS = [
   { id: "open", keys: ["Return", "Enter", "o"], contexts: MAIL,
     group: "Moving", label: "Open the selected message",
     hintKey: "o", hint: { list: "open", reader: "open" } },
-  { id: "backToList", keys: ["u"], contexts: ["reader"],
+  { id: "openReader", keys: ["Right"], contexts: ["list"],
+    group: "Moving", label: "Open the selected message" },
+  { id: "backToList", keys: ["u", "Left"], contexts: ["reader"],
     group: "Moving", label: "Back to the list" },
   // Along the conversation rail, which only the reader has. Two letters rather
   // than a reuse of `j` and `k`: those move the list cursor, and they go on

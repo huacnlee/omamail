@@ -241,7 +241,8 @@ const labelSet = [
   { id: "L3", name: "banana" }
 ]
 deepEqual(model.movableLabels(labelSet, "").map(l => l.id), ["L1", "L3", "L2"])
-deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3"], "filtering is case-insensitive and matches anywhere")
+deepEqual(model.movableLabels(labelSet, "an").map(l => l.id), ["L3", "L1"],
+  "case-insensitive: the typed run first, then the letters in order (A..n in Archive notes)")
 deepEqual(model.movableLabels(labelSet, "  ZEB  ").map(l => l.id), ["L2"], "a typed query is trimmed")
 deepEqual(model.movableLabels(labelSet, "inbox").map(l => l.id), [], "a system label is not a destination")
 deepEqual(model.movableLabels(labelSet, "", "L3").map(l => l.id), ["L1", "L2"],
@@ -1622,3 +1623,28 @@ assert.strictEqual(model.monitoredNote([]), "")
   assert.strictEqual(model.filterRows(rows, "inv")[0].index, undefined, "no `index` on a row: a Repeater owns that word")
   assert.strictEqual(rows[2].sourceIndex, undefined, "the rows given are not written on")
 }
+
+// ------------------------------------------------------------ move-to picker
+{
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Work/2026", name: "Work/2026", rawName: "Work/2026", delimiter: "/" },
+    { id: "Receipts", name: "Receipts", rawName: "Receipts", delimiter: "/" },
+    { id: "Work", name: "Work", rawName: "Work", delimiter: "/" },
+    { id: "Work/Invoices", name: "Work/Invoices", rawName: "Work/Invoices", delimiter: "/" }]
+  // Nothing typed: the tree, a child stepped in under its parent by its leaf.
+  deepEqual(model.movableLabels(labels, "", "").map(l => [l.id, l.depth, l.leaf]),
+    [["Receipts", 0, "Receipts"], ["Work", 0, "Work"], ["Work/2026", 1, "2026"], ["Work/Invoices", 1, "Invoices"]])
+  deepEqual(model.movableLabels(labels, "", "Work").map(l => l.id), ["Receipts", "Work/2026", "Work/Invoices"],
+    "the label the list is in is not a destination")
+  // Typed: the best matches first, flat, by the whole path.
+  deepEqual(model.movableLabels(labels, "inv", "").map(l => [l.id, l.depth, l.leaf]), [["Work/Invoices", 0, "Work/Invoices"]])
+  deepEqual(model.movableLabels(labels, "wk", "").map(l => l.id), ["Work", "Work/2026", "Work/Invoices"], "letters in order find the whole family")
+  deepEqual(model.movableLabels(labels, "zzz", ""), [])
+  deepEqual(model.movableLabels(null, "", ""), [])
+  assert.strictEqual(labels[1].depth, undefined, "the labels given are not written on")
+}
+
+// A provider with no move verb is told so in the hints, the way archive is.
+deepEqual(model.unavailableActions({ archive: true, star: true, move: true }), [])
+deepEqual(model.unavailableActions({ archive: true, star: true }), ["move"])

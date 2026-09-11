@@ -24,7 +24,8 @@ Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yah
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
 - **Gmail, Outlook, HEY, JMAP and IMAP.** Sign in to Gmail with Google, to Outlook with Microsoft, to HEY through the HEY CLI that 37signals publish, or add a mailbox on any JMAP or IMAP server with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
-- **Keyboard-first.** `j`/`k` to move, `e` to archive, `v` to file, `s` to star, `r` to
+- **Keyboard-first.** `j`/`k` to move, `Shift+J`/`Shift+K` to scroll the reader,
+  `e` to archive, `v` to file, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
   which is which — `Alt+A` to switch account, `/` to search, `?` for the rest.
   A key the mailbox has no verb for says so instead of pretending: HEY has
@@ -227,7 +228,8 @@ Right-click does the rest. On a label in the rail: rename it, make a label besid
 
 | Key | What it does |
 | --- | --- |
-| `j` / `k` | Move down / up |
+| `j` / `k`; `Shift+J` / `Shift+K` | Move down / up; scroll the open message down / up |
+| `Right` / `Left` | Open the selected message / return to the list |
 | `Enter` or `o` | Open the selected message |
 | `n` / `p` | Next / previous message in the conversation |
 | `Esc` | Back to the list; close the window from the list |

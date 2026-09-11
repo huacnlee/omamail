@@ -65,7 +65,7 @@ Item {
   // arrive. Kept as defaults here so an account is usable before that happens.
   readonly property var defaultSettingValues: ({
     refreshIntervalSec: 120,
-    maxMessages: 25,
+    maxMessages: 50,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -91,7 +91,7 @@ Item {
   readonly property int refreshIntervalSec: Math.max(30, Math.min(3600,
     Math.floor(Number(setting("refreshIntervalSec", 120))) || 120))
   readonly property int maxMessages: Math.max(5, Math.min(100,
-    Math.floor(Number(setting("maxMessages", 25))) || 25))
+    Math.floor(Number(setting("maxMessages", 50))) || 50))
   readonly property string defaultQuery: String(setting("defaultQuery", "in:inbox")).trim()
   readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))

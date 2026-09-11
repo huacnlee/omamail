@@ -622,7 +622,7 @@ Item {
   }
 
   // The list, fresh: what a mailbox switch, a search, a queued send and the
-  // reader's own "back to list" key all mean. Not a Back — the history is
+  // reader's own "back to list" keys all mean. Not a Back — the history is
   // dropped because the list under it has changed.
   function backToList() {
     pendingComposeMode = ""
@@ -943,8 +943,12 @@ Item {
   // the reader there is only one message it could mean. Refuse an unavailable
   // move before asking for a destination, through the same provider guard that
   // checks the final action before its optimistic update.
-  function openLabelPicker() {
+  // Opened on a message outside the ticks, the picker moves that one alone.
+  property bool labelPickerOnlyCursor: false
+
+  function openLabelPicker(onlyCursor) {
     if (!service || (cursorId === "" && !selectionActive)) return false
+    labelPickerOnlyCursor = onlyCursor === true
     // A merged list draws no labels, so there is nothing to offer and the
     // picker would open empty on a destination list it cannot fill — and a
     // chosen id would belong to whichever mailbox happened to be active
@@ -1124,13 +1128,18 @@ Item {
     if (shortcutHelpVisible) {
       if (id === "cursorDown") return shortcutHelp.scrollBy(1)
       if (id === "cursorUp") return shortcutHelp.scrollBy(-1)
+      if (id === "scrollDown") return shortcutHelp.scrollBy(1)
+      if (id === "scrollUp") return shortcutHelp.scrollBy(-1)
     }
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
+    if (id === "scrollDown") return reader.scrollBy(1)
+    if (id === "scrollUp") return reader.scrollBy(-1)
     // In Drafts, opening a draft from the keyboard is editing it: the
     // message is what was being written. A click still previews, so the
     // list can be read through without a composer opening on every row.
     if (id === "open") return openOrEdit(cursorId)
+    if (id === "openReader") return openOrEdit(cursorId)
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
@@ -2032,6 +2041,7 @@ Item {
 
             MessageList {
               id: list
+              scroller: listFlick
               // Match the sidebar's first row inset below the header.
               y: Style.space(6)
               // Full width, so selected and hovered rows meet the splitter.
@@ -2179,6 +2189,7 @@ Item {
             if (!Conversation.holdsMember(root.service.selectedThread,
                 root.service.selectedId) || root.cursorId === "")
               root.cursorId = root.service.selectedId
+            if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
         }
@@ -2937,7 +2948,7 @@ Item {
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
         onLabelChosen: function(labelId) {
-          root.actOnCursor("label:" + labelId)
+          root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }
       }
 
@@ -2986,6 +2997,7 @@ Item {
           // means that row alone, whatever else is ticked.
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
+          if (action === "moveToLabel") return root.openLabelPicker(outside)
           if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
             return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)

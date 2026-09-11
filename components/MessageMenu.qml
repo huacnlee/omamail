@@ -29,7 +29,7 @@ Item {
   property real anchorY: 0
   property int cursorIndex: -1
   readonly property var menuRows: [replyRow, replyAllRow, forwardRow, archiveRow,
-    unarchiveRow,
+    unarchiveRow, moveRow,
     trashRow, spamRow, readRow, starRow, browserRow, aiRow]
   // Whether this message is archived — out of the inbox and not somewhere
   // that has its own verb. Read off the summary the menu was opened on rather
@@ -200,6 +200,14 @@ Item {
         visible: (!root.service || root.service.canArchive) && root.archived
         text: root.inLabelView ? "Move to Inbox and remove label" : "Move to Inbox"
         onActivated: root.run("unarchive")
+      }
+      MenuRow {
+        id: moveRow
+        // A member of a conversation is not a row the picker can move on
+        // its own; the row above it is.
+        visible: !!root.service && root.service.canMoveToLabel && !root.memberOnly
+        text: "Move to..."
+        onActivated: root.run("moveToLabel")
       }
       MenuRow { id: trashRow; text: "Move to trash"; tone: root.urgentColor; onActivated: root.run("trash") }
       MenuRow {

@@ -237,6 +237,35 @@ const utcRecurringEvents = feed.eventsFromCaldav(utcRecurringXml, "work",
 assert.strictEqual(utcRecurringEvents.length, 1)
 assert.strictEqual(utcRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 12, 0))
 
+// A rule from long ago is walked from the range it is asked for, not from its
+// DTSTART. Walking from 1990 hit the loop's 10 000-day ceiling twenty-seven
+// years in and returned nothing for 2026; the rules that did reach the range
+// paid for every day since they began, on the shell's main thread, on every
+// refresh — a weekly event from 2023 cost a quarter of a second each.
+const ancientXml = recurringXml
+  .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH")
+  .replace(/20240208T140000/g, "19900104T140000")
+  .replace(/20240208T150000/g, "19900104T150000")
+const ancientEvents = feed.eventsFromCaldav(ancientXml, "work",
+  Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.start.ms }))), [
+  Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 10, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+], "every Thursday in range, minus the EXDATE, plus the moved one")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.summary }))),
+  ["Standup", "Standup", "Moved standup"])
+
+// COUNT is the one rule that has to be counted from the start, so it still is:
+// ten Thursdays from July reach 3 September and no further, whatever the range.
+const countedXml = recurringXml
+  .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=10")
+  .replace(/20240208T140000/g, "20260702T140000")
+  .replace(/20240208T150000/g, "20260702T150000")
+const countedEvents = feed.eventsFromCaldav(countedXml, "work",
+  Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+assert.deepStrictEqual(JSON.parse(JSON.stringify(countedEvents.map(function(event) { return event.start.ms }))), [
+  Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+], "27 August is the ninth, 3 September the tenth and excluded, 17 September is past COUNT")
+
 const days = feed.monthDays(2026, 7, 1)
 assert.strictEqual(days.length, 42)
 assert.strictEqual(days[0].isoDate, "2026-07-27")

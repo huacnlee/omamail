@@ -116,6 +116,12 @@ Item {
     })
   }
 
+  function scrollBy(steps) {
+    var maximum = Math.max(0, bodyFlick.contentHeight - bodyFlick.height)
+    bodyFlick.contentY = Math.max(0, Math.min(maximum,
+      bodyFlick.contentY + steps * Style.space(20)))
+  }
+
   readonly property var summary: service ? service.selectedMessage : null
 
   // The id the service answers to, which is not always the one on the summary.
@@ -560,6 +566,7 @@ Item {
 
   Flickable {
     id: bodyFlick
+    objectName: "messageBodyScroller"
 
     WheelScroller { view: bodyFlick }
     anchors.top: notices.bottom
@@ -858,11 +865,27 @@ Item {
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("archive")
         }
+        // Archive under a label, or move to a folder: the same picker `v`
+        // opens, one press away in the reader too.
         IconButton {
-          id: trashButton
+          id: moveButton
+          objectName: "reader-move-button"
           x: (archiveButton.visible
             ? archiveButton.x + archiveButton.width
             : actionGap.x + actionGap.width) + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
+          visible: !!root.service && root.service.canMoveToLabel
+          iconName: "label"; tooltipText: "Move to... · v"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.actionRequested("moveToLabel")
+        }
+        IconButton {
+          id: trashButton
+          x: (moveButton.visible
+            ? moveButton.x + moveButton.width
+            : (archiveButton.visible
+              ? archiveButton.x + archiveButton.width
+              : actionGap.x + actionGap.width)) + messageActions.gap
           y: Math.round((parent.height - height) / 2)
           iconName: "trash"; tooltipText: "Move to trash · d"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
