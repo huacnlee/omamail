@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-tests:
+    name: Portable tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # QML engine behavior and libcurl output routing are version-sensitive.
+      # The Makefile deliberately keeps those checks on the Omarchy host; this
+      # runner executes the repository's portable test boundary only.
+      - name: Run portable tests
+        run: make test-js test-shell-portable
+
+      - name: Check whitespace
+        run: git diff --check

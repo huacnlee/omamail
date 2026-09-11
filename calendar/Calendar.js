@@ -196,7 +196,7 @@ function recurrenceUntil(value) {
     Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)).getTime()
 }
 
-function recurrenceStarts(event, rangeEnd) {
+function recurrenceStarts(event, rangeStart, rangeEnd) {
   if (!event || !event.start || !event.recurrenceRule) return []
   var parts = recurrenceParts(event.recurrenceRule)
   var frequency = String(parts.FREQ || "").toUpperCase()
@@ -220,6 +220,22 @@ function recurrenceStarts(event, rangeEnd) {
   var rangeLimit = Number(rangeEnd) || base.getTime()
   var limit = zoned ? rangeLimit + 86400000
     : Math.min(rangeLimit, until > 0 ? until + 1 : rangeLimit)
+
+  // Every test below is a delta from `base`, so the walk can begin on any day
+  // and still match the same ones. Begin it two days short of the range rather
+  // than at DTSTART: the two days cover the zone offset a zoned cursor carries
+  // (no zone sits more than 14 hours from UTC), and a rule from years back no longer pays for every day since it started
+  // on each refresh — nor runs into the ceiling below before reaching the
+  // range at all. COUNT is the one rule that counts from the start, so it is
+  // still walked from there.
+  var from = Number(rangeStart) || 0
+  if (countLimit === 0 && from > 0) {
+    var skipped = Math.floor((from - 2 * 86400000 - base.getTime()) / 86400000)
+    if (skipped > 0) {
+      if (utc) cursor.setUTCDate(cursor.getUTCDate() + skipped)
+      else cursor.setDate(cursor.getDate() + skipped)
+    }
+  }
 
   for (var scanned = 0; scanned < 10000 && cursor.getTime() < limit; scanned++) {
     var cursorYear = datePart(cursor, "getFullYear", "getUTCFullYear", utc)
@@ -319,7 +335,7 @@ function expandRecurringEvents(events, startMs, endMs) {
     var excluded = {}
     var exclusions = Array.isArray(master.excludedMs) ? master.excludedMs : []
     for (var x = 0; x < exclusions.length; x++) excluded[Number(exclusions[x])] = true
-    var starts = recurrenceStarts(master, endMs)
+    var starts = recurrenceStarts(master, startMs, endMs)
     for (var o = 0; o < starts.length; o++) {
       var key = String(master.uid) + "\n" + Number(starts[o])
       var replacement = overrides[key]
@@ -405,6 +421,116 @@ function eventsFromGoogle(payload, sourceId) {
   }
   out.sort(compareEvents)
   return out
+}
+
+// ------------------------------------------------------------- Microsoft
+//
+// Graph's calendar view: the primary calendar's events between two moments,
+// occurrences of a series already expanded, asked for in UTC so a moment
+// parses without a timezone table. Written the way Google's is read: the
+// same event shape out, the same fields in.
+
+var GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+
+function graphEventsUrl(startMs, endMs) {
+  return GRAPH_ROOT + "/me/calendarView?startDateTime="
+    + encodeURIComponent(new Date(Number(startMs) || 0).toISOString())
+    + "&endDateTime=" + encodeURIComponent(new Date(Number(endMs) || 0).toISOString())
+    + "&$top=500&$orderby=start/dateTime"
+    + "&$select=id,iCalUId,subject,bodyPreview,location,isAllDay,isCancelled,start,end,organizer,attendees,onlineMeeting,webLink,seriesMasterId,type"
+}
+
+function graphEventUrl(eventId) {
+  return GRAPH_ROOT + "/me/events/" + encodeURIComponent(String(eventId || ""))
+}
+
+function graphEventsCreateUrl() {
+  return GRAPH_ROOT + "/me/events"
+}
+
+// A Graph moment arrives as "2026-09-07T15:00:00.0000000" in the timezone
+// the request preferred, UTC here; an all-day one as midnight of its day.
+function graphMoment(value, allDay) {
+  var text = String(value && value.dateTime || "")
+  if (text === "") return null
+  var ms
+  if (allDay) {
+    ms = new Date(Number(text.substring(0, 4)), Number(text.substring(5, 7)) - 1,
+      Number(text.substring(8, 10))).getTime()
+  } else {
+    ms = Date.parse(text.replace(/(\.\d+)?$/, "") + "Z")
+  }
+  if (!isFinite(ms)) return null
+  return { ms: ms, allDay: !!allDay, tzid: "", resolved: true }
+}
+
+function graphPerson(value) {
+  var address = value && value.emailAddress ? value.emailAddress : {}
+  return { email: String(address.address || ""), displayName: String(address.name || "") }
+}
+
+function eventsFromGraph(payload, sourceId) {
+  var items = payload && Array.isArray(payload.value) ? payload.value : []
+  var out = []
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {}
+    if (item.isCancelled === true) continue
+    var allDay = item.isAllDay === true
+    var start = graphMoment(item.start, allDay)
+    if (!start) continue
+    var attendees = Array.isArray(item.attendees) ? item.attendees : []
+    var people = []
+    for (var a = 0; a < attendees.length; a++) people.push(graphPerson(attendees[a]))
+    out.push({
+      method: "", uid: String(item.iCalUId || item.id || ""),
+      // The write URL needs Graph's own id; an occurrence of a series carries
+      // an id of its own, and writing to it changes that occurrence alone.
+      graphId: String(item.id || ""),
+      sequence: 0,
+      summary: String(item.subject || "Untitled event"),
+      description: String(item.bodyPreview || ""),
+      location: String(item.location && item.location.displayName || ""),
+      status: "CONFIRMED", organizer: item.organizer ? graphPerson(item.organizer) : null,
+      attendees: people,
+      start: start, end: graphMoment(item.end, allDay),
+      recurrence: "", meetLink: String(item.onlineMeeting && item.onlineMeeting.joinUrl || ""),
+      sourceId: String(sourceId || ""), href: String(item.webLink || ""), source: null
+    })
+  }
+  out.sort(compareEvents)
+  return out
+}
+
+// What Graph is sent for a new or edited event. A timed event is a UTC
+// moment written without its Z and named as UTC beside it, which is how
+// Graph spells one; an all-day event is midnight to the next midnight.
+function graphStamp(ms) {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "")
+}
+
+function graphEventBody(fields, allDay) {
+  var body = {
+    subject: fields.title,
+    body: { contentType: "text", content: String(fields.description || "") },
+    location: { displayName: String(fields.location || "") },
+    isAllDay: allDay === true
+  }
+  if (allDay === true) {
+    body.start = { dateTime: isoDate(new Date(fields.start)) + "T00:00:00", timeZone: "UTC" }
+    body.end = { dateTime: isoDate(new Date(fields.end)) + "T00:00:00", timeZone: "UTC" }
+  } else {
+    body.start = { dateTime: graphStamp(fields.start), timeZone: "UTC" }
+    body.end = { dateTime: graphStamp(fields.end), timeZone: "UTC" }
+  }
+  return body
+}
+
+function graphResponseError(status, responseText) {
+  var payload = null
+  try { payload = JSON.parse(String(responseText || "")) } catch (e) {}
+  var detail = payload && payload.error ? String(payload.error.message || payload.error.code || "") : ""
+  if (status === 401 || status === 403) return "Microsoft refused the calendar request. Sign in again"
+  return detail !== "" ? "Microsoft Graph answered: " + detail : "Microsoft Graph answered " + status
 }
 
 function googleEventsUrl(startMs, endMs) {
@@ -523,7 +649,11 @@ function createEvent(fields, nowMs) {
   var result = {
     ok: true, uid: uid,
     ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule).join("\r\n"),
-    google: googleEventBody(checked)
+    google: googleEventBody(checked),
+    graph: graphEventBody(checked),
+    // Graph spells a series as a structured rule of its own rather than an
+    // RRULE; one is refused there rather than sent wrong.
+    recurring: recurrence.rule !== ""
   }
   if (recurrence.rule !== "") result.google.recurrence = ["RRULE:" + recurrence.rule]
   return result
@@ -578,7 +708,8 @@ function updateEvent(fields, existing, nowMs) {
     ok: true, uid: uid,
     ics: rewritten !== "" ? rewritten
       : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
-    google: googleEventBody(checked, allDay)
+    google: googleEventBody(checked, allDay),
+    graph: graphEventBody(checked, allDay)
   }
 }
 

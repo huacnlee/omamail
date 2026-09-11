@@ -2,6 +2,7 @@
 
 .import "Imap.js" as Imap
 .import "ImapProtocol.js" as Protocol
+.import "MicrosoftOAuth.js" as Microsoft
 
 // Outlook.com is an IMAP mailbox with a sign-in of its own. Keeping it as a
 // provider rather than a password preset matters: Microsoft no longer accepts
@@ -32,13 +33,19 @@ function webHomeUrl() {
   return "https://outlook.live.com/mail/"
 }
 
-function settings(address) {
+// The servers are Microsoft's and fixed here: a personal mailbox submits
+// through smtp-mail.outlook.com, a work or school one through
+// smtp.office365.com, and both read through outlook.office365.com. `send`
+// names Graph where a tenant has authenticated SMTP switched off.
+function settings(address, tenant, send) {
+  var work = Microsoft.isWorkTenant(tenant)
   return Protocol.normalizeSettings({
     imapHost: "outlook.office365.com",
     imapPort: 993,
-    smtpHost: "smtp-mail.outlook.com",
+    smtpHost: work ? "smtp.office365.com" : "smtp-mail.outlook.com",
     smtpPort: 587,
     username: String(address === undefined || address === null ? "" : address).trim(),
-    insecure: false
+    insecure: false,
+    send: send
   })
 }

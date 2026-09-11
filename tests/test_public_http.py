@@ -246,7 +246,7 @@ class Entrypoints(unittest.TestCase):
             listener.settimeout(0.05)
             urls = [f"https://127.0.0.1:{listener.getsockname()[1]}/secret-token",
                     "https://example.com/secret-token\nurl = https://127.0.0.1/\n#"]
-            for script in ["unsubscribe.py", "image-fetch.py"]:
+            for script in ["unsubscribe.py", "image_fetch.py"]:
                 for url in urls:
                     fields = [url]
                     if script == "unsubscribe.py":

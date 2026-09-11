@@ -3,7 +3,7 @@
 var VERSION = 1
 
 function empty() {
-  return { active: false, returnView: "", draft: null }
+  return { active: false, returnView: "", draft: null, parked: [] }
 }
 
 function text(value) {
@@ -50,6 +50,7 @@ function draft(value) {
     to: text(row.to),
     cc: text(row.cc),
     bcc: text(row.bcc),
+    replyTo: text(row.replyTo),
     subject: text(row.subject),
     body: text(row.body),
     // What the compose window placed in the body rather than what was typed
@@ -65,6 +66,7 @@ function draft(value) {
     inReplyTo: text(row.inReplyTo),
     ccVisible: row.ccVisible === true,
     bccVisible: row.bccVisible === true,
+    replyToVisible: row.replyToVisible === true,
     fromEmail: text(row.fromEmail),
     replyRecipients: people(row.replyRecipients),
     fromWasChosen: row.fromWasChosen === true,
@@ -101,16 +103,34 @@ function parse(raw) {
       || value.active !== true) return empty()
   var saved = draft(value.draft)
   if (!hasMeaningfulDraft(saved)) return empty()
-  return { active: true, returnView: returnView(value.returnView), draft: saved }
+  return {
+    active: true, returnView: returnView(value.returnView), draft: saved,
+    parked: meaningful(value.parked)
+  }
 }
 
-function serialize(view, value) {
+// The other drafts parked for their send when the file was written: one
+// composer, several undo windows. Each that still says something is kept.
+function meaningful(values) {
+  var out = []
+  var list = Array.isArray(values) ? values : []
+  for (var i = 0; i < list.length; i++) {
+    var saved = draft(list[i])
+    if (hasMeaningfulDraft(saved)) out.push(saved)
+  }
+  return out
+}
+
+function serialize(view, value, parked) {
   var saved = draft(value)
   if (!hasMeaningfulDraft(saved)) return ""
-  return JSON.stringify({
+  var others = meaningful(parked)
+  var record = {
     version: VERSION,
     active: true,
     returnView: returnView(view),
     draft: saved
-  }) + "\n"
+  }
+  if (others.length > 0) record.parked = others
+  return JSON.stringify(record) + "\n"
 }

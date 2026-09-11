@@ -56,6 +56,7 @@ Item {
   property var special: ({})
   property bool foldersLoaded: false
   property bool foldersLoading: false
+  property int foldersGeneration: 0
   property var folderWaiters: []
 
   // What the server said it can do, asked for alongside the folder listing so
@@ -202,12 +203,20 @@ Item {
     }
     if (foldersLoading) return
     foldersLoading = true
+    var generation = foldersGeneration
 
     // No folder in the URL: both of these are asked of the server rather than
     // of a mailbox, and they share the one connection.
     run("", [Imap.capabilityCommand(), Imap.listCommand()], function(text, error) {
       root.foldersLoading = false
+      if (generation !== root.foldersGeneration) {
+        root.ensureFolders()
+        return
+      }
       if (!error) {
+        // This LIST is authoritative even when the last folder was deleted.
+        root.folders = Imap.parseList(text)
+        root.special = Imap.specialFolders(root.folders)
         root.adoptServerAnswer(text)
         root.foldersLoaded = true
       }
@@ -745,6 +754,38 @@ Item {
     return handle
   }
 
+  // The folder list, changed. No mailbox is selected for these — the URL is
+  // the server alone — and the cached listing is dropped so the next read
+  // sees the server's answer rather than this client's memory of it.
+  function createLabel(name, callback) {
+    return changeFolders([Imap.createCommand(name)], callback)
+  }
+
+  function renameLabel(id, name, callback) {
+    return changeFolders([Imap.renameCommand(id, name)], callback)
+  }
+
+  function deleteLabel(id, callback) {
+    return changeFolders([Imap.deleteCommand(id)], callback)
+  }
+
+  function changeFolders(commands, callback) {
+    // Check the complete batch before credentials or a transport are requested.
+    for (var i = 0; i < commands.length; i++) {
+      if (commands[i] === "") {
+        if (typeof callback === "function") callback(null, "This folder name cannot be sent safely")
+        return newHandle()
+      }
+    }
+    return root.run("", commands, function(text, error) {
+      if (!error) {
+        root.foldersGeneration++
+        root.foldersLoaded = false
+      }
+      if (typeof callback === "function") callback(null, error)
+    })
+  }
+
   // One id or a list of them, the way every other verb here already takes one.
   // A row that stands for a conversation is trashed as its members, and the
   // list arrives here flat — `applyPlan` groups by folder either way, so a
@@ -883,6 +924,35 @@ Item {
     return handle
   }
 
+  // The draft a sent message was opened from, taken away with the same
+  // commands a save uses to remove the copy it replaced.
+  function deleteDraft(messageId, callback) {
+    var handle = newHandle()
+    ensureFolders(function(folderError) {
+      if (handle.aborted) return
+      if (folderError) {
+        if (typeof callback === "function") callback(null, folderError)
+        return
+      }
+      var groups = Imap.groupByFolder([String(messageId || "")])
+      if (groups.length === 0) {
+        if (typeof callback === "function") callback(null, "")
+        return
+      }
+      var folder = groups[0].folder
+      var plan = Imap.draftReplacementPlan(String(messageId || ""), folder)
+      if (plan.commands.length === 0) {
+        if (typeof callback === "function") callback(null, plan.warning)
+        return
+      }
+      root.run(folder, plan.commands, function(text, error) {
+        if (handle.aborted) return
+        if (typeof callback === "function") callback(null, error)
+      }, handle)
+    })
+    return handle
+  }
+
   // `MailAccount` builds the same payload for either provider: a base64url
   // `raw` field, because that is what Gmail's send endpoint takes. SMTP wants
   // the message itself and the envelope separately, so it is decoded back and
@@ -897,6 +967,10 @@ Item {
 
     var message = Mail.decodeBase64Url(raw)
     var settings = auth ? auth.settings : null
+    // A tenant with authenticated SMTP switched off sends through Graph
+    // instead: the same message, a token of Graph's own audience, and the
+    // sent copy filed by Graph itself.
+    if (Imap.sendsViaGraph(settings)) return sendViaGraph(raw, callback, handle)
     var smtp = Imap.smtpUrl(settings)
     if (smtp === "") {
       if (typeof callback === "function")
@@ -975,6 +1049,63 @@ Item {
   // way every folder name is. A server that named no Sent folder holds no
   // copy: making a folder up would create one rather than find one, and the
   // callback's warning is where the caller says so.
+  function sendViaGraph(raw, callback, handle) {
+    if (!auth || typeof auth.withGraphToken !== "function") {
+      if (typeof callback === "function") callback(null, "This mailbox cannot send through Microsoft Graph")
+      return handle
+    }
+    // The message is bound to the session that queued it. A token arriving
+    // for a mailbox that is no longer this one belongs to that mailbox, not
+    // to this MIME: the send is refused rather than carried to whoever is
+    // signed in now.
+    var session = typeof auth.sessionContext === "function" ? auth.sessionContext() : null
+    root.inFlight++
+    auth.withGraphToken(function(token, tokenError) {
+      if (!root) return
+      if (handle.aborted) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        return
+      }
+      var mine = !session || typeof auth.isCurrent !== "function" || auth.isCurrent(session)
+      if (!token || !mine) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (typeof callback === "function") {
+          callback(null, !mine ? "This mailbox is no longer signed in"
+            : (tokenError || "Not signed in to Microsoft Graph"))
+        }
+        return
+      }
+      var message = Mail.decodeBase64Url(raw)
+      var fields = [Mail.encodeBase64(Imap.GRAPH_SEND_URL), Mail.encodeBase64(token), Mail.encodeBase64(message)]
+      var process = transportComponent.createObject(root, {
+        command: [root.transport],
+        requestLine: "graph-send " + fields.join(" ")
+      })
+      if (!process) {
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (typeof callback === "function") callback(null, "Could not start the mail transport")
+        return
+      }
+      handle.process = process
+      process.finished.connect(function(status, out, err) {
+        if (!root) return
+        handle.process = null
+        process.destroy()
+        root.inFlight = Math.max(0, root.inFlight - 1)
+        if (typeof callback !== "function") return
+        if (status !== 0) {
+          var detail = Imap.decodeResponse(err, Mail.base64ToBytes, Mail.bytesToLatin1)
+          callback(null, Imap.responseError(status, detail, "The message could not be sent through Microsoft Graph"))
+          return
+        }
+        // Graph files the copy in Sent Items itself; nothing to append.
+        callback(Imap.sentCopyResult("Sent Items", true), "")
+      })
+      process.running = true
+    })
+    return handle
+  }
+
   function fileSentCopy(message, callback, handle) {
     ensureFolders(function(folderError) {
       if (!root) return
