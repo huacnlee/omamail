@@ -55,7 +55,9 @@ Column {
     if (address === "") return null
     var clientId = validatedClientId()
     if (clientId === "") return null
-    var tenant = workSwitch.checked ? "organizations" : ""
+    // The native backend needs an explicit authority; saving an empty string
+    // lets device sign-in succeed but breaks subsequent account-bound refresh.
+    var tenant = workSwitch.checked ? "organizations" : "consumers"
     var send = workSwitch.checked && graphSwitch.checked ? "graph" : ""
     var imap = Outlook.settings(address, tenant, send)
     imap.tenant = tenant

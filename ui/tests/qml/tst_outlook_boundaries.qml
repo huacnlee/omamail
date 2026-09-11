@@ -122,6 +122,18 @@ Item {
       compare(label.textFormat, Text.PlainText,
         "Server error messages must not be interpreted as resource-bearing HTML")
     }
+    function test_personal_account_saves_explicit_authority() {
+      var host = readyHost()
+      var service = createTemporaryObject(serviceFactory, parent, { auth: host.auth })
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      verify(page !== null)
+      compare(page.accountValues().imap.tenant, "consumers")
+      var work = findChild(page, "outlook-work-switch")
+      work.checked = true
+      compare(page.accountValues().imap.tenant, "organizations")
+      work.checked = false
+      compare(page.accountValues().imap.tenant, "consumers")
+    }
     function test_cancel_matches_google_signin_and_allows_retry() {
       var host = readyHost()
       var service = createTemporaryObject(serviceFactory, parent, { auth: host.auth })
