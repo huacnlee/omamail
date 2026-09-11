@@ -1,0 +1,204 @@
+{
+  "date": "2026-09-11T17:04:49Z",
+  "machine": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13700KF",
+    "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+    "logicalCpus": 24,
+    "loadAverageBefore": [
+      0.328125,
+      1.3291015625,
+      2.20166015625
+    ],
+    "loadAverageAfter": [
+      1.39599609375,
+      1.48095703125,
+      2.046875
+    ]
+  },
+  "versions": {
+    "qml": "Qml Runtime 6.11.2",
+    "node": "v26.8.1",
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)"
+  },
+  "conditions": "Shared desktop machine; no exclusive CPU affinity or machine isolation.",
+  "commandWallSeconds": 274.2210251110009,
+  "buildWallSeconds": 9.078720936000536,
+  "baseline": {
+    "capturedAt": "2026-09-11T16:13:35.156437+00:00",
+    "sha256": {
+      "message/Message.js": "6bc793110fdc1fb812c8928ba40a42d36a110972a4518e076b6d30966efbc6e3",
+      "message/Direction.js": "b937e2ecbb9c44c7259ea0ac6529c9909270b453663dd3c8408078a718791a76",
+      "message/Signature.js": "6e324dad649c9d21121ff9185e752e972889cb958fc2220b86a40f27a0c3dbe8",
+      "message/Html.js": "792ad666d77622092f79842162b53f33ccde6c3fbcee9933f02615cca46f2572",
+      "tests/load.js": "edfc5fcd0bdd275dec3519ac974b1c2f74f7d666a7a8196a8c8b1eb88f8aff06"
+    },
+    "purpose": "Frozen pre-migration production JavaScript; deterministic synthetic benchmark only"
+  },
+  "nativeBinarySha256": "c233c24bc16a24eb6e1d345cc2326c209a052a727ca2a3b2a8109747922ed65d",
+  "nativeSourceSha256": {
+    "src/message/compose.rs": "d060502f0043befdb80246c34f072a4767f609e0332c111433b88ec1caa5499c",
+    "src/message/content.rs": "b122f24140d02308093894b077aa6aaa9ec0d2da90181ba1015d33b1f586c79a",
+    "src/message/direction.rs": "5f012c0772d070583c77de5f4de6cc0975b031c8caf7ac2764bcdf81235aa2db",
+    "src/message/html/mod.rs": "273715d6b2cf2efecbd1020ed7578a0337338fad1a93defe1f532a3842bc58cc",
+    "src/message/html/policy.rs": "999deb97a0209a176fcce673417c9e43ef121876455aa0488a1f93c6a339f718",
+    "src/message/html/reader.rs": "a2c5759195477847914c95b3e93ba133d8a8764a62897f1cf848f52d6de16fe6",
+    "src/message/html/tests.rs": "e80edbeafff5652abe1e05a6e80e4493deea5d0cb8085075ff17198883fbb3a6",
+    "src/message/html/tree.rs": "9b6493d9f1219dca97b646d51b49fe9b16f9238dd658f3643e07fee909736c9a",
+    "src/message/mod.rs": "20e78cb6d0b75c22dac3bed670a724597d5d1a4440493a33b0a693d6ee54f6a8",
+    "src/message/parity_tests.rs": "5a44821a04b5dbe79c3be2f6cba357d5938322e2da04f10fae81c96dfe55275c",
+    "src/message/signature.rs": "4a8ca5a00d7e009beca2002155b852f4327ead79ad0916a581c32f6fb6b9991d",
+    "src/message/tests.rs": "e65fdb1577f78d6330ce7f160ba4b43d03c354f4753ba3fdd88b5649fdddc39c"
+  },
+  "samples": 31,
+  "batch": 1,
+  "warmupOperations": 5,
+  "attachmentMiB": 10,
+  "corpus": [
+    {
+      "name": "large_attachment",
+      "bytes": 14349510,
+      "htmlBytes": 32,
+      "sha256": "990859c4c1b99c23b9917cd9c5890a78fe63df4e6c26941c88cac9a9e1b247dc"
+    }
+  ],
+  "nodeProcess": {
+    "processWallSeconds": 62.973602537998886,
+    "peakRssKiB": 1070296
+  },
+  "rustProcess": {
+    "processWallSeconds": 0.5191721630017128,
+    "peakRssKiB": 137040
+  },
+  "qmlProcess": {
+    "processWallSeconds": 201.07797191099962,
+    "peakRssKiB": 16336888
+  },
+  "results": [
+    {
+      "name": "large_attachment",
+      "phase": "mime",
+      "semanticMatch": true,
+      "semanticDifference": "",
+      "jsDigest": "55d76e671b5dd01713c7c3ff156b49d431d1782f87e4f1aa43e58f068ea91925",
+      "rustDigest": "55d76e671b5dd01713c7c3ff156b49d431d1782f87e4f1aa43e58f068ea91925",
+      "node": {
+        "coldUs": 1826359.828,
+        "medianUs": 1687169.446,
+        "p95Us": 1744703.217,
+        "samplesUs": [
+          1675358.439,
+          1687169.446,
+          1685848.371,
+          1679274.895,
+          1699837.953,
+          1708619.219,
+          1686652.892,
+          1686440.398,
+          1683829.323,
+          1694988.626,
+          1751862.456,
+          1678940.394,
+          1689746.846,
+          1684438.835,
+          1707460.563,
+          1678499.384,
+          1678152.835,
+          1694053.57,
+          1691110.628,
+          1713278.133,
+          1678912.432,
+          1695294.612,
+          1744703.217,
+          1693827.147,
+          1676959.225,
+          1687160.478,
+          1690929.377,
+          1700245.228,
+          1676077.364,
+          1679961.04,
+          1688274.451
+        ]
+      },
+      "rust": {
+        "coldUs": 14033.357,
+        "medianUs": 11241.178,
+        "p95Us": 12662.139,
+        "samplesUs": [
+          11661.279999999999,
+          11273.561,
+          11172.711,
+          11538.771,
+          11073.915,
+          11241.178,
+          11558.692000000001,
+          11183.599,
+          11434.642,
+          11226.376,
+          12662.139,
+          11975.341,
+          12261.365,
+          11250.097,
+          11599.422,
+          12184.463,
+          10945.727,
+          11213.613000000001,
+          11365.955,
+          18294.68,
+          11148.358,
+          11196.667000000001,
+          11216.581,
+          11596.466999999999,
+          10981.833,
+          11330.966,
+          11137.215,
+          11132.69,
+          11011.408,
+          11048.258,
+          11089.201
+        ]
+      },
+      "speedup": 150.08831334224936,
+      "qml": {
+        "coldUs": 5668000,
+        "medianUs": 4307000,
+        "p95Us": 7198000,
+        "samplesUs": [
+          7198000,
+          4489000,
+          4256000,
+          6532000,
+          4304000,
+          4362000,
+          8040000,
+          4233000,
+          4254000,
+          6494000,
+          4288000,
+          4196000,
+          6434000,
+          4428000,
+          4167000,
+          6417000,
+          4252000,
+          4307000,
+          6568000,
+          4244000,
+          4460000,
+          6949000,
+          4240000,
+          4259000,
+          6574000,
+          4291000,
+          4248000,
+          6429000,
+          4276000,
+          4233000,
+          6453000
+        ],
+        "batch": 1
+      },
+      "qmlSemanticMatch": true,
+      "qmlSpeedup": 383.14489815924986
+    }
+  ]
+}

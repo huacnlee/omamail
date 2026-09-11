@@ -1,10 +1,9 @@
 import QtQuick
-import Quickshell.Io
 import "../message/Message.js" as Mail
 import "../message/Unsubscribe.js" as Unsub
 
 // Unsubscribing from the list the open message came from: a browser page, a
-// mail to the list, or a POST through `scripts/unsubscribe.py`, whichever
+// mail to the list, or a POST through the Rust backend, whichever
 // the headers offer. Beside the account rather than in it, which is at its
 // size ceiling; its state (`unsubscribing`, `unsubscribeDone`) stays on the
 // account, where the reader reads it.
@@ -69,8 +68,8 @@ QtObject {
   // are checked, and it borrows the judgement that decides whether a message
   // may load a picture.
   //
-  // Qt's XHR follows redirects without rechecking the destination. The Python
-  // worker instead resolves and checks every IP, connects to that exact answer
+  // Qt's XHR follows redirects without rechecking the destination. The Rust
+  // backend instead resolves and checks every IP, connects to that exact answer
   // while retaining the original TLS hostname, and never follows a redirect.
   // URL bytes remain data throughout: there is no shell or curl config.
   //
@@ -83,23 +82,16 @@ QtObject {
       return
     }
     account.unsubscribing = true
-    var request = unsubscribeComponent.createObject(account, {
-      command: ["python3", account.pluginDir + "/scripts/unsubscribe.py"],
-      requestLine: [Mail.encodeBase64(String(url)),
-        Mail.encodeBase64(Unsub.postContentType()),
-        Mail.encodeBase64(Unsub.postBody())].join(" ")
-    })
-    if (!request) {
+    if (!account.backend || !account.backend.ready) {
       account.unsubscribing = false
-      account.fail("The unsubscribe request could not be sent")
+      account.fail("The mail backend is not ready")
       return
     }
-    request.finished.connect(function(exitCode, status) {
-      if (!root) return
-      request.destroy()
+    account.backend.call("public.unsubscribe", { url: String(url) }, function(result, error) {
+      var status = result ? Number(result.status || 0) : 0
       account.unsubscribing = false
       account.unsubscribeDone = ""
-      if (exitCode !== 0 || status === 0) {
+      if (error || status === 0) {
         account.fail("The unsubscribe request could not be sent")
         return
       }
@@ -112,47 +104,8 @@ QtObject {
       // it points at was never judged — so it is reported as a refusal rather
       // than followed.
       account.fail(status >= 300 && status < 400
-        ? "This list answered with a redirect instead of account.unsubscribing (" + status + ")"
+        ? "This list answered with a redirect instead of unsubscribing (" + status + ")"
         : "This list refused the unsubscribe request (" + status + ")")
     })
-    request.running = true
-  }
-
-  // One process per request, created and destroyed around it. The same shape
-  // the mail transport uses, for the same reason: the URL crosses on stdin
-  // base64-encoded, so a header a stranger wrote never reaches the process
-  // table and nothing has to be escaped on the way.
-
-  readonly property Component unsubscribeComponent: Component {
-
-    Process {
-      id: unsubscribeProcess
-
-      property string requestLine: ""
-      signal finished(int exitCode, int status)
-
-      stdinEnabled: true
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-
-      onStarted: {
-        // One line, because Quickshell's Process.write() never closes stdin and
-        // the script would wait forever for an EOF that does not come.
-        write(requestLine + "\n")
-        requestLine = ""
-      }
-
-      onExited: function(exitCode) {
-        // "<transport error code> <http status>", and nothing else is read.
-        var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
-        var code = Math.floor(Number(parts[0]))
-        var status = Math.floor(Number(parts[1]))
-        if (exitCode !== 0 || parts.length < 2 || !isFinite(code) || !isFinite(status)) {
-          unsubscribeProcess.finished(exitCode === 0 ? 1 : exitCode, 0)
-          return
-        }
-        unsubscribeProcess.finished(code, status)
-      }
-    }
   }
 }

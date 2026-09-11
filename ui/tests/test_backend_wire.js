@@ -73,3 +73,30 @@ for (const chunkSize of [0, -1, 0.5, Infinity, "65536"]) {
 }
 assert.strictEqual(runUpload(largeRaw, { chunkSize: 1024 * 1024 }).calls.filter(call => call.method === "upload.append").length, 2)
 console.log("backend upload tests ok")
+
+const notification = { jsonrpc: "2.0", method: "mail.updated", params: { accountId: "a@example.org", sequence: 1 } }
+assert.deepStrictEqual(JSON.parse(JSON.stringify(wire.notification(JSON.stringify(notification)))), notification)
+for (const change of [{id:"x"}, {method:"other"}, {params:[]}, {result:{}}, {jsonrpc:"1.0"}])
+  assert.strictEqual(wire.notification(JSON.stringify({...notification, ...change})), null)
+const body = { text: "世界\n\u0000", source: "📨", html: "<p>مرحبا</p>" }
+const uploaded = []
+let committed
+upload.putBody("a@example.org", "1:Inbox", body, (method, params, callback) => {
+  if (method === "upload.begin") callback({upload:"body-1", chunkSize:7}, null)
+  else if (method === "upload.append") {
+    const bytes = Buffer.from(params.data, "base64url")
+    uploaded.push(bytes)
+    callback({offset:params.offset + bytes.length}, null)
+  } else if (method === "cache.bodyPutUpload") {
+    committed = params
+    callback({stored:true}, null)
+  } else throw new Error(method)
+}, () => true, (result, error) => { assert.strictEqual(error, null); assert(result.stored) })
+assert.deepStrictEqual(JSON.parse(Buffer.concat(uploaded).toString("utf8")), body)
+assert.strictEqual(committed.accountId, "a@example.org")
+assert.strictEqual(committed.id, "1:Inbox")
+
+const changed = {jsonrpc:"2.0",method:"accounts.changed",params:{revision:"a".repeat(64)}}
+assert.deepStrictEqual(JSON.parse(JSON.stringify(wire.notification(JSON.stringify(changed)))), changed)
+for (const params of [{revision:""},{revision:"a".repeat(63)},{revision:"G".repeat(64)},{revision:42},{revision:"a".repeat(64),registry:{clientSecret:"forbidden"}}])
+  assert.strictEqual(wire.notification(JSON.stringify({...changed,params})),null)

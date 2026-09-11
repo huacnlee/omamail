@@ -26,6 +26,14 @@ Item {
   // Two mailboxes, A active. The draft under test belongs to B.
   QtObject {
     id: mailService
+    property bool holdNativeText: false
+    property var pendingNativeText: []
+    property var backend: ({call: function(method, params, callback) {
+      if (method !== "message.composeText") return
+      var result = {body: String(params.signature || ""), quote: "", replySubject: "Re: Invoice"}
+      if (mailService.holdNativeText) mailService.pendingNativeText.push({callback:callback,result:result})
+      else callback(result, null)
+    }})
     property bool sendPending: false
     property bool sending: false
     property int sendSecondsRemaining: 10
@@ -153,6 +161,23 @@ Item {
     }
 
     // ------------------------------------------------------- the sign-off
+
+    function test_late_native_body_does_not_overwrite_typing() {
+      mailService.holdNativeText = true
+      mailService.pendingNativeText = []
+      mailService.composeAccountId = bobId
+      compose.begin("reply", incoming(), "Original body", [])
+      var field = named(compose, "compose-body-editor")
+      verify(field !== null)
+      field.text = "Text entered while the backend was preparing the quote"
+      for (var i = 0; i < mailService.pendingNativeText.length; i++) {
+        var pending = mailService.pendingNativeText[i]
+        pending.callback(pending.result, null)
+      }
+      compare(field.text, "Text entered while the backend was preparing the quote")
+      mailService.holdNativeText = false
+      mailService.pendingNativeText = []
+    }
 
     function test_a_draft_is_signed_by_the_mailbox_it_belongs_to() {
       mailService.composeAccountId = bobId

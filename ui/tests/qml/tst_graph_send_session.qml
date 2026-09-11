@@ -39,6 +39,13 @@ Item {
     id: clientFactory
     Providers.ImapClient {
       required property var authObject
+      property var calls: []
+      backend: QtObject {
+        property bool ready: true
+        function call(method, params, callback) {
+          calls = calls.concat([{method: method, params: params, callback: callback}])
+        }
+      }
       auth: authObject
       email: "alice@example.test"
     }
@@ -55,72 +62,56 @@ Item {
       return { auth: auth, client: client }
     }
 
-    // A transport is a Process the client started against mail-transport.sh.
-    // Counting them is how "nothing was sent" is asserted.
-    function transports(client) {
-      var out = []
-      for (var i = 0; i < client.children.length; i++) {
-        var child = client.children[i]
-        if (child.command && String(child.command[0] || "").indexOf("mail-transport.sh") >= 0) out.push(child)
-      }
-      return out
-    }
+    function transports(client) { return client.calls }
 
     function newHandle() { return ({ aborted: false, process: null }) }
 
-    // The reviewer's report: Alice's MIME is queued, the mailbox becomes
-    // Bob's, Bob's token exchange completes, and the old callback builds a
-    // running transport carrying Bob's token and Alice's message.
-    function test_a_send_queued_before_an_account_switch_starts_no_transport() {
-      var made = build()
-      var answers = []
-      made.client.sendViaGraph(Qt.btoa("From: alice@example.test\r\n\r\nhello"),
-        function(result, error) { answers.push({ result: result, error: error }) }, newHandle())
-      compare(made.auth.waiters.length, 1, "the send is waiting on a Graph token")
-      compare(answers.length, 0)
-      compare(made.client.inFlight, 1)
-
+    // Rust resolves the queued account's token. UI changes cannot retarget the
+    // accountId already submitted, and a stale response cannot report success
+    // for whichever account the user switched to in the meantime.
+    function test_account_switch_cannot_retarget_submitted_send() {
+      var made=build()
+      var answers=[]
+      var raw=Qt.btoa("From: alice@example.test\r\n\r\nhello")
+      made.client.sendViaGraph(raw,function(result,error){answers.push({result:result,error:error})},newHandle())
+      compare(made.client.calls.length,1)
+      var request=made.client.calls[0]
+      compare(request.method,"outlook.graphSend")
+      compare(request.params.accountId,"outlook:alice@example.test")
+      compare(request.params.raw,raw)
+      compare(request.params.token,undefined)
+      compare(made.auth.waiters.length,0)
       made.auth.becomeAnotherAccount("outlook:bob@example.test")
-      // Bob's exchange completes and answers the waiter it inherited.
-      made.auth.waiters[0]("bob-graph-token", "")
-
-      compare(transports(made.client).length, 0,
-        "no transport may start for a mailbox that is no longer this one")
-      compare(answers.length, 1, "the send is refused rather than left hanging")
-      compare(answers[0].result, null)
-      verify(answers[0].error !== "")
-      compare(made.client.inFlight, 0, "and the client is not left busy")
+      request.callback({sent:true},"")
+      compare(made.client.calls.length,1)
+      compare(request.params.accountId,"outlook:alice@example.test")
+      compare(answers.length,1)
+      compare(answers[0].result,null)
+      verify(answers[0].error!=="")
+      compare(made.client.inFlight,0)
     }
-
-    // The same session throughout: the send goes, so the guard above is not
-    // simply refusing everything.
-    function test_a_send_on_the_session_that_queued_it_is_carried() {
-      var made = build()
-      var answers = []
-      made.client.sendViaGraph(Qt.btoa("From: alice@example.test\r\n\r\nhello"),
-        function(result, error) { answers.push({ result: result, error: error }) }, newHandle())
-      made.auth.waiters[0]("alice-graph-token", "")
-
-      var started = transports(made.client)
-      compare(started.length, 1, "the mailbox that queued it sends")
-      compare(started[0].running, true)
-      compare(answers.length, 0, "and waits on the transport rather than answering early")
+    function test_unchanged_session_receives_confirmed_send() {
+      var made=build()
+      var answers=[]
+      made.client.sendViaGraph("synthetic",function(result,error){answers.push({result:result,error:error})},newHandle())
+      compare(answers.length,0)
+      made.client.calls[0].callback({sent:true},"")
+      compare(answers.length,1)
+      compare(answers[0].result.sent,true)
+      compare(answers[0].error,"")
+      compare(made.client.inFlight,0)
     }
-
-    // A token refused for a session that has moved on says so once, and still
-    // starts nothing.
-    function test_a_refused_token_after_a_switch_starts_no_transport() {
-      var made = build()
-      var answers = []
-      made.client.sendViaGraph(Qt.btoa("From: alice@example.test\r\n\r\nhello"),
-        function(result, error) { answers.push({ result: result, error: error }) }, newHandle())
+    function test_refused_send_after_account_switch_answers_once_without_retry() {
+      var made=build()
+      var answers=[]
+      made.client.sendViaGraph("synthetic",function(result,error){answers.push({result:result,error:error})},newHandle())
       made.auth.becomeAnotherAccount("outlook:bob@example.test")
-      made.auth.waiters[0]("", "Signed out")
-
-      compare(transports(made.client).length, 0)
-      compare(answers.length, 1)
-      verify(answers[0].error !== "")
-      compare(made.client.inFlight, 0)
+      made.client.calls[0].callback(null,{message:"auth_signed_out"})
+      compare(made.client.calls.length,1)
+      compare(answers.length,1)
+      compare(answers[0].result,null)
+      verify(answers[0].error!=="")
+      compare(made.client.inFlight,0)
     }
   }
 }

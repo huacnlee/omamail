@@ -164,16 +164,11 @@ Item {
       tryVerify(function() { return Transports.newSince(account.api, before).length === 1 }, 1000,
         "sign-in sends the session GET")
       var sessionRequest = Transports.newSince(account.api, before)[0]
-      compare(Transports.requested(sessionRequest).verb, "session")
-      compare(Transports.requested(sessionRequest).url, sessionUrl,
+      compare(sessionRequest.method, "jmap.verify")
+      compare(sessionRequest.params.settings.sessionUrl, sessionUrl,
         "a bare typed host becomes the session URL under it")
-
-      var beforeMailboxes = Transports.transports(account.api)
-      Transports.answer(sessionRequest, 200, session)
-      var calls = Transports.newSince(account.api, beforeMailboxes)
-      compare(calls.length, 1, "a good session is followed by one Mailbox/get")
-      compare(Transports.requested(calls[0]).verb, "call")
-      Transports.answer(calls[0], 200, mailboxes)
+      compare(sessionRequest.params.secret, "app-password")
+      Transports.verified(sessionRequest, session, mailboxes)
       return account
     }
 

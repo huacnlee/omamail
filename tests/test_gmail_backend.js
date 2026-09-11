@@ -6,18 +6,18 @@ const source = fs.readFileSync(require("path").join(__dirname, "../ui/providers/
 function method(name) {
   const start = source.indexOf("  function " + name + "(")
   assert(start >= 0, name)
-  return source.slice(start, source.indexOf("\n  function ", start + 1))
+  return source.slice(start, source.indexOf("\n  }", start + 1) + 4)
 }
 const context = { Api: load("providers/GmailApi.js"), inFlight: 0,
   auth: { accountId: "a@example.org", loggedIn: true },
   backendEpoch: 0, backendAccount: "", Qt: { callLater: fn => fn() } }
 context.root = context
 vm.createContext(context)
-for (const name of ["newHandle", "clearDeadline", "abortRequest", "listMessages", "getMessage", "getAttachment"])
+for (const name of ["newHandle", "abortRequest", "listMessages", "getMessage", "getAttachment"])
   vm.runInContext(method(name), context)
 // Load additional real helpers when present; the pre-migration implementation
 // fails at the forbidden network path, not because a helper is missing.
-for (const name of ["usesBackend", "invalidateBackend", "backendRequest"])
+for (const name of ["usesBackend", "invalidateBackend", "backendError", "backendRequest"])
   if (source.includes("  function " + name + "(")) vm.runInContext(method(name), context)
 let pending, request, calls = 0
 context.backend = { executable: "/test/omamail", call(method, params, cb) { calls++; request = { method, params }; pending = cb } }
@@ -90,5 +90,34 @@ context.request = () => { legacy++ }
 context.getMessage("one", true, () => {})
 context.listMessages("", 25, "", () => {})
 context.getAttachment("one", "part", () => {})
-assert.strictEqual(legacy, 3)
+assert.strictEqual(legacy, 0)
+assert(!source.includes("XMLHttpRequest"), "Gmail transport must remain native")
+context.backend = { executable: "/test/omamail", call(method, params, cb) { request = { method, params }; pending = cb } }
+for (const name of ["modifyMessage", "batchModify", "createLabel", "renameLabel", "deleteLabel", "sendMessage", "saveDraft", "updateDraft", "deleteDraft"])
+  vm.runInContext(method(name), context)
+for (const [name, rpc, args] of [
+  ["modifyMessage", "gmail.modify", ["id", ["STARRED"], []]],
+  ["batchModify", "gmail.batchModify", [["id"], [], ["UNREAD"]]],
+  ["createLabel", "gmail.createLabel", ["Work"]],
+  ["renameLabel", "gmail.renameLabel", ["label", "Work/new"]],
+  ["deleteLabel", "gmail.deleteLabel", ["label"]],
+  ["sendMessage", "gmail.send", [{raw:"YQ",threadId:"thread"}]],
+  ["saveDraft", "gmail.saveDraft", [{raw:"YQ"}]],
+  ["saveDraft", "gmail.updateDraft", [{raw:"YQ",draftId:"message"}]],
+  ["deleteDraft", "gmail.deleteDraft", ["message"]]
+]) {
+  let received
+  context[name](...args,(body,error) => { assert.strictEqual(error, ""); received = body })
+  assert.strictEqual(request.method,rpc)
+  assert.strictEqual(request.params.accountId,"b@example.org")
+  const reply = {id:"updated"}
+  pending(reply,null)
+  assert.strictEqual(received,reply)
+}
 console.log("test_gmail_backend.js ok")
+
+vm.runInContext(method("getProfile"), context)
+context.auth = {loggedIn:true, accountId:"", signedInProfile:{emailAddress:"new@example.org",messagesTotal:2,threadsTotal:1}}
+const beforeBootstrap = calls
+context.getProfile((profile,error) => { assert.strictEqual(error, ""); assert.strictEqual(profile.email, "new@example.org") })
+assert.strictEqual(calls, beforeBootstrap, "initial identity comes from the native completed grant before registry creation")

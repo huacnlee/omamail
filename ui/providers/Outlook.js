@@ -1,42 +1,65 @@
 .pragma library
 
-.import "Imap.js" as Imap
+// Provider presentation only. NativeDomain.js supplies all mail capabilities
+// and mailbox queries; providers.resolve builds dynamic queries in Rust.
+
 .import "ImapProtocol.js" as Protocol
 .import "MicrosoftOAuth.js" as Microsoft
 
-// Outlook.com is an IMAP mailbox with a sign-in of its own. Keeping it as a
-// provider rather than a password preset matters: Microsoft no longer accepts
-// account passwords for personal mail, while the generic IMAP provider still
-// needs them for servers that do.
-
 var ID = "outlook"
+
 var NAME = "Outlook"
+
 var SUMMARY = "Outlook.com and Hotmail, signed in securely with Microsoft."
+
 var AUTH = "oauth"
 
-var CAPABILITIES = Imap.CAPABILITIES
-var MAILBOXES = Imap.MAILBOXES
+var MAILBOXES = [
+  {
+    "key": "inbox",
+    "label": "Inbox",
+    "icon": "inbox"
+  },
+  {
+    "key": "unread",
+    "label": "Unread",
+    "icon": "unread"
+  },
+  {
+    "key": "starred",
+    "label": "Flagged",
+    "icon": "star"
+  },
+  {
+    "key": "sent",
+    "label": "Sent",
+    "icon": "sent"
+  },
+  {
+    "key": "drafts",
+    "label": "Drafts",
+    "icon": "compose"
+  },
+  {
+    "key": "archive",
+    "label": "Archive",
+    "icon": "archive",
+    "optional": true
+  },
+  {
+    "key": "spam",
+    "label": "Junk",
+    "icon": "spam",
+    "optional": true
+  },
+  {
+    "key": "trash",
+    "label": "Trash",
+    "icon": "trash",
+    "optional": true
+  }
+]
 
-function searchQuery(text) {
-  return Imap.searchQuery(text)
-}
-
-function cachedSummaryInSearch(sourceQuery, summary) {
-  return Imap.cachedSummaryInSearch(sourceQuery, summary)
-}
-
-function labelQuery(name) {
-  return Imap.labelQuery(name)
-}
-
-function webHomeUrl() {
-  return "https://outlook.live.com/mail/"
-}
-
-// The servers are Microsoft's and fixed here: a personal mailbox submits
-// through smtp-mail.outlook.com, a work or school one through
-// smtp.office365.com, and both read through outlook.office365.com. `send`
-// names Graph where a tenant has authenticated SMTP switched off.
 function settings(address, tenant, send) {
   var work = Microsoft.isWorkTenant(tenant)
   return Protocol.normalizeSettings({

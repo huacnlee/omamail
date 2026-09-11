@@ -14,6 +14,39 @@ Item {
   TestCase {
     name: "BackendLifecycle"
 
+    function test_agent_context_deadline_includes_uploaded_operation() {
+      var backend = makeBackend()
+      makeReady(backend)
+      var before = Date.now()
+      backend.call("agent.context", {}, function() {})
+      backend.call("request.upload", {method:"agent.context",upload:"synthetic"}, function() {})
+      backend.call("message.prepare", {}, function() {})
+      var pending = Object.keys(backend.pending).map(function(id) { return backend.pending[id] })
+      compare(pending.length, 3)
+      verify(pending[0].deadline >= before + 65000)
+      verify(pending[1].deadline >= before + 65000)
+      verify(pending[2].deadline >= before + 30000 && pending[2].deadline < before + 31000)
+    }
+
+    function test_cancelled_upload_discards_staged_data_without_domain_dispatch() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var callbacks = 0
+      var handle = backend.call("agent.context", {prompt:"x".repeat(210000)}, function() { callbacks++ })
+      var all = requests(process)
+      compare(all[all.length - 1].method, "upload.begin")
+      reply(process, all[all.length - 1], {upload:"synthetic",chunkSize:65536})
+      all = requests(process)
+      var append = all[all.length - 1]
+      compare(append.method,"upload.append")
+      handle.cancel()
+      reply(process,append,{offset:65536})
+      all=requests(process)
+      compare(all[all.length - 1].method,"upload.discard")
+      for (var i=0;i<all.length;i++) verify(all[i].method!=="request.upload")
+      compare(callbacks,0)
+    }
+
     function makeBackend() {
       var backend = createTemporaryObject(backendFactory, parent)
       verify(backend !== null)

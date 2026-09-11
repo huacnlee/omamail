@@ -32,14 +32,14 @@ command -v omarchy >/dev/null 2>&1 || {
 # None of these are hard requirements for installing: the window opens without
 # them and the setup page names whichever is missing. Installing them is the
 # user's call, and this script never does it for them.
-# socat, openssl and xdg-open are the Google sign-in; curl is every IMAP
-# mailbox; Python handles public HTTP and attachments; secret-tool holds secrets.
+# Rust owns mail networking and OAuth callbacks. Desktop integration still
+# opens external applications, accesses the keyring and runs local helpers.
 missing=()
-for tool in socat secret-tool openssl xdg-open curl python3; do
+for tool in secret-tool xdg-open python3; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 if (( ${#missing[@]} )); then
-  printf 'Note: %s not on PATH. Signing in to a mailbox needs them.\n' "${missing[*]}" >&2
+  printf 'Note: %s not on PATH. Some desktop integrations need them.\n' "${missing[*]}" >&2
 fi
 
 printf '%s\n' 'Validating plugin…'

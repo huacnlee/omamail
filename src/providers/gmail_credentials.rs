@@ -158,7 +158,15 @@ fn lookup_with(
 }
 pub fn lookup_refresh_token(client: &Client, account: &str) -> Result<String, &'static str> {
     lookup_with(client, account, |args| {
-        crate::process::run("secret-tool", args, b"", Duration::from_secs(15), 16385)
+        crate::process::run("secret-tool", args, b"", Duration::from_secs(15), 16385).map_err(
+            |error| {
+                if error == "process_failed" {
+                    "gmail_token_missing"
+                } else {
+                    error
+                }
+            },
+        )
     })
 }
 

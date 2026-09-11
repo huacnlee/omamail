@@ -112,9 +112,10 @@ Once the plugin is enabled, Omamail handles `mailto:` links. Clicking an
 address in a browser, a PDF, or a notification opens compose here.
 `xdg-open mailto:you@example.com` is the check.
 
-Requires Omarchy 4, plus `socat`, `secret-tool`, `openssl`, `xdg-open`, `python3` and
-`curl`. Python handles remote images, one-click unsubscribe and attachments; curl handles IMAP, SMTP and CalDAV. A HEY mailbox additionally needs
-`hey`; see below.
+Requires Omarchy 4, the Rust backend, `secret-tool`, `xdg-open` and `python3`
+for keyring and desktop integration. Rust owns mail networking, remote image
+fetching and one-click unsubscribe. A HEY mailbox additionally needs the official
+`hey` client; see below. Building locally also requires the Rust toolchain.
 
 ## Mailboxes it can open
 
@@ -286,8 +287,8 @@ A signature is set per mailbox on the settings page, under Writing. It is placed
   its `QGuiApplication`, and a plugin loads long after that.
 
 Remote images in a message body are blocked until you ask for them, and asking
-covers that one message. Qt really does fetch an `<img src="https://…">`, so
-loading a message's pictures fires whatever tracking pixels it carries and tells
+covers that one message. Rust fetches approved images and gives Qt raster data
+URIs. Loading a message's pictures can fire tracking pixels and tell
 the sender when the mail was read — which is why it is a decision rather than a
 default. Images pointed at this machine or at the network around it (loopback,
 private addresses, `.local` names, `file:`) are never fetched at all, however
@@ -303,9 +304,21 @@ and switched from the menu, the user bar at the foot of the rail, or `Alt+A` —
 which opens the same switcher with the keyboard on the mailbox you are in:
 `j`/`k` move, `Enter` or `o` takes one.
 
-The message list, labels and profile are cached per account so switching never
-waits on the network. Message bodies are cached one file per message — a
-thousand of them, evicted least-recently-used.
+The message list, labels and profile are cached per account so cached views
+can appear while a refresh runs. Parsed bodies and preloaded message resources
+share a 256 MiB disk budget across all accounts, with least-recently-used eviction.
+The Rust backend warms the first Inbox page and downloads newly discovered mail
+in the background. Opening a cached message displays it before network
+revalidation completes; a cache miss follows the normal loading path.
+`j` and `k` immediately open the selected row in the reader.
+
+The persistent Rust backend checks signed-in accounts automatically, including
+while the mail window is closed. Each account uses the configured refresh
+interval (120 seconds by default); checks run asynchronously across accounts,
+and repeated checks for the same account are coalesced. The backend sends updated
+counts and previews to the UI. Signing out cancels that account's checks;
+stopping the shell also stops its backend. This does not install a separate
+system service.
 
 ## Where your credentials live
 
@@ -336,19 +349,33 @@ Rust sources live in `src/`: `cli/` handles commands, `backend/` handles the
 persistent stdio protocol, and business modules are shared by both. Qt/QML,
 JavaScript and runtime artwork live in `ui/`. UI unit tests are in `ui/tests/`,
 Rust unit tests live with their modules, and `tests/` holds integration tests.
-The Rust migration is still in progress; see [backend architecture](docs/BACKEND.md)
-for implemented capabilities and remaining work.
+Rust owns mail transport and shared content processing, query/render caches,
+action reconciliation, the durable outbox and compose recovery. QML keeps editor,
+selection and presentation state. See [backend architecture](docs/BACKEND.md)
+for the method inventory, security boundaries and remaining validation.
 
 ```bash
+make install          # build/install the local backend, link the plugin, restart shell
 ./dev backend         # build the development Rust executable
 ./dev run             # build and print shell environment/start instructions
 make validate         # tests, source regressions, qmllint, manifest check
 ```
 
+`make install` installs the compiled release binary at `runtime/bin/omamail`
+inside this checkout, then links the checkout into the Omarchy plugins directory.
+Use `make install-backend-local` to build and replace only that binary without
+restarting the shell. Unset `OMAMAIL_BIN` when using the installed runtime.
+
 `OMAMAIL_BIN` is an explicit development override; a running shell must receive
 that environment before constructing the plugin. See
 [the runtime guide](docs/BACKEND-RUNTIME.md) for the restart limitation and the
 publish-before-pin release workflow.
+
+For reproducible synthetic MIME and reader CPU measurements, run
+`python3 benchmarks/mail/run.py --samples 31 --batch 3 --qml` after other builds
+and tests finish. The [benchmark guide](benchmarks/mail/README.md) explains the
+frozen JS baseline, required output parity and measurement limits; these timings
+do not measure mail-server latency or end-to-end inbox loading.
 
 How to send a change — there is no issue tracker — is in
 [CONTRIBUTING.md](CONTRIBUTING.md). Working agreements are in

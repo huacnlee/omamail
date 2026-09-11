@@ -23,14 +23,19 @@ fn envelope(bytes: &[u8]) -> Result<Value, &'static str> {
     }
     Ok(result)
 }
-fn run(args: &[String]) -> Result<Value, &'static str> {
-    envelope(&crate::process::run(
+async fn run(args: &[String]) -> Result<Value, &'static str> {
+    let output = crate::process::async_run::run(
         &super::hey_access::program()?,
         args,
         b"",
         Duration::from_secs(60),
         16 * 1024 * 1024,
-    )?)
+    )
+    .await?;
+    if !output.success {
+        return Err("HEY refused the request");
+    }
+    envelope(&output.stdout)
 }
 fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).into()).collect()
@@ -307,10 +312,136 @@ fn read_resource(id: &str, data: &Value, draft: bool) -> Result<Value, &'static 
     Ok(resource(id, &Value::Null, &body, false, true, ""))
 }
 
-pub fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
+// Optional flags are negotiated only on an explicit unknown-flag refusal of a read.
+// Mutations are never retried.
+async fn read_thread(id: &str, topic: &str) -> Result<Value, &'static str> {
+    static DROPPED: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+    let dropped = DROPPED.get_or_init(Default::default);
+    let mut args = strings(&["threads", topic, "--json", "--html", "--allow-partial"]);
+    args.retain(|arg| {
+        !dropped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(arg)
+    });
+    loop {
+        let out = crate::process::async_run::run(
+            &super::hey_access::program()?,
+            &args,
+            b"",
+            Duration::from_secs(20),
+            16 * 1024 * 1024,
+        )
+        .await?;
+        let html = String::from_utf8_lossy(&out.stdout);
+        let start = html.trim_start().to_ascii_lowercase();
+        if out.success && (start.starts_with("<!doctype html") || start.starts_with("<html")) {
+            let mut message = resource(id, &Value::Null, &html, false, true, "");
+            message["payload"]["mimeType"] = json!("text/html");
+            message["payload"]["headers"] =
+                json!([{"name":"Content-Type","value":"text/html; charset=utf-8"}]);
+            return Ok(message);
+        }
+        if out.success
+            && let Ok(answer) = envelope(&out.stdout)
+        {
+            return read_resource(id, &answer["data"], false);
+        }
+        let diagnostics = format!("{}\n{}", html, String::from_utf8_lossy(&out.stderr));
+        let missing = ["--html", "--allow-partial"].into_iter().find(|flag| {
+            args.iter().any(|arg| arg == flag)
+                && diagnostics.contains(&format!("unknown flag: {flag}"))
+        });
+        if let Some(flag) = missing {
+            args.retain(|arg| arg != flag);
+            dropped
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(flag.into());
+        } else {
+            return Err("HEY refused the request");
+        }
+    }
+}
+
+async fn login(method: &str) -> Result<Value, &'static str> {
+    type Job = tokio::task::JoinHandle<Result<bool, &'static str>>;
+    static JOB: std::sync::OnceLock<tokio::sync::Mutex<Option<Job>>> = std::sync::OnceLock::new();
+    let mut job = JOB.get_or_init(Default::default).lock().await;
+    if method == "hey.loginCancel" {
+        if let Some(handle) = job.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+        return Ok(json!({"running":false}));
+    }
+    if method == "hey.loginStart" && job.is_none() {
+        let program = super::hey_access::program()?;
+        *job = Some(tokio::spawn(async move {
+            Ok(crate::process::async_run::run(
+                &program,
+                &strings(&["auth", "login"]),
+                b"",
+                Duration::from_secs(180),
+                1024 * 1024,
+            )
+            .await?
+            .success)
+        }));
+    }
+    if job.as_ref().is_some_and(|handle| handle.is_finished()) {
+        let result = job
+            .take()
+            .unwrap()
+            .await
+            .map_err(|_| "HEY login interrupted")??;
+        return if result {
+            Ok(json!({"running":false,"ok":true}))
+        } else {
+            Err("HEY sign-in did not finish")
+        };
+    }
+    Ok(json!({"running":job.is_some()}))
+}
+
+async fn list_request(q: &Query, cursor: &str) -> Result<Value, &'static str> {
+    if q.kind != "drafts" {
+        return run(&command(q, cursor)).await;
+    }
+    let program = super::hey_access::program()?;
+    let output = crate::process::async_run::run(
+        &program,
+        &command(q, cursor),
+        b"",
+        Duration::from_secs(20),
+        16 * 1024 * 1024,
+    )
+    .await?;
+    if output.success
+        && let Ok(answer) = envelope(&output.stdout)
+    {
+        return Ok(answer);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let diagnostic = format!("{} {}", stdout, String::from_utf8_lossy(&output.stderr));
+    // The initial published CLI calls the read-only index `drafts`.
+    // No mutation is ever retried on a usage error.
+    if diagnostic.contains("unknown command")
+        && (diagnostic.contains("\\\"draft\\\"") || diagnostic.contains("\"draft\""))
+    {
+        if !cursor.is_empty() {
+            return Err("This HEY version cannot page drafts");
+        }
+        return run(&strings(&["drafts", "--json", "--all"])).await;
+    }
+    Err("HEY drafts require a newer official CLI")
+}
+
+pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
     let fields = params.as_object().ok_or("Invalid HEY parameters")?;
     let allowed: &[&str] = match method {
-        "hey.status" => &[],
+        "hey.status" | "hey.probe" | "hey.profile" | "hey.sendAs" | "hey.labels"
+        | "hey.loginStart" | "hey.loginPoll" | "hey.loginCancel" | "hey.logout" => &[],
         "hey.list" => &["query", "pageToken", "pageSize"],
         "hey.read" => &["id"],
         _ => return Err("Unknown HEY method"),
@@ -323,8 +454,58 @@ pub fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
             return Err("Invalid HEY parameter");
         }
     }
+    if method == "hey.probe" {
+        return Ok(json!({"program":super::hey_access::program().unwrap_or_default()}));
+    }
+    if matches!(
+        method,
+        "hey.loginStart" | "hey.loginPoll" | "hey.loginCancel"
+    ) {
+        return login(method).await;
+    }
+    if method == "hey.logout" {
+        let _ = login("hey.loginCancel").await;
+        let output = crate::process::async_run::run(
+            &super::hey_access::program()?,
+            &strings(&["auth", "logout"]),
+            b"",
+            Duration::from_secs(20),
+            1024 * 1024,
+        )
+        .await?;
+        return if output.success {
+            Ok(json!({"ok":true}))
+        } else {
+            Err("HEY logout did not finish")
+        };
+    }
+    if method == "hey.profile" || method == "hey.sendAs" {
+        let answer = run(&strings(&["accounts", "list", "--json"])).await?;
+        let email = answer["data"]
+            .as_array()
+            .ok_or("Invalid HEY accounts")?
+            .iter()
+            .filter(|row| row["id"] != "all")
+            .filter_map(|row| row["email"].as_str())
+            .find(|email| !email.trim().is_empty())
+            .ok_or("Invalid HEY identity")?;
+        return Ok(if method == "hey.sendAs" {
+            json!([{ "email":email, "displayName":"", "isPrimary":true, "isDefault":true }])
+        } else {
+            json!({"email":email,"messagesTotal":0,"threadsTotal":0,"historyId":""})
+        });
+    }
+    if method == "hey.labels" {
+        let answer = run(&strings(&["labels", "--json", "--all"])).await?;
+        let rows = answer["data"].as_array().ok_or("Invalid HEY labels")?;
+        return Ok(Value::Array(rows.iter().filter_map(|row| {
+            let id = text(&row["id"]); let name = text(&row["name"]);
+            if id.is_empty() || name.is_empty() { return None; }
+            Some(json!({"id":id,"name":name,"rawName":id,"system":false,"unread":0,"total":0,"threadsUnread":0}))
+        }).collect()));
+    }
     if method == "hey.status" {
-        let answer = run(&strings(&["auth", "status", "--json"]))?;
+        let answer = run(&strings(&["auth", "status", "--json"])).await?;
         return Ok(
             json!({"authenticated":answer["data"]["authenticated"] == true && answer["data"]["expired"] != true}),
         );
@@ -336,12 +517,11 @@ pub fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
             return Err("Invalid HEY message id");
         }
         let draft = posting == "draft";
-        let answer = run(&if draft {
-            strings(&["draft", "show", topic, "--json"])
-        } else {
-            strings(&["threads", topic, "--json"])
-        })?;
-        return read_resource(&id, &answer["data"], draft);
+        if !draft {
+            return read_thread(&id, topic).await;
+        }
+        let answer = run(&strings(&["draft", "show", topic, "--json"])).await?;
+        return read_resource(&id, &answer["data"], true);
     }
     let q = query(&text(&params["query"]))?;
     let token = text(&params["pageToken"]);
@@ -366,7 +546,7 @@ pub fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
             .filter(|v| (1..=100).contains(v))
             .ok_or("Invalid HEY page size")? as usize,
     };
-    let answer = run(&command(&q, cursor))?;
+    let answer = list_request(&q, cursor).await?;
     let rows = listing(&q, &answer["data"]);
     let total = rows.len();
     let next = if offset.saturating_add(size) < total {
@@ -451,11 +631,19 @@ mod tests {
         assert_eq!(rows[0]["id"], "123:456");
         assert_eq!(rows[0]["labelIds"], json!(["UNREAD", "INBOX"]));
     }
-    #[test]
-    fn invalid_inputs_fail_before_process() {
-        assert!(call("hey.read", &json!({"id":"1:--help"})).is_err());
-        assert!(call("hey.status", &json!({"program":"evil"})).is_err());
-        assert!(call("hey.list", &json!({"query":"search:--help"})).is_err());
+    #[tokio::test]
+    async fn invalid_inputs_fail_before_process() {
+        assert!(call("hey.read", &json!({"id":"1:--help"})).await.is_err());
+        assert!(
+            call("hey.status", &json!({"program":"evil"}))
+                .await
+                .is_err()
+        );
+        assert!(
+            call("hey.list", &json!({"query":"search:--help"}))
+                .await
+                .is_err()
+        );
         assert!(envelope(br#"{"ok":false,"error":"secret"}"#).is_err());
     }
     #[test]

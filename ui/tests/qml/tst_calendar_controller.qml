@@ -9,6 +9,11 @@ Item {
   QtObject {
     id: mailService
 
+    property var requests: []
+    property var backend: ({ call: function(method, params, callback) {
+      mailService.requests.push({ method: method, params: params })
+      callback({ body: "{}", status: 200 }, null)
+    } })
     property bool unifiedCalendarView: false
     property var accountSummaries: [
       { id: "imap:work@example.com", email: "work@example.com",
@@ -46,6 +51,7 @@ Item {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
+      mailService.requests = []
       mailService.unifiedCalendarView = false
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
@@ -55,6 +61,21 @@ Item {
       controller.rangeEnd = 0
       controller.pendingRangeStart = 0
       controller.pendingRangeEnd = 0
+    }
+
+    function test_network_requests_are_owned_by_backend() {
+      var source = {kind: "google", accountId: "one@gmail.com", id: "google:one@gmail.com"}
+      var called = false
+      controller.nativeRequest(source, "list", {start: "a", end: "b"}, function(result, error) {
+        compare(error, "")
+        compare(result.body, "{}")
+        called = true
+      })
+      verify(called)
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.request")
+      compare(mailService.requests[0].params.source.accountId, "one@gmail.com")
+      verify(mailService.requests[0].params.token === undefined)
     }
 
     function sourceIds(list) {

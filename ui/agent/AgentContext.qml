@@ -1,10 +1,7 @@
 import QtQuick
-import "Agent.js" as Agent
-import "../account/Model.js" as Model
-import "../message/Message.js" as Mail
 
-// Read through the owning provider before handing mail to system AI. This
-// never changes selection or marks mail read. A request retains its owner.
+// The editor supplies selection snapshots; Rust reads and prepares the context.
+// Mail stays scoped to the captured account and launches no job until complete.
 Item {
   id: root
   required property var service
@@ -12,75 +9,73 @@ Item {
   property bool busy: false
   property string error: ""
   property int serial: 0
-  property var handles: []
+  property var handle: null
+  property string requestId: ""
+  property string accountId: ""
 
   function finishError(text) {
     serial++
     busy = false
     deadline.stop()
     error = String(text || "Could not prepare mail for AI")
-    var pending = handles
-    handles = []
-    for (var i = 0; i < pending.length; i++) {
-      if (pending[i] && typeof pending[i].cancel === "function") pending[i].cancel()
-    }
+    if (requestId !== "" && service && service.backend)
+      service.backend.call("agent.contextCancel", {accountId:accountId,requestId:requestId}, function() {})
+    requestId = ""
+    if (handle && typeof handle.cancel === "function") handle.cancel()
+    handle = null
+  }
+
+  function selectedSummary(owner, id) {
+    var rows = owner.messages || []
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
+    if (owner.memberSummaries && owner.memberSummaries[id]) return owner.memberSummaries[id]
+    return owner.selectedId === id ? owner.selectedMessage : null
   }
 
   function request(owner, ids, prompt) {
     if (busy || runner.starting) { error = "AI is still starting. Try again shortly."; return false }
     error = ""
-    if (!owner || !owner.api || !Array.isArray(ids) || ids.length === 0 || ids.length > 20) {
+    if (!owner || !Array.isArray(ids) || ids.length === 0 || ids.length > 20) {
       error = "Select between 1 and 20 messages from one mailbox."; return false
     }
     if (String(prompt || "").trim() === "") return false
+    if (!service || !service.backend || !service.backend.ready) {
+      error = "Mail backend unavailable"; return false
+    }
     var summaries = []
     for (var i = 0; i < ids.length; i++) {
-      var summary = Model.messageById(owner.messages, [], ids[i])
-      if (!summary && owner.memberSummaries) summary = owner.memberSummaries[ids[i]]
-      if (!summary && owner.selectedId === ids[i]) summary = owner.selectedMessage
+      var summary = selectedSummary(owner, ids[i])
       if (!summary) { error = "That message is no longer available."; return false }
       summaries.push(summary)
     }
     var token = ++serial
-    var capturedOwner = owner.accountId
-    var folder = owner.mailboxKey
-    var rows = []
-    var next = 0
-    var totalChars = 0
+    var capturedOwner = String(owner.accountId || "")
+    accountId = capturedOwner
+    requestId = "context-" + Date.now() + "-" + token
     busy = true
-    handles = []
     deadline.restart()
-    function readNext() {
+    handle = service.backend.call("agent.context", {accountId:capturedOwner,
+      requestId:requestId, ids:ids, summaries:summaries,
+      folder:String(owner.mailboxKey || ""), prompt:String(prompt)}, function(result, failure) {
       if (token !== root.serial) return
       if (!owner || root.service.findAccount(capturedOwner) !== owner) {
         root.finishError("That mailbox is no longer set up."); return
       }
-      if (next === ids.length) {
-        root.busy = false
-        root.deadlineStop()
-        root.handles = []
-        var line = rows.length === 1
-          ? Agent.payload(rows[0], rows[0].bodyText, owner.accountEmail,
-            Agent.folderOf(ids[0], folder, owner.providerId), prompt, capturedOwner)
-          : Agent.selectionPayload(rows, owner.accountEmail, folder, prompt, capturedOwner)
-        if (!root.runner.start(line)) root.error = root.runner.lastError
+      if (failure || !result || !result.payload) {
+        root.finishError(failure && failure.message === "agent_context_too_large"
+          ? "These messages are too large. Select fewer messages."
+          : "Could not prepare mail for AI. Try again.")
         return
       }
-      var at = next++
-      var handle = owner.api.getMessage(ids[at], true, function(payload, failure) {
-        if (token !== root.serial) return
-        if (failure || !payload) { root.finishError(failure || "Could not read that message."); return }
-        var row = Model.detailSummary(summaries[at], Mail.summarize(payload, new Date()))
-        row.id = ids[at]
-        row.bodyText = Mail.extractBody(payload.payload).text
-        totalChars += Agent.messageText(row, row.bodyText).length
-        if (totalChars > 200000) { root.finishError("These messages are too large. Select fewer messages."); return }
-        rows.push(row)
-        readNext()
-      })
-      if (handle && root.busy) root.handles = root.handles.concat([handle])
-    }
-    readNext()
+      if (String(result.payload.accountId || "") !== capturedOwner) {
+        root.finishError("Mail context does not belong to this mailbox."); return
+      }
+      root.busy = false
+      root.deadlineStop()
+      root.requestId = ""
+      root.handle = null
+      if (!root.runner.start(JSON.stringify(result.payload))) root.error = root.runner.lastError
+    })
     return true
   }
 
@@ -89,5 +84,8 @@ Item {
     id: deadline
     interval: 60000
     onTriggered: root.finishError("Reading mail for AI timed out. Try again.")
+  }
+  Component.onDestruction: {
+    if (busy) finishError("Cancelled")
   }
 }

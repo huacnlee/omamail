@@ -1,0 +1,52 @@
+{
+  "gmail": {
+    "inbox": "in:inbox",
+    "unread": "in:inbox is:unread -category:promotions -category:social -category:forums",
+    "starred": "is:starred",
+    "sent": "in:sent",
+    "drafts": "in:drafts",
+    "all": "in:anywhere -in:spam -in:trash",
+    "spam": "in:spam",
+    "trash": "in:trash"
+  },
+  "outlook": {
+    "inbox": "folder:INBOX",
+    "unread": "folder:INBOX UNSEEN",
+    "starred": "folder:INBOX FLAGGED",
+    "sent": "folder:\\Sent",
+    "drafts": "folder:\\Drafts",
+    "archive": "folder:\\Archive",
+    "spam": "folder:\\Junk",
+    "trash": "folder:\\Trash"
+  },
+  "hey": {
+    "inbox": "box:imbox",
+    "unread": "box:imbox unseen",
+    "drafts": "drafts:",
+    "later": "box:laterbox",
+    "aside": "box:asidebox",
+    "feed": "box:feedbox",
+    "papertrail": "box:trailbox",
+    "trash": "box:trash"
+  },
+  "jmap": {
+    "inbox": "role:inbox",
+    "unread": "role:inbox unseen",
+    "starred": "role:inbox flagged",
+    "sent": "role:sent",
+    "drafts": "role:drafts",
+    "archive": "role:archive",
+    "spam": "role:junk",
+    "trash": "role:trash"
+  },
+  "imap": {
+    "inbox": "folder:INBOX",
+    "unread": "folder:INBOX UNSEEN",
+    "starred": "folder:INBOX FLAGGED",
+    "sent": "folder:\\Sent",
+    "drafts": "folder:\\Drafts",
+    "archive": "folder:\\Archive",
+    "spam": "folder:\\Junk",
+    "trash": "folder:\\Trash"
+  }
+}

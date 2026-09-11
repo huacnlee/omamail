@@ -70,8 +70,8 @@ Column {
           textFormat: Text.PlainText
           // The reply prefix in front of a subject is Latin whatever the thread
           // is written in, so the subject is asked on its own account here too.
-          horizontalAlignment: root.alignmentFor(Direction.resolveSubject(
-            mailRow.modelData.subject, root.contentDirection))
+          horizontalAlignment: root.alignmentFor(Direction.forced(root.contentDirection)
+            || String(mailRow.modelData.subjectDirection || ""))
         }
         Text {
           width: parent.width

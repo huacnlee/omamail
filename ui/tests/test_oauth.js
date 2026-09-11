@@ -96,6 +96,8 @@ const refreshed = oauth.parseTokenResponse(200, JSON.stringify({
   access_token: "ya29.new", expires_in: 3599
 }), "1//0gPrevious")
 assert.strictEqual(refreshed.refreshToken, "1//0gPrevious")
+assert.strictEqual(refreshed.ok, true, "a native cached token can restore the session without repeating grant scopes")
+assert.strictEqual(refreshed.scope, "", "a restored token must not invent permissions absent from its response")
 
 const revoked = oauth.parseTokenResponse(400, JSON.stringify({
   error: "invalid_grant", error_description: "Token has been expired or revoked."

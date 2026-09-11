@@ -2,13 +2,8 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 
-// Showing a message as the cursor reaches it.
-//
-// This behaviour existed once and was taken out, because stepping through a
-// list marked half of it read without any of it having been looked at. So the
-// assertions that matter here are the ones about what a preview does *not*
-// do: it marks nothing read on arrival, it pushes no history, and it does not
-// happen at all in a narrow window where the reader takes the list's place.
+// Keyboard movement opens the reader immediately through explicit selection.
+// No preview preference, settling delay, or dwell can delay that selection.
 Item {
   width: 1200
   height: 700
@@ -77,7 +72,7 @@ Item {
     property var selectedBody: ({ text: "body", source: "plain" })
     property var selectedMessage: null
 
-    property var messages: [
+    readonly property var initialMessages: [
       { id: "m1", subject: "first", unread: true, from: { email: "a@x", display: "A" },
         snippet: "one", time: "now", fullTime: "today", date: 3000 },
       { id: "m2", subject: "second", unread: true, from: { email: "b@x", display: "B" },
@@ -85,6 +80,8 @@ Item {
       { id: "m3", subject: "third", unread: true, from: { email: "c@x", display: "C" },
         snippet: "three", time: "now", fullTime: "today", date: 1000 }
     ]
+
+    property var messages: initialMessages.slice()
 
     // What the panel asked for.
     property string selectedId: ""
@@ -95,6 +92,7 @@ Item {
 
     function select(id, previewOnly) {
       selectedId = String(id || "")
+      selectedMessage = messages.filter(function(row) { return row.id === selectedId })[0] || null
       selectCount += 1
       // What `MailAccount.select` records, because two decisions in the window
       // now turn on it.
@@ -130,12 +128,12 @@ Item {
     }
 
     function cursorOffset(id, delta) {
+      if (messages.length === 0) return ""
       var at = -1
       for (var i = 0; i < messages.length; i++) if (messages[i].id === id) at = i
       if (at < 0) return delta < 0 ? messages[messages.length - 1].id : messages[0].id
       var next = at + delta
-      if (next < 0 || next >= messages.length) return ""
-      return messages[next].id
+      return messages[Math.max(0, Math.min(messages.length - 1, next))].id
     }
 
     function clearSelection() {
@@ -158,7 +156,7 @@ Item {
   }
 
   TestCase {
-    name: "PreviewOnCursor"
+    name: "KeyboardReaderNavigation"
     when: windowShown
 
     // The FloatingWindow, found by its title the way the other App tests find
@@ -185,11 +183,17 @@ Item {
     }
 
     function init() {
+      app.opened = true
       window().width = 1200
       window().height = 700
       waitForRendering(app)
       app.resetNavigation()
       app.cursorId = ""
+      mailService.messages = mailService.initialMessages.slice()
+      mailService.mailboxKey = "inbox"
+      mailService.searchQuery = ""
+      mailService.rawQuery = ""
+      mailService.selectedMessage = null
       mailService.previewOnCursor = true
       mailService.markReadDelaySec = 2
       mailService.selectedId = ""
@@ -198,323 +202,134 @@ Item {
       mailService.openSelects = 0
       mailService.markedRead = []
       mailService.finishFetch()
+      app.cursorId = ""
     }
 
-    // ------------------------------------------------------------ the point
-
-    function test_moving_the_cursor_shows_the_message() {
-      app.moveCursor(1)
-      compare(app.cursorId, "m1")
-      compare(mailService.selectCount, 0,
-        "nothing is asked for until the cursor has settled")
-      tryCompare(mailService, "selectedId", "m1", 1000)
-      compare(mailService.previewSelects, 1)
-      compare(mailService.openSelects, 0, "and it was a preview, not an open")
-    }
-
-    // The settle is the point: a held key crosses rows without asking for any
-    // of them, which on IMAP is a curl process, a TLS handshake and a LOGIN
-    // per row.
-    function test_a_held_key_asks_for_one_message_not_thirty() {
-      for (var i = 0; i < 3; i++) app.moveCursor(1)
-      compare(app.cursorId, "m3")
-      compare(mailService.selectCount, 0)
-
-      tryCompare(mailService, "selectedId", "m3", 1000)
-      compare(mailService.selectCount, 1,
-        "one request for the row it stopped on, not one per row crossed")
-    }
-
-    function test_moving_again_previews_the_next_one() {
-      app.moveCursor(1)
-      tryCompare(mailService, "selectedId", "m1", 1000)
-      app.moveCursor(1)
-      compare(app.cursorId, "m2")
-      tryCompare(mailService, "selectedId", "m2", 1000)
-      compare(mailService.previewSelects, 2)
-    }
-
-    // ----------------------------------------------------- what it does not do
-
-    // The reason this was taken out the first time.
-    function test_a_preview_marks_nothing_read_on_arrival() {
-      app.moveCursor(1)
-      app.moveCursor(1)
-      app.moveCursor(1)
-      compare(mailService.markedRead.length, 0,
-        "stepping through a list must not read it")
-    }
-
-    // Escape and Back have to mean what they meant.
-    function test_a_preview_pushes_no_history() {
-      var before = app.navKinds.join(",")
-      app.moveCursor(1)
-      app.moveCursor(1)
-      compare(app.navKinds.join(","), before, "moving is not a place")
-      compare(app.currentView, "list", "and the list is still what is open")
-    }
-
-    // A narrow window swaps the list for the reader, so previewing would
-    // navigate away from the list being moved through.
-    function test_a_narrow_window_does_not_preview() {
-      window().width = 700
-      waitForRendering(app)
-      compare(app.compact, true)
-
-      app.moveCursor(1)
-      compare(app.cursorId, "m1", "the cursor still moves")
-      compare(mailService.selectCount, 0, "but nothing is shown")
-    }
-
-    function test_the_setting_off_is_the_old_behaviour() {
-      mailService.previewOnCursor = false
-      app.moveCursor(1)
-      compare(app.cursorId, "m1")
-      compare(mailService.selectCount, 0, "moving is not opening")
-    }
-
-    // ---------------------------------------------------------- the dwell
-
-    function test_staying_on_a_message_reads_it() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      compare(mailService.markedRead.length, 0)
-      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 3000,
-        "a message the cursor stayed on counts as read")
-    }
-
-    // The held arrow key: every message is previewed, none is dwelled on.
-    function test_moving_on_before_the_dwell_reads_nothing() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      app.moveCursor(1)
-      app.moveCursor(1)
-      wait(1400)
-      compare(mailService.markedRead.indexOf("m1"), -1, "m1 was passed over")
-      compare(mailService.markedRead.indexOf("m2"), -1, "so was m2")
-      compare(mailService.markedRead.indexOf("m3") >= 0, true,
-        "only the one it stopped on")
-    }
-
-    // Zero is a decision, not a disabled dwell.
-    function test_a_zero_delay_reads_it_at_once() {
-      mailService.markReadDelaySec = 0
-      app.moveCursor(1)
-      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 1000,
-        "at once meaning with the preview, not before it")
-    }
-
-    // ------------------------------------------- the dwell and the body
-
-    // The dwell is time spent looking at a message. It began when the request
-    // went out, so a slow answer spent the whole of it loading and marked read
-    // a message whose body never appeared.
-    function test_a_body_that_has_not_landed_is_not_read() {
-      mailService.markReadDelaySec = 1
-      mailService.beginFetch()
-      app.moveCursor(1)
-
-      wait(1600)
-      compare(mailService.markedRead.indexOf("m1"), -1,
-        "nothing was on screen for the dwell to have been spent on")
-
-      // And when it does land, the dwell runs from there.
-      mailService.finishFetch()
-      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 3000,
-        "the dwell starts at the body, not at the request")
-    }
-
-    // A fetch that fails never paints, so it never arms the dwell at all.
-    function test_a_body_that_never_arrives_is_never_read() {
-      mailService.markReadDelaySec = 1
-      mailService.beginFetch()
-      app.moveCursor(1)
-      wait(600)
-      mailService.failFetch()
-
-      wait(1600)
-      compare(mailService.markedRead.indexOf("m1"), -1,
-        "a message that could not be shown was not read")
-    }
-
-    // Zero is the acute form: it marked the message read before the request
-    // had even been made.
-    function test_a_zero_delay_still_waits_for_the_body() {
-      mailService.markReadDelaySec = 0
-      mailService.beginFetch()
-      app.moveCursor(1)
-
-      wait(500)
-      compare(mailService.markedRead.indexOf("m1"), -1,
-        "at once means with the preview, not before it")
-
-      mailService.finishFetch()
-      tryVerify(function() { return mailService.markedRead.indexOf("m1") >= 0 }, 1000)
-    }
-
-    // ------------------------------------------- coming back to a preview
-
-    // Away and back inside the settle. The dwell is stopped on the way out,
-    // and coming back matched `selectedId` and returned — which is what an
-    // *opened* message does, not a preview. The message the cursor ended up
-    // sitting on stayed unread for as long as it was left there.
-    function test_returning_to_a_preview_restarts_its_dwell() {
-      mailService.markReadDelaySec = 1
-      // Opened, so the window is on the reader — which is the state the early
-      // return is about. Previewing from the list never reaches it.
-      app.openMessage("m1")
-      compare(app.currentView, "reader")
-
-      app.moveCursor(1)
-      tryCompare(mailService, "selectedId", "m2", 1000)
-      compare(mailService.selectionIsPreview, true, "m2 was previewed, not opened")
-      mailService.markedRead = []
-
-      // Away and back inside the settle, so m2 is still the selection.
-      app.moveCursor(1)
-      wait(60)
-      app.moveCursor(-1)
-      compare(app.cursorId, "m2", "back on the message that was previewed")
-
-      tryVerify(function() { return mailService.markedRead.indexOf("m2") >= 0 }, 3000,
-        "sitting on it reads it, however it was arrived at")
-    }
-
-    // Opening marks it read itself, so a dwell still counting has nothing to
-    // do — and must not fire against a message that has since been opened.
-    function test_opening_takes_over_from_the_dwell() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      app.openMessage("m1")
-      compare(mailService.openSelects, 1, "opening is not a preview")
-      wait(1400)
-      compare(mailService.markedRead.length, 0,
-        "the open path marks it read, not the dwell")
-    }
-
-    // ------------------------------------- the dwell against a gone preview
-    //
-    // The dwell is a claim about a message somebody is looking at. Everything
-    // that takes the message off the screen between the cursor arriving and
-    // the timer firing has to withdraw the claim, because by then nobody has
-    // looked at anything.
-
-    function test_a_page_over_the_list_stops_the_dwell() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      app.openSettings()
-      wait(1400)
-      compare(mailService.markedRead.length, 0,
-        "a message behind Settings is not being read")
-    }
-
-    function test_narrowing_the_window_stops_the_dwell() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      window().width = 700
-      waitForRendering(app)
-      compare(app.compact, true)
-      wait(1400)
-      compare(mailService.markedRead.length, 0,
-        "one column shows the list, so the preview is gone")
-    }
-
-    function test_closing_the_window_stops_the_dwell() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      app.close()
-      wait(1400)
-      compare(mailService.markedRead.length, 0,
-        "a shut window shows nothing to have stayed on")
-    }
-
-    // The selection can be dropped without the cursor moving — a search and a
-    // mailbox switch both do it — and then the row under the cursor is no
-    // longer what the reader has.
-    function test_a_dropped_selection_stops_the_dwell() {
-      mailService.markReadDelaySec = 1
-      app.moveCursor(1)
-      tryCompare(mailService, "selectedId", "m1", 1000)
-      mailService.clearSelection()
-      wait(1400)
-      compare(mailService.markedRead.length, 0,
-        "nothing is on screen to be read")
-    }
-
-    // ------------------------------------- a preview is not an open, part two
-
-    // A previewed message satisfies "is this the selected one" without being
-    // open. Reading that as open made `e` on a previewed row archive it and
-    // then call `openMessage` on the *next* one — an archive that reads a
-    // message, which is the fault this feature exists to avoid.
-    function test_archiving_a_previewed_row_does_not_open_its_neighbour() {
-      app.openMessage("m1")
-      compare(app.currentView, "reader")
-      compare(mailService.openSelects, 1)
-
-      app.moveCursor(1)
-      tryCompare(mailService, "selectedId", "m2", 1000)
-      compare(mailService.selectionIsPreview, true)
-      var opensBefore = mailService.openSelects
-
-      app.actOnCursor("archive")
-
-      compare(mailService.openSelects, opensBefore,
-        "archiving a previewed row opens nothing")
-    }
-
-    // The mirror of it: a preview satisfies the id test while pushing no
-    // `reader` entry, so `r` answered a message that was never opened —
-    // nothing marked it read, and closing the draft landed on the list.
-    function test_replying_to_a_previewed_row_opens_it_first() {
-      app.moveCursor(1)
-      tryCompare(mailService, "selectedId", "m1", 1000)
-      compare(app.currentView, "list", "a preview is not a place")
-      compare(mailService.openSelects, 0)
-
-      app.composeFromCursor("reply")
-
-      compare(mailService.openSelects, 1, "answering a message opens it")
-      compare(mailService.selectionIsPreview, false,
-        "so it is no longer a preview")
-      compare(app.currentView, "reader",
-        "and the reader entry is on the stack, so closing the draft comes back to it")
-    }
-
-    // #83's label picker is an overlay rather than a nav entry, so none of the
-    // other guards notice it: `v` during a dwell let the timer mark read a
-    // message that was about to be moved.
-    function test_the_label_picker_stops_a_preview() {
-      var picker = having(app, function(it) {
-        return String(it.objectName || "") === "label-picker"
-      })
-      verify(picker, "the picker has to be there to be guarded against")
-      compare(app.canPreview, true)
-
-      picker.open()
+    function test_real_j_and_k_keys_keep_focus_parked_while_opening_rows() {
+      var scope = having(app, function(item) { return item.keyContext !== undefined })
+      verify(scope)
+      scope.applyContextFocus()
       wait(20)
-      compare(picker.opened, true)
-      compare(app.canPreview, false,
-        "an overlay that is not a nav entry still covers the window")
-
-      // It exposes no `close()` — the popup owns its own dismissal — so the
-      // assertion that matters is the one on the way in.
+      app.cursorId = ""
+      keyClick(Qt.Key_J)
+      compare(mailService.selectedId, "m1")
+      tryCompare(scope, "keyContext", "reader")
+      wait(20)
+      keyClick(Qt.Key_J)
+      compare(app.cursorId, "m2")
+      compare(mailService.selectedId, "m2")
+      keyClick(Qt.Key_K)
+      compare(app.cursorId, "m1")
+      compare(mailService.selectedId, "m1")
+      compare(scope.keyContext, "reader")
     }
 
+    function test_j_opens_without_waiting_for_an_event_loop_or_dwell() {
+      mailService.previewOnCursor = false
+      mailService.markReadDelaySec = 30
+      app.runShortcut("cursorDown", "J")
+      compare(app.cursorId, "m1")
+      compare(mailService.selectedId, "m1")
+      compare(mailService.openSelects, 1)
+      compare(mailService.previewSelects, 0)
+      compare(mailService.selectionIsPreview, false)
+      compare(app.currentView, "reader")
+    }
 
-    // --------------------------------------------- what the reader carries
+    function test_repeated_movement_opens_each_selected_row_and_replaces_reader_history() {
+      app.moveCursor(1)
+      app.moveCursor(1)
+      app.moveCursor(1)
+      compare(app.cursorId, "m3")
+      compare(mailService.selectedId, "m3")
+      compare(mailService.openSelects, 3)
+      compare(app.navKinds.join(","), "list,reader")
+      app.moveCursor(-1)
+      compare(app.cursorId, "m2")
+      compare(mailService.selectedId, "m2")
+    }
 
-    // Insisting on a document the bounds refused is an answer about the
-    // message it was given for. Opening one clears it; so does previewing one,
-    // or the next row inherits a heavy layout nobody asked for.
-    function test_a_preview_does_not_inherit_the_heavy_override() {
-      var view = readerView()
-      verify(view, "the reader panel is there")
+    function test_narrow_window_immediately_shows_reader() {
+      window().width = 700
+      waitForRendering(app)
+      compare(app.compact, true)
       app.moveCursor(1)
-      view.forceRichAnyway = true
+      compare(mailService.selectedId, "m1")
+      compare(app.currentView, "reader")
+    }
+
+    function test_bounds_do_not_reopen_the_same_message() {
+      app.moveCursor(-1)
+      compare(app.cursorId, "m3")
       app.moveCursor(1)
-      compare(view.forceRichAnyway, false,
-        "the override belonged to the message before it")
+      compare(mailService.openSelects, 1)
+      app.moveCursor(-1)
+      app.moveCursor(-1)
+      compare(app.cursorId, "m1")
+      var count = mailService.openSelects
+      app.moveCursor(-1)
+      compare(mailService.openSelects, count)
+    }
+
+    function test_one_message_opens_once_and_an_empty_list_opens_nothing() {
+      mailService.messages = [mailService.initialMessages[0]]
+      app.cursorId = ""
+      app.moveCursor(1)
+      app.moveCursor(1)
+      app.moveCursor(-1)
+      compare(mailService.selectedId, "m1")
+      compare(mailService.openSelects, 1)
+      mailService.messages = []
+      mailService.clearSelection()
+      app.moveCursor(1)
+      compare(mailService.selectedId, "")
+      compare(mailService.openSelects, 1)
+    }
+
+    function test_drafts_navigation_reads_without_opening_the_composer() {
+      mailService.mailboxKey = "drafts"
+      app.moveCursor(1)
+      compare(app.currentView, "reader")
+      compare(app.composing, false)
+      compare(mailService.selectedId, "m1")
+    }
+
+    function test_navigation_preserves_the_current_query() {
+      mailService.searchQuery = "from:sender"
+      mailService.rawQuery = "from:sender"
+      app.moveCursor(1)
+      compare(mailService.searchQuery, "from:sender")
+      compare(mailService.rawQuery, "from:sender")
+      compare(mailService.mailboxKey, "inbox")
+    }
+
+    function test_compose_and_settings_do_not_accept_mail_cursor_moves() {
+      app.openSettings()
+      app.moveCursor(1)
+      compare(mailService.openSelects, 0)
+      app.resetNavigation()
+      app.runShortcut("compose", "C")
+      compare(app.composing, true)
+      app.moveCursor(1)
+      compare(mailService.openSelects, 0)
+    }
+
+    function test_immediate_open_clears_the_previous_heavy_document_override() {
+      var reader = readerView()
+      verify(reader)
+      app.moveCursor(1)
+      reader.forceRichAnyway = true
+      app.moveCursor(1)
+      compare(reader.forceRichAnyway, false)
+    }
+
+    function test_navigation_never_uses_the_preview_mark_read_timer() {
+      app.moveCursor(1)
+      compare(mailService.openSelects, 1)
+      wait(220)
+      compare(mailService.previewSelects, 0)
+      compare(mailService.markedRead.length, 0)
+      compare(mailService.openSelects, 1)
     }
   }
 }

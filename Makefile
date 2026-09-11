@@ -1,8 +1,8 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
-QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml \
+QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml \
-	ui/components/BackendSetup.qml \
-	ui/account/MailAccount.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
+	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
@@ -74,16 +74,25 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml \
 	ui/bar/BarPreview.qml
 
 .PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
-	test-qml qml-check validate bench install
+	test-qml test-local test-backend-process qml-check validate bench install
 
 test: test-rust test-js test-shell test-qml
+
+# The real Quickshell process bridge needs the desktop runtime installed.
+# Keep it explicit so the portable suite can still run without Quickshell.
+test-local: test test-backend-process
+
+test-backend-process:
+	cargo build --locked --target-dir "$(CURDIR)/target" --bin omamail
+	python3 tests/test_backend_process.py
+	python3 tests/test_agent_native_bridge.py
 
 .PHONY: test-rust backend
 test-rust:
 	cargo test --locked
 
 backend:
-	cargo build --locked --release
+	cargo build --locked --release --target-dir "$(CURDIR)/target" --bin omamail
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
@@ -124,6 +133,7 @@ test-js:
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
 	node ui/tests/test_conversation.js
+	node tests/test_reader_pipeline.js
 	node ui/tests/test_keymap.js
 	node ui/tests/test_accounts.js
 	node ui/tests/test_unified.js
@@ -141,6 +151,7 @@ test-shell: test-shell-portable test-shell-libcurl
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
+	python3 tests/test_network_migration.py
 	python3 tests/test_plugin_workflow.py
 	python3 tests/test_backend_runtime.py
 	python3 tests/test_backend_release.py
@@ -199,10 +210,11 @@ test-qml:
 		echo "  Arch:   qt6-declarative" >&2; \
 		echo "  Ubuntu: qt6-declarative-dev-tools qml6-module-qttest" >&2; \
 		exit 1; }
-	QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-		$(QMLTESTRUNNER) -import $(CURDIR)/ui/tests/qml/imports -input ui/tests/qml
+	cargo build --locked --bin omamail
+	python3 tests/run_qml_native.py "$(QMLTESTRUNNER)" -input ui/tests/qml
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
+	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine
@@ -220,5 +232,9 @@ validate: test qml-check
 	git diff --check
 
 # Development only: the Marketplace installs the plugin for ordinary users.
-install:
+.PHONY: install-backend-local
+install-backend-local: backend
+	python3 scripts/backend-runtime.py install-local
+
+install: install-backend-local
 	bash scripts/link-plugin.sh

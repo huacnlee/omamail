@@ -14,6 +14,7 @@
 # already expands past Gmail's 25 MB encoded-message limit once the headers
 # sit on it, so catching it here keeps the bytes off the GUI thread.
 set -eu
+umask 077
 
 MAX=20971520
 
@@ -242,9 +243,17 @@ emit_paths() {
 forget_file() {
   dir=$1
   path=$2
-  if ! inside_dir "$dir" "$path"; then
+  # A restored draft cannot authorize a traversal, subdirectory or symlink.
+  # Only the direct files produced by save_clipboard belong to this helper.
+  name=${path#"$dir"/}
+  if [ "$path" = "$name" ] || [ -L "$dir" ] || [ -L "$path" ]; then
     fail_json "That file is not a draft attachment"
   fi
+  case "$name" in
+    */*|*..*) fail_json "That file is not a draft attachment" ;;
+    screenshot-*|paste-*) ;;
+    *) fail_json "That file is not a draft attachment" ;;
+  esac
   rm -f -- "$path"
   printf '{"ok":true}\n'
 }

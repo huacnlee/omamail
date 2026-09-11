@@ -38,13 +38,16 @@ readonly property string keyContext:
 | Context | What it is | What it binds |
 |---|---|---|
 | `list` | The message list | The mailbox keys |
-| `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the mailbox cursor; `Shift+J`/`Shift+K` scroll the message body |
+| `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the mailbox cursor and immediately open its message; `Shift+J`/`Shift+K` scroll the message body |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+
+`Ctrl+,` opens Settings from every context, including a focused draft field.
+Back returns to the previous screen with the draft intact.
 
 While an AI request is running, Escape interrupts it and keeps the dock open;
 otherwise Escape closes the dock. An open command menu or history view is left first.
@@ -168,11 +171,11 @@ used to exist, and they had.
 The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
-In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with what was written in it; a click previews it, as in every other mailbox. Leaving the composer saves the draft back over the one it came from; sending it takes that draft away. In every other mailbox, `c` starts a new message.
+In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with what was written in it; `j`, `k` and a click open it in the reader. Leaving the composer saves the draft back over the one it came from; sending it takes that draft away. In every other mailbox, `c` starts a new message.
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
-`n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else: `j` and `k` go on moving the list cursor underneath, because the cursor and the open message are two different things. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
+`n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else. `j` and `k` move the list cursor and immediately open the representative of that row, leaving the conversation member selected with `n` or `p`. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
 
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback. Back and `Escape` save a non-empty composition before leaving it. The explicit Discard button remains the destructive exit.
 
@@ -249,6 +252,14 @@ area: movement was anchored on the opened message, so in the list — where
 nothing is open — every step resolved to the first row, and `j` moved once and
 then stopped.
 
+`j`, `k`, `Down` and `Up` now move the cursor and immediately open the row in
+the reader, in both wide and narrow windows. There is no preview settling delay
+or read dwell: the same explicit-open path displays cached content or fetches
+the message and marks it read when that path normally would. Prefetching stays
+separate and never marks a message read. Moving at a list boundary does not
+reopen the same message. The context continues to park focus outside text fields,
+so successive navigation keys work while the reader is open.
+
 `s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 
 Three rules, all in `ui/account/Model.js` so the node tests reach them:
@@ -274,8 +285,8 @@ plausible targets. So there is no `positionViewAtIndex`, and keyboard movement
 has to scroll the list itself: **`Model.contentYToReveal`** decides where the
 scroller goes, leaving it alone while the row is already visible so stepping one
 row does not drag the list under someone reading it. It is called from
-`moveCursor`, not from `cursorId` changing, because hovering a row moves the
-cursor too and scrolling under the pointer fights the mouse.
+`moveCursor`, not from `cursorId` changing. Hover never changes the cursor, and
+scrolling under the pointer would fight the mouse.
 
 ## The mouse
 

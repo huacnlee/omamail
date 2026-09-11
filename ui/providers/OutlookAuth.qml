@@ -9,8 +9,7 @@ import "Credentials.js" as Credentials
 import "Secrets.js" as Secrets
 
 // Microsoft sign-in for the Outlook provider. The refresh token lives in
-// GNOME Keyring, the access token lives only in this process, and curl receives
-// it over stdin for XOAUTH2 authentication to IMAP and SMTP.
+// GNOME Keyring; native backend clients handle OAuth, IMAP and SMTP networking.
 Item {
   id: root
 
@@ -19,6 +18,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  property var backend: null
   property string accountId: ""
   property string configuredClientId: ""
   readonly property string clientId: Microsoft.effectiveClientId(configuredClientId)
@@ -72,7 +72,7 @@ Item {
   readonly property bool sessionBusy: !!lookupProcess || refreshBusy || restoreQueued
   property string lastError: ""
 
-  readonly property var requiredTools: ["secret-tool", "curl", "xdg-open"]
+  readonly property var requiredTools: ["secret-tool", "xdg-open"]
   property var missingTools: []
   property bool toolsChecked: false
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
@@ -154,6 +154,7 @@ Item {
   property var graphWaiters: []
   property var graphLookupProcess: null
   property bool graphQueued: false
+  property bool graphProbeQueued: false
 
   function graphTokenIsFresh() {
     return graphAccessToken !== "" && Date.now() < graphAccessTokenExpiresAt - 60000
@@ -197,6 +198,10 @@ Item {
       return
     }
     graphQueued = false
+    if (backend && accountId) {
+      handleGraphLookup("", sessionContext())
+      return
+    }
     var context = sessionContext()
     var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
     if (attributes.length === 0) {
@@ -225,10 +230,11 @@ Item {
     }
     var grants = graphGrants
     var refreshToken = String(raw || "")
-    if (refreshToken === "") {
+    if (refreshToken === "" && !(backend && accountId)) {
       finishGraphWaiters("", "Sign in to Outlook first")
       return
     }
+    if (backend && accountId) refreshToken = ""
     postForm(Microsoft.tokenUrlFor(tenant),
       Microsoft.graphRefreshBody(clientId, refreshToken),
       function(status, text) {
@@ -279,7 +285,9 @@ Item {
   // rather than at the first send. Any other refusal is sending's to
   // report: the mailbox is signed in.
   function probeGraphConsent(refreshToken) {
+    if (backend && (keyringJob || keyringJobs.length > 0)) { graphProbeQueued = true; return }
     var context = sessionContext()
+    if (backend && accountId) refreshToken = ""
     postForm(Microsoft.tokenUrlFor(tenant),
       Microsoft.graphRefreshBody(clientId, refreshToken),
       function(status, text) {
@@ -351,6 +359,7 @@ Item {
   }
 
   function invalidateAccessToken() {
+    if (backend && accountId) backend.call("auth.invalidate", { accountId: accountId }, function() {})
     accessToken = ""
     accessTokenExpiresAt = 0
   }
@@ -410,6 +419,11 @@ Item {
       return
     }
     restoreQueued = false
+    if (backend && accountId) {
+      savedSessionPresent = true
+      refreshWithToken("", sessionContext())
+      return
+    }
     var context = sessionContext()
     var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
     if (attributes.length === 0) {
@@ -469,11 +483,26 @@ Item {
     if (keyringJobs.length === 0) {
       if (restoreQueued) Qt.callLater(root.restoreSession)
       if (graphQueued) Qt.callLater(root.startGraphLookup)
+      if (graphProbeQueued) { graphProbeQueued = false; Qt.callLater(function() { root.probeGraphConsent("") }) }
       return
     }
     var next = keyringJobs.slice()
     keyringJob = next.shift()
     keyringJobs = next
+    if (backend && keyringJob.context.accountId) {
+      var job = keyringJob
+      backend.call(job.kind === "store" ? "auth.store" : "auth.clear", {
+        accountId: job.context.accountId, clientId: job.context.clientId,
+        token: job.kind === "store" ? job.token : ""
+      }, function(result, error) {
+        if (root.keyringJob !== job) return
+        root.keyringJob = null
+        if (error && root.isCurrent(job.context)) root.lastError = "Could not update the saved Microsoft session"
+        root.runKeyringJob()
+      })
+      job.token = ""
+      return
+    }
     keyringProcess.command = keyringJob.kind === "store"
       ? [pluginDir + "/scripts/keyring-store.sh"].concat(keyringJob.attributes)
       : ["secret-tool", "clear"].concat(keyringJob.attributes)
@@ -481,44 +510,46 @@ Item {
   }
 
   function postForm(url, body, callback) {
-    var request = new XMLHttpRequest()
     var id = ++tokenRequestCount
-    tokenRequests = tokenRequests.concat([{ id: id, request: request }])
-    var deadline = tokenDeadlineComponent.createObject(root, { interval: tokenTimeoutMs })
-
-    function disarm() {
-      if (!deadline) return
-      deadline.stop()
-      deadline.destroy()
-      deadline = null
-    }
-
-    request.onreadystatechange = function() {
-      if (request.readyState !== XMLHttpRequest.DONE) return
-      disarm()
+    var request = { abort: function() {
       var kept = []
+      for (var i = 0; i < root.tokenRequests.length; i++) {
+        if (root.tokenRequests[i].id !== id) kept.push(root.tokenRequests[i])
+      }
+      root.tokenRequests = kept
+    } }
+    tokenRequests = tokenRequests.concat([{ id: id, request: request }])
+    function finish(result, error) {
       var live = false
       for (var i = 0; i < root.tokenRequests.length; i++) {
         if (root.tokenRequests[i].id === id) live = true
-        else kept.push(root.tokenRequests[i])
       }
       if (!live) return
-      root.tokenRequests = kept
-      if (typeof callback === "function") callback(request.status, request.responseText)
+      request.abort()
+      callback(error ? 0 : result.status, error ? "" : result.body)
     }
-    request.open("POST", url)
-    request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
-    request.send(body)
-
-    if (deadline) {
-      deadline.triggered.connect(function() {
-        if (request.abort) request.abort()
+    if (!backend || !backend.ready) { finish(null, true); return }
+    var endpoint = url === Microsoft.deviceUrlFor(tenant) ? "device" : "token"
+    if (url !== Microsoft.deviceUrlFor(tenant) && url !== Microsoft.tokenUrlFor(tenant)) {
+      finish(null, true)
+      return
+    }
+    if (endpoint === "token" && body.indexOf("grant_type=refresh_token") >= 0 && accountId) {
+      backend.call("auth.token", { provider: "outlook", accountId: accountId,
+        resource: body.indexOf("graph.microsoft.com") >= 0 ? "graph" : "mail" }, function(result, error) {
+        var code = error === "auth_signed_out" ? "invalid_grant" : "temporarily_unavailable"
+        var failure = error === "auth_consent_required"
+          ? { error: "interaction_required", error_codes: [65001] } : { error: code }
+        finish({ status: error ? 400 : 200, body: JSON.stringify(error ? failure : result) }, "")
       })
-      deadline.start()
+      return
     }
+    backend.call("auth.form", { provider: "outlook", endpoint: endpoint,
+      tenant: tenant, body: body }, finish)
   }
 
   function refreshWithToken(refreshToken, context) {
+    if (backend && accountId) refreshToken = ""
     refreshBusy = true
     // The mail scopes alone: a token is for one resource, and Microsoft
     // refuses a refresh that names two. The Graph exchange asks for its own.
@@ -760,6 +791,7 @@ Item {
     lookupProcess = null
     if (oldLookup) oldLookup.running = false
     restoreQueued = false
+    graphProbeQueued = false
     refreshRetry.stop()
     // Where what is cut short is the Graph tail of a sign-in — the check
     // or the second code — the mail half is in and is said so.
@@ -782,6 +814,7 @@ Item {
   }
 
   function logout() {
+    if (backend && accountId) backend.call("auth.invalidate", { accountId: accountId }, function() {})
     sessionEnabled = false
     cancelLogin()
     refreshRetry.stop()
@@ -820,11 +853,6 @@ Item {
   onClientIdChanged: changeIdentity()
 
   Component.onCompleted: checkTools()
-
-  Component {
-    id: tokenDeadlineComponent
-    Timer { repeat: false }
-  }
 
   Timer {
     id: devicePoll

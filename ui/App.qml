@@ -7,7 +7,6 @@ import qs.Commons
 import qs.Ui
 
 import "account/Model.js" as Model
-import "account/Conversation.js" as Conversation
 import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
@@ -17,6 +16,7 @@ import "agent/Agent.js" as Agent
 import "message/Mailto.js" as Mailto
 import "message/Message.js" as Message
 import "components"
+import "compose"
 import "calendar"
 
 Item {
@@ -33,11 +33,6 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
-  readonly property string composeRecoveryPath: {
-    var config = Quickshell.env("XDG_CONFIG_HOME")
-      || (Quickshell.env("HOME") + "/.config")
-    return config + "/omamail/compose.json"
-  }
   property var composeRecovery: Recovery.empty()
   property bool composeRecoveryLoaded: false
   property bool composeRecoveryRestoring: false
@@ -46,122 +41,59 @@ Item {
   property string lastComposeRecoveryText: ""
   property string composeWritePayload: ""
   property bool composeWriteQueued: false
+  property bool composeWriting: false
+  property bool composeReading: false
+  property bool composeRecoveryConflict: false
+  property string composeStorageRevision: ""
+  property bool composeReceiptChecking: false
+  property int composeCommittedRevision: 0
+  property var composeReceiptAcks: []
+  property var composeReceiptAckBusy: ({})
+  property var composeDeliveryStates: ({})
 
-  function loadComposeRecovery(raw) {
-    lastComposeRecoveryText = String(raw || "")
-    composeRecovery = Recovery.parse(raw)
+  // Only a native normalized record is restored; the editor owns its live fields.
+  function loadComposeRecovery(record) {
+    composeRecovery = record && typeof record === "object" ? record : Recovery.empty()
+    lastComposeRecoveryText = composeRecovery.active === true ? JSON.stringify(composeRecovery) : ""
     composeRecoveryLoaded = true
-    Qt.callLater(root.restoreComposeRecovery)
+    reconcileComposeReceipts()
   }
 
-  function restoreComposeRecovery() {
-    if (!opened || !composeRecoveryLoaded || composeRecovery.active !== true
-        || compose.opened || !composeRecovery.draft) return false
-    var accountId = String(composeRecovery.draft.accountId || "")
-    if (accountId !== "" && service
-        && String(service.activeAccountId || "") !== accountId
-        && typeof service.switchTo === "function") service.switchTo(accountId)
-    pendingComposeReturnTo = composeRecovery.returnView === "reader" ? Nav.depth(nav) : 1
-    composeRecoveryRestoring = true
-    compose.restoreDraft(composeRecovery.draft)
-    composeRecoveryRestoring = false
-    var parked = composeRecovery.parked || []
-    if (parked.length > 0) compose.recoveryDrafts = compose.recoveryDrafts.concat(parked)
-    return true
+  RecoveryController {
+    id: composeRecoveryController
+    app: root
+    composer: compose
+    recoveryTimer: composeRecoveryTimer
   }
+  function reconcileComposeReceipts() { composeRecoveryController.reconcileComposeReceipts() }
+  function queueComposeReceiptAck(accountId, sendId, revision) {
+    composeRecoveryController.queueComposeReceiptAck(accountId, sendId, revision)
+  }
+  function acknowledgeComposeReceipts() { composeRecoveryController.acknowledgeComposeReceipts() }
 
-  function parkedBesides(draft) {
-    var out = []
-    var parked = compose.parkedDrafts || []
-    for (var i = 0; i < parked.length; i++) {
-      if (parked[i].draft !== draft) out.push(parked[i].draft)
+  function readComposeRecovery() { return composeRecoveryController.readComposeRecovery() }
+  function restoreComposeRecovery() { return composeRecoveryController.restoreComposeRecovery() }
+  function parkedBesides(draft) { return composeRecoveryController.parkedBesides(draft) }
+  function saveComposeRecovery(saved) { return composeRecoveryController.saveComposeRecovery(saved) }
+  function scheduleComposeRecovery() { return composeRecoveryController.scheduleComposeRecovery() }
+  function clearComposeRecovery(expectedRevision) { return composeRecoveryController.clearComposeRecovery(expectedRevision) }
+  function writeComposeRecovery(raw) { return composeRecoveryController.writeComposeRecovery(raw) }
+  function drainComposeRecovery() { return composeRecoveryController.drainComposeRecovery() }
+
+  Connections {
+    target: root.service ? root.service.backend : null
+    ignoreUnknownSignals: true
+    function onReadyChanged() {
+      if (root.service.backend.ready) { root.readComposeRecovery(); root.acknowledgeComposeReceipts() }
     }
-    var recovered = compose.recoveryDrafts || []
-    for (var j = 0; j < recovered.length; j++) {
-      if (recovered[j] !== draft) out.push(recovered[j])
-    }
-    return out
   }
-
-  function saveComposeRecovery(saved) {
-    composeRecoveryTimer.stop()
-    var draft = saved || (compose.opened ? compose.snapshotDraft()
-      : (compose.parkedForSend ? compose.pendingDraft : null))
-    var raw = Recovery.serialize(composeReturnView(), draft, parkedBesides(draft))
-    if (raw === "") {
-      clearComposeRecovery()
-      return composeRecoveryRevision
-    }
-    composeRecovery = Recovery.parse(raw)
-    if (raw === lastComposeRecoveryText) return composeRecoveryRevision
-    composeRecoveryRevision++
-    lastComposeRecoveryText = raw
-    writeComposeRecovery(raw)
-    return composeRecoveryRevision
-  }
-
-  function scheduleComposeRecovery() {
-    if (composeRecoveryRestoring) return
-    composeRecoveryTimer.restart()
-  }
-
-  function clearComposeRecovery(expectedRevision) {
-    if (expectedRevision !== undefined
-        && Number(expectedRevision) !== composeRecoveryRevision) return false
-    composeRecoveryTimer.stop()
-    composeRecovery = Recovery.empty()
-    composeRecoveryRevision++
-    if (lastComposeRecoveryText === "") return true
-    lastComposeRecoveryText = ""
-    writeComposeRecovery('{"version":1,"active":false}')
-    return true
-  }
-
-  function writeComposeRecovery(raw) {
-    composeWritePayload = String(raw || "")
-    if (!service || String(service.pluginDir || "") === "") return
-    if (composeRecoveryWriter.running) {
-      composeWriteQueued = true
-      return
-    }
-    composeWriteQueued = false
-    composeRecoveryWriter.command = [String(service.pluginDir)
-      + "/scripts/config-store.sh", "compose.json"]
-    composeRecoveryWriter.running = true
-  }
-
-  FileView {
-    id: composeRecoveryFile
-    path: root.composeRecoveryPath
-    printErrors: false
-    onLoaded: root.loadComposeRecovery(text())
-    onLoadFailed: root.loadComposeRecovery("")
-  }
+  onServiceChanged: Qt.callLater(readComposeRecovery)
 
   Timer {
     id: composeRecoveryTimer
     interval: 300
     repeat: false
     onTriggered: root.saveComposeRecovery()
-  }
-
-  Process {
-    id: composeRecoveryWriter
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.composeWritePayload + "\n")
-      root.composeWritePayload = ""
-    }
-    onExited: {
-      if (root.composeWriteQueued) {
-        root.composeWriteQueued = false
-        Qt.callLater(function() {
-          root.writeComposeRecovery(root.composeWritePayload)
-        })
-      } else root.composeWritePayload = ""
-    }
   }
 
   readonly property color foreground: Color.foreground
@@ -540,10 +472,6 @@ Item {
 
   function close() {
     closingFromHost = true
-    // A window that is gone shows nothing, so a dwell counting down in it —
-    // or a fetch about to be asked for — has nothing left to be for.
-    markReadDwell.stop()
-    previewSettle.stop()
     // Escape at the list root closes the window without clearing what the
     // cursor had previewed, so it reopened showing a stale message beside the
     // list. A preview is not a place the window was left in.
@@ -563,9 +491,6 @@ Item {
   // override is a per-message decision about one specific message and does not.
   function openMessage(id) {
     if (!service) return
-    // Opening marks it read itself, so a dwell still counting down for the
-    // same message has nothing left to do.
-    markReadDwell.stop()
     pendingComposeMode = ""
     pendingDraftId = ""
     reader.forceRichAnyway = false
@@ -597,11 +522,16 @@ Item {
   }
 
   // Along the rail by keyboard: `n` to the next member, `p` to the previous,
-  // stopping at the ends rather than wrapping. `j` and `k` keep moving the list
-  // cursor underneath, which is the other thing in this window that moves.
+  // stopping at the ends rather than wrapping. `j` and `k` instead move the
+  // mailbox cursor and open that row's representative.
   function stepMember(delta) {
     if (!service || !service.showsRail) return
-    var next = Conversation.memberStep(service.selectedThread, service.selectedId, delta)
+    var projection = service.conversationProjection || ({})
+    var navigation = projection.navigation || ({})
+    var stop = navigation[service.selectedId]
+    var next = stop ? (delta < 0 ? stop.previous : stop.next)
+      : (delta < 0 ? projection.last : projection.first)
+    next = String(next || "")
     if (next !== "" && next !== service.selectedId) openMember(next)
   }
 
@@ -645,9 +575,8 @@ Item {
   // Flickable rather than a ListView — the panel already owns a scroller — so
   // there is no positionViewAtIndex and this has to be said out loud.
   //
-  // Called from here rather than from cursorId changing, because hovering a row
-  // moves the cursor too, and scrolling a half-visible row into view under the
-  // pointer fights the mouse that is pointing at it.
+  // Called only for keyboard movement. Pointer hover stays local to the row,
+  // and a programmatic selection does not scroll the list under the pointer.
   function revealCursorRow() {
     if (!listFlick.visible) return
     var bounds = list.boundsFor(cursorId)
@@ -657,125 +586,18 @@ Item {
       listFlick.contentHeight, Style.space(8))
   }
 
+  // Keyboard selection is explicit reading, with the same cache, network and
+  // mark-read behavior as opening a row. Cursor and reader move together while
+  // the cursor remains the anchor for the next key press.
   function moveCursor(delta) {
-    if (!service) return
+    if (!service || (focusScope.keyContext !== "list" && focusScope.keyContext !== "reader")
+        || labelPicker.opened) return
     var next = service.cursorOffset(cursorId, delta)
     if (next === "") return
     cursorId = next
     revealCursorRow()
-    previewCursor()
-  }
-
-  // Rechecked after the dwell because the visible surface may have changed.
-  readonly property bool canPreview: !!service && service.previewOnCursor
-    && !compact && !showPage && !composing && !calendarVisible
-    && !labelPicker.opened
-
-  // Moving is not opening, and this is the difference.
-  //
-  // It used to open whatever it landed on, which made stepping through a list
-  // a way to mark half of it read without having looked at any of it. So the
-  // preview is off unless it was asked for, it pushes no history — Escape and
-  // Back mean what they meant — and it does not mark anything read. A dwell
-  // does that, which is what stops a held arrow key from reading a mailbox.
-  function previewCursor() {
-    markReadDwell.stop()
-    markReadDwell.dwelledOn = ""
-    previewSettle.stop()
-    if (!canPreview || cursorId === "") return
-    // A message already open stays open on its own terms: it was opened, and
-    // re-selecting it as a preview would take back the read mark it earned.
-    //
-    // A *preview* of the same message is not that. Moving away and back
-    // inside the settle stops the dwell above and used to return here, so the
-    // message the cursor was sitting on never became read at all — the id
-    // matched, which is exactly what a preview does while not being open.
-    if (currentView === "reader" && service.selectedId === cursorId
-      && !service.selectionIsPreview) return
-    // Per message, the same as opening one. Insisting on a document the bounds
-    // refused is an answer about the message it was given for, and the row the
-    // cursor moved to is a different message.
-    reader.forceRichAnyway = false
-    // Settled rather than fetched per keystroke. A held `j` starts a request
-    // for every row it crosses, and on IMAP each one is a curl process, a TLS
-    // handshake and a LOGIN — thirty rows was thirty connections, spawned and
-    // killed as the key repeated. Cancellation was already correct; this is
-    // about not asking. Short enough that a deliberate move still feels
-    // immediate, long enough that a repeat rate never gets through.
-    previewSettle.wanted = cursorId
-    previewSettle.restart()
-  }
-
-  Timer {
-    id: previewSettle
-    property string wanted: ""
-    interval: 180
-    repeat: false
-    onTriggered: root.previewSettled()
-  }
-
-  function previewSettled() {
-    var id = previewSettle.wanted
-    previewSettle.wanted = ""
-    // The cursor may have moved on, or left the state that allows a preview
-    // at all, in the time this waited.
-    if (id === "" || id !== cursorId || !canPreview) return
-    if (currentView === "reader" && service.selectedId === id
-      && !service.selectionIsPreview) return
-    // Coming back to the message that is still the preview restarts its
-    // dwell rather than asking for it again.
-    if (service.selectedId !== id || !service.selectionIsPreview)
-      service.select(id, true)
-    markReadDwell.dwelledOn = id
-    armReadDwell()
-  }
-
-  // Whether the previewed message is actually on screen.
-  //
-  // The dwell measures time spent looking at something, so it cannot start
-  // before there is anything to look at. It began when the request went out,
-  // so a slow fetch spent the whole dwell loading and marked read a message
-  // whose body never appeared — worst at a zero dwell, which marked it read
-  // before the request had even been made. A fetch that fails never paints,
-  // so it never arms this at all.
-  readonly property bool previewShowing: !!service
-    && service.detailPainted && !service.detailLoading
-
-  onPreviewShowingChanged: if (previewShowing) armReadDwell()
-
-  function armReadDwell() {
-    if (!service || markReadDwell.dwelledOn === "") return
-    if (!canPreview || !previewShowing) return
-    // Still the message on screen: a search and a mailbox switch both drop the
-    // selection without moving the cursor off the row.
-    if (service.selectedId !== markReadDwell.dwelledOn) return
-    if (service.markReadDelaySec <= 0) {
-      var now = markReadDwell.dwelledOn
-      markReadDwell.dwelledOn = ""
-      service.markPreviewRead(now)
-      return
-    }
-    markReadDwell.interval = service.markReadDelaySec * 1000
-    markReadDwell.restart()
-  }
-
-  // A previewed message counts as read once the cursor has stayed on it. The
-  // id is held rather than read back off the cursor when this fires: by then
-  // the cursor may have moved on, and the message that was read is the one to
-  // mark.
-  Timer {
-    id: markReadDwell
-    property string dwelledOn: ""
-    repeat: false
-    onTriggered: {
-      if (!root.service || dwelledOn === "") return
-      if (!root.canPreview) return
-      if (root.cursorId !== dwelledOn) return
-      // And it has to still be the message on screen: a search and a mailbox
-      // switch both drop the selection without moving the cursor off the row.
-      if (root.service.selectedId !== dwelledOn) return
-      root.service.markPreviewRead(dwelledOn)
-    }
+    if (service.selectedId !== next || service.selectionIsPreview || currentView !== "reader")
+      openMessage(next)
   }
 
   // An answer needs the message it is answering, and opening one only starts
@@ -908,7 +730,11 @@ Item {
   }
 
   function restoreParkedDraft(sendId, oldest) {
+    var named = (compose.parkedDrafts || []).filter(function(entry) { return entry.sendId === String(sendId || "") })
+    var receiptAccount = named.length && named[0].draft ? String(named[0].draft.accountId || "") : ""
     if (!compose.resumePendingSend(sendId, oldest)) return false
+    var recoveryRevision = saveComposeRecovery()
+    if (receiptAccount !== "") queueComposeReceiptAck(receiptAccount, String(sendId), recoveryRevision)
     var interrupted = compose.interruptedDraft
     var fields = compose.interruptedFields()
     if (!interrupted || !fields || !service) return true
@@ -927,10 +753,9 @@ Item {
 
   function undoPendingSend() {
     if (!service) return false
-    var undone = service.undoSend()
-    if (!undone) return false
-    root.restoreParkedDraft(undone === true ? "" : String(undone), false)
-    return true
+    return service.undoSend(function(id) {
+      if (root && id) root.restoreParkedDraft(id === true ? "" : String(id), false)
+    })
   }
 
   Timer {
@@ -1082,7 +907,9 @@ Item {
     if (!service || member === "") return false
     var wasOpen = currentView === "reader" && service.selectedId === member
     // Worked out before the action, while the member is still a stop.
-    var next = Conversation.neighbourStop(service.selectedThread, member)
+    var projection = service.conversationProjection || ({})
+    var stop = (projection.navigation || ({}))[member]
+    var next = stop ? String(stop.neighbor || "") : ""
     var members = service.memberSummaries
     var summary = members && typeof members === "object" ? members[member] : null
     var leaves = !Model.survivesAction(service.mailboxKey, action,
@@ -1566,14 +1393,20 @@ Item {
 
   function searchAddress(field, address) {
     if (!service) return
-    var query = Provider.addressQuery(service.providerId, field, address)
-    if (query === "") return
-    // In the provider's own words, so it must not pass through the typed
-    // search's wrapping a second time; the box shows the words for it.
-    var text = (field === "to" ? "to: " : "from: ") + String(address || "").trim()
-    service.searchAddress(query, text)
-    searchBar.setQuery(text)
-    backToList()
+    if (!service.backend || !service.backend.ready) return
+    var provider = service.providerId
+    var account = service.current
+    var accountId = account ? account.accountId : ""
+    service.backend.call("providers.resolve", {provider: provider, operation: "addressQuery", field: field, value: String(address || "")}, function(result, error) {
+      if (error || !root.service || root.service.providerId !== provider || root.service.current !== account
+          || (account && account.accountId !== accountId)) return
+      var query = String((result || {}).value || "")
+      if (query === "") return
+      var text = (field === "to" ? "to: " : "from: ") + String(address || "").trim()
+      root.service.searchAddress(query, text)
+      searchBar.setQuery(text)
+      root.backToList()
+    })
   }
 
   FloatingWindow {
@@ -2206,8 +2039,8 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (!Conversation.holdsMember(root.service.selectedThread,
-                root.service.selectedId) || root.cursorId === "")
+            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
+                || root.cursorId === "")
               root.cursorId = root.service.selectedId
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
@@ -2950,7 +2783,7 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
-        canSearch: !!root.service && Provider.addressQuery(root.service.providerId, "from", "a@b.c") !== ""
+        canSearch: !!root.service && Provider.get(root.service.providerId).addressSearch === true
         onCopyRequested: function(address) { root.copyAddress(address) }
         onSearchRequested: function(field, address) { root.searchAddress(field, address) }
       }

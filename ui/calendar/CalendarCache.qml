@@ -1,6 +1,4 @@
 import QtQuick
-import Quickshell
-import Quickshell.Io
 import "Cache.js" as Cache
 
 Item {
@@ -13,10 +11,8 @@ Item {
   property string cacheName: "calendar"
   property var store: Cache.emptyStore()
   property bool loaded: false
-  readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME")
-    || (Quickshell.env("HOME") + "/.cache")
-  readonly property string directory: cacheHome + "/omamail"
-  readonly property string path: directory + "/" + cacheName + ".json"
+  property var backend: null
+  property int epoch: 0
 
   signal restored()
 
@@ -29,35 +25,32 @@ Item {
     if (loaded) saveTimer.restart()
   }
 
-  Component.onCompleted: directoryMaker.running = true
-
-  Process {
-    id: directoryMaker
-    command: ["sh", "-c", "umask 077; mkdir -p \"$1\" && chmod 700 \"$1\"", "sh",
-      root.directory]
-    onExited: cacheFile.reload()
-  }
-
-  FileView {
-    id: cacheFile
-    path: root.path
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      root.store = Cache.load(text())
+  function restore() {
+    var mine = ++epoch
+    loaded = false
+    store = Cache.emptyStore()
+    if (!backend || !backend.ready) return
+    backend.call("cache.calendarRead", { name: cacheName }, function(value,error) {
+      if (!root || root.epoch !== mine) return
+      root.store = error || !value ? Cache.emptyStore() : value
       root.loaded = true
       root.restored()
-    }
-    onLoadFailed: {
-      root.store = Cache.emptyStore()
-      root.loaded = true
-      root.restored()
-    }
+    })
   }
-
+  Component.onCompleted: restore()
+  onBackendChanged: restore()
+  onCacheNameChanged: restore()
+  Connections {
+    target: root.backend
+    ignoreUnknownSignals: true
+    function onReadyChanged() { root.restore() }
+  }
   Timer {
     id: saveTimer
     interval: 800
-    onTriggered: cacheFile.setText(Cache.serialize(root.store))
+    onTriggered: {
+      if (!root.loaded || !root.backend || !root.backend.ready) return
+      root.backend.call("cache.calendarPut", { name: root.cacheName, store: root.store }, function() {})
+    }
   }
 }

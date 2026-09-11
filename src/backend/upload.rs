@@ -6,7 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const CAPACITY: usize = 32 * 1024 * 1024;
+pub const MAX_UPLOAD: usize = 64 * 1024 * 1024;
+const CAPACITY: usize = 2 * MAX_UPLOAD;
 const CHUNK: usize = 256 * 1024;
 
 struct Upload {
@@ -52,7 +53,7 @@ impl Uploads {
                 let request: Begin =
                     serde_json::from_value(params.clone()).map_err(|_| "invalid_params")?;
                 let reserved: usize = self.entries.values().map(|e| e.size).sum();
-                if request.size > crate::message::MAX_MESSAGE
+                if request.size > MAX_UPLOAD
                     || request.size > CAPACITY - reserved
                     || self.entries.len() >= 8
                 {

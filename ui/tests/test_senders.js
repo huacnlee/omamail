@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const senders = load("compose/Senders.js")
+const senders = load("tests/oracles/Senders.js")
 
 const gmail = {
   id: "work@example.com",

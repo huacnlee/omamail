@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "BackendFixture.js" as BackendFixture
+import "NativeIntentFixture.js" as NativeIntentFixture
 import "../../account/Accounts.js" as Accounts
 
 // Moving a message to a label — archived under it on Gmail, into the folder
@@ -21,6 +22,7 @@ Item {
   QtObject {
     id: record
     property var modified: []
+    property var labels: []
     function reset() { modified = [] }
   }
 
@@ -41,7 +43,7 @@ Item {
         record.modified = record.modified.concat([ids.join(",") + " +" + (add || []).join(",") + " -" + (remove || []).join(",")])
         return later(function() { callback(null, "") })
       }
-      function getLabels(callback) { return later(function() { callback([], "") }) }
+      function getLabels(callback) { return later(function() { callback(record.labels, "") }) }
       function getLabelCounts(id, callback) { return later(function() { callback({ id: id, unread: 0, total: 0 }, "") }) }
       function getProfile(callback) { return later(function() { callback({ email: email }, "") }) }
       function getSendAs(callback) { return later(function() { callback([], "") }) }
@@ -68,7 +70,7 @@ Item {
     name: "MoveToLabel"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() { BackendFixture.markReady(mailService); NativeIntentFixture.install(mailService) }
 
     function entry(email) {
       return {
@@ -108,6 +110,7 @@ Item {
       tryCompare(account, "ready", true)
       account.listLoaded = true
       account.labels = [folder("Work/2026"), folder("Receipts"), folder("Work")]
+      record.labels = account.labels
       account.messages = [row("1:INBOX"), row("2:INBOX")]
       return account
     }

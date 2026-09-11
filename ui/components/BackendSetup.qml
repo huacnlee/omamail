@@ -11,6 +11,10 @@ Column {
   required property string panelFontFamily
   property string backendError: ""
   spacing: Style.space(12)
+  OmamailLogo {
+    foreground: root.dimColor
+    accent: root.accentColor
+  }
   Text {
     text: "Mail backend"
     color: root.textColor
@@ -52,6 +56,9 @@ Column {
     width: parent.width
     spacing: Style.space(8)
     Button {
+      bordered: true
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
       objectName: "backend-install"
       visible: !!root.runtime && !root.runtime.development && root.runtime.state !== "ready"
       enabled: !!root.runtime && root.runtime.canInstall
@@ -60,6 +67,9 @@ Column {
       onClicked: root.runtime.install()
     }
     Button {
+      bordered: true
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
       objectName: "backend-refresh"
       text: "Check again"
       enabled: !!root.runtime && !root.runtime.busy
@@ -72,12 +82,18 @@ Column {
     spacing: Style.space(8)
     visible: !!root.runtime && !root.runtime.development && root.runtime.state === "ready"
     Button {
+      bordered: true
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
       text: "Enable terminal command"
       enabled: !!root.runtime && !root.runtime.busy
       foreground: root.textColor
       onClicked: root.runtime.enableCli()
     }
     Button {
+      bordered: true
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
       text: "Remove terminal command"
       enabled: !!root.runtime && !root.runtime.busy
       foreground: root.textColor

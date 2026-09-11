@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const conversation = load("account/Conversation.js")
+const conversation = load("tests/oracles/Conversation.js")
 
 // The conversation rail, against the reference test account's own thread: three
 // messages, oldest first, the first of them a draft that sits in the Inbox and

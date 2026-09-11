@@ -80,41 +80,30 @@ Item {
 
 
 
-    // One count read, answered under a reply that names each state in turn.
-    function countUnder(sessionState) {
+    // Rust refreshes the authoritative session before returning state. The
+    // adapter applies the refreshed limits and never launches a second GET.
+    function countUnder(state) {
       var before = Transports.transports(account.api)
       account.api.getLabelCounts("a", function() {})
       var requests = Transports.newSince(account.api, before)
-      compare(requests.length, 1, "one Mailbox/get")
-      compare(Transports.requested(requests[0]).verb, "call")
+      compare(requests.length, 1)
+      compare(requests[0].method, "jmap.labelCounts")
       var beforeAnswer = Transports.transports(account.api)
-      Transports.answer(requests[0], 200, countReply(sessionState))
-      return Transports.newSince(account.api, beforeAnswer)
+      Transports.complete(requests[0], {unread:1,total:1}, {
+        session:session(state), mailboxes:countReply(state).methodResponses[0][1].list,
+        knownStates:{mailbox:"m0"}
+      })
+      compare(Transports.newSince(account.api, beforeAnswer).length, 0)
     }
-
-    function test_a_reply_naming_a_newer_state_refetches_the_session_once() {
+    function test_backend_refreshed_session_replaces_ui_state_and_limits() {
       verify(!!account.auth && !!account.api)
-      account.api.session = session("s0")
-      account.api.mailboxList = countReply("s0").methodResponses[0][1].list
-      account.api.mailboxesLoaded = true
-      account.auth.secret = "app-password"
-      account.auth.secretChecked = true
-      tryVerify(function() { return account.ready }, 2000, "the mailbox is ready")
-
-      compare(countUnder("s0").length, 0, "the state the session already has moves nothing")
-
-      var refetch = countUnder("s1")
-      compare(refetch.length, 1, "a newer state is one session GET")
-      compare(Transports.requested(refetch[0]).verb, "session")
-      compare(account.api.session.state, "s0", "and the held session stands until it answers")
-
-      compare(countUnder("s1").length, 0, "the same state again is not a second GET")
-
-      Transports.answer(refetch[0], 200, session("s1"))
-      compare(account.api.session.state, "s1", "the answer replaces the held session")
-      compare(account.api.session.capabilities["urn:ietf:params:jmap:core"].maxObjectsInGet, 250,
-        "limits included")
-      compare(countUnder("s1").length, 0, "and the new state is now the one held")
+      countUnder("s0")
+      compare(account.api.session.state, "s0")
+      countUnder("s1")
+      compare(account.api.session.state, "s1")
+      compare(account.api.session.capabilities["urn:ietf:params:jmap:core"].maxObjectsInGet, 250)
+      countUnder("s1")
+      compare(account.api.session.state, "s1")
     }
   }
 }

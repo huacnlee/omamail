@@ -3,6 +3,7 @@ use super::{gmail_credentials, gmail_http};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -15,6 +16,8 @@ mod resources;
 #[cfg(test)]
 #[path = "gmail_tests.rs"]
 mod tests;
+#[path = "gmail_writes.rs"]
+mod writes;
 struct Token {
     value: String,
     expires: Instant,
@@ -22,7 +25,7 @@ struct Token {
 
 struct AccountSession {
     valid: AtomicBool,
-    token: Mutex<Option<Arc<Token>>>,
+    token: tokio::sync::Mutex<Option<Arc<Token>>>,
 }
 
 impl AccountSession {
@@ -34,17 +37,17 @@ impl AccountSession {
         }
     }
 
-    fn token_with(
+    async fn token_with<F: Future<Output = Result<Value, &'static str>>>(
         &self,
-        refresh: impl FnOnce() -> Result<Value, &'static str>,
+        refresh: impl FnOnce() -> F,
     ) -> Result<Arc<Token>, &'static str> {
         // Refresh coalesces per account. Invalidation never waits on this lock.
-        let mut cached = self.token.lock().map_err(|_| "session_failed")?;
+        let mut cached = self.token.lock().await;
         self.check()?;
         if let Some(token) = cached.as_ref().filter(|t| t.expires > Instant::now()) {
             return Ok(Arc::clone(token));
         }
-        let answer = refresh();
+        let answer = refresh().await;
         self.check()?;
         let answer = answer?;
         let value = answer["access_token"]
@@ -65,8 +68,8 @@ impl AccountSession {
         Ok(token)
     }
 
-    fn reject(&self, rejected: &Arc<Token>) -> Result<(), &'static str> {
-        let mut cached = self.token.lock().map_err(|_| "session_failed")?;
+    async fn reject(&self, rejected: &Arc<Token>) -> Result<(), &'static str> {
+        let mut cached = self.token.lock().await;
         self.check()?;
         // An old 401 cannot evict a new grant, even with identical token bytes.
         if cached
@@ -120,38 +123,75 @@ impl Session {
         }
         let session = Arc::new(AccountSession {
             valid: AtomicBool::new(true),
-            token: Mutex::new(None),
+            token: tokio::sync::Mutex::new(None),
         });
         accounts.insert(account.into(), Arc::clone(&session));
         Ok(session)
     }
 
-    fn get_with(
+    async fn get_with<R, G>(
         &self,
         account: &str,
-        refresh: impl Fn() -> Result<Value, &'static str>,
-        get: impl Fn(&str) -> Result<Value, &'static str>,
-    ) -> Result<Value, &'static str> {
+        refresh: impl Fn() -> R,
+        get: impl Fn(String) -> G,
+    ) -> Result<Value, &'static str>
+    where
+        R: Future<Output = Result<Value, &'static str>>,
+        G: Future<Output = Result<Value, &'static str>>,
+    {
         let session = self.account(account)?;
-        let token = session.token_with(&refresh)?;
+        let token = session.token_with(&refresh).await?;
         session.check()?;
-        let answer = get(&token.value);
+        let answer = get(token.value.clone()).await;
         session.check()?;
         if answer != Err("gmail_unauthorized") {
             return answer;
         }
-        session.reject(&token)?;
-        let replacement = session.token_with(refresh)?;
+        session.reject(&token).await?;
+        let replacement = session.token_with(refresh).await?;
         session.check()?;
-        let answer = get(&replacement.value);
+        let answer = get(replacement.value.clone()).await;
         session.check()?;
         if answer == Err("gmail_unauthorized") {
-            session.reject(&replacement)?;
+            session.reject(&replacement).await?;
         }
         answer
     }
 
-    pub fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+    /// Native sibling services may reuse only a registered Gmail account's grant.
+    pub async fn access_token(&self, account: &str) -> Result<String, &'static str> {
+        let account = field(&json!({"accountId": account}), "accountId", true)?.to_lowercase();
+        let accounts = tokio::task::spawn_blocking(crate::account::list)
+            .await
+            .map_err(|_| "session_failed")??;
+        if !accounts["accounts"].as_array().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|a| a["id"] == account && a["provider"] == "gmail")
+        }) {
+            return Err("gmail_account_unknown");
+        }
+        let session = self.account(&account)?;
+        let token = session
+            .token_with(|| async {
+                let (client, refresh) = tokio::task::spawn_blocking(move || {
+                    let client = gmail_credentials::read_for_account(&account)?;
+                    let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
+                    Ok::<_, &'static str>((client, refresh))
+                })
+                .await
+                .map_err(|_| "session_failed")??;
+                gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
+            })
+            .await?;
+        session.check()?;
+        Ok(token.value.clone())
+    }
+
+    pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        if writes::supports(method) {
+            return self.write_call(method, params).await;
+        }
         let allowed: &[&str] = match method {
             "gmail.invalidate" => &["accountId"],
             "gmail.labels" | "gmail.profile" | "gmail.sendAs" => &["accountId"],
@@ -231,7 +271,9 @@ impl Session {
             ],
         };
         // Resolve the registered provider before any credential or network read.
-        let accounts = crate::account::list()?;
+        let accounts = tokio::task::spawn_blocking(crate::account::list)
+            .await
+            .map_err(|_| "session_failed")??;
         if !accounts["accounts"].as_array().is_some_and(|entries| {
             entries
                 .iter()
@@ -239,15 +281,27 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
-        let answer = self.get_with(
-            &account,
-            || {
-                let client = gmail_credentials::read_for_account(&account)?;
-                let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
-                gmail_http::refresh(&client.client_id, &client.client_secret, &refresh)
-            },
-            |token| gmail_http::get(&path, &query, token),
-        )?;
+        let answer = self
+            .get_with(
+                &account,
+                || async {
+                    let account = account.clone();
+                    let (client, refresh) = tokio::task::spawn_blocking(move || {
+                        let client = gmail_credentials::read_for_account(&account)?;
+                        let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
+                        Ok::<_, &'static str>((client, refresh))
+                    })
+                    .await
+                    .map_err(|_| "session_failed")??;
+                    gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
+                },
+                |token| {
+                    let path = &path;
+                    let query = &query;
+                    async move { gmail_http::get(path, query, &token).await }
+                },
+            )
+            .await?;
         if method != "gmail.list" {
             return Ok(resources::normalize(method, answer));
         }

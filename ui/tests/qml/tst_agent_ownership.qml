@@ -2,12 +2,14 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "../../account/Accounts.js" as Accounts
+import "BackendFixture.js" as BackendFixture
+import "NativeIntentFixture.js" as NativeIntentFixture
 
 // A job belongs to the account that asked. Ada and Bob both hold 42:INBOX;
 // with Ada's job running, Bob's row must show no job, glow for nothing, and
 // a cancel from Bob's row must reach no runner — however the switch reached
-// the service. The runner's processes are the test stubs, which record the
-// command they were given and never run it.
+// the service. Projections use the actual native implementation; lifecycle
+// requests are recorded at the RPC boundary and never launch or cancel AI.
 Item {
   width: 900
   height: 600
@@ -24,6 +26,19 @@ Item {
     manifest: ({ id: "omamail", __sourceDir: "/tmp/omamail-test" })
   }
 
+  QtObject {
+    id: bridge
+    property bool ready: true
+    property var modelBridge: null
+    property var requests: []
+    property var listed: []
+    property var projectionErrors: []
+    function call(method, params, callback) {
+      if(method === "agent.jobsProjection") {modelBridge.call(method,params,function(result,error){if(error)bridge.projectionErrors=bridge.projectionErrors.concat([error]);callback(result,error)});return}
+      if(method === "agent.jobsList") {callback(listed, "");return}
+      requests=requests.concat([{method:method,params:params,callback:callback}])
+    }
+  }
   TestCase {
     name: "AgentOwnership"
     when: windowShown
@@ -40,30 +55,34 @@ Item {
       }
     }
 
-    // The runner is the service's child that lists jobs; its processes are
-    // its own children that carry a command.
+    // The runner is the service child that presents native jobs.
     function runner() {
       var kids = mailService.children
       for (var i = 0; i < kids.length; i++) if (kids[i].jobs !== undefined && kids[i].pluginDir !== undefined) return kids[i]
       return null
     }
     function startedCancels() {
-      var out = []
-      var kids = runner().children
-      for (var i = 0; i < kids.length; i++) {
-        var command = kids[i].command
-        if (kids[i].running === true && command && command.indexOf("cancel") >= 0) out.push(command)
-      }
-      return out
+      return bridge.requests.filter(function(request){return request.method === "agent.jobCancel"})
     }
-
-    // The stub processes never exit on their own; between tests they are
-    // put back so a cancel started by one test is not seen by the next.
+    function settled() {wait(1);tryVerify(function(){return bridge.modelBridge.pending.length===0})}
+    function initTestCase() {
+      BackendFixture.markReady(mailService)
+      bridge.modelBridge=NativeIntentFixture.backend(mailService)
+    }
     function init() {
-      var agent = runner()
-      if (!agent) return
-      var kids = agent.children
-      for (var i = 0; i < kids.length; i++) if (kids[i].running === true) kids[i].running = false
+      var agent=runner()
+      agent.backend=null
+      bridge.requests=[]
+      bridge.projectionErrors=[]
+      bridge.listed=[]
+      agent.backend=bridge
+      settled()
+    }
+    function setJobs(jobs) {
+      bridge.listed=jobs
+      runner().applyListing(jobs)
+      settled()
+      compare(bridge.projectionErrors.length,0,"Synthetic jobs must satisfy the native projection contract")
     }
 
     function seed(activeId) {
@@ -79,11 +98,21 @@ Item {
       tryCompare(mailService, "activeAccountId", activeId)
       var agent = runner()
       verify(agent !== null)
-      agent.jobs = [
+      setJobs([
         { id: "synthetic-A-job", messageId: "42:INBOX", accountId: ada, state: "running", created: 5 },
         { id: "synthetic-A-question", messageId: "7:INBOX", accountId: ada, state: "done", question: "File it?", created: 6 }
-      ]
+      ])
       return agent
+    }
+
+    function test_projection_is_independent_of_prior_owner_actions() {
+      test_draft_request_uses_selected_from_owner()
+      init()
+      test_bobs_row_neither_shows_nor_cancels_adas_job()
+      init()
+      test_adas_row_shows_and_cancels_her_own()
+      init()
+      test_a_popup_opened_on_ada_asks_and_cancels_for_ada()
     }
 
     function test_public_manifest_resolves_local_helper_directory() {
@@ -108,10 +137,11 @@ Item {
       var agent = seed(ada)
       var fields = {from: "bob@example.com", accountId: bob, draftKey: "unique-draft", to: "x@example.com", body: "Draft"}
       verify(mailService.askAgentDraft(fields, "Rewrite"))
-      var payload = JSON.parse(agent.startPayload)
+      var request=bridge.requests.filter(function(item){return item.method === "agent.jobStart"})[0]
+      var payload=request.params.payload
       compare(payload.accountId, bob)
-      compare(payload.draftKey, "unique-draft")
-      compare(payload.draft.from, "bob@example.com")
+      compare(payload.draftFields.draftKey, "unique-draft")
+      compare(payload.draftFields.from, "bob@example.com")
       verify(payload.command === undefined)
     }
 
@@ -135,7 +165,7 @@ Item {
       var adas = mailService.accountAt(0)
       adas.messages = [{ id: "42:INBOX", threadId: "", subject: "Invoice", snippet: "", time: "", date: "",
         from: { email: "x@example.com", display: "X" }, unread: false, starred: false, inInbox: true, labelIds: ["INBOX"] }]
-      agent.jobs = agent.jobs.concat([{ id: "synthetic-A-draft", kind: "draft", accountId: ada, draftKey: "draft-A", state: "done", created: 7, summary: "Shorter" }])
+      setJobs(agent.jobs.concat([{ id: "synthetic-A-draft", kind: "draft", accountId: ada, draftKey: "draft-A", state: "done", created: 7, requestPreview: "Shorter" }]))
       compare(mailService.agentJobsForDraft({accountId: ada, draftKey: "draft-A"}).length, 1, "Ada's composer sees her draft answer")
       mailService.accountList = Accounts.setActive(mailService.accountList, bob)
       tryCompare(mailService, "activeAccountId", bob)
@@ -143,7 +173,7 @@ Item {
       compare(mailService.cancelAgent("42:INBOX", ada), true, "Ada's job is cancelled from her popup")
       var cancels = startedCancels()
       compare(cancels.length, 1)
-      compare(String(cancels[0][cancels[0].length - 1]), "synthetic-A-job")
+      compare(cancels[0].params.id, "synthetic-A-job")
       compare(mailService.askAgent("42:INBOX", "File it", "imap:gone@example.com"), false, "a removed owner gets nothing")
     }
 
@@ -160,10 +190,11 @@ Item {
       compare(startedCancels().length, 0)
       mailService.accountList = Accounts.setActive(mailService.accountList, ada)
       tryCompare(mailService, "activeAccountId", ada)
+      settled()
       compare(mailService.cancelAgent("42:INBOX"), true, "Ada's own row cancels")
       var cancels = startedCancels()
       compare(cancels.length, 1)
-      compare(String(cancels[0][cancels[0].length - 1]), "synthetic-A-job")
+      compare(cancels[0].params.id, "synthetic-A-job")
     }
   }
 }

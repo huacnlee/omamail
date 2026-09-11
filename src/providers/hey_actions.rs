@@ -24,7 +24,16 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
     let fields = params.as_object().ok_or("Invalid HEY parameters")?;
     let allowed: &[&str] = match method {
         "hey.act" => &["verb", "ids"],
-        "hey.send" => &["to", "cc", "bcc", "subject", "body", "replyTo"],
+        "hey.send" | "hey.saveDraft" => &[
+            "to",
+            "cc",
+            "bcc",
+            "subject",
+            "body",
+            "replyTo",
+            "draftId",
+            "attachments",
+        ],
         _ => return Err("Unknown HEY mutation"),
     };
     if fields.keys().any(|key| !allowed.contains(&key.as_str())) {
@@ -71,10 +80,27 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
         let subject = field(params, "subject")?;
         let reply = field(params, "replyTo")?;
         let body = params["body"].as_str().ok_or("Invalid HEY body")?;
-        if body.is_empty() || body.len() > LIMIT || body.contains('\0') {
+        if (body.is_empty() && method == "hey.send") || body.len() > LIMIT || body.contains('\0') {
             return Err("Invalid HEY body");
         }
-        if !reply.is_empty() {
+        let draft = field(params, "draftId")?;
+        if !draft.is_empty() {
+            let id = draft.strip_prefix("draft:").unwrap_or(draft);
+            if method != "hey.saveDraft" || !numeric(id) {
+                return Err("Invalid HEY draft id");
+            }
+            // Newer official clients accept draft edit body from stdin, like compose.
+            // Never put private body text in --message / the process table.
+            args.extend(["draft".into(), "edit".into(), id.into()]);
+            for (flag, value) in [
+                ("--to", to),
+                ("--cc", cc),
+                ("--bcc", bcc),
+                ("--subject", subject),
+            ] {
+                args.extend([flag.into(), value.into()]);
+            }
+        } else if !reply.is_empty() {
             if !numeric(reply)
                 || !to.is_empty()
                 || !cc.is_empty()
@@ -85,7 +111,7 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
             }
             args.extend(["reply".into(), reply.into()]);
         } else {
-            if to.trim().is_empty() {
+            if to.trim().is_empty() && method == "hey.send" {
                 return Err("HEY requires a recipient");
             }
             args.extend([
@@ -101,12 +127,37 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
                 }
             }
         }
+        if method == "hey.saveDraft" && draft.is_empty() {
+            args.push("--draft".into());
+        }
+        if let Some(files) = params.get("attachments") {
+            let files = files
+                .as_array()
+                .filter(|v| v.len() <= 32)
+                .ok_or("Invalid HEY attachments")?;
+            for file in files {
+                let path = file
+                    .as_str()
+                    .or_else(|| file["path"].as_str())
+                    .ok_or("Invalid HEY attachment")?;
+                if !path.starts_with('/') || path.chars().any(char::is_control) || path.len() > 8192
+                {
+                    return Err("Invalid HEY attachment");
+                }
+                let metadata = std::fs::metadata(path).map_err(|_| "HEY attachment unavailable")?;
+                if !metadata.is_file() || metadata.len() > LIMIT as u64 {
+                    return Err("Invalid HEY attachment");
+                }
+                args.extend(["--attach".into(), path.into()]);
+            }
+        }
         input.extend_from_slice(body.as_bytes());
     }
     args.push("--json".into());
     Ok((args, input))
 }
 
+#[cfg(test)]
 fn execute(
     method: &str,
     params: &Value,
@@ -123,21 +174,134 @@ fn execute(
     Ok(json!({"ok":true}))
 }
 
-pub fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
-    execute(method, params, |args, input| {
-        crate::process::run(
+fn decode_message(params: &Value) -> Result<Value, &'static str> {
+    use base64::Engine;
+    use mailparse::MailHeaderMap;
+    let fields = params.as_object().ok_or("Invalid HEY parameters")?;
+    if fields
+        .keys()
+        .any(|key| !["raw", "threadId", "draftId", "attachments"].contains(&key.as_str()))
+    {
+        return Err("Unknown HEY parameter");
+    }
+    let encoded = params["raw"]
+        .as_str()
+        .filter(|v| v.len() <= LIMIT * 4 / 3 + 4)
+        .ok_or("Invalid HEY message")?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| "Invalid HEY encoding")?;
+    let mail = mailparse::parse_mail(&bytes).map_err(|_| "Invalid HEY message")?;
+    fn plain(mail: &mailparse::ParsedMail<'_>) -> Option<String> {
+        if mail.ctype.mimetype == "text/plain" {
+            return mail.get_body().ok();
+        }
+        mail.subparts.iter().find_map(plain)
+    }
+    fn attachments(mail: &mailparse::ParsedMail<'_>) -> usize {
+        usize::from(
+            mail.get_content_disposition().disposition == mailparse::DispositionType::Attachment,
+        ) + mail.subparts.iter().map(attachments).sum::<usize>()
+    }
+    if attachments(&mail)
+        > params
+            .get("attachments")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    {
+        return Err("HEY attachments need local files");
+    }
+    let thread = params.get("threadId").and_then(Value::as_str).unwrap_or("");
+    let thread = thread
+        .split_once(':')
+        .map(|(_, topic)| topic)
+        .unwrap_or(thread);
+    let mut out = json!({"body":plain(&mail).unwrap_or_default(),
+        "attachments":params.get("attachments").cloned().unwrap_or(json!([])),
+        "draftId":params.get("draftId").cloned().unwrap_or(json!(""))});
+    if thread.is_empty() {
+        for (key, header) in [
+            ("to", "To"),
+            ("cc", "Cc"),
+            ("bcc", "Bcc"),
+            ("subject", "Subject"),
+        ] {
+            out[key] = json!(mail.headers.get_first_value(header).unwrap_or_default());
+        }
+    } else {
+        out["replyTo"] = json!(thread);
+    }
+    Ok(out)
+}
+
+pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
+    let decoded;
+    let params = if params.get("raw").is_some() {
+        decoded = decode_message(params)?;
+        &decoded
+    } else {
+        params
+    };
+    let (args, input) = prepare(method, params)?;
+    if args.first().is_some_and(|arg| arg == "draft")
+        && args.get(1).is_some_and(|arg| arg == "edit")
+    {
+        let help = crate::process::async_run::run(
             &super::hey_access::program()?,
-            args,
-            input,
-            Duration::from_secs(60),
-            LIMIT,
+            &["draft".into(), "edit".into(), "--help".into()],
+            b"",
+            Duration::from_secs(5),
+            65536,
         )
+        .await?;
+        if !help.success
+            || !String::from_utf8_lossy(&help.stdout)
+                .to_ascii_lowercase()
+                .contains("stdin")
+        {
+            return Err("This HEY CLI cannot securely edit draft bodies from stdin");
+        }
+    }
+    let output = crate::process::async_run::run(
+        &super::hey_access::program()?,
+        &args,
+        &input,
+        Duration::from_secs(20),
+        LIMIT,
+    )
+    .await?;
+    if !output.success {
+        return Err("HEY refused the request");
+    }
+    let answer: Value =
+        serde_json::from_slice(&output.stdout).map_err(|_| "HEY returned invalid JSON")?;
+    if answer["ok"] != true {
+        return Err("HEY refused the request");
+    }
+    Ok(if method == "hey.saveDraft" {
+        answer["data"].clone()
+    } else {
+        json!({"ok":true})
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_message_decoding_retains_bcc_and_private_body() {
+        use base64::Engine;
+        let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            b"To: a@example.org\r\nBcc: hidden@example.org\r\nSubject: Hello\r\n\r\nPrivate body",
+        );
+        let fields = decode_message(&json!({"raw":raw})).unwrap();
+        assert_eq!(fields["bcc"], "hidden@example.org");
+        let (args, input) = prepare("hey.send", &fields).unwrap();
+        assert_eq!(input, b"Private body");
+        assert!(!args.iter().any(|arg| arg.contains("Private body")));
+        assert!(args.iter().any(|arg| arg == "hidden@example.org"));
+    }
 
     #[test]
     fn actions_use_postings_once_and_restore_to_imbox() {

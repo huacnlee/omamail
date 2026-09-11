@@ -1,0 +1,11 @@
+{
+  "capturedAt": "2026-09-11T16:13:35.156437+00:00",
+  "sha256": {
+    "message/Message.js": "6bc793110fdc1fb812c8928ba40a42d36a110972a4518e076b6d30966efbc6e3",
+    "message/Direction.js": "b937e2ecbb9c44c7259ea0ac6529c9909270b453663dd3c8408078a718791a76",
+    "message/Signature.js": "6e324dad649c9d21121ff9185e752e972889cb958fc2220b86a40f27a0c3dbe8",
+    "message/Html.js": "792ad666d77622092f79842162b53f33ccde6c3fbcee9933f02615cca46f2572",
+    "tests/load.js": "edfc5fcd0bdd275dec3519ac974b1c2f74f7d666a7a8196a8c8b1eb88f8aff06"
+  },
+  "purpose": "Frozen pre-migration production JavaScript; deterministic synthetic benchmark only"
+}

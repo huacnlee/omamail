@@ -145,8 +145,8 @@ Item {
       tryVerify(function() { return Transports.newSince(hosts.jmap.api, beforeJmap).length === 1 },
         1000, "the secret is tried against the JMAP server")
       var request = Transports.newSince(hosts.jmap.api, beforeJmap)[0]
-      compare(Transports.requested(request).verb, "session")
-      compare(Transports.requested(request).url, sessionUrl)
+      compare(request.method, "jmap.verify")
+      compare(request.params.settings.sessionUrl, sessionUrl)
       compare(Transports.newSince(hosts.imap.api, beforeImap).length, 0,
         "and not against the IMAP one")
       compare(hosts.imap.auth.loginBusy, false, "whose sign-in was never asked for")

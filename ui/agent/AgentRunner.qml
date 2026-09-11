@@ -1,138 +1,185 @@
 import QtQuick
-import Quickshell
-import Quickshell.Io
-import "Agent.js" as Agent
 
-// The jobs the window can see, and the two things it can do to them: start
-// one, close one. Each turn runs in a background system AI process through
-// `scripts/agent-job.py` and may outlive the dock — see docs/AGENT.md.
-//
-// A poll rather than a watch: a directory of small files rewritten by another
-// process is the case a file watcher reports late or twice, and two seconds
-// while something is running costs nothing measurable. Idle, it reads once on
-// open and then only when asked.
+// Presentation state for native background jobs. Rust owns process lifetime,
+// deadlines, persisted output and job validation; the UI owns the open result.
 Item {
   id: root
-
   required property string pluginDir
-
-  // The account whose messages are being drawn: `provider:address`, from
-  // the service. A message id is only unique inside one account, so the
-  // jobs by message, the attention they ask for and the job a row cancels
-  // are all read inside this one; the pane lists every job regardless.
+  property var backend: null
   property string accountId: ""
-
-  // Every job the runner listed, newest first, and the open account's by
-  // message id.
   property var jobs: []
-  readonly property var byMessage: Agent.jobsByMessage(jobs, accountId)
-  readonly property bool anyActive: Agent.anyActive(jobs)
-
-  // The jobs the owner has opened since they asked a question or finished:
-  // what the glow stops for. Kept for the session; a restart glows again for
-  // what is still unanswered, which is right.
+  property var byMessage: ({})
+  property var byAccount: ({})
+  property var scopesByAccount: ({})
+  property var attentionIds: []
+  property bool anyActive: false
+  property var activeIds: []
+  property var finishedIds: []
   property var seenIds: []
-  readonly property bool attention: Agent.anyAttention(jobs, seenIds)
-  readonly property var attentionByMessage: Agent.attentionByMessage(jobs, seenIds, accountId)
-
-  function acknowledge(jobId) { seenIds = Agent.markSeen(seenIds, jobId) }
-
-  // What the last listing said, so a job that crossed from running to done
-  // between two listings can be reported once.
+  property bool attention: false
+  property var attentionByMessage: ({})
+  property int projectionSerial: 0
+  property var pendingJobs: null
+  function acknowledge(jobId) {
+    var id = String(jobId || "")
+    if (id !== "" && seenIds.indexOf(id) < 0) seenIds = seenIds.concat([id])
+  }
   signal jobFinished(var job)
   signal failed(string text)
 
-  property string startPayload: ""
   property string lastError: ""
-  property bool startTimedOut: false
-  readonly property bool starting: starter.running
-
-  // One job's output, for the dock: the id being watched and the text the
-  // runner last returned. Re-read on every poll while that job is running.
+  property bool starting: false
+  property bool cancelling: false
+  property bool listing: false
+  property bool showing: false
+  property bool forgetting: false
+  property bool refreshQueued: false
+  property bool showQueued: false
+  property var forgetQueue: []
   property string shownId: ""
   property string shownOutput: ""
   property var shownTranscript: []
+  property int generation: 0
+  Component.onDestruction: generation++
 
-  function runner() { return pluginDir + "/scripts/agent-job.py" }
-
-  // A refresh asked for while a listing is in flight is not dropped: it runs
-  // as soon as that listing lands, so a job started during a poll is seen.
-  property bool refreshQueued: false
+  function available() { return !!backend && backend.ready }
+  function request(method, params, callback) {
+    var epoch = generation
+    var owner = backend
+    owner.call(method, params, function(result, error) {
+      if (!root || epoch !== root.generation || owner !== root.backend) return
+      callback(result, error)
+    })
+  }
 
   function refresh() {
-    if (pluginDir === "") return
-    if (lister.running) { refreshQueued = true; return }
-    lister.command = ["python3", runner(), "list"]
-    lister.running = true
+    if (!available()) return
+    if (listing) { refreshQueued = true; return }
+    listing = true
+    request("agent.jobsList", {}, function(result, error) {
+      root.listing = false
+      if (!error && Array.isArray(result)) root.applyListing(result)
+      if (root.refreshQueued) { root.refreshQueued = false; root.refresh() }
+    })
   }
+
+  function applyListing(next) {
+    pendingJobs = next
+    projectJobs()
+  }
+
+  function projectJobs() {
+    if (!available()) return
+    var next = pendingJobs || jobs
+    var serial = ++projectionSerial
+    request("agent.jobsProjection", {jobs: next, before: jobs,
+      accountId: accountId, seenIds: seenIds}, function(result, error) {
+      if (serial !== root.projectionSerial || error || !result) return
+      root.byMessage = result.byMessage || ({})
+      root.byAccount = result.byAccount || ({})
+      root.scopesByAccount = result.scopesByAccount || ({})
+      root.attentionIds = result.attentionIds || []
+      root.anyActive = result.anyActive === true
+      root.activeIds = result.activeIds || []
+      root.finishedIds = result.finishedIds || []
+      root.attention = result.attention === true
+      root.attentionByMessage = result.attentionByMessage || ({})
+      root.pendingJobs = null
+      root.jobs = next
+      var news = result.newlyFinished || []
+      for (var i = 0; i < news.length; i++) root.jobFinished(news[i])
+    })
+  }
+  onAccountIdChanged: {
+    byMessage = ({})
+    attentionByMessage = ({})
+    projectJobs()
+  }
+  onSeenIdsChanged: projectJobs()
 
   function jobFor(messageId, owner) {
-    return Agent.jobFor(jobs, messageId, String(owner || "") !== "" ? owner : accountId)
+    var account = String(owner || "") !== "" ? String(owner) : accountId
+    var messages = account === accountId ? byMessage : (byAccount[account] || ({}))
+    return messages[String(messageId || "")] || null
   }
 
-  // One line of JSON on stdin — `Agent.payload` — and the runner makes the
-  // directory and the background request. The listing follows straight away, so the row
-  // shows the job before the poll would have found it.
+  function scope(owner, ids, draftKey) {
+    var scopes = scopesByAccount[String(owner || accountId)] || ({})
+    var key = draftKey ? "draft:" + String(draftKey) : JSON.stringify((ids || []).slice().sort())
+    return scopes[key] || ({})
+  }
+  function selectionJob(ids, owner) { return scope(owner, ids, "").job || null }
+  function historyFor(owner, ids, draftKey) { return scope(owner, ids, draftKey).history || [] }
+  function draftJobs(owner, draftKey) { return scope(owner, [], draftKey).jobs || [] }
+  function wantsAttention(job) { return !!job && attentionIds.indexOf(String(job.id)) >= 0 }
+  function isActive(job) { return !!job && activeIds.indexOf(String(job.id)) >= 0 }
+
   function start(payloadLine) {
-    if (pluginDir === "") { lastError = "Omamail could not locate its AI helper. Reload the plugin."; return false }
-    if (starter.running) { lastError = "AI is still starting. Try again shortly."; return false }
+    if (!available()) { lastError = "Mail backend is unavailable"; return false }
+    if (starting) { lastError = "AI is still starting. Try again shortly."; return false }
+    var payload = payloadLine
+    if (payload === null || payload === undefined || payload === "") return false
+    if (typeof payload !== "string" && (typeof payload !== "object" || Array.isArray(payload))) return false
     lastError = ""
-    startTimedOut = false
-    startPayload = String(payloadLine || "")
-    if (startPayload === "") return false
-    starter.command = ["python3", runner(), "new"]
-    starter.running = true
-    startupDeadline.restart()
+    starting = true
+    request("agent.jobStart", {payload: payload}, function(result, error) {
+      root.starting = false
+      if (error) {
+        root.lastError = "Could not confirm AI started. Check the conversation before retrying."
+        root.failed(root.lastError)
+        root.refresh()
+        return
+      }
+      root.refresh()
+    })
     return true
   }
 
-  readonly property bool cancelling: canceller.running
-
   function cancel(messageId, owner) {
     var job = jobFor(messageId, owner)
-    if (!job) return false
-    return cancelById(job.id)
+    return job ? cancelById(job.id) : false
   }
 
   function cancelById(jobId) {
     var job = jobFor2(jobId)
-    if (!job || !Agent.isActive(job) || canceller.running) return false
-    canceller.command = ["python3", runner(), "cancel", String(job.id)]
-    canceller.running = true
+    if (!available() || !job || activeIds.indexOf(String(job.id)) < 0 || cancelling) return false
+    cancelling = true
+    request("agent.jobCancel", {id: String(job.id)}, function(result, error) {
+      root.cancelling = false
+      if (error) root.failed("Could not stop the agent. Try again shortly.")
+      root.refresh()
+    })
     return true
   }
 
-  property bool showQueued: false
-
   function show(jobId) {
     var id = String(jobId || "")
-    if (id !== shownId) {
-      shownId = id
-      shownOutput = ""
-      shownTranscript = []
-    }
-    if (pluginDir === "" || id === "") return
-    if (shower.running) { showQueued = true; return }
-    shower.command = ["python3", runner(), "show", id]
-    shower.running = true
+    if (id !== shownId) { shownId = id; shownOutput = ""; shownTranscript = [] }
+    if (!available() || id === "") return
+    if (showing) { showQueued = true; return }
+    showing = true
+    request("agent.jobShow", {id: id}, function(result, error) {
+      root.showing = false
+      if (!error && result && result.job && String(result.job.id || "") === root.shownId) {
+        root.shownOutput = String(result.output || "")
+        var transcript = result.transcript || []
+        if (JSON.stringify(root.shownTranscript) !== JSON.stringify(transcript)) root.shownTranscript = transcript
+      }
+      if (root.showQueued) { root.showQueued = false; root.show(root.shownId) }
+    })
   }
-
-  // A finished job and everything it wrote, removed. Several at once go one
-  // after another, each followed by a listing, so the pane empties as they go.
-  property var forgetQueue: []
 
   function forget(jobId) {
     var id = String(jobId || "")
-    if (id === "") return false
+    if (!available() || id === "") return false
     forgetQueue = forgetQueue.concat([id])
     drainForgets()
     return true
   }
 
   function forgetFinished() {
-    var list = jobs || []
-    var ids = []
-    for (var i = 0; i < list.length; i++) if (!Agent.isActive(list[i])) ids.push(String(list[i].id))
+    if (!available()) return false
+    var ids = finishedIds.slice()
     if (ids.length === 0) return false
     forgetQueue = forgetQueue.concat(ids)
     drainForgets()
@@ -140,123 +187,43 @@ Item {
   }
 
   function drainForgets() {
-    if (pluginDir === "" || forgetter.running || forgetQueue.length === 0) return
-    var next = forgetQueue[0]
+    if (!available() || forgetting || forgetQueue.length === 0) return
+    var id = forgetQueue[0]
     forgetQueue = forgetQueue.slice(1)
-    forgetter.command = ["python3", runner(), "forget", next]
-    forgetter.running = true
-  }
-
-  function applyListing(text) {
-    var next = Agent.parseJobs(text)
-    var news = Agent.newlyFinished(jobs, next)
-    jobs = next
-    for (var i = 0; i < news.length; i++) root.jobFinished(news[i])
-  }
-
-  Process {
-    id: lister
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode === 0) root.applyListing(String(stdout.text || ""))
-      if (root.refreshQueued) {
-        root.refreshQueued = false
-        root.refresh()
-      }
-    }
-  }
-
-  Process {
-    id: starter
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.startPayload + "\n")
-      root.startPayload = ""
-    }
-    onExited: function(exitCode) {
-      startupDeadline.stop()
-      root.startPayload = ""
-      if (root.startTimedOut) return
-      if (exitCode !== 0) {
-        root.lastError = "Could not start AI: " + String(stderr.text || "").trim()
-        root.failed(root.lastError)
-        return
-      }
-      root.refresh()
-    }
-  }
-
-  Process {
-    id: canceller
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) root.failed("Could not stop the agent: " + String(stderr.text || "").trim())
-      root.refresh()
-    }
-  }
-
-  Process {
-    id: forgetter
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) root.failed("Could not remove the job: " + String(stderr.text || "").trim())
+    forgetting = true
+    request("agent.jobForget", {id: id}, function(result, error) {
+      root.forgetting = false
+      if (error) root.failed("Could not remove the job. Try again shortly.")
       root.refresh()
       root.drainForgets()
-    }
-  }
-
-  Process {
-    id: shower
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      var shown = exitCode === 0 ? Agent.parseShown(String(stdout.text || "")) : null
-      if (shown && String(shown.job.id || "") === root.shownId) {
-        root.shownOutput = shown.output
-        if (JSON.stringify(root.shownTranscript) !== JSON.stringify(shown.transcript)) root.shownTranscript = shown.transcript
-      }
-      if (root.showQueued) { root.showQueued = false; root.show(root.shownId) }
-    }
+    })
   }
 
   Timer {
     interval: 500
     repeat: true
-    running: root.anyActive
+    running: root.available() && root.anyActive
     onTriggered: {
       root.refresh()
-      if (root.shownId !== "" && Agent.isActive(root.jobFor2(root.shownId))) root.show(root.shownId)
+      if (root.shownId !== "" && root.activeIds.indexOf(root.shownId) >= 0) root.show(root.shownId)
     }
   }
-
-  Timer {
-    id: startupDeadline
-    interval: 15000
-    onTriggered: {
-      root.startTimedOut = true
-      root.lastError = "Starting AI timed out. Retry the request."
-      starter.running = false
-      root.startPayload = ""
-      root.failed(root.lastError)
-      root.refresh()
-    }
-  }
-
-  // After a listing, the shown job's output is read once more if it just
-  // finished, so the last lines land without waiting for a poll that will
-  // not come.
   onJobsChanged: if (shownId !== "") show(shownId)
-
+  onBackendChanged: {
+    generation++
+    starting = false; cancelling = false; listing = false; showing = false; forgetting = false
+    refreshQueued = false; showQueued = false
+    Qt.callLater(root.refresh)
+    Qt.callLater(root.drainForgets)
+  }
+  Connections {
+    target: root.backend
+    ignoreUnknownSignals: true
+    function onReadyChanged() { if (root.available()) {root.refresh();root.drainForgets()} }
+  }
   function jobFor2(jobId) {
-    var list = root.jobs || []
-    for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(jobId)) return list[i]
+    for (var i = 0; i < jobs.length; i++) if (String(jobs[i].id) === String(jobId)) return jobs[i]
     return null
   }
-
   Component.onCompleted: Qt.callLater(root.refresh)
 }

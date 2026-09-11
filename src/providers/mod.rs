@@ -4,12 +4,15 @@
 //! names match the existing UI registry so clients need no provider-specific map.
 
 use serde_json::{Map, Value, json};
+pub mod domain;
 pub mod gmail;
 pub mod gmail_credentials;
 pub mod gmail_http;
 pub mod hey;
 pub mod hey_access;
 pub mod hey_actions;
+pub mod imap;
+pub mod jmap;
 
 const CAPABILITIES: &[&str] = &[
     "labels",

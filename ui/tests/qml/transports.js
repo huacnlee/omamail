@@ -1,24 +1,34 @@
 .pragma library
 
-// The stubbed transport, read back from the client that made a request.
-//
-// Under `tests/qml/imports` a `Process` is an `Item` that never exits on its
-// own, so every request a JMAP client makes lands among its children and
-// stays there until a test answers it. These are the four questions every
-// such test asks: which processes the client holds, which are new since a
-// moment ago, what one of them asked for, and how to answer it.
-
-// Every transport process the client holds. `requestLine` is the property
-// only a transport carries.
-function transports(client) {
-  var out = []
-  var kids = client ? client.data : null
-  var count = kids ? kids.length : 0
-  for (var i = 0; i < count; i++) {
-    var kid = kids[i]
-    if (kid && kid.hasOwnProperty("requestLine")) out.push(kid)
+// Record the actual backend RPC boundary. The production client is unchanged;
+// tests control only the backend response and can inspect exact request params.
+function install(client) {
+  if (!client.backend || !client.backend.testCalls) {
+    var backend = {
+      ready: true,
+      testCalls: [],
+      call: function(method, params, callback) {
+        var request = { method: method, params: params, callback: callback, answered: false }
+        this.testCalls.push(request)
+        return this.testCalls.length
+      }
+    }
+    client.backend = backend
   }
-  return out
+  return client.backend
+}
+
+function transports(client) {
+  if (!client) return []
+  // These tests count mail requests; cancellation and stream supervision are
+  // separate RPCs, covered by the native cancellation/lifetime tests.
+  return install(client).testCalls.filter(function(request) {
+    return (request.method.indexOf("jmap.") === 0
+      && request.method !== "jmap.cancel" && request.method !== "jmap.invalidate"
+      && request.method !== "jmap.watch" && request.method.indexOf("jmap.stream.") !== 0)
+      || request.method.indexOf("imap.") === 0
+      || request.method === "smtp.send" || request.method === "outlook.graphSend"
+  })
 }
 
 function newSince(client, before) {
@@ -30,31 +40,46 @@ function newSince(client, before) {
   return out
 }
 
-// What a request asked for, read back out of the line the client wrote for
-// the transport script: the verb, then base64 fields — the URL, the scheme,
-// the username, the secret, and for a call its body.
-function requested(process) {
-  var fields = String(process.requestLine).split(" ")
-  var decoded = []
-  for (var i = 1; i < fields.length; i++) decoded.push(fields[i] === "-" ? "" : Qt.atob(fields[i]))
+function requested(request) {
+  var params = request.params
+  var credential = params.credential || {}
   return {
-    verb: fields[0],
-    url: decoded.length > 0 ? decoded[0] : "",
-    scheme: decoded.length > 1 ? decoded[1] : "",
-    fields: decoded
+    verb: params.verb,
+    url: params.url || "",
+    scheme: credential.scheme || "",
+    fields: [params.url || "", credential.scheme || "", credential.username || "",
+      credential.secret || "", params.body || ""]
   }
 }
 
-// A reply with this status and JSON body (or none), in the four lines the
-// transport script writes: curl's exit, the status line, the body and stderr,
-// the last two base64.
-function answer(process, status, body) {
-  var text = body === undefined || body === null ? "" : Qt.btoa(JSON.stringify(body))
-  process.stdout.text = ["0", String(status) + " ", text, ""].join("\n")
-  process.exited(0)
+function reply(request, result, error) {
+  if (request.answered) throw new Error("Backend request answered twice")
+  request.answered = true
+  request.callback(result, error || "")
 }
 
-function answerText(process, status, body) {
-  process.stdout.text = ["0", String(status) + " ", Qt.btoa(String(body || "")), ""].join("\n")
-  process.exited(0)
+function answer(request, status, body) {
+  answerText(request, status, body === undefined || body === null ? "" : JSON.stringify(body))
+}
+
+function answerText(request, status, body) {
+  reply(request, { exit: 0, status: status, redirect: "", body: String(body || ""), stderr: "" }, "")
+}
+
+function fail(request) {
+  reply(request, null, "jmap_network_failed")
+}
+
+function verified(request, session, mailboxReply, scheme) {
+  var boxes = mailboxReply.methodResponses[0][1].list
+  reply(request, { session: session, mailboxes: boxes,
+    sessionUrl: request.params.settings.sessionUrl,
+    authScheme: scheme || request.params.settings.authScheme || "basic",
+    accountId: mailboxReply.methodResponses[0][1].accountId,
+    canSend: !!session.capabilities["urn:ietf:params:jmap:submission"],
+    mailboxCount: boxes.length }, "")
+}
+
+function complete(request, data, state) {
+  reply(request, {data:data, state:state || null}, "")
 }

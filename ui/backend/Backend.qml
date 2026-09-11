@@ -38,6 +38,7 @@ Item {
   property var shutdownFailure: null
 
   signal shutdownComplete(var error)
+  signal notification(string method, var params)
 
   function parseMessage(raw, callback) {
     Upload.parse(raw, function(method, params, done) {
@@ -45,7 +46,31 @@ Item {
     }, function() { return root.ready }, callback)
   }
 
+  function putBodyCache(accountId, id, body, callback) {
+    Upload.putBody(accountId, id, body, function(method, params, done) {
+      root.call(method, params, done)
+    }, function() { return root.ready }, callback)
+  }
+
   function call(method, params, callback) {
+    // Keep each physical frame small even for Unicode-heavy MIME/JSON data.
+    if (JSON.stringify(params).length > 200000) {
+      var alive = true
+      Upload.request(method, params, function(nextMethod, nextParams, done) {
+        // A cancelled upload must never reach its eventual domain operation.
+        // Permit cleanup of bytes already staged by the backend.
+        if (!alive && nextMethod !== "upload.discard") {
+          done(null, {code:-32010,message:"Request cancelled"})
+          return
+        }
+        root.request(nextMethod, nextParams, done, false)
+      }, function() { return root.ready }, function(result, error) {
+        if (!alive) return
+        alive = false
+        if (typeof callback === "function") callback(result, error)
+      })
+      return {cancel:function() { alive = false }}
+    }
     request(method, params, callback, false)
   }
 
@@ -63,7 +88,9 @@ Item {
     }
     var id = "qml-" + (++sequence)
     var next = Object.assign({}, pending)
-    next[id] = { callback: done, deadline: Date.now() + 30000 }
+    var operation = method === "request.upload" && params ? params.method : method
+    var timeout = operation === "agent.context" ? 65000 : 30000
+    next[id] = { callback: done, deadline: Date.now() + timeout }
     pending = next
     child.write(Wire.request(id, method, params))
   }
@@ -146,6 +173,11 @@ Item {
     var decoded = Chunks.accept(responseTransfer, line)
     responseTransfer = decoded.state
     if (!decoded.error && decoded.line === null) return
+    var event = decoded.error ? null : Wire.notification(decoded.line)
+    if (event) {
+      if (ready && !stopping) notification(event.method, event.params)
+      return
+    }
     var reply = decoded.error ? null : Wire.response(decoded.line)
     if (!reply) {
       stopForFailure("Invalid backend response")

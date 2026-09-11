@@ -35,24 +35,8 @@ Item {
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
 
-  // How long a request may hang before it is given up on.
-  //
-  // Qt's QML XMLHttpRequest has **no** `timeout` and **no** `ontimeout` — the
-  // properties simply do not exist, and assigning one is worse than useless
-  // because it reads back exactly what was written, so the obvious fix looks
-  // like it works. A `Timer` calling `abort()` is the whole of what is
-  // available. Measured, both halves: `"timeout" in xhr` is false, and a
-  // request against a socket that accepts and never answers was still hanging
-  // after eight seconds.
-  //
-  // Thirty seconds because this is a mail API on somebody's home connection,
-  // not a local service — long enough that a slow answer is waited for, and
-  // well inside the two-minute poll so a hung request is gone before the next
-  // one is due.
-  readonly property int requestTimeoutMs: 30000
-
   function newHandle() {
-    return { aborted: false, timedOut: false, xhr: null, deadline: null, children: [] }
+    return { aborted: false, children: [] }
   }
 
   function usesBackend() {
@@ -69,13 +53,25 @@ Item {
       backend.call("gmail.invalidate", { accountId: old }, function() {})
   }
 
+  function backendError(error, method) {
+    var code = String(error && error.message || "")
+    if (code === "gmail_timeout" || code === "request_timed_out")
+      return /^(gmail\.(modify|batchModify|createLabel|renameLabel|deleteLabel|trash|untrash|send|saveDraft|updateDraft|deleteDraft))$/.test(method)
+        ? "Gmail did not answer in time. The submitted change may have completed."
+        : "Gmail did not answer in time"
+    if (code === "gmail_unauthorized" || code === "gmail_invalid_token")
+      return "Gmail authorization expired. Sign in again."
+    if (code === "gmail_draft_missing") return "That draft is no longer in the mailbox"
+    return "Gmail backend could not complete this request"
+  }
+
   function backendRequest(method, params, callback) {
     var handle = newHandle()
     var account = auth ? String(auth.accountId || "") : ""
-    if (!auth || !auth.loggedIn || account === "") {
+    if (!usesBackend() || !auth || !auth.loggedIn || account === "") {
       Qt.callLater(function() {
         if (!handle.aborted && typeof callback === "function")
-          callback(null, "Sign in to the configured Gmail account first")
+          callback(null, !usesBackend() ? "Mail backend is unavailable" : "Sign in to the configured Gmail account first")
       })
       return handle
     }
@@ -92,146 +88,34 @@ Item {
       if (handle.aborted || epoch !== root.backendEpoch || auth !== session
           || !auth.loggedIn || String(auth.accountId || "") !== account) return
       if (typeof callback === "function")
-        callback(error ? null : result, error ? "Gmail backend could not complete this request" : "")
+        callback(error ? null : result, error ? backendError(error, method) : "")
     })
     return handle
-  }
-
-  // Stopped and destroyed together, because a Timer that outlives its request
-  // is a timer that aborts the *next* one to reuse the object.
-  function clearDeadline(handle) {
-    if (!handle || !handle.deadline) return
-    handle.deadline.stop()
-    handle.deadline.destroy()
-    handle.deadline = null
   }
 
   function abortRequest(handle) {
     if (!handle) return
     handle.aborted = true
-    clearDeadline(handle)
-    if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
-    handle.xhr = null
     var children = handle.children || []
     for (var i = 0; i < children.length; i++) abortRequest(children[i])
     handle.children = []
   }
 
-  function requestError(status, payload, xhr, fallback) {
-    var error = Api.responseError(status, payload, fallback)
-    if ((status === 429 || status === 403) && xhr && xhr.getResponseHeader)
-      error += Api.rateLimitSuffix(xhr.getResponseHeader("Retry-After"))
-    return error
-  }
-
-  function request(method, path, query, body, callback, retried, existingHandle) {
-    var handle = existingHandle || newHandle()
-    var url = Api.safeApiUrl(path)
-    if (!url) {
-      if (typeof callback === "function")
-        callback(0, null, "Something went wrong while contacting Gmail", null)
-      return handle
-    }
-    url = Api.appendQuery(url, query)
-
-    if (retried !== true) root.inFlight++
-
-    auth.withAccessToken(function(token, tokenError) {
-      if (!root) return
-      if (handle.aborted) {
-        root.inFlight = Math.max(0, root.inFlight - 1)
-        return
-      }
-      if (!token) {
-        root.inFlight = Math.max(0, root.inFlight - 1)
-        if (typeof callback === "function") callback(0, null, tokenError || "Not signed in", null)
-        return
-      }
-      var xhr = new XMLHttpRequest()
-      handle.xhr = xhr
-      xhr.onreadystatechange = function() {
-        if (xhr.readyState !== XMLHttpRequest.DONE) return
-        // The account this client belongs to can be removed while a request is
-        // still in the air; the reply then arrives for an object that is gone.
-        if (!root) return
-        if (handle.xhr === xhr) handle.xhr = null
-        if (handle.aborted) {
-          root.inFlight = Math.max(0, root.inFlight - 1)
-          return
-        }
-        root.clearDeadline(handle)
-        var payload = Api.parseJson(xhr.responseText, null)
-        // One retry only, and only for 401: a token can expire between the
-        // freshness check and the request reaching Google.
-        if (xhr.status === 401 && retried !== true) {
-          auth.invalidateAccessToken()
-          root.request(method, path, query, body, callback, true, handle)
-          return
-        }
-        root.inFlight = Math.max(0, root.inFlight - 1)
-        var ok = xhr.status >= 200 && xhr.status < 300
-        // A request the deadline gave up on arrives here exactly as a failed
-        // one does — `abort()` drives readyState to DONE with status 0, which
-        // is measured rather than assumed. So the timeout costs no second
-        // decrement and no second callback; all it needs is to say which of
-        // the two silences this was.
-        var error = ok ? "" : (handle.timedOut
-          ? "Gmail did not answer in time"
-          : root.requestError(xhr.status, payload, xhr,
-            "Gmail could not complete this request"))
-        if (typeof callback === "function") callback(xhr.status, payload, error, xhr)
-      }
-      xhr.open(String(method || "GET"), url)
-      xhr.setRequestHeader("Authorization", "Bearer " + token)
-      // Armed around the send rather than around the whole call: everything
-      // before this was local, and the wait being bounded is the wait on the
-      // network.
-      root.clearDeadline(handle)
-      handle.deadline = deadlineComponent.createObject(root, { interval: root.requestTimeoutMs })
-      if (handle.deadline) {
-        handle.deadline.triggered.connect(function() {
-          if (!root || handle.aborted) return
-          handle.timedOut = true
-          if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
-        })
-        handle.deadline.start()
-      }
-      if (body !== undefined && body !== null) {
-        xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.send(JSON.stringify(body))
-      } else {
-        xhr.send()
-      }
-    })
-    return handle
-  }
-
   // ---------------------------------------------------------------- reads
 
   function listMessages(query, maxResults, pageToken, callback, progress) {
-    if (usesBackend()) return backendRequest("gmail.list", {
+    return backendRequest("gmail.list", {
       query: String(query || ""), pageToken: String(pageToken || ""),
       pageSize: Math.max(1, Math.min(100, Math.floor(Number(maxResults) || 25)))
     }, callback)
-    return request("GET", Api.messagesPath(),
-      Api.listQuery(query, maxResults, pageToken), null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        if (error) callback(null, error)
-        else callback(Api.parseMessageList(payload), "")
-      })
+
   }
 
   function getMessage(id, full, callback) {
-    if (usesBackend()) return backendRequest("gmail.read", {
+    return backendRequest("gmail.read", {
       id: String(id || ""), full: !!full
     }, callback)
-    return request("GET", Api.messagePath(id),
-      full ? Api.fullQuery() : Api.metadataQuery(), null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error ? null : payload, error)
-      })
+
   }
 
   // The octets of a part Gmail described but did not send. Every part the
@@ -239,17 +123,13 @@ Item {
   // reader asks for one of them: the invitation, whose file has to be read
   // before a meeting can be drawn or answered.
   function getAttachment(messageId, attachmentId, callback) {
-    if (usesBackend()) return backendRequest("gmail.attachment", {
+    return backendRequest("gmail.attachment", {
       messageId: String(messageId || ""), attachmentId: String(attachmentId || "")
     }, function(payload, error) {
       if (typeof callback === "function")
         callback(error || !payload ? "" : String(payload.data || ""), error)
     })
-    return request("GET", Api.attachmentPath(messageId, attachmentId), null, null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error || !payload ? "" : String(payload.data || ""), error)
-      })
+
   }
 
   // The counted members of a conversation, for the reader's conversation rail.
@@ -348,242 +228,96 @@ Item {
   }
 
   function getLabels(callback) {
-    if (usesBackend()) return backendRequest("gmail.labels", {}, function(result, error) {
+    return backendRequest("gmail.labels", {}, function(result, error) {
       if (typeof callback === "function") callback(error ? [] : result, error)
     })
-    return request("GET", Api.labelsPath(), null, null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error ? [] : Api.parseLabels(payload), error)
-      })
+
   }
 
   function getLabelCounts(labelId, callback) {
-    if (usesBackend()) return backendRequest("gmail.labelCounts", { id: String(labelId || "") }, callback)
-    return request("GET", Api.labelPath(labelId), null, null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error ? null : Api.parseLabelCounts(payload), error)
-      })
+    return backendRequest("gmail.labelCounts", { id: String(labelId || "") }, callback)
+
   }
 
   function getProfile(callback) {
-    if (usesBackend()) return backendRequest("gmail.profile", {}, callback)
-    return request("GET", Api.profilePath(), null, null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error ? null : Api.parseProfile(payload), error)
+    // The native sign-in already verified this identity before storing its
+    // grant. A new account has no registry ID until this callback identifies it.
+    if (auth && auth.loggedIn && auth.signedInProfile) {
+      var handle = newHandle()
+      var session = auth
+      var profile = Api.parseProfile(auth.signedInProfile)
+      Qt.callLater(function() {
+        if (!handle.aborted && root.auth === session && session.loggedIn)
+          callback(profile, "")
       })
+      return handle
+    }
+    return backendRequest("gmail.profile", {}, callback)
+
   }
 
   function getSendAs(callback) {
-    if (usesBackend()) return backendRequest("gmail.sendAs", {}, function(result, error) {
+    return backendRequest("gmail.sendAs", {}, function(result, error) {
       if (typeof callback === "function") callback(error ? [] : result, error)
     })
-    return request("GET", Api.sendAsPath(), null, null,
-      function(status, payload, error) {
-        if (typeof callback !== "function") return
-        callback(error ? [] : Api.parseSendAs(payload), error)
-      })
+
   }
 
-  // --------------------------------------------------------------- writes
-
+  // Mail operations and draft resolution are owned by the persistent backend.
   function modifyMessage(id, addLabelIds, removeLabelIds, callback) {
-    return request("POST", Api.modifyPath(id), null, {
-      addLabelIds: Array.isArray(addLabelIds) ? addLabelIds : [],
-      removeLabelIds: Array.isArray(removeLabelIds) ? removeLabelIds : []
-    }, function(status, payload, error) {
-      if (typeof callback === "function") callback(payload, error)
-    })
+    return backendRequest("gmail.modify", { id: String(id || ""), addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }, callback)
   }
-
   function batchModify(ids, addLabelIds, removeLabelIds, callback) {
-    return request("POST", Api.batchModifyPath(), null, {
-      ids: Array.isArray(ids) ? ids : [],
-      addLabelIds: Array.isArray(addLabelIds) ? addLabelIds : [],
-      removeLabelIds: Array.isArray(removeLabelIds) ? removeLabelIds : []
-    }, function(status, payload, error) {
-      if (typeof callback === "function") callback(payload, error)
-    })
+    return backendRequest("gmail.batchModify", { ids: ids || [], addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }, callback)
   }
-
-  // Labels, changed. A nested label is a name with "/" in it, so a move is a
-  // rename to the new path; Gmail renames the labels beneath it with it.
   function createLabel(name, callback) {
-    return request("POST", Api.labelsPath(), null, {
-      name: String(name || ""),
-      labelListVisibility: "labelShow",
-      messageListVisibility: "show"
-    }, function(status, payload, error) {
-      if (typeof callback === "function") callback(payload, error)
-    })
+    return backendRequest("gmail.createLabel", { name: String(name || "") }, callback)
   }
-
   function renameLabel(id, name, callback) {
-    return request("PATCH", Api.labelPath(id), null, { name: String(name || "") },
-      function(status, payload, error) {
-        if (typeof callback === "function") callback(payload, error)
-      })
+    return backendRequest("gmail.renameLabel", { id: String(id || ""), name: String(name || "") }, callback)
   }
-
   function deleteLabel(id, callback) {
-    return request("DELETE", Api.labelPath(id), null, null,
-      function(status, payload, error) {
-        if (typeof callback === "function") callback(payload, error)
-      })
+    return backendRequest("gmail.deleteLabel", { id: String(id || "") }, callback)
   }
-
-  // One id or a list of them: a row that stands for a conversation is trashed
-  // as its members, and the list arrives here flat.
-  //
-  // The only batch endpoint Gmail publishes is `batchModify`, which takes label
-  // ids; trash and untrash are per-message verbs of their own. Rather than
-  // guess that adding TRASH means the same thing to Google as pressing trash
-  // does, a list is one of those verbs each, answered once when the last of
-  // them has — the shape `getMessages` already uses for a page's metadata. An
-  // error on any member fails the whole batch, because a half-trashed
-  // conversation the caller was told nothing about is worse than a failed one
-  // it can put back.
-  function trashMessage(id, callback) {
-    return trashEach(Api.trashPath, id, callback)
-  }
-
-  function untrashMessage(id, callback) {
-    return trashEach(Api.untrashPath, id, callback)
-  }
-
-  function trashEach(pathFor, id, callback) {
+  function trashMessage(id, callback) { return trashEach("gmail.trash", id, callback) }
+  function untrashMessage(id, callback) { return trashEach("gmail.untrash", id, callback) }
+  function trashEach(method, id, callback) {
     var list = Array.isArray(id) ? id : [id]
-    if (list.length === 1) {
-      return request("POST", pathFor(list[0]), null, null,
-        function(status, payload, error) {
-          if (typeof callback === "function") callback(payload, error)
-        })
-    }
-
     var handle = newHandle()
     var remaining = list.length
     var firstError = ""
-    if (remaining === 0) {
-      if (typeof callback === "function") Qt.callLater(function() { if (root) callback(null, "") })
+    if (!remaining) {
+      Qt.callLater(function() { if (!handle.aborted && typeof callback === "function") callback(null, "") })
       return handle
     }
-
     for (var i = 0; i < list.length; i++) {
-      var child = request("POST", pathFor(list[i]), null, null,
-        function(status, payload, error) {
-          if (handle.aborted) return
-          if (error && !firstError) firstError = error
-          remaining--
-          if (remaining === 0 && typeof callback === "function") callback(null, firstError)
-        })
-      handle.children.push(child)
+      handle.children.push(backendRequest(method, { id: String(list[i] || "") }, function(payload, error) {
+        if (handle.aborted) return
+        if (error && !firstError) firstError = error
+        remaining--
+        if (!remaining && typeof callback === "function") callback(payload, firstError)
+      }))
     }
     return handle
   }
-
-  // One Timer per request in flight, created and destroyed around it. A single
-  // shared one cannot work: requests here are fired together — a page of
-  // messages is one list call plus one metadata call each — and they finish in
-  // whatever order Google answers.
-  Component {
-    id: deadlineComponent
-
-    Timer {
-      repeat: false
-    }
-  }
-
   Component {
     id: progressTimerComponent
-
-    Timer {
-      repeat: false
-    }
+    Timer { repeat: false }
   }
-
   function sendMessage(payload, callback) {
-    return request("POST", Api.sendPath(), null, Api.sendBody(payload),
-      function(status, body, error) {
-        if (typeof callback === "function") callback(body, error)
-      })
+    return backendRequest("gmail.send", Api.sendBody(payload), callback)
   }
-
   function saveDraft(payload, callback) {
-    var messageId = payload ? String(payload.draftId || "") : ""
-    if (messageId !== "") return updateDraft(messageId, payload, callback)
-    return request("POST", Api.draftsPath(), null, Api.draftBody(payload),
-      function(status, body, error) {
-        if (typeof callback === "function") callback(body, error)
-      })
+    var id = payload ? String(payload.draftId || "") : ""
+    if (id !== "") return updateDraft(id, payload, callback)
+    return backendRequest("gmail.saveDraft", Api.sendBody(payload), callback)
   }
-
-  // The message list names Gmail's message id. The update endpoint names its
-  // enclosing draft resource, so resolve that immutable id before replacing it.
-  // The draft a sent message was opened from, taken away: found the same way
-  // an update finds it, then deleted. Gmail's own drafts.send would do this
-  // itself; a message sent as raw leaves the draft behind.
-  function deleteDraft(messageId, callback) {
-    var handle = newHandle()
-    function find(pageToken) {
-      root.request("GET", Api.draftsPath(), Api.draftListQuery(pageToken), null,
-        function(status, body, error) {
-          if (handle.aborted) return
-          if (error) {
-            if (typeof callback === "function") callback(null, error)
-            return
-          }
-          var draftId = Api.draftIdForMessage(body, messageId)
-          if (draftId !== "") {
-            root.request("DELETE", Api.draftPath(draftId), null, null,
-              function(deleteStatus, gone, deleteError) {
-                if (typeof callback === "function") callback(gone, deleteError)
-              }, false, handle)
-            return
-          }
-          var next = String(body && body.nextPageToken || "")
-          if (next !== "") {
-            find(next)
-            return
-          }
-          if (typeof callback === "function") callback(null, "")
-        }, false, handle)
-    }
-    find("")
-    return handle
-  }
-
   function updateDraft(messageId, payload, callback) {
-    var handle = newHandle()
-
-    function find(pageToken) {
-      root.request("GET", Api.draftsPath(), Api.draftListQuery(pageToken), null,
-        function(status, body, error) {
-          if (handle.aborted) return
-          if (error) {
-            if (typeof callback === "function") callback(null, error)
-            return
-          }
-          var draftId = Api.draftIdForMessage(body, messageId)
-          if (draftId !== "") {
-            root.request("PUT", Api.draftPath(draftId), null, Api.draftBody(payload),
-              function(updateStatus, saved, updateError) {
-                if (typeof callback === "function") callback(saved, updateError)
-              }, false, handle)
-            return
-          }
-          var next = String(body && body.nextPageToken || "")
-          if (next !== "") {
-            find(next)
-            return
-          }
-          if (typeof callback === "function")
-            callback(null, "That draft is no longer in the mailbox")
-        }, false, handle)
-    }
-
-    find("")
-    return handle
+    var params = Api.sendBody(payload)
+    params.id = String(messageId || "")
+    return backendRequest("gmail.updateDraft", params, callback)
+  }
+  function deleteDraft(messageId, callback) {
+    return backendRequest("gmail.deleteDraft", { id: String(messageId || "") }, callback)
   }
 }

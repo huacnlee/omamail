@@ -199,6 +199,28 @@ def install(required, architecture):
             os.replace(candidate, BINARY)
 
 
+def install_local(required):
+    """Install an explicitly built checkout binary, without release downloads."""
+    source = ROOT / "target/release/omamail"
+    safe_path(source)
+    require(source.is_file(), "Build the local backend first with make backend.")
+    with source.open("rb") as compiled:
+        content = compiled.read(BINARY_LIMIT + 1)
+    require(0 < len(content) <= BINARY_LIMIT, "Local backend exceeded its size limit.")
+    safe_path(BINARY.parent, directory=True, create=True)
+    with tempfile.TemporaryDirectory(prefix=".install-", dir=BINARY.parent) as staging:
+        candidate = Path(staging) / "omamail"
+        with candidate.open("xb") as destination:
+            destination.write(content)
+            destination.flush()
+            os.fsync(destination.fileno())
+        candidate.chmod(0o700)
+        require(version_of(candidate) == required, "Local backend does not match backend-version.")
+        require(pin() == required, "Backend version pin changed during installation.")
+        safe_path(BINARY)
+        os.replace(candidate, BINARY)
+
+
 def cli_link(enable):
     link = Path.home() / ".local/bin/omamail"
     safe_path(link.parent, directory=True, create=enable)
@@ -220,7 +242,7 @@ def run(command):
         development = os.environ.get("OMAMAIL_BIN", "")
         executable = Path(development) if development else BINARY
         result["executable"] = str(executable)
-        require(command in ("status", "install", "uninstall", "enable-cli", "disable-cli"), "Unknown backend operation.")
+        require(command in ("status", "install", "install-local", "uninstall", "enable-cli", "disable-cli"), "Unknown backend operation.")
         if command != "status":
             require(not development, "Unset OMAMAIL_BIN before managing the installed backend.")
         architecture = {"x86_64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine())
@@ -236,6 +258,8 @@ def run(command):
             with locked():
                 if command == "install":
                     install(required, architecture)
+                elif command == "install-local":
+                    install_local(required)
                 elif command == "uninstall":
                     safe_path(BINARY)
                     BINARY.unlink(missing_ok=True)
@@ -246,7 +270,7 @@ def run(command):
                     cli_link(False)
         # The candidate was verified before the atomic commit. A second execution
         # must not turn a completed replacement into a reported install failure.
-        installed = required if command == "install" else version_of(executable)
+        installed = required if command in ("install", "install-local") else version_of(executable)
         result["installedVersion"] = installed
         result["state"] = "missing" if not installed else "ready" if installed == required else "mismatch"
     except Refused as error:

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "transports.js" as Transports
+import "NativeIntentFixture.js" as NativeIntentFixture
 import "../../account" as Account
 
 // An action from a stop on the rail names one message on the wire.
@@ -34,6 +35,12 @@ Item {
 
   TestCase {
     name: "JmapMemberAction"
+    function initTestCase() { account.backend = NativeIntentFixture.backend(account) }
+    function settleNative() {
+      wait(1)
+      tryVerify(function() {return account.backend.pending.length === 0})
+    }
+
     when: windowShown
 
     readonly property var session: ({
@@ -66,14 +73,15 @@ Item {
 
     // The ids an `Email/set` request named, read off the transport line.
     function updatedIds(process) {
-      var body = JSON.parse(Transports.requested(process).fields[4])
-      var call = body.methodCalls[0]
-      compare(call[0], "Email/set")
-      return Object.keys(call[1].update).sort().join(",")
+      verify(process.method === "jmap.trash" || process.method === "jmap.batchModify")
+      compare(process.params.accountId, "jmap:ada@example.org")
+      compare(process.params.credential, undefined)
+      return process.params.ids.slice().sort().join(",")
     }
 
     function test_a_member_action_names_one_message_and_a_row_action_names_them_all() {
       verify(!!account.auth && !!account.api)
+      Transports.install(account.api)
       account.api.session = session
       account.api.mailboxList = mailboxes
       account.api.mailboxesLoaded = true
@@ -81,6 +89,7 @@ Item {
       account.auth.secretChecked = true
       tryVerify(function() { return account.ready }, 2000)
 
+      wait(1)
       // One row, standing for a conversation of three, its own id the newest.
       var block = { id: "d", count: 3, unread: true, flagged: false,
         memberIds: ["m1", "m2", "m3"] }
@@ -92,11 +101,11 @@ Item {
       // From the representative's own stop: the one message.
       var before = Transports.transports(account.api)
       verify(account.act("m3", "trash", false, true), "the member action was accepted")
+      settleNative()
       var sent = Transports.newSince(account.api, before)
       compare(sent.length, 1, "one request")
       compare(updatedIds(sent[0]), "m3", "naming the one message, not the conversation")
-      Transports.answer(sent[0], 200, { methodResponses: [["Email/set",
-        { accountId: "t", updated: { m3: null } }, "0"]], sessionState: "s0" })
+      Transports.complete(sent[0], {})
       tryVerify(function() { return account.pendingAction === "" }, 2000)
 
       // The same verb on the row: every counted member.
@@ -104,6 +113,7 @@ Item {
         labelIds: ["INBOX", "UNREAD"], thread: block }]
       before = Transports.transports(account.api)
       verify(account.act("m3", "trash"), "the row action was accepted")
+      settleNative()
       sent = Transports.newSince(account.api, before)
       compare(sent.length, 1)
       compare(updatedIds(sent[0]), "m1,m2,m3", "the row reaches the whole conversation")

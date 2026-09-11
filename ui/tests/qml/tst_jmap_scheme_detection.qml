@@ -3,23 +3,10 @@ import QtTest 1.3
 import "transports.js" as Transports
 import "../../account" as Account
 
-// The scheme detection asks a question with its first 401 and answers with
-// its last one.
-//
-// A sign-in tries the session GET under one scheme and, on a 401, once more
-// under the other. The client records a 401 as a rejected credential for every
-// request it makes — the flag the setup page draws its re-entry card from and
-// the push stream reads to stop — and it recorded the detection's *first* 401
-// too. On a token-only server that emptied the secret field, drew the card
-// and tore the event stream down on every "Save changes", while the second
-// attempt went on to succeed. An account that has signed in before also starts
-// from the scheme it recorded, so the working one is tried first.
-//
-// Why Qt rather than node: the flag is a property of the client, the order is
-// a decision in the protocol library, and the page and the stream read the
-// flag through the account. `Jmap.schemeOrder` is asserted on its own in
-// `tests/test_jmap.js`; what has to be seen here is the flag staying down
-// between the two attempts, on the real objects, with the transport stubbed.
+// Scheme detection now belongs to Rust. The real account must preserve its
+// credential state while verification is pending, pass the previous scheme,
+// show a rejection only after the final backend refusal, and retain the scheme
+// returned by a successful verification. Rust discovery tests cover HTTP order.
 Item {
   width: 400
   height: 300
@@ -108,24 +95,13 @@ Item {
       var before = Transports.transports(tokenAccount.api)
       verify(tokenAccount.auth.signIn("new-token"), "the check starts")
       var first = Transports.newSince(tokenAccount.api, before)
-      compare(first.length, 1, "one session GET")
-      compare(Transports.requested(first[0]).verb, "session")
-      compare(Transports.requested(first[0]).scheme, "bearer",
-        "the scheme the account recorded is the one tried first")
-      compare(tokenAccount.auth.progressStep, 2, "and the page is told which wait this is")
-
-      // Refused. That is the question, not the answer: the flag stays down and
-      // the other scheme is tried.
-      var beforeSecond = Transports.transports(tokenAccount.api)
-      Transports.answer(first[0], 401, null)
+      compare(first.length, 1, "one native verification")
+      compare(first[0].method, "jmap.verify")
+      compare(first[0].params.settings.authScheme, "bearer",
+        "the backend receives the previously successful scheme")
       compare(tokenAccount.api.credentialsRejected, false,
-        "one refused scheme is not a rejected credential")
-      var second = Transports.newSince(tokenAccount.api, beforeSecond)
-      compare(second.length, 1, "the other scheme is tried")
-      compare(Transports.requested(second[0]).scheme, "basic")
-
-      // Refused again. Now every scheme has been, and that is the answer.
-      Transports.answer(second[0], 401, null)
+        "pending verification does not reject the credential")
+      Transports.reply(first[0], null, {message:"jmap_unauthorized"})
       compare(tokenAccount.api.credentialsRejected, true,
         "a 401 from both is the rejected state")
       compare(tokenAccount.auth.loginBusy, false)
@@ -142,23 +118,11 @@ Item {
       verify(freshAccount.auth.signIn("api-token"))
       var first = Transports.newSince(freshAccount.api, before)
       compare(first.length, 1)
-      compare(Transports.requested(first[0]).scheme, "basic", "nothing recorded: Basic first")
-
-      var beforeSecond = Transports.transports(freshAccount.api)
-      Transports.answer(first[0], 401, null)
+      compare(first[0].method, "jmap.verify")
+      compare(first[0].params.settings.authScheme, "basic")
       compare(freshAccount.api.credentialsRejected, false,
-        "the token-only server's refusal of Basic draws no card")
-      var second = Transports.newSince(freshAccount.api, beforeSecond)
-      compare(second.length, 1)
-      compare(Transports.requested(second[0]).scheme, "bearer")
-
-      var beforeMailboxes = Transports.transports(freshAccount.api)
-      Transports.answer(second[0], 200, session)
-      var calls = Transports.newSince(freshAccount.api, beforeMailboxes)
-      compare(calls.length, 1, "a good session is followed by one Mailbox/get")
-      compare(Transports.requested(calls[0]).verb, "call")
-      compare(Transports.requested(calls[0]).scheme, "bearer", "under the scheme that answered")
-      Transports.answer(calls[0], 200, mailboxes)
+        "scheme detection stays private to the backend until it settles")
+      Transports.verified(first[0], session, mailboxes, "bearer")
 
       compare(freshAccount.api.credentialsRejected, false)
       verify(!!learned, "sign-in reported what it learned")

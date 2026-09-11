@@ -25,6 +25,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  property var backend: null
 
   // Which mailbox this signs in. Unlike Gmail's, an IMAP account knows its own
   // address from the moment it is created — the user typed it — so this is set
@@ -55,8 +56,8 @@ Item {
   property string lastError: ""
 
   // Nothing here needs a browser or a helper that Omarchy might not ship —
-  // secret-tool is the only tool, and curl is checked by the client.
-  readonly property var requiredTools: ["secret-tool", "curl"]
+  // secret-tool owns the saved password; Rust owns network transport.
+  readonly property var requiredTools: ["secret-tool"]
   property var missingTools: []
   property bool toolsChecked: false
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
@@ -84,7 +85,7 @@ Item {
   }
 
   // The one entry point the transport uses. Hands back "user:password" — the
-  // single field curl wants — rather than the two halves, so nothing
+  // single credential field the native client consumes — rather than the two halves, so nothing
   // downstream has to know how they are joined.
   function withCredentials(callback) {
     if (typeof callback !== "function") return
@@ -233,7 +234,7 @@ Item {
 
   Component.onCompleted: {
     toolProbe.command = ["sh", "-c",
-      "for tool in secret-tool curl; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
+      "for tool in secret-tool; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
     toolProbe.running = true
   }
 

@@ -33,7 +33,11 @@ pub fn error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
 }
 
-pub fn handle(frame: &[u8], session: &super::Session) -> (Option<Value>, bool) {
+pub async fn handle(
+    frame: &[u8],
+    session: &super::Session,
+    deadline: tokio::time::Instant,
+) -> (Option<Value>, bool) {
     let raw: Box<RawValue> = match serde_json::from_slice(frame) {
         Ok(raw) => raw,
         Err(_) => return (Some(error(Value::Null, -32700, "Parse error")), false),
@@ -46,7 +50,7 @@ pub fn handle(frame: &[u8], session: &super::Session) -> (Option<Value>, bool) {
         let mut responses = Vec::new();
         let mut quit = false;
         for request in batch {
-            let (response, end) = one(request.get(), session);
+            let (response, end) = one(request.get(), session, deadline).await;
             quit |= end;
             if let Some(response) = response {
                 responses.push(response);
@@ -57,7 +61,7 @@ pub fn handle(frame: &[u8], session: &super::Session) -> (Option<Value>, bool) {
             quit,
         );
     }
-    one(raw.get(), session)
+    one(raw.get(), session, deadline).await
 }
 
 // Detect the control barrier without executing any domain operation. Batch
@@ -87,7 +91,11 @@ pub fn requests_quit(frame: &[u8]) -> bool {
     }
 }
 
-fn one(raw: &str, session: &super::Session) -> (Option<Value>, bool) {
+async fn one(
+    raw: &str,
+    session: &super::Session,
+    deadline: tokio::time::Instant,
+) -> (Option<Value>, bool) {
     let request: Request = match serde_json::from_str(raw) {
         Ok(request) => request,
         Err(_) => return (Some(error(Value::Null, -32600, "Invalid Request")), false),
@@ -100,7 +108,25 @@ fn one(raw: &str, session: &super::Session) -> (Option<Value>, bool) {
     {
         return (Some(error(Value::Null, -32600, "Invalid Request")), false);
     }
-    let result = session.dispatch(&request.method, &request.params);
+    // An expired queued request must not start a side effect: timeout_at polls
+    // its future before checking the clock.
+    let result = if tokio::time::Instant::now() >= deadline {
+        Err("request_timed_out")
+    } else if request.method.starts_with("gmail.")
+        || (request.method == "request.upload"
+            && request.params["method"]
+                .as_str()
+                .is_some_and(|method| method.starts_with("gmail.")))
+    {
+        tokio::time::timeout_at(deadline, session.dispatch(&request.method, &request.params))
+            .await
+            .unwrap_or(Err("request_timed_out"))
+    } else {
+        // Legacy process operations have their own deadlines. Dropping a
+        // spawn_blocking join cannot cancel a running send; await it so quit
+        // remains a completion barrier and never reports a false cancellation.
+        session.dispatch(&request.method, &request.params).await
+    };
     let quit = request.method == "system.quit" && result.is_ok();
     let Id::Present(id) = request.id else {
         return (None, quit);
@@ -112,4 +138,112 @@ fn one(raw: &str, session: &super::Session) -> (Option<Value>, bool) {
         Err(code) => error(id, -32000, code),
     };
     (Some(response), quit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn expired_upload_request_does_not_reserve_capacity() {
+        let session = crate::backend::Session::default();
+        let frame = br#"{"jsonrpc":"2.0","id":1,"method":"upload.begin","params":{"size":0}}"#;
+        let deadline = tokio::time::Instant::now() - Duration::from_secs(1);
+        let (response, quit) = handle(frame, &session, deadline).await;
+        assert!(!quit);
+        assert_eq!(response.unwrap()["error"]["message"], "request_timed_out");
+        // An expired call must leave every upload slot available, not merely
+        // return a timeout after executing the immediate upload future.
+        for _ in 0..8 {
+            assert!(
+                session
+                    .dispatch("upload.begin", &json!({"size":0}))
+                    .await
+                    .is_ok()
+            );
+        }
+        assert_eq!(
+            session.dispatch("upload.begin", &json!({"size":0})).await,
+            Err("upload_capacity_exceeded")
+        );
+    }
+
+    #[tokio::test]
+    async fn uploaded_gmail_deadline_includes_waiting_for_decode_capacity() {
+        let session = crate::backend::Session::default();
+        let upload = session
+            .dispatch("upload.begin", &json!({"size":2}))
+            .await
+            .unwrap()["upload"]
+            .clone();
+        session
+            .dispatch(
+                "upload.append",
+                &json!({"upload":upload,"offset":0,"data":"e30"}),
+            )
+            .await
+            .unwrap();
+        // Occupy both decode permits. The uploaded request must expire while
+        // waiting, before consuming its bytes or starting provider work.
+        let permits = session.upload_jobs.acquire_many(2).await.unwrap();
+        let frame = serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"bounded",
+            "method":"request.upload","params":{"method":"gmail.send","upload":upload}}))
+        .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(20);
+        let response =
+            tokio::time::timeout(Duration::from_secs(1), handle(&frame, &session, deadline)).await;
+        drop(permits);
+        let (response, quit) = response.expect("uploaded Gmail request ignored its RPC deadline");
+        assert!(!quit);
+        let response = response.unwrap();
+        assert_eq!(response["id"], "bounded");
+        assert_eq!(response["error"]["message"], "request_timed_out");
+        assert_eq!(
+            session
+                .dispatch("upload.discard", &json!({"upload":upload}))
+                .await
+                .unwrap(),
+            json!({"discarded":true}),
+            "timed-out queued work must not consume the upload"
+        );
+    }
+
+    #[test]
+    fn blocking_dispatch_is_awaited_after_rpc_deadline() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (release, released) = std::sync::mpsc::channel();
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+            });
+            started.await.unwrap();
+            let session = crate::backend::Session::default();
+            // Unknown methods use the same blocking dispatch path as the HEY
+            // process adapter, without invoking a real provider or changing PATH.
+            let frame = br#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#;
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(20);
+            let request = handle(frame, &session, deadline);
+            tokio::pin!(request);
+            let early = tokio::select! {
+                biased;
+                response = &mut request => Some(response),
+                _ = tokio::time::sleep(Duration::from_millis(60)) => None,
+            };
+            // Always release the thread before asserting so a regression does
+            // not hang Runtime::drop with an unfinished blocking operation.
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            assert!(early.is_none(), "RPC detached a queued blocking operation");
+            let (response, quit) = request.await;
+            assert!(!quit);
+            assert_eq!(response.unwrap()["error"]["code"], -32601);
+        });
+    }
 }

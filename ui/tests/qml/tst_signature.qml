@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "NativeDomainFixture.js" as Native
 
 // A signature is placed by the compose view and edited on the settings page,
 // and neither half is reachable from node: one owns a text editor's contents,
@@ -26,6 +27,14 @@ Item {
 
   QtObject {
     id: mailService
+    property int pendingNative: 0
+    property var backend: ({ready: true, call: function(method, params, callback) {
+      mailService.pendingNative++
+      Qt.callLater(function() {
+        callback(Native.answer(method, params), null)
+        mailService.pendingNative--
+      })
+    }})
     property bool sendPending: false
     property bool sending: false
     property int sendSecondsRemaining: 10
@@ -178,9 +187,11 @@ Item {
     // The behaviour every account without a signature keeps.
     function test_an_unsigned_account_composes_as_before() {
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       compare(named(compose, "compose-body-editor").text, "")
 
       compose.begin("reply", summary(), "Body", [])
+      tryCompare(mailService, "pendingNative", 0)
       var replied = named(compose, "compose-body-editor").text
       compare(replied.indexOf("\n\n"), 0)
       verify(replied.indexOf("> Body") > 0)
@@ -189,6 +200,7 @@ Item {
     function test_a_new_message_opens_signed() {
       mailService.activeSignature = "Maarten\nmadra.nl"
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       compare(named(compose, "compose-body-editor").text, "\n\nMaarten\nmadra.nl")
     }
 
@@ -196,6 +208,7 @@ Item {
     function test_a_reply_signs_above_the_quote() {
       mailService.activeSignature = "Maarten"
       compose.begin("reply", summary(), "Body", [])
+      tryCompare(mailService, "pendingNative", 0)
       var text = named(compose, "compose-body-editor").text
       var sign = text.indexOf("Maarten")
       var quote = text.indexOf("> Body")
@@ -215,7 +228,7 @@ Item {
     function test_a_mailto_draft_is_signed() {
       mailService.activeSignature = "Maarten"
       compose.beginDraft({ mode: "new", to: "her@example.com", body: "" }, "", [])
-      compare(named(compose, "compose-body-editor").text, "\n\nMaarten")
+      tryCompare(named(compose, "compose-body-editor"), "text", "\n\nMaarten")
     }
 
     // ------------------------------------------------------------- settings
@@ -223,7 +236,7 @@ Item {
     function test_the_editor_opens_on_what_is_stored() {
       var editor = named(settings, "settings-signature-editor")
       verify(editor, "the settings page builds a signature field")
-      compare(editor.text, "Maarten\nmadra.nl")
+      tryCompare(editor, "text", "Maarten\nmadra.nl")
     }
 
     function test_the_whole_signature_box_focuses_the_editor() {
@@ -262,6 +275,7 @@ Item {
       tryCompare(mailService, "activeSignature", "Visible before send")
 
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       compare(named(compose, "compose-body-editor").text,
         "\n\nVisible before send")
     }
@@ -274,12 +288,14 @@ Item {
     function test_an_untouched_signed_compose_is_not_a_draft() {
       mailService.activeSignature = "Maarten"
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       compare(compose.hasMeaningfulDraft(), false)
 
       compose.beginDraft({ mode: "new", body: "" }, "", [])
       compare(compose.hasMeaningfulDraft(), false, "a mailto: is the same window")
 
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       var editor = named(compose, "compose-body-editor")
       editor.text = "Something" + editor.text
       compare(compose.hasMeaningfulDraft(), true, "a sentence above it is a draft")
@@ -289,6 +305,7 @@ Item {
     function test_a_reply_is_still_a_draft() {
       mailService.activeSignature = "Maarten"
       compose.begin("reply", summary(), "Body", [])
+      tryCompare(mailService, "pendingNative", 0)
       compare(compose.hasMeaningfulDraft(), true)
     }
 
@@ -297,21 +314,23 @@ Item {
     function test_changing_the_sending_mailbox_re_signs_an_untouched_body() {
       mailService.activeSignature = "Maarten"
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       var editor = named(compose, "compose-body-editor")
-      compare(editor.text, "\n\nMaarten")
+      tryCompare(editor, "text", "\n\nMaarten")
 
       mailService.activeSignature = "Work Signature"
-      compare(editor.text, "\n\nWork Signature")
+      tryCompare(editor, "text", "\n\nWork Signature")
     }
 
     function test_changing_it_does_not_overwrite_what_was_typed() {
       mailService.activeSignature = "Maarten"
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       var editor = named(compose, "compose-body-editor")
       editor.text = "Half a sentence\n\nMaarten"
 
       mailService.activeSignature = "Work Signature"
-      compare(editor.text, "Half a sentence\n\nMaarten")
+      tryCompare(editor, "text", "Half a sentence\n\nMaarten")
     }
 
     // Equality with the placed body is not an edit history. If somebody types
@@ -320,16 +339,17 @@ Item {
     function test_an_edit_reverted_to_the_signature_stays_the_users_body() {
       mailService.activeSignature = "Maarten"
       compose.begin("new", null, "", [])
+      tryCompare(mailService, "pendingNative", 0)
       var editor = named(compose, "compose-body-editor")
       editor.forceActiveFocus()
       editor.cursorPosition = 0
       keyClick(Qt.Key_X)
       keyClick(Qt.Key_Backspace)
-      compare(editor.text, "\n\nMaarten")
+      tryCompare(editor, "text", "\n\nMaarten")
 
       compare(compose.hasMeaningfulDraft(), true)
       mailService.activeSignature = "Work Signature"
-      compare(editor.text, "\n\nMaarten")
+      tryCompare(editor, "text", "\n\nMaarten")
     }
 
     // The settings field used to be built over accountSummaries, which a poll

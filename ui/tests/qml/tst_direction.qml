@@ -13,10 +13,11 @@ Item {
   width: 600
   height: 400
 
-  function summaryFor(subject, sender) {
+  function summaryFor(subject, sender, direction) {
     return ({
       id: "message-1",
       subject: subject,
+      subjectDirection: direction || "",
       from: ({ display: sender, email: "sender@example.com" }),
       to: [({ display: "Reader", email: "reader@example.com" })],
       snippet: sender,
@@ -90,18 +91,27 @@ Item {
     // in, so first-strong alone puts every message in a thread after the first
     // against the wrong edge.
     function test_a_reply_prefix_does_not_flip_an_arabic_subject() {
-      row.summary = summaryFor("Re: مرحبا بالعالم", "Alice")
+      row.summary = summaryFor("Re: مرحبا بالعالم", "Alice", "rtl")
       compare(alignmentOf(subjectItem()), Text.AlignRight)
     }
 
     function test_a_list_tag_and_a_forward_prefix_stack() {
-      row.summary = summaryFor("[team] Fwd: Re: שלום עולם", "Alice")
+      row.summary = summaryFor("[team] Fwd: Re: שלום עולם", "Alice", "rtl")
       compare(alignmentOf(subjectItem()), Text.AlignRight)
     }
 
     function test_a_reply_prefix_leaves_a_latin_subject_alone() {
       row.summary = summaryFor("Re: Hello there", "Alice")
       compare(alignmentOf(subjectItem()), Text.AlignLeft)
+    }
+
+    function test_native_metadata_is_authoritative_and_forced_mode_overrides() {
+      row.summary = summaryFor("Re: sample", "Alice", "rtl")
+      compare(alignmentOf(subjectItem()), Text.AlignRight)
+      row.contentDirection = "Left to right"
+      compare(alignmentOf(subjectItem()), Text.AlignLeft)
+      row.contentDirection = "Auto"
+      compare(alignmentOf(subjectItem()), Text.AlignRight)
     }
 
     // A chosen direction reaches everything, including the text Qt would

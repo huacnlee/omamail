@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "../../account/Unified.js" as Unified
+import "ModelFixture.js" as NativeModel
 
 // The service routing a merged list, against a real `Service` with real
 // account hosts.
@@ -14,6 +15,7 @@ import "../../account/Unified.js" as Unified
 // The hosts are real `MailAccount`s with no credentials, so nothing is fetched
 // and nothing is sent; what is asserted is which of them the service asked.
 Item {
+  id: fixtureRoot
   width: 1200
   height: 700
 
@@ -34,12 +36,19 @@ Item {
     manifest: ({ id: "omamail", __sourceDir: "/tmp/omamail-unified-test" })
   }
 
+  Component {
+    id: keyboardApp
+    Omamail.App {}
+  }
+
   TestCase {
     name: "UnifiedRouting"
     when: windowShown
 
     readonly property string adaId: "ada@example.org"
     readonly property string bobId: "bob@example.net"
+
+    function initTestCase() { NativeModel.install(service) }
 
     function seed() {
       service.applySettings({ unifiedMailboxes: true })
@@ -138,6 +147,36 @@ Item {
       service.select(Unified.unifiedId(adaId, "2"))
       compare(ada().selectedId, "2")
       compare(bob().selectedId, "")
+    }
+
+    function test_keyboard_navigation_opens_the_correct_account_without_changing_query() {
+      var app = createTemporaryObject(keyboardApp, fixtureRoot, {service: service, shell: fakeShell})
+      verify(app)
+      app.opened = true
+      app.backToList()
+      app.cursorId = ""
+      var queryA = ada().effectiveQuery
+      var queryB = bob().effectiveQuery
+      var mailboxA = ada().mailboxKey
+      var mailboxB = bob().mailboxKey
+      app.moveCursor(1)
+      compare(service.selectedId, Unified.unifiedId(adaId, "1"))
+      compare(ada().selectedId, "1")
+      compare(ada().selectionIsPreview, false)
+      app.moveCursor(1)
+      compare(app.cursorId, Unified.unifiedId(bobId, "1"))
+      compare(service.selectedId, app.cursorId)
+      compare(bob().selectedId, "1")
+      compare(ada().selectedId, "")
+      compare(bob().selectionIsPreview, false)
+      compare(app.currentView, "reader")
+      app.moveCursor(-1)
+      compare(service.selectedId, Unified.unifiedId(adaId, "1"))
+      compare(bob().selectedId, "")
+      compare(ada().effectiveQuery, queryA)
+      compare(bob().effectiveQuery, queryB)
+      compare(ada().mailboxKey, mailboxA)
+      compare(bob().mailboxKey, mailboxB)
     }
 
     // A reply is written from the mailbox the message arrived in.
@@ -385,8 +424,8 @@ Item {
 
     function test_a_search_reaches_every_mailbox() {
       service.search("invoice")
-      compare(ada().searchQuery, "invoice")
-      compare(bob().searchQuery, "invoice")
+      tryCompare(ada(), "searchQuery", "invoice")
+      tryCompare(bob(), "searchQuery", "invoice")
     }
   }
 }

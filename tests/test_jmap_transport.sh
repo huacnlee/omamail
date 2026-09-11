@@ -12,6 +12,9 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 script="$root/scripts/jmap-transport.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/omamail-jmap-transport-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM HUP
+# Keep child transport scratch files inside this test's private workspace.
+# Dedicated cases below explicitly unset TMPDIR to test runtime precedence.
+export TMPDIR="$work"
 
 mkdir -p "$work/bin"
 # A small, faithful curl. It reads the config from stdin, writes the "body"

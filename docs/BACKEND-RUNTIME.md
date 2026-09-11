@@ -4,7 +4,7 @@ Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
 one executable at `<plugin root>/runtime/bin/omamail`. The root `backend-version`
 file requires an exact version, independent of PATH and system packages. Service
 starts one persistent `omamail serve` process over stdin/stdout and checks its
-version and protocol before dispatching migrated calls. `--backend` is an alias.
+version and protocol before dispatching migrated calls.
 
 On a missing or mismatched runtime, the UI explains what is needed. Installation
 is explicit; simply loading the plugin never starts a download. From the plugin
@@ -82,6 +82,35 @@ the merge gate intentionally fails until a new version (for example 0.8.3) is
 prepared, published from the feature branch, and pinned after verification.
 Publication, credentials and branch protection setup are maintainer operations;
 this implementation does not claim they have happened.
+
+## Local verification
+
+To try the latest checkout in the desktop, run `make install`. It first builds
+with `cargo build --locked --release` into this checkout's `target/` directory,
+regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary against
+`backend-version` before atomically replacing `runtime/bin/omamail`. Only after
+that succeeds does it link the plugin and restart the shell. It does not need
+published backend assets. Failed builds or version checks preserve the old runtime.
+
+`make install-backend-local` performs only the build and local runtime replacement.
+Restart the shell afterwards to replace an already running backend process.
+Unset `OMAMAIL_BIN` in the shell's startup environment to use the private runtime.
+The separate `scripts/install-backend.sh` command remains the release downloader.
+
+Run `make test-local` on a machine with Rust, Qt 6 test tooling and Quickshell.
+It runs the existing Rust, JavaScript, transport/security and offscreen QML
+suites, then `make test-backend-process` builds the development executable and
+tests the production QML bridge against it using real Quickshell pipes.
+The integration test uses temporary HOME/XDG directories and synthetic account
+settings. It checks version/protocol handshake, concurrent request correlation,
+error responses, credential-free account summaries, a binary message larger
+than 1 MiB through upload and response chunks, and confirmed process shutdown.
+It does not open the desktop plugin or contact mail providers.
+
+`make test-backend-process` can also be run on its own. These local checks do
+not verify live mailbox compatibility, graphical plugin installation, or release
+availability. `make qml-check` additionally needs the installed Omarchy shell's
+QML imports; inspect its diagnostics even when qmllint returns success.
 
 Local synthetic tests cover archive shape, checksum corruption, version drift,
 preparation without pin advancement, pin-only commits and moved-branch refusal.

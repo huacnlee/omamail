@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../.." as Omamail
 import "../../account/Accounts.js" as Accounts
+import "BackendFixture.js" as BackendFixture
 
 Item {
   width: 600
@@ -35,6 +36,7 @@ Item {
     function create() {
       var svc = createTemporaryObject(serviceComponent, parent);
       verify(svc !== null);
+      BackendFixture.markReady(svc);
       var list = Accounts.emptyList();
       list = Accounts.add(list, {
         provider: "gmail",
@@ -48,19 +50,40 @@ Item {
       compare(svc.lastPersistedIds.length, 2);
       return svc;
     }
-    function writer(svc) {
-      for (var i = 0; i < svc.children.length; i++) {
-        var child = svc.children[i];
-        if (child.command && child.command.indexOf("accounts.json") >= 0)
-          return child;
+    function latestRequest(svc, method) {
+      var id = ""
+      for (var i = 0; i < svc.backend.children.length; i++) {
+        var child = svc.backend.children[i]
+        if (!child.written) continue
+        var lines = child.written.split("\n")
+        for (var j = 0; j < lines.length; j++) {
+          if (!lines[j]) continue
+          var request = JSON.parse(lines[j])
+          if (request.method === method) id = request.id
+        }
       }
-      return null;
+      return id
     }
     function finishWrite(svc) {
-      var process = writer(svc);
-      verify(process !== null);
-      process.running = false;
-      process.exited(0);
+      var id = latestRequest(svc, "accounts.save")
+      verify(id !== "")
+      svc.backend.receive(JSON.stringify({jsonrpc:"2.0",id:id,result:{revision:"synthetic-revision"}}))
+    }
+    function test_native_registry_event_reloads_and_coalesces_inflight_read() {
+      var svc = create()
+      var first = latestRequest(svc, "accounts.read")
+      verify(first !== "")
+      var revision = new Array(65).join("a")
+      svc.backend.receive(JSON.stringify({jsonrpc:"2.0",method:"accounts.changed",params:{revision:revision}}))
+      compare(svc.accountsReloadQueued, true)
+      svc.backend.receive(JSON.stringify({jsonrpc:"2.0",id:first,result:{registry:svc.accountList,revision:new Array(65).join("b")}}))
+      var next = latestRequest(svc, "accounts.read")
+      verify(next !== first)
+      var changed = Accounts.setLabel(svc.accountList,"alias@example.com","Native change")
+      svc.backend.receive(JSON.stringify({jsonrpc:"2.0",id:next,result:{registry:changed,revision:revision}}))
+      compare(svc.accountsRevision, revision)
+      compare(svc.accountList.accounts[0].label, "Native change")
+      compare(svc.accountsReading, false)
     }
     function test_queued_profile_correction_is_saved_after_the_old_write() {
       var svc = create();
@@ -101,7 +124,7 @@ Item {
       finishWrite(svc);
       svc.accountList = Accounts.remove(svc.accountList, "other@example.com");
       svc.saveAccounts();
-      compare(writer(svc).running, false, "unrelated omission must not start a writer");
+      compare(svc.accountsWriting, false, "unrelated omission must not start a writer");
       compare(svc.accountsWritePayload, "");
     }
     function test_provider_identity_change_can_be_saved() {

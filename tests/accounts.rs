@@ -27,6 +27,33 @@ fn cli_reads_only_bounded_regular_files_without_writing() {
             .contains("synthetic-secret")
     );
     assert_eq!(std::fs::read(&path).unwrap(), valid);
+    let label =
+        "quotes \" \\ 世界 | row\r\n\t\0\u{1b}]52;c;synthetic\u{7}\u{9b}31m\u{202e}hidden\n";
+    let registry = serde_json::json!({"version":1,"accounts":[{"email":"a@example.org","label":label,"clientSecret":"synthetic-secret"}]});
+    std::fs::write(&path, registry.to_string()).unwrap();
+    let pretty = run();
+    assert!(pretty.status.success());
+    let text = String::from_utf8(pretty.stdout).unwrap();
+    for forbidden in ['\r', '\t', '\0', '\u{1b}', '\u{7}', '\u{9b}', '\u{202e}'] {
+        assert!(
+            !text.contains(forbidden),
+            "terminal control reached pretty output"
+        );
+    }
+    assert!(text.contains("世界") && text.contains("\\r\\n") && text.contains("\\|"));
+    assert!(!text.contains("synthetic-secret"));
+    let machine = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["accounts", "list", "--json"])
+        .env("XDG_CONFIG_HOME", &root)
+        .output()
+        .unwrap();
+    assert!(machine.status.success());
+    let data: serde_json::Value = serde_json::from_slice(&machine.stdout).unwrap();
+    assert_eq!(data["accounts"][0]["label"], label.trim());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        registry.to_string()
+    );
     std::fs::write(&path, vec![b'x'; 1024 * 1024 + 1]).unwrap();
     assert!(!run().status.success());
     std::fs::remove_file(&path).unwrap();

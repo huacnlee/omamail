@@ -36,7 +36,7 @@ three directories away from the client that calls it.
 | `ui/calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
 | `ui/message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
 | `ui/components/` | Views. They draw what they are given and decide nothing. |
-| `ui/agent/` | The message agent: the rules in `Agent.js`, the runner object in `AgentRunner.qml` that starts, lists and stops jobs through `scripts/agent-job.py`. Each job is a transient systemd user unit; see `docs/AGENT.md`. |
+| `ui/agent/` | The message agent: presentation helpers in `Agent.js` and the thin `AgentRunner.qml` RPC adapter. Rust `src/agent/` owns context, durable task state and detached native worker processes; see `docs/AGENT.md`. |
 
 - `tests/test_qml_names.py` checks the entry points under `ui/`, and any QML
   file the Makefile does not list — a file `qmllint` never sees is a file nobody

@@ -4,7 +4,6 @@ import Quickshell.Io
 import "../providers"
 import "../cache"
 
-import "../cache/Cache.js" as Cache
 import "../message/Html.js" as Html
 import "../providers/GmailApi.js" as Api
 import "../message/Message.js" as Mail
@@ -12,9 +11,7 @@ import "../message/Calendar.js" as Calendar
 import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
-import "Conversation.js" as Conversation
 import "Accounts.js" as Accounts
-import "RenderCache.js" as RenderCache
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -38,6 +35,7 @@ Item {
 
   required property string pluginDir
   property var backend: null
+  property string syncFingerprint: ""
   property string configuredEmail: ""
   property string oauthClientId: ""
 
@@ -160,7 +158,7 @@ Item {
 
   // What the cache is keyed on. The page size is part of it: the same query at
   // a different size is a different result set, not a stale one.
-  readonly property string cacheKey: Cache.queryKey(effectiveQuery, maxMessages)
+  readonly property string cacheKey: String(effectiveQuery || "").trim() + "|" + maxMessages
 
   // ------------------------------------------------------------ mailbox
 
@@ -201,7 +199,7 @@ Item {
   // images is a re-render rather than another trip to Gmail, and a sanitiser
   // that learns something new applies it to every message already on disk
   // rather than only to the ones fetched afterwards.
-  property string sourceHtml: ""
+  property string readerSourceKey: ""
   // The parsed document behind `selectedHtml`. The reader fits it to whatever
   // width it happens to be and rebuilds on every relayout, so handing over the
   // tree rather than the string is the difference between one parse per message
@@ -232,7 +230,6 @@ Item {
   property var remoteImageData: ({})
   property var selectedRemoteImageSources: []
   property var imageFetchQueue: []
-  property var imageFetchProcess: null
   property int imageFetchSerial: 0
   // Prepared remote bytes stay separate from the source body. Qt receives only
   // completed data URIs, never an address whose pending load would draw its
@@ -288,19 +285,40 @@ Item {
   // of the account and a label or folder is a mailbox the rail has no row for,
   // so in both every member says where it sits.
   readonly property bool viewingSearch: searchQuery !== "" || rawQuery !== ""
-  readonly property string viewedMailboxKey:
-    Conversation.viewedMailboxKey(mailboxKey, viewingSearch)
-  // What the rail draws, decided here rather than in the reader: whether the
-  // provider collapses its listing at all is an account fact, and a conversation
-  // of one has nowhere to go.
-  readonly property bool showsRail:
-    Conversation.drawsRail(showsConversations, selectedThread)
+  property var conversationOrganisation: ({ showsRail: false, viewedMailboxKey: "" })
+  readonly property string viewedMailboxKey: String(conversationOrganisation.viewedMailboxKey || "")
+  readonly property bool showsRail: conversationOrganisation.showsRail === true
+  property var conversationJobs: []
+  property bool conversationBusy: false
+  property int conversationSerial: 0
+  Connections {
+    target: root.backend
+    ignoreUnknownSignals: true
+    function onReadyChanged() {
+      if (root.backend && root.backend.ready) root.queueConversation("project", null, null, null)
+      else {
+        root.conversationSerial++
+        root.conversationBusy = false
+        root.conversationJobs = []
+      }
+    }
+  }
+  onSelectedThreadChanged: queueConversation("project", null, null, null)
+  onMemberSummariesChanged: queueConversation("project", null, null, null)
 
   // Parsed trees are expensive and immutable after sanitize returns. Keep only
   // the recent working set in memory; the durable cache remains the sender's
   // source HTML so sanitizer fixes still apply after a restart.
-  property var renderCache: RenderCache.create(12)
-  onAccountIdChanged: renderCache = RenderCache.create(12)
+  property int renderSerial: 0
+  property int listLiveSerial: 0
+  onAccountIdChanged: {
+    conversationSerial++
+    conversationBusy = false
+    conversationJobs = []
+    conversationOrganisation = ({ showsRail: false, viewedMailboxKey: "" })
+    renderSerial++
+    syncFingerprint = ""
+  }
 
   // Which of this account's own addresses this message arrived at.
   //
@@ -353,6 +371,7 @@ Item {
   // Set once Gmail's own copy has landed, so a slower cache read knows not to
   // paint over it.
   property bool detailLive: false
+  property bool detailCachedResource: false
   property var detailHandle: null
   // The invitation's own request, which only a message carrying one ever makes.
   property var inviteHandle: null
@@ -390,11 +409,8 @@ Item {
   property string lastError: ""
   property string actionStatus: ""
   property string pendingAction: ""
+  property int actionPreparations: 0
   property string pendingActionQuery: ""
-  // Edits waiting for their server, and each list as it stood before the
-  // first of them; `Intents.qml` holds both.
-  property alias actionIntents: intents.held
-  property alias settledLists: intents.settledLists
   property var deferredListLoad: null
   property var queuedActions: []
   property bool sending: false
@@ -442,14 +458,25 @@ Item {
   // metadata and active-list initialization as a restored sign-in.
   readonly property bool ready: setupState === "ready" && !!api
     && (!backend || !backend.executable || backend.ready === true)
+  readonly property bool nativePolling: Provider.nativeSync(providerId) && !!backend
+    && !!backend.protocolInfo && Array.isArray(backend.protocolInfo.methods)
+    && backend.protocolInfo.methods.indexOf("mail.watch") >= 0
   readonly property bool busy: listLoading || detailLoading || countLoading
     || (auth ? auth.sessionBusy : false) || sending || pendingAction !== ""
   // The provider decides what a mailbox and a typed search amount to: Gmail's
   // are search operators, IMAP's name a folder. Opaque from here on — it is
   // handed back to the client that produced it, and used as a cache key.
+  property string resolvedProviderQuery: ""
+  property string resolvedProviderInput: ""
+  property int providerQuerySerial: 0
+  property int providerLabelSerial: 0
+  readonly property string providerQueryInput: JSON.stringify([providerId, mailboxKey, searchQuery, defaultQuery])
+  readonly property bool providerQueryNeedsResolution: searchQuery.trim() !== ""
+    || (mailboxKey === "inbox" && defaultQuery.trim() !== "" && defaultQuery.trim() !== Provider.get(providerId).inheritedDefault)
   readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
     : searchRaw !== "" ? searchRaw
-    : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
+    : resolvedProviderInput === providerQueryInput ? resolvedProviderQuery
+    : Provider.mailboxFor(providerId, mailboxKey).query
   readonly property bool hasMore: nextPageToken !== ""
   // A cached search can already have rows on screen while this stays true.
   // Kept separate from the generic list state so the view can say that the
@@ -496,7 +523,8 @@ Item {
   // a provider change swapping both loaders out. A local wrapper means none of
   // the callers has to know that.
   function abortRequest(handle) {
-    if (api && handle) api.abortRequest(handle)
+    if (handle && typeof handle.cancelReader === "function") handle.cancelReader()
+    else if (api && handle) api.abortRequest(handle)
   }
 
   function clearNotice() {
@@ -532,6 +560,10 @@ Item {
 
   function refreshCounts() {
     if (!ready || countLoading) return
+    if (nativePolling) {
+      backendSync.check()
+      return
+    }
     var serial = ++countSerial
     countLoading = true
     // Counted with the same query the Unread mailbox uses, not from the INBOX
@@ -553,12 +585,12 @@ Item {
         root.countLoading = false
         root.countHandle = null
       } else {
-        root.countHandle = root.api.getMessages(page.ids, false, function(payloads) {
+        root.countHandle = root.summarizedRead(page.ids, false, function(payloads) {
           if (serial !== root.countSerial) return
           var now = new Date()
           var summaries = []
           for (var i = 0; i < payloads.length; i++) {
-            var summary = Mail.summarize(payloads[i], now)
+            var summary = payloads[i].nativeSummary
             // The provider's unread query is authoritative. Some IMAP servers
             // omit FLAGS from metadata even when SEARCH UNSEEN found the row.
             summary.unread = true
@@ -645,6 +677,93 @@ Item {
     })
   }
 
+  function hydrateSummary(summary) {
+    summary.date = new Date(summary.dateMs || summary.date || 0)
+    summary.time = Mail.relativeTime(summary.date, new Date())
+    return summary
+  }
+
+  function hydrateSummaries(rows) {
+    var values = Array.isArray(rows) ? rows : []
+    for (var i = 0; i < values.length; i++) hydrateSummary(values[i])
+    return values
+  }
+
+  function summarizeResources(payloads, callback) {
+    var account = accountId
+    var list = Array.isArray(payloads) ? payloads : []
+    if (list.length === 0) { callback([], ""); return }
+    if (!backend) { callback([], "Mail backend is unavailable"); return }
+    backend.call("message.summaries", {messages: list, now: Date.now()}, function(result, error) {
+      if (account !== root.accountId) return
+      if (error || !result) { callback([], "Could not prepare message summaries"); return }
+      var summaries = result.summaries || []
+      if (summaries.length !== list.length) { callback([], "Incomplete message summaries"); return }
+      for (var i = 0; i < list.length; i++) list[i].nativeSummary = root.hydrateSummary(summaries[i])
+      callback(list, "")
+    })
+  }
+
+  // Serialize delivery of progress and completion while each batch is prepared
+  // in Rust. The final metadata callback cannot overtake an earlier batch.
+  function summarizedRead(ids, full, callback, parent, progress, members) {
+    var queued = []
+    var preparing = false
+    var handle = null
+    var account = accountId
+    function next() {
+      if (preparing || queued.length === 0) return
+      var item = queued.shift()
+      preparing = true
+      root.summarizeResources(item.payloads, function(payloads, error) {
+        preparing = false
+        if (account !== root.accountId || (handle && handle.aborted)) return
+        if (item.final) callback(payloads, error || item.error)
+        else if (typeof progress === "function") progress(payloads)
+        next()
+      })
+    }
+    function deliver(payloads, error) { queued.push({payloads: payloads, error: error, final: true}); next() }
+    function arrived(payloads) { queued.push({payloads: payloads, final: false}); next() }
+    handle = members ? api.getSummaries(ids, deliver)
+      : api.getMessages(ids, full, deliver, parent, typeof progress === "function" ? arrived : undefined)
+    return handle
+  }
+
+  property string readerRequestPrefix: String(Date.now()) + "-" + String(Math.random())
+  property int readerRequestSerial: 0
+  function readerOptions() {
+    return {allowRemoteImages: remoteImagesAllowed,
+      remoteImageData: remoteImagesAllowed ? remoteImageData : null, withReader: true}
+  }
+
+  function preparedRead(messageId, callback) {
+    var account = accountId
+    var client = api
+    var request = readerRequestPrefix + "-" + (++readerRequestSerial)
+    var handle = {aborted: false, cancelReader: function() {
+      if (handle.aborted) return
+      handle.aborted = true
+      if (root.backend) root.backend.call("reader.cancel", {accountId: account, requestId: request}, function() {})
+    }}
+    function current() { return !handle.aborted && account === root.accountId && client === root.api }
+    function read(cached) {
+      if (!current()) return
+      root.backend.call("reader.open", {accountId: account, id: messageId, requestId: request,
+        cacheOnly: cached, now: Date.now(), options: root.readerOptions()}, function(resource, error) {
+        if (!current()) return
+        if (!error && resource && resource.nativeContent) {
+          resource.nativeSummary = root.hydrateSummary(resource.nativeSummary)
+          callback(resource, "", cached)
+        } else if (!cached) callback(null, "Could not open that message", false)
+        if (cached) read(false)
+      })
+    }
+    if (!backend) { callback(null, "Mail backend is unavailable", false); return handle }
+    read(true)
+    return handle
+  }
+
   function preferredSendAs(recipients) {
     return Api.preferredSendAs(availableSendAsAliases, recipients)
   }
@@ -656,40 +775,43 @@ Item {
   // what can be found.
   function paintFromCache() {
     if (!cacheStore.loaded) return false
-    var entry = cacheStore.get(cacheKey)
-    var restored = entry && entry.summaries ? Cache.hydrate(entry.summaries) : []
-    if (searchQuery !== "" && rawQuery === "") {
-      restored = Model.mergeSearchResults(restored,
-        Cache.searchSummaries(cacheStore.store, searchQuery,
-          function(sourceQuery, summary) {
-            return Provider.cachedSummaryInSearch(root.providerId, sourceQuery, summary)
-          }))
-    }
-    if (restored.length === 0) return false
+    var serial = listSerial
+    var account = accountId
+    var query = cacheKey
+    var liveAtStart = listLiveSerial
+    cacheStore.getPreview(effectiveQuery, maxMessages,
+      searchQuery !== "" && rawQuery === "" ? searchQuery : "", providerId, 0,
+      function(result, error) {
+        if (error || !result || serial !== root.listSerial || account !== root.accountId
+            || query !== root.cacheKey || liveAtStart !== root.listLiveSerial) return
+        var restored = result.summaries || []
+        var entry = result.entry
+        if (restored.length === 0) return
+      for (var i = 0; i < restored.length; i++) {
+        restored[i].date = new Date(restored[i].dateMs || restored[i].date || 0)
+        restored[i].time = Mail.relativeTime(restored[i].date, new Date())
+      }
 
-    var now = new Date()
-    for (var i = 0; i < restored.length; i++)
-      restored[i].time = Mail.relativeTime(restored[i].date, now)
+      // Only when a row differs; see `Model.sameSummaries`.
+      if (!Model.sameSummaries(messages, restored)) messages = restored
+      resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
+      nextPageToken = entry ? entry.nextPageToken : ""
+      listLoaded = true
+      lastError = ""
 
-    // Only when a row differs; see `Model.sameSummaries`.
-    if (!Model.sameSummaries(messages, restored)) messages = restored
-    resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
-    nextPageToken = entry ? entry.nextPageToken : ""
-    listLoaded = true
-    lastError = ""
-
-    // Cached rows count as already seen, so the first live load does not
-    // announce a mailbox the user has been looking at all along.
-    var seen = {}
-    for (var key in seenIds) seen[key] = true
-    for (var j = 0; j < restored.length; j++) seen[restored[j].id] = true
-    seenIds = seen
-    // The cache is also a record of what was on screen last time, so a live
-    // load on top of it can tell genuinely new mail from a first look.
-    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(restored)
-    notificationsPrimed = true
-    listRefreshed()
-    return true
+      // Cached rows count as already seen, so the first live load does not
+      // announce a mailbox the user has been looking at all along.
+      var seen = {}
+      for (var key in seenIds) seen[key] = true
+      for (var j = 0; j < restored.length; j++) seen[restored[j].id] = true
+      seenIds = seen
+      // The cache is also a record of what was on screen last time, so a live
+      // load on top of it can tell genuinely new mail from a first look.
+      if (arrivalFloor === 0) arrivalFloor = restored[0].date.getTime() || 0
+      notificationsPrimed = true
+      listRefreshed()
+      })
+    return false
   }
 
   function loadMessages(append, skipCache, preservedError) {
@@ -699,7 +821,29 @@ Item {
     // but navigation has a different cache key and must still be allowed to
     // load its new view.
     if (!ready) return
-    if (pendingAction !== "" && cacheKey === pendingActionQuery) {
+    if (rawQuery === "" && searchRaw === "" && providerQueryNeedsResolution
+        && resolvedProviderInput !== providerQueryInput) {
+      if (!backend || !backend.ready) return
+      // The old list must not settle while the new opaque query is prepared.
+      listSerial++
+      abortRequest(listHandle)
+      listHandle = null
+      listLoading = true
+      var queryInput = providerQueryInput
+      var queryAccount = accountId
+      var querySerial = ++providerQuerySerial
+      backend.call("providers.resolve", {provider: providerId, operation: "query", mailbox: mailboxKey,
+        search: searchQuery, defaultQuery: defaultQuery}, function(result, error) {
+        if (querySerial !== root.providerQuerySerial || queryAccount !== root.accountId
+            || queryInput !== root.providerQueryInput) return
+        if (error) { root.listLoading = false; root.note("Could not prepare this search"); return }
+        root.resolvedProviderQuery = String((result || {}).value || "")
+        root.resolvedProviderInput = queryInput
+        root.loadMessages(append, skipCache, preservedError)
+      })
+      return
+    }
+    if ((pendingAction !== "" || actionPreparations > 0) && cacheKey === pendingActionQuery) {
       var cleared = !listLoaded
       // A→B→A can arrive here while B still owns the active request. The
       // deferred A load needs a fresh serial now, otherwise B may settle into
@@ -759,6 +903,7 @@ Item {
         root.resultEstimate = page.estimate
         root.nextPageToken = page.nextPageToken
         if (page.ids.length === 0) {
+          root.listLiveSerial++
           root.listLoading = false
           root.listLoaded = true
           if (!append) {
@@ -821,12 +966,15 @@ Item {
     var finalPage = null
     var listingError = ""
     var summaryError = ""
+    var paintQueue = []
+    var paintActive = false
+    var finishing = false
 
     function summariesOf(payloads) {
       var now = new Date()
       var summaries = []
       var list = Array.isArray(payloads) ? payloads : []
-      for (var i = 0; i < list.length; i++) summaries.push(Mail.summarize(list[i], now))
+      for (var i = 0; i < list.length; i++) summaries.push(list[i].nativeSummary)
       return summaries
     }
 
@@ -842,16 +990,35 @@ Item {
       }
       var summaries = summariesOf(fresh)
       if (summaries.length === 0) return
-      liveSummaries = Model.mergeSearchResults(liveSummaries, summaries)
-      root.messages = Model.mergeSearchResults(previewSearch, liveSummaries)
-      root.listLoaded = true
-      root.lastError = preservedError
-      root.listRefreshed()
+      paintQueue.push(summaries)
+      pumpPaint()
+    }
+
+    function pumpPaint() {
+      if (paintActive || paintQueue.length === 0 || serial !== root.listSerial) return
+      paintActive = true
+      var summaries = paintQueue.shift()
+      root.backend.call("model.apply", {operation: "searchProgress",
+        args: [previewSearch, liveSummaries, summaries]}, function(result, error) {
+        if (serial !== root.listSerial) return
+        paintActive = false
+        if (error || !result) summaryError = "Could not prepare search results"
+        else {
+          liveSummaries = root.hydrateSummaries(result.live)
+          root.listLiveSerial++
+          root.messages = root.hydrateSummaries(result.visible)
+          root.listLoaded = true
+          root.lastError = preservedError
+          root.listRefreshed()
+        }
+        if (paintQueue.length > 0) pumpPaint()
+        else finishIfReady()
+      })
     }
 
     function finishIfReady() {
-      if (serial !== root.listSerial || !listingDone || fetchActive
-          || fetchQueue.length > 0) return
+      if (serial !== root.listSerial || !listingDone || fetchActive || paintActive
+          || paintQueue.length > 0 || finishing || fetchQueue.length > 0) return
       root.listLoading = false
       if (!finalPage) {
         // Cache-first may have restored an old continuation, but a failed page
@@ -863,16 +1030,19 @@ Item {
       }
 
       root.resultEstimate = finalPage.estimate
-      var missingSummaries = Model.missingSearchSummaryIds(liveSummaries,
-        finalPage.ids)
+      finishing = true
+      root.backend.call("model.apply", {operation: "searchFinish",
+        args: [settledBase, previewSearch, liveSummaries, finalPage.ids, append]}, function(result, error) {
+      if (serial !== root.listSerial) return
+      if (error || !result) { root.fail("Could not settle search results"); return }
+      var missingSummaries = result.missing
       var metadataError = summaryError
       if (metadataError === "" && missingSummaries.length > 0)
         metadataError = "Some search results could not be read"
       var complete = listingError === "" && metadataError === ""
       root.nextPageToken = complete ? finalPage.nextPageToken : ""
-      var settled = Model.settledSearchResults(settledBase, previewSearch,
-        liveSummaries, finalPage.ids, append)
-      root.applySummaries(settled, false, true, complete)
+      var settled = root.hydrateSummaries(result.settled)
+      root.applySummaries(settled, false, true, complete, function() {
       if (listingError !== "") {
         root.fail(listingError)
         return
@@ -887,6 +1057,8 @@ Item {
         nextPageToken: root.nextPageToken
       }))
       if (preservedError !== "") root.fail(preservedError)
+      })
+      })
     }
 
     // Progress can report another id fragment while the previous fragment's
@@ -900,7 +1072,7 @@ Item {
       }
       var wanted = fetchQueue.shift()
       fetchActive = true
-      api.getMessages(wanted, false, function(payloads, error) {
+      root.summarizedRead(wanted, false, function(payloads, error) {
         if (serial !== root.listSerial) return
         paintPayloads(payloads)
         if (error && summaryError === "") summaryError = error
@@ -947,15 +1119,17 @@ Item {
   }
 
   function fetchSummaries(ids, append, serial, preservedError) {
-    api.getMessages(ids, false, function(payloads, error) {
+    root.summarizedRead(ids, false, function(payloads, error) {
       if (serial !== root.listSerial) return
       root.listLoading = false
       var now = new Date()
       var summaries = []
       var list = Array.isArray(payloads) ? payloads : []
       for (var i = 0; i < list.length; i++)
-        summaries.push(Mail.summarize(list[i], now))
-      var missingSummaries = Model.missingSearchSummaryIds(summaries, ids)
+        summaries.push(list[i].nativeSummary)
+      root.backend.call("model.apply", {operation: "missingSearchSummaryIds", args: [summaries, ids]}, function(missingSummaries, modelError) {
+      if (serial !== root.listSerial) return
+      if (modelError) { root.fail("Could not prepare message list"); return }
       var metadataError = String(error || "")
       if (metadataError === "" && missingSummaries.length > 0)
         metadataError = "Some messages could not be read"
@@ -966,7 +1140,7 @@ Item {
         root.fail(metadataError)
         return
       }
-      root.applySummaries(summaries, append, false, metadataError === "")
+      root.applySummaries(summaries, append, false, metadataError === "", function() {
       if (metadataError !== "") {
         // The list endpoint's token follows every id it returned, including a
         // row whose metadata failed. Paging with it would skip that row just as
@@ -984,16 +1158,27 @@ Item {
         nextPageToken: root.nextPageToken
       }))
       if (preservedError !== "") root.fail(preservedError)
+      })
+      })
     }, listHandle)
   }
 
-  function applySummaries(summaries, append, suppressArrivals, markSynced) {
+  function applySummaries(summaries, append, suppressArrivals, markSynced, callback) {
+    var serial = ++listLiveSerial
+    var account = accountId
+    var list = listSerial
     var merged = append ? root.messages.concat(summaries) : summaries
     // A manual search may uncover an old unread row the current mailbox page
     // never held. That is a result, not newly arrived mail, so it must not turn
     // into a desktop notification.
-    var arrivals = append || suppressArrivals === true ? []
-      : Model.newArrivals(summaries, seenIds, notificationsPrimed, arrivalFloor)
+    if (!backend) { fail("Mail backend is unavailable"); return }
+    backend.call("model.apply", {operation: "batch", calls: [
+      {operation: "newArrivals", args: [summaries, seenIds, notificationsPrimed, arrivalFloor]},
+      {operation: "newestDate", args: [merged]}
+    ]}, function(result, error) {
+      if (serial !== root.listLiveSerial || account !== root.accountId || list !== root.listSerial) return
+      if (error || !result) { root.fail("Could not update message list"); return }
+      var arrivals = append || suppressArrivals === true ? [] : result[0]
 
     var seen = {}
     for (var i = 0; i < merged.length; i++) seen[merged[i].id] = true
@@ -1001,7 +1186,7 @@ Item {
     // does not get announced again when it comes back.
     for (var key in seenIds) seen[key] = true
     seenIds = seen
-    if (arrivalFloor === 0) arrivalFloor = Model.newestDate(merged)
+    if (arrivalFloor === 0) arrivalFloor = Number(result[1]) || 0
     notificationsPrimed = true
 
     messages = merged
@@ -1011,6 +1196,8 @@ Item {
     listRefreshed()
 
     if (notifyNewMail && arrivals.length > 0) notify(arrivals)
+    if (typeof callback === "function") callback()
+    })
   }
 
   function loadMore() {
@@ -1032,6 +1219,7 @@ Item {
     selectionIsPreview = previewOnly === true
     selectedId = messageId
     var serial = ++detailSerial
+    var markedRead = false
     abortRequest(detailHandle)
     abortRequest(inviteHandle)
     inviteHandle = null
@@ -1043,17 +1231,13 @@ Item {
     selectedReaderTooHeavy = false
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
-    sourceHtml = ""
+    readerSourceKey = ""
     remoteImagesAllowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)
     remoteImagesLoading = false
     remoteImageData = ({})
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
-    if (imageFetchProcess) {
-      imageFetchProcess.destroy()
-      imageFetchProcess = null
-    }
     selectedBlockedImages = 0
     selectedRemoteImages = 0
     selectedImages = []
@@ -1075,111 +1259,101 @@ Item {
     // Decided from the row rather than from the read, because `memberIds` is
     // known the moment a row is opened and no summary is — so the rail draws a
     // skeleton stop per id at once and nothing moves when the summaries land.
-    selectedThread = Conversation.threadAfterSelect(selectedThread, messageId, knownSummary)
-    loadMembers()
+    selectConversation(messageId, knownSummary)
 
     // A message that has been opened before opens from its file, usually well
     // before Gmail answers. The read is asynchronous, so the live copy can win
     // the race — in which case the cached one is simply dropped rather than
     // painted over what is already correct.
     detailLive = false
-    bodyCache.read(messageId, function(cached) {
-      if (serial !== root.detailSerial) return
-      if (root.detailLive || !cached) return
-      // The text is read out of the cached markup rather than taken off the
-      // disk beside it, on the same grounds the document is: what the cache
-      // holds is the sender's HTML, so a fix to how a message reads reaches
-      // every message already there instead of only the ones fetched after it.
-      // Every reading comes off the one parse, and the picture list comes with
-      // them — a marker and the list it points into have to be numbered by the
-      // same walk or a marker opens somebody else's picture.
-      var reread = root.renderSource(cached.html, cached.source === "html")
-      root.selectedBody = reread.plainText
-        ? ({ text: reread.plainText.text, source: "html" })
-        : ({ text: cached.text, source: cached.source })
-      root.selectedAttachments = cached.attachments
-      root.selectedImages = reread.plainText ? reread.plainText.images : cached.images
-      // The invitation and the unsubscribe offer are read out of the same
-      // fetch as the body and never change either, so a message opened before
-      // shows its card at the same moment it shows its text rather than a
-      // second later when the network agrees.
-      root.selectedInvite = cached.invite
-      root.selectedUnsubscribe = cached.unsubscribe
-      // Including a body that is empty, which is a real answer: this message
-      // has no text, and saying so at once beats a skeleton that waits for the
-      // network to say the same thing.
-      root.detailPainted = true
-      bodyCache.touch(messageId)
-    })
+    detailCachedResource = false
 
-    detailHandle = api.getMessage(messageId, true, function(payload, error) {
-      if (serial !== root.detailSerial) return
-      root.detailLoading = false
-      root.detailLive = true
-      root.detailPainted = true
+    detailHandle = preparedRead(messageId, function(payload, error, cached) {
+      if (serial !== root.detailSerial || (cached && root.detailLive)) return
       if (error || !payload) {
-        root.fail(error || "Could not open that message")
+        root.detailLoading = false
+        if (!root.detailPainted && !root.detailCachedResource) root.fail(error || "Could not open that message")
         return
       }
+      if (cached) root.detailCachedResource = true
+      else root.detailLive = true
       // Merged with the row rather than replacing it: a provider whose detail
       // read carries no subject line of its own — HEY reads a conversation, not
       // a message — would otherwise blank the one the list had drawn.
       var previous = Model.messageById(root.messages, root.previewMessages, messageId)
-      var summary = Model.detailSummary(previous,
-        Mail.summarize(payload, new Date()))
+      root.backend.call("model.apply", {operation: "detailSummary", args: [previous, payload.nativeSummary]}, function(summary, modelError) {
+      if (serial !== root.detailSerial || (cached && root.detailLive)) return
+      if (modelError || !summary) {
+        root.detailLoading = false
+        if (!root.detailPainted) root.fail("Could not prepare message detail")
+        return
+      }
+      function paintSummary(summary) {
+      if (serial !== root.detailSerial || (cached && root.detailLive)) return
+      summary = root.hydrateSummary(summary)
       root.selectedMessage = summary
-      var decoded = Mail.extractBody(payload.payload)
-      var rawHtml = Mail.extractHtml(payload.payload)
-      // Every reading of the body out of one parse. The markers in the
-      // plain-text one and the pictures they stand for are numbered by the same
-      // walk over the same tree, so a marker cannot open somebody else's image
-      // — and it is only asked for when the text came from the HTML, because a
-      // message that shipped its own text/plain part never had images in it.
-      // A body never changes once fetched, which is what makes the cache
-      // correct — so when the cache already painted this exact markup there is
-      // nothing here to paint again, and rendering it would be a second parse
-      // of the whole message to arrive at the document already on screen.
-      if (rawHtml !== root.sourceHtml || root.selectedDocument === null) {
-        var ready = root.renderSource(rawHtml, decoded.source === "html")
-        if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html" })
+      var decoded = payload.nativeContent.body
+      root.renderSerial++
+      root.imageFetchSerial++
+      root.remoteImagesLoading = false
+      root.remoteImageData = ({})
+      root.imageFetchQueue = []
+      root.readerSourceKey = payload.hasHtml ? String(payload.readerKey) : ""
+      var ready = payload.nativeRender
+      root.applyRendered(ready)
+        root.detailLoading = false
+        root.detailPainted = true
+        root.lastError = ""
+        if (ready.plainText) decoded = ({ text: ready.plainText.text, source: "html", bodyDirection: ready.plainText.bodyDirection || "" })
         root.selectedBody = decoded
         root.selectedImages = ready.plainText ? ready.plainText.images : []
-      }
-      root.selectedAttachments = Mail.attachments(payload.payload)
-      root.selectedInvite = Calendar.fromPayload(payload.payload)
+
+      root.selectedAttachments = payload.nativeContent.attachments
+      root.selectedInvite = payload.cachedInvite || Calendar.fromPayload(payload.payload)
       root.selectedUnsubscribe = Unsub.fromMessage(payload)
-      // What the reader is showing, which is not `decoded` when the cache had
-      // already painted this markup: that text came from `Mail.extractBody`'s
-      // own flattening, and its images are numbered by a different walk than
-      // the list beside it here.
+      // Only the invitation overlay may need persistence after its attachment
+      // arrives; the complete resource remains in the native cache.
       var record = ({
         text: root.selectedBody.text,
         source: root.selectedBody.source,
-        html: rawHtml,
+        bodyDirection: String(root.selectedBody.bodyDirection || ""),
         attachments: root.selectedAttachments,
         images: root.selectedImages,
         invite: root.selectedInvite,
         unsubscribe: root.selectedUnsubscribe
       })
-      bodyCache.put(messageId, record)
       // Gmail describes the calendar part rather than sending it whenever the
       // organiser's calendar named the file, which Google's own does — so the
       // meeting is one request away, and the card lands a moment after the
       // message it belongs to. The cache is written again with it, so it is
       // there at once the next time this message is opened.
-      root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
-      root.messages = Model.replaceById(root.messages, summary)
-      root.previewMessages = Model.replaceById(root.previewMessages, summary)
+      if (!payload.cachedInvite) root.loadInvite(messageId, serial, Calendar.pendingPart(payload.payload), record)
+      if (!cached) {
+        root.messages = Model.replaceById(root.messages, summary)
+        root.previewMessages = Model.replaceById(root.previewMessages, summary)
+      }
       // A message opened from somewhere other than its own row — a notification,
       // a member whose summary had not arrived when it was asked for — brings
       // its conversation with the read rather than before it.
-      root.selectedThread =
-        Conversation.threadAfterSelect(root.selectedThread, messageId, summary)
+      root.selectConversation(messageId, summary)
       root.rememberMember(summary)
-      root.loadMembers()
       // A preview is not opening; only an opened message is marked read here.
-      if (Model.marksReadOnArrival(summary, root.selectionIsPreview))
-        root.act(messageId, "markRead", true)
+      if (!markedRead && Model.marksReadOnArrival(summary, root.selectionIsPreview))
+        markedRead = root.act(messageId, "markRead", true) === true
+      }
+      // A revalidation started before the optimistic read may still contain
+      // UNREAD. Apply the pending read natively before it reaches list/reader,
+      // and never send a second read for the same opening.
+      var keepRead = markedRead && (root.actionPreparations > 0 || root.pendingAction === "markRead"
+        || (root.selectedMessage && root.selectedMessage.unread === false))
+      if (keepRead) {
+        root.backend.call("model.apply", {operation: "applyLabelChange", args: [summary, "markRead", "", null]}, function(readSummary, readError) {
+          if (serial !== root.detailSerial || (cached && root.detailLive)) return
+          if (readError || !readSummary) return
+          paintSummary(readSummary)
+        })
+      } else paintSummary(summary)
+      })
     })
   }
 
@@ -1195,63 +1369,91 @@ Item {
   // Summaries into the store the rail draws from, bounded — and the members of
   // the conversation on screen kept through the bound's reset, because the read
   // that tips the store over is usually the one for the rail being drawn.
-  function mergeMembers(additions) {
-    var open = Conversation.blockOf(selectedThread)
-    memberSummaries = Conversation.mergedSummaries(memberSummaries, additions,
-      Conversation.MAX_REMEMBERED, open ? open.memberIds : [])
-  }
-
-  // One summary the rail can draw a stop from, kept by its own id.
-  function rememberMember(summary) {
-    if (!summary || !summary.id) return
-    var added = ({})
-    added[summary.id] = summary
-    mergeMembers(added)
-  }
-
-  // The summaries the open conversation still owes, asked for in one read.
-  // Seeded from what is on hand — the representative is a row the list drew,
-  // a member opened before is still in the store — so only the rest goes to
-  // the server and moving along a rail costs nothing after the first stop.
-  // Only a provider that collapses its listing has anything to say here; the
-  // others report a count of 0, which never gets this far.
-  function loadMembers() {
-    if (!showsRail || !api) return
-    var ids = Conversation.blockOf(selectedThread).memberIds
-    var seeded = ({})
-    for (var i = 0; i < ids.length; i++) {
-      if (memberSummaries[ids[i]]) continue
-      var known = Model.messageById(messages, previewMessages, ids[i])
-      if (known) seeded[ids[i]] = known
+  function queueConversation(operation, summary, additions, after) {
+    var jobs = (conversationJobs || []).slice()
+    if (operation === "project" && jobs.some(function(job) { return job.operation === "project" })) {
+      pumpConversation(); return
     }
-    mergeMembers(seeded)
-
-    var wanted = Conversation.missingMemberIds(selectedThread, memberSummaries)
-    if (wanted.length === 0) return
-    abortRequest(memberHandle)
-    memberHandle = api.getSummaries(wanted, function(payloads, error) {
-      root.memberHandle = null
-      // A member the read did not answer for stays the skeleton it already
-      // was, which is what a stop with no summary draws. Nothing is retried:
-      // the rail is complete in `memberIds` from the moment the row was read,
-      // and only the lanes inside a stop are ever waiting.
-      if (error || !payloads || payloads.length === 0) return
-      var arrived = ({})
-      var now = new Date()
-      for (var j = 0; j < payloads.length; j++) {
-        var summary = Mail.summarize(payloads[j], now)
-        if (summary.id !== "") arrived[summary.id] = summary
+    jobs.push({ operation: operation, summary: summary, additions: additions,
+      after: after, account: accountId, selected: selectedId })
+    conversationJobs = jobs
+    pumpConversation()
+  }
+  function pumpConversation() {
+    if (conversationBusy || !backend || !backend.ready || conversationJobs.length === 0) return
+    var jobs = conversationJobs.slice()
+    var job = jobs.shift()
+    conversationJobs = jobs
+    if (job.account !== accountId || (job.operation !== "project" && job.selected !== selectedId)) {
+      pumpConversation(); return
+    }
+    conversationBusy = true
+    var serial = ++conversationSerial
+    var account = accountId
+    var selected = selectedId
+    var beforeMembers = JSON.stringify(memberSummaries)
+    var beforeThread = JSON.stringify(selectedThread)
+    backend.call("account.conversation", {
+      operation: job.operation, thread: selectedThread, summaries: memberSummaries,
+      selectedId: selectedId, summary: job.summary, additions: job.additions,
+      messages: job.operation === "seed" ? messages : [],
+      previewMessages: job.operation === "seed" ? previewMessages : [],
+      conversations: showsConversations, mailboxKey: mailboxKey,
+      searching: viewingSearch, mailboxes: mailboxes
+    }, function(result, error) {
+      if (!root || serial !== root.conversationSerial) return
+      root.conversationBusy = false
+      if (!error && result && account === root.accountId && selected === root.selectedId
+          && beforeMembers === JSON.stringify(root.memberSummaries)
+          && beforeThread === JSON.stringify(root.selectedThread)) {
+        root.conversationOrganisation = result
+        if (job.operation === "select" && JSON.stringify(result.thread) !== beforeThread)
+          root.selectedThread = result.thread
+        if ((job.operation === "merge" || job.operation === "seed")
+            && JSON.stringify(result.summaries) !== beforeMembers)
+          root.memberSummaries = result.summaries
+        if (typeof job.after === "function") job.after(result)
+      } else if (!error && account === root.accountId && selected === root.selectedId
+          && (job.operation === "select" || job.operation === "seed")) {
+        // A list or optimistic action changed the snapshot while Rust was
+        // working. Rebase the selection plan against that newer snapshot.
+        root.queueConversation(job.operation, job.summary, job.additions, job.after)
       }
-      root.mergeMembers(arrived)
+      root.pumpConversation()
     })
   }
-
-  // A member's summary after an action on it, so the rail's stop agrees with
-  // what was just done to the message the reader is showing.
-  function applyMemberChange(messageId, action) {
-    var summary = memberSummaries[messageId]
-    if (!summary) return
-    rememberMember(Model.applyLabelChange(summary, action))
+  function selectConversation(messageId, summary) {
+    if (String(messageId) !== selectedId) return
+    queueConversation("select", summary, null, function() { root.loadMembers() })
+  }
+  function mergeMembers(additions) { queueConversation("merge", null, additions, null) }
+  function rememberMember(summary) {
+    if (!summary || !summary.id) return
+    var additions = ({})
+    additions[summary.id] = summary
+    mergeMembers(additions)
+  }
+  function loadMembers() {
+    if (!api || !showsConversations) return
+    queueConversation("seed", null, null, function(result) {
+      var wanted = result.missing || []
+      if (!result.showsRail || wanted.length === 0) return
+      root.abortRequest(root.memberHandle)
+      var account = root.accountId
+      var selected = root.selectedId
+      var serial = root.detailSerial
+      root.memberHandle = root.summarizedRead(wanted, false, function(payloads, error) {
+        if (!root || account !== root.accountId || selected !== root.selectedId || serial !== root.detailSerial) return
+        root.memberHandle = null
+        if (error || !payloads || payloads.length === 0) return
+        var arrived = ({})
+        for (var j = 0; j < payloads.length; j++) {
+          var summary = payloads[j].nativeSummary
+          if (summary && summary.id) arrived[summary.id] = summary
+        }
+        root.mergeMembers(arrived)
+      }, null, null, true)
+    })
   }
 
   // The invitation the message pointed at. Nothing happens for the messages
@@ -1270,66 +1472,55 @@ Item {
         root.selectedInvite = invite
         record.invite = invite
         bodyCache.put(messageId, record)
-      })
+        })
   }
 
-  // The one place `selectedHtml` is set, and the only place the sender's markup
-  // is parsed on the way to the screen. Everything else the reader needs to
-  // know about this body comes back from the same call — how heavy it is, and
-  // its plain-text reading — because each of those asked separately is another
-  // parse of the whole message to work out what was just worked out.
-  function renderSource(source, withPlainText, completeReader) {
-    sourceHtml = String(source || "")
-    withPlainText = withPlainText === true
-    var eagerReader = completeReader === true || bodyMode === "reader" || remoteImagesAllowed
-    var ready = remoteImagesAllowed ? null
-      : RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)
-    if (!ready) {
-      ready = Html.sanitize(sourceHtml, ({
-        allowRemoteImages: remoteImagesAllowed,
-        remoteImageData: remoteImagesAllowed ? remoteImageData : null,
-        withPlainText: withPlainText,
-        withReader: eagerReader
-      }))
-      if (!remoteImagesAllowed && eagerReader)
-        RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)
-    }
-    selectedHtml = ready.html
-    selectedDocument = ready.document
-    selectedReaderDocument = ready.reader ? ready.reader.document : null
-    selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
-    selectedReaderEmpty = !ready.reader || ready.reader.empty
-    selectedReaderRemoteImages = ready.reader ? ready.reader.blockedImages : 0
-    selectedBlockedImages = ready.blockedImages
-    selectedRemoteImages = ready.remoteImages
-    selectedRemoteImageSources = ready.remoteImageSources || []
-    selectedTooHeavy = ready.tooHeavy
-    if (remoteImagesAllowed && !remoteImagesLoading
-      && Object.keys(remoteImageData).length === 0
-      && selectedRemoteImageSources.length > 0)
-      Qt.callLater(root.prepareRemoteImages)
-    if (!ready.reader && !remoteImagesAllowed && !eagerReader) {
-      var deferredId = selectedId
-      var deferredSource = sourceHtml
-      var deferredSerial = detailSerial
-      Qt.callLater(function() {
-        if (root.detailSerial !== deferredSerial || root.selectedId !== deferredId
-          || root.sourceHtml !== deferredSource) return
-        root.renderSource(deferredSource, withPlainText, true)
-      })
-    }
-    return ready
+  // Re-render the native source by identity when display policy changes.
+  // Sender markup never travels back through the UI.
+  function renderSource(source, withPlainText, completeReader, callback) {
+    readerSourceKey = String(source || "")
+    var rendering = ++renderSerial
+    var selection = selectedId
+    var account = accountId
+    var detail = detailSerial
+    var key = readerSourceKey
+    if (!backend) { fail("Mail backend is unavailable"); return }
+    backend.call("reader.render", {accountId: account, id: selection,
+      readerKey: readerSourceKey, now: Date.now(), options: readerOptions()}, function(result, error) {
+      if (rendering !== root.renderSerial || account !== root.accountId
+          || selection !== root.selectedId || detail !== root.detailSerial || key !== root.readerSourceKey) return
+      if (error || !result) { root.detailLoading = false; root.fail("Could not prepare this message for display"); return }
+      root.applyRendered(result.nativeRender)
+      if (typeof callback === "function") callback(result.nativeRender)
+    })
+  }
+
+  function applyRendered(ready) {
+      selectedHtml = ready.html
+      selectedDocument = ready.document
+      selectedReaderDocument = ready.reader ? ready.reader.document : null
+      selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
+      selectedReaderEmpty = !ready.reader || ready.reader.empty
+      selectedReaderRemoteImages = ready.reader ? ready.reader.blockedImages : 0
+      selectedBlockedImages = ready.blockedImages
+      selectedRemoteImages = ready.remoteImages
+      selectedRemoteImageSources = ready.remoteImageSources || []
+      selectedTooHeavy = ready.tooHeavy
+      if (remoteImagesAllowed && !remoteImagesLoading
+        && Object.keys(remoteImageData).length === 0
+        && selectedRemoteImageSources.length > 0)
+        Qt.callLater(root.prepareRemoteImages)
   }
 
   function showRemoteImages() {
-    if (remoteImagesAllowed || sourceHtml === "") return
+    if (remoteImagesAllowed || readerSourceKey === "") return
     remoteImagesAllowed = true
     remoteImageData = ({})
-    renderSource(sourceHtml)
+    renderSource(readerSourceKey)
   }
 
   function prepareRemoteImages() {
-    if (!remoteImagesAllowed || remoteImagesLoading || sourceHtml === ""
+    if (!remoteImagesAllowed || remoteImagesLoading || readerSourceKey === ""
       || selectedRemoteImageSources.length === 0) return
     imageFetchQueue = selectedRemoteImageSources.slice(0)
     remoteImagesLoading = true
@@ -1341,35 +1532,25 @@ Item {
     if (serial !== imageFetchSerial) return
     if (imageFetchQueue.length === 0) {
       remoteImagesLoading = false
-      imageFetchProcess = null
       return
     }
     var queue = imageFetchQueue.slice(0)
     var source = String(queue.shift())
     imageFetchQueue = queue
-    var request = imageFetchComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/image_fetch.py"],
-      requestLine: Mail.encodeBase64(source)
-    })
-    imageFetchProcess = request
-    if (!request) {
-      fetchNextImage(serial)
-      return
-    }
-    request.finished.connect(function(data) {
-      request.destroy()
+    if (!backend || !backend.ready) { remoteImagesLoading = false; return }
+    backend.call("public.image", {url:source}, function(result, error) {
       if (serial !== root.imageFetchSerial) return
-      root.imageFetchProcess = null
+      var data = result && !error ? String(result.data || "") : ""
+      if (!Html.isRasterDataImage(data)) data = ""
       if (data !== "") {
         var prepared = ({})
         for (var key in root.remoteImageData) prepared[key] = root.remoteImageData[key]
         prepared[source] = data
         root.remoteImageData = prepared
-        root.renderSource(root.sourceHtml)
+        root.renderSource(root.readerSourceKey)
       }
       root.fetchNextImage(serial)
     })
-    request.running = true
   }
 
   // One picture, for the plain-text marker. The standing "always show"
@@ -1392,19 +1573,11 @@ Item {
       done("")
       return
     }
-    var request = imageFetchComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/image_fetch.py"],
-      requestLine: Mail.encodeBase64(wanted)
+    if (!backend || !backend.ready) { done(""); return }
+    backend.call("public.image", {url:wanted}, function(result, error) {
+      var data = result && !error ? String(result.data || "") : ""
+      done(Html.isRasterDataImage(data) ? data : "")
     })
-    if (!request) {
-      done("")
-      return
-    }
-    request.finished.connect(function(data) {
-      request.destroy()
-      done(data)
-    })
-    request.running = true
   }
 
 
@@ -1423,17 +1596,13 @@ Item {
     selectedReaderTooHeavy = false
     selectedReaderEmpty = true
     selectedReaderRemoteImages = 0
-    sourceHtml = ""
+    readerSourceKey = ""
     remoteImagesAllowed = false
     remoteImagesLoading = false
     remoteImageData = ({})
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
-    if (imageFetchProcess) {
-      imageFetchProcess.destroy()
-      imageFetchProcess = null
-    }
     selectedImages = []
     selectedBlockedImages = 0
     selectedRemoteImages = 0
@@ -1459,36 +1628,34 @@ Item {
 
   // -------------------------------------------------------------- actions
 
-  // The row already moved; `dispatch` carries the send and its rollback. The
-  // other fields are what `Model.enqueueAction` coalesces a repeat on, and a
-  // coalesced repeat never sends, so `discard` lets go of what it held.
-  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch, discard) {
-    queuedActions = Model.enqueueAction(queuedActions, {
-      id: messageId, action: action, cacheKey: actionQuery,
-      sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true,
-      memberOnly: memberOnly === true, dispatch: dispatch
-    })
-    if (!Model.holdsDispatch(queuedActions, dispatch)) discard()
+  // Network sends keep their order; native intent preparation proceeds while
+  // a previous send is in flight, so a slow server never blocks the next edit.
+  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch, discard, token, sourceLabelId) {
+    var queued = queuedActions.slice()
+    for (var i = queued.length - 1; i >= 0; i--) {
+      var previous = queued[i]
+      if (previous.id !== messageId) continue
+      if (previous.action === action && previous.cacheKey === actionQuery
+          && previous.quiet === quiet && previous.memberOnly === memberOnly
+          && previous.sourceLabelId === sourceLabelId) {
+        discard(previous.token)
+        return
+      }
+      break
+    }
+    queued.push({id: messageId, action: action, cacheKey: actionQuery, dispatch: dispatch,
+      quiet: quiet, memberOnly: memberOnly, token: token, sourceLabelId: sourceLabelId})
+    queuedActions = queued
   }
 
-  // Called before the freeing callback acts on its answer, so no revalidation
-  // starts while a row still waits for its server.
   function runQueuedAction() {
     if (pendingAction !== "" || queuedActions.length === 0) return
     var queued = queuedActions.slice()
-    var request = queued.shift()
+    var next = queued.shift()
     queuedActions = queued
-    request.dispatch()
+    next.dispatch()
   }
 
-  // Every action moves the list immediately and reconciles afterwards. Waiting
-  // for Google before the row moves makes the panel feel broken on a slow
-  // connection, and the failure path puts the row back.
-  //
-  // Read from the booleans the buttons were drawn from, not the registry
-  // again: an account may refuse what its provider declares. The account's own
-  // reason is preferred — "This account has no Archive mailbox" says more than
-  // "IMAP has no archive" when a neighbour of the same kind archives fine.
   function refuseUnavailableAction(action) {
     var needs = Model.actionCapability(action)
     if (needs === "" || actionCapabilities[needs] === true) return false
@@ -1497,337 +1664,163 @@ Item {
     return true
   }
 
-  // `memberOnly` is the rail's: a stop names its one message, not the row's.
+  function intentView() {
+    return {messages: messages, previewMessages: previewMessages,
+      memberSummaries: memberSummaries, selectedId: selectedId,
+      selectedMessage: selectedMessage, selectedThread: selectedThread,
+      inboxUnread: inboxUnread}
+  }
+
+  // Convert native date values at the display boundary, once per returned row.
+  function applyIntentView(view, query, selectedBefore) {
+    if (!view) return
+    if (query === cacheKey && !deferredLoadCleared(query)) {
+      messages = hydrateSummaries(view.messages || [])
+      previewMessages = hydrateSummaries(view.previewMessages || [])
+      var members = view.memberSummaries || ({})
+      for (var id in members) hydrateSummary(members[id])
+      memberSummaries = members
+      inboxUnread = Math.max(0, Number(view.inboxUnread) || 0)
+    }
+    if (selectedId === selectedBefore) {
+      if (String(view.selectedId || "") === "") clearSelection()
+      else if (view.selectedMessage) selectedMessage = hydrateSummary(view.selectedMessage)
+    }
+  }
+
   function act(id, action, quiet, memberOnly) {
-    var messageId = String(id || "")
-    var oneMessage = memberOnly === true
-    if (!ready || messageId === "") return false
-    // Before the optimistic update, not after it. A key is not a button: `e`
-    // and `s` are bound in every mail context, so an action the provider cannot
-    // honour reaches here even though the panel drew no button for it — and the
-    // row would be moved, and the note would say "Archived", for a request no
-    // server ever saw.
+    return runNativeAction([String(id || "")], action, quiet === true, memberOnly === true, false)
+  }
+
+  function runNativeAction(ids, action, quiet, memberOnly, allRead) {
+    if (!ready || !backend || (!allRead && ids.length === 0) || (allRead && messages.length === 0)) return false
     if (refuseUnavailableAction(action)) return false
-    // Only the send waits for the slot; the row moves now. A server that takes
-    // seconds over a move (Proton Bridge does) emptied the list at its pace.
-    var slotTaken = pendingAction !== ""
-    var index = Model.indexById(messages, messageId)
-    var previewIndex = Model.indexById(previewMessages, messageId)
-    // A counted member is not a row, and it is still found by one. The list is
-    // one row per conversation, so every stop on the rail but the
-    // representative's is a message the list never drew — and an action on one
-    // has a row to move, a summary to update and a block to recompute all the
-    // same. Own ids are matched first, so this only ever runs for a member.
-    var memberAction = index < 0 && previewIndex < 0
-    if (memberAction) {
-      index = Model.rowIndexForMember(messages, messageId)
-      previewIndex = Model.rowIndexForMember(previewMessages, messageId)
-    }
-    // No row anywhere: the reader is inside a conversation whose row the list
-    // has navigated away from or has already moved. There is nothing to move,
-    // so the optimistic update is the member's own summary — which is what the
-    // rail draws — and only a message-scoped label change goes out: the quiet
-    // mark-read, star or unstar. Automatic reads also need rollback on failure.
-    if (index < 0 && previewIndex < 0) {
-      if (!Conversation.holdsMember(selectedThread, messageId)) return false
-      var memberChange = Model.labelChangesFor(action)
-      if (!memberChange) return false
-      return actOnDetachedMember(messageId, action, memberChange, quiet, oneMessage, slotTaken)
-    }
+    var account = accountId
     var actionQuery = cacheKey
-    var actionEstimate = resultEstimate
-    var actionToken = nextPageToken
-    // A live list owns snapshots taken before this action. Letting it finish
-    // would rebuild and persist those stale rows over the optimistic edit — a
-    // trashed search hit visibly came back when the slowest metadata request
-    // answered. Stop that load, then revalidate this same query after the
-    // mutation succeeds. Asked again when a queued send goes out.
-    var interruptedQuery = ""
+    var estimate = resultEstimate
+    var oldPageToken = nextPageToken
+    var interrupted = false
     function stopLiveList() {
-      if (index < 0 || root.cacheKey !== actionQuery || !root.listLoading) return
-      interruptedQuery = actionQuery
+      if (root.accountId !== account || root.cacheKey !== actionQuery || !root.listLoading) return
+      interrupted = true
       root.listSerial++
       root.abortRequest(root.listHandle)
       root.listHandle = null
       root.listLoading = false
-      // A provisional streamed offset can cross ids the interrupted search
-      // never settled. No Load-more action is safer than one that skips them.
       root.nextPageToken = ""
-      actionToken = ""
+      oldPageToken = ""
     }
     stopLiveList()
-    var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
-    var rowId = String(before.id || "")
-    var sourceLabelId = hasLabels ? rawLabelId : ""
-
-    // The messages this action is sent for. Expansion is the row's and it
-    // happens here: a conversation-scoped verb reaches every counted member and
-    // the client is handed the flat list, so no client expands anything and
-    // `Thread/get` is never called for an action. A member action names the one
-    // message, and so does the quiet mark-read on opening — the reader shows
-    // one message, so one has been read, and the other unread members keep
-    // their accent nodes, which is what the rail is for.
-    var targets = memberAction || oneMessage || quiet === true
-      ? [messageId] : Model.actionTargets(before, action)
-    if (targets.length === 0) return false
-    var change = Model.labelChangesFor(action, sourceLabelId)
-    if (!change && action !== "trash" && action !== "untrash") return false
-    var token = intents.nextToken()
-    intents.holdLists(actionQuery)
-
-    // Every summary the update touches besides the row's own, and what it was.
-    // The rail draws from these, so a conversation action asserts the whole
-    // conversation across them and the restore behind it puts them back.
-    var memberBefore = ({})
-    var memberAfter = ({})
-    var changedMembers = []
-    function rememberBefore(id, summary) {
-      if (changedMembers.indexOf(id) < 0) {
-        changedMembers.push(id)
-        memberBefore[id] = summary
-      }
-    }
-    function memberAfterOf(summary) {
-      return Model.applyLabelChange(summary, action, sourceLabelId)
-    }
-    for (var t = 0; t < targets.length; t++) {
-      var known = memberSummaries[targets[t]]
-      if (!known) continue
-      var after = memberAfterOf(known)
-      if (!after || after === known) continue
-      rememberBefore(targets[t], known)
-      memberAfter[targets[t]] = after
-    }
-
-    // Only an action that reached every counted member may speak for the
-    // conversation. The quiet mark-read on opening is message-scoped even on a
-    // representative — one message has been read, not the thread — so it takes
-    // the recomputation below with the rest.
-    var conversationAction = !memberAction && !oneMessage && quiet !== true
-      && Model.actionScope(action) === "conversation"
-    // What this action makes of the row, from whichever state it is applied
-    // to: `before` now, an earlier state if an edit ahead of it fails. A
-    // conversation action asserts the block outright — every counted member
-    // was sent the same patch — where one message's change recomputes it.
-    function rowAfter(row) {
-      if (conversationAction) {
-        return Model.applyLabelChange(row, action, sourceLabelId,
-          Model.threadAfterAction(row, action))
-      }
-      // Over the members as the rail holds them now: on a replay, put right.
-      return Model.rowAfterMemberEdit(row,
-        memberAction ? row : Model.applyLabelChange(row, action, sourceLabelId),
-        rowId, root.memberSummaries, targets, memberAfterOf)
-    }
-    var updated = rowAfter(before)
-    // A representative is a row and a stop at once, so it changes in both
-    // places or the rail contradicts the list it was opened from. Its own
-    // summary is the row's, block and all, rather than the member label change
-    // computed above.
-    if (memberSummaries[rowId]) {
-      rememberBefore(rowId, memberSummaries[rowId])
-      memberAfter[rowId] = updated
-    }
-    if (changedMembers.length > 0) mergeMembers(memberAfter)
-
-    // The recomputed row is what decides whether it stays: a mark-read in the
-    // Unread view keeps the row while any member is still unread.
-    var survives = Model.survivesAction(mailboxKey, action, rawQuery, hasLabels,
-      sourceLabelId, updated)
-
-    if (action === "markRead" && before.unread && !updated.unread)
-      inboxUnread = Math.max(0, inboxUnread - 1)
-    if (action === "markUnread" && !before.unread && updated.unread)
-      inboxUnread = inboxUnread + 1
-
-    // An action the user did not ask for must never move them. Opening an
-    // unread message marks it read, and being read is the very thing that
-    // disqualifies it from the unread list — so evicting it there would close
-    // the reader that the click had just opened. The row stays until the list
-    // is next loaded, which is also what Gmail's own clients do.
-    // The keep-open rule reads the conversation too: the reader is showing the
-    // row or one of its members, and a quiet action must not close it.
-    var keepOpen = quiet === true && Model.rowHoldsMember(before, selectedId)
-    var removed = !survives && !keepOpen
-    var opaqueQuery = effectiveQuery
-      !== Provider.query(providerId, mailboxKey, "", "")
-    var invalidatesPage = !survives || opaqueQuery
-    if (invalidatesPage) nextPageToken = ""
-
-    if (index >= 0) {
-      if (removed) messages = Model.removeById(messages, rowId)
-      else messages = Model.replaceById(messages, updated)
-      if (interruptedQuery === "") rememberList()
-    }
-    if (previewIndex >= 0) {
-      previewMessages = updated.unread
-        ? Model.replaceById(previewMessages, updated)
-        : Model.removeById(previewMessages, rowId)
-    }
-    // The reader's copy takes the edit of what it shows.
-    var readerKey = ""
-    if (Model.rowHoldsMember(before, selectedId)) {
-      if (removed) clearSelection()
-      else {
-        var readerAfter = selectedId === rowId ? rowAfter
-          : (memberAfter[selectedId] || targets.indexOf(selectedId) >= 0 ? memberAfterOf : null)
-        if (readerAfter && selectedMessage) {
-          readerKey = "reader:" + selectedId
-          intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
-          selectedMessage = readerAfter(selectedMessage)
+    var parameters = {accountId: account, query: actionQuery, action: action,
+      ids: ids, allRead: allRead === true, quiet: quiet === true,
+      memberOnly: memberOnly === true, mailboxKey: mailboxKey,
+      rawQuery: rawQuery, hasLabels: hasLabels,
+      sourceLabelId: hasLabels ? rawLabelId : "", capabilities: actionCapabilities,
+      opaqueQuery: effectiveQuery !== Provider.mailboxFor(providerId, mailboxKey).query}
+    var preparationEpoch = intents.epoch
+    actionPreparations++
+    if (pendingAction === "") pendingActionQuery = actionQuery
+    intents.begin(parameters, function(prepared, error, selectedBefore) {
+      if (root.accountId === account && preparationEpoch === intents.epoch)
+        root.actionPreparations = Math.max(0, root.actionPreparations - 1)
+      if (error || !prepared) {
+        if (root.accountId === account && preparationEpoch === intents.epoch) {
+          root.fail(error || "Could not prepare the action")
+          if (root.actionPreparations === 0 && root.pendingAction === "") {
+            var resumed = root.resumeDeferredListLoad(actionQuery, String(error || ""))
+            if (!resumed && interrupted && root.cacheKey === actionQuery)
+              root.loadMessages(false, true, String(error || ""))
+          }
         }
-      }
-    }
-    // Held until answered; the row's says whether it left the list.
-    intents.add(rowId, { token: token, before: before, apply: rowAfter, removed: removed })
-    for (var c = 0; c < changedMembers.length; c++) {
-      if (changedMembers[c] === rowId) continue
-      intents.add(changedMembers[c],
-        { token: token, before: memberBefore[changedMembers[c]], apply: memberAfterOf })
-    }
-    var edit = { token: token, query: actionQuery, rowId: rowId, before: before, removed: removed,
-      index: index, previewIndex: previewIndex, members: changedMembers, memberBefore: memberBefore }
-    var optimisticMessages = messages.slice()
-    var optimisticToken = nextPageToken
-
-    // Only this edit comes off: the row, the members and the reader's copy are
-    // replayed over the edits still waiting behind it — on screen, or in the
-    // cache of a query navigated away from, rather than a snapshot of the list
-    // this edit saw put over what a refusal ahead of it just restored.
-    function restore(error) {
-      intents.commit(actionQuery, intents.restore(edit, intents.listsOf(actionQuery)),
-        actionEstimate, actionToken)
-      if (index >= 0 && intents.showing(actionQuery)) {
-        root.nextPageToken = actionToken
-        if (interruptedQuery === "") root.rememberList()
-      }
-      intents.settleReader(readerKey, token, true)
-      root.refreshCounts()
-      root.fail(error)
-    }
-
-    // Agreed to, or a repeat took this send's place.
-    function keep() {
-      intents.keep(edit)
-      intents.settleReader(readerKey, token, false)
-    }
-    function discard() { keep(); intents.releaseLists(actionQuery) }
-
-    var done = function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      root.runQueuedAction()
-      if (error) {
-        restore(error)
-        intents.releaseLists(actionQuery)
-        if (root.resumeDeferredListLoad(actionQuery, error)) return
-        if (interruptedQuery !== "" && root.cacheKey === interruptedQuery)
-          root.loadMessages(false, true, error)
         return
       }
-      keep()
-      intents.releaseLists(actionQuery)
-      if (!quiet) root.note(root.actionLabel(action))
-      root.refreshCounts()
-      if (interruptedQuery !== "" && root.deferredLoadCleared(actionQuery)
-          && cacheStore.loaded) {
-        cacheStore.putQuery(actionQuery, ({
-          summaries: optimisticMessages,
-          estimate: actionEstimate,
-          nextPageToken: optimisticToken
-        }))
-      }
-      if (root.resumeDeferredListLoad(actionQuery, "")) return
-      if (interruptedQuery !== "" && root.cacheKey === interruptedQuery) {
-        // Save the optimistic success for the next visit, then keep this list
-        // on screen while a live request revalidates it without reading cache.
-        root.rememberList()
-        root.loadMessages(false, true, "")
-      } else if (interruptedQuery !== "" && cacheStore.loaded) {
-        // The action succeeded after navigation. Keep the old query's cache in
-        // step without disturbing the view that is now on screen.
-        cacheStore.putQuery(actionQuery, ({
-          summaries: optimisticMessages,
-          estimate: actionEstimate,
-          nextPageToken: optimisticToken
-        }))
-      } else if (invalidatesPage && root.cacheKey === actionQuery) {
-        // An offset cannot survive removing a row before it. Revalidate now so
-        // Load more returns with a fresh provider token instead of remaining
-        // unavailable until the next poll.
-        root.loadMessages(false, true, "")
-      }
-      if (root.active && root.cacheKey !== actionQuery)
-        root.loadMessages(false, true, "")
-    }
-
-    function dispatch() {
-      stopLiveList()
-      root.pendingActionQuery = actionQuery
-      root.pendingAction = action
-      // One id or many, and the interface keeps its fifteen names: `trashMessage`
-      // and `untrashMessage` take either on every client, and a list of more than
-      // one goes to `batchModify` rather than to a call per message.
-      var sent = targets.length > 1 ? targets : targets[0]
-      if (action === "trash") root.api.trashMessage(sent, done)
-      else if (action === "untrash") root.api.untrashMessage(sent, done)
-      else if (targets.length > 1) root.api.batchModify(targets, change.add, change.remove, done)
-      else root.api.modifyMessage(targets[0], change.add, change.remove, done)
-    }
-    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, oneMessage, dispatch, discard)
-    else dispatch()
-    return true
-  }
-
-  // A member whose row is not in either list, acted on deliberately: the
-  // reader can outlive the row it was opened from, and star and unstar still
-  // belong to the message on screen. With no row to move, the optimistic
-  // update is the member's summary and the reader's copy, and the restore puts
-  // back exactly those two. Only a message-scoped label change reaches here.
-  //
-  // `unstar` from a row clears every counted member's star (the row's star
-  // means "any member"); from the reader it clears the one message on screen.
-  function actOnDetachedMember(messageId, action, change, quiet, memberOnly, slotTaken) {
-    var token = intents.nextToken()
-    function after(summary) { return Model.applyLabelChange(summary, action) }
-    var beforeMember = memberSummaries[messageId] || null
-    if (beforeMember) intents.add(messageId, { token: token, before: beforeMember, apply: after })
-    applyMemberChange(messageId, action)
-    var readerKey = ""
-    if (selectedId === messageId && selectedMessage) {
-      readerKey = "reader:" + messageId
-      intents.add(readerKey, { token: token, before: selectedMessage, apply: after })
-      selectedMessage = after(selectedMessage)
-    }
-    var actionQuery = cacheKey
-    function settle(failed) {
-      return {
-        member: beforeMember ? intents.settle(messageId, token, failed, beforeMember) : null,
-        reader: readerKey !== "" ? intents.settle(readerKey, token, failed, null) : null
-      }
-    }
-    function dispatch() {
-      root.pendingActionQuery = actionQuery
-      root.pendingAction = action
-      root.api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
-        root.pendingAction = ""
-        root.pendingActionQuery = ""
-        root.runQueuedAction()
-        var held = settle(!!error)
-        if (error) {
-          if (held.member) root.rememberMember(held.member.summary)
-          if (held.reader && root.selectedId === messageId && held.reader.summary)
-            root.selectedMessage = held.reader.summary
-          root.fail(error)
-          return
+      if (prepared.refused) {
+        if (root.accountId === account && preparationEpoch === intents.epoch) {
+          root.refuseUnavailableAction(action)
+          if (root.actionPreparations === 0 && root.pendingAction === "") {
+            var resumed = root.resumeDeferredListLoad(actionQuery, "")
+            if (!resumed && interrupted && root.cacheKey === actionQuery) root.loadMessages(false, true, "")
+          }
         }
-        if (quiet !== true) root.note(root.actionLabel(action))
-        root.refreshCounts()
-      })
-    }
-    function discard() { settle(false) }
-    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, memberOnly, dispatch, discard)
-    else dispatch()
+        return
+      }
+      var targets = prepared.targets || []
+      var rows = prepared.rows || []
+      if (targets.length === 0) return
+      if (root.accountId !== account || !root.ready || intents.generation !== prepared.generation) {
+        intents.settle(account, actionQuery, prepared.token, rows, function() {}, prepared.generation)
+        return
+      }
+      root.applyIntentView(prepared.view, actionQuery, selectedBefore)
+      var invalidates = prepared.invalidatesPage === true || parameters.opaqueQuery
+      if (root.cacheKey === actionQuery && invalidates) root.nextPageToken = ""
+      if (root.cacheKey === actionQuery && !interrupted) root.rememberList()
+      var optimisticToken = invalidates ? "" : oldPageToken
+      function done(payload, failure, failedIds) {
+        var failed = failure ? (Array.isArray(failedIds) ? failedIds : rows) : []
+        intents.settle(account, actionQuery, prepared.token, failed, function(settled, settleError) {
+          if (root.accountId !== account || intents.generation !== prepared.generation) return
+          root.pendingAction = ""
+          root.pendingActionQuery = ""
+          var message = failure && Array.isArray(failedIds) && rows.length > 1
+            ? Model.batchFailureNote(rows.length, failedIds.length, root.actionLabel(action), failure)
+            : String(failure || settleError || "")
+          if (failure && settled) root.applyIntentView(settled.view, actionQuery, selectedBefore)
+          if (cacheStore.loaded) {
+            cacheStore.invalidate(targets, function() {
+              if (root.accountId !== account || !settled || !settled.view) return
+              cacheStore.putQuery(actionQuery, {
+                summaries: root.cacheKey === actionQuery ? root.messages
+                  : root.hydrateSummaries(settled.view.messages || []), estimate: estimate,
+                nextPageToken: failure && !Array.isArray(failedIds) ? oldPageToken : optimisticToken})
+            })
+          }
+          if (message !== "") root.fail(message)
+          else if (!quiet) {
+            if (allRead) root.note(Model.markAllReadNote(rows.length, prepared.expanded === true))
+            else root.note(rows.length > 1 ? Model.batchNote(rows.length, root.actionLabel(action)) : root.actionLabel(action))
+          }
+          root.refreshCounts()
+          root.runQueuedAction()
+          if (root.resumeDeferredListLoad(actionQuery, message)) return
+          if (root.cacheKey === actionQuery && (interrupted || invalidates || message !== ""))
+            root.loadMessages(false, true, message)
+          else if (root.active && root.cacheKey !== actionQuery) root.loadMessages(false, true, "")
+        }, prepared.generation)
+      }
+      function dispatch() {
+        if (root.accountId !== account || !root.ready || intents.generation !== prepared.generation || !root.api) { done(null, "Account changed"); return }
+        stopLiveList()
+        root.pendingActionQuery = actionQuery
+        root.pendingAction = action
+        var change = prepared.change || {add: [], remove: []}
+        if ((action === "trash" || action === "untrash") && rows.length > 1) {
+          var remaining = rows.length
+          var failures = []
+          var firstError = ""
+          function replyFor(rowId) {
+            return function(payload, error) {
+              if (error) { failures.push(rowId); if (firstError === "") firstError = String(error) }
+              remaining--
+              if (remaining === 0) done(null, firstError, failures)
+            }
+          }
+          for (var r = 0; r < rows.length; r++) {
+            var rowTargets = prepared.targetsOf[rows[r]] || [rows[r]]
+            var sent = rowTargets.length > 1 ? rowTargets : rowTargets[0]
+            if (action === "trash") root.api.trashMessage(sent, replyFor(rows[r]))
+            else root.api.untrashMessage(sent, replyFor(rows[r]))
+          }
+        } else if (action === "trash") root.api.trashMessage(targets.length > 1 ? targets : targets[0], done)
+        else if (action === "untrash") root.api.untrashMessage(targets.length > 1 ? targets : targets[0], done)
+        else if (targets.length > 1) root.api.batchModify(targets, change.add, change.remove, done)
+        else root.api.modifyMessage(targets[0], change.add, change.remove, done)
+      }
+      if (root.pendingAction !== "") root.queueAction(ids.join(","), action, actionQuery, quiet, memberOnly, dispatch, function(intoToken) {
+        intents.coalesce(account, actionQuery, prepared.token, intoToken, prepared.generation)
+      }, prepared.token, parameters.sourceLabelId)
+      else dispatch()
+    })
     return true
   }
 
@@ -1901,172 +1894,7 @@ Item {
   }
 
   function markAllRead() {
-    if (!ready || messages.length === 0) return false
-    if (pendingAction !== "") {
-      note("Another action is still finishing")
-      return false
-    }
-    // Every unread row expanded into one flat batch, which the client chunks.
-    // Every counted member is sent rather than only the unread ones: the row
-    // does not know which members are unread, a redundant patch is harmless,
-    // and asking would cost a read per row.
-    var ids = []
-    var rows = 0
-    var expanded = false
-    for (var i = 0; i < messages.length; i++) {
-      if (!messages[i].unread) continue
-      rows = rows + 1
-      var targets = Model.actionTargets(messages[i], "markRead")
-      if (targets.length > 1) expanded = true
-      for (var t = 0; t < targets.length; t++) {
-        if (ids.indexOf(targets[t]) < 0) ids.push(targets[t])
-      }
-    }
-    if (ids.length === 0) return false
-    var actionQuery = cacheKey
-    var actionEstimate = resultEstimate
-    var actionToken = nextPageToken
-    var interrupted = listLoading
-    if (interrupted) {
-      listSerial++
-      abortRequest(listHandle)
-      listHandle = null
-      listLoading = false
-      nextPageToken = ""
-      actionToken = ""
-    }
-    // One token for the lot and an intent per row, member and reader's copy
-    // under it, so a refusal takes off what this changed and nothing an edit
-    // taken since has: a star pressed while the server was still deciding
-    // stays. A snapshot of the list put back would have lost it.
-    var token = intents.nextToken()
-    intents.holdLists(actionQuery)
-    // The block is asserted on every row for the same reason one action asserts
-    // it: a row whose members were all sent the patch is a read conversation,
-    // and a row that recomputed only its own labels would stay bold because its
-    // block still said unread.
-    function rowRead(row) {
-      return Model.applyLabelChange(row, "markRead", "", Model.threadAfterAction(row, "markRead"))
-    }
-    function memberRead(summary) { return Model.applyLabelChange(summary, "markRead") }
-    // The rail draws from `memberSummaries` and the reader from
-    // `selectedMessage`, and both are among what was just marked: every member
-    // this holds a summary for takes the change, and a representative takes
-    // its row's, block and all. Left alone, a stop kept its dot for the rest
-    // of the session, because nothing later re-reads a member it already has.
-    var memberBefore = ({})
-    var memberAfter = ({})
-    for (var m = 0; m < ids.length; m++) {
-      var held = memberSummaries[ids[m]]
-      if (!held) continue
-      memberBefore[ids[m]] = held
-      memberAfter[ids[m]] = memberRead(held)
-    }
-    var survives = Model.survivesAction(mailboxKey, "markRead")
-    var next = []
-    var edits = []
-    var rowIds = ({})
-    for (var r = 0; r < messages.length; r++) {
-      var row = messages[r]
-      if (!row.unread) {
-        next.push(row)
-        continue
-      }
-      var rowId = String(row.id)
-      rowIds[rowId] = true
-      var updated = rowRead(row)
-      if (memberSummaries[rowId]) {
-        memberBefore[rowId] = memberSummaries[rowId]
-        memberAfter[rowId] = updated
-      }
-      var members = []
-      var own = Model.actionTargets(row, "markRead")
-      for (var o = 0; o < own.length; o++) {
-        if (memberBefore[own[o]] !== undefined) members.push(own[o])
-      }
-      intents.add(rowId, { token: token, before: row, apply: rowRead, removed: !survives })
-      edits.push({ token: token, query: actionQuery, rowId: rowId, before: row, removed: !survives,
-        index: r, previewIndex: -1, members: members, memberBefore: memberBefore })
-      if (survives) next.push(updated)
-    }
-    for (var member in memberBefore) {
-      if (!rowIds[member])
-        intents.add(member, { token: token, before: memberBefore[member], apply: memberRead })
-    }
-    mergeMembers(memberAfter)
-    var readerKey = ""
-    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
-      var readerAfter = rowIds[selectedId] ? rowRead : memberRead
-      readerKey = "reader:" + selectedId
-      intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
-      selectedMessage = readerAfter(selectedMessage)
-    }
-    var opaqueQuery = effectiveQuery
-      !== Provider.query(providerId, mailboxKey, "", "")
-    var invalidatesPage = !survives || opaqueQuery
-    messages = next
-    if (invalidatesPage) nextPageToken = ""
-    var optimistic = messages.slice()
-    var optimisticToken = nextPageToken
-    if (!interrupted) rememberList()
-    pendingActionQuery = actionQuery
-    pendingAction = "markRead"
-    // Answered edit by edit, on screen or in the cache of a query navigated
-    // away from; the list is built once and assigned once.
-    function settleAll(failed) {
-      var lists = failed ? intents.listsOf(actionQuery) : null
-      for (var e = 0; e < edits.length; e++) {
-        if (lists) lists = intents.restore(edits[e], lists)
-        else intents.keep(edits[e])
-      }
-      if (lists) intents.commit(actionQuery, lists, actionEstimate, actionToken)
-      intents.settleReader(readerKey, token, failed)
-      intents.releaseLists(actionQuery)
-    }
-    api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      root.runQueuedAction()
-      if (error) {
-        settleAll(true)
-        if (intents.showing(actionQuery)) {
-          root.nextPageToken = actionToken
-          if (!interrupted) root.rememberList()
-        }
-        root.fail(error)
-        if (root.resumeDeferredListLoad(actionQuery, error)) return
-        if (interrupted && root.cacheKey === actionQuery)
-          root.loadMessages(false, true, error)
-        return
-      }
-      settleAll(false)
-      root.note(Model.markAllReadNote(rows, expanded))
-      root.refreshCounts()
-      if (interrupted && root.deferredLoadCleared(actionQuery)
-          && cacheStore.loaded) {
-        cacheStore.putQuery(actionQuery, ({
-          summaries: optimistic,
-          estimate: actionEstimate,
-          nextPageToken: optimisticToken
-        }))
-      }
-      if (root.resumeDeferredListLoad(actionQuery, "")) return
-      if (interrupted && root.cacheKey === actionQuery) {
-        root.rememberList()
-        root.loadMessages(false, true, "")
-      } else if (interrupted && cacheStore.loaded) {
-        cacheStore.putQuery(actionQuery, ({
-          summaries: optimistic,
-          estimate: actionEstimate,
-          nextPageToken: optimisticToken
-        }))
-      } else if (invalidatesPage && root.cacheKey === actionQuery) {
-        root.loadMessages(false, true, "")
-      }
-      if (root.active && root.cacheKey !== actionQuery)
-        root.loadMessages(false, true, "")
-    })
-    return true
+    return runNativeAction([], "markRead", false, false, true)
   }
 
   function actMany(ids, action) { return batchAction.run(ids, action) }
@@ -2120,7 +1948,7 @@ Item {
   }
 
   // Opens only after the user asks. The provider hands back base64url bytes;
-  // the helper writes them to a private runtime file before the desktop opens
+  // the backend writes them to a private runtime file before the desktop opens
   // the file with its registered application.
   function openAttachment(messageId, attachment) {
     var source = attachment || ({})
@@ -2139,33 +1967,30 @@ Item {
         return
       }
       var file = loaded[0]
-      var request = attachmentOpenComponent.createObject(root, {
-        command: [pluginDir + "/scripts/open-attachment.py"],
-        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
-          + "\n" + String(file.data || "") + "\n"
-      })
-      if (!request) {
-        root.fail("That attachment could not be opened")
+      if (!root.backend || !root.backend.ready) {
+        root.fail("Mail backend unavailable")
         return
       }
-      request.finished.connect(function(exitCode, detail) {
-        request.destroy()
+      root.backend.call("attachment.store", {
+        filename: String(file.filename || "attachment"), data: String(file.data || ""), open: true
+      }, function(result, failure) {
         if (!root) return
-        if (exitCode !== 0) {
-          root.fail(detail || "That attachment could not be opened")
+        if (failure || !result || !result.path) {
+          root.fail(failure && failure.message === "attachment_open_refused"
+            ? "That attachment is not something this can open" : "That attachment could not be opened")
           return
         }
+        Quickshell.execDetached(["xdg-open", String(result.path)])
         root.note("Opening " + String(file.filename || "attachment"))
       })
-      request.running = true
     })
   }
 
   // Keeping an attachment rather than opening it once.
   //
   // The same shape as `openAttachment` because it is the same journey up to
-  // the last step: sign-in, then the provider's own fetch, then one script.
-  // Only the script differs, and the answer it gives back — a path, which the
+  // the last step: sign-in, then the provider's own fetch, then Rust stores it.
+  // Saving returns the path, which the
   // notice repeats, because a saved file nobody can find is not saved.
   function saveAttachment(messageId, attachment) {
     var source = attachment || ({})
@@ -2193,22 +2018,18 @@ Item {
         return
       }
       var file = loaded[0]
-      var request = attachmentSaveComponent.createObject(root, {
-        command: [pluginDir + "/scripts/save-attachment.py"],
-        requestPayload: Mail.encodeBase64(String(file.filename || "attachment"))
-          + "\n" + String(file.data || "") + "\n"
-      })
-      if (!request) {
+      if (!root.backend || !root.backend.ready) {
         root.markSavingAttachment(key, false)
-        root.fail("That attachment could not be saved")
+        root.fail("Mail backend unavailable")
         return
       }
-      request.finished.connect(function(exitCode, path, detail) {
-        request.destroy()
+      root.backend.call("attachment.store", {
+        filename: String(file.filename || "attachment"), data: String(file.data || ""), open: false
+      }, function(result, failure) {
         if (!root) return
         root.markSavingAttachment(key, false)
-        if (exitCode !== 0) {
-          root.fail(detail || "That attachment could not be saved")
+        if (failure || !result || !result.path) {
+          root.fail("That attachment could not be saved")
           return
         }
         // The name first, then the folder. `unique_path` numbers a name that
@@ -2217,13 +2038,12 @@ Item {
         // month's `invoice.pdf` believing it was the one just saved. The
         // notice elides from the right, so the part that can differ from what
         // was clicked has to come before the part that cannot.
-        var saved = String(path || "")
+        var saved = String(result.path || "")
         var at = saved.lastIndexOf("/")
         root.note(at > 0
           ? "Saved " + saved.substring(at + 1) + " to " + saved.substring(0, at)
           : "Saved")
       })
-      request.running = true
     })
   }
 
@@ -2272,55 +2092,18 @@ Item {
     })
   }
 
-  function deliver(payload) {
-    var sendId = payload ? String(payload.sendId || "") : ""
-    if (!ready) {
-      reportSendFailure("The mailbox is not ready to send", sendId)
-      return false
+  function sentDraftRemoved(draftId) {
+    if (Model.indexById(messages, draftId) >= 0) {
+      messages = Model.removeById(messages, draftId)
+      rememberList()
     }
-    if (sending) {
-      reportSendFailure("Another message is still being sent", sendId)
-      return false
-    }
-    sending = true
-    api.sendMessage(payload, function(sentPayload, error) {
-      root.sending = false
-      if (error) {
-        root.reportSendFailure(error, sendId)
-        Qt.callLater(sendQueue.deliverDue)
-        return
-      }
-      root.reportSendSuccess(sentPayload, sendId)
-      if (payload && String(payload.draftId || "") !== "") root.forgetSentDraft(String(payload.draftId))
-      Qt.callLater(sendQueue.deliverDue)
-    })
-    return true
+    if (selectedId === draftId) clearSelection()
+    refreshCounts()
   }
-
-  // The draft a sent message was opened from is done with: the server's copy
-  // goes, and so does its row. A failure here is a footnote on a message
-  // that was sent, so it is noted rather than reported as a failure.
-  function forgetSentDraft(draftId) {
-    if (!api || typeof api.deleteDraft !== "function") return
-    api.deleteDraft(draftId, function(payload, error) {
-      if (!root) return
-      if (error) {
-        root.note("Sent, but the draft it came from could not be removed: " + String(error))
-        return
-      }
-      if (Model.indexById(root.messages, draftId) >= 0) {
-        root.messages = Model.removeById(root.messages, draftId)
-        root.rememberList()
-      }
-      if (root.selectedId === draftId) root.clearSelection()
-      root.refreshCounts()
-    })
-  }
-
 
   function deliverPending() { return sendQueue.deliverAll() }
 
-  function undoSend() { return sendQueue.undoLatest() }
+  function undoSend(callback) { return sendQueue.undoLatest(callback) }
 
   SendQueue {
     id: sendQueue
@@ -2365,7 +2148,7 @@ Item {
       if (typeof callback === "function") callback(null, "Choose a valid From address")
       return null
     }
-    var payload = Mail.buildSendPayload({
+    var composeFields = ({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
       // What the generated Message-ID takes its domain from when the draft
@@ -2385,7 +2168,17 @@ Item {
       references: values.references,
       draftId: String(values.draftId || "")
     })
-    return api.saveDraft(payload, function(saved, error) {
+    var handle = {aborted: false, children: []}
+    var account = accountId
+    if (!backend) { if (typeof callback === "function") callback(null, "Mail backend is unavailable"); return handle }
+    backend.call("message.compose", {fields: composeFields}, function(payload, composeError) {
+      if (handle.aborted || account !== root.accountId) return
+      if (composeError || !payload) {
+        if (typeof callback === "function") callback(null, "Could not prepare this draft")
+        return
+      }
+      var child = root.api.saveDraft(payload, function(saved, error) {
+      if (handle.aborted || account !== root.accountId) return
       if (typeof callback === "function") callback(saved, error)
       // The Drafts list on screen is what the server had before the save: the
       // copy replaced is gone there and the new one is not yet listed, so
@@ -2398,15 +2191,20 @@ Item {
       } else if (!error && root) {
         root.refreshCounts()
       }
+      })
+      if (child) handle.children.push(child)
     })
+    return handle
   }
 
+
+  readonly property string sendSession: Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
 
   function send(fields, sendId, order) {
     var id = String(sendId || "")
     if (id === "") {
       sendQueue.serial += 1
-      id = "send-" + sendQueue.serial
+      id = "send-" + sendSession + "-" + sendQueue.serial
     }
     if (!ready) {
       // Asked for its credentials first, like a save: a token refused a
@@ -2443,7 +2241,7 @@ Item {
       fail("Choose a valid From address")
       return false
     }
-    var payload = Mail.buildSendPayload({
+    var composeFields = ({
       from: from,
       fromName: alias ? String(alias.displayName || "") : "",
       // What the generated Message-ID takes its domain from when the compose
@@ -2466,12 +2264,16 @@ Item {
       // draft behind on every provider.
       draftId: String(values.draftId || "")
     })
-    // The draft this was opened from rides on the queued payload; the send
-    // itself carries only the raw message and the thread.
-    payload.draftId = String(values.draftId || "")
-
-    payload.sendId = id
-    return sendQueue.park(payload, id, order) ? id : ""
+    var account = accountId
+    if (!backend) { reportSendFailure("Mail backend is unavailable", id); return "" }
+    backend.call("message.compose", {fields: composeFields}, function(payload, error) {
+      if (account !== root.accountId) return
+      if (error || !payload) { root.reportSendFailure("Could not prepare this message", id); return }
+      payload.draftId = String(values.draftId || "")
+      payload.sendId = id
+      if (!sendQueue.park(payload, id, order)) root.reportSendFailure("Could not queue this message", id)
+    })
+    return id
   }
 
   signal replySent(string sendId)
@@ -2499,96 +2301,6 @@ Item {
   Unsubscribe {
     id: unsubscribeAction
     account: root
-  }
-
-  Component {
-    id: imageFetchComponent
-
-    Process {
-      id: imageFetchRequest
-      property string requestLine: ""
-      signal finished(string data)
-      stdinEnabled: true
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-      onStarted: {
-        write(requestLine + "\n")
-        requestLine = ""
-      }
-      onExited: function(exitCode) {
-        var data = String(imageFetchRequest.stdout.text || "").trim()
-        imageFetchRequest.finished(exitCode === 0 && Html.isRasterDataImage(data) ? data : "")
-      }
-    }
-  }
-
-
-  Component {
-    id: attachmentSaveComponent
-
-    Process {
-      id: attachmentSaveProcess
-
-      property string requestPayload: ""
-      // Exactly one answer reaches the caller, whichever way this ends.
-      property bool reported: false
-      signal finished(int exitCode, string path, string detail)
-
-      stdinEnabled: true
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-
-      function report(exitCode, path, detail) {
-        if (reported) return
-        reported = true
-        finished(exitCode, path, detail)
-      }
-
-      onStarted: {
-        write(requestPayload)
-        requestPayload = ""
-      }
-
-      onExited: function(exitCode) {
-        var path = String(attachmentSaveProcess.stdout.text || "").trim()
-        var detail = String(attachmentSaveProcess.stderr.text || "").trim()
-        attachmentSaveProcess.report(exitCode, path, detail)
-      }
-
-      // A program that could not be started never exits, so `onExited` never
-      // arrives. Without this the caller waits for an answer that is not
-      // coming, and the save it is holding open would keep the row's button
-      // turning for as long as the window stays open. Deferred by a turn so a
-      // real exit, which clears `running` as well, always reports first.
-      onRunningChanged: if (!running) Qt.callLater(function() {
-        if (attachmentSaveProcess)
-          attachmentSaveProcess.report(1, "", "That attachment could not be saved")
-      })
-    }
-  }
-
-  Component {
-    id: attachmentOpenComponent
-
-    Process {
-      id: attachmentOpenProcess
-
-      property string requestPayload: ""
-      signal finished(int exitCode, string detail)
-
-      stdinEnabled: true
-      stderr: StdioCollector { waitForEnd: true }
-
-      onStarted: {
-        write(requestPayload)
-        requestPayload = ""
-      }
-
-      onExited: function(exitCode) {
-        var detail = String(attachmentOpenProcess.stderr.text || "").trim()
-        attachmentOpenProcess.finished(exitCode, detail)
-      }
-    }
   }
 
   // -------------------------------------------------------- notifications
@@ -2621,6 +2333,8 @@ Item {
   // ------------------------------------------------------------ navigation
 
   function selectMailbox(key) {
+    providerLabelSerial++
+    providerQuerySerial++
     if (mailboxKey === key && searchQuery === "" && rawQuery === "") return
     mailboxKey = String(key || "inbox")
     searchQuery = ""
@@ -2636,12 +2350,30 @@ Item {
 
   // `raw`: an app-built query in the provider's words, sent as it is.
   function search(text, raw) {
+    providerLabelSerial++
+    var serial = ++providerQuerySerial
     var query = String(text || "").trim()
     var built = String(raw || "").trim()
     if (query === searchQuery && built === searchRaw && rawQuery === "") return
+    if (query !== "" && built === "") {
+      if (!backend || !backend.ready) return
+      var boundAccount = accountId
+      var input = providerQueryInput
+      backend.call("providers.resolve", {provider: providerId, operation: "query", mailbox: mailboxKey,
+        search: query, defaultQuery: defaultQuery}, function(result, error) {
+        if (serial !== root.providerQuerySerial || boundAccount !== root.accountId
+            || input !== root.providerQueryInput) return
+        if (error) { root.note("Could not prepare this search"); return }
+        root.applySearch(query, String((result || {}).value || ""))
+      })
+      return
+    }
+    applySearch(query, built)
+  }
+
+  function applySearch(query, built) {
     searchQuery = query
     searchRaw = built
-    // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
     rawLabelId = ""
     clearSelection()
@@ -2653,31 +2385,43 @@ Item {
   // A label on Gmail, a folder on IMAP. One entry point either way, because the
   // sidebar draws one kind of row.
   function selectLabel(name, labelId) {
-    var query = Provider.labelQuery(providerId, name)
-    var id = String(labelId || "")
-    if (query === "" || (query === rawQuery && id === rawLabelId)) return
-    searchQuery = ""
-    searchRaw = ""
-    rawQuery = query
-    rawLabelId = id
-    clearSelection()
-    messages = []
-    listLoaded = false
-    loadMessages(false)
+    providerQuerySerial++
+    if (!backend || !backend.ready) return
+    var serial = ++providerLabelSerial
+    var boundAccount = accountId
+    var boundProvider = providerId
+    backend.call("providers.resolve", {provider: providerId, operation: "labelQuery", value: String(name || "")}, function(result, error) {
+      if (serial !== root.providerLabelSerial || boundAccount !== root.accountId || boundProvider !== root.providerId || error) return
+      var query = String((result || {}).value || "")
+      var id = String(labelId || "")
+      if (query === "" || (query === root.rawQuery && id === root.rawLabelId)) return
+      root.searchQuery = ""
+      root.searchRaw = ""
+      root.rawQuery = query
+      root.rawLabelId = id
+      root.clearSelection()
+      root.messages = []
+      root.listLoaded = false
+      root.loadMessages(false)
+    })
   }
 
   // Which web UI, and where in it, is the provider's answer rather than this
   // file's. It used to be a Gmail call, which meant the day a second provider
   // declared a web UI it would have opened Gmail's.
-  function openInBrowser(id) {
-    var url = Provider.webMessageUrl(providerId, id)
-    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+  function openProviderUrl(operation, value) {
+    if (!backend || !backend.ready) return
+    var boundAccount = accountId
+    var boundProvider = providerId
+    backend.call("providers.resolve", {provider: providerId, operation: operation, value: String(value || "")}, function(result, error) {
+      if (error || boundAccount !== root.accountId || boundProvider !== root.providerId) return
+      var url = String((result || {}).value || "")
+      if (url !== "") Quickshell.execDetached(["xdg-open", url])
+    })
   }
 
-  function openWebInbox() {
-    var url = Provider.webBoxUrl(providerId, effectiveQuery)
-    if (url !== "") Quickshell.execDetached(["xdg-open", url])
-  }
+  function openInBrowser(id) { openProviderUrl("webMessageUrl", id) }
+  function openWebInbox() { openProviderUrl("webBoxUrl", effectiveQuery) }
 
   function openCloudConsole() {
     Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/clients/create"])
@@ -2721,6 +2465,11 @@ Item {
   }
 
   function signOut() {
+    intents.clear()
+    queuedActions = []
+    actionPreparations = 0
+    pendingAction = ""
+    pendingActionQuery = ""
     if (auth) auth.logout()
     messages = []
     labels = []
@@ -2831,6 +2580,7 @@ Item {
     id: gmailAuthComponent
 
     AuthManager {
+      backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId
       mayAdoptLegacyToken: root.mayAdoptLegacyToken
@@ -2851,6 +2601,7 @@ Item {
     id: imapAuthComponent
 
     ImapAuth {
+      backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId
       // Normalised here rather than trusted from the file: a host that arrived
@@ -2872,6 +2623,7 @@ Item {
     id: jmapAuthComponent
 
     JmapAuth {
+      backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId
       // Discovery runs from the address's domain when no server was typed, so
@@ -2901,6 +2653,7 @@ Item {
     id: heyAuthComponent
 
     HeyAuth {
+      backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId
 
@@ -2918,6 +2671,7 @@ Item {
     id: outlookAuthComponent
 
     OutlookAuth {
+      backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId
       configuredClientId: root.oauthClientId
@@ -2956,6 +2710,7 @@ Item {
   Component {
     id: jmapClientComponent
     JmapClient {
+      backend: root.backend
       auth: authLoader.item
       email: root.configuredEmail
       // The session object is the server's answer rather than the account's
@@ -2979,6 +2734,7 @@ Item {
 
   CacheStore {
     id: cacheStore
+    backend: root.backend
     accountId: root.accountId
     // The file lands after the window is already up, so the first paint waits
     // for it rather than the other way round.
@@ -2989,8 +2745,43 @@ Item {
     }
   }
 
+  BackendSync {
+    id: backendSync
+    backend: root.backend
+    enabled: root.ready && root.nativePolling
+    accountId: root.accountId
+    query: Provider.unreadQuery(root.providerId)
+    intervalSec: root.refreshIntervalSec
+    pageSize: root.maxMessages
+    onUpdated: function(snapshot) {
+      if (snapshot.error) return
+      root.summarizeResources(snapshot.messages || [], function(prepared, preparationError) {
+      if (preparationError) return
+      var before = root.inboxUnread
+      root.inboxUnread = snapshot.estimate
+      var summaries = []
+      var payloads = prepared
+      var now = new Date()
+      for (var i = 0; i < payloads.length; i++) {
+        var summary = payloads[i].nativeSummary
+        summary.unread = true
+        summaries.push(summary)
+      }
+      if (summaries.length > 0 || snapshot.estimate === 0) root.previewMessages = summaries
+      var fingerprint = String(snapshot.fingerprint || "")
+      var changed = fingerprint !== "" && fingerprint !== root.syncFingerprint
+      root.syncFingerprint = fingerprint
+      var first = !root.countPrimed
+      root.countPrimed = true
+      if ((first || changed || snapshot.estimate > before || (root.active && root.windowOpen)) && !root.listLoading)
+        root.loadMessages(false)
+      })
+    }
+  }
+
   BodyCache {
     id: bodyCache
+    backend: root.backend
     pluginDir: root.pluginDir
     accountId: root.accountId
   }
@@ -3019,7 +2810,7 @@ Item {
   Timer {
     id: pollTimer
     interval: root.refreshIntervalSec * 1000
-    running: root.ready
+    running: root.ready && !root.nativePolling
     repeat: true
     triggeredOnStart: true
     onTriggered: {

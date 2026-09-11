@@ -4,8 +4,6 @@ import Quickshell.Io
 import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
-import "../message/Message.js" as Mail
-import "../providers/Secrets.js" as Secrets
 
 Item {
   id: root
@@ -38,10 +36,6 @@ Item {
   property string refreshScope: ""
   property var queue: []
   property var activeSource: null
-  property string lookedUpPassword: ""
-  property bool lookupHandled: false
-  property var googleRequest: null
-  property bool googleRequestTimedOut: false
   property var passwordSaveQueue: []
   property string passwordToSave: ""
   property bool savingPassword: false
@@ -55,8 +49,6 @@ Item {
   property bool creatingEvent: false
   property var eventSource: null
   property var eventDraft: null
-  property var eventRequest: null
-  property bool eventRequestTimedOut: false
   // One write at a time, create or otherwise: the password lookup, the writer
   // and the deadline all hold one operation's state, so update and delete
   // share this guard with create rather than growing their own.
@@ -198,21 +190,14 @@ Item {
     }
     if (source.kind === "google") createGoogleEvent()
     else if (source.kind === "microsoft") createGraphEvent()
-    else {
-      eventPasswordLookup.command = ["secret-tool", "lookup"]
-        .concat(Sources.keyringAttributes(source.id))
-      eventPasswordLookup.running = true
-    }
+    else createNativeEvent()
     return true
   }
 
   function finishEvent(ok, error) {
-    eventDeadline.stop()
     creatingEvent = false
     eventSource = null
     eventDraft = null
-    eventRequest = null
-    eventRequestTimedOut = false
     eventCreated(ok, String(error || ""))
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
@@ -259,15 +244,12 @@ Item {
 
   function finishWrite(ok, error) {
     var op = writeOp
-    eventDeadline.stop()
     eventWriting = false
     writeOp = ""
     writeSource = null
     writeEvent = null
     writeDraft = null
     writeUrl = ""
-    eventRequest = null
-    eventRequestTimedOut = false
     if (op === "delete") eventDeleted(ok, String(error || ""))
     else eventUpdated(ok, String(error || ""))
     // A delete is asked for from the detail, not the composer, so nothing
@@ -279,151 +261,57 @@ Item {
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
 
-  function startGoogleWrite() {
-    var eventId = String(writeEvent && writeEvent.googleId || "")
-    if (eventId === "") { finishWrite(false, "This event has no Google id to write against"); return }
-    service.withGoogleAccessToken(writeSource.accountId, function(token, error) {
-      if (!token) { root.finishWrite(false, error); return }
-      var request = new XMLHttpRequest()
-      root.eventRequest = request
-      root.eventRequestTimedOut = false
-      if (root.writeOp === "delete") {
-        request.open("DELETE", Calendar.googleEventUrl(eventId))
-      } else {
-        request.open("PATCH", Calendar.googleEventUrl(eventId))
-        request.setRequestHeader("Content-Type", "application/json")
+  function startGoogleWrite() { startNativeWrite() }
+
+  function startGraphWrite() { startNativeWrite() }
+
+  function createGraphEvent() { createNativeEvent() }
+
+  function startCaldavWrite() { startNativeWrite() }
+
+  function createGoogleEvent() { createNativeEvent() }
+
+  function nativeRequest(source, operation, fields, callback) {
+    if (!service || !service.backend) { callback(null, "Calendar backend is unavailable"); return }
+    var params = fields || {}
+    params.source = source
+    params.operation = operation
+    service.backend.call("calendar.request", params, function(result, error) {
+      var reason = ""
+      if (error) {
+        var code = String(error.code || error)
+        if (code === "calendar_auth_required" || code === "calendar_auth_refused")
+          reason = "Sign in again to access this calendar"
+        else if (code === "calendar_password_missing") reason = "Set this calendar's password in Settings"
+        else if (code === "calendar_origin_refused") reason = "The event's address is outside this calendar's server"
+        else reason = "The calendar request failed"
       }
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        eventDeadline.stop()
-        root.eventRequest = null
-        var timedOut = root.eventRequestTimedOut
-        root.eventRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          root.finishWrite(false, timedOut
-            ? "The Google Calendar event request timed out"
-            : Calendar.googleResponseError(request.status, request.responseText))
-          return
-        }
-        root.finishWrite(true, "")
-      }
-      eventDeadline.restart()
-      if (root.writeOp === "delete") request.send()
-      else request.send(JSON.stringify(root.writeDraft.google))
-      token = ""
+      callback(result, reason)
     })
   }
 
-  // The address is judged before the keyring is touched: a write URL that
-  // does not resolve to the source's own origin stops the operation here,
-  // not after a password has been read for it.
-  // Graph's calendar, written the way Google's is: one request against the
-  // event's own id, with the mailbox's Graph token, under the same deadline.
-  function startGraphWrite() {
-    var eventId = String(writeEvent && writeEvent.graphId || "")
-    if (eventId === "") { finishWrite(false, "This event has no Microsoft id to write against"); return }
-    service.withMicrosoftAccessToken(writeSource.accountId, function(token, error) {
-      if (!token) { root.finishWrite(false, error); return }
-      var request = new XMLHttpRequest()
-      root.eventRequest = request
-      root.eventRequestTimedOut = false
-      if (root.writeOp === "delete") {
-        request.open("DELETE", Calendar.graphEventUrl(eventId))
-      } else {
-        request.open("PATCH", Calendar.graphEventUrl(eventId))
-        request.setRequestHeader("Content-Type", "application/json")
-      }
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        eventDeadline.stop()
-        root.eventRequest = null
-        var timedOut = root.eventRequestTimedOut
-        root.eventRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          root.finishWrite(false, timedOut
-            ? "The Microsoft calendar request timed out"
-            : Calendar.graphResponseError(request.status, request.responseText))
-          return
-        }
-        root.finishWrite(true, "")
-      }
-      eventDeadline.restart()
-      if (root.writeOp === "delete") request.send()
-      else request.send(JSON.stringify(root.writeDraft.graph))
-      token = ""
-    })
+  function createNativeEvent() {
+    var fields = {}
+    if (eventSource.kind === "caldav") {
+      var base = String(eventSource.url || "")
+      if (base.charAt(base.length - 1) !== "/") base += "/"
+      fields.href = base + encodeURIComponent(eventDraft.uid) + ".ics"
+      fields.body = eventDraft.ics
+    } else fields.body = JSON.stringify(eventSource.kind === "google" ? eventDraft.google : eventDraft.graph)
+    nativeRequest(eventSource, "create", fields, function(result, error) { root.finishEvent(!error, error) })
   }
 
-  function createGraphEvent() {
-    service.withMicrosoftAccessToken(eventSource.accountId, function(token, error) {
-      if (!token) { root.finishEvent(false, error); return }
-      var request = new XMLHttpRequest()
-      root.eventRequest = request
-      root.eventRequestTimedOut = false
-      request.open("POST", Calendar.graphEventsCreateUrl())
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      request.setRequestHeader("Content-Type", "application/json")
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        eventDeadline.stop()
-        root.eventRequest = null
-        var timedOut = root.eventRequestTimedOut
-        root.eventRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          root.finishEvent(false, timedOut
-            ? "The Microsoft calendar request timed out"
-            : Calendar.graphResponseError(request.status, request.responseText))
-          return
-        }
-        root.finishEvent(true, "")
-      }
-      eventDeadline.restart()
-      request.send(JSON.stringify(root.eventDraft.graph))
-      token = ""
-    })
-  }
-
-  function startCaldavWrite() {
-    var url = Calendar.caldavEventUrl(writeSource ? writeSource.url : "", writeEvent)
-    if (url === "") {
-      finishWrite(false, "The event's address is outside this calendar's server")
-      return
+  function startNativeWrite() {
+    var fields = {}
+    if (writeSource.kind === "caldav") {
+      fields.href = String(writeEvent.href || Calendar.caldavEventUrl(writeSource.url, writeEvent))
+      if (!fields.href) { finishWrite(false, "The event's address is outside this calendar's server"); return }
+      if (writeDraft) fields.body = writeDraft.ics
+    } else {
+      fields.eventId = String(writeSource.kind === "google" ? writeEvent.googleId : writeEvent.graphId)
+      if (writeDraft) fields.body = JSON.stringify(writeSource.kind === "google" ? writeDraft.google : writeDraft.graph)
     }
-    writeUrl = url
-    caldavWritePasswordLookup.command = ["secret-tool", "lookup"]
-      .concat(Sources.keyringAttributes(writeSource.id))
-    caldavWritePasswordLookup.running = true
-  }
-
-  function createGoogleEvent() {
-    service.withGoogleAccessToken(eventSource.accountId, function(token, error) {
-      if (!token) { root.finishEvent(false, error); return }
-      var request = new XMLHttpRequest()
-      root.eventRequest = request
-      root.eventRequestTimedOut = false
-      request.open("POST", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      request.setRequestHeader("Content-Type", "application/json")
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        eventDeadline.stop()
-        root.eventRequest = null
-        var timedOut = root.eventRequestTimedOut
-        root.eventRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          root.finishEvent(false, timedOut
-            ? "The Google Calendar event request timed out"
-            : Calendar.googleResponseError(request.status, request.responseText))
-          return
-        }
-        root.finishEvent(true, "")
-      }
-      eventDeadline.restart()
-      request.send(JSON.stringify(root.eventDraft.google))
-      token = ""
-    })
+    nativeRequest(writeSource, writeOp, fields, function(result, error) { root.finishWrite(!error, error) })
   }
 
   function saveCalDavPassword(secret) {
@@ -611,105 +499,33 @@ Item {
     else failSource("The HEY CLI does not expose calendar events")
   }
 
-  function startPasswordLookup() {
-    var attributes = Sources.keyringAttributes(activeSource.id)
-    if (attributes.length === 0) { failSource("The calendar source has no id"); return }
-    lookupHandled = false
-    lookedUpPassword = ""
-    passwordLookup.command = ["secret-tool", "lookup"].concat(attributes)
-    passwordLookup.running = true
-  }
+  function startPasswordLookup() { startNativeList() }
 
-  function handlePassword(value) {
-    if (lookupHandled) return
-    lookupHandled = true
-    lookedUpPassword = String(value || "")
-    if (lookedUpPassword === "") { failSource("Add this calendar's password in Settings"); return }
-    var report = Calendar.caldavReport(rangeStart, rangeEnd)
-    var credentials = activeSource.username + ":" + lookedUpPassword
-    calendarTransport.command = [pluginDir + "/scripts/calendar-transport.sh"]
-    calendarTransport.requestLine = Mail.encodeBase64(activeSource.url) + " "
-      + Mail.encodeBase64(credentials) + " " + Mail.encodeBase64(report) + "\n"
-    credentials = ""
-    lookedUpPassword = ""
-    calendarTransport.running = true
-  }
-
-  function startGraph() {
-    if (!service || typeof service.withMicrosoftAccessToken !== "function") {
-      failSource("Microsoft calendar access is unavailable")
-      return
-    }
-    service.withMicrosoftAccessToken(activeSource.accountId, function(token, error) {
-      if (!token) { root.failSource(error); return }
-      var request = new XMLHttpRequest()
-      root.googleRequest = request
-      root.googleRequestTimedOut = false
-      request.open("GET", Calendar.graphEventsUrl(root.rangeStart, root.rangeEnd))
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      // Moments in UTC, so they parse without a timezone table.
-      request.setRequestHeader("Prefer", "outlook.timezone=\"UTC\"")
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        googleDeadline.stop()
-        root.googleRequest = null
-        var timedOut = root.googleRequestTimedOut
-        root.googleRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          root.failSource(timedOut ? "The Microsoft calendar request timed out"
-            : Calendar.graphResponseError(request.status, request.responseText))
-          return
-        }
+  function startNativeList() {
+    var fields = { start: new Date(rangeStart).toISOString(), end: new Date(rangeEnd).toISOString() }
+    if (activeSource.kind === "caldav") fields.body = Calendar.caldavReport(rangeStart, rangeEnd)
+    nativeRequest(activeSource, "list", fields, function(result, error) {
+      if (error) { root.failSource(error); return }
+      var body = String(result && result.body || "")
+      var values = []
+      if (root.activeSource.kind === "caldav")
+        values = Calendar.eventsFromCaldav(body, root.activeSource.id, root.rangeStart, root.rangeEnd)
+      else {
         var payload = null
-        try { payload = JSON.parse(request.responseText) } catch (e) {}
-        if (!payload) { root.failSource("Microsoft Graph returned an unreadable response"); return }
-        root.replaceActiveSourceEvents(Calendar.eventsFromGraph(payload, root.activeSource.id))
-        root.processNext()
+        try { payload = JSON.parse(body) } catch (e) {}
+        if (!payload) { root.failSource("The calendar returned an unreadable response"); return }
+        values = root.activeSource.kind === "google"
+          ? Calendar.eventsFromGoogle(payload, root.activeSource.id)
+          : Calendar.eventsFromGraph(payload, root.activeSource.id)
       }
-      googleDeadline.restart()
-      request.send()
-      token = ""
+      root.replaceActiveSourceEvents(values)
+      root.processNext()
     })
   }
 
-  function startGoogle() {
-    if (!service || typeof service.withGoogleAccessToken !== "function") {
-      failSource("Google calendar access is unavailable")
-      return
-    }
-    service.withGoogleAccessToken(activeSource.accountId, function(token, error) {
-      if (!token) { root.failSource(error); return }
-      var request = new XMLHttpRequest()
-      root.googleRequest = request
-      root.googleRequestTimedOut = false
-      request.open("GET", Calendar.googleEventsUrl(root.rangeStart, root.rangeEnd))
-      request.setRequestHeader("Authorization", "Bearer " + token)
-      request.onreadystatechange = function() {
-        if (request.readyState !== XMLHttpRequest.DONE) return
-        googleDeadline.stop()
-        root.googleRequest = null
-        var timedOut = root.googleRequestTimedOut
-        root.googleRequestTimedOut = false
-        if (request.status < 200 || request.status >= 300) {
-          var reason = timedOut
-            ? "The Google Calendar request timed out"
-            : Calendar.googleResponseError(request.status, request.responseText)
-          root.failSource(reason, !timedOut
-              && Calendar.isGoogleCalendarApiDisabledError(reason)
-            ? "googleApiDisabled" : "")
-          return
-        }
-        var payload = null
-        try { payload = JSON.parse(request.responseText) } catch (e) {}
-        if (!payload) { root.failSource("Google Calendar returned an unreadable response"); return }
-        root.replaceActiveSourceEvents(Calendar.eventsFromGoogle(payload, root.activeSource.id))
-        root.processNext()
-      }
-      googleDeadline.restart()
-      request.send()
-      token = ""
-    })
-  }
+  function startGraph() { startNativeList() }
+
+  function startGoogle() { startNativeList() }
 
   FileView {
     path: root.configPath
@@ -728,22 +544,6 @@ Item {
     }
   }
 
-  Process {
-    id: passwordLookup
-    // `secret-tool lookup` writes the secret with no trailing newline, so a
-    // SplitParser splitting on one never fires its read at all: the password
-    // was found, the callback was not, and the source reported itself as
-    // having no password saved. The whole output, read when the process is
-    // done with, is the same answer without depending on how it ends —
-    // which is what `eventPasswordLookup` below already does.
-    stdout: StdioCollector { id: passwordLookupOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      // No entry is not an error: it is what a source that has never been
-      // given a password looks like.
-      root.handlePassword(exitCode === 0 ? Secrets.fromKeyring(passwordLookupOutput.text) : "")
-    }
-  }
 
   Process {
     id: passwordStore
@@ -809,128 +609,16 @@ Item {
     }
   }
 
-  Process {
-    id: calendarTransport
-    property string requestLine: ""
-    stdinEnabled: true
-    stdout: StdioCollector { id: transportOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(requestLine)
-      requestLine = ""
-    }
-    onExited: function(exitCode) {
-      var lines = String(transportOutput.text || "").split("\n")
-      var status = Number(lines[0])
-      var body = lines.length > 1 ? Mail.decodeBase64Url(lines[1].replace(/\+/g, "-").replace(/\//g, "_")) : ""
-      if (exitCode !== 0 || status !== 0) { root.failSource("The CalDAV request failed"); return }
-      root.replaceActiveSourceEvents(Calendar.eventsFromCaldav(
-        body, root.activeSource.id, root.rangeStart, root.rangeEnd))
-      root.processNext()
-    }
-  }
 
-  Process {
-    id: eventPasswordLookup
-    stdout: StdioCollector { id: eventPasswordOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      var password = String(eventPasswordOutput.text || "").trim()
-      if (exitCode !== 0 || password === "") {
-        root.finishEvent(false, "Set this calendar's password in Settings")
-        return
-      }
-      var base = String(root.eventSource.url || "")
-      if (base.charAt(base.length - 1) !== "/") base += "/"
-      var url = base + encodeURIComponent(root.eventDraft.uid) + ".ics"
-      var credentials = root.eventSource.username + ":" + password
-      eventWriter.command = [root.pluginDir + "/scripts/calendar-write.sh"]
-      eventWriter.requestLine = Mail.encodeBase64(url) + " "
-        + Mail.encodeBase64(credentials) + " " + Mail.encodeBase64(root.eventDraft.ics) + "\n"
-      password = ""
-      credentials = ""
-      eventWriter.running = true
-    }
-  }
 
-  Process {
-    id: eventWriter
-    property string requestLine: ""
-    stdinEnabled: true
-    stderr: StdioCollector { id: eventWriteError; waitForEnd: true }
-    onStarted: { write(requestLine); requestLine = "" }
-    onExited: function(exitCode) {
-      root.finishEvent(exitCode === 0,
-        exitCode === 0 ? "" : String(eventWriteError.text || "Could not create the event"))
-    }
-  }
 
-  Process {
-    id: caldavWritePasswordLookup
-    stdout: StdioCollector { id: writePasswordOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      var password = String(writePasswordOutput.text || "").trim()
-      if (exitCode !== 0 || password === "") {
-        root.finishWrite(false, "Set this calendar's password in Settings")
-        return
-      }
-      // The URL was resolved and judged in startCaldavWrite, before this
-      // lookup ran; here it is only read back.
-      var url = root.writeUrl
-      var credentials = root.writeSource.username + ":" + password
-      if (root.writeOp === "delete") {
-        eventDeleter.command = [root.pluginDir + "/scripts/calendar-delete.sh"]
-        eventDeleter.requestLine = Mail.encodeBase64(url) + " "
-          + Mail.encodeBase64(credentials) + "\n"
-        eventDeleter.running = true
-      } else {
-        caldavEventUpdater.command = [root.pluginDir + "/scripts/calendar-write.sh"]
-        caldavEventUpdater.requestLine = Mail.encodeBase64(url) + " "
-          + Mail.encodeBase64(credentials) + " " + Mail.encodeBase64(root.writeDraft.ics) + "\n"
-        caldavEventUpdater.running = true
-      }
-      password = ""
-      credentials = ""
-    }
-  }
 
-  Process {
-    id: caldavEventUpdater
-    property string requestLine: ""
-    stdinEnabled: true
-    stderr: StdioCollector { id: eventUpdateError; waitForEnd: true }
-    onStarted: { write(requestLine); requestLine = "" }
-    onExited: function(exitCode) {
-      root.finishWrite(exitCode === 0,
-        exitCode === 0 ? "" : String(eventUpdateError.text || "Could not update the event"))
-    }
-  }
 
-  Process {
-    id: eventDeleter
-    property string requestLine: ""
-    stdinEnabled: true
-    stderr: StdioCollector { id: eventDeleteError; waitForEnd: true }
-    onStarted: { write(requestLine); requestLine = "" }
-    onExited: function(exitCode) {
-      root.finishWrite(exitCode === 0,
-        exitCode === 0 ? "" : String(eventDeleteError.text || "Could not delete the event"))
-    }
-  }
 
-  Timer {
-    id: googleDeadline
-    interval: 60000
-    onTriggered: {
-      if (!root.googleRequest) return
-      root.googleRequestTimedOut = true
-      root.googleRequest.abort()
-    }
-  }
 
   CalendarCache {
     id: eventCache
+    backend: root.service ? root.service.backend : null
     cacheName: root.cacheName
     onRestored: {
       if (root.rangeStart && root.rangeEnd && !root.loading)
@@ -938,13 +626,4 @@ Item {
     }
   }
 
-  Timer {
-    id: eventDeadline
-    interval: 60000
-    onTriggered: {
-      if (!root.eventRequest) return
-      root.eventRequestTimedOut = true
-      root.eventRequest.abort()
-    }
-  }
 }

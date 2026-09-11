@@ -2,6 +2,12 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 
+pub mod direction;
+pub mod compose;
+pub mod content;
+pub mod html;
+pub mod signature;
+
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 
 #[cfg(test)]
@@ -176,3 +182,6 @@ fn looks_like_html(raw: &[u8]) -> bool {
                 .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_')
     })
 }
+
+#[cfg(test)]
+mod parity_tests;

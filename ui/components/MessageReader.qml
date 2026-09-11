@@ -6,7 +6,6 @@ import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
-import "../account/Conversation.js" as Conversation
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -74,10 +73,9 @@ Item {
   // this asks.
   readonly property bool showsRail: !!service && service.showsRail === true
   readonly property var conversationStops: !root.showsRail ? []
-    : Conversation.stops(service.selectedThread, service.memberSummaries,
-        service.selectedId, service.viewedMailboxKey, service.mailboxes)
+    : (service.conversationProjection ? service.conversationProjection.stops || [] : [])
   readonly property string conversationCaption: !root.showsRail ? ""
-    : Conversation.caption(service.selectedThread, service.memberSummaries)
+    : (service.conversationProjection ? service.conversationProjection.caption || "" : "")
 
   // The member the rail should have on screen, revealed with the smallest
   // scroll — the list cursor's rule. Watched rather than called from the click,
@@ -150,11 +148,11 @@ Item {
   // What comes back is the document's base direction, which a sender's own
   // `dir` still overrides element by element. It is a default for the parts of
   // the message that state nothing, not a ruling over the parts that do.
-  readonly property string subjectDirection: Direction.resolveSubject(
-    root.summary ? root.summary.subject : "", root.contentDirection)
-  readonly property string bodyDirection: Direction.resolveBody(
-    root.service && root.service.selectedBody ? root.service.selectedBody.text : "",
-    root.contentDirection)
+  readonly property string subjectDirection: Direction.forced(root.contentDirection)
+    || String(root.summary ? root.summary.subjectDirection || "" : "")
+  readonly property string bodyDirection: Direction.forced(root.contentDirection)
+    || String(root.service && root.service.selectedBody
+      ? root.service.selectedBody.bodyDirection || "" : "")
   // The header lines below the subject carry a name, an address and a date, all
   // of which Qt lays out correctly from their own first strong character. There
   // is nothing to add on Auto, and a chosen direction still has to reach them.

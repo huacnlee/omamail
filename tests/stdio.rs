@@ -3,10 +3,39 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+struct Sandbox(std::path::PathBuf);
+impl Sandbox {
+    fn new() -> Self {
+        static SERIAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "omamail-stdio-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+    fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_omamail"));
+        command
+            .env("HOME", &self.0)
+            .env("XDG_CONFIG_HOME", self.0.join("config"))
+            .env("XDG_CACHE_HOME", self.0.join("cache"));
+        command
+    }
+}
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn fragmented_input_and_bytes_before_eof_are_preserved() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
-        .arg("--backend")
+    let sandbox = Sandbox::new();
+    let mut child = sandbox
+        .command()
+        .arg("serve")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -28,8 +57,10 @@ fn fragmented_input_and_bytes_before_eof_are_preserved() {
 
 #[test]
 fn broken_output_stops_backend_while_input_remains_open() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
-        .arg("--backend")
+    let sandbox = Sandbox::new();
+    let mut child = sandbox
+        .command()
+        .arg("serve")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -60,8 +91,10 @@ fn broken_output_stops_backend_while_input_remains_open() {
 
 #[test]
 fn backend_replies_before_eof_and_drains_requests_before_quit() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
-        .arg("--backend")
+    let sandbox = Sandbox::new();
+    let mut child = sandbox
+        .command()
+        .arg("serve")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

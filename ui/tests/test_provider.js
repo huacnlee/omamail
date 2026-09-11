@@ -2,6 +2,11 @@ const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
 const provider = load("providers/Registry.js")
+// Historical query assertions stay as oracles; Rust independently matches the
+// captured parameter/result fixtures. Production Registry has no query engine.
+const legacy = load("tests/oracles/providers/Registry.js")
+for (const method of ["query", "cachedSummaryInSearch", "labelQuery", "addressQuery", "webMessageUrl", "webBoxUrl"])
+  provider[method] = legacy[method]
 
 // ------------------------------------------------------------- the registry
 //

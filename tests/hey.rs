@@ -12,9 +12,11 @@ fn hey_send_keeps_body_on_stdin_and_checks_identity_before_sending() {
     let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
     let executable = dir.join("hey");
     let body_file = dir.join("body");
+    let shim = dir.join("mise");
     fs::write(
-        &executable,
+        &shim,
         br#"#!/bin/sh
+[ "${0##*/}" = hey ] || exit 9
 if [ "$*" = 'accounts list --json' ]; then
   printf '%s\n' '{"ok":true,"data":[{"id":1,"email":"a@example.org"}]}'
   exit 0
@@ -27,13 +29,14 @@ printf '%s\n' '{"ok":true}'
 "#,
     )
     .unwrap();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
+    std::os::unix::fs::symlink(&shim, &executable).unwrap();
     let body = "Private synthetic body\r\n世界\nquotes ' \" and \\\n";
     let invoke = |account: &str| {
         let params = serde_json::json!({"program":executable,"accountId":account,
             "to":"b@example.org","subject":"Unicode world","body":body});
         let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
-            .args(["call", "hey.send"])
+            .args(["call", "hey.send", "--json"])
             .env("PATH", &dir)
             .env("HEY_BODY_FILE", &body_file)
             .stdin(Stdio::piped())
@@ -68,6 +71,7 @@ printf '%s\n' '{"ok":true}'
     assert!(output.stderr.is_empty());
     fs::remove_file(body_file).unwrap();
     fs::remove_file(executable).unwrap();
+    fs::remove_file(shim).unwrap();
     fs::remove_dir(dir).unwrap();
 }
 
@@ -82,7 +86,7 @@ fn hey_adapter_uses_official_argv_and_refuses_invalid_ids_before_process() {
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
     let invoke = |method: &str, input: &[u8]| {
         let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
-            .args(["call", method])
+            .args(["call", method, "--json"])
             .env("PATH", &dir)
             .env("HEY_TEST_MARKER", &marker)
             .stdin(Stdio::piped())
@@ -126,6 +130,61 @@ fn hey_adapter_uses_official_argv_and_refuses_invalid_ids_before_process() {
     );
     assert!(marker.exists());
     fs::remove_file(marker).unwrap();
+    fs::remove_file(executable).unwrap();
+    fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn optional_read_flags_negotiate_without_retrying_real_failures() {
+    let temp = Command::new("mktemp").arg("-d").output().unwrap();
+    let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
+    let executable = dir.join("hey");
+    fs::write(
+        &executable,
+        br##"#!/bin/sh
+case "$*" in
+  *--allow-partial*) printf '%s' '{"ok":false,"error":"unknown flag: --allow-partial"}'; exit 1 ;;
+  *--html*) printf '<!doctype html><html><body>Whole conversation</body></html>'; exit 0 ;;
+  *) exit 9 ;;
+esac
+"##,
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["call", "hey.read", "--json"])
+        .env("PATH", &dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"id":"1:2"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer["result"]["payload"]["mimeType"], "text/html");
+    use base64::Engine;
+    let body = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(
+            answer["result"]["payload"]["body"]["data"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        String::from_utf8(body)
+            .unwrap()
+            .contains("Whole conversation")
+    );
     fs::remove_file(executable).unwrap();
     fs::remove_dir(dir).unwrap();
 }

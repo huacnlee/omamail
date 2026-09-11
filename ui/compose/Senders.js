@@ -24,41 +24,6 @@ function asList(value) {
   return out
 }
 
-function identities(mailboxes) {
-  var rows = asList(mailboxes)
-  var out = []
-  var seen = ({})
-  var i
-  for (i = 0; i < rows.length; i++) {
-    var box = rows[i] || ({})
-    if (box.ready !== true || box.canSend === false) continue
-    var accountId = String(box.id || "")
-    if (accountId === "") continue
-    var aliases = Array.isArray(box.aliases) ? box.aliases : []
-    if (aliases.length === 0) {
-      var fallback = String(box.email || "").trim()
-      if (fallback === "") continue
-      aliases = [{ email: fallback, displayName: String(box.displayName || "") }]
-    }
-    var j
-    for (j = 0; j < aliases.length; j++) {
-      var alias = aliases[j] || ({})
-      var email = String(alias.email || "").trim()
-      if (email === "") continue
-      var key = accountId + "\n" + email.toLowerCase()
-      if (seen[key]) continue
-      seen[key] = true
-      out.push({
-        accountId: accountId,
-        email: email,
-        displayName: String(alias.displayName || ""),
-        label: String(box.label || "")
-      })
-    }
-  }
-  return out
-}
-
 function visible(rows, accountId, mode) {
   var list = asList(rows)
   var kind = String(mode || "new")

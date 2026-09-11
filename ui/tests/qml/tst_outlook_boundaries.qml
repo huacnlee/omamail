@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import "transports.js" as Transports
 import "../../account" as Account
 import "../../components" as Components
 import "../../message/Message.js" as Mail
@@ -47,43 +48,64 @@ Item {
       verify(host !== null)
       wait(1)
       host.auth.cancelLogin()
+      Transports.install(host.api)
       host.auth.accessToken = "synthetic-outlook-token"
       host.auth.accessTokenExpiresAt = Date.now() + 3600000
       return host
     }
-    function assertRequest(handle, mode, url) {
-      verify(handle.process !== null)
-      var fields = handle.process.requestLine.split(" ")
-      compare(fields[0], mode)
-      compare(Mail.bytesToLatin1(Mail.base64ToBytes(fields[2])), "alice@hotmail.com")
-      compare(Mail.bytesToLatin1(Mail.base64ToBytes(fields[3])), "synthetic-outlook-token")
-      compare(Mail.bytesToLatin1(Mail.base64ToBytes(fields[1])), url,
-        "Microsoft's bearer token must not be offered to an unrelated origin")
+    function assertRequest(host, method) {
+      var requests = Transports.transports(host.api)
+      compare(requests.length, 1)
+      var request = requests[0]
+      compare(request.method, method)
+      compare(request.params.accountId, "outlook:alice@hotmail.com")
+      compare(request.params.settings, undefined)
+      compare(request.params.credential, undefined)
+      compare(request.params.oauth, undefined)
+      compare(request.params.url, undefined)
+      verify(JSON.stringify(request.params).indexOf("synthetic-outlook-token") < 0,
+        "the UI never forwards an access token or destination; Rust resolves the saved account")
     }
     function test_saved_settings_cannot_redirect_outlook_bearer() {
       var host = readyHost()
-      var handle = host.api.run("", ["NOOP"], function() {})
-      assertRequest(handle, "imap-oauth", "imaps://outlook.office365.com:993")
+      host.api.getLabelCounts("INBOX", function() {})
+      assertRequest(host, "imap.count")
     }
     function test_saved_settings_cannot_redirect_smtp_bearer() {
       var host = readyHost()
       var raw = "From: alice@hotmail.com\r\nTo: bob@example.com\r\nSubject: Test\r\n\r\nSynthetic body"
-      var handle = host.api.sendMessage({ raw: Mail.encodeBase64Url(raw) }, function() {})
-      assertRequest(handle, "smtp-oauth", "smtp://smtp-mail.outlook.com:587")
+      host.api.sendMessage({ raw: Mail.encodeBase64Url(raw) }, function() {})
+      assertRequest(host, "imap.send")
       compare(host.auth.settings.insecure, false, "SMTP requires STARTTLS")
     }
     function test_saved_settings_cannot_redirect_append_bearer() {
       var host = readyHost()
-      var handle = host.api.appendMessage("Drafts", "Subject: Test\r\n\r\nBody", "draft", "Failed", function() {})
-      assertRequest(handle, "imap-append-oauth", "imaps://outlook.office365.com:993/Drafts")
+      host.api.saveDraft({raw:Mail.encodeBase64Url("Subject: Test\r\n\r\nBody")}, function() {})
+      assertRequest(host, "imap.saveDraft")
     }
     function test_settings_reload_cannot_redirect_bearer_or_username() {
       var host = readyHost()
       host.imapSettings = ({ imapHost: "other.example", imapPort: 143,
         smtpHost: "other.example", smtpPort: 25, insecure: true,
         username: "other@example.com" })
-      assertRequest(host.api.run("", ["NOOP"], function() {}),
-        "imap-oauth", "imaps://outlook.office365.com:993")
+      host.api.getLabelCounts("INBOX", function() {})
+      assertRequest(host, "imap.count")
+    }
+    function test_unsaved_generic_imap_verification_supplies_only_explicit_input() {
+      var host = readyHost()
+      host.providerId = "imap"
+      wait(1)
+      Transports.install(host.api)
+      var settings = {imapHost:"imap.example.org",imapPort:993,username:"new@example.org",insecure:false}
+      host.api.verifyCredentials(settings, "new@example.org:synthetic-password", function() {})
+      var requests = Transports.transports(host.api)
+      compare(requests.length, 1)
+      compare(requests[0].method, "imap.folders")
+      compare(requests[0].params.accountId, undefined,
+        "an unsaved sign-in must not resolve a different saved account")
+      compare(JSON.stringify(requests[0].params.settings), JSON.stringify(settings))
+      compare(requests[0].params.credential, "new@example.org:synthetic-password")
+      compare(requests[0].params.oauth, false)
     }
     function test_generic_imap_keeps_configured_servers() {
       var host = readyHost()

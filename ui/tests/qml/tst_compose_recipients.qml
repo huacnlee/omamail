@@ -8,6 +8,14 @@ Item {
 
   QtObject {
     id: mailService
+    property bool holdNativeText: false
+    property var pendingNativeText: []
+    property var backend: ({call: function(method, params, callback) {
+      if (method !== "message.composeText") return
+      var result = {body: String(params.signature || ""), quote: "", replySubject: "Re: Invoice"}
+      if (mailService.holdNativeText) mailService.pendingNativeText.push({callback:callback,result:result})
+      else callback(result, null)
+    }})
     property bool sendPending: false
     property bool sending: false
     property int sendSecondsRemaining: 10

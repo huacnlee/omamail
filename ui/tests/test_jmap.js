@@ -2,7 +2,7 @@ const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
 const jmap = load("providers/JmapProtocol.js")
-const description = load("providers/Jmap.js")
+const description = load("tests/oracles/providers/Jmap.js")
 const registry = load("providers/Registry.js")
 const message = load("message/Message.js")
 const calendar = load("message/Calendar.js")
@@ -2430,28 +2430,28 @@ deepEqual(provider.mailboxes, [
 
 // A typed search names no mailbox: the server's `text` condition searches the
 // account, and the client excludes Junk and Trash when it builds the filter.
-assert.strictEqual(provider.searchQuery("  invoice from ada  "), "text:invoice from ada")
-assert.strictEqual(provider.searchQuery(""), "")
-assert.strictEqual(provider.searchQuery("   "), "")
-assert.strictEqual(provider.searchQuery(null), "")
-assert.strictEqual(provider.searchQuery("\"quoted phrase\""), 'text:"quoted phrase"',
+assert.strictEqual(description.searchQuery("  invoice from ada  "), "text:invoice from ada")
+assert.strictEqual(description.searchQuery(""), "")
+assert.strictEqual(description.searchQuery("   "), "")
+assert.strictEqual(description.searchQuery(null), "")
+assert.strictEqual(description.searchQuery("\"quoted phrase\""), 'text:"quoted phrase"',
   "the whole of the rest of the string is the text, quotes included")
 
 // A sidebar mailbox is selected by its id, which is what every filter takes;
 // its name can change under it and repeat under another parent.
-assert.strictEqual(provider.labelQuery(" a1b2 "), "mailbox:a1b2")
-assert.strictEqual(provider.labelQuery(""), "")
+assert.strictEqual(description.labelQuery(" a1b2 "), "mailbox:a1b2")
+assert.strictEqual(description.labelQuery(""), "")
 
 // Gmail's search-cache rule, for Gmail's reason: the local preview only
 // understands plain text, so a row known to be in Junk or Trash is outside the
 // server search being previewed.
-assert.strictEqual(provider.cachedSummaryInSearch("role:inbox", { labelIds: ["INBOX"] }), true)
-assert.strictEqual(provider.cachedSummaryInSearch("role:inbox", { labelIds: ["SPAM"] }), false)
-assert.strictEqual(provider.cachedSummaryInSearch("role:inbox", { labelIds: ["INBOX", "TRASH"] }), false)
-assert.strictEqual(provider.cachedSummaryInSearch("role:junk", { labelIds: ["INBOX"] }), false,
+assert.strictEqual(description.cachedSummaryInSearch("role:inbox", { labelIds: ["INBOX"] }), true)
+assert.strictEqual(description.cachedSummaryInSearch("role:inbox", { labelIds: ["SPAM"] }), false)
+assert.strictEqual(description.cachedSummaryInSearch("role:inbox", { labelIds: ["INBOX", "TRASH"] }), false)
+assert.strictEqual(description.cachedSummaryInSearch("role:junk", { labelIds: ["INBOX"] }), false,
   "and a search of Junk is not a search the client sends")
-assert.strictEqual(provider.cachedSummaryInSearch("role:trash", {}), false)
-assert.strictEqual(provider.cachedSummaryInSearch("mailbox:a1b2", { labelIds: [] }), true)
-assert.strictEqual(provider.cachedSummaryInSearch("", null), true)
+assert.strictEqual(description.cachedSummaryInSearch("role:trash", {}), false)
+assert.strictEqual(description.cachedSummaryInSearch("mailbox:a1b2", { labelIds: [] }), true)
+assert.strictEqual(description.cachedSummaryInSearch("", null), true)
 
 console.log("jmap ok")

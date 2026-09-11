@@ -44,6 +44,63 @@ class RuntimeTests(unittest.TestCase):
         self.binary.chmod(0o700)
         return self.binary.read_bytes()
 
+    def test_install_local_checks_version_and_preserves_old_runtime_on_failure(self):
+        source = self.root / "target/release/omamail"
+        source.parent.mkdir(parents=True)
+        source.write_text("#!/bin/sh\nprintf 'omamail 0.8.2\\n'\n")
+        source.chmod(0o700)
+        result = self.manager.run("install-local")
+        self.assertEqual(result["state"], "ready", result)
+        installed = self.root / "runtime/bin/omamail"
+        self.assertEqual(installed.read_bytes(), source.read_bytes())
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o700)
+        previous = installed.read_bytes()
+        source.write_text("#!/bin/sh\nprintf 'omamail 9.9.9\\n'\n")
+        self.assertEqual(self.manager.run("install-local")["state"], "error")
+        self.assertEqual(installed.read_bytes(), previous)
+        source.unlink()
+        self.assertEqual(self.manager.run("install-local")["state"], "error")
+        self.assertEqual(installed.read_bytes(), previous)
+
+    def test_make_install_builds_and_installs_before_linking(self):
+        shutil.copyfile(SOURCE.parent.parent / "Makefile", self.root / "Makefile")
+        tools = self.root / "tools"
+        tools.mkdir()
+        cargo = tools / "cargo"
+        cargo.write_text(f"#!{sys.executable}\n" + '''import os, pathlib, sys
+root = pathlib.Path.cwd()
+args = sys.argv[1:]
+assert args[:3] == ['build', '--locked', '--release']
+assert args[args.index('--target-dir') + 1] == str(root / 'target')
+assert args[args.index('--bin') + 1] == 'omamail'
+if os.environ.get('BUILD_FAIL'): sys.exit(1)
+binary = root / 'target/release/omamail'
+binary.parent.mkdir(parents=True, exist_ok=True)
+binary.write_text("#!/bin/sh\\nprintf 'omamail 0.8.2\\\\n'\\n")
+binary.chmod(0o700)
+''')
+        cargo.chmod(0o700)
+        link = self.root / "scripts/link-plugin.sh"
+        link.write_text('''#!/bin/sh
+set -eu
+test "$(runtime/bin/omamail --version)" = 'omamail 0.8.2'
+cmp target/release/omamail runtime/bin/omamail
+touch linked
+''')
+        env = dict(os.environ, PATH=str(tools) + os.pathsep + os.defpath,
+                   CARGO_TARGET_DIR=str(self.root / "other-target"))
+        result = subprocess.run(["make", "install"], cwd=self.root, env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        marker = self.root / "linked"
+        self.assertTrue(marker.exists())
+        previous = self.binary.read_bytes()
+        marker.unlink()
+        result = subprocess.run(["make", "install"], cwd=self.root,
+                                env=dict(env, BUILD_FAIL="1"), capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.binary.read_bytes(), previous)
+
     def archive(self, name="omamail", kind=tarfile.REGTYPE, version="0.8.2", extra=False):
         content = ("#!/bin/sh\nprintf 'omamail " + version + "\\n'\n").encode()
         stream = io.BytesIO()

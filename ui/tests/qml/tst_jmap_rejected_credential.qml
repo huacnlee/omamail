@@ -78,11 +78,12 @@ Item {
     })
 
     function carriesSecret(process) {
-      return Transports.requested(process).fields.indexOf("app-password") >= 0
+      return process.method !== "jmap.verify"
     }
 
     function test_no_verb_carries_a_refused_secret_until_sign_in_clears_it() {
       verify(!!account.auth && !!account.api)
+      Transports.install(account.api)
       account.auth.secret = "app-password"
       account.auth.secretChecked = true
       tryVerify(function() { return account.ready }, 2000, "the mailbox is ready")
@@ -93,7 +94,11 @@ Item {
       var first = Transports.transports(account.api).filter(carriesSecret)
       verify(first.length > 0, "the first poll carries the secret, as it must")
       var before
-      Transports.answer(first[0], 401, null)
+      compare(first[0].params.credential, undefined)
+      // Several native startup reads may already be pending. Their terminal
+      // refusals drain accounting; no new request may pass the rejection gate.
+      for (var pending=0;pending<first.length;pending++)
+        Transports.reply(first[pending], null, {message:"jmap_unauthorized"})
       compare(account.api.credentialsRejected, true, "the 401 raised the flag")
       compare(account.ready, true, "and the account still stands, card drawn")
 
@@ -111,10 +116,8 @@ Item {
 
       var answers = []
       before = Transports.transports(account.api)
-      account.api.call([["Mailbox/get", { accountId: "t", ids: null }, "0"]], null,
-        function(responses, error) { answers.push(["call", error]) })
-      account.api.uploadMessage("Subject: x\r\n\r\nbody\r\n", null,
-        function(blobId, error) { answers.push(["upload", error]) })
+      account.api.getLabels(function(result,error) { answers.push(["call",error]) })
+      account.api.saveDraft({raw:"eA"},function(result,error) { answers.push(["upload",error]) })
       account.api.getAttachment("m1", "blob1",
         function(data, error) { answers.push(["download", error]) })
       account.api.session = null
@@ -132,12 +135,8 @@ Item {
       verify(account.auth.signIn("app-password"), "sign-in starts")
       var check = Transports.newSince(account.api, before)
       compare(check.length, 1, "sign-in's session GET goes out")
-      compare(Transports.requested(check[0]).verb, "session")
-      var beforeMailboxes = Transports.transports(account.api)
-      Transports.answer(check[0], 200, session)
-      var calls = Transports.newSince(account.api, beforeMailboxes)
-      compare(calls.length, 1, "followed by its Mailbox/get")
-      Transports.answer(calls[0], 200, mailboxes)
+      compare(check[0].method, "jmap.verify")
+      Transports.verified(check[0], session, mailboxes)
       compare(account.api.credentialsRejected, false, "a good sign-in clears the flag")
 
       before = Transports.transports(account.api)

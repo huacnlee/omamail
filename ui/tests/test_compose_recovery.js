@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
-const recovery = load("compose/Recovery.js")
+const recovery = load("tests/oracles/Recovery.js")
 
 const draft = {
   accountId: "me@example.com",

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "NativeDomainFixture.js" as NativeDomain
 
 // `n` and `p` walk the conversation rail; Shift+J and Shift+K scroll the open message.
 //
@@ -141,6 +142,11 @@ Item {
       memberIds: ["maaaaad", "maaaaae", "maaaaaf"]
     })
     property var memberSummaries: ({})
+    readonly property var conversationProjection: NativeDomain.conversation({
+      thread: selectedThread, summaries: memberSummaries, selectedId: selectedId,
+      conversations: showsConversations && showsRail, mailboxKey: viewedMailboxKey,
+      searching: searchQuery !== "" || rawQuery !== "", mailboxes: mailboxes
+    })
 
     // Two conversations in the Inbox, each drawn by its representative.
     property var messages: [
@@ -462,7 +468,11 @@ Item {
 
       keyClick(Qt.Key_J)
       compare(app.cursorId, "yaaaaag", "plain j still moves the mailbox cursor")
-      compare(mailService.selectedId, "maaaaaf", "moving the cursor is not opening")
+      compare(mailService.selectedId, "yaaaaag", "plain j immediately opens the cursor row")
+      compare(app.currentView, "reader")
+      keyClick(Qt.Key_K)
+      compare(app.cursorId, "maaaaaf")
+      compare(mailService.selectedId, "maaaaaf", "plain k opens the previous row")
     }
 
     function test_right_opens_the_cursor_and_left_returns_to_the_list() {

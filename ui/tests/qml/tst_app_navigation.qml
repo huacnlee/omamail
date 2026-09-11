@@ -274,6 +274,46 @@ Item {
       compare(kinds(), "list", "every test starts on the list")
     }
 
+    function test_control_comma_opens_settings_data() {
+      return [{ tag: "list", context: "list" },
+              { tag: "reader", context: "reader" },
+              { tag: "compose-subject", context: "compose", field: "compose-subject-field" },
+              { tag: "compose-body", context: "compose", field: "compose-body-editor" }]
+    }
+
+    function test_control_comma_opens_settings(data) {
+      if (data.context === "reader") app.openMessage("message-1")
+      if (data.context === "compose") app.startCompose("new")
+      var scope = having(app, function(item) { return item.keyContext !== undefined })
+      verify(scope)
+      tryCompare(scope, "keyContext", data.context)
+      scope.applyContextFocus()
+      wait(20)
+      var field = data.field ? named(app, data.field) : null
+      if (field) {
+        field.text = "Keep this draft"
+        field.forceActiveFocus()
+        verify(field.activeFocus)
+      }
+      var before = kinds()
+      keyClick(Qt.Key_Comma, Qt.ControlModifier)
+      tryCompare(app, "page", "settings")
+      compare(kinds(), before + ",settings", "the shortcut uses the existing settings route")
+      tryCompare(scope, "keyContext", "page")
+      if (field) {
+        compare(field.text, "Keep this draft", "Ctrl+, must not insert a comma")
+        tryCompare(field, "activeFocus", false)
+      }
+      app.back()
+      compare(kinds(), before, "Back returns to the screen that opened settings")
+      if (field) compare(field.text, "Keep this draft", "the draft survives the settings visit")
+      if (field) {
+        field.text = ""
+        app.saveAndLeaveCompose()
+        tryCompare(app, "composing", false)
+      }
+    }
+
     function test_settings_add_and_the_form_unwind_one_page_at_a_time() {
       app.openSettings()
       compare(kinds(), "list,settings")

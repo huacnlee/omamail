@@ -133,43 +133,14 @@ Item {
       compare(mailService.hostForId(absent), null)
     }
 
-    // Off, and a settings file written before it existed is not an opt-in.
-    function test_preview_on_cursor_is_off_until_it_is_asked_for() {
-      mailService.applySettings({})
-      compare(mailService.previewOnCursor, false)
-      mailService.applySettings({ previewOnCursor: "yes" })
-      compare(mailService.previewOnCursor, false, "only true is true")
-
-      mailService.setPreviewOnCursor(true)
-      compare(mailService.previewOnCursor, true)
+    function test_legacy_preview_preferences_are_tolerated_without_controls() {
+      mailService.applySettings({previewOnCursor: true, markReadDelaySec: 30})
+      compare(mailService.settings.previewOnCursor, true)
+      compare(mailService.settings.markReadDelaySec, 30)
+      mailService.setShowBarIcon(false)
+      compare(mailService.showBarIcon, false)
       compare(shellStore.updatedEntry.previewOnCursor, true)
-    }
-
-    // Zero is a real answer here — read it the instant it is previewed — so
-    // nothing that merely coerces to zero may be read as somebody asking for
-    // it. A file that lost the key, or holds a word, gets the default dwell.
-    function test_a_dwell_that_is_not_a_number_is_the_default() {
-      mailService.applySettings({})
-      compare(mailService.markReadDelaySec, 2, "a missing key is the default")
-
-      mailService.applySettings({ markReadDelaySec: null })
-      compare(mailService.markReadDelaySec, 2, "and so is null")
-
-      mailService.applySettings({ markReadDelaySec: "" })
-      compare(mailService.markReadDelaySec, 2, "and an empty string")
-
-      mailService.applySettings({ markReadDelaySec: "soon" })
-      compare(mailService.markReadDelaySec, 2, "and a word")
-
-      mailService.applySettings({ markReadDelaySec: -5 })
-      compare(mailService.markReadDelaySec, 2,
-        "a negative interval never fires at all")
-
-      mailService.applySettings({ markReadDelaySec: 0 })
-      compare(mailService.markReadDelaySec, 0, "but a typed zero is kept")
-
-      mailService.applySettings({ markReadDelaySec: 900 })
-      compare(mailService.markReadDelaySec, 30, "and a long one is clamped")
+      compare(shellStore.updatedEntry.markReadDelaySec, 30)
     }
   }
 }

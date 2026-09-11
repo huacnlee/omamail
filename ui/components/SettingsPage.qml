@@ -3,7 +3,6 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
-import "../message/Signature.js" as Signature
 import "../message/Html.js" as Html
 
 // Where mailboxes are managed.
@@ -106,10 +105,32 @@ Column {
     var entry = signatureAccount(selectedSignatureAccountId)
     return entry ? String(entry.signatureHtml || "") : ""
   }
+  property var selectedSignatureDocument: null
+  property int signatureRenderSerial: 0
+  onSelectedSignatureHtmlChanged: renderSignaturePreview()
+  function renderSignaturePreview() {
+    var serial = ++signatureRenderSerial
+    selectedSignatureDocument = null
+    if (!service || !service.backend || selectedSignatureHtml === "") return
+    service.backend.call("message.render", {html: selectedSignatureHtml,
+      options: {allowRemoteImages: false, withReader: false}}, function(result, error) {
+      if (serial !== root.signatureRenderSerial) return
+      if (!error && result) root.selectedSignatureDocument = result.document
+    })
+  }
   property bool importing: false
   property string importNote: ""
   property bool importFailed: false
   property string importStage: ""
+
+  function signatureImportNote(result) {
+    if (result.problem) return String(result.problem)
+    var parts = []
+    if (result.images > 0) parts.push(result.images + (result.images === 1 ? " image" : " images"))
+    if (result.dropped > 0) parts.push(result.dropped + " unsafe or unsupported "
+      + (result.dropped === 1 ? "part" : "parts") + " removed")
+    return parts.length ? "Imported: " + parts.join(", ") : "Imported"
+  }
 
   function importSignature() {
     if (importing || !service) return
@@ -138,26 +159,42 @@ Column {
       signatureImporter.running = true
       return
     }
-    importing = false
     var mime = String(result.mimeType || "").toLowerCase()
     var name = String(result.filename || "").toLowerCase()
-    var imported
-    if (mime.indexOf("image/") === 0) {
-      imported = Signature.importImage(String(result.data || ""))
-    } else if (mime === "text/html" || mime === "application/xhtml+xml" || /\.x?html?$/.test(name)) {
-      imported = Signature.importHtml(Qt.atob(String(result.data || "")))
-    } else {
-      imported = { problem: "Choose a PNG, JPEG, GIF or WebP picture, or an HTML file" }
+    var kind = mime.indexOf("image/") === 0 ? "image"
+      : (mime === "text/html" || mime === "application/xhtml+xml" || /\.x?html?$/.test(name)) ? "html" : ""
+    if (kind === "") {
+      importing = false
+      importNote = "Choose a PNG, JPEG, GIF or WebP picture, or an HTML file"
+      importFailed = true
+      return
     }
-    importNote = Signature.importNote(imported)
-    importFailed = String(imported.problem || "") !== ""
-    if (importFailed) return
-    service.setAccountSignatureHtml(selectedSignatureAccountId, imported.html)
-    // The words for a text-only client, unless the editor already has some.
-    if (String(imported.plain || "") !== "" && String(signatureEdit.text || "").trim() === "") {
-      signatureEdit.text = imported.plain
-      saveSignature()
+    if (!service || !service.backend || !service.backend.ready) {
+      importing = false
+      importNote = "Mail backend unavailable"
+      importFailed = true
+      return
     }
+    var accountId = selectedSignatureAccountId
+    service.backend.call("message.signatureImport", { kind: kind,
+      data: kind === "html" ? Qt.atob(String(result.data || "")) : String(result.data || "")
+    }, function(imported, error) {
+      root.importing = false
+      if (error || !imported) {
+        root.importNote = "That signature could not be imported"
+        root.importFailed = true
+        return
+      }
+      root.importNote = root.signatureImportNote(imported)
+      root.importFailed = String(imported.problem || "") !== ""
+      if (root.importFailed) return
+      root.service.setAccountSignatureHtml(accountId, imported.html)
+      if (accountId === root.selectedSignatureAccountId && String(imported.plain || "") !== ""
+          && String(signatureEdit.text || "").trim() === "") {
+        signatureEdit.text = imported.plain
+        root.saveSignature()
+      }
+    })
   }
 
   readonly property string attachScript: {
@@ -202,6 +239,7 @@ Column {
     ensureNameAccount()
   }
   Component.onCompleted: {
+    renderSignaturePreview()
     ensureSignatureAccount()
     ensureNameAccount()
   }
@@ -366,118 +404,6 @@ Column {
 
   // Showing a message as the cursor reaches it, and the dwell that keeps that
   // from reading a mailbox by holding an arrow key down.
-  Rectangle {
-    width: parent.width
-    implicitHeight: Math.max(previewText.implicitHeight, previewSwitch.implicitHeight)
-      + Style.space(16)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-
-    Column {
-      id: previewText
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(12)
-      anchors.right: previewSwitch.left
-      anchors.rightMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(2)
-
-      Text {
-        width: parent.width
-        text: "Preview as the cursor moves"
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        textFormat: Text.PlainText
-      }
-
-      Text {
-        width: parent.width
-        text: "Show a message as soon as j, k or an arrow reaches it, instead of "
-          + "waiting for Enter. A previewed message is marked read only once the "
-          + "cursor has stayed on it, so stepping through a list does not read it. "
-          + "Not applied in a narrow window, where the reader takes the list's place."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-      }
-    }
-
-    ToggleSwitch {
-      id: previewSwitch
-      objectName: "previewOnCursorSwitch"
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
-      checked: !!root.service && root.service.previewOnCursor
-      foreground: root.textColor
-      accent: root.accentColor
-      onToggled: if (root.service)
-        root.service.setPreviewOnCursor(!root.service.previewOnCursor)
-    }
-  }
-
-  Rectangle {
-    width: parent.width
-    visible: !!root.service && root.service.previewOnCursor
-    implicitHeight: Math.max(dwellText.implicitHeight, dwellSeconds.implicitHeight)
-      + Style.space(16)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-
-    Column {
-      id: dwellText
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(12)
-      anchors.right: dwellSeconds.left
-      anchors.rightMargin: Style.space(16)
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(2)
-
-      Text {
-        width: parent.width
-        text: "Mark a previewed message read after"
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        textFormat: Text.PlainText
-      }
-
-      Text {
-        width: parent.width
-        text: "How long the cursor has to stay before it counts as read. "
-          + "Set 0 to mark it read as soon as it is previewed. Enter always does."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-      }
-    }
-
-    NumberField {
-      id: dwellSeconds
-      objectName: "markReadDelayField"
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(12)
-      anchors.verticalCenter: parent.verticalCenter
-      label: "Seconds"
-      from: 0
-      to: 30
-      stepSize: 1
-      value: root.service ? root.service.markReadDelaySec : 2
-      foreground: root.textColor
-      accent: root.accentColor
-      fontFamily: root.panelFontFamily
-      fontSize: Style.font.bodySmall
-      onModified: function(next) {
-        if (root.service) root.service.setMarkReadDelaySec(next)
-      }
-    }
-  }
-
   Rectangle {
     width: parent.width
     implicitHeight: Math.max(heavyText.implicitHeight, heavySwitch.implicitHeight)
@@ -867,8 +793,8 @@ Column {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
         // The stored markup, and nothing else: the same string that is sent.
-        text: Html.documentFor(root.selectedSignatureHtml, {
-          foreground: root.textColor, background: "transparent", link: root.accentColor })
+        text: root.selectedSignatureDocument ? Html.documentFor(root.selectedSignatureDocument, {
+          foreground: root.textColor, background: "transparent", link: root.accentColor }) : ""
       }
     }
 

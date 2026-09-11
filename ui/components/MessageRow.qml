@@ -81,7 +81,7 @@ Rectangle {
   // own text, so on Auto there is nothing to add; only a direction the reader
   // has actually chosen has to be carried to them.
   readonly property var subjectAlignment: alignmentFor(
-    Direction.resolveSubject(root.summary.subject, root.contentDirection))
+    Direction.forced(root.contentDirection) || String(root.summary.subjectDirection || ""))
   readonly property var textAlignment: alignmentFor(
     Direction.forced(root.contentDirection))
 

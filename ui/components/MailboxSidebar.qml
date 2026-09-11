@@ -144,8 +144,7 @@ Item {
           selected: root.menuLabelPath === modelData.path
             || (modelData.selectable && !root.calendarSelected && !!root.service
               && root.service.rawQuery !== ""
-              && root.service.rawQuery
-                === Provider.labelQuery(root.service.providerId, modelData.rawName))
+              && root.service.rawLabelId === modelData.id)
           onActivated: {
             if (modelData.selectable) root.labelSelected(modelData.id, modelData.rawName)
             else root.folderToggled(modelData.path)

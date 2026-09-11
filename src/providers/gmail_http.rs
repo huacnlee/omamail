@@ -1,39 +1,116 @@
-//! Fixed-origin Gmail HTTP calls with credentials confined to subprocess stdin.
+//! Native, pooled HTTP to fixed Google origins. Errors never include request data.
 use serde_json::Value;
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 #[cfg(test)]
 #[path = "gmail_http_runtime_tests.rs"]
 mod runtime_tests;
 
 struct Request {
-    args: Vec<String>,
-    input: Vec<u8>,
+    url: String,
+    method: reqwest::Method,
+    content_type: &'static str,
+    authorization: Option<reqwest::header::HeaderValue>,
+    body: Option<String>,
 }
 
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+const DEADLINE: Duration = Duration::from_secs(20);
+static CLIENT: OnceLock<Result<reqwest::Client, &'static str>> = OnceLock::new();
+
+fn client() -> Result<&'static reqwest::Client, &'static str> {
+    CLIENT
+        .get_or_init(build_client)
+        .as_ref()
+        .map_err(|error| *error)
+}
+
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .https_only(true)
+        .hickory_dns(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(DEADLINE)
+}
+
+fn build_client() -> Result<reqwest::Client, &'static str> {
+    client_builder().build().map_err(|_| "gmail_http_failed")
+}
 
 /// Path entries are individual components, never an arbitrary URL or slash path.
-pub fn get(path: &[&str], query: &[(String, String)], token: &str) -> Result<Value, &'static str> {
-    execute(prepare_get(path, query, token)?)
+pub async fn get(
+    path: &[&str],
+    query: &[(String, String)],
+    token: &str,
+) -> Result<Value, &'static str> {
+    let request = prepare_get(path, query, token)?;
+    execute(client()?, request, DEADLINE).await
 }
 
-pub fn refresh(id: &str, secret: &str, token: &str) -> Result<Value, &'static str> {
-    execute(prepare_refresh(id, secret, token)?)
+pub async fn refresh(id: &str, secret: &str, token: &str) -> Result<Value, &'static str> {
+    let request = prepare_refresh(id, secret, token)?;
+    execute(client()?, request, DEADLINE).await
 }
 
-fn execute(request: Request) -> Result<Value, &'static str> {
-    // No curl config: the Authorization header or URL-encoded POST body goes
-    // directly through stdin. Neither credentials nor sender data become code.
-    let bytes = crate::process::run(
-        "curl",
-        &request.args,
-        &request.input,
-        Duration::from_secs(35),
-        MAX_RESPONSE,
-    )?;
-    response(&bytes)
+fn http_error(error: reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "gmail_timeout"
+    } else {
+        "gmail_http_failed"
+    }
+}
+
+async fn execute(
+    client: &reqwest::Client,
+    request: Request,
+    deadline: Duration,
+) -> Result<Value, &'static str> {
+    tokio::time::timeout(deadline, async {
+        let empty_success =
+            request.authorization.is_some() && request.method != reqwest::Method::GET;
+        let mut builder = client.request(request.method, &request.url);
+        if let Some(body) = request.body {
+            builder = builder
+                .header(reqwest::header::CONTENT_TYPE, request.content_type)
+                .body(body);
+        }
+        if let Some(authorization) = request.authorization {
+            builder = builder.header(reqwest::header::AUTHORIZATION, authorization);
+        }
+        let mut response = builder.send().await.map_err(http_error)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err("gmail_unauthorized");
+        }
+        if !response.status().is_success() {
+            return Err("gmail_http_failed");
+        }
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_RESPONSE as u64)
+        {
+            return Err("gmail_response_too_large");
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(http_error)? {
+            if chunk.len() > MAX_RESPONSE - bytes.len() {
+                return Err("gmail_response_too_large");
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if bytes.is_empty() && empty_success {
+            return Ok(serde_json::json!({}));
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(|_| "gmail_invalid_response")?;
+        if !value.is_object() {
+            return Err("gmail_invalid_response");
+        }
+        Ok(value)
+    })
+    .await
+    .map_err(|_| "gmail_timeout")?
 }
 
 fn valid(value: &str) -> Result<(), &'static str> {
@@ -56,31 +133,6 @@ fn encode(value: &str) -> String {
         }
     }
     result
-}
-
-fn args() -> Vec<String> {
-    [
-        "-q",
-        "--globoff",
-        "--silent",
-        "--proto",
-        "=https",
-        "--proto-redir",
-        "=https",
-        "--noproxy",
-        "*",
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        "30",
-        "--max-redirs",
-        "0",
-        "--write-out",
-        "\n%{http_code}",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
 }
 
 fn prepare_get(
@@ -117,11 +169,15 @@ fn prepare_get(
     if url.len() > MAX_INPUT {
         return Err("gmail_invalid_input");
     }
-    let mut args = args();
-    args.extend(["--header".into(), "@-".into(), "--url".into(), url]);
+    let mut authorization = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|_| "gmail_invalid_input")?;
+    authorization.set_sensitive(true);
     Ok(Request {
-        args,
-        input: format!("Authorization: Bearer {token}\n").into_bytes(),
+        url,
+        method: reqwest::Method::GET,
+        content_type: "application/json",
+        authorization: Some(authorization),
+        body: None,
     })
 }
 
@@ -141,137 +197,49 @@ fn prepare_refresh(id: &str, secret: &str, token: &str) -> Result<Request, &'sta
     if body.len() > MAX_INPUT {
         return Err("gmail_invalid_input");
     }
-    let mut args = args();
-    args.extend([
-        "--header".into(),
-        "Content-Type: application/x-www-form-urlencoded".into(),
-        "--data-binary".into(),
-        "@-".into(),
-        "--url".into(),
-        "https://oauth2.googleapis.com/token".into(),
-    ]);
     Ok(Request {
-        args,
-        input: body.into_bytes(),
+        url: "https://oauth2.googleapis.com/token".into(),
+        method: reqwest::Method::POST,
+        content_type: "application/x-www-form-urlencoded",
+        authorization: None,
+        body: Some(body),
     })
 }
 
-fn response(bytes: &[u8]) -> Result<Value, &'static str> {
-    let Some(index) = bytes.iter().rposition(|b| *b == b'\n') else {
-        return Err("gmail_invalid_response");
-    };
-    let status = &bytes[index + 1..];
-    if status.len() != 3 || !status.iter().all(u8::is_ascii_digit) {
-        return Err("gmail_invalid_response");
-    }
-    if status == b"401" {
-        return Err("gmail_unauthorized");
-    }
-    if status[0] != b'2' {
-        return Err("gmail_http_failed");
-    }
-    let value: Value =
-        serde_json::from_slice(&bytes[..index]).map_err(|_| "gmail_invalid_response")?;
-    if !value.is_object() {
-        return Err("gmail_invalid_response");
-    }
-    Ok(value)
+/// Mutations are sent once. A timeout leaves completion unknown and is never retried.
+pub async fn write(
+    method: reqwest::Method,
+    path: &[&str],
+    body: Option<&Value>,
+    token: &str,
+) -> Result<Value, &'static str> {
+    let request = prepare_write(method, path, body, token)?;
+    execute(client()?, request, DEADLINE).await
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn unauthorized_is_distinct_without_echoing_server_body() {
-        assert_eq!(
-            response(b"synthetic-secret\n401"),
-            Err("gmail_unauthorized")
-        );
-        assert_eq!(response(b"synthetic-secret\n403"), Err("gmail_http_failed"));
+fn prepare_write(
+    method: reqwest::Method,
+    path: &[&str],
+    body: Option<&Value>,
+    token: &str,
+) -> Result<Request, &'static str> {
+    if !matches!(
+        method,
+        reqwest::Method::POST
+            | reqwest::Method::PUT
+            | reqwest::Method::PATCH
+            | reqwest::Method::DELETE
+    ) {
+        return Err("gmail_invalid_input");
     }
-    #[test]
-    fn get_encodes_untrusted_path_and_query_without_exposing_token() {
-        let request = prepare_get(
-            &["messages", "x/y?z#@"],
-            &[("q".into(), "from:a+b@example.org &主题".into())],
-            "synthetic-secret",
-        )
-        .unwrap();
-        assert_eq!(request.args[0], "-q");
-        assert!(request.args.contains(&"--globoff".into()));
-        assert_eq!(
-            request.args.last().unwrap(),
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/x%2Fy%3Fz%23%40?q=from%3Aa%2Bb%40example.org%20%26%E4%B8%BB%E9%A2%98"
-        );
-        assert!(!request.args.iter().any(|s| s.contains("synthetic-secret")));
-        assert_eq!(request.input, b"Authorization: Bearer synthetic-secret\n");
-    }
-    #[test]
-    fn controls_are_rejected_before_any_request_exists() {
-        for bad in ["x\n", "x\r", "x\r\n", "x\0", "x\u{7f}", "x\t"] {
-            assert_eq!(
-                prepare_get(&["messages"], &[], bad).err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_get(&[bad], &[], "valid").err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_refresh("id", "secret", bad).err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_refresh(bad, "secret", "token").err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_refresh("id", bad, "token").err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_get(&["messages"], &[(bad.into(), "value".into())], "token").err(),
-                Some("gmail_invalid_input")
-            );
-            assert_eq!(
-                prepare_get(&["messages"], &[("q".into(), bad.into())], "token").err(),
-                Some("gmail_invalid_input")
-            );
+    let mut request = prepare_get(path, &[], token)?;
+    request.method = method;
+    if let Some(body) = body {
+        let body = serde_json::to_string(body).map_err(|_| "gmail_invalid_input")?;
+        if body.len() > 48 * 1024 * 1024 {
+            return Err("gmail_invalid_input");
         }
-        for path in [vec![".."], vec!["."], vec![""]] {
-            assert!(prepare_get(&path, &[], "token").is_err());
-        }
+        request.body = Some(body);
     }
-    #[test]
-    fn refresh_form_preserves_quotes_backslashes_unicode_without_argv_credentials() {
-        let request = prepare_refresh("id", "quote\"\\", "é+&=").unwrap();
-        assert_eq!(
-            String::from_utf8(request.input).unwrap(),
-            "grant_type=refresh_token&client_id=id&client_secret=quote%22%5C&refresh_token=%C3%A9%2B%26%3D"
-        );
-        assert!(
-            !request
-                .args
-                .iter()
-                .any(|s| s.contains("quote") || s.contains("é"))
-        );
-        assert_eq!(
-            request.args.last().unwrap(),
-            "https://oauth2.googleapis.com/token"
-        );
-    }
-    #[test]
-    fn status_trailer_rejects_redirects_and_never_echoes_errors() {
-        assert_eq!(response(b"{\"ok\":true}\n200").unwrap()["ok"], true);
-        for input in [
-            b"synthetic-secret\n302".as_slice(),
-            b"synthetic-secret\n401",
-            b"{}\n000",
-            b"{}\n200\n",
-            b"[]\n200",
-        ] {
-            assert!(response(input).is_err());
-            assert!(!response(input).unwrap_err().contains("synthetic-secret"));
-        }
-    }
+    Ok(request)
 }

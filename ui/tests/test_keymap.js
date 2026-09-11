@@ -121,6 +121,12 @@ assert.strictEqual(keymap.isEnabled(byId("search"), "compose", false), false,
 
 const settings = byId("settings")
 assert.strictEqual(keymap.displayFor(settings), "Ctrl+,")
+keymap.CONTEXTS.forEach(function (context) {
+  const entries = keymap.sequencesFor(context).filter(entry => entry.sequence === "Ctrl+,")
+  assert.strictEqual(entries.length, 1, "Ctrl+, has exactly one action in " + context)
+  assert.strictEqual(entries[0].id, "settings")
+  assert.strictEqual(keymap.isSequenceEnabled(settings, "Ctrl+,", context, false), true)
+})
 assert.strictEqual(keymap.isEnabled(settings, "calendar", false), true,
   "settings must open from the calendar")
 assert.strictEqual(keymap.isEnabled(settings, "page", false), true,

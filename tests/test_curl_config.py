@@ -21,7 +21,10 @@ with tempfile.TemporaryDirectory(prefix="omamail-config-test-") as directory:
     stub.write_text('#!/bin/sh\nprintf called > "$CURL_MARKER"\nprintf "%s\\n" "$@" > "$CURL_ARGUMENTS"\ncat >/dev/null\n')
     stub.chmod(0o700)
     env = dict(os.environ, PATH=str(work) + os.pathsep + os.environ["PATH"],
-               CURL_MARKER=str(marker), CURL_ARGUMENTS=str(arguments))
+               CURL_MARKER=str(marker), CURL_ARGUMENTS=str(arguments),
+               # The production transport prefers the desktop runtime directory.
+               # Tests must use their own writable, cleaned workspace instead.
+               TMPDIR=str(work), XDG_RUNTIME_DIR=str(work / "unavailable-runtime"))
     cases = [
         ("calendar-transport.sh", [], [b"https://example.com/dav", b"user:secret", b"<query/>"], [0, 1, 2]),
         ("calendar-write.sh", [], [b"https://example.com/dav", b"user:secret", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"], [0, 1]),

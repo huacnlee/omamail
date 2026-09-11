@@ -3,6 +3,7 @@ import QtTest
 import "../../components" as C
 import "../../agent" as AI
 import "../../agent/Agent.js" as Agent
+import "../oracles/agent/Agent.js" as Oracle
 
 Item {
   width: 800; height: 650
@@ -23,10 +24,10 @@ Item {
     property bool accept: true
     property int calls: 0
     property string requestedId: ""
-    function agentJobFor(id, account) { return Agent.selectionJob(jobs,[id],account) }
-    function agentSelectionJob(ids, account) { return Agent.selectionJob(jobs,ids,account) }
-    function agentHistoryFor(fields, ids, account) { return Agent.historyFor(jobs, fields ? fields.accountId : account, ids, fields ? fields.draftKey : "") }
-    function agentJobsForDraft(fields) { return Agent.draftJobs(jobs,fields.accountId,fields.draftKey) }
+    function agentJobFor(id, account) { return Oracle.selectionJob(jobs,[id],account) }
+    function agentSelectionJob(ids, account) { return Oracle.selectionJob(jobs,ids,account) }
+    function agentHistoryFor(fields, ids, account) { return Oracle.historyFor(jobs, fields ? fields.accountId : account, ids, fields ? fields.draftKey : "") }
+    function agentJobsForDraft(fields) { return Oracle.draftJobs(jobs,fields.accountId,fields.draftKey) }
     function showAgentJob(id) { agentShownId=id }
     function acknowledgeAgentJob(id) {}
     function askAgent(id, prompt, account) { requestedId=id; calls++; if (accept) agentStarting=true; return accept }
@@ -49,7 +50,13 @@ Item {
     textColor: Qt.rgba(0.93,0.93,0.93,1); accentColor: Qt.rgba(0.66,0.8,0.93,1); urgentColor: Qt.rgba(0.93,0.66,0.66,1); dimColor: Qt.rgba(0.6,0.6,0.6,1)
     popupBackgroundColor: Qt.rgba(0.13,0.13,0.13,1); popupBorderColor: Qt.rgba(0.26,0.26,0.26,1); panelFontFamily: "monospace"
   }
-  AI.AgentRunner { id: runner; pluginDir:"/synthetic" }
+  QtObject {
+    id: runnerBackend
+    property bool ready: true
+    property var requests: []
+    function call(method, params, callback) {requests=requests.concat([{method:method,params:params,callback:callback}])}
+  }
+  AI.AgentRunner { id: runner; pluginDir:"/synthetic"; backend:runnerBackend }
   TestCase {
     name: "AgentInteraction"
     when: windowShown
@@ -374,21 +381,16 @@ Item {
     }
 
     function test_switching_result_while_reading_retries_latest_id() {
+      runnerBackend.requests=[]
       runner.show("one")
-      var shower=null
-      for (var i=0;i<runner.children.length;i++) {
-        var child=runner.children[i]
-        if(child.command && child.command.indexOf("show")>=0) shower=child
-      }
-      verify(shower!==null)
+      compare(runnerBackend.requests.length,1)
+      compare(runnerBackend.requests[0].method,"agent.jobShow")
       runner.show("two")
-      shower.stdout.text=JSON.stringify({job:{id:"one"},output:"Old"})
-      shower.running=false;shower.exited(0)
-      compare(shower.command[shower.command.length-1],"two")
-      compare(shower.running,true)
+      runnerBackend.requests[0].callback({job:{id:"one"},output:"Old",transcript:[]}, "")
+      compare(runnerBackend.requests[1].params.id,"two")
+      compare(runner.showing,true)
       compare(runner.shownOutput,"")
-      shower.stdout.text=JSON.stringify({job:{id:"two"},output:"Latest"})
-      shower.running=false;shower.exited(0)
+      runnerBackend.requests[1].callback({job:{id:"two"},output:"Latest",transcript:[]}, "")
       compare(runner.shownOutput,"Latest")
     }
   }

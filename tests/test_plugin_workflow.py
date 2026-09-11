@@ -11,7 +11,11 @@ class PluginWorkflow(unittest.TestCase):
     def test_install_delegates_to_plugin_installer(self):
         result = subprocess.run(["make", "--no-print-directory", "-n", "install"], cwd=ROOT,
                                 capture_output=True, text=True, check=True)
-        self.assertEqual(result.stdout.strip(), "bash scripts/link-plugin.sh")
+        self.assertEqual(result.stdout.strip().splitlines(), [
+            f'cargo build --locked --release --target-dir "{ROOT}/target" --bin omamail',
+            'python3 scripts/backend-runtime.py install-local',
+            'bash scripts/link-plugin.sh',
+        ])
 
 
 if __name__ == "__main__":

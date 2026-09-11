@@ -1,4 +1,5 @@
 //! Bounded subprocess transport for providers with an official command interface.
+pub mod async_run;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;

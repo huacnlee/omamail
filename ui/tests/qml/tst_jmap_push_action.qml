@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "transports.js" as Transports
+import "NativeIntentFixture.js" as NativeIntentFixture
 import "../../account" as Account
 
 // A push that lands while an action is still in the air.
@@ -45,6 +46,12 @@ Item {
 
   TestCase {
     name: "JmapPushAction"
+    function initTestCase() { account.backend = NativeIntentFixture.backend(account) }
+    function settleNative() {
+      wait(1)
+      tryVerify(function() {return account.backend.pending.length === 0})
+    }
+
     when: windowShown
 
     // A session with no `eventSourceUrl`, so the push owner has nowhere to
@@ -90,6 +97,7 @@ Item {
       // The session and the mailbox list are what every read gates on, and both
       // are normally the answer to a request. Placing them here is what stops
       // the action below from spending its first round trip on them.
+      Transports.install(account.api)
       account.api.session = session
       account.api.mailboxList = mailboxes
       account.api.mailboxesLoaded = true
@@ -102,6 +110,7 @@ Item {
       tryVerify(function() { return account.ready }, 2000,
         "a configured mailbox with a secret in memory is ready")
 
+      wait(1)
       // One row, already on screen and already loaded — so the deferral below
       // is the ordinary one rather than the cleared-view variant.
       account.messages = [{ id: "m1", subject: "One", unread: true,
@@ -111,6 +120,7 @@ Item {
 
       var beforeAction = Transports.transports(account.api)
       verify(account.act("m1", "markRead"), "the action was accepted")
+      settleNative()
       compare(account.pendingAction, "markRead")
       compare(account.pendingActionQuery, account.cacheKey)
       var actionProcesses = Transports.newSince(account.api, beforeAction)
@@ -131,11 +141,11 @@ Item {
       compare(Transports.newSince(account.api, beforePush).length, 0,
         "no list request went out while the action was pending")
 
-      // The action answers. The reply is short of the four lines the transport
-      // writes, which is the script refusing before curl ran — the failure path,
+      // The action answers with a backend transport failure — the failure path,
       // where the row goes back and the deferred load is replayed all the same.
       var beforeReply = Transports.transports(account.api)
-      actionProcess.exited(2)
+      Transports.fail(actionProcess)
+      settleNative()
 
       compare(account.pendingAction, "", "the action is finished")
       compare(account.deferredListLoad, null, "and the deferred load was taken")

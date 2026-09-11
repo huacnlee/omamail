@@ -13,6 +13,16 @@ Item {
   height: 500
 
   QtObject {
+    id: fakeBackend
+    property bool ready: true
+    property string method: ""
+    property var params: null
+    property var callback: null
+    function call(method, params, callback) {
+      fakeBackend.method = method; fakeBackend.params = params; fakeBackend.callback = callback
+    }
+  }
+  QtObject {
     id: fakeService
 
     property string activeAccountId: "a@example.org"
@@ -26,6 +36,10 @@ Item {
     property bool notifyNewMail: true
     property string contentDirection: "auto"
     property var auth: null
+    property var backend: fakeBackend
+    property string signatureId: ""
+    property string signatureHtml: ""
+    function setAccountSignatureHtml(id, html) { signatureId = id; signatureHtml = html }
 
     // What the page wrote, and for which mailbox.
     property string namedId: ""
@@ -83,6 +97,23 @@ Item {
       fakeService.namedText = ""
       fakeService.nameWrites = 0
       page.selectNameAccount("a@example.org")
+    }
+
+    function test_signature_import_waits_for_native_result_and_keeps_original_account() {
+      fakeService.signatureHtml = ""
+      page.selectedSignatureAccountId = "a@example.org"
+      page.importStage = "read"
+      page.importing = true
+      page.finishImport(JSON.stringify({ok: true, mimeType: "image/png", data: "iVBORw0KGgoAAA=="}))
+      compare(fakeBackend.method, "message.signatureImport")
+      compare(fakeBackend.params.kind, "image")
+      compare(page.importing, true)
+      compare(fakeService.signatureHtml, "")
+      page.selectedSignatureAccountId = "b@example.net"
+      fakeBackend.callback({html: "<p>native</p>", plain: "", images: 1, dropped: 0, problem: ""}, null)
+      compare(fakeService.signatureId, "a@example.org")
+      compare(fakeService.signatureHtml, "<p>native</p>")
+      compare(page.importing, false)
     }
 
     function test_the_field_is_on_the_page_and_starts_from_the_stored_name() {

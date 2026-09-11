@@ -89,7 +89,7 @@ QtObject {
     account.bodies.put(messageId, ({
       text: account.selectedBody.text,
       source: account.selectedBody.source,
-      html: account.sourceHtml,
+      html: "",
       attachments: account.selectedAttachments,
       images: account.selectedImages,
       invite: updated,

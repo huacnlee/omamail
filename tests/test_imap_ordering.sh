@@ -253,22 +253,17 @@ stop_server
 [ "$(commands)" = 'CAPABILITY|LOGIN|ID NIL|SELECT "{one,two}"|UID FETCH 1:* (UID)|NOOP|LOGOUT|' ] \
   || fail "an encoded folder must remain literal across all sections, saw: $(commands)"
 
-# The gate itself lives in QML, where none of the above can reach it.
+# Rust owns capability negotiation and sends ID once before selecting a folder.
+# The native controlled-server test proves both ID/non-ID peers and pool reuse.
 python3 - <<'SRC' || exit 1
-import re, sys
-
-text = open("ui/providers/ImapClient.qml", encoding="utf-8").read()
-start = text.index("function run(folder, commands, callback, existingHandle)")
-end = text.index("function ensureFolders", start)
-block = text[start:end]
-
-gate = re.search(r'hasCapability\(root\.serverCapabilities,\s*"ID"\)', block)
-if not gate:
-    sys.exit("test_imap_ordering.sh: ID must be sent only to a server that advertised it")
-if block.index("Imap.idCommand()") < gate.start():
-    sys.exit("test_imap_ordering.sh: the ID command must sit behind the capability check")
-if 'transportMode(opening === "" ? "imap" : "imap-id")' not in block:
-    sys.exit("test_imap_ordering.sh: the ID command must travel in the transport's imap-id mode")
+from pathlib import Path
+text = Path("src/providers/imap/mod.rs").read_text()
+acquire = text[text.index("async fn acquire("):text.index("async fn release(")]
+assert 'command(&mut wire, "CAPABILITY")' in acquire
+assert 'if advertises_id(&capabilities)' in acquire
+assert acquire.index('if advertises_id(&capabilities)') < acquire.index('"ID (')
+assert 'p["identify"]' not in text
+assert 'native_id_gate_is_checked_once_before_select' in Path("src/providers/imap/tests.rs").read_text()
 SRC
 
 echo "imap ordering ok"

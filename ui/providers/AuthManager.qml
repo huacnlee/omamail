@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Commons
 
 import "OAuth.js" as OAuth
 import "Credentials.js" as Credentials
@@ -25,6 +24,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  property var backend: null
   property int oauthPort: OAuth.DEFAULT_PORT
   property var scopes: OAuth.SCOPES
 
@@ -33,16 +33,6 @@ Item {
   // keyring entry has to be keyed on both or they overwrite each other and one
   // gets signed out at random.
   property string accountId: ""
-
-  // The browser page after Google redirects is the only part of this app that
-  // renders outside Quickshell, so it takes the active theme with it.
-  readonly property var callbackTheme: ({
-    background: String(Color.background),
-    foreground: String(Color.foreground),
-    accent: String(Color.accent),
-    urgent: String(Color.urgent),
-    fontFamily: Style.font.family
-  })
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string credentialsPath: Credentials.path(home)
@@ -72,7 +62,7 @@ Item {
   property string lastError: ""
 
   // Everything the sign-in needs that Omarchy does not guarantee is present.
-  readonly property var requiredTools: ["socat", "secret-tool", "openssl", "xdg-open"]
+  readonly property var requiredTools: ["secret-tool", "xdg-open"]
   property var missingTools: []
   property bool toolsChecked: false
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
@@ -87,9 +77,8 @@ Item {
   property string keyringWriteToken: ""
   property string credentialsWritePayload: ""
 
-  property string pkceVerifier: ""
-  property string pkceChallenge: ""
-  property string oauthState: ""
+  property var signedInProfile: null
+  property string nativeFlow: ""
   property bool callbackHandled: false
   property bool exchangingCode: false
   property var tokenRequest: null
@@ -111,6 +100,7 @@ Item {
   }
 
   function resetMemorySession() {
+    signedInProfile = null
     accessToken = ""
     accessTokenExpiresAt = 0
     loggedIn = false
@@ -226,6 +216,12 @@ Item {
   property bool mayAdoptLegacyToken: true
 
   function startSecretLookup() {
+    if (accountId !== "" && backend) {
+      savedSessionPresent = true
+      refreshWithToken("", lookupPurpose)
+      lookupPurpose = ""
+      return
+    }
     if (!clientId) {
       handleSecretLookup("")
       return
@@ -379,63 +375,23 @@ Item {
 
   // ---------------------------------------------------------------- tokens
 
-  // How long the token endpoint may hang before the sign-in gives up on it.
-  //
-  // Qt's QML XMLHttpRequest has no `timeout` and no `ontimeout`; a `Timer`
-  // calling `abort()` is what there is. See `GmailApiClient.requestTimeoutMs`
-  // for the measurements, and for why thirty seconds.
-  //
-  // This one matters more than a list load does: a session restore that never
-  // answers leaves `sessionChecked` false, and the panel waits on it for a
-  // session that is never coming.
-  readonly property int tokenTimeoutMs: 30000
-
+  // Native requests have a bounded deadline in the backend.
   function postTokenRequest(body, previousRefreshToken, callback) {
     var serial = ++tokenRequestSerial
-    var request = new XMLHttpRequest()
+    var request = { abort: function() { root.tokenRequestSerial++ } }
     tokenRequest = request
-
-    var deadline = tokenDeadlineComponent.createObject(root, { interval: tokenTimeoutMs })
-    function disarm() {
-      if (!deadline) return
-      deadline.stop()
-      deadline.destroy()
-      deadline = null
+    if (!backend || !backend.ready) {
+      callback(OAuth.parseTokenResponse(0, "", previousRefreshToken))
+      return
     }
-
-    request.onreadystatechange = function() {
-      if (request.readyState !== XMLHttpRequest.DONE) return
-      disarm()
+    if (!accountId) { callback(OAuth.parseTokenResponse(0, "", "")); return }
+    backend.call("auth.token", { provider: "gmail", accountId: accountId, resource: "mail" }, function(result, error) {
       if (serial !== root.tokenRequestSerial) return
-      if (root.tokenRequest === request) root.tokenRequest = null
-      // `abort()` drives readyState to DONE with status 0, so a request the
-      // deadline gave up on lands here as the failure it is —
-      // `parseTokenResponse` already reads a zero status as "could not reach
-      // Google", which is the honest thing to tell somebody whose network went
-      // away mid sign-in.
-      var result = OAuth.parseTokenResponse(request.status, request.responseText,
-        previousRefreshToken)
-      if (typeof callback === "function") callback(result)
-    }
-    request.open("POST", OAuth.TOKEN_URL)
-    request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
-    request.send(body)
-
-    if (deadline) {
-      deadline.triggered.connect(function() {
-        if (!root) return
-        if (request.abort) request.abort()
-      })
-      deadline.start()
-    }
-  }
-
-  Component {
-    id: tokenDeadlineComponent
-
-    Timer {
-      repeat: false
-    }
+      root.tokenRequest = null
+      var signedOut = error === "gmail_invalid_token" || error === "gmail_token_invalid" || error === "gmail_token_missing" || error === "gmail_unauthorized"
+      callback(OAuth.parseTokenResponse(error ? 400 : 200,
+        error ? JSON.stringify({ error: signedOut ? "invalid_grant" : "temporarily_unavailable" }) : JSON.stringify(result), ""))
+    })
   }
 
   function refreshWithToken(refreshToken, purpose) {
@@ -500,8 +456,45 @@ Item {
     loginBusy = true
     callbackHandled = false
     exchangingCode = false
-    pkceGenerator.command = [pluginDir + "/scripts/pkce.sh"]
-    pkceGenerator.running = true
+    if (!backend || !backend.ready) { failLogin("Mail backend unavailable"); return }
+    var serial = ++tokenRequestSerial
+    backend.call("auth.begin", { clientId: clientId, clientSecret: credentials.clientSecret,
+      port: OAuth.normalizedPort(oauthPort), scopes: scopes, loginHint: loginHint }, function(result, error) {
+      if (serial !== root.tokenRequestSerial || !root.loginBusy) {
+        if (result && result.id) root.backend.call("auth.cancel", { id: result.id }, function() {})
+        return
+      }
+      if (error) {
+        root.failLogin(error === "auth_port_unavailable"
+          ? "Could not listen on port " + OAuth.normalizedPort(root.oauthPort) + ". Close the other listener or change the port in settings"
+          : "Could not start secure Google sign-in")
+        return
+      }
+      root.nativeFlow = result.id
+      Quickshell.execDetached(["xdg-open", result.url])
+      nativePoll.start()
+      authTimeout.restart()
+    })
+  }
+
+  function pollNativeLogin() {
+    if (!nativeFlow || !loginBusy) return
+    var flow = nativeFlow
+    backend.call("auth.poll", { id: flow }, function(result, error) {
+      if (flow !== root.nativeFlow) return
+      if (error) {
+        root.failLogin(error.message === "auth_missing_scope"
+          ? "Google sign-in is missing permissions. Sign in again and leave every checkbox ticked"
+          : (error.message === "auth_keyring_failed" ? "Could not save the Google session to the keyring. Please try again"
+            : "Google sign-in failed. Please try again"))
+        return
+      }
+      if (result.pending) { nativePoll.start(); return }
+      root.nativeFlow = ""
+      authTimeout.stop()
+      root.signedInProfile = result.profile || null
+      root.acceptSignIn(OAuth.parseTokenResponse(result.status, result.body, ""))
+    })
   }
 
   function scheduleRefreshRetry() {
@@ -511,75 +504,7 @@ Item {
     refreshRetry.start()
   }
 
-  function handlePkce(raw) {
-    if (!loginBusy || pkceVerifier !== "") return
-    var result = OAuth.parsePkceOutput(raw)
-    if (!result.ok) {
-      failLogin("Could not start a secure Google sign-in. Please try again")
-      return
-    }
-    pkceVerifier = result.verifier
-    pkceChallenge = result.challenge
-    oauthState = result.state
-    // socat answers exactly one connection and exits, which is all the
-    // loopback redirect needs and leaves nothing listening afterwards.
-    callbackListener.command = [
-      "socat", "-T", "180",
-      "TCP4-LISTEN:" + OAuth.normalizedPort(oauthPort) + ",bind=127.0.0.1,reuseaddr",
-      "STDIO"
-    ]
-    callbackListener.running = true
-    authTimeout.restart()
-  }
-
-  function openAuthorizationPage() {
-    if (!loginBusy || callbackHandled || pkceChallenge === "") return
-    Quickshell.execDetached(["xdg-open", OAuth.authorizationUrl({
-      clientId: clientId,
-      challenge: pkceChallenge,
-      state: oauthState,
-      port: oauthPort,
-      scopes: scopes,
-      loginHint: loginHint
-    })])
-  }
-
-  function handleCallbackLine(rawLine) {
-    if (!loginBusy || callbackHandled) return
-    var line = String(rawLine || "").replace(/\r$/, "")
-    if (line.indexOf("GET ") !== 0) return
-    callbackHandled = true
-    authTimeout.stop()
-    var callback = OAuth.parseCallbackRequestLine(line, OAuth.CALLBACK_PATH)
-    // A mismatched state means this response did not come from the request
-    // this process started, so the code in it is not exchanged.
-    if (!callback.ok || callback.state !== oauthState) {
-      callbackListener.write(OAuth.failureResponse(callbackTheme, callback.error))
-      callbackStopTimer.restart()
-      failLogin(callback.ok
-        ? "Google sign-in could not be verified. Please try again"
-        : callback.error, true)
-      return
-    }
-    callbackListener.write(OAuth.successResponse(callbackTheme))
-    callbackStopTimer.restart()
-    exchangeAuthorizationCode(callback.code)
-  }
-
-  function exchangeAuthorizationCode(code) {
-    exchangingCode = true
-    var requestBody = OAuth.formBody({
-      client_id: clientId,
-      client_secret: credentials.clientSecret,
-      code: code,
-      code_verifier: pkceVerifier,
-      grant_type: "authorization_code",
-      redirect_uri: OAuth.redirectUri(oauthPort)
-    })
-    code = ""
-    clearPkce()
-
-    postTokenRequest(requestBody, "", function(result) {
+  function acceptSignIn(result) {
       root.exchangingCode = false
       root.loginBusy = false
       if (!result.ok) {
@@ -604,14 +529,6 @@ Item {
       root.sessionChecked = true
       root.finishWaiters(root.accessToken, "")
       root.loginSucceeded()
-    })
-    requestBody = ""
-  }
-
-  function clearPkce() {
-    pkceVerifier = ""
-    pkceChallenge = ""
-    oauthState = ""
   }
 
   function failLogin(reason, listenerAlreadyAnswered) {
@@ -619,18 +536,15 @@ Item {
     loginBusy = false
     exchangingCode = false
     authTimeout.stop()
-    authOpenDelay.stop()
-    if (!listenerAlreadyAnswered && callbackListener.running) callbackListener.running = false
-    clearPkce()
+    nativePoll.stop()
+    stopNativeLogin()
     sessionUnavailable(lastError)
   }
 
   function cancelLogin() {
     authTimeout.stop()
-    authOpenDelay.stop()
-    callbackStopTimer.stop()
-    if (callbackListener.running) callbackListener.running = false
-    if (pkceGenerator.running) pkceGenerator.running = false
+    nativePoll.stop()
+    stopNativeLogin()
     tokenRequestSerial++
     if (tokenRequest && tokenRequest.abort) tokenRequest.abort()
     tokenRequest = null
@@ -638,7 +552,6 @@ Item {
     loginBusy = false
     exchangingCode = false
     callbackHandled = false
-    clearPkce()
   }
 
   function logout() {
@@ -719,16 +632,16 @@ Item {
     }
   }
 
-  Timer {
-    id: authOpenDelay
-    interval: 120
-    onTriggered: root.openAuthorizationPage()
+  function stopNativeLogin() {
+    nativePoll.stop()
+    if (nativeFlow && backend) backend.call("auth.cancel", { id: nativeFlow }, function() {})
+    nativeFlow = ""
   }
 
   Timer {
-    id: callbackStopTimer
-    interval: 250
-    onTriggered: if (callbackListener.running) callbackListener.running = false
+    id: nativePoll
+    interval: 500
+    onTriggered: root.pollNativeLogin()
   }
 
   Timer {
@@ -741,38 +654,6 @@ Item {
     id: refreshRetry
     repeat: false
     onTriggered: root.restoreSession()
-  }
-
-  Process {
-    id: pkceGenerator
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handlePkce(line) }
-    }
-    onExited: function(exitCode) {
-      if (root.loginBusy && root.pkceVerifier === "" && exitCode !== 0)
-        root.failLogin("Could not start a secure Google sign-in. Please try again")
-    }
-  }
-
-  Process {
-    id: callbackListener
-    stdinEnabled: true
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) { root.handleCallbackLine(line) }
-    }
-    stderr: StdioCollector { waitForEnd: true }
-    // The browser only opens once the listener is actually accepting, or the
-    // redirect races it and lands on a closed port.
-    onStarted: authOpenDelay.restart()
-    onExited: function(exitCode) {
-      if (root.loginBusy && !root.callbackHandled && !root.exchangingCode)
-        root.failLogin(exitCode === 0
-          ? "The Google sign-in window closed before it finished"
-          : "Could not listen on port " + OAuth.normalizedPort(root.oauthPort)
-            + ". Close whatever is using it, or change the port in settings")
-    }
   }
 
   Process {

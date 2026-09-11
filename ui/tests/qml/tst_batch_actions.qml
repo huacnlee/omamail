@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "BackendFixture.js" as BackendFixture
+import "NativeIntentFixture.js" as NativeIntentFixture
 import "../../account/Accounts.js" as Accounts
 
 // The batch's two boundaries, driven against a client the test controls.
@@ -32,7 +33,10 @@ Item {
     property int lists: 0
     property string refuse: ""
     property bool refuseBatch: false
-    function reset() { trashed = []; untrashed = []; batches = []; lists = 0; refuse = ""; refuseBatch = false }
+    property bool hold: false
+    property var pending: []
+    function finish() {var callbacks=pending;pending=[];hold=false;for(var i=0;i<callbacks.length;i++)callbacks[i]()}
+    function reset() { trashed = []; untrashed = []; batches = []; lists = 0; refuse = ""; refuseBatch = false; hold=false; pending=[] }
   }
 
   Component {
@@ -41,7 +45,7 @@ Item {
       property var auth: null
       property string email: ""
       function handle() { return ({ aborted: false }) }
-      function later(fn) { Qt.callLater(fn); return handle() }
+      function later(fn) { if(record.hold)record.pending=record.pending.concat([fn]);else Qt.callLater(fn); return handle() }
       function trashMessage(id, callback) {
         var mine = record.trashed.slice(); mine.push(String(id)); record.trashed = mine
         var refused = String(id) === record.refuse
@@ -88,7 +92,7 @@ Item {
     name: "BatchActions"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() { BackendFixture.markReady(mailService); NativeIntentFixture.install(mailService) }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"
@@ -258,7 +262,14 @@ Item {
       mouseClick(target, 32, target.height / 2, Qt.LeftButton, Qt.ControlModifier)
       compare(check.visible, true, "selection mode survives releasing Ctrl")
       compare(star.visible, false)
+      compare(app.checkedIds.join(","), "1:INBOX")
+      // Visibility changes synchronously, but Row lays out its replacement
+      // controls on the next polish. Wait for the actual checkbox hit target,
+      // otherwise this click can use the old three-button lane coordinates.
+      tryCompare(check.parent, "width", check.width)
+      tryCompare(check, "x", 0)
       mouseClick(check, check.width / 2, check.height / 2)
+      compare(app.checkedIds.length, 0, "the checkbox click clears the selection")
       compare(check.visible, false, "clearing the last check restores actions")
       compare(star.visible, true)
       app.close()
@@ -371,9 +382,12 @@ Item {
       app.cursorId = "1:INBOX"
       verify(app.toggleCheck("1:INBOX"))
       verify(app.toggleCheck("2:INBOX"))
+      record.hold=true
       app.runShortcut("trash", "d")
+      tryCompare(account, "pendingAction", "trash")
       compare(account.messages.length, 1, "both rows left optimistically")
       tryCompare(record, "trashed", ["1:INBOX", "2:INBOX"])
+      record.finish()
       tryVerify(function() { return account.messages.length === 2 }, 1000)
       compare(account.messages.map(function(m) { return m.id }), ["2:INBOX", "3:INBOX"],
         "the refused row is back in its place; the accepted one is gone")
@@ -394,9 +408,12 @@ Item {
       verify(app.toggleCheck("1:INBOX"))
       verify(app.toggleCheck("2:INBOX"))
       var listsBefore = record.lists
+      record.hold=true
       app.runShortcut("trash", "d")
+      tryCompare(account, "pendingAction", "trash")
       compare(account.hasMore, false, "the optimistic page has no token")
       tryCompare(record, "trashed", ["1:INBOX", "2:INBOX"])
+      record.finish()
       tryVerify(function() { return account.messages.length === 2 }, 1000)
       tryVerify(function() { return record.lists > listsBefore }, 1000)
       compare(account.messages.map(function(m) { return m.id }), ["2:INBOX", "3:INBOX"],
@@ -417,12 +434,14 @@ Item {
       verify(app.toggleCheck("1:INBOX"))
       verify(app.toggleCheck("2:INBOX"))
       var listsBefore = record.lists
+      record.hold=true
       app.runShortcut("trash", "d")
-      compare(account.pendingAction, "trash")
+      tryCompare(account, "pendingAction", "trash")
       account.loadMessages(false, true, "")
       compare(record.lists, listsBefore, "the refresh waits on the action")
       verify(account.deferredListLoad !== null, "and is remembered")
       tryCompare(record, "trashed", ["1:INBOX", "2:INBOX"])
+      record.finish()
       tryVerify(function() { return account.pendingAction === "" }, 1000)
       tryVerify(function() { return record.lists > listsBefore }, 1000)
       compare(account.deferredListLoad, null, "the waiting refresh ran")
@@ -440,10 +459,12 @@ Item {
       verify(app.toggleCheck("1:INBOX"))
       verify(app.toggleCheck("2:INBOX"))
       var listsBefore = record.lists
+      record.hold=true
       app.runShortcut("markRead", "I")
-      compare(account.pendingAction, "markRead")
+      tryCompare(account, "pendingAction", "markRead")
       account.loadMessages(false, true, "")
       compare(record.lists, listsBefore, "the refresh waits on the action")
+      record.finish()
       tryVerify(function() { return account.pendingAction === "" }, 1000)
       tryVerify(function() { return record.lists > listsBefore }, 1000)
       compare(account.deferredListLoad, null, "the waiting refresh ran")

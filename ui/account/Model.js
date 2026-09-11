@@ -1136,10 +1136,9 @@ function wrappedIndex(index, delta, count) {
 }
 
 // Where the list cursor lands after a step. Anchored on the cursor itself,
-// because the cursor and the open message are two different things: nothing is
-// open while the list is being walked, and walking must not move the reader.
-// Anchoring this on the open message pinned it — every step in the list
-// resolved to row 0, and in the reader the anchor never advanced.
+// because a conversation member can be open while the cursor stays on its
+// representative row. The window opens the resulting row immediately, but
+// anchoring this on the opened member would send movement back to row 0.
 function cursorAfterOffset(list, cursorId, delta) {
   var source = Array.isArray(list) ? list : []
   if (source.length === 0) return ""

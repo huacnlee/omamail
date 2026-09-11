@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "BackendFixture.js" as BackendFixture
+import "NativeIntentFixture.js" as NativeIntentFixture
 
 // The move route through the real objects. Unit tests own each rule; this one
 // catches a forwarding argument or property dropped between App, Service and
@@ -31,7 +32,7 @@ Item {
     name: "MoveWiring"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() { BackendFixture.markReady(mailService); NativeIntentFixture.install(mailService) }
 
     function named(item, objectName) {
       if (!item) return null
@@ -96,7 +97,7 @@ Item {
       verify(slot >= 0)
       app.goSlot(slot)
 
-      compare(account.rawLabelId, "Label_3")
+      tryCompare(account, "rawLabelId", "Label_3")
       compare(mailService.rawLabelId, "Label_3")
       compare(mailService.rawQuery, "label:Work")
       compare(ids(named(app, "label-picker").matchingLabels), "Label_7",
@@ -127,6 +128,8 @@ Item {
 
       verify(app.actOnCursor("label:Label_7"))
 
+      tryCompare(account, "actionPreparations", 0)
+      tryCompare(mailService, "selectedId", "two")
       compare(mailService.selectedId, "two",
         "the reader follows the action to the same next message as the cursor")
       compare(app.cursorId, "two",
@@ -157,7 +160,7 @@ Item {
       verify(slot >= 0)
       app.goSlot(slot)
 
-      compare(account.rawLabelId, "Receipts")
+      tryCompare(account, "rawLabelId", "Receipts")
       compare(ids(named(app, "label-picker").matchingLabels), "Archive",
         "the current folder cannot become a same-folder UID MOVE")
     }

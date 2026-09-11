@@ -11,10 +11,8 @@ import "Secrets.js" as Secrets
 // Same shape from outside as `ImapAuth` and `AuthManager`: `MailAccount` asks
 // whether it is `loggedIn` and asks for a credential with one call whose
 // callback takes `(value, error)`. What differs is what a credential *is*
-// here. IMAP's is one `user:password` field because that is what curl wants;
-// this one is three fields — a scheme, a username and a secret — because the
-// transport script builds the `Authorization` value itself and QML must never
-// assemble one.
+// here: a scheme, a username and a secret. Rust constructs and validates the
+// Authorization header; QML never assembles one.
 //
 // The secret is an app password or an API token, and which of the two it is
 // decides the scheme. That is detected rather than asked: the client sends the
@@ -33,6 +31,7 @@ Item {
   width: 0
   height: 0
 
+  property var backend: null
   required property string pluginDir
 
   // Which mailbox this signs in. Known from the moment the address is typed,
@@ -96,10 +95,8 @@ Item {
   // this is only what the last check found out, for the page's one sentence.
   property bool sendingOffered: true
 
-  // secret-tool holds the credential and curl carries every request. Neither
-  // is a helper Omarchy might not ship, and both are checked here rather than
-  // discovered as a failed sign-in.
-  readonly property var requiredTools: ["secret-tool", "curl"]
+  // secret-tool holds the credential. Rust owns all network requests.
+  readonly property var requiredTools: ["secret-tool"]
   property var missingTools: []
   property bool toolsChecked: false
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
@@ -127,8 +124,8 @@ Item {
   }
 
   // Three fields rather than one string. The script joins them into whichever
-  // header the scheme needs, and refuses a scheme it does not know before curl
-  // runs — so there is no place here where an `Authorization` value is built.
+  // header the scheme needs, and refuses a scheme it does not know before networking
+  // starts — so there is no place here where an `Authorization` value is built.
   function credential() {
     var values = settings || {}
     var user = String(values.username || "")
@@ -313,7 +310,7 @@ Item {
 
   Component.onCompleted: {
     toolProbe.command = ["sh", "-c",
-      "for tool in secret-tool curl; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
+      "for tool in secret-tool; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
     toolProbe.running = true
   }
 

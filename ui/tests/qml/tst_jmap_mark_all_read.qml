@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "transports.js" as Transports
+import "NativeIntentFixture.js" as NativeIntentFixture
 import "../../account" as Account
 
 // "Mark these read" reaches the rail and the open message, and comes back.
@@ -41,6 +42,8 @@ Item {
 
   TestCase {
     name: "JmapMarkAllRead"
+    function initTestCase() {account.backend=NativeIntentFixture.backend(account)}
+    function settleNative() {wait(1);tryVerify(function(){return account.backend.pending.length===0})}
     when: windowShown
 
     readonly property var session: ({
@@ -85,6 +88,7 @@ Item {
 
     function test_mark_all_read_marks_the_rail_and_the_open_member_and_restores() {
       verify(!!account.auth && !!account.api)
+      Transports.install(account.api)
       account.api.session = session
       account.api.mailboxList = mailboxes
       account.api.mailboxesLoaded = true
@@ -103,8 +107,10 @@ Item {
       account.selectedId = "m2"
       account.selectedMessage = member("m2", true)
 
+      wait(1)
       var before = Transports.transports(account.api)
       verify(account.markAllRead(), "the batch was accepted")
+      settleNative()
       compare(account.pendingAction, "markRead")
       var requests = Transports.newSince(account.api, before)
       compare(requests.length, 1, "one request for the whole batch")
@@ -117,9 +123,10 @@ Item {
       compare(account.memberSummaries.m2.unread, false, "the reply's stop is read too")
       compare(account.selectedMessage.unread, false, "and so is the open message")
 
-      // The request fails — a reply short of the four lines — and everything
+      // The backend request fails, and everything
       // that was marked goes back: rows, stops and the open message.
-      requests[0].exited(2)
+      Transports.fail(requests[0])
+      settleNative()
       compare(account.pendingAction, "")
       compare(account.messages[0].unread, true, "the row is back")
       compare(account.memberSummaries.m1.unread, true, "and the representative's stop")

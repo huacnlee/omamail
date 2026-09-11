@@ -7,7 +7,15 @@ Item {
   height: 600
 
   QtObject {
+    id: recoveryBackend
+    property bool ready: false
+    property var requests: []
+    function call(method, params, callback) { requests = requests.concat([{method:method,params:params,done:callback}]) }
+  }
+
+  QtObject {
     id: mailService
+    property var backend: recoveryBackend
 
     property bool hasAgent: true
     property bool agentStarting: false
@@ -130,9 +138,10 @@ Item {
       sendPending = true
       return true
     }
-    function undoSend() {
+    function undoSend(callback) {
       if (!sendPending) return false
       sendPending = false
+      if (typeof callback === "function") callback(true)
       return true
     }
     function saveDraft(fields, callback) {
@@ -187,6 +196,20 @@ Item {
     }
 
     function init() {
+      recoveryBackend.ready = false
+      recoveryBackend.requests = []
+      app.composeWriting = false
+      app.composeReading = false
+      app.composeRecoveryConflict = false
+      app.composeStorageRevision = ""
+      app.composeReceiptChecking = false
+      app.composeReceiptAcks = []
+      app.composeReceiptAckBusy = ({})
+      app.composeCommittedRevision = 0
+      app.composeDeliveryStates = ({})
+      app.composeWritePayload = ""
+      app.composeWriteQueued = false
+
       var assistant = named(app, "compose-agent")
       if (assistant) {
         assistant.close()
@@ -237,6 +260,104 @@ Item {
       }
     }
 
+    function beginNativeRecovery() {
+      app.composeWritePayload = ""
+      app.composeWriteQueued = false
+      recoveryBackend.ready = true
+      compare(recoveryBackend.requests.length, 1)
+      compare(recoveryBackend.requests[0].method, "compose.recoveryRead")
+      recoveryBackend.requests[0].done({record:{active:false,returnView:"",draft:null,parked:[]},revision:"initial"}, null)
+    }
+    function lastNativeRequest(method) {
+      for (var i = recoveryBackend.requests.length - 1; i >= 0; i--) if (recoveryBackend.requests[i].method === method) return recoveryBackend.requests[i]
+      return null
+    }
+    function recoveredPending() {
+      return {version:1,active:true,returnView:"list",draft:{body:"Recovered queued message",accountId:"me@example.com",pendingSendId:"receipt-one"},parked:[]}
+    }
+    function test_sent_receipt_is_not_restored_and_is_acknowledged_only_after_durable_save() {
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:recoveredPending(),revision:"r1"},null)
+      var receipt = lastNativeRequest("outbox.snapshot")
+      verify(receipt !== null);compare(receipt.params.sendId,"receipt-one")
+      receipt.done({accountId:"me@example.com",entries:[{id:"receipt-one",state:"sent"}]},null)
+      tryVerify(function(){return lastNativeRequest("compose.recoverySave") !== null})
+      verify(app.composeRecovery.active !== true);verify(!composeView().opened)
+      compare(lastNativeRequest("outbox.forget"),null)
+      var saved = lastNativeRequest("compose.recoverySave")
+      saved.done({record:saved.params.record,revision:"r2"},null)
+      lastNativeRequest("outbox.snapshot").done({entries:[{state:"sent"}]},null)
+      verify(lastNativeRequest("outbox.forget") !== null)
+    }
+    function test_queued_receipt_stays_parked_instead_of_opening_a_duplicate_composer() {
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:recoveredPending(),revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({accountId:"me@example.com",entries:[{id:"receipt-one",state:"queued"}]},null)
+      tryVerify(function(){return composeView().parkedDrafts.length > 0})
+      compare(composeView().parkedDrafts[0].sendId,"receipt-one")
+      app.opened = true;app.restoreComposeRecovery();verify(!composeView().opened)
+    }
+    function test_recovered_identical_send_ids_in_different_accounts_are_not_deduplicated() {
+      recoveryBackend.ready = true
+      var record = recoveredPending()
+      record.parked = [{body:"Other queued message",accountId:"other@example.org",pendingSendId:"receipt-one"}]
+      lastNativeRequest("compose.recoveryRead").done({record:record,revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({entries:[{id:"receipt-one",state:"queued"}]},null)
+      wait(1)
+      lastNativeRequest("outbox.snapshot").done({entries:[{id:"receipt-one",state:"queued"}]},null)
+      tryCompare(composeView(),"parkedForSend",true)
+      compare(composeView().parkedDrafts.length,2)
+      verify(composeView().parkedDrafts[0].draft.accountId !== composeView().parkedDrafts[1].draft.accountId)
+    }
+    function test_unknown_receipt_is_retained_and_no_send_is_replayed() {
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:recoveredPending(),revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({accountId:"me@example.com",entries:[{id:"receipt-one",state:"unknown"}]},null)
+      tryVerify(function(){return app.composeRecovery.draft && app.composeRecovery.draft.deliveryUnknown === true})
+      compare(lastNativeRequest("outbox.enqueue"),null);compare(lastNativeRequest("outbox.forget"),null)
+      verify(!app.composeRecovery.draft.pendingSendId)
+    }
+    function test_native_recovered_draft_discard_persists_a_tombstone() {
+      beginNativeRecovery()
+      app.loadComposeRecovery({active:true,returnView:"list",draft:{body:"Recovered",accountId:"one@example.org"},parked:[]})
+      verify(app.clearComposeRecovery())
+      compare(recoveryBackend.requests.length,2)
+      compare(recoveryBackend.requests[1].params.record.active,false)
+      compare(recoveryBackend.requests[1].params.expectedRevision,"initial")
+    }
+    function test_native_recovery_serializes_writes_and_stale_reply_keeps_newer_snapshot() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"First",accountId:"one@example.org"})
+      compare(recoveryBackend.requests.length,2)
+      var first = recoveryBackend.requests[1]
+      compare(first.params.expectedRevision,"initial")
+      app.saveComposeRecovery({body:"Second",accountId:"two@example.org"})
+      compare(recoveryBackend.requests.length,2)
+      first.done({record:{active:true,draft:{body:"First"}},revision:"first"},null)
+      compare(app.composeRecovery.draft.body,"Second")
+      compare(recoveryBackend.requests.length,3)
+      var second = recoveryBackend.requests[2]
+      compare(second.params.expectedRevision,"first")
+      compare(second.params.record.draft.accountId,"two@example.org")
+      second.done({record:{active:true,draft:{body:"Second"}},revision:"second"},null)
+      compare(app.composeWritePayload,"")
+      compare(app.composeWriting,false)
+    }
+    function test_native_recovery_conflict_never_retries_over_another_instance() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft"})
+      recoveryBackend.requests[1].done(null,{message:"recovery_conflict"})
+      compare(app.composeRecoveryConflict,true)
+      compare(app.composeRecovery.draft.body,"Keep local draft")
+      app.saveComposeRecovery({body:"New local edit"})
+      compare(recoveryBackend.requests.length,2)
+      recoveryBackend.ready = false
+      recoveryBackend.ready = true
+      compare(recoveryBackend.requests.length,3)
+      recoveryBackend.requests[2].done({record:{active:true,draft:{body:"Other instance"}},revision:"other"},null)
+      compare(app.composeRecovery.draft.body,"New local edit")
+      compare(recoveryBackend.requests.length,3)
+    }
     function test_ai_dock_reserves_space_and_escape_keeps_the_draft() {
       app.open("{}")
       app.startCompose("new")

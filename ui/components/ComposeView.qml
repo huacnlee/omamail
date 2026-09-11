@@ -195,6 +195,9 @@ DropArea {
   }
 
   function clearCurrentDraft(forgetAttachments) {
+    composeTextSerial++
+    pendingQuoteSummary = null
+    pendingQuoteText = ""
     draftKey = newDraftKey()
     forwardLoadSerial++
     fromMenu.close()
@@ -241,9 +244,37 @@ DropArea {
   // Rebuilt rather than patched: the signature is not at a known offset once
   // the quote is under it, and searching for the old one to swap would find a
   // sign-off the user had quoted from somebody else.
+  property int composeTextSerial: 0
+  property var pendingQuoteSummary: null
+  property string pendingQuoteText: ""
+
   function placeBody() {
-    placedBody = bodyPrefix + Mail.composeBody(root.accountSignature, bodyQuote)
-    bodyEdit.text = placedBody
+    var serial = ++composeTextSerial
+    var account = accountId
+    var previous = bodyEdit.text
+    var previouslyEdited = bodyWasEdited
+    var previousSubject = subjectField.text
+    var params = { signature: accountSignature, quote: bodyQuote }
+    if (pendingQuoteSummary) {
+      params.summary = pendingQuoteSummary
+      params.body = pendingQuoteText
+    }
+    if (!service || !service.backend) return
+    service.backend.call("message.composeText", params, function(result, error) {
+      if (serial !== root.composeTextSerial || account !== root.accountId || !root.opened) return
+      if (error || !result) {
+        if (root.service && typeof root.service.fail === "function") root.service.fail("Could not prepare the message text")
+        return
+      }
+      if (bodyEdit.text !== previous || root.bodyWasEdited !== previouslyEdited) return
+      root.bodyQuote = String(result.quote || "")
+      root.pendingQuoteSummary = null
+      root.pendingQuoteText = ""
+      root.placedBody = root.bodyPrefix + String(result.body || "")
+      bodyEdit.text = root.placedBody
+      if (params.summary && (root.mode === "reply" || root.mode === "replyAll") && subjectField.text === previousSubject)
+        subjectField.text = String(result.replySubject || previousSubject)
+    })
   }
 
   // From reaches every mailbox, and choosing one switches the active account
@@ -521,13 +552,14 @@ DropArea {
         if (originalAttachments.length > 0) loadForwardAttachments()
       } else {
         toField.text = replyTo
-        subjectField.text = Mail.replySubject(summary.subject)
+        subjectField.text = String(summary.subject || "")
         if (mode === "replyAll") {
           ccField.text = otherRecipients(summary)
           ccVisible = ccField.text !== ""
         }
       }
-      quoted = Mail.quoteBody(summary, String(bodyText || ""))
+      pendingQuoteSummary = summary
+      pendingQuoteText = String(bodyText || "")
     }
 
     bodyPrefix = ""
@@ -858,7 +890,7 @@ DropArea {
   }
 
   function pumpAttach() {
-    if (attacher.running || root.attachJobs.length === 0) return
+    if (attacher.running || root.attachmentReadPending || root.attachJobs.length === 0) return
     if (root.attachScript === "") {
       root.attachJobs = []
       if (service && typeof service.fail === "function")
@@ -869,17 +901,34 @@ DropArea {
     var rest = root.attachJobs.slice(1)
     root.attachJobs = rest
     root.attaching = true
+    if (job.mode === "read" || job.mode === "forget") {
+      if (!root.service || !root.service.backend || !root.service.backend.ready) {
+        finishAttach(job.mode, JSON.stringify({ ok: false, error: "Mail backend unavailable" }))
+        return
+      }
+      root.attachmentReadPending = true
+      root.service.backend.call(job.mode === "forget" ? "attachment.forget" : "attachment.read", { path: job.path }, function(result, error) {
+        root.attachmentReadPending = false
+        var code = error ? String(error.message || "") : ""
+        finishAttach(job.mode, JSON.stringify(error ? { ok: false,
+          error: code === "attachment_too_large" ? "That file is larger than the 20 MB send limit"
+            : "That file could not be read" } : result))
+      })
+      return
+    }
     attacher.jobMode = job.mode
     if (job.mode === "clipboard")
       attacher.command = [root.attachScript, "clipboard", root.composeDir]
     else if (job.mode === "pick")
       attacher.command = [root.attachScript, "pick"]
-    else if (job.mode === "forget")
-      attacher.command = [root.attachScript, "forget", root.composeDir, job.path]
-    else
-      attacher.command = [root.attachScript, "read", job.path]
+    else {
+      finishAttach(job.mode, JSON.stringify({ ok: false, error: "Unknown attachment action" }))
+      return
+    }
     attacher.running = true
   }
+
+  property bool attachmentReadPending: false
 
   function finishAttach(mode, text) {
     var result = null

@@ -2,7 +2,7 @@
 use serde_json::Value;
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
-pub fn checked_params(params: &Value) -> Result<Value, &'static str> {
+pub async fn checked_params(params: &Value) -> Result<Value, &'static str> {
     let mut fields = params.as_object().ok_or("invalid_params")?.clone();
     let program = fields.remove("program");
     let account = fields.remove("accountId");
@@ -23,17 +23,22 @@ pub fn checked_params(params: &Value) -> Result<Value, &'static str> {
         .ok_or("invalid_hey_binding")?;
     let resolved = resolve_program().ok_or("hey_unavailable")?;
     let requested = std::fs::canonicalize(program).map_err(|_| "hey_program_mismatch")?;
-    if requested != resolved {
+    if requested != resolved.canonicalize().map_err(|_| "hey_unavailable")? {
         return Err("hey_program_mismatch");
     }
-    let bytes = crate::process::run(
+    let output = crate::process::async_run::run(
         resolved.to_str().ok_or("hey_program_mismatch")?,
         &["accounts".into(), "list".into(), "--json".into()],
         b"",
         Duration::from_secs(30),
         1024 * 1024,
-    )?;
-    let response: Value = serde_json::from_slice(&bytes).map_err(|_| "invalid_hey_identity")?;
+    )
+    .await?;
+    if !output.success {
+        return Err("invalid_hey_identity");
+    }
+    let response: Value =
+        serde_json::from_slice(&output.stdout).map_err(|_| "invalid_hey_identity")?;
     if response["ok"] != true {
         return Err("invalid_hey_identity");
     }
@@ -52,8 +57,12 @@ pub fn checked_params(params: &Value) -> Result<Value, &'static str> {
 }
 
 fn resolve_program() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let fallback = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".local/bin"));
     std::env::split_paths(&path)
+        .chain(fallback)
         .filter(|p| p.is_absolute())
         .find_map(|p| {
             let candidate = p.join("hey");
@@ -61,7 +70,9 @@ fn resolve_program() -> Option<PathBuf> {
             if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
                 return None;
             }
-            candidate.canonicalize().ok()
+            // Multicall shims such as mise select the tool from argv[0].
+            // Canonicalize only for identity checks, never for invocation.
+            Some(candidate)
         })
 }
 

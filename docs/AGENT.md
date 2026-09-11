@@ -51,11 +51,13 @@ breathing animation.
 
 ## Background bridge
 
-`AgentContext.qml` loads bodies; `Agent.js` builds context and matches identity.
-`AgentRunner.qml` starts a Python worker and polls validated display snapshots.
-`scripts/agent-job.py` reads requests on stdin and launches the installed Claude
+`AgentContext.qml` requests account-bound context from Rust; `AgentRunner.qml`
+polls native task projections and validated display snapshots.
+The persistent Rust backend accepts structured job requests over JSON-RPC and launches a detached `omamail agent-worker` process. The worker launches the installed Claude
 CLI with non-interactive streaming JSON output. Mail and questions reach Claude
 through stdin, never process arguments. No terminal launcher is invoked.
+Already-running workers from the prior Python bridge remain visible and cancellable
+during an upgrade; new tasks always use the native worker.
 
 Each turn has a private 0700 directory under
 `$XDG_STATE_HOME/omamail/assistant/<turn-id>/`; files are 0600. The parser imports

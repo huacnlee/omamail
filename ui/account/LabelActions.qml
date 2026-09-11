@@ -237,7 +237,7 @@ QtObject {
   property bool reloadQueued: false
 
   function afterLabelMoved(label, newPath, before) {
-    var wasOpen = account.rawQuery !== "" && account.rawQuery === Provider.labelQuery(account.providerId, String(label.rawName || label.name || ""))
+    var wasOpen = account.rawQuery !== "" && account.rawLabelId === String(label.id || "")
     followLabelPath = wasOpen ? String(newPath || "") : ""
     migrations = migrations.concat([{ before: before, oldPath: labelPathOf(label), newPath: String(newPath || ""),
       delimiter: Model.labelDelimiter(label) }])

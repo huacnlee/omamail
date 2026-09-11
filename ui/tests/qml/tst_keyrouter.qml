@@ -177,9 +177,8 @@ Item {
       compare(host.lastId, "cursorDown")
     }
 
-    // Moving is deliberately not opening, so with a message up there has to be
-    // a key that says open — otherwise reading the next one means leaving the
-    // reader and coming back.
+    // Explicit open remains available from the reader, alongside immediate
+    // opening when the mailbox cursor moves.
     function test_open_works_from_the_reader_too() {
       host.context = "reader"
       wait(20)

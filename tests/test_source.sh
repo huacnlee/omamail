@@ -111,28 +111,43 @@ grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
 if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
   fail "the reader view must not sanitise a body; the account renders it once"
 fi
-grep -q 'withReader: eagerReader' account/MailAccount.qml \
-  || fail "the current reading mode must decide whether reader rebuilding is on the paint path"
-grep -q 'Qt.callLater(function()' account/MailAccount.qml \
-  || fail "a deferred reading document must be completed outside the first paint"
-grep -q 'RenderCache.get(renderCache, selectedId, sourceHtml, withPlainText)' account/MailAccount.qml \
-  || fail "reopening a cached body must reuse its process-local parsed documents"
-grep -q 'RenderCache.put(renderCache, selectedId, sourceHtml, withPlainText, ready)' account/MailAccount.qml \
-  || fail "a parsed body must enter the bounded process-local render cache"
-grep -q 'onAccountIdChanged: renderCache = RenderCache.create(12)' account/MailAccount.qml \
-  || fail "the render cache must not cross account identities"
+# Sanitization and reader reconstruction now run in the Rust worker. Only a
+# correlated, successful native result may reach the QML document properties.
+python3 - <<'PY_NATIVE_RENDER'
+from pathlib import Path
+account = Path("account/MailAccount.qml").read_text()
+start = account.index("  function renderSource(")
+render = account[start:account.index("  function showRemoteImages", start)]
+if 'backend.call("reader.render"' not in render or "withReader: true" not in account:
+    raise SystemExit("test_source.sh: native render must prepare both safe display trees")
+if "Html.sanitize(" in account or "RenderCache." in account:
+    raise SystemExit("test_source.sh: body parsing and render caching belong to Rust")
+for guard in ("rendering !== root.renderSerial", "account !== root.accountId",
+              "selection !== root.selectedId", "detail !== root.detailSerial",
+              "if (error || !result)"):
+    if guard not in render or render.index(guard) > render.index("selectedHtml = ready.html"):
+        raise SystemExit("test_source.sh: stale or failed renders must never reach the document")
+native = Path("../src/backend/content.rs").read_text()
+if "message::html::request(params)?" not in native or ".get(account, id, source, &policy)" not in native:
+    raise SystemExit("test_source.sh: render results must originate in the native sanitizer and keyed cache")
+cache = Path("../src/cache/render.rs").read_text()
+for invariant in ("MAX_PER_ACCOUNT: usize = 12", "MAX_BYTES", "e.account == account",
+                  "e.id == id", "e.source == source", "e.options == *options"):
+    if invariant not in cache:
+        raise SystemExit("test_source.sh: native render cache must be bounded and isolated by complete policy")
+PY_NATIVE_RENDER
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
-grep -q 'command: \["python3", pluginDir + "/scripts/image_fetch.py"\]' account/MailAccount.qml \
-  || fail "remote images must use the public-IP-checked Python transport"
+grep -q 'backend.call("public.image"' account/MailAccount.qml \
+  || fail "remote images must use the public-IP-checked native backend"
 grep -q 'function isDisplayableImageUrl(value) {' message/Html.js \
   || fail "isDisplayableImageUrl must remain the Image-element gate"
 grep -q 'return isRasterDataImage(value)' message/Html.js \
   || fail "the reader may hand Qt only prepared raster bytes, never a remote URL"
 grep -q 'function fetchDisplayImage' account/MailAccount.qml \
   || fail "a plain-text image marker must fetch through the public-host worker"
-grep -q 'command: \["python3", account.pluginDir + "/scripts/unsubscribe.py"\]' account/Unsubscribe.qml \
-  || fail "one-click unsubscribe must use the public-IP-checked Python transport"
+grep -q '"public.unsubscribe"' account/Unsubscribe.qml \
+  || fail "one-click unsubscribe must use the public-IP-checked native backend"
 # Redirect and DNS policy require behavioral tests, not a matching config line.
 
 # The standing "always show images" answer is an answer about a message
@@ -182,15 +197,19 @@ fi
 # after the first against the wrong edge — which is the bug the module exists
 # for, and the one a refactor is most likely to reintroduce.
 for file in components/MessageRow.qml components/MessageReader.qml bar/BarPreview.qml; do
-  grep -q 'Direction.resolveSubject' "$file" \
-    || fail "$file must strip the reply prefix before asking which way a subject runs"
+  grep -q 'subjectDirection' "$file" \
+    || fail "$file must consume the native subject direction"
 done
 
 # The same mistake on the body side. The plain reading of an HTML message
 # carries this client's own `[image N]` markers in front of the sender's first
 # word, so `resolve` on it answers about a Latin "i" that omamail wrote.
-grep -q 'Direction.resolveBody' components/MessageReader.qml \
-  || fail "the reader must look past its own image markers before asking which way a body runs"
+grep -q 'selectedBody.bodyDirection' components/MessageReader.qml \
+  || fail "the reader must consume the native body direction"
+grep -q 'direction::resolve_subject' ../src/message/content.rs \
+  || fail "native summaries must resolve subjects through the reply-prefix-aware rule"
+grep -q 'direction::resolve_body' ../src/message/content.rs \
+  || fail "native body preparation must resolve text through the image-marker-aware rule"
 
 # The interface is not mirrored: this setting is a fact about the mail, not
 # about the window around it. A LayoutMirroring here would be a different
@@ -498,18 +517,17 @@ if grep -q '^    events = \[\]$' calendar/CalendarController.qml; then
 fi
 grep -q 'root.refresh(nextStart, nextEnd)' calendar/CalendarController.qml \
   || fail "the queued calendar range must run after the active refresh"
-grep -q 'eventDeadline.restart()' calendar/CalendarController.qml \
-  || fail "Google event creation must start its deadline"
+grep -q '"calendar.request"' calendar/CalendarController.qml \
+  || fail "calendar operations must use the bounded native backend"
 python3 - <<'PY'
 from pathlib import Path
 
 controller = Path("calendar/CalendarController.qml").read_text()
-google_timeout = controller[controller.index("id: googleDeadline"):]
-google_timeout = google_timeout[:google_timeout.index("}\n  }")]
-if "failSource(" in google_timeout:
-    raise SystemExit("test_source.sh: abort must be the only Google refresh timeout completion path")
-if "id: eventDeadline" not in controller or "root.eventRequest.abort()" not in controller:
-    raise SystemExit("test_source.sh: Google event creation must abort after a deadline")
+if "XMLHttpRequest" in controller:
+    raise SystemExit("test_source.sh: calendar network must run in Rust")
+native = Path("../src/calendar/mod.rs").read_text()
+if "timeout(" not in native:
+    raise SystemExit("test_source.sh: native calendar requests require deadlines")
 
 service = Path("Service.qml").read_text()
 if "readonly property var pendingSendHost" not in service:
@@ -619,19 +637,31 @@ if grep -q 'implicitHeight: childrenRect\.height' components/ListSkeleton.qml; t
   fail "Column.implicitHeight is read-only and makes ListSkeleton unavailable"
 fi
 
+# Provider DSL and capability ceilings are native; UI files retain presentation.
+if grep -Eq 'Provider\.(query|labelQuery|addressQuery|webMessageUrl|webBoxUrl)\(' \
+    account/MailAccount.qml account/LabelActions.qml App.qml components/MailboxSidebar.qml; then
+  fail "provider query and message URL construction must use the native domain"
+fi
+if grep -Eq '^function (query|searchQuery|labelQuery|addressQuery|webMessageUrl|webBoxUrl|cachedSummaryInSearch)\(' \
+    providers/Registry.js providers/Gmail.js providers/Outlook.js providers/Hey.js providers/Jmap.js providers/Imap.js; then
+  fail "legacy provider domain functions belong only in test oracles"
+fi
+grep -q 'capabilities: capabilities(facts.capabilities)' providers/Registry.js \
+  || fail "UI capability ceilings must come from the generated native snapshot"
+
 # A first-time search paints what every cached mailbox page already knows, then
 # accepts provider results without waiting for the last metadata request. The
 # progress argument is part of the shared client interface, not a Gmail branch
 # in MailAccount.
-grep -q 'Cache\.searchSummaries(cacheStore\.store, searchQuery,' account/MailAccount.qml \
+grep -q 'cacheStore.getPreview(effectiveQuery, maxMessages,' account/MailAccount.qml \
   || fail "typed searches must inspect eligible cached message summaries first"
-grep -q 'Provider\.cachedSummaryInSearch' account/MailAccount.qml \
+grep -q 'eligible(provider, source_query(key), row)' ../src/cache/query.rs \
   || fail "cached search previews must stay inside the provider's live scope"
 grep -q 'function loadSearchMessages' account/MailAccount.qml \
   || fail "typed searches need a progressive list pipeline"
-grep -q 'Model\.settledSearchResults' account/MailAccount.qml \
+grep -q 'operation: "searchFinish"' account/MailAccount.qml \
   || fail "the final server ids must replace the cached search preview"
-grep -q 'Model\.missingSearchSummaryIds' account/MailAccount.qml \
+grep -q 'operation: "missingSearchSummaryIds"' account/MailAccount.qml \
   || fail "a partial metadata page must close paging before a missing row"
 grep -q '}, idsArrived)' account/MailAccount.qml \
   || fail "server ids must be consumed before the final list callback"
@@ -670,150 +700,54 @@ awk '
   || fail "a conversation member must not be given the row's thread block"
 grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
-grep -q 'Imap\.topUidCommand(count)' providers/ImapClient.qml \
-  || fail "interactive IMAP search must not wait for the complete UID snapshot"
-! grep -q '"[A-Z ]*FETCH \*:\*' providers/ImapProtocol.js providers/ImapClient.qml \
-  || fail "curl drops the untagged answer to a one-message FETCH: read the ceiling numerically"
-grep -q 'Imap\.searchCommands(criteria, snapshot, nextUid)' providers/ImapClient.qml \
-  || fail "a sparse interactive search must reuse a UID snapshot after its first window"
-grep -q 'streamedSummaryBatch' providers/ImapClient.qml \
-  || fail "streamed IMAP results must fetch headers in visible batches"
+grep -q 'UID FETCH \*:\* (UID)' ../src/providers/imap/read.rs \
+  || fail "native IMAP search must read its highest UID before a complete snapshot"
+grep -q 'sparse_search_emits_numeric_prefix_then_snapshot_continuation' ../src/providers/imap/read/tests.rs \
+  || fail "native sparse search needs a tested snapshot continuation"
+grep -q 'continuation' ../src/providers/imap/read.rs \
+  || fail "native streamed IMAP reads must continue through opaque bounded batches"
 grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
   || fail "streamed metadata reads need one shared queue"
-awk '
-  /function act\(/ { in_act = 1 }
-  in_act && /^    stopLiveList\(\)/ { stopped = 1 }
-  in_act && /if \(removed\) messages = Model\.removeById\(messages, rowId\)/ { exit !stopped }
-  END { exit !stopped }
-' account/MailAccount.qml \
-  || fail "an action must stop a live list before stale snapshots can settle"
-grep -q 'pendingAction !== "" && cacheKey === pendingActionQuery' account/MailAccount.qml \
-  || fail "an action may only suppress refreshes for its own query"
-grep -q 'deferredListLoad = ({' account/MailAccount.qml \
-  || fail "navigation back to an action query must defer rather than lose its load"
-grep -q 'resumeDeferredListLoad(actionQuery' account/MailAccount.qml \
-  || fail "an action callback must resume a deferred navigation load"
-awk '
-  /function act\(/ { in_act = 1 }
-  in_act && /function dispatch\(\)/ { in_dispatch = 1 }
-  in_act && /pendingAction = action/ { exit !in_dispatch }
-  END { exit !in_dispatch }
-' account/MailAccount.qml \
-  || fail "only the send may take the pending action slot; a queued action must not"
-awk '
-  /function markAllRead\(\)/ { in_mark_all = 1 }
-  in_mark_all && /if \(pendingAction !== ""\)/ { guarded = 1 }
-  in_mark_all && /pendingAction = "markRead"/ { exit !guarded }
-  END { exit !guarded }
-' account/MailAccount.qml \
-  || fail "mark-all must not overwrite the pending action slot"
-awk '
-  /function loadMessages\(/ { in_load = 1 }
-  in_load && /if \(error \|\| !page\)/ { in_page_error = 1 }
-  in_page_error && /if \(!append\) root\.nextPageToken = ""/ { cleared = 1 }
-  in_page_error && /return/ { exit !cleared }
-  END { exit !cleared }
-' account/MailAccount.qml \
-  || fail "a failed page-one refresh must clear its stale continuation token"
-grep -q 'if (invalidatesPage) nextPageToken = ""' account/MailAccount.qml \
-  || fail "a membership-changing action must invalidate its offset token"
-grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml \
-  || fail "mark-all must invalidate opaque search offsets too"
-grep -q 'var invalidatesPage = !survives || opaqueQuery' account/MailAccount.qml \
-  || fail "paging membership must not follow the reader's keep-open decision"
+# Native intent preparation owns row/member updates, scoped rollback and
+# conversation expansion. QML still owns queueing provider writes and navigation.
+python3 - <<'PY_NATIVE_INTENTS'
+from pathlib import Path
+account = Path("account/MailAccount.qml").read_text()
+start = account.index("  function runNativeAction(")
+run = account[start:account.index("  function rememberList", start)]
+for marker in ("intents.begin(parameters", "intents.settle(account, actionQuery",
+               "root.applyIntentView(prepared.view", "prepared.targets", "prepared.change",
+               "prepared.generation", "allRead: allRead === true", "quiet: quiet === true",
+               "memberOnly: memberOnly === true", "sourceLabelId: hasLabels ? rawLabelId"):
+    if marker not in run:
+        raise SystemExit("test_source.sh: native action contract missing: " + marker)
+if not run.index("stopLiveList()\n    var parameters") < run.index("intents.begin(parameters"):
+    raise SystemExit("test_source.sh: action preparation must invalidate pre-edit list snapshots")
+if not run.index("root.applyIntentView(prepared.view") < run.index("function dispatch()"):
+    raise SystemExit("test_source.sh: optimistic native view must apply before provider dispatch")
+dispatch = run[run.index("function dispatch()"):]
+if not dispatch.index("stopLiveList()") < dispatch.index("root.pendingAction = action"):
+    raise SystemExit("test_source.sh: queued provider writes must interrupt stale list reads")
+settle = run[run.index("intents.settle(account, actionQuery, prepared.token, failed"):]
+if not settle.index("root.runQueuedAction()") < settle.index("root.resumeDeferredListLoad("):
+    raise SystemExit("test_source.sh: completed actions must drain the write queue before revalidation")
+for marker in ("prepared.invalidatesPage === true || parameters.opaqueQuery",
+               'root.nextPageToken = ""', "cacheStore.invalidate(targets",
+               "root.loadMessages(false, true, message)", "root.active && root.cacheKey !== actionQuery"):
+    if marker not in run:
+        raise SystemExit("test_source.sh: mutation cache/pagination reconciliation missing: " + marker)
+if '(pendingAction !== "" || actionPreparations > 0) && cacheKey === pendingActionQuery' not in account:
+    raise SystemExit("test_source.sh: preparations and writes must only defer their own query")
+if "deferredListLoad = ({" not in account or "next.dispatch()" not in account:
+    raise SystemExit("test_source.sh: navigation and queued provider writes must not be discarded")
+intents = Path("account/Intents.qml").read_text()
+if 'account.backend.call("model.intent"' not in intents or "Model." in intents:
+    raise SystemExit("test_source.sh: optimistic replay must run in the native intent store")
+if "account.runNativeAction(" not in Path("account/BatchAction.qml").read_text():
+    raise SystemExit("test_source.sh: bulk edits must share the native transaction pipeline")
+PY_NATIVE_INTENTS
 grep -q 'if (!service.act(acted, action)) return false' App.qml \
   || fail "a refused action must not move the keyboard cursor"
-# Clearing a mailbox means pressing the same key down a list faster than any
-# server answers. Refusing the second press dropped it: the message stayed, the
-# note blamed the user for a failure they had not caused, and the false return
-# held the keyboard cursor on a row the user had already left behind. Queueing
-# the whole action was not enough either: the row moves at the keystroke.
-awk '
-  /function act\(/ { in_act = 1 }
-  in_act && /if \(removed\) messages = Model\.removeById\(messages, rowId\)/ { moved = 1 }
-  in_act && /if \(slotTaken\) queueAction\(messageId, action, actionQuery, quiet === true, oneMessage, dispatch, discard\)/ { exit !moved }
-  END { exit !moved }
-' account/MailAccount.qml \
-  || fail "an action taken while one is pending must move its row before its send waits"
-# Scoped to `act`. `markAllRead` still refuses on purpose: it reads the unread
-# set at the moment it runs, so one queued behind a mutation would send a list
-# the mailbox had already moved past.
-awk '
-  /function act\(/ { in_act = 1 }
-  in_act && /Another action is still finishing/ { refuses = 1 }
-  in_act && /var index = Model\.indexById\(messages, messageId\)/ { exit refuses }
-  END { exit refuses }
-' account/MailAccount.qml \
-  || fail "a queued action must not report a failure the user did not cause"
-# A queued request is a send, not a verb to run through `act` again: its row
-# has already left.
-awk '
-  /function runQueuedAction\(\)/ { in_queued = 1 }
-  in_queued && /request\.dispatch\(\)/ { dispatches = 1 }
-  /function refuseUnavailableAction\(/ { exit !dispatches }
-  END { exit !dispatches }
-' account/MailAccount.qml \
-  || fail "a queued action must run the send it was taken with"
-grep -q 'dispatch: previous.dispatch' account/Model.js \
-  || fail "coalescing a repeated action must keep the send that carries its rollback"
-# A queued send runs inside the callback that freed the slot, which may just
-# have resumed this query's list.
-awk '
-  /function dispatch\(\)/ { in_dispatch = 1 }
-  in_dispatch && /stopLiveList\(\)/ { interrupts = 1 }
-  in_dispatch && /if \(slotTaken\)/ { exit !interrupts }
-  END { exit !interrupts }
-' account/MailAccount.qml \
-  || fail "a queued send must stop a live list before stale snapshots can settle"
-# The slot is retaken before the freeing answer is acted on, so no reload
-# settles a state the next edit is not in yet.
-awk '
-  /function act\(/ { in_act = 1 }
-  in_act && /var done = function/ { in_done = 1 }
-  in_done && /root\.runQueuedAction\(\)/ { drains = 1 }
-  in_done && /resumeDeferredListLoad\(actionQuery/ { exit !drains }
-  END { exit !drains }
-' account/MailAccount.qml \
-  || fail "an action callback must send the next queued action before it revalidates"
-test "$(grep -c 'root.active && root.cacheKey !== actionQuery' account/MailAccount.qml)" -ge 2 \
-  || fail "successful actions must revalidate a mailbox opened while they were pending"
-awk '
-  /function run\(/ { in_bulk = 1 }
-  in_bulk && /^    stopLiveList\(\)/ { saw_interrupt = 1 }
-  in_bulk && /account\.loadMessages\(false, true, note\)/ { saw_retry = 1 }
-  in_bulk && /^  }/ { exit !(saw_interrupt && saw_retry) }
-  END { exit !(saw_interrupt && saw_retry) }
-' account/BatchAction.qml \
-  || fail "a bulk action must stop and revalidate a live list too"
-# The batch is one more producer on the same queue and one more completion
-# that drains it: taken while a send holds the slot it moves its rows now and
-# queues its own send; answered, it sends the next queued action before it
-# acts on its answer, so an action taken behind it is never left waiting.
-grep -q 'if (slotTaken) account.queueAction(listed.join(","), action, actionQuery, false, false, dispatch, discard)' account/BatchAction.qml \
-  || fail "a batch taken while a send holds the slot must queue its send, not run through act"
-awk '
-  /var done = function/ { in_done = 1 }
-  in_done && /account\.runQueuedAction\(\)/ { drains = 1 }
-  in_done && /if \(error\)/ { exit !drains }
-  END { exit !drains }
-' account/BatchAction.qml \
-  || fail "a batch callback must send the next queued action before it acts on its answer"
-# A refused bulk edit comes off row by row through the same intents a single
-# edit holds, never as a snapshot of the list put back over the edits taken
-# behind it: a star pressed while mark-all was still deciding stays.
-for bulk in account/MailAccount.qml account/BatchAction.qml; do
-  grep -q 'intents\.restore(edits\[e\], lists)' "$bulk" \
-    || fail "$bulk must settle a refused bulk edit through its intents"
-done
-if awk '/function markAllRead\(\)/ { in_mark_all = 1 } in_mark_all && /root\.messages = before/ { found = 1 } END { exit !found }' account/MailAccount.qml; then
-  fail "mark-all must not put a snapshot of the list back over later edits"
-fi
-grep -q 'return batchAction.run(ids, action)' account/MailAccount.qml \
-  || fail "the account must hand its batch to BatchAction"
-grep -q 'root\.loadMessages(false, true, error)' account/MailAccount.qml \
-  || fail "a failed action must resume the list without losing its error"
-grep -q 'root\.loadMessages(false, true, "")' account/MailAccount.qml \
-  || fail "a successful action must revalidate without repainting stale cache"
 awk '
   /if \(!finalPage\)/ { in_null_page = 1 }
   in_null_page && /root\.nextPageToken = ""/ { cleared = 1 }
@@ -823,18 +757,18 @@ awk '
   || fail "a failed page-one search must clear cached pagination"
 awk '
   /function fetchSummaries/ { in_fetch = 1 }
-  in_fetch && /Model\.missingSearchSummaryIds\(summaries, ids\)/ { checks_ids = 1 }
+  in_fetch && /operation: "missingSearchSummaryIds"/ { checks_ids = 1 }
   in_fetch && /root\.nextPageToken = ""/ { clears_page = 1 }
   /function applySummaries/ { exit !(checks_ids && clears_page) }
   END { exit !(checks_ids && clears_page) }
 ' account/MailAccount.qml \
   || fail "ordinary metadata reads must detect holes and close paging"
-grep -q 'if (error && prefixSettled !== true)' providers/ImapClient.qml \
+grep -q 'Err(error) => return Err(error)' ../src/providers/imap/read.rs \
   || fail "an IMAP failure before SEARCH answers must keep the cached preview"
-for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
-  grep -q 'callback(ordered, firstError)' "$client" \
-    || fail "$client must report partial metadata failures"
-done
+grep -q 'callback(ordered, firstError)' providers/GmailApiClient.qml \
+  || fail "Gmail must report partial metadata failures"
+grep -q 'Some messages could not be loaded' providers/ImapClient.qml \
+  || fail "native IMAP partial metadata failures must reach the UI"
 grep -q 'progressTimerComponent' providers/GmailApiClient.qml \
   || fail "parallel Gmail metadata replies must be coalesced before repainting"
 grep -q 'MAX_SUMMARIES_PER_QUERY' cache/Cache.js \
@@ -1166,7 +1100,7 @@ grep -q 'register-mailto.sh' ../scripts/link-plugin.sh \
   || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
-grep -q 'bcc: Mail.headerFrom(parsed.headers, "Bcc")' providers/HeyClient.qml \
+grep -q '("bcc", "Bcc")' ../src/providers/hey_actions.rs \
   || fail "HEY must pass a mailto Bcc through to hey compose"
 grep -q 'signal mailtoRequested(string url)' components/MessageReader.qml \
   || fail "a mailto in a message body must compose here, not leave through xdg-open"
@@ -1181,21 +1115,32 @@ fi
 
 grep -q 'sendIdentities' components/ComposeView.qml \
   || fail "compose From must list every connected mailbox that can send"
-grep -q 'function identities' compose/Senders.js \
-  || fail "which addresses a new message may be sent as lives in compose/Senders.js"
+grep -q 'backend.call("account.identities"' Service.qml \
+  || fail "sender identities must be projected by the native account domain"
 grep -q 'root.service.switchTo' components/ComposeView.qml \
   || fail "choosing another mailbox as From must switch the sending account"
 python3 - <<'PY'
 from pathlib import Path
 
 service = Path("Service.qml").read_text()
-start = service.index("readonly property var sendIdentities:")
-end = service.index("readonly property string accountAddress:", start)
+start = service.index("readonly property var senderSources:")
+end = service.index("// The name the entry being edited", start)
 block = service[start:end]
 if "hostsEpoch" not in block:
     raise SystemExit(
         "test_source.sh: sendIdentities must re-read after a mailbox host signs in"
     )
+for required in ('onSenderSourcesChanged: scheduleSenderIdentities()',
+                 'senderRequestSerial++', 'sendIdentities = []',
+                 'serial !== root.senderRequestSerial', 'error || !result',
+                 'backend.call("account.identities"'):
+    if required not in block:
+        raise SystemExit("test_source.sh: sender projection must fail closed and reject stale replies: " + required)
+projection = service[service.index('property var conversationProjection:'):service.index('function refreshConversationProjection()')]
+if 'conversationProjectionSerial++' not in projection or 'showsRail: false' not in projection:
+    raise SystemExit("test_source.sh: conversation changes must invalidate the previous projection")
+if 'serial !== root.conversationProjectionSerial' not in service:
+    raise SystemExit("test_source.sh: stale conversation projections must not reach the reader")
 recount = service[service.index("function recount("):]
 recount = recount[:recount.index("\n  }") + 4]
 if "hostsEpoch" not in recount:
@@ -1298,12 +1243,15 @@ for verb in ("canArchive", "canReportSpam", "canStar", "hasLabels",
         raise SystemExit("test_source.sh: `unifiedAbilities` must read host.%s, "
                          "or a mailbox's own refusal is dropped in a merged list" % verb)
 
+if 'abilities: unifiedAbilities' not in source or '"model.unified"' not in source:
+    raise SystemExit("test_source.sh: native unified capability requests must carry host abilities")
+
 for name in ("canArchive", "canReportSpam", "canStar", "hasLabels", "canOpenOnWeb"):
     offered = re.search(r"readonly property bool " + name + r": unified\s*\n\s*\?([^\n]*)",
                         source)
-    if not offered or "unifiedAbilities" not in offered.group(1):
+    if not offered or "unifiedSnapshot.capabilities" not in offered.group(1):
         raise SystemExit("test_source.sh: %s in a merged list must intersect "
-                         "`unifiedAbilities`" % name)
+                         "the native unified capability snapshot" % name)
 
 if re.search(r"Unified\.(sharedCapability|sharedMailboxes|hasSharedMailbox)\b", source):
     raise SystemExit("test_source.sh: the provider-only intersection is gone; "
@@ -1333,7 +1281,7 @@ source = Path("account/MailAccount.qml").read_text()
 # The read mark on arrival must ask whether this was a preview. The decision
 # itself lives in `Model.marksReadOnArrival`, where it is unit-tested; what is
 # guarded here is that the call site still asks it.
-mark = re.search(r"if \(Model\.marksReadOnArrival\([^)]*\)\)\s*\n?\s*root\.act\([^)]*markRead",
+mark = re.search(r"if \((?:!markedRead && )?Model\.marksReadOnArrival\([^)]*\)\)\s*\n?\s*(?:markedRead = )?root\.act\([^)]*markRead",
                  source)
 if not mark:
     raise SystemExit("test_source.sh: MailAccount must mark an opened message read")

@@ -105,10 +105,33 @@ Item {
       compose.opened = false
     }
 
+    property int outboxRevision: 1
+    function pending(method, accountId) {
+      var fixture = BackendFixture.install(mailService)
+      for (var i = fixture.requests.length - 1; i >= 0; i--) {
+        var request = fixture.requests[i]
+        if (request.method === method && (!accountId || request.params.accountId === accountId) && !request.answered) return request
+      }
+      return null
+    }
+    function answerQueued(accountId) {
+      tryVerify(function() { return pending("outbox.enqueue", accountId) !== null })
+      var request = pending("outbox.enqueue", accountId)
+      request.answered = true
+      var entry = { id:request.params.sendId, state:"queued", order:request.params.order,
+        queuedAt:Date.now(),dueAt:Date.now()+10000 }
+      BackendFixture.respond(mailService,request,{snapshot:{accountId:accountId,revision:++outboxRevision,entries:[entry]}})
+      wait(0)
+      return entry
+    }
     function stopSends() {
       for (var i = 0; i < mailService.accountCount; i++) {
         var account = mailService.accountAt(i)
-        if (account && account.sendPending) account.undoSend()
+        if (account) {
+          account.sendQueue.parked = []
+          account.sendQueue.submitted = ({})
+          account.sendQueue.arm()
+        }
       }
     }
 
@@ -133,7 +156,8 @@ Item {
       named(compose, "compose-to-field").text = "person@example.com"
       named(compose, "compose-body-editor").text = "Keep Ada's words"
       compose.submit()
-      compare(compose.parkedForSend, true)
+      tryCompare(compose, "parkedForSend", true)
+      answerQueued(adaId)
 
       verify(mailService.switchToIndex(1))
       compare(mailService.activeAccountId, bobId)
@@ -147,7 +171,11 @@ Item {
       compare(named(compose, "compose-body-editor").text, "Keep Ada's words")
     }
 
-    function test_zero_delay_synchronous_rejection_restores_the_composer() {
+    function test_zero_delay_native_failure_restores_the_composer_data() {
+      return [{tag:"rejected",state:"failed"},{tag:"delivery-unknown",state:"unknown"}]
+    }
+
+    function test_zero_delay_native_failure_restores_the_composer(data) {
       mailService.applySettings({ undoSendSeconds: 0 })
       seed([entry(ada, false)], adaId)
       var compose = composeView()
@@ -155,16 +183,26 @@ Item {
       named(compose, "compose-to-field").text = "person@example.com"
       named(compose, "compose-subject-field").text = "No SMTP"
       named(compose, "compose-body-editor").text = "Keep every word"
-
       compose.submit()
-
-      compare(compose.opened, false,
+      tryCompare(compose, "opened", false, 5000,
         "an accepted immediate send parks before its deferred result")
+      tryVerify(function() { return pending("outbox.enqueue", adaId) !== null })
+      var request = pending("outbox.enqueue", adaId)
+      request.answered = true
+      compare(request.params.provider, "imap")
+      compare(request.params.delaySeconds, 0)
+      // Rust's authoritative failure must cross account and Service boundaries;
+      // the UI does not issue an imap.send or replay the uncertain delivery.
+      BackendFixture.respond(mailService, request, {snapshot:{accountId:adaId,
+        revision:++outboxRevision,entries:[{id:request.params.sendId,state:data.state}]}})
       tryCompare(compose, "opened", true)
       compare(named(compose, "compose-subject-field").text, "No SMTP")
       compare(named(compose, "compose-body-editor").text, "Keep every word")
       tryCompare(app.composeRecovery, "active", true)
       compare(app.composeRecovery.draft.body, "Keep every word")
+      var requests = BackendFixture.install(mailService).requests
+      for (var i = 0; i < requests.length; i++)
+        verify(requests[i].method !== "imap.send", "UI cannot send or retry mail after a backend result")
     }
 
     function test_a_second_send_parks_behind_the_first_and_undo_takes_back_the_newest() {
@@ -174,7 +212,8 @@ Item {
       named(compose, "compose-to-field").text = "first@example.com"
       named(compose, "compose-body-editor").text = "Ada's pending message"
       compose.submit()
-      compare(mailService.accountAt(0).sendPending, true)
+      tryCompare(mailService.accountAt(0), "sendPending", true)
+      answerQueued(adaId)
       compare(compose.pendingDraft.body, "Ada's pending message")
 
       verify(app.switchAccount(1))
@@ -184,14 +223,20 @@ Item {
 
       app.runShortcut("send", "Ctrl+Return")
 
-      compare(compose.opened, false, "a second send parks like the first")
+      tryCompare(compose, "opened", false, 5000, "a second send parks like the first")
+      answerQueued(bobId)
       compare(mailService.accountAt(1).sendPending, true)
       compare(mailService.sendPendingCount, 2)
       compare(compose.pendingDraft.body, "Bob's newer draft",
         "the newest parked draft is the one Undo would take back")
 
       verify(app.undoPendingSend())
-      compare(named(compose, "compose-body-editor").text, "Bob's newer draft")
+      tryVerify(function() { return pending("outbox.undo", bobId) !== null })
+      var undo = pending("outbox.undo", bobId)
+      undo.answered = true
+      BackendFixture.respond(mailService,undo,{id:undo.params.sendId,snapshot:{accountId:bobId,
+        revision:++outboxRevision,entries:[{id:undo.params.sendId,state:"cancelled"}]}})
+      tryCompare(named(compose, "compose-body-editor"), "text", "Bob's newer draft")
       compare(mailService.accountAt(1).sendPending, false)
       compare(mailService.accountAt(0).sendPending, true,
         "undoing the newest send leaves the older one parked")

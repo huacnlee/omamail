@@ -11,8 +11,6 @@ import "agent/Agent.js" as Agent
 import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
 import "account/Unified.js" as Unified
-import "account/Conversation.js" as Conversation
-import "compose/Senders.js" as Senders
 import "providers/Registry.js" as Provider
 import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
@@ -57,9 +55,12 @@ Item {
   readonly property var backend: rustBackend
   Backend {
     id: rustBackend
-    executable: privateRuntime.developmentExecutable || root.pluginDir + "/runtime/bin/omamail"
-    launchEnabled: privateRuntime.state === "ready" && privateRuntime.executable === executable
+    // The runtime manager resolves symlinks. Launch its validated path rather
+    // than comparing it with the spelling used to load this plugin.
+    executable: privateRuntime.executable
+    launchEnabled: privateRuntime.state === "ready" && executable !== ""
     expectedVersion: privateRuntime.requiredVersion
+    onReadyChanged: root.scheduleUnifiedSnapshot()
   }
 
   readonly property string pluginId: manifest && manifest.id
@@ -89,9 +90,7 @@ Item {
     undoSendSeconds: 10,
     unifiedCalendarView: false,
     showBarIcon: true,
-    unifiedMailboxes: false,
-    previewOnCursor: false,
-    markReadDelaySec: 2
+    unifiedMailboxes: false
   })
   property var settings: defaultSettingValues
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
@@ -110,19 +109,19 @@ Item {
   // agent buttons pulse for. Opening a job's popup or card is what stops it.
   readonly property bool agentAttention: agentRunner.attention
   readonly property var agentAttentionByMessage: agentRunner.attentionByMessage
-  function agentJobWantsAttention(job) { return Agent.wantsAttention(job, agentRunner.seenIds) }
+  function agentJobWantsAttention(job) { return agentRunner.wantsAttention(job) }
   function acknowledgeAgentJob(jobId) { agentRunner.acknowledge(jobId) }
   readonly property bool agentBusy: agentRunner.anyActive
 
   function agentJobFor(messageId, accountId) {
     var target = agentTarget(messageId, accountId)
-    return target.owner ? Agent.selectionJob(agentRunner.jobs, [target.id], target.owner.accountId) : null
+    return target.owner ? agentRunner.selectionJob( [target.id], target.owner.accountId) : null
   }
 
   function agentHistoryFor(fields, ids, accountId) {
     if (fields && fields.draftKey) {
       var sender = sendHostFor(fields)
-      return sender ? Agent.historyFor(agentRunner.jobs, sender.accountId, [], fields.draftKey) : []
+      return sender ? agentRunner.historyFor( sender.accountId, [], fields.draftKey) : []
     }
     if (!ids || !ids.length) return []
     var target = agentTarget(ids[0], accountId)
@@ -133,7 +132,7 @@ Item {
       if (item.owner !== target.owner) return []
       own.push(item.id)
     }
-    return Agent.historyFor(agentRunner.jobs, target.owner.accountId, own, "")
+    return agentRunner.historyFor( target.owner.accountId, own, "")
   }
 
   function agentSelectionJob(ids, accountId) {
@@ -145,7 +144,7 @@ Item {
       if (item.owner !== target.owner) return null
       own.push(item.id)
     }
-    return Agent.selectionJob(agentRunner.jobs, own, target.owner.accountId)
+    return agentRunner.selectionJob( own, target.owner.accountId)
   }
 
   // Whose message an ask or a cancel is about: the account the popup was
@@ -191,10 +190,10 @@ Item {
   function answerAgent(jobId, answer) {
     if (!hasAgent) return false
     var job = agentRunner.jobFor2(jobId)
-    if (!job || !job.canContinue || Agent.isActive(job) || !findAccount(job.accountId)
+    if (!job || !job.canContinue || agentRunner.isActive(job) || !findAccount(job.accountId)
         || String(answer || "").trim() === "") return false
     agentContext.error = ""
-    if (!agentRunner.start(Agent.continuationPayload(job, answer))) return false
+    if (!agentRunner.start({ parent: String(job.id), prompt: String(answer || "").trim() })) return false
     return true
   }
 
@@ -227,19 +226,19 @@ Item {
   // The composer's asks: the draft as it stands and what to do with it.
   function agentJobsForDraft(fields) {
     var owner = sendHostFor(fields)
-    return owner ? Agent.draftJobs(agentRunner.jobs, owner.accountId, fields.draftKey) : []
+    return owner ? agentRunner.draftJobs( owner.accountId, fields.draftKey) : []
   }
 
   function askAgentDraft(fields, ask) {
     var owner = sendHostFor(fields)
     if (!owner || !fields || !fields.draftKey || String(ask || "").trim() === "") return false
     agentContext.error = ""
-    return agentRunner.start(Agent.draftPayload(fields, ask, owner.accountEmail, owner.accountId))
+    return agentRunner.start({ draftFields: fields, ask: ask, account: owner.accountEmail, accountId: owner.accountId })
   }
 
   function cancelAgentJob(jobId) {
     var job = agentRunner.jobFor2(jobId)
-    if (!job || !Agent.isActive(job) || agentRunner.cancelling) return false
+    if (!job || !agentRunner.isActive(job) || agentRunner.cancelling) return false
     return agentRunner.cancelById(jobId)
   }
 
@@ -273,35 +272,19 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Whether the cursor reaching a message is enough to show it.
-  readonly property bool previewOnCursor: !!settings
-    && settings.previewOnCursor === true
-
-  // How long the cursor has to stay before a previewed message counts as
-  // read. Clamped rather than trusted: this is a hand-editable file, and a
-  // negative interval on a Timer never fires at all.
-  //
-  // A number or nothing, because `Number` reads `null`, `false` and `""` as
-  // zero and zero is a real answer here — "mark it read the moment it is
-  // previewed". A settings file that lost the key, or holds a word where a
-  // count should be, must not be read as somebody having asked for that.
-  readonly property int markReadDelaySec: {
-    var raw = settings ? settings.markReadDelaySec : 2
-    if (typeof raw !== "number") return 2
-    var value = Math.floor(raw)
-    if (!isFinite(value) || value < 0) return 2
-    return Math.min(30, value)
-  }
-
   // Thunderbird and Betterbird keep both explicit and learned addresses in
   // their local profile. The helper reads those databases without modifying
   // them. Nothing is copied into Omamail's settings or cache.
   property var recipientContacts: []
+  property bool contactsLoading: false
 
   function refreshRecipientContacts() {
-    if (contactReader.running || pluginDir === "") return
-    contactReader.command = [pluginDir + "/scripts/contact-suggestions.py"]
-    contactReader.running = true
+    if (contactsLoading || !backend || !backend.ready) return
+    contactsLoading = true
+    backend.call("contacts.suggest", {}, function(result, error) {
+      root.contactsLoading = false
+      if (!error && Array.isArray(result)) root.recipientContacts = result
+    })
   }
 
   function registerMailtoHandler() {
@@ -369,23 +352,16 @@ Item {
     persistSetting("unifiedMailboxes", value === true)
   }
 
-  function setPreviewOnCursor(value) {
-    persistSetting("previewOnCursor", value === true)
-  }
-
-  // The same rule on the way in: what cannot be read as a count is written as
-  // the default rather than as the shortest dwell there is.
-  function setMarkReadDelaySec(value) {
-    var next = Math.floor(Number(value))
-    if (!isFinite(next) || next < 0) next = 2
-    persistSetting("markReadDelaySec", Math.min(30, next))
-  }
-
   // ---------------------------------------------------------- the accounts
 
   property var accountList: Accounts.emptyList()
   property bool accountsLoaded: false
   property string accountsWritePayload: ""
+  property var accountsReleasedIds: []
+  property bool accountsWriting: false
+  property bool accountsReading: false
+  property bool accountsReloadQueued: false
+  property string accountsRevision: ""
 
   readonly property int accountCount: Accounts.count(accountList)
   readonly property bool hasSavedAccounts: Accounts.hasSavedAccounts(accountList)
@@ -481,7 +457,7 @@ Item {
 
   // Turning the merged view on or off changes which mailboxes are live, and
   // `refreshCurrent` does not run for it: the account on screen has not moved.
-  onUnifiedChanged: applyLiveHosts()
+  onUnifiedChanged: { applyLiveHosts(); scheduleUnifiedSnapshot() }
 
   // The whole point of switching is that it is instant, which it is because
   // each account keeps its own cache on disk. A queued send belongs to its
@@ -608,6 +584,7 @@ Item {
     // A profile may replace a configured alias with its canonical address,
     // or identify this row as a duplicate. Only this row's old id is released;
     // every other persisted mailbox must still survive the following save.
+    accountsReleasedIds = accountsReleasedIds.concat([String(accounts[index].id || "")])
     lastPersistedIds = Accounts.withoutId(lastPersistedIds, String(accounts[index].id || ""))
 
     // Two rows cannot hold one address. Rebuilding the list would fold them
@@ -691,8 +668,10 @@ Item {
     // guard would otherwise read its absence as a mailbox dropped by mistake
     // and refuse every save from here on.
     var oldId = String(accounts[index].id || "")
-    if (oldId !== "" && id !== oldId)
+    if (oldId !== "" && id !== oldId) {
+      accountsReleasedIds = accountsReleasedIds.concat([oldId])
       lastPersistedIds = Accounts.withoutId(lastPersistedIds, oldId)
+    }
     accountList = updated
     saveAccounts()
     refreshCurrent()
@@ -785,17 +764,59 @@ Item {
     if (Accounts.dropsNamedMailbox(accountList, writable)) return
     var allowDrop = !!(opts && opts.allowDrop)
     if (!allowDrop && Accounts.dropsAnyId(lastPersistedIds, writable)) return
-    if (accountsWriter.running) {
+    if (accountsWriting) {
       accountsSaveQueued = true
       if (allowDrop) accountsSaveQueuedAllowDrop = true
       return
     }
     accountsSaveQueued = false
     accountsSaveQueuedAllowDrop = false
-    lastPersistedIds = Accounts.namedIds(writable)
+    if (!backend || !backend.ready) { accountsSaveQueued = true; accountsSaveQueuedAllowDrop = allowDrop; return }
+    accountsWriting = true
     accountsWritePayload = Accounts.serialize(writable)
-    accountsWriter.command = [pluginDir + "/scripts/config-store.sh", "accounts.json"]
-    accountsWriter.running = true
+    var released = accountsReleasedIds.slice()
+    backend.call("accounts.save", { registry: writable, revision: accountsRevision, allowDrop: allowDrop, releasedIds: released }, function(result, error) {
+      if (!root) return
+      root.accountsWriting = false
+      root.accountsWritePayload = ""
+      if (!error && result) {
+        root.accountsRevision = String(result.revision || "")
+        root.accountsReleasedIds = root.accountsReleasedIds.filter(function(id) { return released.indexOf(id) < 0 })
+        root.lastPersistedIds = Accounts.namedIds(writable).filter(function(id) { return root.accountsReleasedIds.indexOf(id) < 0 })
+      } else {
+        root.accountsSaveQueued = false
+        root.accountsSaveQueuedAllowDrop = false
+        root.accountsRevision = ""
+        if (root.current) root.current.fail("Account changes could not be saved. Reloading saved accounts.")
+        root.restoreAccountRegistry()
+        return
+      }
+      if (root.accountsSaveQueued) {
+        var drop = root.accountsSaveQueuedAllowDrop
+        root.saveAccounts(drop ? { allowDrop: true } : undefined)
+      } else if (root.accountsReloadQueued) {
+        root.accountsReloadQueued = false
+        root.restoreAccountRegistry()
+      }
+    })
+  }
+
+  function restoreAccountRegistry() {
+    if (!backend || !backend.ready) return
+    if (accountsReading || accountsWriting || accountsSaveQueued) { accountsReloadQueued = true; return }
+    accountsReading = true
+    backend.call("accounts.read", {}, function(result, error) {
+      if (!root) return
+      root.accountsReading = false
+      var reload = root.accountsReloadQueued
+      root.accountsReloadQueued = false
+      if (!error && result && !root.accountsWriting && !root.accountsSaveQueued
+          && (!root.accountsLoaded || root.accountsRevision !== result.revision)) {
+        root.accountsRevision = String(result.revision || "")
+        root.applyAccounts(JSON.stringify(result.registry))
+      }
+      if (reload) root.restoreAccountRegistry()
+    })
   }
 
   function applyAccounts(raw) {
@@ -825,7 +846,7 @@ Item {
       return
     // What is on disk is behind what is in memory until the pending write
     // lands, so a reload now would be a straight revert.
-    if (accountsWriter.running || accountsSaveQueued) return
+    if (accountsWriting || accountsSaveQueued) return
     accountList = loaded
     accountsLoaded = true
     lastPersistedIds = Accounts.namedIds(Accounts.savedOnly(loaded))
@@ -1172,8 +1193,63 @@ Item {
   }
 
 
+  // Rust merges, orders and intersects capabilities in one request. Coalesce
+  // host changes; a response from an older account/view generation is ignored.
+  property var unifiedSnapshot: ({})
+  property int unifiedRevision: 0
+  property bool unifiedRequestPending: false
+  property bool unifiedRequestQueued: false
+  property string unifiedAccountKey: ""
+  property string unifiedSnapshotError: ""
   readonly property var unifiedMessages: unified
-    ? Unified.mergeMessages(unifiedSources) : []
+    ? (unifiedSnapshot.messages || []) : []
+
+  function scheduleUnifiedSnapshot() {
+    unifiedRevision++
+    unifiedRequestQueued = true
+    var ids = []
+    var sources = unifiedSources || []
+    for (var i = 0; i < sources.length; i++) ids.push(sources[i].id)
+    var key = JSON.stringify(ids)
+    if (!unified || key !== unifiedAccountKey) {
+      unifiedSnapshot = ({})
+      unifiedSnapshotError = ""
+    }
+    unifiedAccountKey = key
+    unifiedSnapshotTimer.restart()
+  }
+
+  function refreshUnifiedSnapshot() {
+    if (!unified || !backend || !backend.ready || unifiedRequestPending) return
+    unifiedRequestQueued = false
+    unifiedRequestPending = true
+    var generation = unifiedRevision
+    backend.call("model.unified", {
+      sources: unifiedSources, abilities: unifiedAbilities,
+      states: unifiedStates, summaries: accountSummaries
+    }, function(value, error) {
+      if (!root) return
+      root.unifiedRequestPending = false
+      if (root.unified && generation === root.unifiedRevision) {
+        if (error || !value) root.unifiedSnapshotError = "Could not combine mailboxes"
+        else {
+          var rows = value.messages || []
+          for (var i = 0; i < rows.length; i++) {
+            if (rows[i].date) rows[i].date = new Date(rows[i].date)
+          }
+          root.unifiedSnapshot = value
+          root.unifiedSnapshotError = ""
+        }
+      }
+      if (root.unifiedRequestQueued) unifiedSnapshotTimer.restart()
+    })
+  }
+
+  onUnifiedSourcesChanged: scheduleUnifiedSnapshot()
+  onUnifiedAbilitiesChanged: scheduleUnifiedSnapshot()
+  onUnifiedStatesChanged: scheduleUnifiedSnapshot()
+  onAccountSummariesChanged: scheduleUnifiedSnapshot()
+  Timer { id: unifiedSnapshotTimer; interval: 0; onTriggered: root.refreshUnifiedSnapshot() }
 
   // The mailbox every account is showing. A unified view puts them all on the
   // same rail row, so this is the row rather than one account's idea of it —
@@ -1256,7 +1332,7 @@ Item {
   readonly property var sendAsAliases: current ? current.availableSendAsAliases : []
   // Every address a new message may be sent as, across signed-in mailboxes.
   // Compose reads this and hides the ones that do not belong on a reply.
-  readonly property var sendIdentities: {
+  readonly property var senderSources: {
     var _epoch = hostsEpoch
     var mailboxes = []
     var accounts = accountList ? accountList.accounts : []
@@ -1272,7 +1348,24 @@ Item {
         aliases: host ? host.availableSendAsAliases : []
       })
     }
-    return Senders.identities(mailboxes)
+    return mailboxes
+  }
+  property var sendIdentities: []
+  property int senderRequestSerial: 0
+  function scheduleSenderIdentities() {
+    senderRequestSerial++
+    sendIdentities = []
+    senderProjectionTimer.restart()
+  }
+  Timer { id: senderProjectionTimer; interval: 0; onTriggered: root.refreshSenderIdentities() }
+  onSenderSourcesChanged: scheduleSenderIdentities()
+  function refreshSenderIdentities() {
+    if (!backend || !backend.ready) return
+    var serial = senderRequestSerial
+    backend.call("account.identities", { mailboxes: senderSources }, function(result, error) {
+      if (!root || serial !== root.senderRequestSerial || error || !result) return
+      root.sendIdentities = result.identities || []
+    })
   }
   // The name the entry being edited was given, or "" for none: what the
   // setup page's name field shows. `accountLabel` cannot say, because it
@@ -1289,7 +1382,7 @@ Item {
     return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
   }
   readonly property int inboxUnread: unified
-    ? Unified.totalUnread(accountSummaries) : (current ? current.inboxUnread : 0)
+    ? Number(unifiedSnapshot.totalUnread || 0) : (current ? current.inboxUnread : 0)
   readonly property var messages: unified
     ? unifiedMessages : (current ? current.messages : [])
   // A label belongs to one service and one mailbox within it, so a merged list
@@ -1312,25 +1405,25 @@ Item {
   // `Unified.everyMailboxCan` rather than from here.
   readonly property string providerId: current ? current.providerId : Provider.DEFAULT_ID
   readonly property var mailboxes: unified
-    ? Unified.sharedMailboxRows(unifiedAbilities)
+    ? (unifiedSnapshot.mailboxes || [])
     : (current ? current.mailboxes : Provider.mailboxes(Provider.DEFAULT_ID))
   readonly property bool canArchive: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "archive")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.archive)
     : (!current || current.canArchive)
   readonly property bool canReportSpam: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "spam")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.spam)
     : (!current || current.canReportSpam)
   readonly property bool canStar: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "star")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.star)
     : (!current || current.canStar)
   readonly property bool hasLabels: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "labels")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.labels)
     : (!current || current.hasLabels)
   // Intersected like every other capability: a merged list holds rows from
   // mailboxes whose provider has no web UI at all, and "Open in browser" on
   // one of those is a button that cannot be honoured.
   readonly property bool canOpenOnWeb: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "web")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.web)
     : (!current || current.canOpenOnWeb)
   readonly property bool canOpenWebInbox: !unified && !!current && current.canOpenWebInbox
   // A key is not a button: `e`, `s`, and `v` are bound whatever mailbox is open, so
@@ -1376,12 +1469,12 @@ Item {
   // account's threads beside a mailbox that has none would draw a member count
   // on the rows that happened to carry one and nothing on the rest.
   readonly property bool showsConversations: unified
-    ? Unified.everyMailboxCan(unifiedAbilities, "conversations")
+    ? !!(unifiedSnapshot.capabilities && unifiedSnapshot.capabilities.conversations)
     : (!!current && current.showsConversations)
   // The rail and its members are about the message being read, so they come
   // from the mailbox holding the selection — the same place `selectedMessage`
   // and `detailPainted` come from.
-  readonly property bool showsRail: !!reading && reading.showsRail
+  readonly property bool showsRail: conversationProjection.showsRail === true
   // Composed on the way out, like `selectedId` and for the same reason: the
   // rail hands a member id back to `select` and to `act`, and compares the
   // open one against `selectedId`. A raw one reached no mailbox at all.
@@ -1401,9 +1494,30 @@ Item {
   // the same question of the merged list as of one mailbox — so it is asked of
   // the service's own `mailboxKey` rather than of whichever account is
   // underneath it.
-  readonly property string viewedMailboxKey: unified
-    ? Conversation.viewedMailboxKey(mailboxKey, searchQuery !== "")
-    : (current ? current.viewedMailboxKey : "")
+  readonly property string viewedMailboxKey: String(conversationProjection.viewedMailboxKey || "")
+  property var conversationProjection: ({ showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+  property int conversationProjectionSerial: 0
+  readonly property var conversationSource: ({
+    operation: "project", thread: selectedThread, summaries: memberSummaries,
+    selectedId: selectedId, mailboxKey: mailboxKey,
+    searching: searchQuery !== "" || rawQuery !== "", mailboxes: mailboxes,
+    conversations: !!reading && reading.showsConversations
+  })
+  function scheduleConversationProjection() {
+    conversationProjectionSerial++
+    conversationProjection = ({ showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+    conversationProjectionTimer.restart()
+  }
+  Timer { id: conversationProjectionTimer; interval: 0; onTriggered: root.refreshConversationProjection() }
+  onConversationSourceChanged: scheduleConversationProjection()
+  function refreshConversationProjection() {
+    if (!backend || !backend.ready) return
+    var serial = conversationProjectionSerial
+    backend.call("account.conversation", conversationSource, function(result, error) {
+      if (!root || serial !== root.conversationProjectionSerial || error || !result) return
+      root.conversationProjection = result
+    })
+  }
   // The typed search and the query behind it. A merged search asks every
   // mailbox the same words, so one account's copy is every account's — and
   // reading it from the visible one keeps the box showing what was typed.
@@ -1412,19 +1526,19 @@ Item {
   // A unified view draws no labels, so it can never be showing one.
   readonly property string rawLabelId: unified || !current ? "" : current.rawLabelId
   readonly property bool listLoading: unified
-    ? Unified.anyLoading(unifiedStates) : (!!current && current.listLoading)
+    ? !!unifiedSnapshot.loading : (!!current && current.listLoading)
   // A mailbox that cannot load is not a mailbox still loading, which is the
   // distinction `Unified.allLoaded` draws: requiring every one of them left a
   // signed-out account holding the placeholder blank indefinitely.
   readonly property bool listLoaded: unified
-    ? Unified.allLoaded(unifiedStates) : (!!current && current.listLoaded)
+    ? !!unifiedSnapshot.loaded : (!!current && current.listLoaded)
   // Still coming from any server. A unified search asks every mailbox, so the
   // spinner must remain visible while any of them is still answering.
   readonly property bool serverSearchLoading: unified
-    ? Unified.anyServerSearchLoading(unifiedStates)
+    ? !!unifiedSnapshot.serverSearchLoading
     : (!!current && current.serverSearchLoading)
   readonly property bool hasMore: unified
-    ? Unified.anyHasMore(unifiedStates) : (!!current && current.hasMore)
+    ? !!unifiedSnapshot.hasMore : (!!current && current.hasMore)
   // "12 results" for the visible mailbox. Left alone deliberately rather than
   // summed: a merged count would have to wait for every mailbox to finish
   // searching, and a number that keeps growing while it is read is worse than
@@ -1504,7 +1618,7 @@ Item {
   readonly property int sendSecondsRemaining: pendingSendHost
     ? pendingSendHost.sendSecondsRemaining : 0
   readonly property string lastError: unified
-    ? Unified.firstError(unifiedStates) : (current ? current.lastError : "")
+    ? (unifiedSnapshotError || unifiedSnapshot.error || "") : (current ? current.lastError : "")
   // The last thing a mailbox said it did, and the undo that goes with it. Read
   // from `current` alone, archiving a row from a non-active mailbox in a merged
   // list produced no confirmation and no undo affordance at all — so the most
@@ -1752,7 +1866,7 @@ Item {
     if (!host) return false
     sendSequence += 1
     return host.send(withSignatures(withSourceDraftId(values), host),
-      "send-" + sendSequence, sendSequence)
+      "send-" + sendSession + "-" + sendSequence, sendSequence)
   }
 
   // The mailbox a submission is sent from.
@@ -1835,6 +1949,7 @@ Item {
     return values
   }
 
+  readonly property string sendSession: Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)
   property int sendSequence: 0
 
   function saveDraft(fields, callback) {
@@ -1849,7 +1964,7 @@ Item {
   }
   function fail(text) { if (current) current.fail(text) }
   function note(text) { if (current) current.note(text) }
-  function undoSend() {
+  function undoSend(callback) {
     var host = pendingSendHost
     if (!host) return false
     // Same reason as `forwardReplyFailure`: the draft names its mailbox, so a
@@ -1862,7 +1977,7 @@ Item {
         }
       }
     }
-    return host.undoSend()
+    return host.undoSend(callback)
   }
   function loadAttachments(messageId, attachments, callback) {
     var host = hostForId(messageId)
@@ -2195,6 +2310,7 @@ Item {
 
   AgentRunner {
     id: agentRunner
+    backend: root.backend
     pluginDir: root.pluginDir
     // The open account owns what the rows show and cancel: an IMAP id is
     // only unique inside one account, and two accounts can share an address.
@@ -2221,47 +2337,21 @@ Item {
     onExited: root.windowWritePayload = ""
   }
 
-  FileView {
-    id: accountsFile
-    path: {
-      var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
-      return home + "/omamail/accounts.json"
+  Connections {
+    target: root.backend
+    function onNotification(method, params) {
+      if (method === "accounts.changed" && params && params.revision !== root.accountsRevision)
+        root.restoreAccountRegistry()
     }
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.applyAccounts(text())
-    onFileChanged: reload()
-    // No list yet is the ordinary first-run state, not an error.
-    onLoadFailed: root.applyAccounts("")
-  }
-
-  Process {
-    id: accountsWriter
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.accountsWritePayload + "\n")
-      root.accountsWritePayload = ""
-    }
-    onExited: {
-      root.accountsWritePayload = ""
-      if (root.accountsSaveQueued) {
-        var drop = root.accountsSaveQueuedAllowDrop
-        root.saveAccounts(drop ? { allowDrop: true } : undefined)
+    function onReadyChanged() {
+      root.scheduleSenderIdentities()
+      root.scheduleConversationProjection()
+      if (root.backend.ready) {
+        if (root.accountsSaveQueued) root.saveAccounts(root.accountsSaveQueuedAllowDrop ? { allowDrop: true } : undefined)
+        else root.restoreAccountRegistry()
+        root.refreshRecipientContacts()
       }
-    }
-  }
-
-  Process {
-    id: contactReader
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) return
-      var parsed = null
-      try { parsed = JSON.parse(String(stdout.text || "[]")) } catch (e) { parsed = null }
-      if (Array.isArray(parsed)) root.recipientContacts = parsed
+      else root.contactsLoading = false
     }
   }
 
@@ -2272,6 +2362,7 @@ Item {
   }
 
   Component.onCompleted: {
+    Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
   }

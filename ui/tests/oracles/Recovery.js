@@ -1,0 +1,136 @@
+.pragma library
+
+var VERSION = 1
+
+function empty() {
+  return { active: false, returnView: "", draft: null, parked: [] }
+}
+
+function text(value) {
+  return String(value || "")
+}
+
+function person(value) {
+  var row = value && typeof value === "object" ? value : ({})
+  return { email: text(row.email), display: text(row.display) }
+}
+
+function people(value) {
+  var rows = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < rows.length; i++) out.push(person(rows[i]))
+  return out
+}
+
+function attachment(value) {
+  var row = value && typeof value === "object" ? value : ({})
+  var path = text(row.path)
+  return {
+    filename: text(row.filename),
+    mimeType: text(row.mimeType),
+    size: Math.max(0, Math.floor(Number(row.size) || 0)),
+    data: path === "" ? text(row.data) : "",
+    path: path,
+    owned: row.owned === true,
+    attachmentId: text(row.attachmentId),
+    partId: text(row.partId)
+  }
+}
+
+function attachments(value) {
+  var rows = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < rows.length; i++) out.push(attachment(rows[i]))
+  return out
+}
+
+function draft(value) {
+  var row = value && typeof value === "object" ? value : ({})
+  return {
+    to: text(row.to),
+    cc: text(row.cc),
+    bcc: text(row.bcc),
+    replyTo: text(row.replyTo),
+    subject: text(row.subject),
+    body: text(row.body),
+    // What the compose window placed in the body rather than what was typed
+    // into it. A row written before this existed has none, which reads as an
+    // empty string — so any body at all differs from it, and a recovered draft
+    // from the previous build is still offered back.
+    placedBody: text(row.placedBody),
+    bodyWasEdited: row.bodyWasEdited === true,
+    accountId: text(row.accountId),
+    sourceDraftId: text(row.sourceDraftId),
+    mode: text(row.mode) || "new",
+    threadId: text(row.threadId),
+    inReplyTo: text(row.inReplyTo),
+    ccVisible: row.ccVisible === true,
+    bccVisible: row.bccVisible === true,
+    replyToVisible: row.replyToVisible === true,
+    fromEmail: text(row.fromEmail),
+    replyRecipients: people(row.replyRecipients),
+    fromWasChosen: row.fromWasChosen === true,
+    originalAttachments: attachments(row.originalAttachments),
+    forwardedAttachments: attachments(row.forwardedAttachments),
+    draftAttachments: attachments(row.draftAttachments)
+  }
+}
+
+function hasMeaningfulDraft(value) {
+  var row = value && typeof value === "object" ? value : ({})
+  if (text(row.to).trim() !== "") return true
+  if (text(row.cc).trim() !== "") return true
+  if (text(row.bcc).trim() !== "") return true
+  if (text(row.subject).trim() !== "") return true
+  // Equality alone cannot say whether somebody typed and then deleted back to
+  // the placed text, so preserve that edit history beside the original body.
+  if ((row.bodyWasEdited === true || text(row.body) !== text(row.placedBody))
+      && text(row.body).trim() !== "") return true
+  if (Array.isArray(row.forwardedAttachments) && row.forwardedAttachments.length > 0)
+    return true
+  return Array.isArray(row.draftAttachments) && row.draftAttachments.length > 0
+}
+
+function returnView(value) {
+  var view = text(value)
+  return view === "reader" || view === "calendar" ? view : "list"
+}
+
+function parse(raw) {
+  var value
+  try { value = JSON.parse(text(raw)) } catch (error) { return empty() }
+  if (!value || typeof value !== "object" || value.version !== VERSION
+      || value.active !== true) return empty()
+  var saved = draft(value.draft)
+  if (!hasMeaningfulDraft(saved)) return empty()
+  return {
+    active: true, returnView: returnView(value.returnView), draft: saved,
+    parked: meaningful(value.parked)
+  }
+}
+
+// The other drafts parked for their send when the file was written: one
+// composer, several undo windows. Each that still says something is kept.
+function meaningful(values) {
+  var out = []
+  var list = Array.isArray(values) ? values : []
+  for (var i = 0; i < list.length; i++) {
+    var saved = draft(list[i])
+    if (hasMeaningfulDraft(saved)) out.push(saved)
+  }
+  return out
+}
+
+function serialize(view, value, parked) {
+  var saved = draft(value)
+  if (!hasMeaningfulDraft(saved)) return ""
+  var others = meaningful(parked)
+  var record = {
+    version: VERSION,
+    active: true,
+    returnView: returnView(view),
+    draft: saved
+  }
+  if (others.length > 0) record.parked = others
+  return JSON.stringify(record) + "\n"
+}

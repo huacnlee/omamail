@@ -21,13 +21,3 @@ pub(super) fn read_params(input: impl Read) -> Result<Value, &'static str> {
     }
     Ok(params)
 }
-
-pub(super) fn print_result(result: Result<Value, &'static str>) {
-    match result {
-        Ok(value) => println!("{}", json!({"ok": true, "result": value})),
-        Err(code) => {
-            println!("{}", json!({"ok": false, "error": {"code": code}}));
-            std::process::exit(1);
-        }
-    }
-}

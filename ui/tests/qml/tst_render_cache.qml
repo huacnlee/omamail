@@ -1,11 +1,25 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../account" as Account
-import "../../account/RenderCache.js" as RenderCache
 
 Item {
+  QtObject {
+    id: backend
+    property bool ready: true
+    property var requests: []
+    function call(method, params, callback) {
+      if (method === "reader.render") requests.push({method: method, params: params, callback: callback})
+    }
+    function complete(index, text, error) {
+      var document = {type: "root", children: []}
+      requests[index].callback(error ? null : {nativeRender:{html: text, document: document,
+        reader: {document: document, tooHeavy: false, empty: false, blockedImages: 0},
+        blockedImages: 0, remoteImages: 0, remoteImageSources: [], tooHeavy: false}}, error)
+    }
+  }
   Account.MailAccount {
     id: account
+    backend: backend
     pluginDir: "/tmp/omamail-render-cache-test"
     active: false
     windowOpen: false
@@ -19,52 +33,74 @@ Item {
     function init() {
       account.clearSelection()
       account.accountId = "account-one"
-      account.renderCache = RenderCache.create(12)
+      backend.requests = []
       account.bodyMode = "original"
+      account.remoteImagesAllowed = false
+      account.remoteImageData = ({})
     }
 
-    function test_reader_rebuild_is_deferred_then_cached() {
+    function test_html_is_only_drawn_after_native_sanitization() {
       account.selectedId = "message-one"
-      var first = account.renderSource("<p>First message</p>", true)
-
-      compare(first.reader, null, "original mode does not rebuild reading mode on its paint path")
-      compare(account.selectedReaderDocument, null)
-
-      wait(0)
-      verify(account.selectedReaderDocument !== null,
-        "the next event-loop turn completes the reading document")
-
-      var cached = RenderCache.get(account.renderCache, "message-one",
-        "<p>First message</p>", true)
-      verify(cached !== null)
-      compare(account.renderSource("<p>First message</p>", true), cached,
-        "reopening returns the cached render result")
-    }
-
-    function test_a_stale_deferred_render_cannot_replace_the_new_selection() {
-      account.selectedId = "message-one"
-      account.renderSource("<p>Old message</p>", false)
-      account.detailSerial++
-      account.selectedId = "message-two"
-      // Complete the current message immediately. If the older callback is
-      // not guarded it runs afterwards and becomes the final visible state.
-      account.renderSource("<p>Current message</p>", false, true)
-
-      wait(0)
-      verify(account.selectedHtml.indexOf("Current message") >= 0)
-      verify(account.selectedHtml.indexOf("Old message") < 0)
+      account.renderSource("opaque-native-key", true)
+      compare(account.selectedHtml, "")
+      compare(backend.requests.length, 1)
+      compare(backend.requests[0].method, "reader.render")
+      compare(backend.requests[0].params.readerKey, "opaque-native-key")
+      compare(backend.requests[0].params.html, undefined, "sender HTML remains in Rust")
+      compare(backend.requests[0].params.options.withReader, true)
+      backend.complete(0, "safe native result", null)
+      compare(account.selectedHtml, "safe native result")
       verify(account.selectedReaderDocument !== null)
     }
 
-    function test_changing_account_identity_drops_render_entries() {
+    function test_a_stale_render_cannot_replace_the_new_selection() {
       account.selectedId = "message-one"
-      account.renderSource("<p>First message</p>", false, true)
-      verify(RenderCache.get(account.renderCache, "message-one",
-        "<p>First message</p>", false) !== null)
-
-      account.accountId = "account-two"
-      compare(RenderCache.get(account.renderCache, "message-one",
-        "<p>First message</p>", false), null)
+      account.renderSource("old", false)
+      account.detailSerial++
+      account.selectedId = "message-two"
+      account.renderSource("current", false, true)
+      backend.complete(1, "current", null)
+      backend.complete(0, "old", null)
+      compare(account.selectedHtml, "current")
     }
+
+    function test_changing_account_identity_rejects_late_render() {
+      account.selectedId = "message-one"
+      account.renderSource("private account one", false, true)
+      account.accountId = "account-two"
+      backend.complete(0, "private account one", null)
+      compare(account.selectedHtml, "")
+    }
+
+    function test_failure_never_falls_back_to_sender_html() {
+      account.selectedId = "message-one"
+      account.renderSource("opaque-key-with-blocked-images", false, true)
+      backend.complete(0, "", {code: "failed"})
+      compare(account.selectedHtml, "")
+      verify(account.lastError !== "")
+    }
+    function test_late_cached_source_cannot_overwrite_a_live_projection() {
+      account.selectedId = "message-one"
+      account.renderSource("cached-key")
+      account.readerSourceKey = "live-key"
+      account.selectedHtml = "new native projection"
+      backend.complete(0, "old cached projection", null)
+      compare(account.selectedHtml, "new native projection")
+    }
+
+    function test_image_policy_change_only_rerenders_the_opaque_native_source() {
+      account.selectedId = "message-one"
+      account.renderSource("native-key")
+      account.showRemoteImages()
+      compare(backend.requests.length, 2)
+      compare(backend.requests[0].params.options.allowRemoteImages, false)
+      compare(backend.requests[1].params.options.allowRemoteImages, true)
+      compare(backend.requests[1].params.readerKey, "native-key")
+      compare(backend.requests[1].params.html, undefined)
+      backend.complete(1, "current image policy", null)
+      backend.complete(0, "obsolete image policy", null)
+      compare(account.selectedHtml, "current image policy")
+    }
+
   }
 }
