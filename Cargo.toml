@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
 [profile.release]
+opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
