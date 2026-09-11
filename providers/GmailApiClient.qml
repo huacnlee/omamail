@@ -15,9 +15,10 @@ Item {
   required property var auth
 
   // Gmail's list endpoint returns ids only, so every page costs one list call
-  // plus one metadata call per message. Those are fired together rather than
-  // in sequence: 25 sequential round trips to Google is most of a second of
-  // staring at an empty panel.
+  // plus one metadata call per message. Those overlap rather than run in
+  // sequence — 25 sequential round trips to Google is most of a second of
+  // staring at an empty panel — but no more than Api.MAX_PARALLEL_READS of them
+  // are in the air at once, for the reason written beside that constant.
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
 
@@ -38,7 +39,17 @@ Item {
   readonly property int requestTimeoutMs: 30000
 
   function newHandle() {
-    return { aborted: false, timedOut: false, xhr: null, deadline: null, children: [] }
+    return { aborted: false, timedOut: false, counted: false, xhr: null, deadline: null,
+      retry: null, children: [] }
+  }
+
+  // The in-flight count belongs to the handle rather than to the call, because
+  // a request that is re-sent — a stale token, a throttled page — is still the
+  // same one request as far as `busy` is concerned.
+  function release(handle) {
+    if (!handle || !handle.counted) return
+    handle.counted = false
+    root.inFlight = Math.max(0, root.inFlight - 1)
   }
 
   // Stopped and destroyed together, because a Timer that outlives its request
@@ -50,10 +61,44 @@ Item {
     handle.deadline = null
   }
 
+  // Stopped and destroyed like the deadline is: a retry that fires after the
+  // caller has moved on re-sends a page nobody is waiting for.
+  function clearRetry(handle) {
+    if (!handle || !handle.retry) return
+    handle.retry.stop()
+    handle.retry.destroy()
+    handle.retry = null
+  }
+
+  // Waiting holds the in-flight count, so `busy` stays true across the pause
+  // and no caller is told the page failed. Answers false when there is no
+  // wait to be had: re-sending immediately is the burst this exists to
+  // prevent, so the caller reports the refusal instead.
+  function scheduleRetry(handle, delayMs, action) {
+    if (!handle || handle.aborted) return false
+    clearRetry(handle)
+    handle.retry = retryComponent.createObject(root, { interval: delayMs })
+    if (!handle.retry) return false
+    handle.retry.triggered.connect(function() {
+      if (!root) return
+      root.clearRetry(handle)
+      if (handle.aborted) return
+      action()
+    })
+    handle.retry.start()
+    return true
+  }
+
+  // A request waiting out a refusal has no reply left to arrive: `abort()` on
+  // the previous one already drove it to DONE, so this is the only place its
+  // in-flight count can be given back. `release` counts once per handle, so
+  // the ordinary path releasing it again in the reply is not a second one.
   function abortRequest(handle) {
     if (!handle) return
     handle.aborted = true
     clearDeadline(handle)
+    clearRetry(handle)
+    release(handle)
     if (handle.xhr && handle.xhr.abort) handle.xhr.abort()
     handle.xhr = null
     var children = handle.children || []
@@ -68,26 +113,30 @@ Item {
     return error
   }
 
-  function request(method, path, query, body, callback, retried, existingHandle) {
+  function request(method, path, query, body, callback, retried, existingHandle, attempt) {
     var handle = existingHandle || newHandle()
     var url = Api.safeApiUrl(path)
     if (!url) {
+      release(handle)
       if (typeof callback === "function")
         callback(0, null, "Something went wrong while contacting Gmail", null)
       return handle
     }
     url = Api.appendQuery(url, query)
 
-    if (retried !== true) root.inFlight++
+    if (!handle.counted) {
+      handle.counted = true
+      root.inFlight++
+    }
 
     auth.withAccessToken(function(token, tokenError) {
       if (!root) return
       if (handle.aborted) {
-        root.inFlight = Math.max(0, root.inFlight - 1)
+        root.release(handle)
         return
       }
       if (!token) {
-        root.inFlight = Math.max(0, root.inFlight - 1)
+        root.release(handle)
         if (typeof callback === "function") callback(0, null, tokenError || "Not signed in", null)
         return
       }
@@ -100,7 +149,7 @@ Item {
         if (!root) return
         if (handle.xhr === xhr) handle.xhr = null
         if (handle.aborted) {
-          root.inFlight = Math.max(0, root.inFlight - 1)
+          root.release(handle)
           return
         }
         root.clearDeadline(handle)
@@ -109,10 +158,28 @@ Item {
         // freshness check and the request reaching Google.
         if (xhr.status === 401 && retried !== true) {
           auth.invalidateAccessToken()
-          root.request(method, path, query, body, callback, true, handle)
+          root.request(method, path, query, body, callback, true, handle, attempt)
           return
         }
-        root.inFlight = Math.max(0, root.inFlight - 1)
+        // Throttling is the one failure the panel can answer on its own:
+        // Gmail counts its ceiling per second and says nothing a reader can
+        // act on. Waiting it out beats handing the mailbox an error it would
+        // only clear on the next poll two minutes later.
+        //
+        // Reads only, and that is the whole of the rule. A 401 can be re-sent
+        // because it says Google never got as far as the request; a throttling
+        // refusal can come from a front end with the write already committed
+        // behind it, and a re-sent `messages/send` is a second message in
+        // somebody's inbox that nothing can take back.
+        var waitMs = String(method || "GET").toUpperCase() === "GET"
+          ? Api.retryDelayMs(xhr.status, payload,
+            xhr.getResponseHeader ? xhr.getResponseHeader("Retry-After") : "", attempt)
+          : 0
+        if (waitMs > 0 && root.scheduleRetry(handle, waitMs, function() {
+          root.request(method, path, query, body, callback, retried, handle,
+            (Number(attempt) || 0) + 1)
+        })) return
+        root.release(handle)
         var ok = xhr.status >= 200 && xhr.status < 300
         // A request the deadline gave up on arrives here exactly as a failed
         // one does — `abort()` drives readyState to DONE with status 0, which
@@ -202,13 +269,14 @@ Item {
     return handle
   }
 
-  // Fetches every id at once and calls back once, with the results in the
-  // order the ids were given rather than the order Google answered in. A list
-  // search may also take `progress`, which receives the payloads as Google
-  // answers so cached rows can be filled in without waiting for the slowest
-  // request on the page. Answers close enough to share a frame are batched:
-  // repainting and sorting the whole list once per one of 25 parallel replies
-  // costs far more than the few milliseconds of extra latency reveal.
+  // Fetches every id through a window of Api.MAX_PARALLEL_READS and calls back
+  // once, with the results in the order the ids were given rather than the
+  // order Google answered in. A list search may also take `progress`, which
+  // receives the payloads as Google answers so cached rows can be filled in
+  // without waiting for the slowest read on the page. Answers close enough to
+  // share a frame are batched: repainting and sorting the whole list once per
+  // parallel reply costs far more than the few milliseconds of extra latency
+  // reveal.
   function getMessages(ids, full, callback, existingHandle, progress) {
     var handle = existingHandle || newHandle()
     var list = Array.isArray(ids) ? ids : []
@@ -262,19 +330,44 @@ Item {
       callback(ordered, firstError)
     }
 
-    for (var i = 0; i < list.length; i++) {
-      (function(index) {
-        var child = root.getMessage(list[index], full, function(payload, error) {
-          if (handle.aborted) return
-          if (error && !firstError) firstError = error
-          results[index] = payload
-          queueProgress(payload)
-          remaining--
-          if (remaining === 0) finish()
-        })
-        handle.children.push(child)
-      })(i)
+    var started = 0
+    var active = 0
+    var pumping = false
+
+    // A window rather than the whole page at once: Gmail's quota is counted
+    // per second, and a page of metadata reads in one breath is the burst that
+    // earns a 403 rateLimitExceeded. Api.MAX_PARALLEL_READS still overlaps the
+    // round trips, so a page arrives in a few rounds instead of one staircase
+    // of them.
+    //
+    // One loop, never nested. A read can answer while it is being started —
+    // there is no credential yet, or the id is not one a url can be built from
+    // — and its callback comes back here; `pumping` turns that into another
+    // turn of the loop already running instead of a frame on top of it, which
+    // on a large page is the difference between a page and a stack overflow.
+    function pump() {
+      if (pumping) return
+      pumping = true
+      while (!handle.aborted && started < list.length && active < Api.MAX_PARALLEL_READS) {
+        (function(index) {
+          active++
+          var child = root.getMessage(list[index], full, function(payload, error) {
+            active--
+            if (handle.aborted) return
+            if (error && !firstError) firstError = error
+            results[index] = payload
+            queueProgress(payload)
+            remaining--
+            if (remaining === 0) finish()
+            else pump()
+          })
+          handle.children.push(child)
+        })(started++)
+      }
+      pumping = false
     }
+
+    pump()
     return handle
   }
 
@@ -407,9 +500,9 @@ Item {
   }
 
   // One Timer per request in flight, created and destroyed around it. A single
-  // shared one cannot work: requests here are fired together — a page of
-  // messages is one list call plus one metadata call each — and they finish in
-  // whatever order Google answers.
+  // shared one cannot work: requests here overlap — a page of messages is one
+  // list call plus one metadata call each — and they finish in whatever order
+  // Google answers.
   Component {
     id: deadlineComponent
 
@@ -420,6 +513,14 @@ Item {
 
   Component {
     id: progressTimerComponent
+
+    Timer {
+      repeat: false
+    }
+  }
+
+  Component {
+    id: retryComponent
 
     Timer {
       repeat: false

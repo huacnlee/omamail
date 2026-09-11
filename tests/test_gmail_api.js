@@ -181,6 +181,62 @@ assert.strictEqual(api.sendAsFor(aliases, "waiting@example.org"), null)
 assert.strictEqual(api.sendAsFor(aliases, ""), null)
 assert.strictEqual(api.sendAsFor(null, "me@example.com"), null)
 
+// ----------------------------------------------------------- rate limits
+//
+// 429 is throttling on its own. 403 is also how Gmail reports a missing scope,
+// a disabled API and a suspended account, so the reason string is what decides
+// whether waiting can fix it.
+const throttled = { error: { errors: [{ reason: "rateLimitExceeded" }] } }
+const perUser = { error: { errors: [{ reason: "userRateLimitExceeded" }] } }
+const forbidden = { error: { errors: [{ reason: "insufficientPermissions" }] } }
+assert.strictEqual(api.rateLimited(429, null), true)
+assert.strictEqual(api.rateLimited(403, throttled), true)
+assert.strictEqual(api.rateLimited(403, perUser), true)
+assert.strictEqual(api.rateLimited(403, forbidden), false)
+assert.strictEqual(api.rateLimited(403, null), false)
+assert.strictEqual(api.rateLimited(500, null), false)
+
+// The newer Google envelope names the same condition in `status` rather than in
+// a reason, and a 403 read out of neither envelope is not throttling.
+assert.strictEqual(api.rateLimited(403, { error: { status: "RESOURCE_EXHAUSTED" } }), true)
+assert.strictEqual(api.rateLimited(429, { error: { status: "RESOURCE_EXHAUSTED" } }), true)
+assert.strictEqual(api.rateLimited(403, { error: { errors: [] } }), false)
+assert.strictEqual(api.rateLimited(403, { error: "insufficient scope" }), false)
+
+// Every reason the client waits on reads the same way to the person holding the
+// mailbox. Google's own prose for this one names a timestamp and a quota metric.
+assert.strictEqual(
+  api.responseError(403, { error: { message: "User-rate limit exceeded. Retry after 2026-01-01T00:00:00Z",
+    errors: [{ reason: "userRateLimitExceeded" }] } }, "fallback"),
+  "Gmail is rate limiting this account. Try again shortly")
+assert.strictEqual(api.responseError(429, { error: { status: "RESOURCE_EXHAUSTED" } }, "fallback"),
+  "Gmail is rate limiting this account. Try again shortly")
+assert.strictEqual(
+  api.responseError(403, { error: { message: "Request had insufficient authentication scopes.",
+    errors: [{ reason: "insufficientPermissions" }] } }, "fallback"),
+  "Request had insufficient authentication scopes.")
+
+// Google's own wait wins, capped so a long one cannot park the panel.
+assert.strictEqual(api.retryDelayMs(429, null, "3", 0), 3000)
+assert.strictEqual(api.retryDelayMs(429, null, "600", 0), 15000)
+assert.strictEqual(api.retryDelayMs(403, throttled, "0.5", 0), 500)
+assert.strictEqual(api.retryDelayMs(403, forbidden, "3", 0), 0,
+  "a permission failure is not a wait")
+assert.strictEqual(api.retryDelayMs(429, null, "3", api.MAX_RATE_LIMIT_RETRIES), 0,
+  "the attempts run out")
+
+// No usable header: the wait doubles per attempt and carries jitter under a
+// quarter second, so two accounts refused together do not return together.
+function delayWithin(attempt, retryAfter, low, high) {
+  const value = api.retryDelayMs(429, null, retryAfter, attempt)
+  assert.ok(value >= low && value < high,
+    "attempt " + attempt + " waited " + value + ", expected " + low + "-" + high)
+}
+delayWithin(0, null, 1200, 1450)
+delayWithin(1, "", 2400, 2650)
+delayWithin(2, "Wed, 21 Oct 2015 07:28:00 GMT", 4800, 5050)
+delayWithin(2, "-1", 4800, 5050)
+
 // -------------------------------------------------------------- browsing
 
 assert.strictEqual(api.webMessageUrl("18f3a", 0), "https://mail.google.com/mail/u/0/#all/18f3a")
