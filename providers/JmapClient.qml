@@ -315,8 +315,8 @@ Item {
     // One unauthenticated GET, and at most one redirect hop taken from the
     // reply rather than by curl. A 200 is a candidate only when the body is a
     // JMAP session; a 401 only when it is a JMAP challenge, not an HTML page.
-    // The hop has to stay on the address domain: an unauthenticated redirect
-    // is not a reason to send the secret to another site.
+    // The address domain's authenticated HTTPS reply may delegate to a hosted
+    // provider; the hop itself still has to be HTTPS and carry no userinfo.
     function probe(url, hops, found) {
       request("session", url, null, null, handle, function(reply) {
         if (handle.aborted) return
@@ -324,7 +324,7 @@ Item {
           found("")
           return
         }
-        var hop = Jmap.discoveryHop(reply.status, reply.redirect, plan.domain)
+        var hop = Jmap.discoveryHop(reply.status, reply.redirect)
         if (hop !== "" && hops > 0) {
           probe(hop, hops - 1, found)
           return

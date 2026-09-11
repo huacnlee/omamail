@@ -634,19 +634,11 @@ function redirectHop(status, redirectUrl) {
   return url
 }
 
-function hostBelongsToDomain(host, domain) {
-  var name = bareHost(String(host || "").replace(/:\d+$/, ""))
-  var site = bareHost(domain)
-  if (name === "" || site === "") return false
-  if (name === site) return true
-  return name.length > site.length
-    && name.substring(name.length - site.length - 1) === "." + site
-}
-
-function discoveryHop(status, redirectUrl, domain) {
-  var url = redirectHop(status, redirectUrl)
-  if (url === "") return ""
-  return hostBelongsToDomain(sessionHost(url), domain) ? url : ""
+function discoveryHop(status, redirectUrl) {
+  // This Location came from the address domain's authenticated HTTPS
+  // well-known response, so that response is the authority that delegates to
+  // a hosted provider. `redirectHop` still requires HTTPS and no userinfo.
+  return redirectHop(status, redirectUrl)
 }
 
 function looksLikeSessionDocument(body) {

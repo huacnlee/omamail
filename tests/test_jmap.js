@@ -343,9 +343,9 @@ assert.strictEqual(jmap.redirectHop(307, ""), "")
 assert.strictEqual(jmap.redirectHop(0, "https://mail.example.org/"), "")
 assert.strictEqual(jmap.discoveryHop(307, "https://mail.example.org/jmap/session", "example.org"),
   "https://mail.example.org/jmap/session")
-assert.strictEqual(jmap.discoveryHop(307, "https://evil.example/jmap/session", "example.org"), "",
-  "an unauthenticated hop cannot leave the address domain")
-assert.strictEqual(jmap.discoveryHop(307, "https://example.org.evil.example/jmap", "example.org"), "")
+assert.strictEqual(jmap.discoveryHop(307, "https://api.mailhost.example/jmap/session", "customer.example"),
+  "https://api.mailhost.example/jmap/session",
+  "the address domain's authenticated well-known response may delegate to its provider")
 
 assert.strictEqual(jmap.sessionProbeAccepts(200, "<html>Sign in</html>"), false,
   "a web page is not a session")
