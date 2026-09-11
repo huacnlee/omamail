@@ -211,11 +211,11 @@ Item {
       compare(switcher.opened, true)
       compare(switcher.cursorIndex, 1)
 
-      keyClick(Qt.Key_J)
-      compare(switcher.cursorIndex, 2, "j moves down inside the popup")
+      keyClick(Qt.Key_Down)
+      compare(switcher.cursorIndex, 2, "Down moves down inside the popup")
 
-      keyClick(Qt.Key_K)
-      compare(switcher.cursorIndex, 1)
+      keyClick(Qt.Key_K, Qt.ControlModifier)
+      compare(switcher.cursorIndex, 1, "and so does Ctrl+K, for vim hands; a bare k is a letter now")
 
       keyClick(Qt.Key_Up)
       compare(switcher.cursorIndex, 0, "and the arrows reach the combined row too")
@@ -225,12 +225,51 @@ Item {
       compare(switcher.opened, false, "and closes the menu")
     }
 
-    function test_o_opens_the_row_the_cursor_is_on() {
+    // A digit is a letter here: no row carries a number, and a mailbox may
+    // well be named with one. Blank is nothing typed, and typing it all
+    // away rests the cursor on the mailbox in use rather than on the
+    // combined row.
+    function test_digits_and_blanks_are_typing() {
       switcher.openCentered()
-      switcher.cursorIndex = 2
-      keyClick(Qt.Key_O)
+      compare(switcher.cursorIndex, 1, "the mailbox in use")
+      keyClick(Qt.Key_2)
+      compare(switcher.query, "2")
+      compare(chosenSpy.count, 0)
+      compare(unifiedSpy.count, 0)
+      keyClick(Qt.Key_Backspace)
+      compare(switcher.query, "")
+      compare(switcher.cursorIndex, 1, "back on the mailbox in use, not the combined row")
+      keyClick(Qt.Key_Space)
+      compare(switcher.unifiedOffered, true, "a space is nothing typed")
+      compare(switcher.cursorIndex, 1)
+      keyClick(Qt.Key_Return)
+      compare(unifiedSpy.count, 0)
       compare(chosenSpy.count, 1)
-      compare(chosenSpy.signalArguments[0][0], 1)
+      compare(chosenSpy.signalArguments[0][0], 0)
+    }
+
+    // Letters narrow the rows to the mailboxes they name — by the name they
+    // were given or their address — and Enter opens the match by its place
+    // in the full list. The combined row stands aside while anything is typed.
+    function test_typing_finds_a_mailbox_by_name_or_address() {
+      switcher.openCentered()
+      compare(switcher.rowCount, 4)
+      keyClick(Qt.Key_W); keyClick(Qt.Key_O); keyClick(Qt.Key_R)
+      compare(switcher.query, "wor")
+      compare(switcher.unifiedOffered, false, "no combined row while typing")
+      compare(switcher.rowCount, 1)
+      compare(switcher.cursorIndex, 0)
+      keyClick(Qt.Key_Return)
+      compare(chosenSpy.count, 1)
+      compare(chosenSpy.signalArguments[0][0], 1, "Work is the second mailbox")
+      compare(switcher.opened, false)
+
+      switcher.openCentered()
+      compare(switcher.query, "", "a fresh opening starts clean")
+      keyClick(Qt.Key_N); keyClick(Qt.Key_E); keyClick(Qt.Key_T)
+      compare(switcher.rowCount, 1, "an address is searched too")
+      keyClick(Qt.Key_Return)
+      compare(chosenSpy.signalArguments[1][0], 1)
     }
   }
 }

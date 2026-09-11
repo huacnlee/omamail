@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 
-// `n` and `p` walk the conversation rail; `j` and `k` scroll the open message.
+// `n` and `p` walk the conversation rail; Shift+J and Shift+K scroll the open message.
 //
 // Why this needs Qt rather than a node test: the whole claim is that two
 // positions in one window move independently under real keystrokes. Three
@@ -423,8 +423,8 @@ Item {
     }
 
     // The claim. Both keys move the reader along the rail and neither moves the
-    // list cursor, while `j` and `k` scroll the open message.
-    function test_n_and_p_move_along_the_rail_while_j_and_k_scroll_the_message() {
+    // list cursor, while Shift+J and Shift+K scroll the open message.
+    function test_n_and_p_move_along_the_rail_while_shift_j_and_k_scroll_the_message() {
       app.openMessage("maaaaaf")
       waitForRendering(app)
       compare(app.currentView, "reader")
@@ -453,12 +453,16 @@ Item {
       var body = named(app, "messageBodyScroller")
       verify(body, "the reader exposes its body scroller")
       var before = body.contentY
-      keyClick(Qt.Key_J)
-      verify(body.contentY > before, "j scrolls the open message down")
+      keyClick(Qt.Key_J, Qt.ShiftModifier)
+      verify(body.contentY > before, "Shift+J scrolls the open message down")
       compare(app.cursorId, "maaaaaf", "and leaves the list cursor where it was")
       compare(mailService.selectedId, "maaaaaf", "and does not open another message")
-      keyClick(Qt.Key_K)
-      compare(body.contentY, before, "k scrolls the open message back up")
+      keyClick(Qt.Key_K, Qt.ShiftModifier)
+      compare(body.contentY, before, "Shift+K scrolls the open message back up")
+
+      keyClick(Qt.Key_J)
+      compare(app.cursorId, "yaaaaag", "plain j still moves the mailbox cursor")
+      compare(mailService.selectedId, "maaaaaf", "moving the cursor is not opening")
     }
 
     function test_right_opens_the_cursor_and_left_returns_to_the_list() {

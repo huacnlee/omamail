@@ -3,7 +3,7 @@
 .import "Palette.js" as Palette
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "hey"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -25,6 +25,7 @@ function sourceId(raw) {
   var value = raw || {}
   var kind = normalizeKind(value.kind)
   if (kind === "google") return "google:" + trimmed(value.accountId)
+  if (kind === "microsoft") return "microsoft:" + trimmed(value.accountId)
   var address = trimmed(value.url).toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -177,6 +178,41 @@ function withGoogleAccounts(list, accountSummaries) {
   return next
 }
 
+// A Microsoft calendar comes with an Outlook or Microsoft 365 mailbox the
+// way a Google one comes with Gmail: one source per signed-in account, its
+// primary calendar, reached through the mailbox's own Graph token.
+function withMicrosoftAccounts(list, accountSummaries) {
+  var next = copyList(list)
+  var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
+  for (var i = 0; i < accounts.length; i++) {
+    var account = accounts[i] || {}
+    if (account.provider !== "outlook" || account.signedIn !== true) continue
+    var accountId = trimmed(account.id || account.email)
+    if (accountId === "") continue
+    var saved = null
+    for (var s = 0; s < next.sources.length; s++) {
+      if (next.sources[s] && next.sources[s].id === "microsoft:" + accountId) {
+        saved = next.sources[s]
+        break
+      }
+    }
+    next = add(next, {
+      id: "microsoft:" + accountId,
+      kind: "microsoft",
+      name: trimmed(account.email || account.label || "Microsoft Calendar"),
+      accountId: accountId,
+      enabled: saved ? saved.enabled !== false : true,
+      readOnly: false,
+      colorKey: saved ? saved.colorKey : Palette.defaultKey("microsoft:" + accountId)
+    })
+  }
+  return next
+}
+
+function comesWithAccount(source) {
+  return !!source && (source.kind === "google" || source.kind === "microsoft")
+}
+
 function forAccount(list, accountId) {
   var source = list || emptyList()
   var wanted = trimmed(accountId)
@@ -185,7 +221,7 @@ function forAccount(list, accountId) {
   var values = Array.isArray(source.sources) ? source.sources : []
   for (var i = 0; i < values.length; i++) {
     if (!values[i]) continue
-    if (values[i].kind !== "google" || trimmed(values[i].accountId) === wanted)
+    if (!comesWithAccount(values[i]) || trimmed(values[i].accountId) === wanted)
       next = add(next, values[i])
   }
   return next
@@ -194,6 +230,7 @@ function forAccount(list, accountId) {
 function providerLabel(kind) {
   var value = trimmed(kind).toLowerCase()
   if (value === "google" || value === "gmail") return "Google"
+  if (value === "microsoft" || value === "outlook") return "Microsoft"
   if (value === "hey") return "HEY"
   return "CalDAV"
 }

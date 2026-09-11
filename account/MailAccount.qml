@@ -165,6 +165,7 @@ Item {
 
   property string mailboxKey: "inbox"
   property string searchQuery: ""
+  property string searchRaw: ""
   // A query picked from a list rather than typed: a Gmail label, an IMAP
   // folder. Kept apart from `searchQuery` because that one gets shaped into a
   // search — an IMAP folder wrapped in a TEXT search would go looking for the
@@ -389,17 +390,18 @@ Item {
   property string actionStatus: ""
   property string pendingAction: ""
   property string pendingActionQuery: ""
+  // Edits waiting for their server, and each list as it stood before the
+  // first of them; `Intents.qml` holds both.
+  property alias actionIntents: intents.held
+  property alias settledLists: intents.settledLists
   property var deferredListLoad: null
   property var queuedActions: []
   property bool sending: false
-  property var pendingSend: null
+  readonly property alias sendQueue: sendQueue
+  readonly property int sendPendingCount: sendQueue.parked.length
+  readonly property bool sendPending: sendQueue.parked.length > 0
+  readonly property var latestSend: sendQueue.latest
   property int sendSecondsRemaining: 0
-  readonly property bool sendPending: pendingSend !== null
-
-  onPendingActionChanged: {
-    if (pendingAction === "" && queuedActions.length > 0)
-      Qt.callLater(root.runQueuedAction)
-  }
 
   // Notifications only start once the first successful load has established
   // what was already there.
@@ -441,6 +443,7 @@ Item {
   // are search operators, IMAP's name a folder. Opaque from here on — it is
   // handed back to the client that produced it, and used as a cache key.
   readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
+    : searchRaw !== "" ? searchRaw
     : Provider.query(providerId, mailboxKey, searchQuery, defaultQuery)
   readonly property bool hasMore: nextPageToken !== ""
   // A cached search can already have rows on screen while this stays true.
@@ -516,8 +519,11 @@ Item {
   function refresh() {
     if (!ready) return
     refreshCounts()
+    labelActions.refreshMonitored()
     if (active && (windowOpen || !listLoaded)) loadMessages(false)
   }
+
+  property var monitoredIds: []
 
   function refreshCounts() {
     if (!ready || countLoading) return
@@ -660,7 +666,8 @@ Item {
     for (var i = 0; i < restored.length; i++)
       restored[i].time = Mail.relativeTime(restored[i].date, now)
 
-    messages = restored
+    // Only when a row differs; see `Model.sameSummaries`.
+    if (!Model.sameSummaries(messages, restored)) messages = restored
     resultEstimate = entry ? Math.max(entry.estimate, restored.length) : restored.length
     nextPageToken = entry ? entry.nextPageToken : ""
     listLoaded = true
@@ -1412,79 +1419,26 @@ Item {
 
   // -------------------------------------------------------------- actions
 
-  // `quiet` rides along because it decides whether the row may be evicted from
-  // under an open reader. A queued explicit trash that ran as if it were quiet
-  // would leave the message the user deleted still on screen. A rail stop's
-  // single-message scope must survive the wait even when its id is also a row.
-  function queueAction(messageId, action, actionQuery, quiet, memberOnly) {
+  // The row already moved; `dispatch` carries the send and its rollback. The
+  // other fields are what `Model.enqueueAction` coalesces a repeat on, and a
+  // coalesced repeat never sends, so `discard` lets go of what it held.
+  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch, discard) {
     queuedActions = Model.enqueueAction(queuedActions, {
       id: messageId, action: action, cacheKey: actionQuery,
       sourceLabelId: hasLabels ? rawLabelId : "", quiet: quiet === true,
-      memberOnly: memberOnly === true
+      memberOnly: memberOnly === true, dispatch: dispatch
     })
+    if (!Model.holdsDispatch(queuedActions, dispatch)) discard()
   }
 
+  // Called before the freeing callback acts on its answer, so no revalidation
+  // starts while a row still waits for its server.
   function runQueuedAction() {
     if (pendingAction !== "" || queuedActions.length === 0) return
     var queued = queuedActions.slice()
     var request = queued.shift()
     queuedActions = queued
-
-    // Prefer the normal optimistic path while the row is still in either
-    // account view with the same label context. A typed search may have the
-    // same cache key as a label view but no source label to remove. Navigation
-    // does not change the operation already accepted for the original view.
-    if (cacheKey === request.cacheKey
-        && (hasLabels ? rawLabelId : "") === request.sourceLabelId
-        && (Model.rowIndexForMember(messages, request.id) >= 0
-        || Model.rowIndexForMember(previewMessages, request.id) >= 0)) {
-      act(request.id, request.action, request.quiet, request.memberOnly)
-      return
-    }
-
-    var change = Model.labelChangesFor(request.action, request.sourceLabelId)
-    if (request.action !== "trash" && request.action !== "untrash" && !change) {
-      if (queuedActions.length > 0) Qt.callLater(root.runQueuedAction)
-      return
-    }
-    // The prior action may just have resumed this query's deferred list before
-    // the queued quiet mutation got its callLater turn. That stream still owns
-    // pre-mutation summaries, so serialize it exactly like the visible action
-    // path and revalidate deliberately after the mutation finishes.
-    if (cacheKey === request.cacheKey && listLoading) {
-      listSerial++
-      abortRequest(listHandle)
-      listHandle = null
-      listLoading = false
-      nextPageToken = ""
-    }
-    pendingActionQuery = request.cacheKey
-    pendingAction = request.action
-    var done = function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      if (error) root.fail(error)
-      else {
-        // The detached row is not available for an optimistic cache edit, but
-        // its provider offset is certainly no longer safe after the mutation.
-        var entry = root.cacheStore.loaded ? root.cacheStore.get(request.cacheKey) : null
-        if (entry) root.cacheStore.putQuery(request.cacheKey, ({
-          summaries: entry.summaries,
-          estimate: entry.estimate,
-          nextPageToken: ""
-        }))
-        root.refreshCounts()
-      }
-      if (root.resumeDeferredListLoad(request.cacheKey, String(error || ""))) return
-      // The message may also be visible in the mailbox navigated to while it
-      // waited. Its list was allowed to load during the A-scoped mutation, so
-      // replace any pre-mutation summary there as soon as the server answers.
-      if (root.active)
-        root.loadMessages(false, true, String(error || ""))
-    }
-    if (request.action === "trash") api.trashMessage(request.id, done)
-    else if (request.action === "untrash") api.untrashMessage(request.id, done)
-    else api.modifyMessage(request.id, change.add, change.remove, done)
+    request.dispatch()
   }
 
   // Every action moves the list immediately and reconciles afterwards. Waiting
@@ -1514,17 +1468,9 @@ Item {
     // row would be moved, and the note would say "Archived", for a request no
     // server ever saw.
     if (refuseUnavailableAction(action)) return false
-    // One mutation is in flight at a time, because the rollback below restores
-    // a row by the index it held when the action was taken. That is a reason to
-    // make the next action wait, not a reason to drop it: a mailbox is cleared
-    // by pressing the same key down a list faster than any server answers, and
-    // refusing the second press lost the keystroke, left the note explaining a
-    // failure the user had not caused, and — because `act` answered false —
-    // stopped the cursor moving on. Queue it and run it when the slot frees.
-    if (pendingAction !== "") {
-      queueAction(messageId, action, cacheKey, quiet === true, oneMessage)
-      return true
-    }
+    // Only the send waits for the slot; the row moves now. A server that takes
+    // seconds over a move (Proton Bridge does) emptied the list at its pace.
+    var slotTaken = pendingAction !== ""
     var index = Model.indexById(messages, messageId)
     var previewIndex = Model.indexById(previewMessages, messageId)
     // A counted member is not a row, and it is still found by one. The list is
@@ -1546,29 +1492,30 @@ Item {
       if (!Conversation.holdsMember(selectedThread, messageId)) return false
       var memberChange = Model.labelChangesFor(action)
       if (!memberChange) return false
-      return actOnDetachedMember(messageId, action, memberChange, quiet)
+      return actOnDetachedMember(messageId, action, memberChange, quiet, oneMessage, slotTaken)
     }
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
-    var beforeMessages = messages.slice()
     // A live list owns snapshots taken before this action. Letting it finish
     // would rebuild and persist those stale rows over the optimistic edit — a
     // trashed search hit visibly came back when the slowest metadata request
     // answered. Stop that load, then revalidate this same query after the
-    // mutation succeeds.
+    // mutation succeeds. Asked again when a queued send goes out.
     var interruptedQuery = ""
-    if (index >= 0 && listLoading) {
+    function stopLiveList() {
+      if (index < 0 || root.cacheKey !== actionQuery || !root.listLoading) return
       interruptedQuery = actionQuery
-      listSerial++
-      abortRequest(listHandle)
-      listHandle = null
-      listLoading = false
+      root.listSerial++
+      root.abortRequest(root.listHandle)
+      root.listHandle = null
+      root.listLoading = false
       // A provisional streamed offset can cross ids the interrupted search
       // never settled. No Load-more action is safer than one that skips them.
-      nextPageToken = ""
+      root.nextPageToken = ""
       actionToken = ""
     }
+    stopLiveList()
     var before = index >= 0 ? messages[index] : previewMessages[previewIndex]
     var rowId = String(before.id || "")
     var sourceLabelId = hasLabels ? rawLabelId : ""
@@ -1583,6 +1530,10 @@ Item {
     var targets = memberAction || oneMessage || quiet === true
       ? [messageId] : Model.actionTargets(before, action)
     if (targets.length === 0) return false
+    var change = Model.labelChangesFor(action, sourceLabelId)
+    if (!change && action !== "trash" && action !== "untrash") return false
+    var token = intents.nextToken()
+    intents.holdLists(actionQuery)
 
     // Every summary the update touches besides the row's own, and what it was.
     // The rail draws from these, so a conversation action asserts the whole
@@ -1596,10 +1547,13 @@ Item {
         memberBefore[id] = summary
       }
     }
+    function memberAfterOf(summary) {
+      return Model.applyLabelChange(summary, action, sourceLabelId)
+    }
     for (var t = 0; t < targets.length; t++) {
       var known = memberSummaries[targets[t]]
       if (!known) continue
-      var after = Model.applyLabelChange(known, action, sourceLabelId)
+      var after = memberAfterOf(known)
       if (!after || after === known) continue
       rememberBefore(targets[t], known)
       memberAfter[targets[t]] = after
@@ -1611,30 +1565,21 @@ Item {
     // the recomputation below with the rest.
     var conversationAction = !memberAction && !oneMessage && quiet !== true
       && Model.actionScope(action) === "conversation"
-    var updated
-    if (conversationAction) {
-      // A conversation action asserts the block outright: every counted member
-      // was sent the same patch, so the row says so at once rather than waiting
-      // for the next read to agree.
-      updated = Model.applyLabelChange(before, action, sourceLabelId,
-        Model.threadAfterAction(before, action))
-    } else {
-      // One message changed, so the block is recomputed from the members
-      // rather than asserted. An unknown member never flips a flag off, which
-      // is what keeps a row in the Unread view while a reply nobody has read is
-      // still in it — and what stops the quiet mark-read on opening a thread
-      // from clearing the dot of every other member with it.
-      var ownLabels = memberAction ? before
-        : Model.applyLabelChange(before, action, sourceLabelId)
-      var nextMembers = ({})
-      for (var held in memberSummaries) nextMembers[held] = memberSummaries[held]
-      for (var changed in memberAfter) nextMembers[changed] = memberAfter[changed]
-      // The representative's own new state is evidence whether or not the rail
-      // ever drew it, so it goes in rather than counting as an unknown member.
-      if (!memberAction) nextMembers[rowId] = ownLabels
-      updated = Model.rowWithThread(ownLabels,
-        Model.threadAfterMemberChange(before, nextMembers))
+    // What this action makes of the row, from whichever state it is applied
+    // to: `before` now, an earlier state if an edit ahead of it fails. A
+    // conversation action asserts the block outright — every counted member
+    // was sent the same patch — where one message's change recomputes it.
+    function rowAfter(row) {
+      if (conversationAction) {
+        return Model.applyLabelChange(row, action, sourceLabelId,
+          Model.threadAfterAction(row, action))
+      }
+      // Over the members as the rail holds them now: on a replay, put right.
+      return Model.rowAfterMemberEdit(row,
+        memberAction ? row : Model.applyLabelChange(row, action, sourceLabelId),
+        rowId, root.memberSummaries, targets, memberAfterOf)
     }
+    var updated = rowAfter(before)
     // A representative is a row and a stop at once, so it changes in both
     // places or the rail contradicts the list it was opened from. Its own
     // summary is the row's, block and all, rather than the member label change
@@ -1679,70 +1624,74 @@ Item {
         ? Model.replaceById(previewMessages, updated)
         : Model.removeById(previewMessages, rowId)
     }
-    var selectedBefore = selectedMessage
-    var selectedWas = selectedId
+    // The reader's copy takes the edit of what it shows.
+    var readerKey = ""
     if (Model.rowHoldsMember(before, selectedId)) {
       if (removed) clearSelection()
-      else if (selectedId === rowId) selectedMessage = updated
-      else if (memberAfter[selectedId]) selectedMessage = memberAfter[selectedId]
-      else if (targets.indexOf(selectedId) >= 0 && selectedMessage)
-        selectedMessage = Model.applyLabelChange(selectedMessage, action, sourceLabelId)
+      else {
+        var readerAfter = selectedId === rowId ? rowAfter
+          : (memberAfter[selectedId] || targets.indexOf(selectedId) >= 0 ? memberAfterOf : null)
+        if (readerAfter && selectedMessage) {
+          readerKey = "reader:" + selectedId
+          intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
+          selectedMessage = readerAfter(selectedMessage)
+        }
+      }
     }
+    // Held until answered; the row's says whether it left the list.
+    intents.add(rowId, { token: token, before: before, apply: rowAfter, removed: removed })
+    for (var c = 0; c < changedMembers.length; c++) {
+      if (changedMembers[c] === rowId) continue
+      intents.add(changedMembers[c],
+        { token: token, before: memberBefore[changedMembers[c]], apply: memberAfterOf })
+    }
+    var edit = { token: token, query: actionQuery, rowId: rowId, before: before, removed: removed,
+      index: index, previewIndex: previewIndex, members: changedMembers, memberBefore: memberBefore }
     var optimisticMessages = messages.slice()
     var optimisticToken = nextPageToken
 
+    // Only this edit comes off: the row, the members and the reader's copy are
+    // replayed over the edits still waiting behind it — on screen, or in the
+    // cache of a query navigated away from, rather than a snapshot of the list
+    // this edit saw put over what a refusal ahead of it just restored.
     function restore(error) {
-      if (index >= 0 && root.cacheKey === actionQuery
-          && !root.deferredLoadCleared(actionQuery)) {
+      intents.commit(actionQuery, intents.restore(edit, intents.listsOf(actionQuery)),
+        actionEstimate, actionToken)
+      if (index >= 0 && intents.showing(actionQuery)) {
         root.nextPageToken = actionToken
-        root.messages = removed
-          ? root.messages.slice(0, index).concat([before], root.messages.slice(index))
-          : Model.replaceById(root.messages, before)
         if (interruptedQuery === "") root.rememberList()
-      } else if (index >= 0 && root.cacheStore.loaded) {
-        // Navigation may have replaced the visible list while the request was
-        // in flight. Repair the old query's optimistic cache without inserting
-        // its row into the newly selected mailbox.
-        root.cacheStore.putQuery(actionQuery, ({
-          summaries: beforeMessages,
-          estimate: actionEstimate,
-          nextPageToken: actionToken
-        }))
       }
-      if (previewIndex >= 0) {
-        var previewKnown = Model.indexById(root.previewMessages, messageId)
-        root.previewMessages = previewKnown >= 0
-          ? Model.replaceById(root.previewMessages, before)
-          : root.previewMessages.slice(0, previewIndex).concat(
-              [before], root.previewMessages.slice(previewIndex))
-      }
-      // Both halves go back: the row the list drew and every member summary
-      // the optimistic update asserted the conversation across.
-      for (var m = 0; m < changedMembers.length; m++)
-        root.rememberMember(memberBefore[changedMembers[m]])
-      if (selectedWas !== "" && root.selectedId === selectedWas)
-        root.selectedMessage = selectedBefore
+      intents.settleReader(readerKey, token, true)
       root.refreshCounts()
       root.fail(error)
     }
 
-    pendingActionQuery = actionQuery
-    pendingAction = action
+    // Agreed to, or a repeat took this send's place.
+    function keep() {
+      intents.keep(edit)
+      intents.settleReader(readerKey, token, false)
+    }
+    function discard() { keep(); intents.releaseLists(actionQuery) }
+
     var done = function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
+      root.runQueuedAction()
       if (error) {
         restore(error)
+        intents.releaseLists(actionQuery)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
         if (interruptedQuery !== "" && root.cacheKey === interruptedQuery)
           root.loadMessages(false, true, error)
         return
       }
+      keep()
+      intents.releaseLists(actionQuery)
       if (!quiet) root.note(root.actionLabel(action))
       root.refreshCounts()
       if (interruptedQuery !== "" && root.deferredLoadCleared(actionQuery)
-          && root.cacheStore.loaded) {
-        root.cacheStore.putQuery(actionQuery, ({
+          && cacheStore.loaded) {
+        cacheStore.putQuery(actionQuery, ({
           summaries: optimisticMessages,
           estimate: actionEstimate,
           nextPageToken: optimisticToken
@@ -1754,10 +1703,10 @@ Item {
         // on screen while a live request revalidates it without reading cache.
         root.rememberList()
         root.loadMessages(false, true, "")
-      } else if (interruptedQuery !== "" && root.cacheStore.loaded) {
+      } else if (interruptedQuery !== "" && cacheStore.loaded) {
         // The action succeeded after navigation. Keep the old query's cache in
         // step without disturbing the view that is now on screen.
-        root.cacheStore.putQuery(actionQuery, ({
+        cacheStore.putQuery(actionQuery, ({
           summaries: optimisticMessages,
           estimate: actionEstimate,
           nextPageToken: optimisticToken
@@ -1772,22 +1721,21 @@ Item {
         root.loadMessages(false, true, "")
     }
 
-    // One id or many, and the interface keeps its fifteen names: `trashMessage`
-    // and `untrashMessage` take either on every client, and a list of more than
-    // one goes to `batchModify` rather than to a call per message.
-    var sent = targets.length > 1 ? targets : targets[0]
-    if (action === "trash") api.trashMessage(sent, done)
-    else if (action === "untrash") api.untrashMessage(sent, done)
-    else {
-      var change = Model.labelChangesFor(action, sourceLabelId)
-      if (!change) {
-        pendingAction = ""
-        pendingActionQuery = ""
-        return false
-      }
-      if (targets.length > 1) api.batchModify(targets, change.add, change.remove, done)
-      else api.modifyMessage(targets[0], change.add, change.remove, done)
+    function dispatch() {
+      stopLiveList()
+      root.pendingActionQuery = actionQuery
+      root.pendingAction = action
+      // One id or many, and the interface keeps its fifteen names: `trashMessage`
+      // and `untrashMessage` take either on every client, and a list of more than
+      // one goes to `batchModify` rather than to a call per message.
+      var sent = targets.length > 1 ? targets : targets[0]
+      if (action === "trash") root.api.trashMessage(sent, done)
+      else if (action === "untrash") root.api.untrashMessage(sent, done)
+      else if (targets.length > 1) root.api.batchModify(targets, change.add, change.remove, done)
+      else root.api.modifyMessage(targets[0], change.add, change.remove, done)
     }
+    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, oneMessage, dispatch, discard)
+    else dispatch()
     return true
   }
 
@@ -1799,26 +1747,47 @@ Item {
   //
   // `unstar` from a row clears every counted member's star (the row's star
   // means "any member"); from the reader it clears the one message on screen.
-  function actOnDetachedMember(messageId, action, change, quiet) {
+  function actOnDetachedMember(messageId, action, change, quiet, memberOnly, slotTaken) {
+    var token = intents.nextToken()
+    function after(summary) { return Model.applyLabelChange(summary, action) }
     var beforeMember = memberSummaries[messageId] || null
-    var beforeSelected = selectedMessage
+    if (beforeMember) intents.add(messageId, { token: token, before: beforeMember, apply: after })
     applyMemberChange(messageId, action)
-    if (selectedId === messageId && selectedMessage)
-      selectedMessage = Model.applyLabelChange(selectedMessage, action)
-    pendingActionQuery = cacheKey
-    pendingAction = action
-    api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
-      root.pendingAction = ""
-      root.pendingActionQuery = ""
-      if (error) {
-        if (beforeMember) root.rememberMember(beforeMember)
-        if (root.selectedId === messageId) root.selectedMessage = beforeSelected
-        root.fail(error)
-        return
+    var readerKey = ""
+    if (selectedId === messageId && selectedMessage) {
+      readerKey = "reader:" + messageId
+      intents.add(readerKey, { token: token, before: selectedMessage, apply: after })
+      selectedMessage = after(selectedMessage)
+    }
+    var actionQuery = cacheKey
+    function settle(failed) {
+      return {
+        member: beforeMember ? intents.settle(messageId, token, failed, beforeMember) : null,
+        reader: readerKey !== "" ? intents.settle(readerKey, token, failed, null) : null
       }
-      if (quiet !== true) root.note(root.actionLabel(action))
-      root.refreshCounts()
-    })
+    }
+    function dispatch() {
+      root.pendingActionQuery = actionQuery
+      root.pendingAction = action
+      root.api.modifyMessage(messageId, change.add, change.remove, function(payload, error) {
+        root.pendingAction = ""
+        root.pendingActionQuery = ""
+        root.runQueuedAction()
+        var held = settle(!!error)
+        if (error) {
+          if (held.member) root.rememberMember(held.member.summary)
+          if (held.reader && root.selectedId === messageId && held.reader.summary)
+            root.selectedMessage = held.reader.summary
+          root.fail(error)
+          return
+        }
+        if (quiet !== true) root.note(root.actionLabel(action))
+        root.refreshCounts()
+      })
+    }
+    function discard() { settle(false) }
+    if (slotTaken) queueAction(messageId, action, actionQuery, quiet === true, memberOnly, dispatch, discard)
+    else dispatch()
     return true
   }
 
@@ -1917,7 +1886,6 @@ Item {
     var actionQuery = cacheKey
     var actionEstimate = resultEstimate
     var actionToken = nextPageToken
-    var before = messages.slice()
     var interrupted = listLoading
     if (interrupted) {
       listSerial++
@@ -1927,78 +1895,116 @@ Item {
       nextPageToken = ""
       actionToken = ""
     }
+    // One token for the lot and an intent per row, member and reader's copy
+    // under it, so a refusal takes off what this changed and nothing an edit
+    // taken since has: a star pressed while the server was still deciding
+    // stays. A snapshot of the list put back would have lost it.
+    var token = intents.nextToken()
+    intents.holdLists(actionQuery)
     // The block is asserted on every row for the same reason one action asserts
     // it: a row whose members were all sent the patch is a read conversation,
     // and a row that recomputed only its own labels would stay bold because its
     // block still said unread.
-    var next = []
-    for (var j = 0; j < messages.length; j++) {
-      next.push(Model.applyLabelChange(messages[j], "markRead", "",
-        Model.threadAfterAction(messages[j], "markRead")))
+    function rowRead(row) {
+      return Model.applyLabelChange(row, "markRead", "", Model.threadAfterAction(row, "markRead"))
     }
+    function memberRead(summary) { return Model.applyLabelChange(summary, "markRead") }
     // The rail draws from `memberSummaries` and the reader from
     // `selectedMessage`, and both are among what was just marked: every member
     // this holds a summary for takes the change, and a representative takes
     // its row's, block and all. Left alone, a stop kept its dot for the rest
     // of the session, because nothing later re-reads a member it already has.
-    var memberBefore = memberSummaries
+    var memberBefore = ({})
     var memberAfter = ({})
     for (var m = 0; m < ids.length; m++) {
       var held = memberSummaries[ids[m]]
-      if (held) memberAfter[ids[m]] = Model.applyLabelChange(held, "markRead")
-    }
-    for (var r = 0; r < next.length; r++) {
-      if (memberSummaries[next[r].id]) memberAfter[next[r].id] = next[r]
-    }
-    mergeMembers(memberAfter)
-    var selectedBefore = selectedMessage
-    var selectedWas = selectedId
-    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
-      selectedMessage = memberAfter[selectedId]
-        || Model.applyLabelChange(selectedMessage, "markRead")
+      if (!held) continue
+      memberBefore[ids[m]] = held
+      memberAfter[ids[m]] = memberRead(held)
     }
     var survives = Model.survivesAction(mailboxKey, "markRead")
+    var next = []
+    var edits = []
+    var rowIds = ({})
+    for (var r = 0; r < messages.length; r++) {
+      var row = messages[r]
+      if (!row.unread) {
+        next.push(row)
+        continue
+      }
+      var rowId = String(row.id)
+      rowIds[rowId] = true
+      var updated = rowRead(row)
+      if (memberSummaries[rowId]) {
+        memberBefore[rowId] = memberSummaries[rowId]
+        memberAfter[rowId] = updated
+      }
+      var members = []
+      var own = Model.actionTargets(row, "markRead")
+      for (var o = 0; o < own.length; o++) {
+        if (memberBefore[own[o]] !== undefined) members.push(own[o])
+      }
+      intents.add(rowId, { token: token, before: row, apply: rowRead, removed: !survives })
+      edits.push({ token: token, query: actionQuery, rowId: rowId, before: row, removed: !survives,
+        index: r, previewIndex: -1, members: members, memberBefore: memberBefore })
+      if (survives) next.push(updated)
+    }
+    for (var member in memberBefore) {
+      if (!rowIds[member])
+        intents.add(member, { token: token, before: memberBefore[member], apply: memberRead })
+    }
+    mergeMembers(memberAfter)
+    var readerKey = ""
+    if (selectedMessage && ids.indexOf(selectedId) >= 0) {
+      var readerAfter = rowIds[selectedId] ? rowRead : memberRead
+      readerKey = "reader:" + selectedId
+      intents.add(readerKey, { token: token, before: selectedMessage, apply: readerAfter })
+      selectedMessage = readerAfter(selectedMessage)
+    }
     var opaqueQuery = effectiveQuery
       !== Provider.query(providerId, mailboxKey, "", "")
     var invalidatesPage = !survives || opaqueQuery
-    messages = survives ? next : []
+    messages = next
     if (invalidatesPage) nextPageToken = ""
     var optimistic = messages.slice()
     var optimisticToken = nextPageToken
     if (!interrupted) rememberList()
     pendingActionQuery = actionQuery
     pendingAction = "markRead"
+    // Answered edit by edit, on screen or in the cache of a query navigated
+    // away from; the list is built once and assigned once.
+    function settleAll(failed) {
+      var lists = failed ? intents.listsOf(actionQuery) : null
+      for (var e = 0; e < edits.length; e++) {
+        if (lists) lists = intents.restore(edits[e], lists)
+        else intents.keep(edits[e])
+      }
+      if (lists) intents.commit(actionQuery, lists, actionEstimate, actionToken)
+      intents.settleReader(readerKey, token, failed)
+      intents.releaseLists(actionQuery)
+    }
     api.batchModify(ids, [], ["UNREAD"], function(payload, error) {
       root.pendingAction = ""
       root.pendingActionQuery = ""
+      root.runQueuedAction()
       if (error) {
-        if (root.cacheKey === actionQuery
-            && !root.deferredLoadCleared(actionQuery)) {
+        settleAll(true)
+        if (intents.showing(actionQuery)) {
           root.nextPageToken = actionToken
-          root.messages = before
           if (!interrupted) root.rememberList()
-        } else if (root.cacheStore.loaded) {
-          root.cacheStore.putQuery(actionQuery, ({
-            summaries: before,
-            estimate: actionEstimate,
-            nextPageToken: actionToken
-          }))
         }
-        // The rail and the reader go back with the rows, unless the reader
-        // has moved on to something this never touched.
-        root.memberSummaries = memberBefore
-        if (root.selectedId === selectedWas) root.selectedMessage = selectedBefore
         root.fail(error)
         if (root.resumeDeferredListLoad(actionQuery, error)) return
         if (interrupted && root.cacheKey === actionQuery)
           root.loadMessages(false, true, error)
         return
       }
+      settleAll(false)
       root.note(Model.markAllReadNote(rows, expanded))
       root.refreshCounts()
       if (interrupted && root.deferredLoadCleared(actionQuery)
-          && root.cacheStore.loaded) {
-        root.cacheStore.putQuery(actionQuery, ({
+          && cacheStore.loaded) {
+        cacheStore.putQuery(actionQuery, ({
           summaries: optimistic,
           estimate: actionEstimate,
           nextPageToken: optimisticToken
@@ -2008,8 +2014,8 @@ Item {
       if (interrupted && root.cacheKey === actionQuery) {
         root.rememberList()
         root.loadMessages(false, true, "")
-      } else if (interrupted && root.cacheStore.loaded) {
-        root.cacheStore.putQuery(actionQuery, ({
+      } else if (interrupted && cacheStore.loaded) {
+        cacheStore.putQuery(actionQuery, ({
           summaries: optimistic,
           estimate: actionEstimate,
           nextPageToken: optimisticToken
@@ -2023,11 +2029,16 @@ Item {
     return true
   }
 
-  // The batch — several ticked rows at once — lives in `BatchAction.qml`.
   function actMany(ids, action) { return batchAction.run(ids, action) }
 
   BatchAction {
     id: batchAction
+    account: root
+    intents: intents
+  }
+
+  Intents {
+    id: intents
     account: root
   }
 
@@ -2197,18 +2208,18 @@ Item {
   // holding, and a return that says nothing throws it away. The mailbox can
   // stop being ready during the undo window — a reload, a sign-out — so the
   // guards are reachable and not only the transport's own error.
-  function reportSendFailure(error) {
+  function reportSendFailure(error, sendId) {
     fail(error)
     // A zero-delay send can be rejected synchronously by a provider before
     // ComposeView has returned from service.send() and parked its accepted
     // draft. Cross the event-loop boundary so every terminal signal observes
     // the same state as an ordinary network reply.
     Qt.callLater(function() {
-      if (root) root.replyFailed()
+      if (root) root.replyFailed(String(sendId || ""))
     })
   }
 
-  function reportSendSuccess(result) {
+  function reportSendSuccess(result, sendId) {
     // The sent copy is filed after the send has answered, so how the filing
     // went is a footnote on a success rather than a failure of one: the note
     // says what happened to the copy, and the reply still counts as sent.
@@ -2217,53 +2228,93 @@ Item {
     // Success has the same ordering requirement as failure: a provider may
     // finish locally, but the composer owns parking after send() returns.
     Qt.callLater(function() {
-      if (root) root.replySent()
+      if (root) root.replySent(String(sendId || ""))
     })
   }
 
   function deliver(payload) {
+    var sendId = payload ? String(payload.sendId || "") : ""
     if (!ready) {
-      reportSendFailure("The mailbox is not ready to send")
+      reportSendFailure("The mailbox is not ready to send", sendId)
       return false
     }
     if (sending) {
-      reportSendFailure("Another message is still being sent")
+      reportSendFailure("Another message is still being sent", sendId)
       return false
     }
     sending = true
     api.sendMessage(payload, function(sentPayload, error) {
       root.sending = false
       if (error) {
-        root.reportSendFailure(error)
+        root.reportSendFailure(error, sendId)
+        Qt.callLater(sendQueue.deliverDue)
         return
       }
-      root.reportSendSuccess(sentPayload)
+      root.reportSendSuccess(sentPayload, sendId)
+      if (payload && String(payload.draftId || "") !== "") root.forgetSentDraft(String(payload.draftId))
+      Qt.callLater(sendQueue.deliverDue)
     })
     return true
   }
 
-  function deliverPending() {
-    if (!sendPending) return false
-    var payload = pendingSend.payload
-    sendDelayTimer.stop()
-    sendCountdownTimer.stop()
-    pendingSend = null
-    sendSecondsRemaining = 0
-    return deliver(payload)
+  // The draft a sent message was opened from is done with: the server's copy
+  // goes, and so does its row. A failure here is a footnote on a message
+  // that was sent, so it is noted rather than reported as a failure.
+  function forgetSentDraft(draftId) {
+    if (!api || typeof api.deleteDraft !== "function") return
+    api.deleteDraft(draftId, function(payload, error) {
+      if (!root) return
+      if (error) {
+        root.note("Sent, but the draft it came from could not be removed: " + String(error))
+        return
+      }
+      if (Model.indexById(root.messages, draftId) >= 0) {
+        root.messages = Model.removeById(root.messages, draftId)
+        root.rememberList()
+      }
+      if (root.selectedId === draftId) root.clearSelection()
+      root.refreshCounts()
+    })
   }
 
-  function undoSend() {
-    if (!sendPending) return false
-    sendDelayTimer.stop()
-    sendCountdownTimer.stop()
-    pendingSend = null
-    sendSecondsRemaining = 0
-    note("Send undone")
-    return true
+
+  function deliverPending() { return sendQueue.deliverAll() }
+
+  function undoSend() { return sendQueue.undoLatest() }
+
+  SendQueue {
+    id: sendQueue
+    account: root
+  }
+
+  // A mailbox whose token was just refused is not ready until the next
+  // lookup answers — and the next lookup is asked for by the next request.
+  // A save or a send that arrived in that window failed as "not ready" for
+  // a mailbox that was signed in a second ago. So the credentials are asked
+  // for first, which is what any other request does, and the work goes on
+  // once they are back; a mailbox with nothing to look up fails at once.
+  function whenReady(callback) {
+    if (ready) { callback(true); return }
+    if (!auth || !auth.configured || auth.loginBusy || typeof auth.withCredentials !== "function") {
+      callback(false)
+      return
+    }
+    auth.withCredentials(function(credentials, error) {
+      if (!root) return
+      callback(!!credentials && root.ready)
+    })
   }
 
   function saveDraft(fields, callback) {
-    if (!ready || !api || typeof api.saveDraft !== "function") {
+    if (!ready) {
+      whenReady(function(ok) {
+        if (!root) return
+        if (ok) root.saveDraft(fields, callback)
+        else if (typeof callback === "function") callback(null, "The mailbox is not ready to save drafts")
+      })
+      return null
+    }
+    if (!api || typeof api.saveDraft !== "function") {
       if (typeof callback === "function") callback(null, "The mailbox is not ready to save drafts")
       return null
     }
@@ -2283,6 +2334,9 @@ Item {
       to: String(values.to || "").trim(),
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
+      replyTo: String(values.replyTo || "").trim(),
+      signature: String(values.signature || ""),
+      signatureHtml: String(values.signatureHtml || ""),
       subject: String(values.subject || ""),
       body: String(values.body || ""),
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
@@ -2293,11 +2347,37 @@ Item {
     })
     return api.saveDraft(payload, function(saved, error) {
       if (typeof callback === "function") callback(saved, error)
+      // The Drafts list on screen is what the server had before the save: the
+      // copy replaced is gone there and the new one is not yet listed, so
+      // a list left as it was showed both — the old row until the next poll,
+      // and a second row for every save. Read it again from the server now.
+      if (!error && root && root.mailboxKey === "drafts") {
+        root.listSerial++
+        root.nextPageToken = ""
+        root.loadMessages(false, true, "")
+      } else if (!error && root) {
+        root.refreshCounts()
+      }
     })
   }
 
-  function send(fields) {
-    if (!ready || sending || sendPending) return false
+
+  function send(fields, sendId, order) {
+    var id = String(sendId || "")
+    if (id === "") {
+      sendQueue.serial += 1
+      id = "send-" + sendQueue.serial
+    }
+    if (!ready) {
+      // Asked for its credentials first, like a save: a token refused a
+      // moment ago is looked up again rather than the send refused.
+      whenReady(function(ok) {
+        if (!root) return
+        if (ok) root.send(fields, id, order)
+        else root.reportSendFailure("The mailbox is not ready to send", id)
+      })
+      return id
+    }
     var values = fields || ({})
     var files = Array.isArray(values.attachments) ? values.attachments : []
     var hasFiles = false
@@ -2332,6 +2412,9 @@ Item {
       to: to,
       cc: String(values.cc || "").trim(),
       bcc: String(values.bcc || "").trim(),
+      replyTo: String(values.replyTo || "").trim(),
+      signature: String(values.signature || ""),
+      signatureHtml: String(values.signatureHtml || ""),
       subject: String(values.subject || ""),
       body: body,
       attachments: Array.isArray(values.attachments) ? values.attachments : [],
@@ -2343,24 +2426,19 @@ Item {
       // draft behind on every provider.
       draftId: String(values.draftId || "")
     })
+    // The draft this was opened from rides on the queued payload; the send
+    // itself carries only the raw message and the thread.
+    payload.draftId = String(values.draftId || "")
 
-    var queued = Outbox.schedule(payload, Date.now(), undoSendSeconds)
-    if (!queued) return deliver(payload)
-
-    pendingSend = queued
-    sendSecondsRemaining = Outbox.remainingSeconds(queued.dueAt, Date.now())
-    sendDelayTimer.interval = Math.max(1, queued.dueAt - Date.now())
-    sendDelayTimer.restart()
-    sendCountdownTimer.restart()
-    note("Message queued")
-    return true
+    payload.sendId = id
+    return sendQueue.park(payload, id, order) ? id : ""
   }
 
-  signal replySent()
+  signal replySent(string sendId)
 
   // A send that did not happen. The panel answers it by putting the parked
   // draft back in front of the writer, which is the only remaining copy.
-  signal replyFailed()
+  signal replyFailed(string sendId)
 
   // ------------------------------------------------------------------ RSVP
 
@@ -2375,114 +2453,14 @@ Item {
 
   // ----------------------------------------------------------- unsubscribe
 
-  // Three ways off a list, and `Unsubscribe.plan` picks between them so that
-  // nothing here branches on a header. In order of how little the user has to
-  // do: a POST the sender has promised is enough, a message to the address
-  // they nominated, or their page in a browser.
-  function unsubscribe() {
-    if (unsubscribing || unsubscribeDone !== "") return
-    var info = selectedUnsubscribe
-    var how = Unsub.plan(info, canSend)
-    if (how === "") return
-    clearNotice()
+  // See `Unsubscribe.qml`: the account file is at its size ceiling.
+  function unsubscribe() { unsubscribeAction.run() }
 
-    if (how === "browser") {
-      Qt.openUrlExternally(info.url)
-      // What happened is that a page opened. Whether the list acted on it is
-      // between the user and that page, and saying "unsubscribed" here would
-      // be this panel taking credit for work it cannot see.
-      unsubscribeDone = "The unsubscribe page is open in your browser"
-      return
-    }
-
-    if (how === "mail") {
-      if (!ready) {
-        fail("Sign in before unsubscribing")
-        return
-      }
-      unsubscribing = true
-      api.sendMessage(Mail.buildSendPayload({
-        // The address the newsletter was sent to. A list that only ever knew
-        // an alias has no reason to act on a request from anywhere else.
-        from: receivedAsAddress,
-        fromName: receivedAsName,
-        accountAddress: ownAddress,
-        to: info.mail.to,
-        subject: info.mail.subject,
-        body: info.mail.body
-      }), function(payload, error) {
-        root.unsubscribing = false
-        if (error) {
-          root.fail(error)
-          return
-        }
-        root.unsubscribeDone = "Unsubscribe request sent to " + info.mail.to
-      })
-      return
-    }
-
-    postUnsubscribe(info.postUrl)
+  Unsubscribe {
+    id: unsubscribeAction
+    account: root
   }
 
-  // The RFC 8058 one-click request: a fixed body, to an https address on the
-  // public internet that this sender put in a header saying a single POST
-  // would do it. `Unsubscribe.isPostableUrl` is where both of those conditions
-  // are checked, and it borrows the judgement that decides whether a message
-  // may load a picture.
-  //
-  // Qt's XHR follows redirects without rechecking the destination. The Python
-  // worker instead resolves and checks every IP, connects to that exact answer
-  // while retaining the original TLS hostname, and never follows a redirect.
-  // URL bytes remain data throughout: there is no shell or curl config.
-  //
-  // The reply is never read beyond its status. It is a document from whoever
-  // sent the mail, and the only question being asked of it is whether the
-  // address is off the list.
-  function postUnsubscribe(url) {
-    if (!Unsub.isPostableUrl(url)) {
-      fail("That unsubscribe address is not one this can post to")
-      return
-    }
-    unsubscribing = true
-    var request = unsubscribeComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/unsubscribe.py"],
-      requestLine: [Mail.encodeBase64(String(url)),
-        Mail.encodeBase64(Unsub.postContentType()),
-        Mail.encodeBase64(Unsub.postBody())].join(" ")
-    })
-    if (!request) {
-      unsubscribing = false
-      fail("The unsubscribe request could not be sent")
-      return
-    }
-    request.finished.connect(function(exitCode, status) {
-      if (!root) return
-      request.destroy()
-      root.unsubscribing = false
-      root.unsubscribeDone = ""
-      if (exitCode !== 0 || status === 0) {
-        root.fail("The unsubscribe request could not be sent")
-        return
-      }
-      if (status >= 200 && status < 300) {
-        root.unsubscribeDone = "Unsubscribed from this list"
-        return
-      }
-      // A 3xx is a server answering a one-click request with "go and ask over
-      // there". It has not done what its own header promised, and the address
-      // it points at was never judged — so it is reported as a refusal rather
-      // than followed.
-      root.fail(status >= 300 && status < 400
-        ? "This list answered with a redirect instead of unsubscribing (" + status + ")"
-        : "This list refused the unsubscribe request (" + status + ")")
-    })
-    request.running = true
-  }
-
-  // One process per request, created and destroyed around it. The same shape
-  // the mail transport uses, for the same reason: the URL crosses on stdin
-  // base64-encoded, so a header a stranger wrote never reaches the process
-  // table and nothing has to be escaped on the way.
   Component {
     id: imageFetchComponent
 
@@ -2504,39 +2482,6 @@ Item {
     }
   }
 
-  Component {
-    id: unsubscribeComponent
-
-    Process {
-      id: unsubscribeProcess
-
-      property string requestLine: ""
-      signal finished(int exitCode, int status)
-
-      stdinEnabled: true
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-
-      onStarted: {
-        // One line, because Quickshell's Process.write() never closes stdin and
-        // the script would wait forever for an EOF that does not come.
-        write(requestLine + "\n")
-        requestLine = ""
-      }
-
-      onExited: function(exitCode) {
-        // "<transport error code> <http status>", and nothing else is read.
-        var parts = String(unsubscribeProcess.stdout.text || "").trim().split(/\s+/)
-        var code = Math.floor(Number(parts[0]))
-        var status = Math.floor(Number(parts[1]))
-        if (exitCode !== 0 || parts.length < 2 || !isFinite(code) || !isFinite(status)) {
-          unsubscribeProcess.finished(exitCode === 0 ? 1 : exitCode, 0)
-          return
-        }
-        unsubscribeProcess.finished(code, status)
-      }
-    }
-  }
 
   Component {
     id: attachmentSaveComponent
@@ -2624,6 +2569,14 @@ Item {
   }
 
   function notify(arrivals) { newMailNotification.notify(arrivals) }
+  readonly property alias labelActions: labelActions
+  // The watched ids after a rename or move changed what they name.
+  signal monitoredMigrated(var ids)
+
+  LabelActions {
+    id: labelActions
+    account: root
+  }
 
   // ------------------------------------------------------------ navigation
 
@@ -2631,6 +2584,7 @@ Item {
     if (mailboxKey === key && searchQuery === "" && rawQuery === "") return
     mailboxKey = String(key || "inbox")
     searchQuery = ""
+    searchRaw = ""
     rawQuery = ""
     rawLabelId = ""
     clearSelection()
@@ -2640,10 +2594,13 @@ Item {
     loadMessages(false)
   }
 
-  function search(text) {
+  // `raw`: an app-built query in the provider's words, sent as it is.
+  function search(text, raw) {
     var query = String(text || "").trim()
-    if (query === searchQuery && rawQuery === "") return
+    var built = String(raw || "").trim()
+    if (query === searchQuery && built === searchRaw && rawQuery === "") return
     searchQuery = query
+    searchRaw = built
     // Typing in the search box leaves whatever label was selected.
     rawQuery = ""
     rawLabelId = ""
@@ -2660,6 +2617,7 @@ Item {
     var id = String(labelId || "")
     if (query === "" || (query === rawQuery && id === rawLabelId)) return
     searchQuery = ""
+    searchRaw = ""
     rawQuery = query
     rawLabelId = id
     clearSelection()
@@ -2816,9 +2774,7 @@ Item {
 
   // The client takes the manager as a required property, so it cannot be built
   // until there is one.
-  // A test's stand-in for the provider: a component the loader prefers when
-  // set, so the account can be driven against a controlled client without a
-  // server or a credential. Never set outside a test.
+  // A test's stand-in for the provider.
   property Component clientOverride: null
 
   Loader {
@@ -2926,6 +2882,7 @@ Item {
       accountId: root.accountId
       configuredClientId: root.oauthClientId
       configuredEmail: root.configuredEmail
+      entrySettings: root.imapSettings
 
       onLoginSucceeded: {
         root.lastError = lastError
@@ -2933,6 +2890,7 @@ Item {
       }
       onLoggedOut: root.clearNotice()
       onSessionUnavailable: function(reason) { root.fail(reason) }
+      onGraphRefused: function(reason) { root.note(reason) }
     }
   }
 
@@ -3014,25 +2972,6 @@ Item {
     onTriggered: root.actionStatus = ""
   }
 
-  Timer {
-    id: sendDelayTimer
-    repeat: false
-    onTriggered: root.deliverPending()
-  }
-
-  Timer {
-    id: sendCountdownTimer
-    interval: 250
-    repeat: true
-    onTriggered: {
-      if (!root.sendPending) {
-        stop()
-        return
-      }
-      root.sendSecondsRemaining = Outbox.remainingSeconds(
-        root.pendingSend.dueAt, Date.now())
-    }
-  }
 
   // The unread count is one label read — cheap enough to keep running while
   // the panel is closed, which is the only way the bar badge stays honest.

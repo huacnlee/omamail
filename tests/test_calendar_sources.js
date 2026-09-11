@@ -162,3 +162,22 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
 }] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
 
 console.log("test_calendar_sources.js ok")
+
+// A Microsoft calendar comes with a signed-in Outlook mailbox, the way a
+// Google one comes with Gmail.
+{
+  const withMicrosoft = sources.withMicrosoftAccounts(list, [
+    { id: "outlook:me@contoso.com", email: "me@contoso.com", provider: "outlook", signedIn: true },
+    { id: "outlook:later@contoso.com", email: "later@contoso.com", provider: "outlook", signedIn: false },
+    { id: "me@gmail.com", email: "me@gmail.com", provider: "gmail", signedIn: true }
+  ])
+  assert.strictEqual(withMicrosoft.sources.length, 2)
+  assert.strictEqual(withMicrosoft.sources[1].id, "microsoft:outlook:me@contoso.com")
+  assert.strictEqual(withMicrosoft.sources[1].kind, "microsoft")
+  assert.strictEqual(withMicrosoft.sources[1].name, "me@contoso.com")
+  assert.ok(sources.writable(withMicrosoft.sources[1]))
+  assert.strictEqual(sources.providerLabel("microsoft"), "Microsoft")
+  const mine = sources.forAccount(withMicrosoft, "outlook:me@contoso.com")
+  assert.strictEqual(mine.sources.length, 2, "another account's Microsoft calendar is left out, a CalDAV one kept")
+  assert.strictEqual(sources.forAccount(withMicrosoft, "me@gmail.com").sources.length, 1)
+}

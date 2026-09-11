@@ -23,7 +23,10 @@ Column {
 
   readonly property var auth: service ? service.auth : null
   readonly property bool signedIn: !!auth && auth.loggedIn
-  readonly property bool busy: !!auth && auth.loginBusy
+  readonly property bool busy: !!auth && (auth.loginBusy || auth.graphRoundBusy === true)
+  // Signed in for mail, and Microsoft refused Graph for want of consent:
+  // the sign-in button stays, as the Graph sign-in.
+  readonly property bool graphConsentNeeded: root.signedIn && !!auth && auth.graphConsentNeeded === true
   readonly property bool usingBuiltinClient: Microsoft.isValidClientId(Microsoft.BUILTIN_CLIENT_ID)
   readonly property bool toolsMissing: !!auth && auth.toolsChecked && auth.missingTools.length > 0
 
@@ -52,12 +55,16 @@ Column {
     if (address === "") return null
     var clientId = validatedClientId()
     if (clientId === "") return null
+    var tenant = workSwitch.checked ? "organizations" : ""
+    var send = workSwitch.checked && graphSwitch.checked ? "graph" : ""
+    var imap = Outlook.settings(address, tenant, send)
+    imap.tenant = tenant
     return ({
       provider: "outlook",
       email: address,
       clientId: clientId,
       clientSecret: "",
-      imap: Outlook.settings(address)
+      imap: imap
     })
   }
 
@@ -70,6 +77,13 @@ Column {
 
   function signIn() {
     if (root.busy) return
+    if (root.graphConsentNeeded) {
+      // Nothing to save: the mailbox is set up and signed in. The code
+      // asked for is Graph's.
+      errorText.text = ""
+      auth.beginLogin()
+      return
+    }
     var values = accountValues()
     if (!values || !service) return
     errorText.text = ""
@@ -81,8 +95,13 @@ Column {
     addressField.text = String(service.accountAddress || "")
     if (auth && auth.configuredClientId)
       clientIdField.text = String(auth.configuredClientId)
+    workSwitch.checked = !!auth && Microsoft.isWorkTenant(auth.tenant)
+    graphSwitch.checked = !!auth && String(auth.configuredSend || "") === "graph"
   }
 
+  // The auth object is rebuilt when the entry is saved, so the switches are
+  // read again from whichever one is current.
+  onAuthChanged: syncFromStore()
   Component.onCompleted: syncFromStore()
 
   Connections {
@@ -91,6 +110,7 @@ Column {
     function onLastErrorChanged() {
       if (root.auth && root.auth.lastError !== "") errorText.text = root.auth.lastError
     }
+    function onGraphRefused(reason) { errorText.text = String(reason || "") }
   }
 
   ProviderHero {
@@ -140,7 +160,7 @@ Column {
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
-      placeholderText: "Outlook or Hotmail address"
+      placeholderText: "Outlook, Hotmail or Microsoft 365 address"
       onAccepted: if (!root.usingBuiltinClient) clientIdField.forceActiveFocus()
     }
 
@@ -154,6 +174,74 @@ Column {
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Microsoft Application (client) ID"
       onAccepted: root.signIn()
+    }
+
+    // A work or school mailbox lives in its own tenant rather than the
+    // consumer one, and submits through Microsoft 365's SMTP host — or, where
+    // the tenant has switched authenticated SMTP off, through Graph.
+    Row {
+      width: parent.width
+      spacing: Style.space(10)
+
+      ToggleSwitch {
+        id: workSwitch
+        objectName: "outlook-work-switch"
+        anchors.verticalCenter: parent.verticalCenter
+        foreground: root.textColor
+        accent: root.accentColor
+        onToggled: checked = !checked
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Work or school account (Microsoft 365)"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      // The slider alone does not say which way is on.
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: workSwitch.checked ? "On" : "Off"
+        color: workSwitch.checked ? root.accentColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    Row {
+      width: parent.width
+      spacing: Style.space(10)
+      visible: workSwitch.checked
+
+      ToggleSwitch {
+        id: graphSwitch
+        objectName: "outlook-graph-switch"
+        anchors.verticalCenter: parent.verticalCenter
+        foreground: root.textColor
+        accent: root.accentColor
+        onToggled: checked = !checked
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Send through Microsoft Graph (the tenant has SMTP switched off)"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+        width: parent.width - graphSwitch.width - graphState.width - Style.space(20)
+      }
+
+      Text {
+        id: graphState
+        anchors.verticalCenter: parent.verticalCenter
+        text: graphSwitch.checked ? "On" : "Off"
+        color: graphSwitch.checked ? root.accentColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
     }
 
     Text {
@@ -246,7 +334,9 @@ Column {
 
       Text {
         width: parent.width
-        text: "Enter this code on the Microsoft page opened in your browser:"
+        text: root.auth && root.auth.devicePurpose === "graph"
+          ? "One more code, to allow Microsoft Graph (sending and the calendar). Enter it on the Microsoft page opened in your browser:"
+          : "Enter this code on the Microsoft page opened in your browser:"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
@@ -256,7 +346,7 @@ Column {
       TextField {
         width: parent.width
         readOnly: true
-        text: root.auth ? root.auth.userCode : ""
+        text: root.auth && root.auth.userCode !== undefined ? root.auth.userCode : ""
         foreground: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.body
@@ -267,7 +357,7 @@ Column {
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
-        tooltipText: root.auth ? root.auth.verificationUri : ""
+        tooltipText: root.auth && root.auth.verificationUri !== undefined ? root.auth.verificationUri : ""
         onActivated: Qt.openUrlExternally(tooltipText)
       }
     }
@@ -278,9 +368,10 @@ Column {
 
     Button {
       objectName: "outlook-sign-in"
-      visible: !root.signedIn
-      text: "Sign in with Microsoft..."
-      enabled: !root.busy && addressField.text.trim() !== ""
+      visible: !root.signedIn || root.graphConsentNeeded
+      text: root.graphConsentNeeded ? "Allow Microsoft Graph..." : "Sign in with Microsoft..."
+      enabled: !root.busy && !(root.auth && root.auth.refreshBusy === true)
+        && addressField.text.trim() !== ""
         && (root.usingBuiltinClient || clientIdField.text.trim() !== "")
       foreground: root.textColor
       bordered: true
