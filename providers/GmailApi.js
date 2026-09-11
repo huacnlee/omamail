@@ -90,12 +90,11 @@ function responseError(status, payload, fallback) {
     reason = String(payload.error.errors[0].reason || "")
 
   if (status === 401) return "Google rejected the session. Sign in again"
-  if (status === 403 && reason === "rateLimitExceeded") return "Gmail is rate limiting this account. Try again shortly"
+  if (rateLimited(status, payload)) return "Gmail is rate limiting this account. Try again shortly"
   if (status === 403 && /Gmail API has not been used/i.test(detail))
     return "The Gmail API is not enabled for this Google Cloud project"
   if (status === 403) return detail ? redact(detail) : "Google refused this request"
   if (status === 404) return "That message is no longer in the mailbox"
-  if (status === 429) return "Gmail is rate limiting this account. Try again shortly"
   if (status === 0) return "Could not reach Gmail. Check the network connection"
   if (status >= 500) return "Gmail is having trouble right now. Try again shortly"
   if (detail) return redact(detail)
@@ -107,6 +106,58 @@ function rateLimitSuffix(retryAfter) {
   if (!isFinite(seconds) || seconds <= 0) return ""
   if (seconds < 60) return " (retry in " + seconds + "s)"
   return " (retry in " + Math.ceil(seconds / 60) + " min)"
+}
+
+// ------------------------------------------------------------ rate limits
+//
+// How many message reads of one page may be in the air at once. Gmail charges
+// five quota units for a `messages.get` and allows one user 250 a second, so a
+// fifty-row page sent all at once is exactly the ceiling — and the
+// `messages.list` that found the ids shares that second, which is what turns
+// the ceiling into a 403. Ten leaves room for the rest of the panel's traffic
+// and still overlaps the round trips, which is why they were sent together in
+// the first place.
+var MAX_PARALLEL_READS = 10
+
+// Google counts its ceiling per second, so the first wait already outlasts the
+// window that refused the request. Three attempts, then the failure is the
+// caller's to show.
+var MAX_RATE_LIMIT_RETRIES = 3
+var BASE_RETRY_DELAY_MS = 1200
+var MAX_RETRY_DELAY_MS = 15000
+
+// Throttling, as opposed to a refusal that waiting cannot fix. 429 says so by
+// itself; 403 is also how Gmail reports a missing scope, a disabled API and a
+// suspended account, so that one is only throttling when the reason says it is.
+function rateLimited(status, payload) {
+  if (status === 429) return true
+  if (status !== 403) return false
+  var error = payload && payload.error ? payload.error : null
+  if (!error || typeof error === "string") return false
+  // Two envelopes, because Gmail answers in the legacy one and the rest of
+  // Google has moved on: `errors[].reason` and `status`. A 403 read out of
+  // neither is a refusal waiting cannot fix.
+  if (String(error.status || "") === "RESOURCE_EXHAUSTED") return true
+  var reason = ""
+  if (error.errors && error.errors.length > 0) reason = String(error.errors[0].reason || "")
+  return reason === "rateLimitExceeded" || reason === "userRateLimitExceeded"
+}
+
+// How long to wait before sending a throttled request again, or 0 when it must
+// not be sent again at all. A `Retry-After` Google names is used instead of the
+// backoff, but never for longer than MAX_RETRY_DELAY_MS: a header asking for an
+// hour would park the mailbox on a wait no reader is watching, and the refusals
+// that really do last that long — a daily quota — are not the reasons this
+// answers to. Without a header the wait doubles per attempt and carries jitter,
+// so two accounts refused in the same second do not come back in the same one.
+function retryDelayMs(status, payload, retryAfter, attempt) {
+  if (!rateLimited(status, payload)) return 0
+  var count = Math.max(0, Math.floor(Number(attempt) || 0))
+  if (count >= MAX_RATE_LIMIT_RETRIES) return 0
+  var named = Number(String(retryAfter === undefined || retryAfter === null ? "" : retryAfter).trim())
+  if (isFinite(named) && named > 0) return Math.min(Math.ceil(named * 1000), MAX_RETRY_DELAY_MS)
+  var backoff = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, count), MAX_RETRY_DELAY_MS)
+  return backoff + Math.floor(Math.random() * 250)
 }
 
 // ------------------------------------------------------------------ paths
