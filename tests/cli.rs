@@ -13,14 +13,17 @@ fn omamail(args: &[&str]) -> Output {
 fn version_commands_have_stable_machine_readable_output() {
     let plain = omamail(&["--version"]);
     assert!(plain.status.success());
-    assert_eq!(plain.stdout, b"omamail 0.8.2\n");
+    assert_eq!(
+        plain.stdout,
+        format!("omamail {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
+    );
     assert!(plain.stderr.is_empty());
 
     let json = omamail(&["version", "--json"]);
     assert!(json.status.success());
     assert_eq!(
         serde_json::from_slice::<Value>(&json.stdout).unwrap(),
-        serde_json::json!({"version":"0.8.2"})
+        serde_json::json!({"version":env!("CARGO_PKG_VERSION")})
     );
     assert!(json.stderr.is_empty());
 }
