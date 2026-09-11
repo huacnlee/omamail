@@ -1,9 +1,14 @@
 .pragma library
 
-function accepts(info, expectedVersion) {
+function accepts(info, expectedVersion, expectedApiVersion) {
   return !!info && info.protocol === 1
     && typeof expectedVersion === "string" && expectedVersion.length > 0
     && typeof info.version === "string" && info.version === expectedVersion
+    && typeof expectedApiVersion === "number" && expectedApiVersion > 0
+    && expectedApiVersion <= 2147483647
+    && Math.floor(expectedApiVersion) === expectedApiVersion
+    && (info.apiVersion === expectedApiVersion
+      || (info.apiVersion === undefined && info.version === "0.9.0" && expectedApiVersion === 1))
 }
 
 function dispatchError(connected, ready, stopping, method, internal) {

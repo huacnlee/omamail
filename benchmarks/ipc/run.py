@@ -49,7 +49,7 @@ fn main(){
   let request:Value=serde_json::from_str(&line.unwrap()).unwrap();
   let method=request["method"].as_str().unwrap();
   let result=match method{
-   "system.info"=>json!({"name":"omamail","protocol":1,"version":"VERSION","methods":["bench.response"]}),
+   "system.info"=>json!({"name":"omamail","protocol":1,"apiVersion":1,"version":"VERSION","methods":["bench.response"]}),
    "system.quit"=>json!({"quitReady":true}),
    "bench.response"=>{
      let index=request["params"]["index"].as_u64().unwrap() as usize;
@@ -121,6 +121,7 @@ Scope {
   id: backend
   executable: BINARY
   expectedVersion: VERSION
+  expectedApiVersion: 1
   onReadyChanged: if(ready&&!root.began){root.began=true;root.next()}
   onFailureChanged: if(failure!=="")root.fail(failure)
  }

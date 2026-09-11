@@ -46,6 +46,24 @@ three directories away from the client that calls it.
   `import "account"`, `ui/account/MailAccount.qml` has `import "../providers"` and
   `import "../cache"`.
 
+## Backend API compatibility
+
+- `backend-version` is the installed plugin's exact binary pin, independent of
+  the development Cargo version. Never resolve main/latest or a PATH binary for
+  the plugin. Keep old release assets available and never overwrite them.
+- `backend-api.json` versions the public API contract. Internal Rust changes do
+  not require a release, but new QML dependencies on methods, parameters,
+  responses or error semantics require updated contract fixtures and a higher
+  API revision. Publish the backend and advance the pin before merging those
+  QML changes to main.
+- The required Published backend merge gate tests the actual pinned release with
+  current QML codecs. Extend the contract tests for changed behavior; an inventory
+  check alone does not prove compatibility. Source fingerprints are release
+  provenance, not a requirement that future Rust source remain unchanged.
+- Plugin-local exact version and API handshake checks must both remain in place.
+  The missing-apiVersion exception applies only to the historical 0.9.0 binary
+  with API 1. See `docs/BACKEND-RUNTIME.md` for the release process.
+
 ## JavaScript libraries
 
 - The `.js` files are read by the QML engine. They start with `.pragma library`

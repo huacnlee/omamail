@@ -13,6 +13,7 @@ Item {
       property var runtime
       executable: "/synthetic/plugin/runtime/bin/omamail"
       expectedVersion: runtime.requiredVersion
+      expectedApiVersion: runtime.requiredApiVersion
       launchEnabled: runtime.state === "ready" && runtime.executable === executable
       Connections {
         target: runtime
@@ -31,7 +32,7 @@ Item {
     function reply(runtime, state, version, error, cliInstalled) {
       var process = processOf(runtime)
       process.running = false
-      process.stdout.read(JSON.stringify({ state: state, requiredVersion: "0.8.2",
+      process.stdout.read(JSON.stringify({ state: state, requiredVersion: "0.8.2", requiredApiVersion: 1,
         installedVersion: version, executable: "/synthetic/plugin/runtime/bin/omamail", error: error || "",
         cliInstalled: cliInstalled === true }))
       process.exited(error ? 1 : 0)
@@ -105,7 +106,7 @@ Item {
       process.started()
       var handshake = JSON.parse(process.written.trim())
       backend.receive(JSON.stringify({ jsonrpc: "2.0", id: handshake.id,
-        result: { name: "omamail", protocol: 1, version: "0.8.2",
+        result: { name: "omamail", apiVersion: 1, protocol: 1, version: "0.8.2",
           methods: ["system.info", "system.quit"] } }))
       verify(backend.ready)
       return backend
@@ -201,7 +202,7 @@ Item {
       runtime.refresh()
       var process = processOf(runtime)
       process.running = false
-      process.stdout.read(JSON.stringify({ state: "ready", requiredVersion: "0.8.3",
+      process.stdout.read(JSON.stringify({ state: "ready", requiredVersion: "0.8.3", requiredApiVersion: 1,
         installedVersion: "0.8.3", executable: runtime.executable, error: "" }))
       process.exited(0)
       verify(!backend.launchEnabled)
@@ -213,7 +214,7 @@ Item {
       processOf(backend).started()
       var request = JSON.parse(processOf(backend).written.trim().split("\n").pop())
       backend.receive(JSON.stringify({ jsonrpc: "2.0", id: request.id,
-        result: { name: "omamail", protocol: 1, version: "0.8.2",
+        result: { name: "omamail", apiVersion: 1, protocol: 1, version: "0.8.2",
           methods: ["system.info", "system.quit"] } }))
       verify(!backend.ready)
       verify(!processOf(backend).running)

@@ -37,6 +37,77 @@ class ReleaseTests(unittest.TestCase):
         (self.root / 'Cargo.lock').write_text('[[package]]\nname = "omamail"\nversion = "0.8.1"\n')
         self.assertNotEqual(self.run_helper('check', '--root', self.root).returncode, 0)
 
+    def api_fixture(self):
+        self.metadata()
+        backend = self.root / 'src/backend'
+        backend.mkdir(parents=True)
+        (backend / 'methods.rs').write_text('pub const ALL: &[&str] = &["system.info"];')
+        contract = {'apiVersion': 1, 'protocolVersion': 1, 'methods': ['system.info'],
+                    'contractCases': [{'name': 'handshake', 'method': 'system.info',
+                                       'params': {}, 'types': {'name': 'string'}}]}
+        self.api = self.root / 'backend-api.json'
+        self.api.write_text(json.dumps(contract))
+        self.published = self.root / 'published-api.json'
+        self.published.write_text(json.dumps(contract, indent=2, sort_keys=True))
+        return contract
+
+    def test_internal_rust_versions_and_source_can_reuse_pin_and_api(self):
+        self.api_fixture()
+        (self.root / 'Cargo.toml').write_text('[package]\nname="omamail"\nversion="9.0.0"\n')
+        (self.root / 'Cargo.lock').write_text('[[package]]\nname="omamail"\nversion="9.0.0"\n')
+        (self.root / 'src/internal.rs').write_text('fn optimized() {}')
+        pin = self.run_helper('pin-version', '--root', self.root)
+        self.assertEqual(pin.returncode, 0, pin.stderr)
+        self.assertEqual(pin.stdout.strip(), '0.8.1')
+        result = self.run_helper('check-api', '--root', self.root, '--published', self.published)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_api_inventory_change_requires_contract_and_publication(self):
+        contract = self.api_fixture()
+        methods = self.root / 'src/backend/methods.rs'
+        methods.write_text('pub const ALL: &[&str] = &["system.info", "message.new"];')
+        self.assertNotEqual(self.run_helper('check-api', '--root', self.root).returncode, 0)
+        contract['methods'].append('message.new')
+        self.api.write_text(json.dumps(contract))
+        self.assertEqual(self.run_helper('check-api', '--root', self.root).returncode, 0)
+        self.assertNotEqual(self.run_helper('check-api', '--root', self.root,
+                                           '--published', self.published).returncode, 0)
+        self.assertNotEqual(self.run_helper('check-api', '--root', self.root,
+                                           '--baseline', self.published).returncode, 0)
+        contract['apiVersion'] = 2
+        self.api.write_text(json.dumps(contract))
+        result = self.run_helper('check-api', '--root', self.root, '--baseline', self.published)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_response_contract_changes_require_revision_bump(self):
+        contract = self.api_fixture()
+        self.assertEqual(self.run_helper('check-api', '--root', self.root,
+                                         '--baseline', self.published).returncode, 0)
+        contract['contractCases'][0]['types']['version'] = 'string'
+        self.api.write_text(json.dumps(contract))
+        for mode in ('--baseline', '--published'):
+            self.assertNotEqual(self.run_helper('check-api', '--root', self.root,
+                                               mode, self.published).returncode, 0)
+        contract['apiVersion'] = 2
+        self.api.write_text(json.dumps(contract))
+        self.assertEqual(self.run_helper('check-api', '--root', self.root,
+                                         '--baseline', self.published).returncode, 0)
+
+    def test_api_revisions_and_pin_require_canonical_values(self):
+        contract = self.api_fixture()
+        for value in (True, 0, -1, '1', 1.5, 2147483648):
+            for field in ('apiVersion', 'protocolVersion'):
+                with self.subTest(field=field, value=value):
+                    invalid = dict(contract, **{field: value})
+                    self.api.write_text(json.dumps(invalid))
+                    self.assertNotEqual(self.run_helper('check-api', '--root', self.root).returncode, 0)
+        for value in ('v0.9.0', '0.09.0', '0.9.0\r\n', '0.9.0\n\n', '0.9.0-beta', '0.9.0\0'):
+            (self.root / 'backend-version').write_bytes(value.encode())
+            self.assertNotEqual(self.run_helper('pin-version', '--root', self.root).returncode, 0)
+        for value in ('{}', '[]', '{"apiVersion": 1, "apiVersion": 1}', ' ' * (4 * 1024 * 1024 + 1)):
+            self.api.write_text(value)
+            self.assertNotEqual(self.run_helper('check-api', '--root', self.root).returncode, 0)
+
     def source_fixture(self):
         self.metadata()
         (self.root / 'src').mkdir()

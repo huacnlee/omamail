@@ -61,8 +61,9 @@ function respond(service, request, result, error) {
 function markReady(service) {
   install(service)
   service.backendRuntime.requiredVersion = "0.0.0"
+  service.backendRuntime.requiredApiVersion = 1
   service.backendRuntime.executable = "/synthetic/runtime/bin/omamail"
   service.backendRuntime.state = "ready"
   service.backend.connected = true
-  service.backend.protocolInfo = { protocol: 1, version: "0.0.0" }
+  service.backend.protocolInfo = { apiVersion: 1, protocol: 1, version: "0.0.0" }
 }

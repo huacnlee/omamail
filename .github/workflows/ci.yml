@@ -25,6 +25,7 @@ jobs:
       # Version-sensitive QML/libcurl checks remain on the Omarchy host.
       - run: make test-rust test-js test-shell-portable
       - run: python3 tests/test_backend_release.py
+      - run: python3 scripts/package-backend.py check-api
       - run: git diff --check
 
   published-assets:
@@ -41,23 +42,27 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Require exact pin and verify actual published archives
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Require exact pin and verify published API compatibility
         env:
           GH_TOKEN: ${{ github.token }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          version="$(python3 scripts/package-backend.py check --require-pin)"
+          version="$(python3 scripts/package-backend.py pin-version)"
           # Missing bootstrap assets intentionally fail this required check.
           test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = false
           mkdir published
-          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-build.json
+          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-api.json
           python3 scripts/package-backend.py verify published
-          # Same version text is insufficient: the Rust build inputs must match.
-          python3 scripts/package-backend.py check-provenance published/backend-build.json
+          # Internal Rust changes may reuse this release; API changes may not.
+          python3 scripts/package-backend.py check-api --published published/backend-api.json
           mkdir probe
           tar -xzf "published/omamail-linux-$ARCH.tar.gz" -C probe
           test "$(probe/omamail --version)" = "omamail $version"
+          python3 tests/test_backend_api.py --binary probe/omamail --expected-version "$version"
           readelf -l probe/omamail > program-headers.txt
           readelf -d probe/omamail > dynamic-headers.txt
           if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi

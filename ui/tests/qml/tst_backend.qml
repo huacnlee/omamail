@@ -8,6 +8,7 @@ Item {
     BackendModule.Backend {
       executable: "/tmp/omamail-synthetic-backend"
       expectedVersion: "0.8.2"
+      expectedApiVersion: 1
     }
   }
 
@@ -109,7 +110,7 @@ Item {
       var process = start(backend)
       reply(process, requests(process)[0], {
         name: "omamail",
-        protocol: 1,
+        apiVersion: 1, protocol: 1,
         version: "0.8.2",
         methods: ["system.info", "system.quit"]
       }, null)
@@ -139,7 +140,7 @@ Item {
     function test_recheck_restarts_after_a_failed_handshake() {
       var backend = makeBackend()
       var process = start(backend)
-      reply(process, requests(process)[0], { protocol: 1, version: "0.8.1" }, null)
+      reply(process, requests(process)[0], { apiVersion: 1, protocol: 1, version: "0.8.1" }, null)
       process.exited(1)
       backend.executable = ""
       wait(0)
@@ -147,6 +148,23 @@ Item {
       wait(0)
       compare(process.running, true)
       compare(backend.ready, false)
+    }
+
+    function test_api_mismatch_stops_without_business_dispatch_data() {
+      return [{ tag: "missing", info: { protocol: 1, version: "0.8.2" } },
+        { tag: "wrong", info: { protocol: 1, version: "0.8.2", apiVersion: 2 } }]
+    }
+    function test_api_mismatch_stops_without_business_dispatch(data) {
+      var backend = makeBackend()
+      var process = start(backend)
+      reply(process, requests(process)[0], data.info, null)
+      compare(backend.ready, false)
+      verify(!process.running)
+      var before = process.written
+      var error = null
+      backend.call("gmail.sendAs", {}, function(_result, failure) { error = failure })
+      verify(error !== null)
+      compare(process.written, before)
     }
 
     function test_unvalidated_runtime_never_starts_or_dispatches() {
@@ -170,7 +188,7 @@ Item {
       var process = start(backend)
       reply(process, requests(process)[0], {
         name: "omamail",
-        protocol: 1,
+        apiVersion: 1, protocol: 1,
         version: "0.8.1",
         methods: ["system.info", "system.quit"]
       }, null)
@@ -189,7 +207,7 @@ Item {
 
       reply(process, requests(process)[0], {
         name: "omamail",
-        protocol: 1,
+        apiVersion: 1, protocol: 1,
         version: "0.8.1",
         methods: ["system.info", "system.quit"]
       }, null)

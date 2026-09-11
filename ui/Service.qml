@@ -60,6 +60,7 @@ Item {
     executable: privateRuntime.executable
     launchEnabled: privateRuntime.state === "ready" && executable !== ""
     expectedVersion: privateRuntime.requiredVersion
+    expectedApiVersion: privateRuntime.requiredApiVersion
     onReadyChanged: root.scheduleUnifiedSnapshot()
   }
 

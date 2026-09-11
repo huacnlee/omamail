@@ -400,12 +400,26 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "methods": methods::ALL
+            "protocol": 1, "apiVersion": 1, "methods": methods::ALL
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),
         "providers.list" => Ok(crate::providers::list()),
         _ => Err("unknown_method"),
+    }
+}
+
+#[cfg(test)]
+mod api_contract_tests {
+    use super::*;
+
+    #[test]
+    fn advertised_api_matches_versioned_contract() {
+        let contract: Value = serde_json::from_str(include_str!("../../backend-api.json")).unwrap();
+        let info = dispatch("system.info", &json!({})).unwrap();
+        assert_eq!(info["apiVersion"], contract["apiVersion"]);
+        assert_eq!(info["protocol"], contract["protocolVersion"]);
+        assert_eq!(info["methods"], contract["methods"]);
     }
 }
 

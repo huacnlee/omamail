@@ -50,6 +50,7 @@ Scope {
     id: backend
     executable: __BINARY__
     expectedVersion: __VERSION__
+    expectedApiVersion: 1
     onReadyChanged: {
       if (!ready || root.began) return
       root.began = true

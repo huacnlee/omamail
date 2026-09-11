@@ -30,6 +30,101 @@ def check(root, tag=None, require_pin=False):
     return version
 
 
+def pin_version(root):
+    path = root / 'backend-version'
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('backend-version must be a regular file')
+    with path.open('rb') as stream:
+        raw = stream.read(129)
+    if len(raw) > 128 or not re.fullmatch(rb'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\n?', raw):
+        raise ValueError('backend-version must be canonical MAJOR.MINOR.PATCH')
+    return raw.decode('ascii').removesuffix('\n')
+
+
+def read_api(path):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('backend API contract must be a regular file')
+    with path.open('rb') as stream:
+        raw = stream.read(4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024:
+        raise ValueError('backend API contract exceeds size limit')
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate API contract field')
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError('non-JSON API contract constant: ' + value)
+
+    try:
+        contract = json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+    except (UnicodeError, RecursionError) as error:
+        raise ValueError('malformed backend API contract') from error
+    if (not isinstance(contract, dict)
+            or set(contract) != {'apiVersion', 'protocolVersion', 'methods', 'contractCases'}):
+        raise ValueError('invalid backend API contract fields')
+    for key in ('apiVersion', 'protocolVersion'):
+        if type(contract[key]) is not int or not 1 <= contract[key] <= 2147483647:
+            raise ValueError('invalid backend API revision: ' + key)
+    methods = contract['methods']
+    if (not isinstance(methods, list) or not methods
+            or any(not isinstance(method, str) or not re.fullmatch(r'[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+', method)
+                   for method in methods) or len(set(methods)) != len(methods)):
+        raise ValueError('invalid or duplicate API methods')
+    cases = contract['contractCases']
+    if not isinstance(cases, list) or not cases:
+        raise ValueError('API contract requires contractCases')
+    names = set()
+    for case in cases:
+        if (not isinstance(case, dict) or not {'name', 'method', 'params'} <= set(case)
+                or set(case) - {'name', 'method', 'params', 'errorCode', 'equals', 'types'}
+                or not isinstance(case['name'], str) or not case['name'] or case['name'] in names
+                or case['method'] not in methods or not isinstance(case['params'], dict)):
+            raise ValueError('invalid API contract case')
+        names.add(case['name'])
+        if 'errorCode' in case:
+            if type(case['errorCode']) is not int or set(case) & {'equals', 'types'}:
+                raise ValueError('invalid API error expectation')
+        elif not case.get('equals') and not case.get('types'):
+            raise ValueError('API contract case requires an expectation')
+        for field in ('equals', 'types'):
+            if field in case and not isinstance(case[field], dict):
+                raise ValueError('invalid API expectation: ' + field)
+        if any(value not in ('null', 'boolean', 'number', 'string', 'array', 'object')
+               for value in case.get('types', {}).values()):
+            raise ValueError('invalid API expected type')
+    return contract
+
+
+def check_api(root, published=None, baseline=None):
+    contract = read_api(root / 'backend-api.json')
+    source = (root / 'src/backend/methods.rs').read_text()
+    inventory = re.search(r'pub\s+const\s+ALL\s*:\s*&\[&str\]\s*=\s*&\[(.*?)\];', source, re.S)
+    if not inventory:
+        raise ValueError('cannot locate public ALL method inventory')
+    entries = re.sub(r'//[^\n]*', '', inventory[1])
+    if re.sub(r'"[a-zA-Z0-9.]+"|[\s,]', '', entries):
+        raise ValueError('public method inventory must contain literal method names')
+    methods = re.findall(r'"([a-zA-Z0-9.]+)"', entries)
+    if len(set(methods)) != len(methods) or set(methods) != set(contract['methods']):
+        raise ValueError('public method inventory differs from backend-api.json; update the API contract')
+    if published is not None:
+        expected = read_api(published)
+        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+        if canonical(contract) != canonical(expected):
+            raise ValueError('published backend API contract differs; publish and pin a compatible backend')
+    if baseline is not None:
+        previous = read_api(baseline)
+        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+        if canonical(contract) != canonical(previous) and contract['apiVersion'] <= previous['apiVersion']:
+            raise ValueError('changed API contract requires a newer apiVersion')
+    return contract['apiVersion']
+
+
 PROVENANCE_LIMIT = 4 * 1024 * 1024
 
 
@@ -244,6 +339,12 @@ def main():
     cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     cmd.add_argument('--tag')
     cmd.add_argument('--require-pin', action='store_true')
+    cmd = sub.add_parser('pin-version')
+    cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    cmd = sub.add_parser('check-api')
+    cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    cmd.add_argument('--published', type=Path)
+    cmd.add_argument('--baseline', type=Path)
     cmd = sub.add_parser('package')
     cmd.add_argument('binary', type=Path)
     cmd.add_argument('arch', choices=ARCHES)
@@ -265,6 +366,10 @@ def main():
     try:
         if args.command == 'check':
             print(check(args.root, args.tag, args.require_pin))
+        elif args.command == 'pin-version':
+            print(pin_version(args.root))
+        elif args.command == 'check-api':
+            print(check_api(args.root, args.published, args.baseline))
         elif args.command == 'package':
             package(args.binary, args.arch, args.output)
         elif args.command == 'verify':

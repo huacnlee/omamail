@@ -96,8 +96,8 @@ plugin never downloads a binary. The installer uses the exact `backend-version`
 release for Linux x86_64 or aarch64 and keeps it at `runtime/bin/omamail` inside
 the plugin. No system package or second Quickshell process is installed.
 See [backend installation and releases](docs/BACKEND-RUNTIME.md) for updates,
-optional CLI access and recovery. This branch's initial release gate is pending:
-v0.8.2 has no backend assets; a new version must be published before merge.
+optional CLI access and recovery. Each plugin revision keeps its own exact backend
+pin; an old plugin never automatically switches to the backend used by main.
 
 Then click the envelope in the bar. To open it from the keyboard, add this to
 `~/.config/hypr/bindings.lua`:

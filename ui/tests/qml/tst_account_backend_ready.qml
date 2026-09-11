@@ -9,6 +9,7 @@ Item {
     BackendModule.Backend {
       executable: "/synthetic/runtime/bin/omamail"
       expectedVersion: "0.8.2"
+      expectedApiVersion: 1
       launchEnabled: false
     }
   }
@@ -75,7 +76,7 @@ Item {
       compare(account.api.calls, 0, "launch alone is not a handshake")
       var request = JSON.parse(process.written.trim())
       process.stdout.read(JSON.stringify({ jsonrpc: "2.0", id: request.id,
-        result: { protocol: 1, version: "0.8.2" } }))
+        result: { apiVersion: 1, protocol: 1, version: "0.8.2" } }))
       tryCompare(account, "ready", true)
       tryCompare(account, "listLoaded", true)
       compare(account.profile.email, "ada@example.org")

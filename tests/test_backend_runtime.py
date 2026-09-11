@@ -31,6 +31,7 @@ class RuntimeTests(unittest.TestCase):
         self.manager = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.manager)
         (self.root / "backend-version").write_text("0.8.2\n")
+        (self.root / "backend-api.json").write_text('{"apiVersion": 1}')
         self.binary = self.root / "runtime/bin/omamail"
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {}, clear=True).start()
@@ -221,8 +222,28 @@ touch linked
 
     def test_missing_status_never_downloads(self):
         result = self.manager.run("status")
-        self.assertEqual(result, dict(state="missing", requiredVersion="0.8.2", installedVersion="", executable=str(self.binary), error="", cliInstalled=False))
+        self.assertEqual(result, dict(state="missing", requiredVersion="0.8.2", requiredApiVersion=1, installedVersion="", executable=str(self.binary), error="", cliInstalled=False))
         self.assertFalse(self.binary.parent.exists())
+
+    def test_release_status_uses_only_local_pin_and_api_despite_newer_cargo(self):
+        self.local_checkout()
+        self.release(self.archive())
+        self.assertEqual(self.manager.run("install")["state"], "ready")
+        (self.root / "Cargo.toml").write_text('[package]\nversion = "2.0.0"\n')
+        result = self.manager.run("status")
+        self.assertEqual(result["state"], "ready")
+        self.assertEqual(result["requiredVersion"], "0.8.2")
+        self.assertEqual(result["requiredApiVersion"], 1)
+        (self.root / "backend-api.json").write_text('{"apiVersion": 2}')
+        self.assertEqual(self.manager.run("status")["requiredApiVersion"], 2)
+
+    def test_missing_or_invalid_api_contract_fails_closed(self):
+        contract = self.root / "backend-api.json"
+        for value in (0, -1, True, "1", 1.5):
+            contract.write_text(json.dumps({"apiVersion": value}))
+            self.assertEqual(self.manager.run("status")["state"], "error")
+        contract.unlink()
+        self.assertEqual(self.manager.run("status")["state"], "error")
 
     def test_failed_mutations_exit_nonzero_with_json_through_wrappers(self):
         old = self.old()

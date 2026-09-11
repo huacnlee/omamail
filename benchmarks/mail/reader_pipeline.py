@@ -109,6 +109,7 @@ Scope {
   id:backend
   executable:BINARY
   expectedVersion:VERSION
+  expectedApiVersion: 1
   onReadyChanged:if(ready&&!root.began){root.began=true;Qt.callLater(root.nextCase)}
   onFailureChanged:if(failure!=="")root.fail(failure)
  }

@@ -1,0 +1,323 @@
+{
+  "apiVersion": 1,
+  "protocolVersion": 1,
+  "methods": [
+    "system.info",
+    "system.quit",
+    "accounts.list",
+    "account.identities",
+    "account.conversation",
+    "agent.context",
+    "agent.jobsList",
+    "agent.jobsProjection",
+    "agent.jobStart",
+    "agent.jobShow",
+    "agent.jobCancel",
+    "agent.jobForget",
+    "agent.contextCancel",
+    "reader.open",
+    "reader.render",
+    "reader.cancel",
+    "accounts.read",
+    "accounts.save",
+    "providers.list",
+    "providers.resolve",
+    "providers.snapshot",
+    "message.parse",
+    "message.compose",
+    "message.prepare",
+    "message.prepareCached",
+    "message.summarize",
+    "message.summaries",
+    "message.composeText",
+    "message.render",
+    "message.direction",
+    "message.signatureImport",
+    "message.signatureInline",
+    "attachment.forget",
+    "outbox.enqueue",
+    "outbox.snapshot",
+    "outbox.undo",
+    "outbox.flush",
+    "outbox.abandon",
+    "outbox.forget",
+    "cache.queryRestore",
+    "cache.queryGet",
+    "cache.queryPut",
+    "cache.queryLabels",
+    "cache.queryProfile",
+    "cache.querySession",
+    "cache.querySessionGet",
+    "cache.queryBind",
+    "cache.queryClear",
+    "cache.queryInvalidate",
+    "cache.querySnapshot",
+    "cache.queryFlush",
+    "model.unified",
+    "model.apply",
+    "model.intent",
+    "compose.recoveryRead",
+    "compose.recoverySave",
+    "message.parseUpload",
+    "upload.begin",
+    "upload.append",
+    "upload.discard",
+    "request.upload",
+    "mail.watch",
+    "mail.unwatch",
+    "mail.check",
+    "mail.snapshot",
+    "cache.resourceRead",
+    "cache.resourcePut",
+    "cache.resourceClear",
+    "cache.bodyRead",
+    "cache.bodyPut",
+    "cache.bodyPutUpload",
+    "cache.bodyTouch",
+    "cache.bodyClear",
+    "cache.storeRead",
+    "cache.storePut",
+    "cache.calendarRead",
+    "cache.calendarPut",
+    "contacts.suggest",
+    "attachment.read",
+    "attachment.store",
+    "attachment.storeUpload",
+    "public.image",
+    "public.unsubscribe",
+    "calendar.request",
+    "auth.form",
+    "auth.begin",
+    "auth.poll",
+    "auth.cancel",
+    "auth.invalidate",
+    "auth.token",
+    "auth.store",
+    "auth.clear",
+    "outlook.graphSend",
+    "hey.probe",
+    "hey.status",
+    "hey.profile",
+    "hey.sendAs",
+    "hey.labels",
+    "hey.list",
+    "hey.read",
+    "hey.loginStart",
+    "hey.loginPoll",
+    "hey.loginCancel",
+    "hey.logout",
+    "hey.act",
+    "hey.send",
+    "hey.saveDraft",
+    "gmail.list",
+    "gmail.read",
+    "gmail.attachment",
+    "gmail.invalidate",
+    "gmail.labels",
+    "gmail.labelCounts",
+    "gmail.profile",
+    "gmail.sendAs",
+    "gmail.modify",
+    "gmail.batchModify",
+    "gmail.createLabel",
+    "gmail.renameLabel",
+    "gmail.deleteLabel",
+    "gmail.trash",
+    "gmail.untrash",
+    "gmail.send",
+    "gmail.saveDraft",
+    "gmail.updateDraft",
+    "gmail.deleteDraft",
+    "imap.request",
+    "imap.append",
+    "imap.check",
+    "imap.folders",
+    "imap.list",
+    "imap.listContinue",
+    "imap.messages",
+    "imap.count",
+    "imap.cancel",
+    "imap.attachment",
+    "imap.modify",
+    "imap.trash",
+    "imap.untrash",
+    "imap.createFolder",
+    "imap.renameFolder",
+    "imap.deleteFolder",
+    "imap.saveDraft",
+    "imap.deleteDraft",
+    "imap.send",
+    "smtp.send",
+    "jmap.verify",
+    "jmap.profile",
+    "jmap.session",
+    "jmap.list",
+    "jmap.messages",
+    "jmap.read",
+    "jmap.attachment",
+    "jmap.labels",
+    "jmap.labelCounts",
+    "jmap.watch",
+    "jmap.modify",
+    "jmap.batchModify",
+    "jmap.trash",
+    "jmap.untrash",
+    "jmap.sendAs",
+    "jmap.send",
+    "jmap.saveDraft",
+    "jmap.invalidate",
+    "jmap.cancel",
+    "jmap.request",
+    "jmap.stream.open",
+    "jmap.stream.poll",
+    "jmap.stream.close"
+  ],
+  "contractCases": [
+    {
+      "name": "strict handshake parameters",
+      "method": "system.info",
+      "params": {
+        "unexpected": true
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "MIME resource fields",
+      "method": "message.parse",
+      "params": {
+        "raw": "U3ViamVjdDogQVBJIGZpeHR1cmUNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQpoZWxsbw"
+      },
+      "equals": {
+        "mimeType": "text/plain",
+        "body.data": "aGVsbG8",
+        "body.size": 5
+      },
+      "types": {
+        "headers": "array"
+      }
+    },
+    {
+      "name": "prepared reader content",
+      "method": "message.prepare",
+      "params": {
+        "message": {
+          "id": "fixture",
+          "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+              {
+                "name": "Subject",
+                "value": "API fixture"
+              },
+              {
+                "name": "From",
+                "value": "Sender <sender@example.org>"
+              }
+            ],
+            "body": {
+              "data": "SGVsbG8g5ZCI5oiQ"
+            }
+          },
+          "labelIds": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "internalDate": "1700000000000"
+        },
+        "now": 1700000000000
+      },
+      "equals": {
+        "body.text": "Hello 合成",
+        "summary.subject": "API fixture",
+        "summary.id": "fixture"
+      },
+      "types": {
+        "summary": "object",
+        "attachments": "array"
+      }
+    },
+    {
+      "name": "list summary",
+      "method": "message.summarize",
+      "params": {
+        "message": {
+          "id": "fixture",
+          "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+              {
+                "name": "Subject",
+                "value": "API fixture"
+              },
+              {
+                "name": "From",
+                "value": "Sender <sender@example.org>"
+              }
+            ],
+            "body": {
+              "data": "SGVsbG8g5ZCI5oiQ"
+            }
+          },
+          "labelIds": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "internalDate": "1700000000000"
+        },
+        "now": 1700000000000
+      },
+      "equals": {
+        "subject": "API fixture",
+        "id": "fixture",
+        "unread": true
+      },
+      "types": {
+        "from": "object",
+        "time": "string"
+      }
+    },
+    {
+      "name": "provider rules snapshot",
+      "method": "providers.snapshot",
+      "params": {},
+      "equals": {
+        "gmail.nativeSync": true,
+        "hey.nativeSync": true
+      },
+      "types": {
+        "gmail.queries": "object",
+        "outlook.queries": "object",
+        "hey.queries": "object",
+        "jmap.queries": "object",
+        "imap.queries": "object"
+      }
+    },
+    {
+      "name": "both display modes",
+      "method": "message.render",
+      "params": {
+        "html": "<p>API fixture</p>",
+        "options": {
+          "allowRemoteImages": false,
+          "withReader": true
+        }
+      },
+      "types": {
+        "document": "object",
+        "reader.document": "object",
+        "html": "string"
+      }
+    },
+    {
+      "name": "missing cached message",
+      "method": "message.prepareCached",
+      "params": {
+        "accountId": "contract@example.org",
+        "id": "absent"
+      },
+      "equals": {
+        "": null
+      }
+    }
+  ]
+}

@@ -4,7 +4,9 @@ Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
 one executable at `<plugin root>/runtime/bin/omamail`. The root `backend-version`
 file requires an exact version, independent of PATH and system packages. Service
 starts one persistent `omamail serve` process over stdin/stdout and checks its
-version and protocol before dispatching migrated calls.
+exact binary version, protocol and API revision before dispatching migrated calls.
+The plugin-local `backend-api.json` describes its required API; it is not fetched
+from main or from a latest-release endpoint.
 
 On a missing or mismatched runtime, the UI explains what is needed. Installation
 is explicit; simply loading the plugin never starts a download. From the plugin
@@ -33,6 +35,33 @@ to make the override available when the shell constructs the plugin, restarting
 the shell with that environment when needed. This is not a second Quickshell
 application. Rust mail migration remains incomplete; see [BACKEND.md](BACKEND.md).
 
+## Stable API and old plugins
+
+`backend-version` belongs to the installed plugin revision. A plugin that has not
+been updated continues using that exact private binary, even after main and newer
+plugins move on. Neither the app nor Install CLI selects a global or latest backend.
+Install CLI only links to the plugin's own executable. Old release tags, binaries,
+checksums and API contract assets must remain available and immutable: an old
+plugin must also be able to reinstall its pinned version years later. This preserves
+the plugin/backend pairing; it cannot guarantee that external mail providers will
+never change their services.
+
+There are three independent versions: the plugin manifest version, the exact
+backend binary release in `backend-version`, and the integer API revision in
+`backend-api.json`. JSON-RPC framing has its own `protocolVersion`. Internal Rust
+fixes or optimizations can merge without changing the binary pin or API revision;
+users receive those fixes when a later backend release is explicitly pinned.
+QML presentation changes can likewise reuse the existing backend.
+
+The contract records the public method inventory and representative request/response
+fixtures. Changes to methods, accepted parameters, returned fields, errors or their
+meaning require contract review, updated fixtures and a higher API revision. Even an
+additive method needs a release before QML can depend on it. Maintain backwards
+compatibility where practical, but never use it as a reason to silently replace an
+old plugin's binary. `system.info.apiVersion` states the API revision. The initial
+published binary 0.9.0 predates this field; only that exact version is recognized as
+legacy API 1. Missing revision information from any other version is refused.
+
 ## Release before pin
 
 Prepare a new version with `scripts/bump.sh MAJOR.MINOR.PATCH`. This edits only
@@ -51,7 +80,10 @@ The workflow tests and builds locked native musl binaries on Linux x86_64 and
 aarch64, executes each version probe, rejects dynamic ELF dependencies, and
 packages `omamail-linux-x86_64.tar.gz` and `omamail-linux-aarch64.tar.gz`. Each
 contains exactly one regular executable named `omamail`. A combined SHA256SUMS
-and `backend-build.json` are published with both assets only after both build jobs pass.
+and `backend-build.json` plus `backend-api.json` are published with both assets only
+after both build jobs pass. The release checks the new contract against the pinned
+release: a changed contract requires a higher API revision. Each native binary
+must also pass the contract runner before packaging.
 Both native build jobs produce identical source fingerprints before publication. The new draft
 release is completed, made public, downloaded again and verified before a
 follow-up commit changes only backend-version on the release's source branch.
@@ -72,20 +104,33 @@ push because it suppresses subsequent workflow triggers. Release runs only by
 explicit dispatch or a push to `release/backend/**` of trusted code; restrict
 write access to these release branches. PR CI has read-only permissions and never
 receives that secret. Require **Published backend merge gate** in branch
-protection. That check requires Cargo/lock/pin equality, downloads and verifies
-the actual public release archives, and compares `backend-build.json` against
-the PR checkout. It fingerprints Rust sources and resources, Cargo profiles and
-lockfile, build scripts, toolchain/config files, and literal compile-time includes.
-A Rust change without a version bump therefore fails even if the old executable
-prints the expected version. Ordinary QML and plugin manifest version changes
-can reuse the backend: plugin and backend versions are independent.
+protection. That check reads the plugin's exact pin independently of Cargo's
+current development version, verifies both published native archives, compares the
+published API contract with the PR's contract, and runs `tests/test_backend_api.py`
+against each actual published binary using the PR's production QML Wire/Chunks
+codecs. It also checks that Rust's public method inventory matches the contract.
+A PR cannot satisfy this check merely by building a newer local executable.
 
-For a combined QML/Rust PR: test locally, prepare a new backend version, publish
-it from the trusted PR source, then update backend-version after verification.
-The required merge check must pass before merging; publishing after merging would
-leave plugin users exposed to the mismatch. Build-input discovery, workflow and
-repository policy changes themselves need trusted review. No repository settings are changed by
-these scripts.
+Source fingerprints in `backend-build.json` remain release provenance. They bind
+both release builds to the same Rust sources, resources and build inputs; they do
+not require future PRs to contain identical Rust source. Cargo and Cargo.lock must
+still agree for builds, but their development version need not equal the pinned
+published binary.
+
+For a combined QML/Rust PR requiring an API change: update the API revision and
+contract fixtures, test locally, prepare a new binary version and publish it from
+the trusted PR source, then advance `backend-version` after verification. The
+required merge check must pass before merging. Publishing after merging would
+leave plugin users exposed to the mismatch. Runtime handshake still requires the
+exact plugin-local binary pin, even when a newer release reports the same API.
+
+The contract runner currently exercises 13 methods and checks the full advertised
+inventory. It covers representative mail processing and cached reader behavior,
+not every provider operation or every possible QML argument. API reviewers must
+extend fixtures for newly used behavior; passing these tests is not a proof of
+complete semantic compatibility. Contract fixtures, API revisions, workflows and
+repository policy changes require trusted review. These scripts do not change
+repository settings.
 
 Bootstrap status: v0.9.0 contains the optimized x86_64 and aarch64 static
 backends. The published packages were checked against the successful native CI
@@ -136,10 +181,10 @@ QML imports; inspect its diagnostics even when qmllint returns success.
 
 Local synthetic tests cover archive shape, checksum corruption, version drift,
 preparation without pin advancement, pin-only commits and moved-branch refusal.
-A native aarch64 Debian Bookworm container with Rust 1.100.0-nightly
+Historical pre-release checks: a native aarch64 Debian Bookworm container with Rust 1.100.0-nightly
 (2026-09-03) passed locked musl tests and a release build; its version probe
 returned 0.8.2 and ELF inspection found no interpreter or dynamic section.
-The local x86_64 musl test process crashed under Docker emulation, so native
-x86_64 execution remains unverified here. Actual Actions publication, both
-hosted runner architectures and graphical Omarchy installation remain separate
-acceptance checks. Passing local tests is not release availability.
+The local x86_64 musl test process crashed under Docker emulation. Subsequent
+v0.9.0 native Actions builds and published-asset verification supersede that
+architecture gap, as recorded above. Future releases still require their own
+hosted checks; passing local tests alone is not release availability.

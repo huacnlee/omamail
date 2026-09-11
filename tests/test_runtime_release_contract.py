@@ -23,6 +23,7 @@ class RuntimeReleaseContract(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="omamail-release-contract-") as directory:
             root = Path(directory).resolve()
             (root / "backend-version").write_text("0.8.2\n")
+            (root / "backend-api.json").write_text('{"apiVersion": 1}')
             binary = root / "build/omamail"
             binary.parent.mkdir()
             payload = b"#!/bin/sh\nprintf 'omamail 0.8.2\\n'\n"

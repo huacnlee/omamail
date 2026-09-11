@@ -9,6 +9,7 @@ Item {
   id: root
   required property string executable
   required property string expectedVersion
+  property int expectedApiVersion: 0
   property bool launchEnabled: true
   onLaunchEnabledChanged: Qt.callLater(reconcileProcess)
   onExecutableChanged: Qt.callLater(reconcileProcess)
@@ -247,7 +248,7 @@ Item {
       }
       root.failure = ""
       root.request("system.info", {}, function(info, error) {
-        if (error || !Compatibility.accepts(info, root.expectedVersion))
+        if (error || !Compatibility.accepts(info, root.expectedVersion, root.expectedApiVersion))
           root.stopForFailure("Incompatible backend")
         else root.protocolInfo = info
       }, true)

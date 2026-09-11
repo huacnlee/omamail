@@ -8,6 +8,7 @@ Item {
   property string developmentExecutable: ""
   state: "checking"
   property string requiredVersion: ""
+  property int requiredApiVersion: 0
   property string installedVersion: ""
   property string executable: ""
   property string error: ""
@@ -46,6 +47,7 @@ Item {
 
   function applyResult(result, exitCode) {
     requiredVersion = result.requiredVersion
+    requiredApiVersion = result.requiredApiVersion
     installedVersion = result.installedVersion
     executable = exitCode === 0 ? result.executable : ""
     error = result.error
@@ -89,7 +91,8 @@ Item {
         return
       }
       if (root.state === "ready" && result.state === "ready" && exitCode === 0
-          && (root.requiredVersion !== result.requiredVersion || root.executable !== result.executable)) {
+          && (root.requiredVersion !== result.requiredVersion || root.requiredApiVersion !== result.requiredApiVersion
+              || root.executable !== result.executable)) {
         // Let the backend stop before publishing a different validated runtime,
         // so its replacement must perform a new exact-version handshake.
         root.state = "checking"

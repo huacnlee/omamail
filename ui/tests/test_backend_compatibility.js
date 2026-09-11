@@ -2,24 +2,33 @@ const assert = require("assert")
 const { load } = require("./load")
 
 const compatibility = load("backend/Compatibility.js")
+assert.strictEqual(compatibility.accepts({ protocol: 1, version: "0.9.0" }, "0.9.0", 1), true)
+for (const version of ["0.8.2", "0.9.1", "1.0.0"])
+  assert.strictEqual(compatibility.accepts({ protocol: 1, version }, version, 1), false)
+assert.strictEqual(compatibility.accepts({ protocol: 1, version: "0.9.0" }, "0.9.0", 2), false)
+assert.strictEqual(compatibility.accepts({ protocol: 1, version: "0.9.0" }, "0.9.1", 1), false)
+for (const apiVersion of [null, "1", 2, 0])
+  assert.strictEqual(compatibility.accepts({ protocol: 1, version: "0.9.0", apiVersion }, "0.9.0", 1), false)
+for (const expectedApiVersion of [undefined, "1", 0, 1.5, Infinity])
+  assert.strictEqual(compatibility.accepts({ protocol: 1, version: "0.9.0", apiVersion: expectedApiVersion }, "0.9.0", expectedApiVersion), false)
 
 assert.strictEqual(
-  compatibility.accepts({ protocol: 1, version: "0.8.2" }, "0.8.2"), true,
+  compatibility.accepts({ apiVersion: 1, protocol: 1, version: "0.8.2" }, "0.8.2", 1), true,
   "the UI accepts the backend built from its exact application version")
 assert.strictEqual(
-  compatibility.accepts({ protocol: 2, version: "0.8.2" }, "0.8.2"), false,
+  compatibility.accepts({ protocol: 2, version: "0.8.2" }, "0.8.2", 1), false,
   "a different protocol cannot become ready")
 assert.strictEqual(
-  compatibility.accepts({ version: "0.8.2" }, "0.8.2"), false,
+  compatibility.accepts({ version: "0.8.2" }, "0.8.2", 1), false,
   "a backend without a protocol cannot become ready")
 assert.strictEqual(
-  compatibility.accepts({ protocol: 1, version: "0.8.1" }, "0.8.2"), false,
+  compatibility.accepts({ apiVersion: 1, protocol: 1, version: "0.8.1" }, "0.8.2", 1), false,
   "a different application version cannot become ready")
 assert.strictEqual(
-  compatibility.accepts({ protocol: 1, version: "0.8.2" }, ""), false,
+  compatibility.accepts({ apiVersion: 1, protocol: 1, version: "0.8.2" }, "", 1), false,
   "an unversioned UI cannot accept a backend")
 assert.strictEqual(
-  compatibility.accepts({ protocol: 1 }, "0.8.2"), false,
+  compatibility.accepts({ apiVersion: 1, protocol: 1 }, "0.8.2", 1), false,
   "an unversioned backend cannot become ready")
 
 assert.strictEqual(

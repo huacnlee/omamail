@@ -46,6 +46,15 @@ def pin():
     return version
 
 
+def api_pin():
+    with (ROOT / "backend-api.json").open("rb") as source:
+        raw = source.read(1024 * 1024 + 1)
+    require(len(raw) <= 1024 * 1024, "Backend API contract is too large.")
+    version = json.loads(raw).get("apiVersion")
+    require(type(version) is int and 0 < version <= 2147483647, "Invalid backend API version.")
+    return version
+
+
 def safe_path(path, directory=False, create=False):
     """Refuse symlink components, including dangling links; never chmod existing paths."""
     for part in [*reversed(path.parents), path]:
@@ -321,10 +330,11 @@ def cli_installed():
 
 
 def run(command):
-    result = dict(state="error", requiredVersion="", installedVersion="", executable=str(BINARY), error="", cliInstalled=False)
+    result = dict(state="error", requiredVersion="", requiredApiVersion=0, installedVersion="", executable=str(BINARY), error="", cliInstalled=False)
     try:
         required = pin()
         result["requiredVersion"] = required
+        result["requiredApiVersion"] = api_pin()
         development = os.environ.get("OMAMAIL_BIN", "")
         executable = Path(development) if development else BINARY
         result["executable"] = str(executable)

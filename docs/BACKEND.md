@@ -17,7 +17,7 @@ compose recovery. The ownership and remaining boundaries below distinguish
 implemented paths from live-provider compatibility evidence.
 
 `Service.qml` starts the plugin-private exact backend version, validates its
-version/protocol handshake and exposes correlated calls with pending-request
+exact version/protocol/API handshake and exposes correlated calls with pending-request
 limits and deadlines. `OMAMAIL_BIN` selects an explicit development executable.
 Migrated operations report an unavailable backend instead of silently falling
 back to QML networking. `info` lists implemented RPC methods; it is not a claim

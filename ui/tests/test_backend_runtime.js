@@ -2,10 +2,13 @@ const assert = require("assert")
 const { load } = require("./load")
 const runtime = load("backend/Runtime.js")
 function status(overrides) {
-  return JSON.stringify(Object.assign({ state: "ready", requiredVersion: "0.8.2",
+  return JSON.stringify(Object.assign({ state: "ready", requiredVersion: "0.8.2", requiredApiVersion: 1,
     installedVersion: "0.8.2", executable: "/plugin/runtime/bin/omamail", error: "" }, overrides))
 }
 assert.strictEqual(runtime.decode(status()).state, "ready")
+assert.strictEqual(runtime.decode(status()).requiredApiVersion, 1)
+for (const requiredApiVersion of [undefined, null, "1", 0, 1.5, 2147483648])
+  assert.strictEqual(runtime.decode(status({ requiredApiVersion })).state, "error")
 assert.strictEqual(runtime.decode(status()).cliInstalled, false)
 assert.strictEqual(runtime.decode(status({ cliInstalled: true })).cliInstalled, true)
 for (const cliInstalled of ["true", 1, null])

@@ -23,7 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: version
-        run: echo "version=$(python3 scripts/package-backend.py check)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/package-backend.py check)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Require a branch and an unused release version
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -40,6 +43,15 @@ jobs:
           # Listing must succeed; network/authentication failures never mean absent.
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
           if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
+      - name: Require a new API revision when the published contract changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/package-backend.py pin-version)"
+          mkdir baseline
+          gh release download "v$version" --dir baseline --pattern backend-api.json
+          python3 scripts/package-backend.py check-api --baseline baseline/backend-api.json
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -62,6 +74,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: rustup target add "${{ matrix.target }}"
       - name: Test and build native static Linux backend
@@ -84,9 +99,12 @@ jobs:
           readelf -d "$binary" > dynamic-headers.txt
           if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
           if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
+          python3 scripts/package-backend.py check-api
+          python3 tests/test_backend_api.py --binary "$binary" --expected-version "$VERSION"
           python3 scripts/package-backend.py package "$binary" "$ARCH" artifact
           python3 scripts/package-backend.py verify artifact --arch "$ARCH"
           python3 scripts/package-backend.py provenance --output artifact/backend-build.json
+          cp backend-api.json artifact/backend-api.json
       - uses: actions/upload-artifact@v4
         with:
           name: backend-${{ matrix.arch }}
@@ -123,6 +141,9 @@ jobs:
           cp artifacts/backend-x86_64/omamail-linux-x86_64.tar.gz release-assets/
           cp artifacts/backend-aarch64/omamail-linux-aarch64.tar.gz release-assets/
           cat artifacts/backend-x86_64/SHA256SUMS artifacts/backend-aarch64/SHA256SUMS > release-assets/SHA256SUMS
+          cmp artifacts/backend-x86_64/backend-api.json artifacts/backend-aarch64/backend-api.json
+          cp artifacts/backend-x86_64/backend-api.json release-assets/
+          python3 scripts/package-backend.py check-api --published release-assets/backend-api.json
           cmp artifacts/backend-x86_64/backend-build.json artifacts/backend-aarch64/backend-build.json
           cp artifacts/backend-x86_64/backend-build.json release-assets/
           python3 scripts/package-backend.py check-provenance release-assets/backend-build.json
@@ -130,9 +151,10 @@ jobs:
           gh release create "v$VERSION" release-assets/* --target "$GITHUB_SHA" --draft --title "v$VERSION" --generate-notes
           gh release edit "v$VERSION" --draft=false
           mkdir published
-          gh release download "v$VERSION" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-build.json
+          gh release download "v$VERSION" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-build.json --pattern backend-api.json
           python3 scripts/package-backend.py verify published
           python3 scripts/package-backend.py check-provenance published/backend-build.json
+          cmp release-assets/backend-api.json published/backend-api.json
           cmp release-assets/backend-build.json published/backend-build.json
           cmp release-assets/SHA256SUMS published/SHA256SUMS
           # Refuse moved refs and push only a pin commit, without force.
