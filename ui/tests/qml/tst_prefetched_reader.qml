@@ -105,6 +105,32 @@ Item {
       compare(opens[0].params.requestId,opens[1].params.requestId)
       compare(backend.requests.filter(function(call) {return call.method === "cache.resourcePut" || call.method === "message.prepare"}).length,0)
     }
+    function test_cache_to_live_keeps_completed_images_and_inflight_queue() {
+      var message = resource("one", "<p>Same mail</p><img src='https://example.org/picture'>")
+      message.payload.mimeType = "text/html"
+      backend.cached = message
+      account.select("one", true)
+      account.remoteImagesAllowed = true
+      var png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+      account.remoteImageData = ({"https://example.org/picture": png})
+      account.remoteImageAttempted = ({"https://example.org/picture": true})
+      account.remoteImagesLoading = true
+      account.imageFetchQueue = ["https://example.org/pending"]
+      var serial = account.imageFetchSerial
+      var painted = {type: "root", children: [{type: "text", text: "approved image is visible"}]}
+      account.selectedDocument = painted
+      transport.pending.one(message, "")
+      compare(account.detailLive, true)
+      compare(account.selectedDocument, painted)
+      compare(account.remoteImageData["https://example.org/picture"], png)
+      compare(account.imageFetchSerial, serial)
+      compare(account.remoteImagesLoading, true)
+      compare(account.imageFetchQueue.length, 1)
+      var renders = backend.requests.filter(function(call) { return call.method === "reader.render" })
+      compare(renders.length, 1)
+      compare(renders[0].params.options.remoteImageData["https://example.org/picture"], png)
+    }
+
     function test_background_failure_keeps_a_cached_body_without_skeleton() {
       backend.cached=resource("one","Cached")
       account.select("one",true)
@@ -143,15 +169,15 @@ Item {
       backend.holdCache=true
       account.select("one",true)
       compare(account.detailPainted,false)
-      compare(account.selectedHtml,"")
+      compare(account.selectedHasHtml,false)
       compare(backend.cacheRequests.length,1)
       backend.cacheRequests[0].callback(null,{code:"render_failed"})
       compare(account.detailPainted,false)
-      compare(account.selectedHtml,"")
+      compare(account.selectedHasHtml,false)
       compare(transport.reads,1,"failed cache projection still permits a fresh native read")
       transport.pending.one(null,"Render failed")
       compare(account.detailLoading,false)
-      compare(account.selectedHtml,"")
+      compare(account.selectedHasHtml,false)
       verify(account.lastError!=="")
     }
     function test_image_policy_is_passed_to_both_native_reads() {

@@ -172,7 +172,7 @@ Rectangle {
                         // measure: at three columns a fixed one left the label
                         // no room at all.
                         width: Math.round(parent.width * 0.54)
-                        text: modelData.keys
+                        text: Keymap.keycapLabel(modelData.keys)
                         color: root.textColor
                         font.family: root.panelFontFamily
                         font.pixelSize: Style.font.caption

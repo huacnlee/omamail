@@ -100,3 +100,90 @@ const changed = {jsonrpc:"2.0",method:"accounts.changed",params:{revision:"a".re
 assert.deepStrictEqual(JSON.parse(JSON.stringify(wire.notification(JSON.stringify(changed)))), changed)
 for (const params of [{revision:""},{revision:"a".repeat(63)},{revision:"G".repeat(64)},{revision:42},{revision:"a".repeat(64),registry:{clientSecret:"forbidden"}}])
   assert.strictEqual(wire.notification(JSON.stringify({...changed,params})),null)
+
+// Exercise Backend.receive itself and count actual parser calls in each module.
+const fs = require('fs')
+const vm = require('vm')
+const chunks = load('backend/Chunks.js')
+let parses = 0
+const countingJson = {parse(text) { parses++; return JSON.parse(text) }, stringify: JSON.stringify}
+wire.JSON = countingJson
+chunks.JSON = countingJson
+const backendSource = fs.readFileSync(require('path').join(__dirname,'../backend/Backend.qml'),'utf8')
+const receiveStart = backendSource.indexOf('  function receive(')
+const receiveSource = backendSource.slice(receiveStart,backendSource.indexOf('\n  }',receiveStart)+4)
+function receiver() {
+  const events=[], replies=[], failures=[]
+  const context = {Chunks:chunks,Wire:wire,responseTransfer:null,ready:true,stopping:false,
+    pending:{x:{callback:(result,error)=>replies.push({result,error})}},
+    notification:(method,params)=>events.push({method,params}),
+    stopForFailure:error=>failures.push(error),maybeRequestQuit:()=>{}}
+  vm.createContext(context)
+  vm.runInContext(receiveSource,context)
+  return {context,events,replies,failures}
+}
+let run = receiver()
+parses = 0
+run.context.receive(JSON.stringify({jsonrpc:'2.0',id:'x',result:{text:'مرحبا📨'}}))
+assert.strictEqual(parses,1,'ordinary reply must be decoded exactly once')
+assert.strictEqual(run.replies[0].result.text,'مرحبا📨')
+assert.strictEqual(run.failures.length,0)
+const completeJson=JSON.stringify({jsonrpc:'2.0',id:'x',result:'📨'.repeat(90000)})
+const dataParts=[]
+for(let offset=0;offset<completeJson.length;offset+=60000)dataParts.push(completeJson.slice(offset,offset+60000))
+const transferFrames=dataParts.map((data,index)=>JSON.stringify({jsonrpc:'2.0',method:'transport.chunk',params:{transfer:'1',index,total:dataParts.length,size:completeJson.length,data}}))
+run=receiver();parses=0
+for(const frame of transferFrames)run.context.receive(frame)
+assert.strictEqual(parses,transferFrames.length+1,'parse each frame once and assembled response once')
+assert.strictEqual(run.replies.length,1)
+assert.strictEqual(run.replies[0].result,'📨'.repeat(90000))
+for(const input of ['broken','null','[]','{"jsonrpc":"2.0","id":"x","result":1,"error":{}}',
+  '{"jsonrpc":"2.0","method":"accounts.changed","params":{"revision":"invalid"}}',
+  '{"jsonrpc":"2.0","method":"mail.updated","params":{},"result":"hidden"}']) {
+  run=receiver();parses=0;run.context.receive(input)
+  assert.strictEqual(parses,1)
+  assert.strictEqual(run.failures.length,1)
+  assert.strictEqual(run.events.length+run.replies.length,0,'invalid envelopes must not deliver anything')
+}
+run=receiver();run.context.receive(transferFrames[0]);run.context.receive(JSON.stringify(notification))
+assert.strictEqual(run.failures.length,1,'notification cannot interrupt a contiguous transfer')
+assert.strictEqual(run.events.length,0)
+for(const stopping of [false,true]) {
+  run=receiver();run.context.stopping=stopping;parses=0
+  run.context.receive(JSON.stringify(notification))
+  assert.strictEqual(parses,1)
+  assert.strictEqual(run.events.length,stopping?0:1)
+  assert.strictEqual(run.failures.length,0)
+}
+run=receiver();run.context.receive('{"jsonrpc":"2.0","id":"unrelated","result":1}')
+assert.strictEqual(run.replies.length+run.failures.length,0)
+console.log('Backend.receive single-decode, chunking, malformed envelopes and shutdown notification guards passed')
+// A fully framed transfer can still contain invalid assembled JSON; completion
+// must fail without delivering the partially decoded data.
+run=receiver()
+for(let index=0;index<2;index++)run.context.receive(JSON.stringify({jsonrpc:'2.0',method:'transport.chunk',params:{transfer:'2',index,total:2,size:4,data:'xx'}}))
+assert.strictEqual(run.failures.length,1)
+assert.strictEqual(run.replies.length+run.events.length,0)
+run=receiver()
+run.context.receive('{"jsonrpc":"2.0","id":"x","error":{"code":-1,"message":"refused"}}')
+assert.strictEqual(run.replies.length,1)
+assert.strictEqual(run.replies[0].error.message,'refused')
+
+// Uncorrelated IDs must never resolve through Object.prototype. Neither an
+// ordinary envelope nor a chunked one may throw, consume a request or notify.
+for(const id of ['__proto__','constructor','toString']) {
+  for(const chunked of [false,true]) {
+    run=receiver()
+    const encoded=JSON.stringify({jsonrpc:'2.0',id,result:'uncorrelated'})
+    if(chunked) {
+      const middle=Math.floor(encoded.length/2)
+      for(const [index,data] of [encoded.slice(0,middle),encoded.slice(middle)].entries())
+        run.context.receive(JSON.stringify({jsonrpc:'2.0',method:'transport.chunk',params:{transfer:'3',index,total:2,size:encoded.length,data}}))
+    } else run.context.receive(encoded)
+    assert.strictEqual(run.replies.length+run.events.length+run.failures.length,0)
+    assert(Object.prototype.hasOwnProperty.call(run.context.pending,'x'))
+    run.context.receive('{"jsonrpc":"2.0","id":"x","result":"still correlated"}')
+    assert.strictEqual(run.replies.length,1)
+    assert.strictEqual(run.replies[0].result,'still correlated')
+  }
+}

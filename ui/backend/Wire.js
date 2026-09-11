@@ -7,6 +7,10 @@ function request(id, method, params) {
 function response(line) {
   var value
   try { value = JSON.parse(line) } catch (error) { return null }
+  return responseValue(value)
+}
+
+function responseValue(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
       || value.jsonrpc !== "2.0" || typeof value.id !== "string") return null
   var success = Object.prototype.hasOwnProperty.call(value, "result")
@@ -21,6 +25,10 @@ function response(line) {
 function notification(line) {
   var value
   try { value = JSON.parse(line) } catch (error) { return null }
+  return notificationValue(value)
+}
+
+function notificationValue(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
       || value.jsonrpc !== "2.0" || ["mail.updated", "accounts.changed", "outbox.changed"].indexOf(value.method) < 0
       || Object.prototype.hasOwnProperty.call(value, "id")

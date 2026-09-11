@@ -27,7 +27,7 @@ Item {
     })
     property bool detailLoading: false
     property bool detailPainted: true
-    property string selectedHtml: ""
+    property bool selectedHasHtml: false
     property var selectedDocument: null
     property int selectedRemoteImages: 0
     property bool remoteImagesAllowed: false

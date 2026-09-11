@@ -202,8 +202,23 @@ native. `reader.render` accepts an account/message-bound source key and transien
 render options, so changing image policy does not upload the original HTML.
 UI theme, layout and settings remain owned by QML.
 
-The native source store is bounded to 64 MiB, with at most 64 entries overall
-and 12 per account. Existing interactive message limits are unchanged. A cache
+The QML bridge decodes each ordinary response once, then validates notifications
+and replies against that same value. Chunk frames are individually decoded and
+bounded; their assembled response is decoded once. Unrecognized response IDs
+must be own keys of the pending-request map before any callback can run.
+
+The reader retains prepared content and the native HTML source, rather than a
+second full MIME resource. Image-policy rerenders reuse that preparation; they
+do not decode MIME bodies again. Responses contain safe document trees for both
+display modes without redundant serialized HTML copies. A source-and-policy
+revision lets QML retain an unchanged document across cache/live delivery.
+Approved image bytes survive revalidation of the same selected message, and
+image completions are coalesced before rerendering. Changing the selection
+invalidates pending image callbacks and clears those bytes.
+
+The native source store has a 64 MiB serialized-payload budget, with at most 64
+entries overall and 12 per account; this is not a total heap/RSS limit. Existing
+interactive message limits are unchanged. A cache
 hit can paint before live revalidation; a failed refresh retains the displayed
 body. Request cancellation guards cache/store commits, and account, selection
 and source-generation checks reject stale results. Cached plus live delivery
@@ -299,7 +314,28 @@ and do not describe scoped transport tests as a complete security audit.
 
 ## Mail processing performance
 
-The primary comparison includes the full QML request/response path:
+The current cached-reader comparison includes disk reads and the full QML
+request/response path:
+
+```sh
+python3 benchmarks/mail/reader_pipeline.py
+```
+
+[Reader results](../benchmarks/mail/reader-pipeline-results.md) compare the
+full-resource bridge, the previous prepared-cache bridge and native `reader.open`
+with equivalent display output. A separate before/after run isolates the latest
+reader optimization. This ends at the completed display-data callback, before
+subsequent model updates, QML layout or painting; network and image downloads
+are excluded. It is a comparison of Rust pipeline arrangements, not the original
+JavaScript application.
+
+[Concurrency results](../benchmarks/mail/reader-concurrency-results.md) separately
+compare 1/2/4/8 outstanding reader calls and isolate the single-decode QML bridge
+change. They report both throughput and individual callback p95 with identical
+display output, using the same frozen Rust executable for both bridge versions.
+The projection comparison above predates this bridge change.
+
+The independent processing-stage comparison is retained:
 
 ```sh
 python3 benchmarks/mail/roundtrip.py

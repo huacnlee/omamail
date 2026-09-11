@@ -302,7 +302,9 @@ impl Store {
         let entries = names(&dir)?;
         // Validate the complete set before deleting anything.
         for name in &entries {
-            if !name.starts_with(".write-") {
+            // Pre-streaming jobs kept this legacy output file. Permit its
+            // removal only after the same regular/private/no-link validation.
+            if !name.starts_with(".write-") && name != "response.txt" {
                 filename(name)?;
             }
             regular(&dir, name)?.ok_or("agent_unsafe_storage")?;
@@ -373,6 +375,21 @@ mod tests {
         );
         store.remove(ID).unwrap();
         assert!(!path.exists());
+    }
+    #[test]
+    fn legacy_response_links_are_refused_before_any_removal() {
+        let temp = Temp::new();
+        let store = Store::open_at(&temp.0).unwrap();
+        store.create(ID).unwrap();
+        store.write_json(ID, "job.json", &json!({"id":ID})).unwrap();
+        let external = temp.0.join("unrelated");
+        std::fs::write(&external, "keep").unwrap();
+        let response = store.path().join(ID).join("response.txt");
+        std::os::unix::fs::symlink(&external, &response).unwrap();
+        assert!(store.remove(ID).is_err());
+        assert!(store.path().join(ID).join("job.json").exists());
+        assert_eq!(std::fs::read_to_string(&external).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(response).unwrap().is_symlink());
     }
     #[test]
     fn hostile_components_and_links_have_no_external_effect() {

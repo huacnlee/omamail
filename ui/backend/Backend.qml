@@ -170,19 +170,20 @@ Item {
   }
 
   function receive(line) {
-    var decoded = Chunks.accept(responseTransfer, line)
+    var decoded = Chunks.decode(responseTransfer, line)
     responseTransfer = decoded.state
     if (!decoded.error && decoded.line === null) return
-    var event = decoded.error ? null : Wire.notification(decoded.line)
+    var event = decoded.error ? null : Wire.notificationValue(decoded.value)
     if (event) {
       if (ready && !stopping) notification(event.method, event.params)
       return
     }
-    var reply = decoded.error ? null : Wire.response(decoded.line)
+    var reply = decoded.error ? null : Wire.responseValue(decoded.value)
     if (!reply) {
       stopForFailure("Invalid backend response")
       return
     }
+    if (!Object.prototype.hasOwnProperty.call(pending, reply.id)) return
     var entry = pending[reply.id]
     if (!entry) return
     var next = Object.assign({}, pending)

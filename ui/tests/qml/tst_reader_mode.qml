@@ -43,7 +43,7 @@ Item {
     })
     property bool detailLoading: false
     property bool detailPainted: true
-    property string selectedHtml: rendered.html
+    property bool selectedHasHtml: rendered.html !== ""
     property var selectedDocument: rendered.document
     property var selectedReaderDocument: rendered.reader.document
     property bool selectedReaderTooHeavy: rendered.reader.tooHeavy

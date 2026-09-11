@@ -148,43 +148,6 @@ Rectangle {
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
 
-    // The subject leads. It is what the message is, and it is what you scan a
-    // list for; the sender had the top line and the weight, which put the
-    // emphasis on who wrote rather than on what about.
-    Item {
-      width: parent.width
-      implicitHeight: Math.max(subject.implicitHeight, time.implicitHeight)
-
-      Text {
-        id: subject
-        anchors.left: parent.left
-        anchors.right: time.left
-        anchors.rightMargin: Style.space(8)
-        // A stranger wrote this. Qt's default AutoText switches a string that
-        // looks like markup into rich text, and rich text with an <img> in it is
-        // a fetch — the same beacon the message body is stripped of.
-        textFormat: Text.PlainText
-        text: root.summary.subject
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.body
-        font.bold: root.summary.unread
-        elide: Text.ElideRight
-        horizontalAlignment: root.subjectAlignment
-      }
-
-      Text {
-        id: time
-        anchors.right: parent.right
-        anchors.baseline: subject.baseline
-        textFormat: Text.PlainText
-        text: root.summary.time
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-      }
-    }
-
     // The sender, the mailbox it arrived in where the list is made of several,
     // and how long the conversation is. Both of the last two are optional and
     // the sender takes what they leave: only a merged row carries
@@ -192,14 +155,15 @@ Rectangle {
     // an empty column — naming the only mailbox there is says nothing.
     Item {
       width: parent.width
-      implicitHeight: sender.implicitHeight
+      implicitHeight: Math.max(sender.implicitHeight, time.implicitHeight)
 
       Text {
         id: sender
+        objectName: "message-sender"
         anchors.left: parent.left
         anchors.right: source.visible ? source.left
-          : (count.visible ? count.left : parent.right)
-        anchors.rightMargin: (source.visible || count.visible) ? Style.space(4) : 0
+          : (count.visible ? count.left : time.left)
+        anchors.rightMargin: (source.visible || count.visible) ? Style.space(4) : Style.space(8)
         textFormat: Text.PlainText
         text: root.summary.from.display
         color: root.dimColor
@@ -217,8 +181,9 @@ Rectangle {
       // can set, and a long one squeezed the sender to nothing.
       Text {
         id: source
-        anchors.right: count.visible ? count.left : parent.right
-        anchors.rightMargin: count.visible ? Style.space(4) : 0
+        objectName: "message-source"
+        anchors.right: count.visible ? count.left : time.left
+        anchors.rightMargin: count.visible ? Style.space(4) : Style.space(8)
         anchors.baseline: sender.baseline
         visible: root.sourceLabel !== ""
         // A ceiling, because `elide` on its own never fires: with only an
@@ -243,7 +208,9 @@ Rectangle {
       // that groups its listing.
       Text {
         id: count
-        anchors.right: parent.right
+        objectName: "message-conversation-count"
+        anchors.right: time.left
+        anchors.rightMargin: Style.space(8)
         anchors.baseline: sender.baseline
         visible: root.conversations && root.threadCount > 0
         textFormat: Text.PlainText
@@ -253,9 +220,37 @@ Rectangle {
         font.pixelSize: Style.font.caption
         font.bold: root.summary.unread
       }
+
+      Text {
+        id: time
+        objectName: "message-time"
+        anchors.right: parent.right
+        anchors.baseline: sender.baseline
+        textFormat: Text.PlainText
+        text: root.summary.time
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
     }
 
     Text {
+      id: subject
+      objectName: "message-subject"
+      width: parent.width
+      // Sender-controlled text must never activate Qt's rich-text loader.
+      textFormat: Text.PlainText
+      text: root.summary.subject
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.body
+      font.bold: root.summary.unread
+      elide: Text.ElideRight
+      horizontalAlignment: root.subjectAlignment
+    }
+
+    Text {
+      objectName: "message-description"
       width: parent.width
       visible: root.summary.snippet !== ""
       textFormat: Text.PlainText

@@ -36,3 +36,36 @@ rerender.callback({nativeRender:{}},null)
 assert(!method('preparedRead').includes('message.prepare'))
 assert(!method('preparedRead').includes('getMessage'))
 console.log('Native reader adapter: cache/live, cancellation, opaque rerender and stale source guards passed')
+
+// Remote image loading must paint one completed batch, without refetching a
+// source when the cached resource is replaced by its live native projection.
+const images=[]
+const paints=[]
+const later=[]
+const imageContext={remoteImagesAllowed:true,remoteImagesLoading:false,readerSourceKey:'cache',
+  selectedRemoteImageSources:['https://example.org/one','https://example.org/two'],
+  remoteImageData:{},remoteImageAttempted:{},imageFetchQueue:[],imageFetchSerial:0,imageBatchDirty:false,
+  imagePaintTimer:{running:false,start(){this.running=true},stop(){this.running=false}},
+  Html:require('../ui/tests/load').load('message/Html.js'),Qt:{callLater:fn=>later.push(fn)},
+  backend:{ready:true,call(method,params,callback){images.push({method,params,callback})}},
+  renderSource:key=>paints.push(key)}
+imageContext.root=imageContext
+vm.createContext(imageContext)
+for(const name of ['prepareRemoteImages','fetchNextImage','flushRemoteImages'])vm.runInContext(method(name),imageContext)
+const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII='
+imageContext.prepareRemoteImages()
+images[0].callback({data:png},null)
+assert.strictEqual(paints.length,0,'first image must not rebuild whole document before batch ends')
+imageContext.readerSourceKey='live'
+images[1].callback({data:png},null)
+assert.deepStrictEqual(paints,['live'])
+imageContext.prepareRemoteImages()
+assert.strictEqual(images.length,2,'approved sources must not be fetched twice')
+imageContext.selectedRemoteImageSources.push('https://example.org/bad')
+imageContext.prepareRemoteImages()
+images[2].callback({data:'data:image/svg+xml;base64,PHN2Zz4='},null)
+assert.strictEqual(imageContext.remoteImageData['https://example.org/bad'],undefined)
+imageContext.prepareRemoteImages()
+assert.strictEqual(images.length,3,'refused sources must not create an automatic retry loop')
+assert.strictEqual(paints.length,1)
+console.log('Remote images: one batch paint, cached/live continuity, no duplicate fetch or unsafe image passed')

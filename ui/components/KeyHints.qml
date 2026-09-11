@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../keys/Keymap.js" as Keymap
 
 // What the keyboard offers from wherever you are standing.
 //
@@ -43,7 +44,7 @@ Row {
         Text {
           id: cap
           anchors.centerIn: parent
-          text: pair.modelData.key
+          text: Keymap.keycapLabel(pair.modelData.key)
           color: root.textColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption

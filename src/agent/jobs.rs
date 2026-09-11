@@ -214,7 +214,9 @@ pub fn read_job(store: &Store, id: &str) -> Result<Value> {
 pub fn saved_display(store: &Store, id: &str) -> Result<Value> {
     let v = store
         .read_json(id, "display.json", 512 * 1024)?
-        .ok_or("agent_display_missing")?;
+        // Older cancelled jobs have no display record. Missing output is an
+        // empty, incomplete answer; malformed or unsafe existing files still fail.
+        .unwrap_or_else(|| json!({"transcript":[],"output":"","complete":false,"sessionId":""}));
     let o = v
         .as_object()
         .filter(|o| {

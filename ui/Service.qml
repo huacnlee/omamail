@@ -1566,7 +1566,7 @@ Item {
   }
   readonly property var selectedMessage: reading ? reading.selectedMessage : null
   readonly property var selectedBody: reading ? reading.selectedBody : ({ text: "", source: "" })
-  readonly property string selectedHtml: reading ? reading.selectedHtml : ""
+  readonly property bool selectedHasHtml: reading ? reading.selectedHasHtml : false
   readonly property var selectedDocument: reading ? reading.selectedDocument : null
   readonly property var selectedReaderDocument: reading ? reading.selectedReaderDocument : null
   readonly property bool selectedReaderTooHeavy: !!reading && reading.selectedReaderTooHeavy

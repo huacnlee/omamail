@@ -125,7 +125,7 @@ if "Html.sanitize(" in account or "RenderCache." in account:
 for guard in ("rendering !== root.renderSerial", "account !== root.accountId",
               "selection !== root.selectedId", "detail !== root.detailSerial",
               "if (error || !result)"):
-    if guard not in render or render.index(guard) > render.index("selectedHtml = ready.html"):
+    if guard not in render or render.index(guard) > render.index("selectedDocument = ready.document"):
         raise SystemExit("test_source.sh: stale or failed renders must never reach the document")
 native = Path("../src/backend/content.rs").read_text()
 if "message::html::request(params)?" not in native or ".get(account, id, source, &policy)" not in native:

@@ -214,7 +214,9 @@ async fn auth_and_invalid_json_return_only_static_errors() {
     let client = client_builder().https_only(false).build().unwrap();
     for (status, body, error) in [
         (401, "synthetic-secret", "gmail_unauthorized"),
-        (403, "synthetic-secret", "gmail_http_failed"),
+        (403, "synthetic-secret", "gmail_forbidden"),
+        (411, "synthetic-secret", "gmail_length_required"),
+        (429, "synthetic-secret", "gmail_rate_limited"),
         (200, "[]", "gmail_invalid_response"),
         (200, "synthetic-secret", "gmail_invalid_response"),
     ] {
@@ -473,4 +475,74 @@ async fn mutation_timeout_does_not_retry_an_accepted_request() {
     tokio::time::sleep(Duration::from_millis(120)).await;
     assert_eq!(peer.requests.lock().unwrap().len(), 1);
     assert_eq!(peer.connections.load(Ordering::SeqCst), 1);
+}
+
+// Model a gateway which rejects unframed POSTs with 411, before any mutation.
+async fn strict_empty_post_server() -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let connections = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+    let accepted = connections.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            accepted.fetch_add(1, Ordering::SeqCst);
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                bytes.push(stream.read_u8().await.unwrap());
+                assert!(bytes.len() < 8192);
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            let framed = request
+                .to_ascii_lowercase()
+                .contains("\r\ncontent-length: 0\r\n");
+            seen.lock().unwrap().push(request);
+            let response = if framed {
+                "HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"id\":\"chosen\"}"
+            } else {
+                "HTTP/1.1 411 Length Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            };
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    Server {
+        url,
+        requests,
+        connections,
+        task,
+    }
+}
+
+#[tokio::test]
+async fn gmail_bodyless_trash_posts_exact_id_with_explicit_empty_length() {
+    let client = client_builder().https_only(false).build().unwrap();
+    for action in ["trash", "untrash"] {
+        let peer = strict_empty_post_server().await;
+        let mut request = prepare_write(
+            reqwest::Method::POST,
+            &["messages", "chosen", action],
+            None,
+            "synthetic-token",
+        )
+        .unwrap();
+        assert!(request.url.ends_with(&format!("/messages/chosen/{action}")));
+        request.url = format!("{}/messages/chosen/{action}", peer.url);
+        let result = execute(&client, request, DEADLINE).await;
+        assert_eq!(
+            peer.connections.load(Ordering::SeqCst),
+            1,
+            "never retry a mutation"
+        );
+        let requests = peer.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with(&format!("POST /messages/chosen/{action} HTTP/1.1\r\n")));
+        assert_eq!(result.unwrap()["id"], "chosen");
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("\r\ncontent-length: 0\r\n")
+        );
+    }
 }

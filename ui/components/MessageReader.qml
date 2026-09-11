@@ -173,7 +173,7 @@ Item {
   // would fire every tracking pixel in the message the instant it opened, and
   // would let a crafted one aim a request at whatever is listening on this
   // machine. They come back only when the reader asks, for this message alone.
-  readonly property string rawHtml: service ? service.selectedHtml : ""
+  readonly property bool hasHtml: !!service && !!service.selectedHasHtml
   // The parsed form of the same document. Fitting it to this window is done on
   // the way out, so this is rebuilt on every relayout without being reparsed.
   readonly property var bodyDocument: service ? service.selectedDocument : null
@@ -194,7 +194,7 @@ Item {
   // `Html.resolveBodyMode` answers the chosen mode against. `forced` is the
   // reader having insisted on a document the bounds refused.
   readonly property var bodyOffer: ({
-    html: root.rawHtml !== "",
+    html: root.hasHtml,
     reader: !!root.readerDocument && !!root.service && !root.service.selectedReaderEmpty,
     readerHeavy: !!root.service && root.service.selectedReaderTooHeavy,
     originalHeavy: !!root.service && root.service.selectedTooHeavy,
@@ -248,7 +248,7 @@ Item {
     ? Html.readingColumnWidth(root.bodyWidth, root.readingMeasure)
     : (root.shownMode === "original"
       ? Html.preferredContentWidth(
-          root.bodyDocument ? root.bodyDocument : root.rawHtml, root.bodyWidth)
+          root.bodyDocument, root.bodyWidth)
       : root.bodyWidth)
   // Reading mode centres its column in whatever the panel has spare. The other
   // two start at the page inset, because the sender's own layout and a
@@ -507,7 +507,7 @@ Item {
       width: parent.width
       visible: !!root.summary && !!root.service
         && !root.service.detailLoading && root.service.detailPainted
-        && root.bodySource === "" && root.rawHtml === ""
+        && root.bodySource === "" && !root.hasHtml
         && (root.service.selectedAttachments || []).length === 0
       text: "This message has no text to show"
       // Only where there is somewhere to go and read it. The service decides
@@ -644,7 +644,7 @@ Item {
             direction: root.bodyDirection
           }))
         : (root.shownMode === "original"
-          ? Html.documentFor(root.bodyDocument ? root.bodyDocument : root.rawHtml, ({
+          ? Html.documentFor(root.bodyDocument, ({
               foreground: root.textColor,
               background: root.backgroundColor,
               link: root.linkColor,
@@ -988,7 +988,7 @@ Item {
     property bool firstSegment: false
     // Nothing to choose between where there is no markup: the text is then the
     // message rather than one reading of it.
-    visible: root.rawHtml !== ""
+    visible: root.hasHtml
     selected: root.bodyMode === mode
     bordered: false
     foreground: selected ? root.textColor : root.dimColor

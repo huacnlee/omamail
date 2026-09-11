@@ -345,11 +345,27 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_flow_releases_its_listener_and_does_not_exchange_a_code() {
-        let reservation = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = reservation.local_addr().unwrap().port();
-        drop(reservation);
         let flows = Flows::default();
-        let answer = flows.begin(&json!({"clientId":"synthetic-client", "clientSecret":"synthetic-secret", "loginHint":"", "port":port, "scopes":["openid"]})).await.unwrap();
+        // Port zero chooses a candidate, not a reservation that can survive
+        // closing it. Other parallel listeners or fork-before-exec children
+        // can own that port before begin binds it. Retry only admission's
+        // explicit busy-port error and require a real bound flow to proceed.
+        let (port, answer) = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let reservation=TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let port=reservation.local_addr().unwrap().port();
+                drop(reservation);
+                let params=json!({"clientId":"synthetic-client", "clientSecret":"synthetic-secret", "loginHint":"", "port":port, "scopes":["openid"]});
+                match flows.begin(&params).await {
+                    Ok(answer)=>return (port,answer),
+                    Err("auth_port_unavailable")=>{
+                        assert!(flows.0.lock().await.is_empty(),"Refused admission cannot register a flow");
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error)=>panic!("Unexpected OAuth flow admission failure: {error}"),
+                }
+            }
+        }).await.expect("Could not obtain a loopback OAuth test port");
         let url = answer["url"].as_str().unwrap();
         assert!(!url.contains("synthetic-secret"));
         assert!(!url.contains("code_verifier"));
@@ -378,6 +394,21 @@ mod tests {
         .await
         .expect("Cancelled OAuth flow must release its listener");
         assert_eq!(rebound.local_addr().unwrap().port(), port);
+    }
+
+    #[tokio::test]
+    async fn occupied_port_refuses_admission_without_registering_a_flow() {
+        let reservation = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = reservation.local_addr().unwrap().port();
+        let flows = Flows::default();
+        let result=flows.begin(&json!({"clientId":"synthetic-client","clientSecret":"synthetic-secret","loginHint":"","port":port,"scopes":["openid"]})).await;
+        assert_eq!(result.unwrap_err(), "auth_port_unavailable");
+        assert!(flows.0.lock().await.is_empty());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), reservation.accept())
+                .await
+                .is_err()
+        );
     }
 
     #[test]

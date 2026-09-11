@@ -102,12 +102,18 @@ Scope {
             root.check(!failed && view.readerKey && view.nativeContent.body.text === "hello", "native cached full reader pipeline")
             root.check(view.nativeContent.html === undefined && view.hasHtml, "raw HTML remains native")
             root.check(view.payload.parts.length === 0, "MIME octets remain native")
-            root.check(view.nativeRender.html.indexOf("<script") === -1, "reader HTML is sanitized")
+            root.check(view.nativeRender.html === undefined && view.nativeRender.reader.html === undefined,
+                       "duplicate HTML does not cross the bridge")
+            root.check(JSON.stringify(view.nativeRender.document).indexOf("hiddenExecutable") === -1
+                       && JSON.stringify(view.nativeRender.reader.document).indexOf("hiddenExecutable") === -1,
+                       "both reader documents are sanitized")
             root.check(view.nativeContent.attachments[0].attachmentId === "part-one", "reader attachment locator retained")
             root.check(JSON.stringify(view).length < 16384, "full reader projection excludes large attachments")
             backend.call("reader.render", {accountId:"local@example.org",id:"prefetched",readerKey:view.readerKey,
               now:Date.now(),options:{allowRemoteImages:false}}, function(rendered, renderFailure) {
-              root.check(!renderFailure && rendered.nativeRender.html === view.nativeRender.html,
+              root.check(!renderFailure && rendered.nativeRender.revision === view.nativeRender.revision
+                         && JSON.stringify(rendered.nativeRender.document) === JSON.stringify(view.nativeRender.document)
+                         && JSON.stringify(rendered.nativeRender.reader.document) === JSON.stringify(view.nativeRender.reader.document),
                          "rerender uses native identity without raw HTML upload")
               backend.call("reader.render", {accountId:"local@example.org",id:"another-message",readerKey:view.readerKey,
                 now:Date.now(),options:{}}, function(wrong, wrongError) {

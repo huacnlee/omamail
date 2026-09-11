@@ -1,8 +1,48 @@
 # Synthetic mail performance benchmarks
 
+## Cached reader including QML transport
+
+[reader-pipeline-results.md](reader-pipeline-results.md) measures the current
+reader from a persisted synthetic message ID to the completed QML display-data
+callback. It compares the older full-resource bridge, the previous prepared-cache
+bridge, and `reader.open`. All paths use the same release backend and production
+QML transport. A separate before/after table isolates the latest native reader
+optimization; both runs must have matching corpus, harness and display results.
+
+```sh
+python3 benchmarks/mail/reader_pipeline.py
+```
+
+This includes resource disk reads, preparation, rendering and full RPC transport.
+It excludes initial cache seeding, network/image downloads, subsequent model
+updates, layout and painting. Warm-cache medians and first-call results are
+separate; the first call does not mean cold operating-system disk cache. These
+are Rust pipeline comparisons, not speedups over the original JavaScript app.
+See the report for exact boundaries, raw samples, hashes and reproduction of
+the before/after comparison.
+
+## Reader concurrency and bridge decoding
+
+[reader-concurrency-results.md](reader-concurrency-results.md) measures 1, 2, 4
+and 8 outstanding cached-reader requests. It compares the old bridge with the
+single-decode bridge using the same frozen Rust binary, with every returned
+display projection checked. This is separate from the projection optimization
+above, which was measured before changing the bridge.
+
+```sh
+python3 benchmarks/mail/reader_concurrency.py --binary target/release/omamail
+```
+
+Each level uses the same eight message IDs and 16 operations per round, for
+seven timed rounds after warmup. The report includes throughput and individual
+callback median/p95, not just aggregate completion time. The renderer is warm;
+network/image downloads and QML painting are excluded. Increasing concurrency
+can improve throughput while worsening per-message latency. This test does not
+establish network concurrency gains or an ideal limit for every workload.
+
 ## Processing including QML ↔ Rust transport
 
-The primary comparison is [roundtrip-results.md](roundtrip-results.md): the
+[roundtrip-results.md](roundtrip-results.md) retains the independent-stage comparison: the
 previous Qt JavaScript implementation versus the release backend, timed from
 QML request to completed callback. It includes parameter encoding, uploads,
 Rust processing, response serialization, pipe transfer and QML decoding.

@@ -83,6 +83,28 @@ Item {
       verify(backend.ready)
       return backend
     }
+    function test_chunked_response_delivers_once_after_complete_json() {
+      var runtime = make()
+      reply(runtime, "ready", "0.8.2")
+      var backend = readyBackend(runtime)
+      var process = processOf(backend)
+      var calls = 0
+      var received = null
+      backend.call("reader.render", {}, function(value, error) { calls++; received = value; compare(error, null) })
+      var request = JSON.parse(process.written.trim().split("\n").pop())
+      var result = {text: "مرحبا📨", document: {type: "root", children: []}}
+      var encoded = JSON.stringify({jsonrpc: "2.0", id: request.id, result: result})
+      var middle = Math.floor(encoded.length / 2)
+      backend.receive(JSON.stringify({jsonrpc: "2.0", method: "transport.chunk", params: {
+        transfer: "4", index: 0, total: 2, size: encoded.length, data: encoded.slice(0, middle)}}))
+      compare(calls, 0)
+      backend.receive(JSON.stringify({jsonrpc: "2.0", method: "transport.chunk", params: {
+        transfer: "4", index: 1, total: 2, size: encoded.length, data: encoded.slice(middle)}}))
+      compare(calls, 1)
+      compare(received, result)
+      compare(backend.responseTransfer, null)
+    }
+
     function test_successful_recheck_preserves_pending_request() {
       var runtime = make()
       reply(runtime, "ready", "0.8.2")

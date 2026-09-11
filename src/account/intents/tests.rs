@@ -314,3 +314,22 @@ fn future_generation_begin_cannot_discard_existing_intents() {
         false
     );
 }
+
+#[test]
+fn gmail_trash_keeps_captured_id_when_reader_and_list_selection_change() {
+    let store = IntentStore::default();
+    let mut moved = view();
+    moved["selectedId"] = json!("b");
+    moved["selectedMessage"] = row("b");
+    moved["messages"] = json!([row("c"), row("b"), row("a")]);
+    let prepared = begin(&store, moved, "trash", json!(["a"]));
+    assert_eq!(prepared["targets"], json!(["a"]));
+    assert_eq!(prepared["rows"], json!(["a"]));
+    assert_eq!(prepared["targetsOf"]["a"], json!(["a"]));
+    assert_eq!(prepared["view"]["selectedId"], "b");
+    assert_eq!(prepared["view"]["selectedMessage"]["id"], "b");
+    assert_eq!(prepared["view"]["messages"], json!([row("c"), row("b")]));
+    let settled = settle(&store, &prepared["token"], json!([]));
+    assert_eq!(settled["targets"], json!(["a"]));
+    assert_eq!(settled["view"]["selectedId"], "b");
+}

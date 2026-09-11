@@ -1,0 +1,1185 @@
+{
+  "date": "2026-09-11T18:27:02Z",
+  "samples": 31,
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13700KF",
+  "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+  "versions": {
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "qt": "Qml Runtime 6.11.2",
+    "quickshell": "Quickshell 0.3.1 (revision , distributed by Arch Linux)"
+  },
+  "loadBefore": [
+    1.65380859375,
+    3.17578125,
+    2.517578125
+  ],
+  "loadAfter": [
+    1.6826171875,
+    2.84716796875,
+    2.4560546875
+  ],
+  "wallSeconds": 82.54062688599879,
+  "binarySha256": "c0bf56a8241cd271c326b1a3b90a1eabacc84cfef7e899da88bf156075cf6608",
+  "buildMode": "prebuilt",
+  "sourceSha256": {
+    "src/account/conversation.rs": "a4c88911168ba2bc0300c82359050cde03ba45884b0bcfbd84d2a84d707b6693",
+    "src/account/intents/tests.rs": "9501c0d934071f81b858f1194f4ade43b163dfeca6cf0ab2b0f83b0a83cc77e6",
+    "src/account/intents.rs": "fa8d8c7fdbedb6baa312dc0bdc730fed2fbb246b03137a0b0716ca224e84dd62",
+    "src/account/mod.rs": "97f58d656460d130fd0f7ab192671f6d4d6a01e5bbd1c7cfcc1c9b0166e0314c",
+    "src/account/model.rs": "b24435a17ed4be11bbd654a6bcb4c511cbe94682c2fda528e516dfa7f54856c4",
+    "src/account/model_tests.rs": "b2cd1d548ab5d503da7f920abdb46a084e7c309708ef8e9c02c0912faf635e9f",
+    "src/account/senders.rs": "8756533751794483bc866cd41b5eb7da64793657afca16237cf16437f1bfd47e",
+    "src/account/storage.rs": "ad913b9d905c79ea318ae401a4ed35e0406108e9e3f041b0963746e27caf9b05",
+    "src/account/tests.rs": "97c10c42be9a0d3af562b7b9bfe69d3ece2d0016d35c6368851e64220576f878",
+    "src/account/unified.rs": "6257878758cf4e5294e3e880bc69326aa8ab8cfe6a3fc7d066b7075e4a897132",
+    "src/agent/context.rs": "6b6e66a491805766a60070d46a7ad6edbc5fe4041fc641473dd34baa9d8d260f",
+    "src/agent/jobs.rs": "92817ad729fc41aff32c1c7d1998a04461ee885e6da32b5fae42c89213be595c",
+    "src/agent/mod.rs": "2f86e2e5f68ed34718ae2721634f1d057b5296239e29073758debcd1fee3e9f4",
+    "src/agent/storage.rs": "cbe125b6945dbb409ecd730c3f0fd8cc2aad61ad2530406b30ee7e45722928e5",
+    "src/agent/stream/tests.rs": "57d4ee2b4fabf95925fc57501bf334e3e77c54d13f191b6c99c67fdc4da2dce0",
+    "src/agent/stream.rs": "2e6bda2e2658681851f0f6f2a828cdfc88a59808e0c08456374eec23b17a7746",
+    "src/agent/worker.rs": "b1c81c883f87444a0fa3fc0e8c55427114f5b38ef03517cbd68dd498e1c7d4e4",
+    "src/agent/worker_tests.rs": "8bdfce34663a07f0c67bc7c0abe0ab8bcf4367da48a20081d120f9bebb8a5711",
+    "src/attachment/mod.rs": "4ce0b57f9bfa084acc513ef7fdc77b7ef0520bda670ae6fecacdf70579179350",
+    "src/auth/callback.rs": "4fa1b38a76a6bddd1d231826279cbb469fc6e0c25eb019d55ed2e42e450f0838",
+    "src/auth/credentials.rs": "05e868bd9771c4a656ce2c7618bfdcd1ae008f41689b66621206246dad85dce9",
+    "src/auth/graph.rs": "79874ff01bb03b5a214f31a31e2bdbfa951b80892798c0cc4f2df1ceee4b39ac",
+    "src/auth/mod.rs": "ef1d2efc8cf1409809e9a7f1b40b2b733eb1650e1646365e921bd574a90b9b6f",
+    "src/backend/content.rs": "bc3f784491ed8e4b4864f0130a119da92202ce88bf65c6aae6e0071b1010161a",
+    "src/backend/methods.rs": "5ebe259c315cfc0305581cb5d820886ce276cb5f5853ff88272876ba77b46fb6",
+    "src/backend/mod.rs": "b19a27b4ac960fa2d5fa1c5ee380c14c7fedba3cf74eead113a0a35565e6be19",
+    "src/backend/protocol.rs": "a8ec25016fc9af3b3f414dbe066b8af70e47e9aaa8702a0181e05c34a6d4264b",
+    "src/backend/reader.rs": "e3fa2f8ff5828ecf555a6d57484d459ce28c58ead2ae27cc74680fa5af1c3603",
+    "src/backend/rpc.rs": "8bb0d04048ac291f95650a621fbfa79fae90b46982d8bd6bcb0b3553c467f648",
+    "src/backend/stdio.rs": "f5fc9283cd8f5b71ff7de3fe6b325717cae2d7e33ec0d36e6e191b112a88db5e",
+    "src/backend/upload.rs": "9bb53b1cbf7b89bd6c959c9b68af149f3be12ed5107106a4a35bdd8e8ca6e5c2",
+    "src/cache/disk.rs": "8678fbd852ecd23a72716c0ac69708e76bd3d39f5fab06943f05ad69a670db1c",
+    "src/cache/mod.rs": "edf78e29c356747feddf169a22e2e84e2e6dd0c2df9584333249bba8acc5c696",
+    "src/cache/query/tests.rs": "ada9b8fa99b4e9640fbc724c026389767ed3f9018767151c65e3733ef1f474df",
+    "src/cache/query.rs": "14b910d5100e36201ae177438d8e719219b222609411381d6732b7d013325207",
+    "src/cache/render.rs": "6719dca08980cfc608b688b7d5748c97ffbb8c46f02c9c1f775260eef1b4f065",
+    "src/cache/resource.rs": "9e4d6f64fc21fcd3644d11b391d80a6d137edff9d4e6cd2c8d4b71313b7e2fba",
+    "src/cache/store.rs": "35d6268eecfd104e909a6cae715ed234acce16ff7c2178144e84d204e68b0414",
+    "src/cache/tests.rs": "98933703978ca3dfd0da9eca324ce06f88b4c026351ebcd7a02551805a77bd96",
+    "src/calendar/mod.rs": "e2fe121c94e6c0fe3ea00d9fdf3dc9a5c59eac3cfd1825cc4b891c7543132d8c",
+    "src/calendar/tests.rs": "e47c7c3631ec83fee03406c4b01c66919bfc6cacf3c545c773f514d7ae5f0914",
+    "src/cli/call.rs": "5982b34128a7cdd77870dca493cbb660efc6733f2c40a53c082ff64ab8671b6c",
+    "src/cli/mod.rs": "6d09b0297ddf9b7cd0fc57cdd95e533017e7770af743a876ff72e5586410e1f2",
+    "src/cli/output.rs": "bd1fe63e692adb7f4d2480c796b0b925ec630891d31e4fd1992bb1824b523d4f",
+    "src/compose/mod.rs": "b611470c62f88c4000acb460f362262f7d61766675c58686d1c5e9fa982a0cf9",
+    "src/compose/tests.rs": "0fe96ab3f0e51a17d54b99f55683006432369377b2dc57ea2cfca3eb6a38cdd8",
+    "src/contacts/mod.rs": "e522d954f777ae5484899e3b4f6483c61b1a8a2608f2a2f155441dd2deaa740c",
+    "src/lib.rs": "6cd269e7fce0a5feda078a10cbbae9f6bc24b221687e8a7a8ca1e44cf841de4b",
+    "src/main.rs": "10451f0e73a76c135a7738ea2a01240f8fa8e6c6dbb89562a968c468602ad12e",
+    "src/message/compose.rs": "d060502f0043befdb80246c34f072a4767f609e0332c111433b88ec1caa5499c",
+    "src/message/content.rs": "41c6b80bdcae6dbb4ab94d5d7e60ea7ba6fe662bff3648ebf00e5f5695f7b981",
+    "src/message/direction.rs": "5f012c0772d070583c77de5f4de6cc0975b031c8caf7ac2764bcdf81235aa2db",
+    "src/message/html/golden.js": "c879637283baa3a7a9251e0b07c21b296b60053cd35a8a7e87fd0398b76d2817",
+    "src/message/html/mod.rs": "273715d6b2cf2efecbd1020ed7578a0337338fad1a93defe1f532a3842bc58cc",
+    "src/message/html/policy.rs": "999deb97a0209a176fcce673417c9e43ef121876455aa0488a1f93c6a339f718",
+    "src/message/html/reader.rs": "a2c5759195477847914c95b3e93ba133d8a8764a62897f1cf848f52d6de16fe6",
+    "src/message/html/tests.rs": "e80edbeafff5652abe1e05a6e80e4493deea5d0cb8085075ff17198883fbb3a6",
+    "src/message/html/tree.rs": "9b6493d9f1219dca97b646d51b49fe9b16f9238dd658f3643e07fee909736c9a",
+    "src/message/mod.rs": "20e78cb6d0b75c22dac3bed670a724597d5d1a4440493a33b0a693d6ee54f6a8",
+    "src/message/parity_tests.rs": "5a44821a04b5dbe79c3be2f6cba357d5938322e2da04f10fae81c96dfe55275c",
+    "src/message/signature.rs": "4a8ca5a00d7e009beca2002155b852f4327ead79ad0916a581c32f6fb6b9991d",
+    "src/message/tests.rs": "e65fdb1577f78d6330ce7f160ba4b43d03c354f4753ba3fdd88b5649fdddc39c",
+    "src/outbox/delivery.rs": "580743c2c8c19306b37eb533af9de7c9a5f2f23d59d8d1da22d3f89082c53953",
+    "src/outbox/mod.rs": "45868e3ae840b104621d9005e46040dd8e33690e6974bea27e190dd747739e67",
+    "src/outbox/storage.rs": "61b864f7642c86919efaf80d0a47a5f6a9ebb0b70ec64e010d8186dd002d10bd",
+    "src/outbox/tests.rs": "06a34237b07efe3cf7f0cab5adfca82f26e8eaa1c04b8752a15d33d21bd72260",
+    "src/process/async_run.rs": "a7113e8eae6b8d54efcd247de30da8e431aa3064af79710a4cc148b55847c3a0",
+    "src/process/mod.rs": "cf51a1455566333ebb9f96fc986ec5b49428a22525a48f371637b75e891d47c4",
+    "src/providers/domain.rs": "170311c9a121dc8ddad1977c892153fcb01668d6565215adc0265655ee56da48",
+    "src/providers/domain_queries.json": "7d474723a110bd72809eeef8a28b0fd4c175d038580ed661e95b82592a92cecb",
+    "src/providers/gmail.rs": "04d712156f60ef618f42f24b77ce456c59dc2b43aee45106845c7c610852bb78",
+    "src/providers/gmail_credentials.rs": "d51f7a003bc2f3ecd468a26bd807cb681c7f78f732793c3004cf811a782d86e4",
+    "src/providers/gmail_http.rs": "d64dfed0931ba1969980f665cc5eec40b38bf958f26362f65131678c3e637b7d",
+    "src/providers/gmail_http_runtime_tests.rs": "c952880ae4102de95ba65314924d460c7fc957b63d93c3631de4dc313a305b74",
+    "src/providers/gmail_http_tls_test.py": "0350d59901529d6201cd8b68bc3dc9c260f3bdbbd1fc9e4c485db3215bc99e1a",
+    "src/providers/gmail_resources.rs": "e76211cd9780d35ac699fb6a94a6f472522b108e6e21193dec80d264f14105dc",
+    "src/providers/gmail_tests.rs": "3fe447f398b24edcef20283b387a05da303ae8722ab0ff7db008fd0dd8872f49",
+    "src/providers/gmail_writes.rs": "620d4c545d5651db39f14dd049c9f437c28dbabdc8697ca427d76136e7310e71",
+    "src/providers/hey.rs": "f45317e289a488cf459b801c2aa03c943fb162e04e408df4dd294101c6c915f7",
+    "src/providers/hey_access.rs": "649321fa7594aa38f0063fd9e69c268e1bb91a9f3376396f4ceb9af268394639",
+    "src/providers/hey_actions.rs": "b2799857012d830400076afa5aaec9e8139d6a0353ac559690f2eba5dab2b775",
+    "src/providers/imap/cancel.rs": "fc476b1d5a9b359d6113a1c9adbd744d20a2849838d5e8148b02062b2a4b72ef",
+    "src/providers/imap/mod.rs": "4515227dc16c283731ae94ccfc0d0c26e1f6328ebd128636eda9585e9dc4a2ad",
+    "src/providers/imap/mutation/tests.rs": "1fc7c95a925bed4d6ecd8fb109515a1ee713c6a4ab71fc27e485be19266f32b9",
+    "src/providers/imap/mutation.rs": "90086f222fedcdd006118834385510365dbfd714f78b29c4a665ce001f94e154",
+    "src/providers/imap/read/tests.rs": "5699b035da8cde875e8e577df310f66a7b4c02428b48997b5cac3e666e41b0c5",
+    "src/providers/imap/read.rs": "61a77cab59553e848f8007fdf806bf351e431a9a6af0f7b1c662e3f80cc6d6b9",
+    "src/providers/imap/tests.rs": "99646e688f46ffa1450eacd6c2196cb778f48167a937bb0b7d3f90ab90942a5d",
+    "src/providers/jmap/check.rs": "079595ab23c00617dca14a390a6ac383680cca17a78910d9a170a0414a3c33cb",
+    "src/providers/jmap/discovery.rs": "df6c3fbf5fcfc5aff1b56873e28b5a5dfec846d71f89bac52aa48a1ed9b8d54c",
+    "src/providers/jmap/discovery_tls_test.py": "75827bc2570402f5a881585f9311c5c6dfbc548d872f0435c7cb5de2a04bfb29",
+    "src/providers/jmap/mailbox.rs": "c64cc0f6f5386b6a09623bc596e4678869c2f6639cbef357229d2ae2ba2a2bb5",
+    "src/providers/jmap/mailbox_runtime_tests.rs": "a7ccde2ed4fe267f89cd509ab4c26c9f5cdc7facaf8e1a89aa7da2edd29b6cdc",
+    "src/providers/jmap/mailbox_tls_test.py": "f428560c0d2b4970ebb423709dfe50f51d5e54d41338b84192193bbc1cf10b55",
+    "src/providers/jmap/mod.rs": "83719c9c7275c0366231773c40497a8beea76eb830ebbfefe9272e67c30075e1",
+    "src/providers/jmap/mutation.rs": "ab4982e30c82306091c89f6eb4e27fea5683b57399a17764fca840298bc0d998",
+    "src/providers/jmap/query.rs": "6eebd28033b4fc06089bd2d9431fb80f1708ed3f48ead08d7b85a42dbf18bd0b",
+    "src/providers/jmap/read.rs": "3767a2e18dcaa039cddbdba4f6624a84a093dc823b75793f68ccb1b2e2ad1647",
+    "src/providers/jmap/resource.rs": "39c94b2ca25317de54905a58517474d16d684b063691b2e1fdaca69e52ef3122",
+    "src/providers/jmap/resource_tests.rs": "0168b34081d339fd8cfefabb9b5be3f7ddfe7740f8ee5cb3ef7318fbbd39b8d7",
+    "src/providers/jmap/stream.rs": "0a59d0eb4ebb29e5655ae77cf7b5f89a6ecfebf316d306481cd1ecd28628896b",
+    "src/providers/jmap/tests.rs": "011471aed4da238600a066e702cd1b2b54038c4b48eb8e9ff2d0e3b9bd775b20",
+    "src/providers/mod.rs": "9d89574d137e6b9cc567a35b4bf4d5800564d94a51eb91ee829a2cf91f561e78",
+    "src/public_http/mod.rs": "c16bd6b119275e663fc5437598404dc67a8d6febd59adb4bc456c4697de4a664",
+    "src/public_http/tests.rs": "d9f24c2291f27b6d709f76ea57bae0874abe09c214edf2c8a6e42af98a31fba5",
+    "src/sync/mod.rs": "44c22a84e2d55d6aa50b47763359c20bc9d13cbdcb552c84183756b6aa440972",
+    "src/sync/preload.rs": "e43ba90ec8a07cc87f23ffe85176803332a358ba1049883371e596e6eba94674",
+    "ui/backend/Backend.qml": "1c8da182c0caa4490ac7737feb035dbc705d09ba57e49917dfe2da1c741cbfab",
+    "ui/backend/Chunks.js": "e9f42ab06f351b65c316066c6d59a8549528090e279818cba300065974bfee56",
+    "ui/backend/Compatibility.js": "ff892a8e8eef809a6b06e3627674ed40829fdf0968fd77272a0040a592c4b4e3",
+    "ui/backend/Runtime.js": "c575a39d3bfdf53eb64af80b01ddc6f2546edfa7b678c682e3709ec4a4b96db4",
+    "ui/backend/Runtime.qml": "a1fed29763c380e94b629bda3f9493a7e7d96279d183771276a4a06faa0837e0",
+    "ui/backend/Upload.js": "458df30d9c9395e59bbe9a12576b7e90ad9f7303be731e89ebc1554c3bedb3d1",
+    "ui/backend/Wire.js": "ec842792853c21e513c8499a739313aff4ffbf26191f72723c47f24300036e0b",
+    "ui/message/Calendar.js": "a0c7dae8d81331cb220472659694a578fa1c8b2a99a87b480e16b741820a28f1",
+    "ui/message/Direction.js": "b937e2ecbb9c44c7259ea0ac6529c9909270b453663dd3c8408078a718791a76",
+    "ui/message/Html.js": "792ad666d77622092f79842162b53f33ccde6c3fbcee9933f02615cca46f2572",
+    "ui/message/Mailto.js": "38d4111fb5abf1d961786b90d908632b8894616476c4d0402431131457c86960",
+    "ui/message/Message.js": "6bc793110fdc1fb812c8928ba40a42d36a110972a4518e076b6d30966efbc6e3",
+    "ui/message/Outbox.js": "0e94c973580501b2877332482c32261a487d0cfdad09bfd01a38eb8c1ff955a6",
+    "ui/message/Signature.js": "6e324dad649c9d21121ff9185e752e972889cb958fc2220b86a40f27a0c3dbe8",
+    "ui/message/Unsubscribe.js": "0c6099c3f7b18a34e106e84162a5975a321c8f32ffec3aacdfa4518437204c36"
+  },
+  "harnessSha256": {
+    "reader_pipeline.py": "c125671c8595a2980f0abed98d741243c0350235490ac73c29f437009213f771",
+    "corpus.py": "2e9a29e08dd4d3bde573f92253ac9f51354f76e287436327c78c63c5767a8979",
+    "run.py": "73caa9197cd752becc039ec5bddbd417d2cc8f5d237afdd359c89027b297ee7d"
+  },
+  "corpus": [
+    {
+      "name": "small_plain",
+      "bytes": 346,
+      "htmlBytes": 60,
+      "sha256": "0a64fc70265c0907a4d71af8bf48262bd329d2d09e7a7ece41ce54632013ed27"
+    },
+    {
+      "name": "newsletter_html",
+      "bytes": 380279,
+      "htmlBytes": 277696,
+      "sha256": "ea237fb8f55547dc93a47ca91b3a6d76f92736d9081ccf2e215b16ea98472c2f"
+    },
+    {
+      "name": "nested_mime",
+      "bytes": 1949,
+      "htmlBytes": 231,
+      "sha256": "42f5bba5b49e7b3baf0d6bcd915e1b2075fcbceea3cbeeb9fac7d893432456a0"
+    },
+    {
+      "name": "large_attachment",
+      "bytes": 2870362,
+      "htmlBytes": 32,
+      "sha256": "d4c6634e31a38ea810babbe1d1f5fd82b472b9f98b3222382e3fac7b3600b46b"
+    },
+    {
+      "name": "unicode",
+      "bytes": 16694,
+      "htmlBytes": 12007,
+      "sha256": "80b6536d25d98246fde75c2bd3d5870943830e31877f432737c9ae5c2b3ccca9"
+    }
+  ],
+  "results": [
+    {
+      "name": "small_plain",
+      "semanticMatch": true,
+      "differences": {
+        "resource_bridge": "",
+        "prepared_bridge": "",
+        "reader_open": ""
+      },
+      "digests": {
+        "resource_bridge": "65467e58494c578672a6517ebca21d8cb378fbad923653c1991403e3194416ce",
+        "prepared_bridge": "65467e58494c578672a6517ebca21d8cb378fbad923653c1991403e3194416ce",
+        "reader_open": "65467e58494c578672a6517ebca21d8cb378fbad923653c1991403e3194416ce"
+      },
+      "resource_bridge": {
+        "coldUs": 6000,
+        "medianUs": 375,
+        "p95Us": 437.5,
+        "samplesUs": [
+          437.5,
+          375,
+          375,
+          437.5,
+          375,
+          312.5,
+          375,
+          437.5,
+          437.5,
+          437.5,
+          375,
+          375,
+          312.5,
+          375,
+          312.5,
+          437.5,
+          375,
+          375,
+          375,
+          312.5,
+          375,
+          312.5,
+          375,
+          312.5,
+          375,
+          375,
+          312.5,
+          375,
+          312.5,
+          375,
+          375
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "cache.resourceRead",
+            "direction": "request",
+            "bytes": 64
+          },
+          {
+            "method": "cache.resourceRead",
+            "direction": "response",
+            "bytes": 699
+          },
+          {
+            "method": "message.prepare",
+            "direction": "request",
+            "bytes": 731
+          },
+          {
+            "method": "message.prepare",
+            "direction": "response",
+            "bytes": 852
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 182
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "prepared_bridge": {
+        "coldUs": 6000,
+        "medianUs": 312.5,
+        "p95Us": 562.5,
+        "samplesUs": [
+          375,
+          375,
+          312.5,
+          437.5,
+          562.5,
+          562.5,
+          375,
+          312.5,
+          375,
+          187.5,
+          250,
+          250,
+          250,
+          312.5,
+          375,
+          312.5,
+          312.5,
+          375,
+          312.5,
+          375,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          187.5,
+          187.5
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "message.prepareCached",
+            "direction": "request",
+            "bytes": 84
+          },
+          {
+            "method": "message.prepareCached",
+            "direction": "response",
+            "bytes": 2206
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 182
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "reader_open": {
+        "coldUs": 7000,
+        "medianUs": 250,
+        "p95Us": 312.5,
+        "samplesUs": [
+          375,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          250,
+          250,
+          187.5,
+          250,
+          187.5,
+          250,
+          187.5,
+          187.5,
+          250,
+          187.5,
+          250,
+          187.5,
+          187.5,
+          312.5,
+          250,
+          250,
+          250,
+          187.5,
+          187.5,
+          250,
+          250,
+          187.5,
+          187.5,
+          250
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "reader.open",
+            "direction": "request",
+            "bytes": 207
+          },
+          {
+            "method": "reader.open",
+            "direction": "response",
+            "bytes": 2596
+          }
+        ]
+      },
+      "preparedSpeedup": 1.25
+    },
+    {
+      "name": "newsletter_html",
+      "semanticMatch": true,
+      "differences": {
+        "resource_bridge": "",
+        "prepared_bridge": "",
+        "reader_open": ""
+      },
+      "digests": {
+        "resource_bridge": "d8e7ea20f9006df402c01678d175bd98afe36fef0672bd63963b94cbfe9ddb1d",
+        "prepared_bridge": "d8e7ea20f9006df402c01678d175bd98afe36fef0672bd63963b94cbfe9ddb1d",
+        "reader_open": "d8e7ea20f9006df402c01678d175bd98afe36fef0672bd63963b94cbfe9ddb1d"
+      },
+      "resource_bridge": {
+        "coldUs": 397000,
+        "medianUs": 336000,
+        "p95Us": 376000,
+        "samplesUs": [
+          326000,
+          324000,
+          328000,
+          326000,
+          327000,
+          327000,
+          328000,
+          330000,
+          342000,
+          335000,
+          340000,
+          340000,
+          333000,
+          335000,
+          344000,
+          346000,
+          330000,
+          349000,
+          359000,
+          359000,
+          334000,
+          336000,
+          353000,
+          378000,
+          376000,
+          345000,
+          341000,
+          336000,
+          331000,
+          365000,
+          345000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "cache.resourceRead",
+            "direction": "request",
+            "bytes": 68
+          },
+          {
+            "method": "cache.resourceRead",
+            "direction": "response",
+            "bytes": 370900
+          },
+          {
+            "method": "message.prepare",
+            "direction": "request",
+            "bytes": 370932
+          },
+          {
+            "method": "message.prepare",
+            "direction": "response",
+            "bytes": 380804
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 287483
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 1449450
+          }
+        ]
+      },
+      "prepared_bridge": {
+        "coldUs": 205000,
+        "medianUs": 176000,
+        "p95Us": 185000,
+        "samplesUs": [
+          177000,
+          173000,
+          173000,
+          185000,
+          184000,
+          171000,
+          180000,
+          183000,
+          179000,
+          176000,
+          181000,
+          176000,
+          174000,
+          179000,
+          176000,
+          171000,
+          173000,
+          172000,
+          185000,
+          174000,
+          173000,
+          177000,
+          171000,
+          175000,
+          172000,
+          173000,
+          176000,
+          177000,
+          178000,
+          175000,
+          176000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "message.prepareCached",
+            "direction": "request",
+            "bytes": 88
+          },
+          {
+            "method": "message.prepareCached",
+            "direction": "response",
+            "bytes": 382180
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 287483
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 1449450
+          }
+        ]
+      },
+      "reader_open": {
+        "coldUs": 87000,
+        "medianUs": 53000,
+        "p95Us": 57000,
+        "samplesUs": [
+          52000,
+          52000,
+          54000,
+          59000,
+          54000,
+          56000,
+          54000,
+          54000,
+          54000,
+          54000,
+          53000,
+          55000,
+          53000,
+          55000,
+          53000,
+          52000,
+          53000,
+          52000,
+          57000,
+          52000,
+          53000,
+          53000,
+          52000,
+          54000,
+          51000,
+          54000,
+          53000,
+          53000,
+          52000,
+          53000,
+          51000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "reader.open",
+            "direction": "request",
+            "bytes": 211
+          },
+          {
+            "method": "reader.open",
+            "direction": "response",
+            "bytes": 1546695
+          }
+        ]
+      },
+      "preparedSpeedup": 3.3207547169811322
+    },
+    {
+      "name": "nested_mime",
+      "semanticMatch": true,
+      "differences": {
+        "resource_bridge": "",
+        "prepared_bridge": "",
+        "reader_open": ""
+      },
+      "digests": {
+        "resource_bridge": "ae09cb006477ab2333dbdc60596cee461b930ddf6c4d90f5e24f463a3c968c2d",
+        "prepared_bridge": "ae09cb006477ab2333dbdc60596cee461b930ddf6c4d90f5e24f463a3c968c2d",
+        "reader_open": "ae09cb006477ab2333dbdc60596cee461b930ddf6c4d90f5e24f463a3c968c2d"
+      },
+      "resource_bridge": {
+        "coldUs": 1000,
+        "medianUs": 625,
+        "p95Us": 875,
+        "samplesUs": [
+          562.5,
+          562.5,
+          562.5,
+          625,
+          562.5,
+          625,
+          1187.5,
+          562.5,
+          562.5,
+          750,
+          812.5,
+          625,
+          562.5,
+          812.5,
+          875,
+          812.5,
+          875,
+          625,
+          687.5,
+          625,
+          625,
+          625,
+          625,
+          625,
+          562.5,
+          625,
+          562.5,
+          500,
+          625,
+          562.5,
+          500
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "cache.resourceRead",
+            "direction": "request",
+            "bytes": 64
+          },
+          {
+            "method": "cache.resourceRead",
+            "direction": "response",
+            "bytes": 4172
+          },
+          {
+            "method": "message.prepare",
+            "direction": "request",
+            "bytes": 4204
+          },
+          {
+            "method": "message.prepare",
+            "direction": "response",
+            "bytes": 846
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 213
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 732
+          }
+        ]
+      },
+      "prepared_bridge": {
+        "coldUs": 0,
+        "medianUs": 437.5,
+        "p95Us": 812.5,
+        "samplesUs": [
+          312.5,
+          375,
+          375,
+          375,
+          375,
+          375,
+          937.5,
+          437.5,
+          375,
+          500,
+          500,
+          500,
+          437.5,
+          437.5,
+          437.5,
+          437.5,
+          375,
+          500,
+          437.5,
+          437.5,
+          562.5,
+          562.5,
+          812.5,
+          687.5,
+          687.5,
+          625,
+          625,
+          437.5,
+          437.5,
+          375,
+          437.5
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "message.prepareCached",
+            "direction": "request",
+            "bytes": 84
+          },
+          {
+            "method": "message.prepareCached",
+            "direction": "response",
+            "bytes": 5446
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 213
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 732
+          }
+        ]
+      },
+      "reader_open": {
+        "coldUs": 1000,
+        "medianUs": 375,
+        "p95Us": 625,
+        "samplesUs": [
+          312.5,
+          375,
+          375,
+          375,
+          375,
+          375,
+          375,
+          375,
+          750,
+          250,
+          250,
+          250,
+          375,
+          375,
+          375,
+          375,
+          375,
+          437.5,
+          375,
+          375,
+          250,
+          312.5,
+          250,
+          375,
+          312.5,
+          312.5,
+          375,
+          375,
+          375,
+          437.5,
+          625
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "reader.open",
+            "direction": "request",
+            "bytes": 207
+          },
+          {
+            "method": "reader.open",
+            "direction": "response",
+            "bytes": 2835
+          }
+        ]
+      },
+      "preparedSpeedup": 1.1666666666666667
+    },
+    {
+      "name": "large_attachment",
+      "semanticMatch": true,
+      "differences": {
+        "resource_bridge": "",
+        "prepared_bridge": "",
+        "reader_open": ""
+      },
+      "digests": {
+        "resource_bridge": "fccd339790cd009c076b3c7dbf721f3274e127bb8c4156ef9d22dc9d5c601cb9",
+        "prepared_bridge": "fccd339790cd009c076b3c7dbf721f3274e127bb8c4156ef9d22dc9d5c601cb9",
+        "reader_open": "fccd339790cd009c076b3c7dbf721f3274e127bb8c4156ef9d22dc9d5c601cb9"
+      },
+      "resource_bridge": {
+        "coldUs": 1203000,
+        "medianUs": 1223000,
+        "p95Us": 1302000,
+        "samplesUs": [
+          1286000,
+          1198000,
+          1179000,
+          1184000,
+          1190000,
+          1223000,
+          1289000,
+          1204000,
+          1234000,
+          1268000,
+          1274000,
+          1258000,
+          1201000,
+          1198000,
+          1200000,
+          1295000,
+          1297000,
+          1215000,
+          1201000,
+          1226000,
+          1223000,
+          1248000,
+          1227000,
+          1195000,
+          1308000,
+          1213000,
+          1302000,
+          1211000,
+          1199000,
+          1183000,
+          1251000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "cache.resourceRead",
+            "direction": "request",
+            "bytes": 69
+          },
+          {
+            "method": "cache.resourceRead",
+            "direction": "response",
+            "bytes": 2797408
+          },
+          {
+            "method": "message.prepare",
+            "direction": "request",
+            "bytes": 2797440
+          },
+          {
+            "method": "message.prepare",
+            "direction": "response",
+            "bytes": 944
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 187
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "prepared_bridge": {
+        "coldUs": 2000,
+        "medianUs": 2000,
+        "p95Us": 2000,
+        "samplesUs": [
+          2000,
+          1000,
+          2000,
+          2000,
+          1000,
+          2000,
+          1000,
+          2000,
+          2000,
+          1000,
+          3000,
+          1000,
+          2000,
+          2000,
+          2000,
+          1000,
+          2000,
+          1000,
+          2000,
+          2000,
+          2000,
+          1000,
+          2000,
+          2000,
+          2000,
+          1000,
+          2000,
+          2000,
+          1000,
+          2000,
+          2000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "message.prepareCached",
+            "direction": "request",
+            "bytes": 89
+          },
+          {
+            "method": "message.prepareCached",
+            "direction": "response",
+            "bytes": 2846
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 187
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "reader_open": {
+        "coldUs": 2000,
+        "medianUs": 2000,
+        "p95Us": 3000,
+        "samplesUs": [
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          3000,
+          2000,
+          2000,
+          3000,
+          3000,
+          3000,
+          3000,
+          2000,
+          2000,
+          3000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          2000,
+          3000,
+          3000,
+          3000,
+          2000
+        ],
+        "batch": 1,
+        "logicalPayloads": [
+          {
+            "method": "reader.open",
+            "direction": "request",
+            "bytes": 212
+          },
+          {
+            "method": "reader.open",
+            "direction": "response",
+            "bytes": 2681
+          }
+        ]
+      },
+      "preparedSpeedup": 1.0
+    },
+    {
+      "name": "unicode",
+      "semanticMatch": true,
+      "differences": {
+        "resource_bridge": "",
+        "prepared_bridge": "",
+        "reader_open": ""
+      },
+      "digests": {
+        "resource_bridge": "94ebdca71fc7718de939215a06b7f3633fa3589237e07fc09dc6dbe59cc1cebd",
+        "prepared_bridge": "94ebdca71fc7718de939215a06b7f3633fa3589237e07fc09dc6dbe59cc1cebd",
+        "reader_open": "94ebdca71fc7718de939215a06b7f3633fa3589237e07fc09dc6dbe59cc1cebd"
+      },
+      "resource_bridge": {
+        "coldUs": 2000,
+        "medianUs": 1062.5,
+        "p95Us": 1250,
+        "samplesUs": [
+          1062.5,
+          1062.5,
+          1062.5,
+          1062.5,
+          1062.5,
+          1000,
+          1062.5,
+          1000,
+          1062.5,
+          1062.5,
+          1375,
+          1250,
+          1062.5,
+          1062.5,
+          1062.5,
+          1062.5,
+          1000,
+          1062.5,
+          1000,
+          1000,
+          687.5,
+          562.5,
+          562.5,
+          625,
+          562.5,
+          625,
+          562.5,
+          562.5,
+          750,
+          1125,
+          1062.5
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "cache.resourceRead",
+            "direction": "request",
+            "bytes": 60
+          },
+          {
+            "method": "cache.resourceRead",
+            "direction": "response",
+            "bytes": 16623
+          },
+          {
+            "method": "message.prepare",
+            "direction": "request",
+            "bytes": 16655
+          },
+          {
+            "method": "message.prepare",
+            "direction": "response",
+            "bytes": 12787
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 178
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "prepared_bridge": {
+        "coldUs": 0,
+        "medianUs": 375,
+        "p95Us": 562.5,
+        "samplesUs": [
+          312.5,
+          437.5,
+          625,
+          562.5,
+          500,
+          562.5,
+          500,
+          500,
+          500,
+          562.5,
+          562.5,
+          500,
+          375,
+          375,
+          312.5,
+          312.5,
+          312.5,
+          375,
+          375,
+          375,
+          375,
+          375,
+          312.5,
+          312.5,
+          312.5,
+          312.5,
+          375,
+          312.5,
+          312.5,
+          312.5,
+          312.5
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "message.prepareCached",
+            "direction": "request",
+            "bytes": 80
+          },
+          {
+            "method": "message.prepareCached",
+            "direction": "response",
+            "bytes": 14124
+          },
+          {
+            "method": "message.render",
+            "direction": "request",
+            "bytes": 178
+          },
+          {
+            "method": "message.render",
+            "direction": "response",
+            "bytes": 421
+          }
+        ]
+      },
+      "reader_open": {
+        "coldUs": 1000,
+        "medianUs": 500,
+        "p95Us": 625,
+        "samplesUs": [
+          562.5,
+          562.5,
+          500,
+          625,
+          562.5,
+          562.5,
+          500,
+          375,
+          375,
+          312.5,
+          312.5,
+          375,
+          562.5,
+          562.5,
+          500,
+          562.5,
+          500,
+          500,
+          500,
+          500,
+          375,
+          437.5,
+          562.5,
+          625,
+          375,
+          375,
+          375,
+          312.5,
+          312.5,
+          437.5,
+          562.5
+        ],
+        "batch": 16,
+        "logicalPayloads": [
+          {
+            "method": "reader.open",
+            "direction": "request",
+            "bytes": 203
+          },
+          {
+            "method": "reader.open",
+            "direction": "response",
+            "bytes": 14512
+          }
+        ]
+      },
+      "preparedSpeedup": 0.75
+    }
+  ],
+  "buildNote": "Built from fc8b41f plus the src/agent/jobs.rs and src/agent/storage.rs compatibility fixes, before reader optimizations; parent-recorded provenance, frozen binary SHA256 independently verified. Checkout source hashes were captured later.",
+  "clock": 1788825600000,
+  "imagePolicy": {
+    "allowRemoteImages": false,
+    "remoteImageData": null,
+    "withReader": true
+  },
+  "cacheMode": "warm in-process render cache; OS cache warmed by seeding"
+}

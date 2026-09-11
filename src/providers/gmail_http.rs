@@ -71,11 +71,20 @@ async fn execute(
     tokio::time::timeout(deadline, async {
         let empty_success =
             request.authorization.is_some() && request.method != reqwest::Method::GET;
+        let empty_post = request.body.is_none()
+            && matches!(
+                request.method,
+                reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH
+            );
         let mut builder = client.request(request.method, &request.url);
         if let Some(body) = request.body {
             builder = builder
                 .header(reqwest::header::CONTENT_TYPE, request.content_type)
                 .body(body);
+        } else if empty_post {
+            // Bodyless Gmail trash/untrash requests still need explicit framing.
+            // Some gateways reject a POST without Content-Length with HTTP 411.
+            builder = builder.header(reqwest::header::CONTENT_LENGTH, "0");
         }
         if let Some(authorization) = request.authorization {
             builder = builder.header(reqwest::header::AUTHORIZATION, authorization);
@@ -85,7 +94,12 @@ async fn execute(
             return Err("gmail_unauthorized");
         }
         if !response.status().is_success() {
-            return Err("gmail_http_failed");
+            return Err(match response.status().as_u16() {
+                403 => "gmail_forbidden",
+                411 => "gmail_length_required",
+                429 => "gmail_rate_limited",
+                _ => "gmail_http_failed",
+            });
         }
         if response
             .content_length()

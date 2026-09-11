@@ -268,12 +268,15 @@ assert.strictEqual(keymap.hintKeyFor(byId("archive")), "e",
   "falling back to the keys when there is nothing to shorten")
 
 const listHints = keymap.hintsFor("list")
+assert.strictEqual(keymap.keycapLabel("Shift+J / Shift+K"), "shift+j / shift+k")
+assert.strictEqual(keymap.keycapLabel("Ctrl+Enter, Esc, Space"), "ctrl+enter, esc, space")
+assert.ok(!keymap.hintsFor("reader").some(function (hint) { return hint.label === "open" }))
 deepEqual(listHints.map(function (h) { return h.key + " " + h.label }),
-  ["j / k move", "o open", "e archive", "d trash", "Space select", "c compose"],
+  ["j / k move", "e archive", "d trash", "Space select", "c compose"],
   "the status bar offers what the list can do, in its short form")
 const selectedListHints = keymap.hintsFor("list", [], true)
 deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
-  ["j / k move", "o open", "e archive", "d trash", "v move to", "Space select", "c compose"],
+  ["j / k move", "e archive", "d trash", "v move to", "Space select", "c compose"],
   "the move hint joins the existing row only while a message is selected")
 assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
   return h.key === "v"

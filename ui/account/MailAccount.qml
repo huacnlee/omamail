@@ -190,20 +190,11 @@ Item {
   property string selectedId: ""
   property var selectedMessage: null
   property var selectedBody: ({ text: "", source: "" })
-  // Already sanitised by the time the reader sees it. Decoding uses Qt.atob
-  // where it exists, which is native and skips the per-character base64 loop
-  // that made this the one expensive step in opening a message.
-  property string selectedHtml: ""
-  // The sender's own HTML, exactly as Gmail handed it over. This is what the
-  // body cache holds and what `selectedHtml` is derived from — so asking for the
-  // images is a re-render rather than another trip to Gmail, and a sanitiser
-  // that learns something new applies it to every message already on disk
-  // rather than only to the ones fetched afterwards.
+  property bool selectedHasHtml: false
+  property string selectedRenderRevision: ""
+  // Opaque identity of a source retained and sanitised by the native reader.
   property string readerSourceKey: ""
-  // The parsed document behind `selectedHtml`. The reader fits it to whatever
-  // width it happens to be and rebuilds on every relayout, so handing over the
-  // tree rather than the string is the difference between one parse per message
-  // and one per drag step.
+  // Native safe trees are fitted to the current viewport without reparsing HTML.
   property var selectedDocument: null
   // The same message read a second way, off the same parse. Reading mode is a
   // document of its own rather than a restyling of the one above: the sender's
@@ -231,6 +222,8 @@ Item {
   property var selectedRemoteImageSources: []
   property var imageFetchQueue: []
   property int imageFetchSerial: 0
+  property var remoteImageAttempted: ({})
+  property bool imageBatchDirty: false
   // Prepared remote bytes stay separate from the source body. Qt receives only
   // completed data URIs, never an address whose pending load would draw its
   // built-in broken placeholder or whose redirect could escape the URL gate.
@@ -312,6 +305,7 @@ Item {
   property int renderSerial: 0
   property int listLiveSerial: 0
   onAccountIdChanged: {
+    clearSelection()
     conversationSerial++
     conversationBusy = false
     conversationJobs = []
@@ -1225,7 +1219,8 @@ Item {
     inviteHandle = null
     selectedMessage = null
     selectedBody = { text: "", source: "" }
-    selectedHtml = ""
+    selectedHasHtml = false
+    selectedRenderRevision = ""
     selectedDocument = null
     selectedReaderDocument = null
     selectedReaderTooHeavy = false
@@ -1235,6 +1230,9 @@ Item {
     remoteImagesAllowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)
     remoteImagesLoading = false
     remoteImageData = ({})
+    remoteImageAttempted = ({})
+    imageBatchDirty = false
+    imagePaintTimer.stop()
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
@@ -1294,13 +1292,10 @@ Item {
       root.selectedMessage = summary
       var decoded = payload.nativeContent.body
       root.renderSerial++
-      root.imageFetchSerial++
-      root.remoteImagesLoading = false
-      root.remoteImageData = ({})
-      root.imageFetchQueue = []
+      root.selectedHasHtml = !!payload.hasHtml
       root.readerSourceKey = payload.hasHtml ? String(payload.readerKey) : ""
       var ready = payload.nativeRender
-      root.applyRendered(ready)
+      root.adoptRendered(ready)
         root.detailLoading = false
         root.detailPainted = true
         root.lastError = ""
@@ -1495,8 +1490,20 @@ Item {
     })
   }
 
+  function adoptRendered(ready) {
+    // A live response may have been prepared before cached images completed.
+    // Keep the painted document until Rust incorporates the approved bytes.
+    if (readerSourceKey !== "" && remoteImagesAllowed && Object.keys(remoteImageData).length > 0) {
+      renderSource(readerSourceKey)
+      return
+    }
+    applyRendered(ready)
+  }
+
   function applyRendered(ready) {
-      selectedHtml = ready.html
+      var revision = String(ready.revision || "")
+      if (revision !== "" && revision === selectedRenderRevision) return
+      selectedRenderRevision = revision
       selectedDocument = ready.document
       selectedReaderDocument = ready.reader ? ready.reader.document : null
       selectedReaderTooHeavy = !!ready.reader && ready.reader.tooHeavy
@@ -1507,7 +1514,6 @@ Item {
       selectedRemoteImageSources = ready.remoteImageSources || []
       selectedTooHeavy = ready.tooHeavy
       if (remoteImagesAllowed && !remoteImagesLoading
-        && Object.keys(remoteImageData).length === 0
         && selectedRemoteImageSources.length > 0)
         Qt.callLater(root.prepareRemoteImages)
   }
@@ -1522,22 +1528,39 @@ Item {
   function prepareRemoteImages() {
     if (!remoteImagesAllowed || remoteImagesLoading || readerSourceKey === ""
       || selectedRemoteImageSources.length === 0) return
-    imageFetchQueue = selectedRemoteImageSources.slice(0)
+    var pending = []
+    for (var i = 0; i < selectedRemoteImageSources.length; i++) {
+      var source = String(selectedRemoteImageSources[i])
+      if (!remoteImageAttempted[source] && !remoteImageData[source] && pending.indexOf(source) < 0)
+        pending.push(source)
+    }
+    if (pending.length === 0) return
+    imageFetchQueue = pending
+    imageBatchDirty = false
     remoteImagesLoading = true
     imageFetchSerial++
     fetchNextImage(imageFetchSerial)
+  }
+
+  function flushRemoteImages() {
+    if (!imageBatchDirty || !remoteImagesAllowed || readerSourceKey === "") return
+    imageBatchDirty = false
+    renderSource(readerSourceKey)
   }
 
   function fetchNextImage(serial) {
     if (serial !== imageFetchSerial) return
     if (imageFetchQueue.length === 0) {
       remoteImagesLoading = false
+      imagePaintTimer.stop()
+      flushRemoteImages()
       return
     }
     var queue = imageFetchQueue.slice(0)
     var source = String(queue.shift())
     imageFetchQueue = queue
     if (!backend || !backend.ready) { remoteImagesLoading = false; return }
+    remoteImageAttempted[source] = true
     backend.call("public.image", {url:source}, function(result, error) {
       if (serial !== root.imageFetchSerial) return
       var data = result && !error ? String(result.data || "") : ""
@@ -1547,7 +1570,8 @@ Item {
         for (var key in root.remoteImageData) prepared[key] = root.remoteImageData[key]
         prepared[source] = data
         root.remoteImageData = prepared
-        root.renderSource(root.readerSourceKey)
+        root.imageBatchDirty = true
+        if (!imagePaintTimer.running) imagePaintTimer.start()
       }
       root.fetchNextImage(serial)
     })
@@ -1574,7 +1598,11 @@ Item {
       return
     }
     if (!backend || !backend.ready) { done(""); return }
+    var account = accountId
+    var selection = selectedId
+    var detail = detailSerial
     backend.call("public.image", {url:wanted}, function(result, error) {
+      if (account !== root.accountId || selection !== root.selectedId || detail !== root.detailSerial) return
       var data = result && !error ? String(result.data || "") : ""
       done(Html.isRasterDataImage(data) ? data : "")
     })
@@ -1590,7 +1618,8 @@ Item {
     selectedId = ""
     selectedMessage = null
     selectedBody = { text: "", source: "" }
-    selectedHtml = ""
+    selectedHasHtml = false
+    selectedRenderRevision = ""
     selectedDocument = null
     selectedReaderDocument = null
     selectedReaderTooHeavy = false
@@ -1600,6 +1629,9 @@ Item {
     remoteImagesAllowed = false
     remoteImagesLoading = false
     remoteImageData = ({})
+    remoteImageAttempted = ({})
+    imageBatchDirty = false
+    imagePaintTimer.stop()
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
@@ -2789,6 +2821,14 @@ Item {
   // The loader has to have built the manager first, which it has not when this
   // component completes.
   onAuthChanged: if (auth) auth.restoreSession()
+
+  // Coalesce quick image completions without waiting for a slow next request.
+  Timer {
+    id: imagePaintTimer
+    interval: 100
+    repeat: false
+    onTriggered: root.flushRemoteImages()
+  }
 
   // Only ages the "synced" label; nothing else depends on it.
   Timer {

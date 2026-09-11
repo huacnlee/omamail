@@ -40,13 +40,11 @@ var BINDINGS = [
   { id: "scrollUp", keys: ["Shift+K"], contexts: ["reader"],
     survivesOverlay: true,
     group: "Moving", label: "Scroll up" },
-  // Live in the reader as well as the list. Moving is deliberately not opening
-  // — stepping through with j used to mark half a mailbox read without anyone
-  // looking at it — so with the reader up there has to be a key that says open,
-  // or the only way to read the next message is to leave and come back.
+  // Explicit opening remains available, but cursor movement already opens the
+  // reader, so the footer does not need an additional open hint.
   { id: "open", keys: ["Return", "Enter", "o"], contexts: MAIL,
     group: "Moving", label: "Open the selected message",
-    hintKey: "o", hint: { list: "open", reader: "open" } },
+    hintKey: "o" },
   { id: "openReader", keys: ["Right"], contexts: ["list"],
     group: "Moving", label: "Open the selected message" },
   { id: "backToList", keys: ["u", "Left"], contexts: ["reader"],
@@ -351,6 +349,11 @@ function hintKeyFor(binding) {
   if (!binding) return ""
   if (binding.hintKey) return binding.hintKey
   return displayFor(binding)
+}
+
+// Keycaps are presentation; Qt's case-sensitive sequence names stay intact.
+function keycapLabel(text) {
+  return String(text || "").toLowerCase()
 }
 
 function hintTextFor(binding, context) {

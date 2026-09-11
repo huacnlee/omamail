@@ -61,6 +61,9 @@ Item {
         : "Gmail did not answer in time"
     if (code === "gmail_unauthorized" || code === "gmail_invalid_token")
       return "Gmail authorization expired. Sign in again."
+    if (code === "gmail_forbidden") return "Gmail refused this request (HTTP 403). Check account permissions."
+    if (code === "gmail_length_required") return "Gmail rejected the request format (HTTP 411)."
+    if (code === "gmail_rate_limited") return "Gmail is receiving too many requests (HTTP 429). Try again later."
     if (code === "gmail_draft_missing") return "That draft is no longer in the mailbox"
     return "Gmail backend could not complete this request"
   }

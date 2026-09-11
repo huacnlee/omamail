@@ -2,6 +2,7 @@
 use super::Session;
 use crate::{cache, message};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
@@ -25,8 +26,27 @@ struct Entry {
     account: String,
     id: String,
     key: String,
-    resource: Arc<Value>,
+    prepared: Arc<Prepared>,
     bytes: usize,
+}
+struct Prepared {
+    source: String,
+    base: Value,
+    source_hash: [u8; 32],
+    fallback: Option<(Arc<Value>, i64)>,
+}
+impl Prepared {
+    fn bytes(&self) -> Result<usize, &'static str> {
+        if let Some((resource, _)) = &self.fallback {
+            return Ok(serde_json::to_vec(resource.as_ref())
+                .map_err(|_| "invalid_message")?
+                .len());
+        }
+        Ok(self.source.len()
+            + serde_json::to_vec(&self.base)
+                .map_err(|_| "invalid_message")?
+                .len())
+    }
 }
 #[derive(Clone)]
 struct Job {
@@ -47,11 +67,9 @@ impl ReaderStore {
         &mut self,
         account: &str,
         id: &str,
-        resource: Arc<Value>,
+        prepared: Arc<Prepared>,
     ) -> Result<String, &'static str> {
-        let bytes = serde_json::to_vec(resource.as_ref())
-            .map_err(|_| "invalid_message")?
-            .len();
+        let bytes = prepared.bytes()?;
         if bytes > MAX_BYTES {
             return Err("reader_resource_too_large");
         }
@@ -77,19 +95,19 @@ impl ReaderStore {
             account: account.into(),
             id: id.into(),
             key: key.clone(),
-            resource,
+            prepared,
             bytes,
         });
         Ok(key)
     }
-    fn get(&mut self, account: &str, id: &str, key: &str) -> Result<Arc<Value>, &'static str> {
+    fn get(&mut self, account: &str, id: &str, key: &str) -> Result<Arc<Prepared>, &'static str> {
         let at = self
             .entries
             .iter()
             .position(|v| v.account == account && v.id == id && v.key == key)
             .ok_or("reader_source_expired")?;
         let entry = self.entries.remove(at).ok_or("reader_source_expired")?;
-        let value = entry.resource.clone();
+        let value = entry.prepared.clone();
         self.entries.push_back(entry);
         Ok(value)
     }
@@ -221,7 +239,7 @@ impl Session {
         if method == "reader.render" {
             registered(&account).await?;
             let key = field(params, "readerKey")?;
-            let resource = self
+            let prepared = self
                 .reader
                 .lock()
                 .map_err(|_| "session_failed")?
@@ -229,12 +247,11 @@ impl Session {
             let key = key.to_owned();
             let renders = self.renders.clone();
             return tokio::task::spawn_blocking(move || {
-                projection(
-                    resource.as_ref(),
+                render_prepared(
+                    prepared.as_ref(),
                     &account,
                     &id,
                     &key,
-                    now,
                     options,
                     &renders,
                     None,
@@ -298,20 +315,20 @@ impl Session {
             let job = job.clone();
             tokio::task::spawn_blocking(move || {
                 job.current()?;
+                let prepared = Arc::new(prepare_for_store(resource.clone(), &id, now)?);
                 let mut store_guard = store.lock().map_err(|_| "session_failed")?;
                 let live_guard = job.live.lock().map_err(|_| "session_failed")?;
                 if !*live_guard {
                     return Err("reader_cancelled");
                 }
-                let key = store_guard.put(&account, &id, resource.clone())?;
+                let key = store_guard.put(&account, &id, prepared.clone())?;
                 drop(live_guard);
                 drop(store_guard);
-                let result = projection(
-                    resource.as_ref(),
+                let result = render_prepared(
+                    prepared.as_ref(),
                     &account,
                     &id,
                     &key,
-                    now,
                     options,
                     &renders,
                     Some(&job.live),
@@ -336,35 +353,21 @@ impl Session {
         result
     }
 }
-#[allow(clippy::too_many_arguments)] // Explicit source identity, render policy, and cancellation boundary.
-fn projection(
-    resource: &Value,
-    account: &str,
-    id: &str,
-    key: &str,
-    now: i64,
-    mut options: Value,
-    renders: &Arc<Mutex<cache::render::RenderCache>>,
-    live: Option<&Arc<Mutex<bool>>>,
-) -> Result<Value, &'static str> {
+fn prepare(resource: &Value, id: &str, now: i64) -> Result<Prepared, &'static str> {
     let mut prepared = message::content::prepare_for_render(resource, now)?;
-    let source = prepared["html"].as_str().unwrap_or("");
-    let html_body = prepared["body"]["source"] == "html";
-    options["withPlainText"] = json!(html_body);
-    options["withReader"] = json!(true);
-    let rendered = super::content::render(
-        &json!({"accountId":account,"messageId":id,"html":source,"options":options}),
-        renders,
-        live,
-    )?;
-    let has_html = !source.is_empty();
-    prepared
+    let source = prepared
         .as_object_mut()
         .ok_or("invalid_message")?
-        .remove("html");
-    if html_body && rendered["plainText"].is_object() {
-        prepared["body"] = json!({"text":rendered["plainText"]["text"],"source":"html","bodyDirection":rendered["plainText"]["bodyDirection"]});
-    }
+        .remove("html")
+        .and_then(|v| {
+            if let Value::String(source) = v {
+                Some(source)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    let has_html = !source.is_empty();
     // Only calendar material and header metadata cross for existing invitation /
     // unsubscribe views. MIME body and file octets remain in the native store.
     fn calendars(
@@ -404,8 +407,116 @@ fn projection(
     }
     let mut parts = Vec::new();
     calendars(&resource["payload"], 0, &mut 4096, &mut parts)?;
-    Ok(
-        json!({"id":id,"threadId":resource["threadId"],"labelIds":resource["labelIds"],"readerKey":key,"hasHtml":has_html,"payload":{"mimeType":"multipart/mixed","headers":resource["payload"]["headers"],"parts":parts},"nativeSummary":prepared["summary"],"nativeContent":prepared,"nativeRender":rendered}),
+    Ok(Prepared {
+        source_hash: Sha256::digest(source.as_bytes()).into(),
+        fallback: None,
+        source,
+        base: json!({"id":id,"threadId":resource["threadId"],"labelIds":resource["labelIds"],"hasHtml":has_html,"payload":{"mimeType":"multipart/mixed","headers":resource["payload"]["headers"],"parts":parts},"nativeSummary":prepared["summary"],"nativeContent":prepared}),
+    })
+}
+
+fn prepare_for_store(resource: Arc<Value>, id: &str, now: i64) -> Result<Prepared, &'static str> {
+    prepare_for_store_bounded(resource, id, now, MAX_BYTES)
+}
+fn prepare_for_store_bounded(
+    resource: Arc<Value>,
+    id: &str,
+    now: i64,
+    limit: usize,
+) -> Result<Prepared, &'static str> {
+    // Preserve the existing accepted resource limit. A pathological charset
+    // expansion can make prepared text larger than its original resource; keep
+    // that rare entry in its old bounded form instead of rejecting valid mail.
+    if serde_json::to_vec(resource.as_ref())
+        .map_err(|_| "invalid_message")?
+        .len()
+        > limit
+    {
+        return Err("reader_resource_too_large");
+    }
+    let prepared = prepare(resource.as_ref(), id, now)?;
+    if prepared.bytes()? <= limit {
+        return Ok(prepared);
+    }
+    Ok(Prepared {
+        source: String::new(),
+        base: Value::Null,
+        source_hash: [0; 32],
+        fallback: Some((resource, now)),
+    })
+}
+
+fn render_prepared(
+    prepared: &Prepared,
+    account: &str,
+    id: &str,
+    key: &str,
+    mut options: Value,
+    renders: &Arc<Mutex<cache::render::RenderCache>>,
+    live: Option<&Arc<Mutex<bool>>>,
+) -> Result<Value, &'static str> {
+    if let Some((resource, now)) = &prepared.fallback {
+        return render_prepared(
+            &prepare(resource.as_ref(), id, *now)?,
+            account,
+            id,
+            key,
+            options,
+            renders,
+            live,
+        );
+    }
+    let html_body = prepared.base["nativeContent"]["body"]["source"] == "html";
+    options["withPlainText"] = json!(html_body);
+    options["withReader"] = json!(true);
+    let mut revision = Sha256::new();
+    revision.update(prepared.source_hash);
+    revision.update(serde_json::to_vec(&options).map_err(|_| "invalid_params")?);
+    let revision = format!("{:x}", revision.finalize());
+    let mut rendered = super::content::render(
+        &json!({"accountId":account,"messageId":id,"html":prepared.source,"options":options}),
+        renders,
+        live,
+    )?;
+    // QML draws both sanitized document trees. Serialized HTML copies are
+    // redundant and must not cross the process boundary a second time.
+    rendered
+        .as_object_mut()
+        .ok_or("invalid_message")?
+        .remove("html");
+    if let Some(reader) = rendered["reader"].as_object_mut() {
+        reader.remove("html");
+    }
+    rendered["revision"] = json!(revision);
+    let mut result = prepared.base.clone();
+    if html_body && rendered["plainText"].is_object() {
+        result["nativeContent"]["body"] = json!({"text":rendered["plainText"]["text"],"source":"html","bodyDirection":rendered["plainText"]["bodyDirection"]});
+    }
+    result["readerKey"] = json!(key);
+    result["nativeRender"] = rendered;
+    Ok(result)
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn projection(
+    resource: &Value,
+    account: &str,
+    id: &str,
+    key: &str,
+    now: i64,
+    options: Value,
+    renders: &Arc<Mutex<cache::render::RenderCache>>,
+    live: Option<&Arc<Mutex<bool>>>,
+) -> Result<Value, &'static str> {
+    render_prepared(
+        &prepare(resource, id, now)?,
+        account,
+        id,
+        key,
+        options,
+        renders,
+        live,
     )
 }
 
@@ -451,7 +562,9 @@ mod tests {
     #[test]
     fn opaque_sources_are_bound_to_account_and_message() {
         let mut store = ReaderStore::default();
-        let key = store.put("a", "m", Arc::new(fixture())).unwrap();
+        let key = store
+            .put("a", "m", Arc::new(prepare(&fixture(), "m", 0).unwrap()))
+            .unwrap();
         assert!(store.get("b", "m", &key).is_err());
         assert!(store.get("a", "other", &key).is_err());
         assert!(store.get("a", "m", &key).is_ok());
@@ -549,6 +662,104 @@ mod tests {
         assert_eq!(
             message::content::prepare(&plain, 0).unwrap(),
             message::content::prepare_for_render(&plain, 0).unwrap()
+        );
+    }
+    #[test]
+    fn compact_render_preserves_both_documents_and_every_policy_field() {
+        let prepared = prepare(&fixture(), "m", 0).unwrap();
+        let options = json!({"withPlainText":true,"withReader":true});
+        let mut old = super::super::content::render(
+            &json!({"accountId":"a","messageId":"m","html":prepared.source,"options":options}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        old.as_object_mut().unwrap().remove("html");
+        old["reader"].as_object_mut().unwrap().remove("html");
+        let mut current = render_prepared(
+            &prepared,
+            "a",
+            "m",
+            "key",
+            options,
+            &Default::default(),
+            None,
+        )
+        .unwrap()["nativeRender"]
+            .take();
+        assert!(current.get("html").is_none());
+        assert!(current["reader"].get("html").is_none());
+        current.as_object_mut().unwrap().remove("revision");
+        assert_eq!(old, current);
+    }
+    #[test]
+    fn prepared_cache_discards_file_octets_and_reuses_prepared_identity() {
+        let mut resource = fixture();
+        resource["payload"]["parts"][1]["body"]["data"] = json!("A".repeat(2 * 1024 * 1024));
+        let prepared = Arc::new(prepare_for_store(Arc::new(resource), "m", 0).unwrap());
+        assert!(prepared.fallback.is_none());
+        assert!(prepared.bytes().unwrap() < 10000);
+        let mut store = ReaderStore::default();
+        let key = store.put("a", "m", prepared.clone()).unwrap();
+        assert!(Arc::ptr_eq(&prepared, &store.get("a", "m", &key).unwrap()));
+    }
+    #[test]
+    fn prepared_expansion_keeps_old_resource_bound_and_render_parity() {
+        let resource = Arc::new(
+            json!({"id":"m","payload":{"mimeType":"text/plain","headers":[],"body":{"data":"SGVsbG8"}}}),
+        );
+        let old_bytes = serde_json::to_vec(resource.as_ref()).unwrap().len();
+        let prepared = prepare_for_store_bounded(resource.clone(), "m", 0, old_bytes).unwrap();
+        assert!(prepared.fallback.is_some());
+        assert_eq!(prepared.bytes().unwrap(), old_bytes);
+        let rendered = render_prepared(
+            &prepared,
+            "a",
+            "m",
+            "k",
+            json!({}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            rendered,
+            projection(
+                resource.as_ref(),
+                "a",
+                "m",
+                "k",
+                0,
+                json!({}),
+                &Default::default(),
+                None
+            )
+            .unwrap()
+        );
+        assert!(prepare_for_store_bounded(resource, "m", 0, old_bytes - 1).is_err());
+    }
+    #[test]
+    fn revision_tracks_every_render_policy_and_source_without_instance_keys() {
+        let prepared = prepare(&fixture(), "m", 0).unwrap();
+        let render = |p: &Prepared, key: &str, options: Value| {
+            render_prepared(p,"a","m",key,options,&Default::default(),None).unwrap()["nativeRender"]["revision"].clone()
+        };
+        let first = render(&prepared, "first", json!({}));
+        assert_eq!(first, render(&prepared, "second", json!({})));
+        assert_ne!(
+            first,
+            render(&prepared, "first", json!({"allowRemoteImages":true}))
+        );
+        assert_ne!(
+            first,
+            render(&prepared, "first", json!({"keepColors":true}))
+        );
+        let mut resource = fixture();
+        resource["payload"]["parts"][0]["body"]["data"] =
+            json!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("<p>Different</p>"));
+        assert_ne!(
+            first,
+            render(&prepare(&resource, "m", 0).unwrap(), "first", json!({}))
         );
     }
 }

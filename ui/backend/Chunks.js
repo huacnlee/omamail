@@ -9,7 +9,7 @@ function accept(state, line) {
   var value
   try { value = JSON.parse(line) } catch (error) { return invalid() }
   if (!value || value.method !== "transport.chunk")
-    return state ? invalid() : { state: null, line: line }
+    return state ? invalid() : { state: null, line: line, value: value }
   var p = value.params
   if (value.jsonrpc !== "2.0" || Object.prototype.hasOwnProperty.call(value, "id")
       || !p || typeof p.transfer !== "string" || !/^[0-9]{1,20}$/.test(p.transfer)
@@ -32,4 +32,16 @@ function accept(state, line) {
   if (state.next < state.total) return { state: state, line: null }
   if (state.length !== state.size) return invalid()
   return { state: null, line: state.parts.join("") }
+}
+
+// Retain the frame's decoded value. A completed transfer needs one additional
+// decode of the assembled document; an ordinary response needs none.
+function decode(state, line) {
+  var accepted = accept(state, line)
+  if (accepted.error || accepted.line === null) return accepted
+  if (!Object.prototype.hasOwnProperty.call(accepted, "value")) {
+    try { accepted.value = JSON.parse(accepted.line) }
+    catch (error) { return { error: true, state: null, line: null } }
+  }
+  return accepted
 }

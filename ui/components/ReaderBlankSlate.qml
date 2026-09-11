@@ -126,7 +126,7 @@ Item {
             anchors.right: parent.horizontalCenter
             anchors.rightMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
-            text: modelData.key
+            text: Keymap.keycapLabel(modelData.key)
             color: root.dimColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption

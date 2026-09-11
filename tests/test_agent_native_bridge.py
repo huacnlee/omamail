@@ -236,6 +236,34 @@ emit({'type':'result','subtype':'success','result':'Visible answer'})
         self.assertFalse(marker.exists())
         self.assertFalse(list(self.store.glob('*/job.json')))
 
+    def test_legacy_cancelled_job_without_display_does_not_block_new_jobs(self):
+        self.call('list')
+        ident = '1' * 32
+        folder = self.store / ident
+        folder.mkdir(mode=0o700)
+        job = {'id':ident, 'accountId':'imap:ada@example.test', 'subject':'Legacy',
+               'messageId':'old', 'messageIds':['old'], 'draftKey':'',
+               'draftFingerprint':'', 'kind':'message', 'state':'cancelled',
+               'created':1, 'updated':1, 'resultReady':False}
+        for name, value in [('job.json',job),('context.json',{'prompt':'Legacy'})]:
+            path = folder / name
+            path.write_text(json.dumps(value))
+            path.chmod(0o600)
+        response = folder / 'response.txt'
+        response.write_text('Unverified legacy output must not become a resumable answer')
+        response.chmod(0o600)
+        listed = self.call('list')
+        self.assertEqual(listed[0]['state'], 'cancelled')
+        shown = self.call('show', ident)
+        self.assertEqual(shown['output'], '')
+        self.assertEqual(shown['transcript'], [])
+        self.assertFalse(shown['job']['canContinue'])
+        self.assertFalse((folder / 'display.json').exists())
+        new_id = self.new()
+        self.assertEqual(self.wait(new_id)['job']['state'], 'done')
+        self.call('forget', ident)
+        self.assertFalse(folder.exists())
+
     def test_saved_answer_session_mismatch_cannot_continue(self):
         ident=self.new();self.wait(ident)
         file=self.store/ident/'display.json'

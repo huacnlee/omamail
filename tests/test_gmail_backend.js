@@ -121,3 +121,24 @@ context.auth = {loggedIn:true, accountId:"", signedInProfile:{emailAddress:"new@
 const beforeBootstrap = calls
 context.getProfile((profile,error) => { assert.strictEqual(error, ""); assert.strictEqual(profile.email, "new@example.org") })
 assert.strictEqual(calls, beforeBootstrap, "initial identity comes from the native completed grant before registry creation")
+
+// A later UI selection cannot retarget an already captured destructive action.
+for (const name of ['trashMessage','untrashMessage','trashEach'])
+  vm.runInContext(method(name),context)
+const trashRequests=[]
+context.auth={loggedIn:true,accountId:'synthetic@example.org'}
+context.backend={executable:'/test/omamail',call(method,params,callback){trashRequests.push({method,params,callback})}}
+context.selectedId='first'
+context.trashMessage('first',()=>{})
+context.selectedId='second'
+assert.strictEqual(trashRequests[0].method,'gmail.trash')
+assert.strictEqual(trashRequests[0].params.id,'first')
+assert.strictEqual(trashRequests[0].params.accountId,'synthetic@example.org')
+context.trashMessage('second',()=>{})
+assert.strictEqual(trashRequests[1].params.id,'second')
+console.log('Gmail trash adapter preserves exact captured message IDs')
+for (const [code,status] of [['gmail_forbidden','403'],['gmail_length_required','411'],['gmail_rate_limited','429']]) {
+  const shown=context.backendError({message:code,body:'synthetic-secret'},'gmail.trash')
+  assert(shown.includes(status))
+  assert(!shown.includes('synthetic-secret'))
+}
