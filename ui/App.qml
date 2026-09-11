@@ -1703,7 +1703,7 @@ Item {
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
-            tooltipText: "AI... · Alt+G"
+            tooltipText: "AI... · alt+g"
             ActionIcon {
               anchors.centerIn: parent
               // The antenna makes the robot visually bottom-heavy.
@@ -2153,7 +2153,11 @@ Item {
         BackBar {
           id: pageBack
           objectName: "page-back"
-          x: Style.space(18) + (root.showSettings ? settingsArea.blockLeft : setup.x)
+          // Keep the fixed Back hit target above the full-height settings viewport.
+          z: 2
+          parent: root.showSettings && root.compact ? settingsHolder : body
+          x: (root.showSettings && root.compact ? 0 : Style.space(18))
+            + (root.showSettings ? settingsArea.blockLeft : setup.x)
           anchors.top: parent.top
           anchors.topMargin: Style.space(18)
           visible: root.showPage && Nav.depth(root.nav) > 1
@@ -2225,8 +2229,8 @@ Item {
         Item {
           id: settingsArea
           anchors.fill: parent
-          anchors.margins: Style.space(18)
-          anchors.topMargin: parent.pageTop
+          anchors.leftMargin: Style.space(18)
+          anchors.rightMargin: Style.space(18)
           visible: root.showSettings
 
           // The rail and the page are one block, centred together: the rail
@@ -2246,6 +2250,7 @@ Item {
             z: 1
             x: settingsArea.blockLeft
             anchors.top: parent.top
+            anchors.topMargin: body.pageTop
             width: Style.space(176)
             sections: settings.sections
             activeKey: Model.activeSettingsSection(settings.sections, settingsFlick.contentY)
@@ -2294,12 +2299,14 @@ Item {
             width: settingsFlick.width
             // Padded under the page so the last section can reach the top,
             // which is what makes a click on it land where it says.
-            implicitHeight: Model.settingsContentHeight(settings.sections,
-              settings.implicitHeight, settingsFlick.height)
+            implicitHeight: body.pageTop + Model.settingsContentHeight(settings.sections,
+              settings.implicitHeight, Math.max(0, settingsFlick.height - body.pageTop))
 
             SettingsPage {
               id: settings
               objectName: "settings-page"
+              // Initial spacing scrolls with the content; clipping starts at the header.
+              y: body.pageTop
               x: settingsArea.blockLeft + settingsArea.railWidth
               width: settingsArea.pageWidth
               service: root.service

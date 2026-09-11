@@ -34,6 +34,7 @@ class RuntimeTests(unittest.TestCase):
         self.binary = self.root / "runtime/bin/omamail"
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {}, clear=True).start()
+        patch.object(self.manager.Path, "home", return_value=self.root / "home").start()
         patch.object(self.manager.platform, "system", return_value="Linux").start()
         patch.object(self.manager.platform, "machine", return_value="x86_64").start()
         patch.object(self.manager, "download", side_effect=AssertionError("unexpected network")).start()
@@ -101,6 +102,98 @@ touch linked
         self.assertFalse(marker.exists())
         self.assertEqual(self.binary.read_bytes(), previous)
 
+    def local_checkout(self):
+        (self.root / ".git").mkdir()
+        (self.root / "Cargo.toml").write_text('[package]\nversion = "0.9.0"\n')
+        source = self.root / "target/release/omamail"
+        source.parent.mkdir(parents=True)
+        source.write_text("#!/bin/sh\nprintf 'omamail 0.9.0\\n'\n")
+        source.chmod(0o700)
+        return source
+
+    def test_local_checkout_can_advance_without_changing_release_pin(self):
+        self.local_checkout()
+        for command in ("install-local", "status"):
+            result = self.manager.run(command)
+            self.assertEqual(result["state"], "ready", result)
+            self.assertEqual(result["requiredVersion"], "0.9.0")
+            self.assertEqual(result["installedVersion"], "0.9.0")
+        self.assertEqual((self.root / "backend-version").read_text(), "0.8.2\n")
+        marker = self.root / "runtime/local-build.json"
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+        home = self.root / "home"
+        with patch.object(self.manager.Path, "home", return_value=home):
+            self.assertEqual(self.manager.run("enable-cli")["state"], "ready")
+
+    def test_local_marker_never_authorizes_changed_bytes_checkout_or_pin(self):
+        self.local_checkout()
+        self.assertEqual(self.manager.run("install-local")["state"], "ready")
+        previous = self.binary.read_bytes()
+        self.binary.write_bytes(previous + b"# modified\n")
+        self.assertEqual(self.manager.run("status")["state"], "mismatch")
+        self.binary.write_bytes(previous)
+        (self.root / "Cargo.toml").write_text('[package]\nversion = "0.9.1"\n')
+        self.assertEqual(self.manager.run("status")["state"], "mismatch")
+        (self.root / "Cargo.toml").write_text('[package]\nversion = "0.9.0"\n')
+        (self.root / ".git").rmdir()
+        self.assertEqual(self.manager.run("status")["state"], "mismatch")
+        (self.root / ".git").mkdir()
+        (self.root / "backend-version").write_text("0.8.3\n")
+        self.assertEqual(self.manager.run("status")["requiredVersion"], "0.8.3")
+
+    def test_release_install_keeps_exact_pin_and_clears_local_marker(self):
+        self.local_checkout()
+        self.assertEqual(self.manager.run("install-local")["state"], "ready")
+        self.release(self.archive(version="0.9.0"))
+        self.assertEqual(self.manager.run("install")["state"], "error")
+        self.assertEqual(self.manager.run("status")["state"], "ready")
+        self.release(self.archive())
+        result = self.manager.run("install")
+        self.assertEqual(result["state"], "ready", result)
+        self.assertEqual(result["requiredVersion"], "0.8.2")
+        self.assertFalse((self.root / "runtime/local-build.json").exists())
+        self.assertEqual(self.manager.run("status")["requiredVersion"], "0.8.2")
+
+    def test_unsafe_local_marker_refused_without_touching_target(self):
+        self.local_checkout()
+        self.assertEqual(self.manager.run("install-local")["state"], "ready")
+        marker = self.root / "runtime/local-build.json"
+        marker.chmod(0o644)
+        self.assertEqual(self.manager.run("status")["state"], "error")
+        outside = self.root / "outside"
+        marker.rename(outside)
+        marker.symlink_to(outside)
+        before = outside.read_bytes()
+        for command in ("status", "install-local", "uninstall"):
+            self.assertEqual(self.manager.run(command)["state"], "error")
+            self.assertEqual(outside.read_bytes(), before)
+
+    def test_local_override_is_removed_on_uninstall(self):
+        self.local_checkout()
+        self.assertEqual(self.manager.run("install-local")["state"], "ready")
+        self.assertEqual(self.manager.run("uninstall")["state"], "missing")
+        self.assertFalse((self.root / "runtime/local-build.json").exists())
+
+    def test_failed_atomic_replacement_preserves_local_runtime_and_marker(self):
+        source = self.local_checkout()
+        self.assertEqual(self.manager.run("install-local")["state"], "ready")
+        previous = self.binary.read_bytes()
+        marker = self.root / "runtime/local-build.json"
+        previous_marker = marker.read_bytes()
+        source.write_bytes(previous + b"# new build\n")
+        replace = os.replace
+        def fail_binary(src, dst):
+            if dst == self.binary:
+                raise OSError("synthetic replacement failure")
+            return replace(src, dst)
+        self.release(self.archive())
+        for command in ("install-local", "install"):
+            with patch.object(self.manager.os, "replace", side_effect=fail_binary):
+                self.assertEqual(self.manager.run(command)["state"], "error")
+            self.assertEqual(self.binary.read_bytes(), previous)
+            self.assertEqual(marker.read_bytes(), previous_marker)
+            self.assertEqual(self.manager.run("status")["state"], "ready")
+
     def archive(self, name="omamail", kind=tarfile.REGTYPE, version="0.8.2", extra=False):
         content = ("#!/bin/sh\nprintf 'omamail " + version + "\\n'\n").encode()
         stream = io.BytesIO()
@@ -128,7 +221,7 @@ touch linked
 
     def test_missing_status_never_downloads(self):
         result = self.manager.run("status")
-        self.assertEqual(result, dict(state="missing", requiredVersion="0.8.2", installedVersion="", executable=str(self.binary), error=""))
+        self.assertEqual(result, dict(state="missing", requiredVersion="0.8.2", installedVersion="", executable=str(self.binary), error="", cliInstalled=False))
         self.assertFalse(self.binary.parent.exists())
 
     def test_failed_mutations_exit_nonzero_with_json_through_wrappers(self):
@@ -326,8 +419,37 @@ touch linked
             link.unlink()
             self.assertEqual(self.manager.run("enable-cli")["state"], "ready")
             self.assertEqual(os.readlink(link), str(self.binary))
+            self.assertTrue(self.manager.run("status")["cliInstalled"])
+            self.assertTrue(self.manager.run("enable-cli")["cliInstalled"])
             self.assertEqual(self.manager.run("disable-cli")["state"], "ready")
+            self.assertFalse(self.manager.run("status")["cliInstalled"])
             self.assertFalse(link.is_symlink())
+
+    def test_cli_status_requires_exact_owned_link_and_valid_private_runtime(self):
+        self.release(self.archive())
+        self.assertFalse(self.manager.run("install")["cliInstalled"])
+        link = self.root / "home/.local/bin/omamail"
+        link.parent.mkdir(parents=True)
+        foreign = self.root / "foreign"
+        foreign.write_text("#!/bin/sh\ntouch " + str(self.root / "executed") + "\n")
+        foreign.chmod(0o700)
+        link.symlink_to(foreign)
+        self.assertFalse(self.manager.run("status")["cliInstalled"])
+        self.assertEqual(self.manager.run("disable-cli")["state"], "error")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), str(foreign))
+        self.assertTrue(foreign.is_file())
+        self.assertFalse((self.root / "executed").exists())
+        link.unlink()
+        link.write_text("foreign regular file")
+        self.assertFalse(self.manager.run("status")["cliInstalled"])
+        link.unlink()
+        link.symlink_to(self.binary)
+        self.assertTrue(self.manager.run("status")["cliInstalled"])
+        self.binary.unlink()
+        self.assertFalse(self.manager.run("status")["cliInstalled"])
+        self.old()
+        self.assertFalse(self.manager.run("status")["cliInstalled"])
 
 
 if __name__ == "__main__":

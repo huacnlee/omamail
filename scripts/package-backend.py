@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import gzip
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -17,7 +18,7 @@ def check(root, tag=None, require_pin=False):
     version = tomllib.loads((root / 'Cargo.toml').read_text())['package']['version']
     if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
         raise ValueError('expected canonical MAJOR.MINOR.PATCH')
-    versions = {'manifest': json.loads((root / 'manifest.json').read_text())['version']}
+    versions = {}
     packages = tomllib.loads((root / 'Cargo.lock').read_text())['package']
     versions['lock'] = next(p['version'] for p in packages if p['name'] == 'omamail')
     if require_pin:
@@ -27,6 +28,142 @@ def check(root, tag=None, require_pin=False):
     if any(value != version for value in versions.values()):
         raise ValueError(f'versions disagree with Cargo {version}: {versions}')
     return version
+
+
+PROVENANCE_LIMIT = 4 * 1024 * 1024
+
+
+def provenance(root):
+    """Fingerprint source inputs, independent of checkout paths and mtimes.
+
+    Include non-Rust resources under src and literal include macro dependencies
+    outside it. Dynamic include expressions fail closed: add explicit support
+    before using them, rather than publishing an incomplete fingerprint.
+    """
+    root = root.resolve()
+    version = check(root)
+    # This is a reviewed input inventory, not a Cargo build sandbox. A build
+    # script can read arbitrary files and environment values; new build scripts,
+    # compiler flags or workflow/toolchain changes require build-config review.
+    manifest = tomllib.loads((root / 'Cargo.toml').read_text())
+    if 'workspace' in manifest or 'workspace' in manifest.get('package', {}):
+        raise ValueError('workspace inputs require explicit provenance support')
+
+    def reject_local_dependencies(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == 'path':
+                    raise ValueError('Cargo path dependencies require explicit provenance support')
+                reject_local_dependencies(child)
+        elif isinstance(value, list):
+            for child in value:
+                reject_local_dependencies(child)
+
+    for key in ('dependencies', 'dev-dependencies', 'build-dependencies', 'target', 'patch', 'replace'):
+        reject_local_dependencies(manifest.get(key, {}))
+    for kind in ('lib', 'bin', 'example', 'test', 'bench'):
+        targets = manifest.get(kind, [])
+        if isinstance(targets, dict):
+            targets = [targets]
+        for target in targets:
+            if 'path' in target:
+                resolved = Path(os.path.abspath(root / target['path']))
+                if not resolved.is_relative_to(root / 'src'):
+                    raise ValueError('Cargo target paths outside src require explicit provenance support')
+    build = manifest.get('package', {}).get('build')
+    if build not in (None, False, True, 'build.rs'):
+        raise ValueError('custom build script paths require explicit provenance support')
+    paths = set()
+
+    def add(path):
+        relative = path.relative_to(root)
+        if any(part in ('.', '..') for part in relative.parts):
+            raise ValueError('noncanonical source path')
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError('source inputs must not be symlinks')
+        if not path.is_file():
+            raise ValueError('missing source input: ' + relative.as_posix())
+        paths.add(path)
+        if len(paths) > 10000:
+            raise ValueError('too many source inputs')
+
+    def add_reference(parent, name):
+        target = parent / name
+        current = Path(target.anchor)
+        for part in target.parts[1:]:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError('source inputs must not be symlinks')
+        add(Path(os.path.abspath(target)))
+
+    if not (root / 'src').is_dir() or (root / 'src').is_symlink():
+        raise ValueError('missing or unsafe src directory')
+    for path in (root / 'src').rglob('*'):
+        if path.is_symlink():
+            raise ValueError('source inputs must not be symlinks')
+        if path.is_file():
+            add(path)
+    for name in ('Cargo.toml', 'Cargo.lock', 'build.rs', 'rust-toolchain',
+                 'rust-toolchain.toml', '.cargo/config', '.cargo/config.toml'):
+        path = root / name
+        if path.exists() or path.is_symlink():
+            add(path)
+    visited = set()
+    while True:
+        pending = sorted(path for path in paths - visited if path.suffix == '.rs')
+        if not pending:
+            break
+        for path in pending:
+            visited.add(path)
+            source = path.read_text(encoding='utf-8')
+            if not path.is_relative_to(root / 'src') and re.search(r'\bmod\s+\w+\s*;', source):
+                raise ValueError('implicit modules outside src require explicit provenance support')
+            if re.search(r'#\s*\[\s*cfg_attr\b[^\]]*\bpath\s*=', source):
+                raise ValueError('conditional module paths require explicit provenance support')
+            for match in re.finditer(r'#\s*\[\s*path\s*=', source):
+                literal = re.match(r'\s*"([^"\\]*)"\s*\]', source[match.end():])
+                if not literal:
+                    raise ValueError('module path requires a literal source path')
+                add_reference(path.parent, literal[1])
+            for match in re.finditer(r'\binclude(?:_str|_bytes)?\s*!\s*\(', source):
+                literal = re.match(r'\s*"([^"\\]*)"\s*\)', source[match.end():])
+                if not literal:
+                    raise ValueError('include macro requires a literal source path')
+                add_reference(path.parent, literal[1])
+    files = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+             for path in sorted(paths)}
+    canonical = json.dumps(files, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+    return {'schemaVersion': 1, 'backendVersion': version,
+            'sourceSha256': hashlib.sha256(canonical).hexdigest(), 'sourceFiles': files}
+
+
+def check_provenance(root, manifest):
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError('build provenance must be a regular file')
+    with manifest.open('rb') as stream:
+        raw = stream.read(PROVENANCE_LIMIT + 1)
+    if len(raw) > PROVENANCE_LIMIT:
+        raise ValueError('build provenance exceeds size limit')
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate build provenance field')
+            result[key] = value
+        return result
+
+    try:
+        saved = json.loads(raw, object_pairs_hook=unique)
+    except (UnicodeError, RecursionError) as error:
+        raise ValueError('malformed build provenance') from error
+    expected = provenance(root)
+    if (not isinstance(saved, dict) or type(saved.get('schemaVersion')) is not int
+            or saved != expected):
+        raise ValueError('published backend build inputs do not match this checkout; publish a new backend version')
 
 
 def package(binary, arch, output):
@@ -114,6 +251,12 @@ def main():
     cmd = sub.add_parser('verify')
     cmd.add_argument('directory', type=Path)
     cmd.add_argument('--arch', choices=ARCHES, action='append')
+    cmd = sub.add_parser('provenance')
+    cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    cmd.add_argument('--output', type=Path, default=Path('backend-build.json'))
+    cmd = sub.add_parser('check-provenance')
+    cmd.add_argument('manifest', type=Path)
+    cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     cmd = sub.add_parser('pin')
     cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     cmd.add_argument('--branch', required=True)
@@ -126,6 +269,10 @@ def main():
             package(args.binary, args.arch, args.output)
         elif args.command == 'verify':
             verify(args.directory, args.arch or ARCHES)
+        elif args.command == 'provenance':
+            args.output.write_text(json.dumps(provenance(args.root), indent=2, sort_keys=True) + '\n')
+        elif args.command == 'check-provenance':
+            check_provenance(args.root, args.manifest)
         else:
             pin(args.root, args.branch, args.expected)
     except (ValueError, OSError, KeyError, StopIteration, tarfile.TarError, subprocess.CalledProcessError) as error:

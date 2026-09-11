@@ -1924,7 +1924,7 @@ DropArea {
 
       IconTextButton {
         iconName: "send"
-        tooltipText: "Send · Ctrl+Enter"
+        tooltipText: "Send · ctrl+enter"
         // A send in flight or parked is no reason to hold the next: each is
         // parked in its account's line and goes in turn.
         text: "Send"

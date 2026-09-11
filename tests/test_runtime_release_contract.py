@@ -50,6 +50,7 @@ class RuntimeReleaseContract(unittest.TestCase):
 
             installed = root / "runtime/bin/omamail"
             with patch.object(runtime, "ROOT", root), patch.object(runtime, "BINARY", installed), \
+                    patch.object(runtime.Path, "home", return_value=root / "home"), \
                     patch.object(runtime.platform, "system", return_value="Linux"), \
                     patch.object(runtime.platform, "machine", return_value="x86_64"), \
                     patch.dict(runtime.os.environ, {"OMAMAIL_BIN": ""}), \

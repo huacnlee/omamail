@@ -51,7 +51,8 @@ The workflow tests and builds locked native musl binaries on Linux x86_64 and
 aarch64, executes each version probe, rejects dynamic ELF dependencies, and
 packages `omamail-linux-x86_64.tar.gz` and `omamail-linux-aarch64.tar.gz`. Each
 contains exactly one regular executable named `omamail`. A combined SHA256SUMS
-is published with both assets only after both build jobs pass. The new draft
+and `backend-build.json` are published with both assets only after both build jobs pass.
+Both native build jobs produce identical source fingerprints before publication. The new draft
 release is completed, made public, downloaded again and verified before a
 follow-up commit changes only backend-version on the release's source branch.
 
@@ -71,31 +72,52 @@ push because it suppresses subsequent workflow triggers. Release runs only by
 explicit dispatch or a push to `release/backend/**` of trusted code; restrict
 write access to these release branches. PR CI has read-only permissions and never
 receives that secret. Require **Published backend merge gate** in branch
-protection. That check requires Cargo/lock/manifest/pin equality and downloads
-and verifies the actual public release archives. Workflow and repository policy
-changes themselves need trusted review. No repository settings are changed by
+protection. That check requires Cargo/lock/pin equality, downloads and verifies
+the actual public release archives, and compares `backend-build.json` against
+the PR checkout. It fingerprints Rust sources and resources, Cargo profiles and
+lockfile, build scripts, toolchain/config files, and literal compile-time includes.
+A Rust change without a version bump therefore fails even if the old executable
+prints the expected version. Ordinary QML and plugin manifest version changes
+can reuse the backend: plugin and backend versions are independent.
+
+For a combined QML/Rust PR: test locally, prepare a new backend version, publish
+it from the trusted PR source, then update backend-version after verification.
+The required merge check must pass before merging; publishing after merging would
+leave plugin users exposed to the mismatch. Build-input discovery, workflow and
+repository policy changes themselves need trusted review. No repository settings are changed by
 these scripts.
 
-Bootstrap status: v0.8.2 is already public without backend assets. Do not attach
-assets to or overwrite that old release. The implementation retains 0.8.2, so
-the merge gate intentionally fails until a new version (for example 0.8.3) is
-prepared, published from the feature branch, and pinned after verification.
-Publication, credentials and branch protection setup are maintainer operations;
-this implementation does not claim they have happened.
+Bootstrap status: v0.9.0 contains the optimized x86_64 and aarch64 static
+backends. The published packages were checked against the successful native CI
+artifacts from f38c2ac; its source fingerprint was added and downloaded again
+before advancing the pin. v0.8.2 remains unchanged. The first CI publication
+attempt failed because RELEASE_TOKEN lacked permission to create a release;
+the release was completed separately. Future automated publication still requires
+a contents-write token as described above.
 
 ## Local verification
 
 To try the latest checkout in the desktop, run `make install`. It first builds
 with `cargo build --locked --release` into this checkout's `target/` directory,
-regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary against
-`backend-version` before atomically replacing `runtime/bin/omamail`. Only after
+regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary before
+atomically replacing `runtime/bin/omamail`. When its version is ahead of the
+release pin, it must match the Git checkout's Cargo package version. The explicit
+local installation records a private `runtime/local-build.json` marker binding
+that version, the current release pin and the installed binary's SHA-256.
+Status and CLI activation accept this local version only while the checkout,
+Cargo version, pin and binary bytes still match. No tracked pin is changed.
+Only after
 that succeeds does it link the plugin and restart the shell. It does not need
 published backend assets. Failed builds or version checks preserve the old runtime.
 
 `make install-backend-local` performs only the build and local runtime replacement.
 Restart the shell afterwards to replace an already running backend process.
 Unset `OMAMAIL_BIN` in the shell's startup environment to use the private runtime.
-The separate `scripts/install-backend.sh` command remains the release downloader.
+The separate `scripts/install-backend.sh` command remains the release downloader:
+it always uses `backend-version`, ignores the local override when selecting a
+release, and clears the marker after verification as part of installation.
+Uninstall also removes the marker. Local version overrides require Python 3.11
+or newer for Cargo TOML parsing; normal pinned installations do not.
 
 Run `make test-local` on a machine with Rust, Qt 6 test tooling and Quickshell.
 It runs the existing Rust, JavaScript, transport/security and offscreen QML

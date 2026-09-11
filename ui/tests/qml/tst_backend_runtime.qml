@@ -28,11 +28,12 @@ Item {
         if (runtime.children[i].command) return runtime.children[i]
       fail("Missing runtime process")
     }
-    function reply(runtime, state, version, error) {
+    function reply(runtime, state, version, error, cliInstalled) {
       var process = processOf(runtime)
       process.running = false
       process.stdout.read(JSON.stringify({ state: state, requiredVersion: "0.8.2",
-        installedVersion: version, executable: "/synthetic/plugin/runtime/bin/omamail", error: error || "" }))
+        installedVersion: version, executable: "/synthetic/plugin/runtime/bin/omamail", error: error || "",
+        cliInstalled: cliInstalled === true }))
       process.exited(error ? 1 : 0)
     }
     function test_missing_requires_explicit_install() {
@@ -71,6 +72,32 @@ Item {
       runtime.enableCli()
       runtime.disableCli()
       compare(processOf(runtime).command[2], "status")
+    }
+    function test_cli_install_updates_state_and_cannot_repeat() {
+      var runtime = make()
+      reply(runtime, "ready", "0.8.2")
+      compare(runtime.cliInstalled, false)
+      runtime.enableCli()
+      compare(processOf(runtime).command[2], "enable-cli")
+      reply(runtime, "ready", "0.8.2", "", true)
+      compare(runtime.cliInstalled, true)
+      runtime.enableCli()
+      compare(processOf(runtime).running, false)
+      runtime.disableCli()
+      compare(processOf(runtime).command[2], "disable-cli")
+      reply(runtime, "ready", "0.8.2", "", false)
+      compare(runtime.cliInstalled, false)
+    }
+    function test_initial_status_recognizes_existing_cli_link() {
+      var runtime = make()
+      reply(runtime, "ready", "0.8.2", "", true)
+      compare(runtime.cliInstalled, true)
+      runtime.enableCli()
+      compare(processOf(runtime).command[2], "status")
+      compare(processOf(runtime).running, false)
+      runtime.refresh()
+      reply(runtime, "error", "", "Probe failed", true)
+      compare(runtime.cliInstalled, false)
     }
     function readyBackend(runtime) {
       var backend = createTemporaryObject(backendFactory, parent, { runtime: runtime })

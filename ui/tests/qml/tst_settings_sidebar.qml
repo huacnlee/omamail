@@ -331,6 +331,29 @@ Item {
 
     // Narrow, the rail has no room; the page keeps the whole width and its
     // own scroll, which is all it ever had.
+    function test_back_button_is_clickable_data() {
+      return [{tag:"wide",width:980},{tag:"compact",width:600}]
+    }
+    function test_back_button_is_clickable(data) {
+      window().width=data.width
+      waitForRendering(app)
+      var back=named(app,"page-back")
+      verify(back.visible)
+      compare(back.parent.childAt(back.x+back.width/2,back.y+back.height/2),back,"Back is above the scroll viewport")
+      mouseClick(back,back.width/2,back.height/2)
+      tryCompare(app,"showSettings",false)
+    }
+
+    function test_settings_viewport_reaches_header_and_content_inset_scrolls() {
+      var view=flick()
+      var page=named(app,"settings-page")
+      var rail=named(app,"settings-sidebar")
+      compare(view.mapToItem(rail.parent.parent,0,0).y,0)
+      verify(page.y>0,"initial spacing belongs to scrollable content")
+      view.contentY=page.y
+      compare(page.mapToItem(view,0,0).y,0,"content can reach the header edge")
+    }
+
     function test_a_narrow_window_has_no_rail() {
       window().width = 600
       waitForRendering(app)
@@ -338,6 +361,11 @@ Item {
       verify(rail && !rail.visible)
       var page = named(app, "settings-page")
       verify(page.visible, "the page itself is still drawn")
+      var back=named(app,"page-back")
+      var view=flick()
+      var before=back.mapToItem(view,0,0).y
+      view.contentY=40
+      compare(back.mapToItem(view,0,0).y,before-40,"compact Back scrolls away with content")
     }
   }
 }

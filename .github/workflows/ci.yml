@@ -51,8 +51,10 @@ jobs:
           # Missing bootstrap assets intentionally fail this required check.
           test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = false
           mkdir published
-          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS
+          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-build.json
           python3 scripts/package-backend.py verify published
+          # Same version text is insufficient: the Rust build inputs must match.
+          python3 scripts/package-backend.py check-provenance published/backend-build.json
           mkdir probe
           tar -xzf "published/omamail-linux-$ARCH.tar.gz" -C probe
           test "$(probe/omamail --version)" = "omamail $version"

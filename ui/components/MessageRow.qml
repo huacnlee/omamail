@@ -368,8 +368,8 @@ Rectangle {
       PanelToolTip {
         visible: checkMouse.containsMouse
         text: (root.checked ? "Deselect" : "Select") + " · "
-          + Keymap.displayFor(Keymap.byId("toggleCheck"))
-          + " · Ctrl+click toggles; Shift+click selects or clears a range"
+          + Keymap.keycapLabel(Keymap.displayFor(Keymap.byId("toggleCheck")))
+          + " · ctrl+click toggles; shift+click selects or clears a range"
         fontFamily: root.panelFontFamily
       }
     }

@@ -37,6 +37,128 @@ class ReleaseTests(unittest.TestCase):
         (self.root / 'Cargo.lock').write_text('[[package]]\nname = "omamail"\nversion = "0.8.1"\n')
         self.assertNotEqual(self.run_helper('check', '--root', self.root).returncode, 0)
 
+    def source_fixture(self):
+        self.metadata()
+        (self.root / 'src').mkdir()
+        (self.root / 'src/main.rs').write_text('fn main() {}')
+        (self.root / 'ui').mkdir()
+        (self.root / 'ui/App.qml').write_text('Item {}')
+        self.build_manifest = self.root / 'backend-build.json'
+        result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def provenance_matches(self):
+        return self.run_helper('check-provenance', self.build_manifest, '--root', self.root).returncode == 0
+
+    def test_provenance_is_deterministic_and_ui_only_changes_are_independent(self):
+        self.source_fixture()
+        first = self.build_manifest.read_bytes()
+        self.assertTrue(self.provenance_matches())
+        (self.root / 'ui/App.qml').write_text('Item { width: 200 }')
+        (self.root / 'manifest.json').write_text('{"version":"0.8.3"}')
+        self.assertTrue(self.provenance_matches())
+        result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(first, self.build_manifest.read_bytes())
+
+    def test_same_version_source_addition_modification_deletion_are_detected(self):
+        self.source_fixture()
+        source = self.root / 'src/main.rs'
+        for path, value in ((source, 'fn main() { panic!(); }'),
+                            (self.root / 'src/new.json', '{}'),
+                            (self.root / 'Cargo.toml', '[profile.release]\nstrip = true\n'),
+                            (self.root / 'rust-toolchain.toml', '[toolchain]\nchannel="stable"\n'),
+                            (self.root / 'build.rs', 'fn main() {}')):
+            with self.subTest(path=path.name):
+                original = path.read_bytes() if path.exists() else None
+                path.write_bytes((original or b'') + value.encode())
+                self.assertFalse(self.provenance_matches())
+                if original is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(original)
+                self.assertTrue(self.provenance_matches())
+        source.unlink()
+        self.assertFalse(self.provenance_matches())
+
+    def test_include_resources_and_cargo_configuration_are_inputs(self):
+        self.source_fixture()
+        (self.root / 'src/main.rs').write_text('const X: &str = include_str!("../ui/data.txt");')
+        (self.root / 'ui/data.txt').write_text('embedded')
+        (self.root / '.cargo').mkdir()
+        config = self.root / '.cargo/config.toml'
+        config.write_text('[build]\njobs=2\n')
+        result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.provenance_matches())
+        (self.root / 'ui/data.txt').write_text('changed')
+        self.assertFalse(self.provenance_matches())
+        (self.root / 'ui/data.txt').write_text('embedded')
+        config.unlink()
+        self.assertFalse(self.provenance_matches())
+
+    def test_uninventoried_cargo_inputs_fail_closed(self):
+        self.source_fixture()
+        cargo = self.root / 'Cargo.toml'
+        original = cargo.read_text()
+        additions = [
+            '[workspace]\nmembers=["other"]\n',
+            '[dependencies]\nhelper={path="helper"}\n',
+            '[target.\'cfg(unix)\'.dependencies]\nhelper={path="helper"}\n',
+            '[patch.crates-io]\nhelper={path="helper"}\n',
+            '[[bin]]\nname="other"\npath="outside/main.rs"\n',
+            '[lib]\npath="outside/lib.rs"\n',
+        ]
+        for addition in additions:
+            with self.subTest(addition=addition):
+                cargo.write_text(original + addition)
+                result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('explicit provenance support', result.stderr)
+        cargo.write_text(original + 'build="tools/build.rs"\n')
+        self.assertNotEqual(self.run_helper('provenance', '--root', self.root,
+                                          '--output', self.build_manifest).returncode, 0)
+
+    def test_external_literal_module_path_is_fingerprinted(self):
+        self.source_fixture()
+        external = self.root / 'external'
+        external.mkdir()
+        module = external / 'helper.rs'
+        module.write_text('pub fn helper() {}')
+        (self.root / 'src/main.rs').write_text('#[path = "../external/helper.rs"] mod helper;')
+        result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.provenance_matches())
+        module.write_text('pub fn helper() { panic!(); }')
+        self.assertFalse(self.provenance_matches())
+        module.write_text('mod more;')
+        result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('explicit provenance support', result.stderr)
+
+    def test_untrusted_provenance_and_unsafe_sources_fail_closed(self):
+        self.source_fixture()
+        original = self.build_manifest.read_text()
+        payloads = ['[]', '{}', '{', original.replace('"schemaVersion": 1', '"schemaVersion": true'),
+                    original.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1'),
+                    original.replace('0.8.2', '0.8.1'), original.replace('{', '{"extra": 1,', 1), ' ' * (4 * 1024 * 1024 + 1)]
+        for payload in payloads:
+            with self.subTest(length=len(payload)):
+                self.build_manifest.write_text(payload)
+                self.assertFalse(self.provenance_matches())
+        self.build_manifest.write_text(original)
+        real_manifest = self.root / 'real-build.json'
+        self.build_manifest.rename(real_manifest)
+        self.build_manifest.symlink_to(real_manifest)
+        self.assertFalse(self.provenance_matches())
+        self.build_manifest.unlink()
+        real_manifest.rename(self.build_manifest)
+        (self.root / 'src/linked').symlink_to(self.root / 'ui/App.qml')
+        self.assertFalse(self.provenance_matches())
+        (self.root / 'src/linked').unlink()
+        (self.root / 'src/main.rs').write_text('include!(concat!(env!("OUT_DIR"), "/generated.rs"));')
+        self.assertFalse(self.provenance_matches())
+
     def test_archive_has_only_regular_executable_and_checksum_detects_corruption(self):
         binary = self.root / 'binary'
         binary.write_bytes(b'example binary')

@@ -11,6 +11,7 @@ Item {
   property string installedVersion: ""
   property string executable: ""
   property string error: ""
+  property bool cliInstalled: false
   readonly property bool development: developmentExecutable !== ""
   readonly property bool busy: operation.running
   readonly property bool canInstall: Rules.canInstall(state, busy, development)
@@ -22,8 +23,8 @@ Item {
 
   function refresh() { run("status") }
   function install() { if (canInstall) run("install") }
-  function enableCli() { if (!development && state === "ready") run("enable-cli") }
-  function disableCli() { if (!development) run("disable-cli") }
+  function enableCli() { if (!development && !cliInstalled && state === "ready") run("enable-cli") }
+  function disableCli() { if (!development && cliInstalled) run("disable-cli") }
 
   function run(command) {
     if (busy || pluginDir === "") return
@@ -49,6 +50,7 @@ Item {
     executable = exitCode === 0 ? result.executable : ""
     error = result.error
     state = exitCode !== 0 && result.state === "ready" ? "error" : result.state
+    cliInstalled = exitCode === 0 && state === "ready" && !development && result.cliInstalled === true
     if (exitCode !== 0 && result.state === "ready")
       error = "Backend runtime operation failed"
     if (state === "ready") validated()
@@ -63,6 +65,7 @@ Item {
       root.timedOut = true
       root.state = "error"
       root.executable = ""
+      root.cliInstalled = false
       root.error = "Backend runtime operation timed out. Retry the check."
       operation.running = false
     }

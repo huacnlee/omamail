@@ -2,7 +2,7 @@
 
 function decode(raw) {
   var failed = { state: "error", requiredVersion: "", installedVersion: "",
-    executable: "", error: "Could not read backend runtime status", development: false }
+    executable: "", error: "Could not read backend runtime status", development: false, cliInstalled: false }
   var value
   try { value = JSON.parse(raw) } catch (e) { return failed }
   if (!value || ["ready", "missing", "mismatch", "unsupported", "error"].indexOf(value.state) < 0
@@ -15,7 +15,8 @@ function decode(raw) {
   return { state: value.state, requiredVersion: value.requiredVersion,
     installedVersion: value.installedVersion,
     executable: value.state === "ready" ? value.executable : "",
-    error: value.error, development: value.development === true }
+    error: value.error, development: value.development === true,
+    cliInstalled: value.state === "ready" && value.development !== true && value.cliInstalled === true }
 }
 
 function canInstall(state, busy, development) {

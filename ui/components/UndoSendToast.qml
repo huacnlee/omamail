@@ -46,7 +46,7 @@ Rectangle {
     Button {
       objectName: "undo-send-button"
       anchors.verticalCenter: parent.verticalCenter
-      text: root.queuedCount > 1 ? "Undo last  Alt+Z" : "Undo  Alt+Z"
+      text: root.queuedCount > 1 ? "Undo last  alt+z" : "Undo  alt+z"
       foreground: root.accentColor
       accent: root.accentColor
       bordered: true

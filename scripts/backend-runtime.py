@@ -100,6 +100,71 @@ def version_of(executable):
         process.stdout.close()
 
 
+def checkout_version():
+    """A local build may advance Cargo before a release has advanced the pin."""
+    import tomllib
+    require((ROOT / ".git").exists(), "Local version overrides require a Git checkout.")
+    safe_path(ROOT / "Cargo.toml")
+    with (ROOT / "Cargo.toml").open("rb") as source:
+        version = tomllib.load(source)["package"]["version"]
+    require(isinstance(version, str) and VERSION.fullmatch(version), "Invalid Cargo package version.")
+    return version
+
+
+def local_required(required):
+    """Only an explicit installation of these exact bytes overrides the release pin."""
+    local_build = ROOT / "runtime/local-build.json"
+    safe_path(local_build)
+    if not local_build.exists():
+        return required
+    descriptor = os.open(local_build, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as source:
+        metadata = os.fstat(source.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.getuid()
+                and metadata.st_nlink == 1 and metadata.st_mode & 0o077 == 0,
+                "Local build marker must be a private regular file.")
+        raw = source.read(1025)
+    require(len(raw) <= 1024, "Invalid local build marker.")
+    marker = json.loads(raw)
+    require(isinstance(marker, dict) and set(marker) == {"version", "releasePin", "sha256"}
+            and isinstance(marker["version"], str) and VERSION.fullmatch(marker["version"])
+            and isinstance(marker["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", marker["sha256"]),
+            "Invalid local build marker.")
+    if marker["releasePin"] != required or not (ROOT / ".git").exists() or not BINARY.exists():
+        return required
+    if checkout_version() != marker["version"]:
+        return required
+    with BINARY.open("rb") as binary:
+        digest = hashlib.sha256()
+        size = 0
+        while chunk := binary.read(1024 * 1024):
+            size += len(chunk)
+            require(size <= BINARY_LIMIT, "Local backend exceeded its size limit.")
+            digest.update(chunk)
+    return marker["version"] if digest.hexdigest() == marker["sha256"] else required
+
+
+def replace_runtime(candidate, marker=None):
+    """Keep the old override if the atomic executable replacement fails."""
+    local_build = ROOT / "runtime/local-build.json"
+    safe_path(BINARY)
+    safe_path(local_build)
+    backup = candidate.parent / "previous-local-build.json"
+    had_marker = local_build.exists()
+    if had_marker:
+        os.replace(local_build, backup)
+    try:
+        if marker is not None:
+            os.replace(marker, local_build)
+        os.replace(candidate, BINARY)
+    except BaseException:
+        if had_marker:
+            os.replace(backup, local_build)
+        else:
+            local_build.unlink(missing_ok=True)
+        raise
+
+
 def release_url_allowed(url):
     parsed = urllib.parse.urlsplit(url)
     return (parsed.scheme == "https" and parsed.hostname in
@@ -158,6 +223,7 @@ def locked():
 
 def install(required, architecture):
     safe_path(BINARY)
+    safe_path(ROOT / "runtime/local-build.json")
     asset = "omamail-linux-" + architecture + ".tar.gz"
     base = "https://github.com/huacnlee/omamail/releases/download/v" + required + "/"
     with deadline():
@@ -195,8 +261,7 @@ def install(required, architecture):
             candidate.chmod(0o700)
             require(version_of(candidate) == required, "Downloaded backend has the wrong version.")
             require(pin() == required, "Backend version pin changed during installation.")
-            safe_path(BINARY)
-            os.replace(candidate, BINARY)
+            replace_runtime(candidate)
 
 
 def install_local(required):
@@ -215,10 +280,21 @@ def install_local(required):
             destination.flush()
             os.fsync(destination.fileno())
         candidate.chmod(0o700)
-        require(version_of(candidate) == required, "Local backend does not match backend-version.")
+        version = version_of(candidate)
+        local = version != required
+        require(not local or version == checkout_version(), "Local backend does not match Cargo package version.")
         require(pin() == required, "Backend version pin changed during installation.")
-        safe_path(BINARY)
-        os.replace(candidate, BINARY)
+        marker = None
+        if local:
+            marker = Path(staging) / "local-build.json"
+            with marker.open("xb") as destination:
+                destination.write(json.dumps(dict(version=version, releasePin=required,
+                                                  sha256=hashlib.sha256(content).hexdigest())).encode())
+                destination.flush()
+                os.fsync(destination.fileno())
+            marker.chmod(0o600)
+        replace_runtime(candidate, marker)
+        return version
 
 
 def cli_link(enable):
@@ -234,8 +310,18 @@ def cli_link(enable):
         os.symlink(str(BINARY), link)
 
 
+def cli_installed():
+    """Inspect only the owned link; never execute a PATH or foreign target."""
+    link = Path.home() / ".local/bin/omamail"
+    try:
+        safe_path(link.parent, directory=True)
+        return link.is_symlink() and os.readlink(link) == str(BINARY)
+    except (OSError, Refused):
+        return False
+
+
 def run(command):
-    result = dict(state="error", requiredVersion="", installedVersion="", executable=str(BINARY), error="")
+    result = dict(state="error", requiredVersion="", installedVersion="", executable=str(BINARY), error="", cliInstalled=False)
     try:
         required = pin()
         result["requiredVersion"] = required
@@ -252,6 +338,9 @@ def run(command):
             return result
         if not development:
             safe_path(BINARY)
+            if command in ("status", "enable-cli", "disable-cli"):
+                required = local_required(required)
+                result["requiredVersion"] = required
         else:
             require(executable.is_absolute(), "OMAMAIL_BIN must be an absolute executable path.")
         if command != "status":
@@ -259,9 +348,13 @@ def run(command):
                 if command == "install":
                     install(required, architecture)
                 elif command == "install-local":
-                    install_local(required)
+                    required = install_local(required)
+                    result["requiredVersion"] = required
                 elif command == "uninstall":
                     safe_path(BINARY)
+                    local_build = ROOT / "runtime/local-build.json"
+                    safe_path(local_build)
+                    local_build.unlink(missing_ok=True)
                     BINARY.unlink(missing_ok=True)
                 elif command == "enable-cli":
                     require(version_of(BINARY) == required, "Install the required backend before enabling the CLI.")
@@ -273,6 +366,7 @@ def run(command):
         installed = required if command in ("install", "install-local") else version_of(executable)
         result["installedVersion"] = installed
         result["state"] = "missing" if not installed else "ready" if installed == required else "mismatch"
+        result["cliInstalled"] = not development and result["state"] == "ready" and cli_installed()
     except Refused as error:
         result["state"] = "error"
         result["error"] = str(error)

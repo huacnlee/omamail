@@ -86,6 +86,7 @@ jobs:
           if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
           python3 scripts/package-backend.py package "$binary" "$ARCH" artifact
           python3 scripts/package-backend.py verify artifact --arch "$ARCH"
+          python3 scripts/package-backend.py provenance --output artifact/backend-build.json
       - uses: actions/upload-artifact@v4
         with:
           name: backend-${{ matrix.arch }}
@@ -122,12 +123,17 @@ jobs:
           cp artifacts/backend-x86_64/omamail-linux-x86_64.tar.gz release-assets/
           cp artifacts/backend-aarch64/omamail-linux-aarch64.tar.gz release-assets/
           cat artifacts/backend-x86_64/SHA256SUMS artifacts/backend-aarch64/SHA256SUMS > release-assets/SHA256SUMS
+          cmp artifacts/backend-x86_64/backend-build.json artifacts/backend-aarch64/backend-build.json
+          cp artifacts/backend-x86_64/backend-build.json release-assets/
+          python3 scripts/package-backend.py check-provenance release-assets/backend-build.json
           python3 scripts/package-backend.py verify release-assets
           gh release create "v$VERSION" release-assets/* --target "$GITHUB_SHA" --draft --title "v$VERSION" --generate-notes
           gh release edit "v$VERSION" --draft=false
           mkdir published
-          gh release download "v$VERSION" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS
+          gh release download "v$VERSION" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-build.json
           python3 scripts/package-backend.py verify published
+          python3 scripts/package-backend.py check-provenance published/backend-build.json
+          cmp release-assets/backend-build.json published/backend-build.json
           cmp release-assets/SHA256SUMS published/SHA256SUMS
           # Refuse moved refs and push only a pin commit, without force.
           python3 scripts/package-backend.py pin --branch "$GITHUB_REF_NAME" --expected "$GITHUB_SHA"
