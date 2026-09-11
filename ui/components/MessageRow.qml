@@ -273,7 +273,7 @@ Rectangle {
     anchors.right: parent.right
     anchors.rightMargin: Style.space(6)
     y: body.y + subject.y + (body.height - subject.y - height) / 2
-    spacing: Style.space(1)
+    spacing: 0
     visible: root.hot || root.summary.starred || root.selectionMode
 
     IconButton {
