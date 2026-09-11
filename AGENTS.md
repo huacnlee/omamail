@@ -16,28 +16,34 @@
 
 ## Layout
 
-**Grouped by module, not by file type.** A module holds whatever doing its job
+Rust lives in `src/`; Qt/QML and its JavaScript live in `ui/`. Keep CLI
+argument handling in `src/cli/`, protocol and process dispatch in `src/backend/`,
+and shared business modules beside them, such as `src/account/` and `src/message/`.
+`tests/` holds integration tests; Rust unit tests live with their modules and
+UI unit tests live in `ui/tests/`.
+
+**Within each layer, group by module, not by file type.** A UI module holds whatever doing its job
 takes — the rules in `.js`, the object in `.qml`, side by side. There is no
 directory of "all the JavaScript": that arrangement puts a provider's parsing
 three directories away from the client that calls it.
 
 | Module | What it is |
 |-----------------|--------------------------------------------------------|
-| root | `Service.qml`, `BarWidget.qml`, `App.qml`, and nothing else. `manifest.json` names these three and the shell loads them at that path. |
-| `providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
-| `account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
-| `cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
-| `calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
-| `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
-| `components/` | Views. They draw what they are given and decide nothing. |
-| `agent/` | The message agent: the rules in `Agent.js`, the runner object in `AgentRunner.qml` that starts, lists and stops jobs through `scripts/agent-job.py`. Each job is a transient systemd user unit; see `docs/AGENT.md`. |
+| `ui/` | `Service.qml`, `BarWidget.qml`, and `App.qml` are the shell entry points. The root `manifest.json` names their `ui/` paths. |
+| `ui/providers/` | Everything that differs between mail services: a description per provider, the registry over them, the protocol each speaks, and the pair of objects — signs in, fetches — that each needs. |
+| `ui/account/` | One mailbox and the list of them. `MailAccount.qml`, `Accounts.js`, and the rules in `Model.js` about what a list does after an action. |
+| `ui/cache/` | What a query result and a message body are kept in, and the two objects that keep them. |
+| `ui/calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
+| `ui/message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
+| `ui/components/` | Views. They draw what they are given and decide nothing. |
+| `ui/agent/` | The message agent: the rules in `Agent.js`, the runner object in `AgentRunner.qml` that starts, lists and stops jobs through `scripts/agent-job.py`. Each job is a transient systemd user unit; see `docs/AGENT.md`. |
 
-- `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML
+- `tests/test_qml_names.py` checks the entry points under `ui/`, and any QML
   file the Makefile does not list — a file `qmllint` never sees is a file nobody
   checks.
 - QML resolves a type by name from its own directory, so a file that builds a
   type from another module imports that directory: `Service.qml` has
-  `import "account"`, `account/MailAccount.qml` has `import "../providers"` and
+  `import "account"`, `ui/account/MailAccount.qml` has `import "../providers"` and
   `import "../cache"`.
 
 ## JavaScript libraries
@@ -46,14 +52,17 @@ three directories away from the client that calls it.
   and use `var` and `function` only — no `const`, `let`, arrow functions, or
   template literals. `tests/test_source.sh` finds them wherever they are, so a
   new module is covered without being added to a list.
-- Everything that parses, formats, or decides lives in one of them, so the node
-  tests can reach it without a compositor. QML holds no logic worth testing.
+- UI decisions belong in these libraries so node tests can reach them without
+  a compositor. Mail fetching, parsing, classification, organization and updates
+  are migrating into shared Rust modules; see `docs/BACKEND.md`. QML retains
+  presentation and interaction state and communicates with a persistent backend
+  over stdin/stdout, not by invoking CLI commands.
 - One JS resource may build on others with QML's `.import "Other.js" as Other`,
-  which is how `providers/Registry.js` is assembled out of `Gmail.js`,
+  which is how `ui/providers/Registry.js` is assembled out of `Gmail.js`,
   `Outlook.js`, `Hey.js`, `Jmap.js` and `Imap.js` — and those out of `GmailApi.js`,
   `HeyCli.js` and `JmapProtocol.js` in turn, because where a message lives on
   the web, or what a query string means, is a fact about the service rather
-  than about the registry. `tests/load.js` resolves the chain the same
+  than about the registry. `ui/tests/load.js` resolves the chain the same
   way the engine does, so the tests exercise the real files.
 - Tests name the module path: `load("cache/Cache.js")`. A bare filename would no
   longer say where the thing lives.
@@ -90,7 +99,7 @@ different features and only one of them is here.
   elides the *logical* end of a right-to-left string under `Text.ElideRight`,
   resolves each `<br>`-separated line of a plain body separately, and needs no
   help with an Arabic subject or an Arabic paragraph.
-- `message/Direction.js` exists for the three places it is wrong or absent, and
+- `ui/message/Direction.js` exists for the three places it is wrong or absent, and
   for nothing else. Adding a fourth caller is a decision, not a formality.
 - **A subject is asked with `resolveSubject`, never `resolve`.** A reply prefix
   is Latin whatever the thread is written in, so `Re: مرحبا` reads left-to-right
@@ -136,7 +145,7 @@ different features and only one of them is here.
   a delimiter by searching for `--` and the boundary anywhere in the body, so an
   inner boundary that began with the outer one would be found by the outer scan
   as well and the message would come apart at the wrong line. `nestedBoundary`
-  puts its tag in front for that reason, and `tests/test_message.js` asserts the
+  puts its tag in front for that reason, and `ui/tests/test_message.js` asserts the
   inner delimiter cannot be read as the outer one.
 - The calendar reply keeps its two parts and gains no twin. An RSVP's sentence
   is generated rather than composed, so there is no writer's direction to carry,
@@ -168,7 +177,7 @@ different features and only one of them is here.
 The design and the full table are in `docs/KEYS.md`; read it before touching a
 key. What matters while working:
 
-- Every binding lives in `keys/Keymap.js` and nothing else describes one. The
+- Every binding lives in `ui/keys/Keymap.js` and nothing else describes one. The
   shortcut sheet and the status hints render from it, and a test asserts
   `docs/KEYS.md` matches it. Three hand-written copies used to exist and had
   already drifted apart.
@@ -211,7 +220,7 @@ key. What matters while working:
   popup's `contentItem` is the only thing that works. The account switcher
   and the agent prompt are the components that answer keys themselves, for
   this reason.
-  `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
+  `ui/tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
   be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when
   content moves under a still pointer and the list scrolls to follow the
@@ -503,7 +512,7 @@ key. What matters while working:
 - Screenshots go to GitHub's attachment host by dragging them into an issue or
   a release, never into the tree. A 320 KB PNG that nothing referenced was a
   quarter of what a clone cost.
-- `assets/` holds what the running plugin draws, which includes the provider
+- `ui/assets/` holds what the running plugin draws, which includes the provider
   artwork — a few kilobytes each, at 128px, reached through `Registry.mark` and
   `Registry.logo`. Those are two different questions: `mark` is the square icon
   a list row wants, `logo` is the lockup a page about the service opens with,

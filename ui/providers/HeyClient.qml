@@ -33,6 +33,8 @@ Item {
   height: 0
 
   required property var auth
+  property var backend: null
+  property var resources: ({})
 
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
@@ -70,6 +72,45 @@ Item {
   }
 
   // ------------------------------------------------------------- transport
+
+  function usesBackend() {
+    return backend && String(backend.executable || "") !== ""
+  }
+
+  function backendRead(method, params, callback, handle) {
+    var account = auth ? String(auth.accountId || "") : ""
+    var program = auth ? String(auth.heyPath || "") : ""
+    if (!auth || !auth.loggedIn || account === "" || program === "") {
+      Qt.callLater(function() {
+        if (!handle.aborted) callback(null, "Sign in to the configured HEY account first")
+      })
+      return handle
+    }
+    params.accountId = account
+    params.program = program
+    root.inFlight++
+    backend.call(method, params, function(result, error) {
+      root.inFlight = Math.max(0, root.inFlight - 1)
+      if (handle.aborted) return
+      if (!auth || !auth.loggedIn || String(auth.accountId || "") !== account
+          || String(auth.heyPath || "") !== program) {
+        callback(null, "The HEY account changed during this request")
+        return
+      }
+      var message = error ? Cli.redact(String(error.message || "HEY backend request failed")) : ""
+      if (/sign in|not (logged|signed) in|unauthor/i.test(message)
+          && typeof auth.reportAuthFailure === "function") auth.reportAuthFailure()
+      callback(result, message)
+    })
+    return handle
+  }
+
+  function rememberResource(resource) {
+    var next = {}
+    for (var key in resources) next[key] = resources[key]
+    next[String(resource.id)] = resource
+    resources = next
+  }
 
   // One invocation, one answer. `hey` holds the token and refreshes it itself,
   // so unlike the other clients there is no credential to fetch first and
@@ -253,6 +294,18 @@ Item {
 
   function listMessages(query, maxResults, pageToken, callback, progress) {
     var handle = newHandle()
+    if (usesBackend()) {
+      return backendRead("hey.list", {
+        query: String(query || ""), pageToken: String(pageToken || ""),
+        pageSize: Math.max(1, Math.min(100, Number(maxResults) || 25))
+      }, function(result, error) {
+        if (!error && result && Array.isArray(result.messages)) {
+          for (var i = 0; i < result.messages.length; i++)
+            root.rememberResource(result.messages[i])
+        }
+        if (typeof callback === "function") callback(result, error)
+      }, handle)
+    }
     var parsed = Cli.parseQuery(query)
 
     run(Cli.listCommand(parsed, maxResults, pageToken), "", function(text, error) {
@@ -358,6 +411,11 @@ Item {
       if (!root || handle.aborted) return
       var out = []
       for (var i = 0; i < list.length; i++) {
+        if (root.usesBackend()) {
+          var resource = root.resources[String(list[i])]
+          if (resource) out.push(resource)
+          continue
+        }
         var row = root.rowFor(list[i])
         if (row) out.push(root.toMessage(list[i], row, null))
       }
@@ -372,6 +430,27 @@ Item {
     var handle = newHandle()
     var messageId = String(id || "")
     var row = rowFor(messageId)
+
+    if (usesBackend()) {
+      if (full !== true) {
+        Qt.callLater(function() {
+          if (handle.aborted || typeof callback !== "function") return
+          var known = root.resources[messageId]
+          callback(known || null, known ? "" : "That message is no longer in the mailbox")
+        })
+        return handle
+      }
+      return backendRead("hey.read", { id: messageId }, function(result, error) {
+        var known = root.resources[messageId]
+        if (!error && result && known && Cli.draftIdOf(messageId) === "") {
+          result.payload.headers = known.payload.headers
+          result.labelIds = known.labelIds
+          result.internalDate = known.internalDate
+          result.snippet = known.snippet
+        }
+        if (typeof callback === "function") callback(result, error)
+      }, handle)
+    }
 
     if (full !== true) {
       if (typeof callback !== "function") return handle
@@ -554,6 +633,12 @@ Item {
   // batch is one invocation rather than one per message.
   function act(verb, ids, callback) {
     var handle = newHandle()
+    if (usesBackend()) {
+      return backendRead("hey.act", { verb: String(verb || ""), ids: ids }, function(result, error) {
+        if (!error) root.forget(verb, ids)
+        if (typeof callback === "function") callback(null, error)
+      }, handle)
+    }
     var command = Cli.actionCommand(verb, ids)
     if (command.length === 0) {
       if (typeof callback === "function") {
@@ -576,6 +661,17 @@ Item {
   function forget(verb, ids) {
     if (verb !== "markRead" && verb !== "markUnread") return
     var list = Array.isArray(ids) ? ids : [ids]
+    var updated = {}
+    for (var resourceId in resources) updated[resourceId] = resources[resourceId]
+    for (var r = 0; r < list.length; r++) {
+      var resource = updated[String(list[r])]
+      if (!resource) continue
+      var changed = Object.assign({}, resource)
+      changed.labelIds = resource.labelIds.filter(function(label) { return label !== "UNREAD" })
+      if (verb === "markUnread") changed.labelIds.push("UNREAD")
+      updated[String(list[r])] = changed
+    }
+    resources = updated
     var next = {}
     for (var key in rows) next[key] = rows[key]
     for (var i = 0; i < list.length; i++) {
@@ -618,6 +714,24 @@ Item {
     var threadId = payload && payload.threadId ? Cli.topicIdOf(String(payload.threadId)) : ""
     if (threadId === "" && payload && payload.threadId)
       threadId = String(payload.threadId)
+
+    if (usesBackend()) {
+      if (files.length > 0 || Mail.attachments(parsed).length > 0) {
+        if (typeof callback === "function")
+          callback(null, "The HEY backend cannot send attachments yet")
+        return handle
+      }
+      var params = threadId !== "" ? { replyTo: threadId, body: body } : {
+        to: Mail.headerFrom(parsed.headers, "To"),
+        cc: Mail.headerFrom(parsed.headers, "Cc"),
+        bcc: Mail.headerFrom(parsed.headers, "Bcc"),
+        subject: Mail.decodeHeaderValue(Mail.headerFrom(parsed.headers, "Subject")),
+        body: body
+      }
+      return backendRead("hey.send", params, function(result, error) {
+        if (typeof callback === "function") callback(error ? null : {}, error)
+      }, handle)
+    }
 
     var command = Cli.composeCommand({
       threadId: threadId,

@@ -2,7 +2,7 @@
 # Two rules that are easy to break by accident and invisible until someone
 # switches to a light theme or the QML engine chokes on modern syntax.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../ui"
 
 fail() { printf 'test_source.sh: %s\n' "$1" >&2; exit 1; }
 
@@ -37,7 +37,7 @@ done \
 # it at dash. Bash's global parameter replacement then passes locally and dies
 # only in CI with "Bad substitution". Scripts declaring /bin/sh stay within
 # POSIX parameter expansion regardless of which shell happens to own that path.
-if grep -rnE '\$\{[A-Za-z_][A-Za-z0-9_]*//' --include='*.sh' scripts; then
+if grep -rnE '\$\{[A-Za-z_][A-Za-z0-9_]*//' --include='*.sh' ../scripts; then
   fail "a /bin/sh script uses bash-only global parameter replacement"
 fi
 
@@ -583,7 +583,7 @@ grep -q 'placeholderText: "Password or app password"' components/CalendarSetting
   || fail "calendar setup needs its own password field"
 grep -q 'text: "Set password"' components/CalendarSettings.qml \
   || fail "existing CalDAV calendars need a password action"
-grep -q 'credentials.json|accounts.json|window.json|calendars.json|compose.json' scripts/config-store.sh \
+grep -q 'credentials.json|accounts.json|window.json|calendars.json|compose.json' ../scripts/config-store.sh \
   || fail "the config writer must accept calendar source records"
 if grep -q 'Five Nextcloud calendars\|imported from Thunderbird\|Nextcloud password' components/CalendarSettings.qml; then
   fail "calendar settings must not describe one user's imported setup"
@@ -842,7 +842,7 @@ grep -q 'MAX_SUMMARIES_PER_QUERY' cache/Cache.js \
 
 # New-mail notifications use the application's own mark, not the desktop's
 # generic unread-mail glyph.
-grep -q 'assets/omamail.svg' scripts/notify-mail.py \
+grep -q 'assets/omamail.svg' ../scripts/notify-mail.py \
   || fail "new-mail notifications need the Omamail app icon"
 [ -f assets/omamail.svg ] || fail "the notification app icon is missing"
 
@@ -1131,16 +1131,18 @@ awk '
 #    would still be a megabyte every user clones.
 limit=$((128 * 1024))
 preview_limit=$((384 * 1024))
-oversized=$(git ls-files -z \
-  | xargs -0 -I{} sh -c '
-      [ -f "{}" ] || exit 0
-      case "{}" in
-        preview.png) ceiling='"$preview_limit"' ;;
-        *) ceiling='"$limit"' ;;
+oversized=$(cd ..
+  while IFS= read -r -d '' file; do
+      [ -f "$file" ] || continue
+      case "$file" in
+        (preview.png) ceiling=$preview_limit ;;
+        (*) ceiling=$limit ;;
       esac
-      size=$(wc -c < "{}" 2>/dev/null || echo 0)
-      [ "$size" -gt "$ceiling" ] && printf "%s\t%s\n" "$size" "{}"' \
-  || true)
+      size=$(wc -c < "$file")
+      if [ "$size" -gt "$ceiling" ]; then
+        printf '%s\t%s\n' "$size" "$file"
+      fi
+  done < <(git ls-files -z))
 if [ -n "$oversized" ]; then
   printf '%s\n' "$oversized" >&2
   fail "the files above are over their size ceiling; keep large assets out of the clone"
@@ -1158,9 +1160,9 @@ grep -q 'Mailto.draftFromPayload(payload)' App.qml \
   || fail "open() must seed compose from a mailto payload"
 grep -q 'function beginDraft' components/ComposeView.qml \
   || fail "ComposeView must fill a new draft from a mailto"
-grep -q 'omarchy-shell shell summon' scripts/mailto.sh \
+grep -q 'omarchy-shell shell summon' ../scripts/mailto.sh \
   || fail "the mailto handler must summon Omamail, not toggle it"
-grep -q 'register-mailto.sh' scripts/link-plugin.sh \
+grep -q 'register-mailto.sh' ../scripts/link-plugin.sh \
   || fail "link-plugin.sh must register the mailto desktop handler"
 grep -q 'registerMailtoHandler' Service.qml \
   || fail "the service must register the mailto handler when the plugin loads"
@@ -1311,7 +1313,7 @@ UNIFIEDCAPS
 python3 - <<'PLUGINDIR'
 from pathlib import Path
 source = Path("Service.qml").read_text()
-if "Qt.resolvedUrl(\".\")" not in source:
+if "Qt.resolvedUrl(\"..\")" not in source:
     raise SystemExit("test_source.sh: Service must resolve its own directory when Omarchy hides __sourceDir")
 if "decodeURIComponent" not in source:
     raise SystemExit("test_source.sh: Service must decode its resolved filesystem path")

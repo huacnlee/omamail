@@ -14,9 +14,9 @@
   ],
   "activation": "on-demand",
   "entryPoints": {
-    "service": "Service.qml",
-    "barWidget": "BarWidget.qml",
-    "panel": "App.qml"
+    "service": "ui/Service.qml",
+    "barWidget": "ui/BarWidget.qml",
+    "panel": "ui/App.qml"
   },
   "barWidget": {
     "displayName": "Omamail",

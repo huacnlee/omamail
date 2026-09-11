@@ -27,6 +27,7 @@ Item {
 
   required property var auth
   required property string email
+  property var backend: null
 
   property int inFlight: 0
   readonly property bool busy: inFlight > 0
@@ -501,21 +502,20 @@ Item {
       var child = root.run(group.folder, [command], function(text, error) {
         if (handle.aborted) return
         if (error && !firstError) firstError = error
+        function groupDone(completed, parseError) {
+          if (handle.aborted) return
+          if (parseError && !firstError) firstError = parseError
+          for (var at = 0; at < completed.length; at++) results.push(completed[at])
+          if (completed.length > 0 && typeof progress === "function") progress(completed)
+          activeGroups--
+          remaining--
+          if (remaining === 0) finish()
+          else startAvailableGroups()
+        }
         if (!error) {
           var fetched = Imap.parseFetch(text)
-          var completed = []
-          for (var i = 0; i < fetched.length; i++) {
-            var message = root.toMessage(fetched[i], group.folder, full)
-            results.push(message)
-            completed.push(message)
-          }
-          if (completed.length > 0 && typeof progress === "function")
-            progress(completed)
-        }
-        activeGroups--
-        remaining--
-        if (remaining === 0) finish()
-        else startAvailableGroups()
+          root.parseMessages(fetched, group.folder, full, handle, groupDone)
+        } else groupDone([], "")
       })
       handle.children.push(child)
     }
@@ -563,8 +563,29 @@ Item {
 
   // One FETCH result, as a Gmail message resource. This is the seam the whole
   // provider turns on: past this point nothing can tell the two services apart.
-  function toMessage(entry, folder, full) {
-    var payload = Mail.parseRfc822(entry.raw)
+  function parseMessages(entries, folder, full, handle, callback) {
+    var completed = []
+    var index = 0
+    function next() {
+      if (handle.aborted) return
+      if (index >= entries.length) { callback(completed, ""); return }
+      var entry = entries[index++]
+      if (root.backend && root.backend.executable !== "") {
+        root.backend.parseMessage(entry.raw, function(payload, error) {
+          if (handle.aborted) return
+          if (error) { callback(completed, "The backend could not parse this message"); return }
+          completed.push(root.toMessage(entry, folder, full, payload))
+          next()
+        })
+      } else {
+        completed.push(root.toMessage(entry, folder, full, Mail.parseRfc822(entry.raw)))
+        Qt.callLater(next)
+      }
+    }
+    next()
+  }
+
+  function toMessage(entry, folder, full, payload) {
     var message = {
       id: Imap.messageId(entry.uid, folder),
       // No conversation id, so a message is its own thread. The reader groups

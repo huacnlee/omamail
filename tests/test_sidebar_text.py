@@ -166,13 +166,13 @@ def main():
                 "JMAP": "providers/JmapProtocol.js", "IMAP": "providers/ImapProtocol.js",
                 "HEY": "providers/HeyCli.js",
             }.items():
-                source = source.replace("@" + key + "@", json.dumps((ROOT / path).as_uri()))
+                source = source.replace("@" + key + "@", json.dumps((ROOT / "ui" / path).as_uri()))
             source = source.replace("@ENDPOINT@", json.dumps(f"http://127.0.0.1:{server.server_port}"))
             fixture = Path(directory) / "tst_sidebar_text.qml"
             fixture.write_text(source)
             env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        QT_QPA_PLATFORMTHEME="", NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
-            result = subprocess.run([runner, "-import", str(ROOT / "tests/qml/imports"),
+            result = subprocess.run([runner, "-import", str(ROOT / "ui/tests/qml/imports"),
                                      "-input", str(fixture)], env=env, timeout=30)
         assert requests == ["/control"], f"Unexpected label network requests: {requests}"
         result.check_returncode()

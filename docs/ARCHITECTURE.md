@@ -22,7 +22,7 @@ The visual system is separate from all five layers. Colors, typography, spacing,
 
 ## Entry points and window composition
 
-The repository root contains only the QML entry points the shell loads:
+The shell loads the QML entry points under `ui/`, as named by the root manifest:
 
 - `Service.qml` is the long-lived application and account host. The shell constructs it, so it declares no required properties beyond what the shell supplies. It owns state that must survive the window.
 - `BarWidget.qml` is the shell-facing trigger and settings bridge.
@@ -65,8 +65,8 @@ Follow the Coding Guides' controlled-state and feedback-loop rules. In Omamail, 
 
 The existing keyboard architecture is the clearest GPUI-derived part of Omamail and is the model for other interactions.
 
-- `keys/Keymap.js` declares actions, bindings, and the contexts in which they mean something.
-- `components/KeyRouter.qml` turns that declaration into window shortcuts.
+- `ui/keys/Keymap.js` declares actions, bindings, and the contexts in which they mean something.
+- `ui/components/KeyRouter.qml` turns that declaration into window shortcuts.
 - `App.qml` dispatches action identifiers to application operations.
 - `docs/KEYS.md` documents the model and the platform-specific exceptions.
 
@@ -74,23 +74,37 @@ An action describes intent, not an input device. `archive` is the same operation
 
 The context is the guard. Do not add a second collection of `enabled` tests in the key handler for conditions already expressed by the context. Capability is different: it comes from the active provider and decides whether an operation exists at all. A provider capability should remove an unavailable action from the view rather than offer an action that fails after activation.
 
-Qt Quick Controls popups intercept keys before window shortcuts. That is a platform fact, not an exception to the architecture. Popup-local navigation therefore lives on the popup content item, and the popup owns its own Escape dismissal. An application action may open a popup, but `goBack()` does not duplicate the popup's close policy. The tests in `tests/qml/tst_popup_keys.qml` preserve this boundary.
+Qt Quick Controls popups intercept keys before window shortcuts. That is a platform fact, not an exception to the architecture. Popup-local navigation therefore lives on the popup content item, and the popup owns its own Escape dismissal. An application action may open a popup, but `goBack()` does not duplicate the popup's close policy. The tests in `ui/tests/qml/tst_popup_keys.qml` preserve this boundary.
 
 ## Domain modules
 
-Modules are grouped by responsibility rather than language or file type:
+Rust lives under `src/`, Qt/QML and its JavaScript under `ui/`. Within each
+layer, modules are grouped by responsibility. `src/cli/` handles headless
+commands, `src/backend/` handles persistent stdio JSON-RPC communication, and
+shared business modules such as `src/account/` and `src/message/` serve both.
+The migration is incomplete; `BACKEND.md` records the current boundary. The
+existing UI modules are:
 
-- `providers/` owns service descriptions, authentication, protocol behavior, capabilities, and normalization into the shared Gmail-shaped resource.
-- `account/` owns accounts, a mailbox, and list behavior after actions.
-- `cache/` owns stored query results and message bodies.
-- `calendar/` owns event sources, the range cache, and event reads and writes.
-- `message/` owns parsing, sanitizing, calendar data, and other decisions about a message's content.
-- `keys/` owns the action and binding declaration.
-- `components/` owns views and reusable interaction primitives.
+- `ui/providers/` owns service descriptions, authentication, protocol behavior, capabilities, and normalization into the shared Gmail-shaped resource.
+- `ui/account/` owns accounts, a mailbox, and list behavior after actions.
+- `ui/cache/` owns stored query results and message bodies.
+- `ui/calendar/` owns event sources, the range cache, and event reads and writes.
+- `ui/message/` owns parsing, sanitizing, calendar data, and other decisions about a message's content.
+- `ui/keys/` owns the action and binding declaration.
+- `ui/components/` owns views and reusable interaction primitives.
 
-Rules that parse, format, choose, clamp, or otherwise decide belong in `.js` libraries whenever they can. QML binds state and renders results. This is more than a testing convenience: it keeps behavior independent of compositor and widget lifecycle, in the same spirit as separating GPUI entity state from an element's layout and paint passes.
+Mail fetching, updates, parsing, classification, organization and storage belong
+in the shared Rust business layer. During migration, their existing JavaScript
+implementations remain under `ui/` until callers switch. UI decisions such as
+navigation and layout calculations remain testable JavaScript libraries; QML
+binds state and renders results. UI unit tests live in `ui/tests/`, Rust unit
+tests beside their modules, and cross-boundary integration tests in `tests/`.
 
-Reusable behavior and presentation remain separate without introducing a framework layer merely to name that separation. JavaScript owns portable decisions and state transitions; QML components own Qt lifecycle and input mechanics; feature views supply Omamail composition; semantic properties supplied from `App.qml` carry the Omarchy presentation. This is the `gpui-base` and `gpui-component` seam expressed through the units this repository already has.
+Reusable behavior and presentation remain separate. Rust owns migrated business
+decisions; JavaScript owns UI decisions and remaining legacy business logic;
+QML components own Qt lifecycle and input mechanics. Feature views supply
+Omamail composition; semantic properties supplied from `App.qml` carry the
+Omarchy presentation.
 
 Provider differences end at the provider boundary. Code above that boundary asks about capabilities and consumes the common message resource. It does not branch on provider IDs.
 
@@ -102,7 +116,7 @@ Review terminology in the rendered surface beside neighboring labels, not as an 
 
 ## Components and primitives
 
-`components/` may contain two kinds of QML type:
+`ui/components/` may contain two kinds of QML type:
 
 ### Feature views
 
@@ -132,7 +146,7 @@ Required semantic properties are preferable to hidden dependencies on `App.qml`.
 
 Menus, the account switcher, the image popover, and shortcut help all draw above the mail panes, but they do not share one implementation or input model.
 
-`App.qml` keeps one navigation history for the non-popup surfaces it composes: a stack of entries, ruled by `account/Navigation.js`, with the pages (list, calendar, reader, event detail, settings, provider chooser, setup form) and the plain overlays (compose, event composer, shortcut help) as its entries. Every `visible:` is read off the top of that stack, and `back()` is the one way out: it pops an entry, or asks the view that owns an overlay's open state to close so that the view's own change pops it. Each Qt popup owns its close policy, placement, and popup-local keys and stays outside the stack; each plain overlay participates in the application key context and the stack. Feature views supply content and translate activation back into domain actions. There is no common overlay manager between them.
+`App.qml` keeps one navigation history for the non-popup surfaces it composes: a stack of entries, ruled by `ui/account/Navigation.js`, with the pages (list, calendar, reader, event detail, settings, provider chooser, setup form) and the plain overlays (compose, event composer, shortcut help) as its entries. Every `visible:` is read off the top of that stack, and `back()` is the one way out: it pops an entry, or asks the view that owns an overlay's open state to close so that the view's own change pops it. Each Qt popup owns its close policy, placement, and popup-local keys and stays outside the stack; each plain overlay participates in the application key context and the stack. Feature views supply content and translate activation back into domain actions. There is no common overlay manager between them.
 
 An overlay contract includes:
 
@@ -185,7 +199,7 @@ Every scrollable region has one owner. That owner fills the panel viewport and p
 
 Anything supplied by a sender is plain data unless it passes through the specific message-body renderer. Subjects, names, snippets, filenames, and labels explicitly use plain text. A reusable component cannot weaken that rule by relying on `Text.AutoText`.
 
-`message/Html.js` is a security boundary, not a presentation helper. The body cache keeps source content; the sanitizer decides what Qt may render; remote resource policy remains centralized. Approved remote images are collected from that same parse, fetched by `scripts/image_fetch.py` through `public_http.py` with checked DNS answers, connections pinned to public IPs and no redirects, and handed back as validated `data:` URIs, so Qt sees neither a pending remote source nor its broken loading placeholder. The same transport handles one-click unsubscribe. Neither path invokes shell or curl. Component extraction must not move any of those decisions into a reader view or a generic rich-text primitive.
+`ui/message/Html.js` is a security boundary, not a presentation helper. The body cache keeps source content; the sanitizer decides what Qt may render; remote resource policy remains centralized. Approved remote images are collected from that same parse, fetched by `scripts/image_fetch.py` through `public_http.py` with checked DNS answers, connections pinned to public IPs and no redirects, and handed back as validated `data:` URIs, so Qt sees neither a pending remote source nor its broken loading placeholder. The same transport handles one-click unsubscribe. Neither path invokes shell or curl. Component extraction must not move any of those decisions into a reader view or a generic rich-text primitive.
 
 Reading mode lives there for the same reason and is a rebuild rather than a filter: it constructs a fresh document whose elements begin with empty attribute lists, and carries across only text, a checked `href`, a checked `src`, and numeric image dimensions capped to a small inline size. Fixed alignment and spacing attributes the reader adds to its own compact avatar row carry no sender value. That is a structural guarantee rather than a list of removals, and it holds only while every element in the output is built here and every copied value is bounded where it is added. A resource-bearing attribute is refused before any appearance option is consulted, because no appearance option may buy a network request.
 

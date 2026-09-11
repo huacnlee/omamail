@@ -305,7 +305,7 @@ assert.strictEqual(keymap.sequencesFor("compose").filter(function (row) {
   const fs = require("fs")
   const path = require("path")
   const doc = fs.readFileSync(
-    path.join(__dirname, "..", "docs", "KEYS.md"), "utf8")
+    path.join(__dirname, "..", "..", "docs", "KEYS.md"), "utf8")
   const body = doc.split("<!-- BEGIN BINDINGS -->")[1]
   assert.ok(body, "docs/KEYS.md must fence its table with BEGIN/END BINDINGS")
   const rows = body.split("<!-- END BINDINGS -->")[0]

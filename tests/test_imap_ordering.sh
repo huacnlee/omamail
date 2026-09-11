@@ -257,7 +257,7 @@ stop_server
 python3 - <<'SRC' || exit 1
 import re, sys
 
-text = open("providers/ImapClient.qml", encoding="utf-8").read()
+text = open("ui/providers/ImapClient.qml", encoding="utf-8").read()
 start = text.index("function run(folder, commands, callback, existingHandle)")
 end = text.index("function ensureFolders", start)
 block = text[start:end]

@@ -5,6 +5,7 @@ import qs.Commons
 import "account"
 import "calendar"
 import "agent"
+import "backend"
 import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
@@ -45,11 +46,19 @@ Item {
   property var pluginRegistry: null
   property var barWidgetRegistry: null
 
+  // Migration entry point. One service-owned process survives window openings.
+  // An explicit binary enables development before packaging installs the backend.
+  readonly property var backend: rustBackend
+  Backend {
+    id: rustBackend
+    executable: Quickshell.env("OMAMAIL_BIN") || ""
+  }
+
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
   // Modern Omarchy strips private manifest metadata for third-party plugins.
-  // Helpers belong beside this component, independently of host internals.
-  readonly property string pluginDir: decodeURIComponent(String(Qt.resolvedUrl("."))
+  // Helpers live at the plugin root, one level above the UI components.
+  readonly property string pluginDir: decodeURIComponent(String(Qt.resolvedUrl(".."))
     .replace(/^file:\/\//, "")).replace(/\/$/, "")
   // Shown in the empty reader, so a screenshot in a bug report says which build
   // it came from. The shell's manifest validation requires both fields, so a
@@ -2093,6 +2102,7 @@ Item {
       notificationAccent: Color.accent
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
+      backend: root.backend
       configuredEmail: entry ? entry.email : ""
       oauthClientId: entry ? entry.clientId : ""
       // Which service this mailbox is, and — for the one that needs them — the

@@ -230,14 +230,14 @@ def main():
     thread.start()
     try:
         with tempfile.TemporaryDirectory(prefix="omamail-outlook-http-") as directory:
-            source = QML.replace("@PROVIDERS@", json.dumps((ROOT / "providers").as_uri()))
-            source = source.replace("@MICROSOFT@", json.dumps((ROOT / "providers/MicrosoftOAuth.js").as_uri()))
+            source = QML.replace("@PROVIDERS@", json.dumps((ROOT / "ui/providers").as_uri()))
+            source = source.replace("@MICROSOFT@", json.dumps((ROOT / "ui/providers/MicrosoftOAuth.js").as_uri()))
             source = source.replace("@ENDPOINT@", json.dumps(f"http://127.0.0.1:{server.server_port}"))
             fixture = Path(directory) / "tst_outlook_http.qml"
             fixture.write_text(source)
             env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        QT_QPA_PLATFORMTHEME="", NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
-            subprocess.run([runner, "-import", str(ROOT / "tests/qml/imports"),
+            subprocess.run([runner, "-import", str(ROOT / "ui/tests/qml/imports"),
                             "-input", str(fixture)], env=env, check=True, timeout=90)
         paths = [path for path, _ in requests]
         assert paths[:2] == ["/hang", "/delayed"], requests

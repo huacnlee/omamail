@@ -5,9 +5,9 @@
 # node's — so this is worth running on the machine the shell runs on rather
 # than wherever the code was written.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-node tests/bench_node.js
+node ui/tests/bench_node.js
 
 runtime=""
 for candidate in qml6 qml /usr/lib/qt6/bin/qml; do
@@ -31,7 +31,7 @@ printf '\n'
 export QT_FORCE_STDERR_LOGGING=1
 # A benchmark, not a test: a QML runtime that will not start is worth saying out
 # loud, but it is not a reason to fail the target.
-if ! "$runtime" tests/bench_html.qml; then
+if ! "$runtime" ui/tests/bench_html.qml; then
   printf '\nThe QML column did not run: %s exited non-zero above.\n' "$runtime"
   printf 'On a machine where the shell itself runs, that is worth looking into.\n'
 fi

@@ -14,7 +14,7 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parent.parent / "ui"
 
 # What a message, an account or Google can put words into.
 UNTRUSTED = re.compile(

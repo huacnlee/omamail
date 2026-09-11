@@ -26,7 +26,7 @@ def main(args):
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     # A new path per palette also prevents image caches retaining the old theme.
     path = directory / (foreground[1:] + '-' + accent[1:] + '.svg')
-    svg = ET.parse(Path(__file__).resolve().parents[1] / 'assets/omamail.svg')
+    svg = ET.parse(Path(__file__).resolve().parents[1] / 'ui/assets/omamail.svg')
     paint(svg.getroot()[0], foreground)
     paint(svg.getroot()[1], accent)
     # Atomic publication: concurrent accounts must never see a partial image.

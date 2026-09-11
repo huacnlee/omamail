@@ -11,9 +11,9 @@ by the app, and scoped to the contexts where it means something.
 
 Everything follows from that:
 
-- Every binding lives in one table, `keys/Keymap.js`. Nothing else describes a
+- Every binding lives in one table, `ui/keys/Keymap.js`. Nothing else describes a
   key. The shortcut sheet and the status-bar hints render from that table.
-- `components/KeyRouter.qml` turns the table into `Shortcut` objects and reports
+- `ui/components/KeyRouter.qml` turns the table into `Shortcut` objects and reports
   what was pressed by id. `App.qml` answers with one `runShortcut` function.
 - `Escape` is a binding like any other, not a `Keys.onEscapePressed` handler, so
   it does not depend on who holds the focus.
@@ -104,7 +104,7 @@ the two cannot disagree.
 
 ## The bindings
 
-Generated from `keys/Keymap.js`. `tests/test_keymap.js` asserts this table
+Generated from `ui/keys/Keymap.js`. `ui/tests/test_keymap.js` asserts this table
 matches it, so the two cannot drift — three hand-written copies of this list
 used to exist, and they had.
 
@@ -209,7 +209,7 @@ everywhere. With rows ticked and the list on screen — alone, or beside the
 reader in a wide window — it unticks them first and goes nowhere; the next
 press goes back. Where it goes is not decided by the key: the window keeps a history
 of the places it has been — a stack in `App.qml`, ruled by
-`account/Navigation.js` — and `Escape`, like every Back bar, calls `back()`,
+`ui/account/Navigation.js` — and `Escape`, like every Back bar, calls `back()`,
 which pops one entry. A draft, the event form and the shortcut sheet are
 entries too, so the sheet closes before the message under it, and a reply
 raised from the list returns to the list, not to the message it opened on the
@@ -237,7 +237,7 @@ name, by the name they were given or their address; `Down` and `Up`, or `Ctrl`
 with `j`, `k`, `n` or `p`, walk what is left; `Enter` opens the row the cursor
 is on. A bare `j` or `k` is a letter there now, as it has to be for "jack" to
 find a mailbox.
-`tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
+`ui/tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.
 
@@ -251,7 +251,7 @@ then stopped.
 
 `s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 
-Three rules, all in `account/Model.js` so the node tests reach them:
+Three rules, all in `ui/account/Model.js` so the node tests reach them:
 
 - **`cursorAfterOffset`** — moving. Anchored on the cursor itself, clamped at
   both ends, and starting from the end the move came from when there is no
@@ -289,11 +289,11 @@ pointer that has not moved, and the list scrolls to follow the keyboard. With
 hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
 different row under the still pointer, and the cursor snapped back to it — so
 `j` and `k` stuck on whichever rows the mouse was resting near.
-`tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
+`ui/tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
 
 ## Adding a key
 
-1. Add a row to `BINDINGS` in `keys/Keymap.js`. Name the contexts it means
+1. Add a row to `BINDINGS` in `ui/keys/Keymap.js`. Name the contexts it means
    something in — that is the guard, and there is no other. A `display` string
    is how the sheet shows a range instead of enumerating every key.
 2. Add a case to `runShortcut` in `App.qml`. The second argument is the

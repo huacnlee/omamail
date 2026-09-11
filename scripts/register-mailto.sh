@@ -24,7 +24,7 @@ while [ "$#" -gt 0 ]; do
 done
 plugin_dir=$(cd "$plugin_dir" && pwd)
 [ -x "$plugin_dir/scripts/mailto.sh" ] || fail 'register-mailto.sh: mailto.sh is missing'
-[ -f "$plugin_dir/assets/omamail.svg" ] || fail 'register-mailto.sh: omamail.svg is missing'
+[ -f "$plugin_dir/ui/assets/omamail.svg" ] || fail 'register-mailto.sh: omamail.svg is missing'
 
 data_home=${XDG_DATA_HOME:-${HOME:?}/.local/share}
 apps="$data_home/applications"
@@ -42,7 +42,7 @@ Type=Application
 Name=Omamail
 Comment=Email client for Omarchy
 Exec=$plugin_dir/scripts/mailto.sh %u
-Icon=$plugin_dir/assets/omamail.svg
+Icon=$plugin_dir/ui/assets/omamail.svg
 Terminal=false
 StartupNotify=false
 MimeType=x-scheme-handler/mailto;

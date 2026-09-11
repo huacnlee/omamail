@@ -1,124 +1,136 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
-QML_FILES := Service.qml BarWidget.qml App.qml \
-	account/MailAccount.qml account/SendQueue.qml account/Intents.qml account/BatchAction.qml account/Rsvp.qml account/LabelActions.qml account/Unsubscribe.qml account/NewMailNotification.qml \
-	cache/CacheStore.qml cache/BodyCache.qml \
-	providers/AuthManager.qml providers/GmailApiClient.qml \
-	providers/OutlookAuth.qml \
-	providers/ImapAuth.qml providers/ImapClient.qml \
-	providers/HeyAuth.qml providers/HeyClient.qml \
-	providers/JmapAuth.qml providers/JmapClient.qml providers/JmapPush.qml \
-	components/ImapSetupPage.qml \
-	components/OutlookSetupPage.qml \
-	components/JmapSetupPage.qml \
-	components/HeySetupPage.qml \
-	components/ProviderPicker.qml \
-	components/GmailIcon.qml \
-	components/ProviderLogo.qml \
-	components/ProviderHero.qml \
-	components/LinkLabel.qml \
-	components/MailboxSidebar.qml \
-	components/MailboxTabs.qml \
-	components/MessageList.qml \
-	components/ListSkeleton.qml \
-	components/MessageRow.qml \
-	components/MessageMenu.qml \
-	components/MenuActionRow.qml components/MenuSeparatorLine.qml \
-	components/KeyRouter.qml \
-	components/WheelScroller.qml \
-	components/ActionIcon.qml \
-	components/IconButton.qml \
-	components/IconTextButton.qml \
-	components/ImagePopover.qml \
-	components/AttachmentRow.qml \
-  components/KeyHints.qml \
-	components/MessageReader.qml \
-	components/ConversationRail.qml \
-	components/ReaderNotice.qml \
-	components/InviteCard.qml \
-	components/SwitcherSearch.qml \
-	components/AccountNameField.qml \
-	components/ReaderBlankSlate.qml \
-	components/ReaderSkeleton.qml \
-	components/ComposeView.qml \
-	components/RecipientSuggestions.qml \
-	components/ContactsPicker.qml \
-	components/LabelPicker.qml \
-	components/UndoSendToast.qml \
-	components/DraftSavedToast.qml \
-	components/SearchBar.qml \
-	components/AppMenu.qml \
-	components/AccountSwitcher.qml \
-	components/AgentPrompt.qml agent/PendingMessages.qml \
-	components/LabelMenu.qml \
-	components/LabelMovePicker.qml \
-	components/NamePrompt.qml \
-	components/AddressMenu.qml \
-	components/ComposeAgent.qml \
-	agent/AgentRunner.qml agent/AgentContext.qml \
-	components/AccountRemovalDialog.qml \
-	components/BackBar.qml \
-	components/SettingsPage.qml \
-	components/SettingsSidebar.qml \
-	components/CalendarSettings.qml \
-	components/CalendarEventComposer.qml \
-	components/CalendarEventDetail.qml \
-	components/CalendarPalette.qml \
-	components/ConfirmDeleteDialog.qml \
-	components/SetupPage.qml \
-	components/ShortcutHelp.qml \
-	calendar/CalendarController.qml calendar/CalendarCache.qml \
-	components/CalendarView.qml \
-	components/WeekCalendarView.qml \
-	bar/BarPreview.qml
+QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml \
+	ui/backend/Backend.qml \
+	ui/account/MailAccount.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
+	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
+	ui/providers/OutlookAuth.qml \
+	ui/providers/ImapAuth.qml ui/providers/ImapClient.qml \
+	ui/providers/HeyAuth.qml ui/providers/HeyClient.qml \
+	ui/providers/JmapAuth.qml ui/providers/JmapClient.qml ui/providers/JmapPush.qml \
+	ui/components/ImapSetupPage.qml \
+	ui/components/OutlookSetupPage.qml \
+	ui/components/JmapSetupPage.qml \
+	ui/components/HeySetupPage.qml \
+	ui/components/ProviderPicker.qml \
+	ui/components/GmailIcon.qml \
+	ui/components/ProviderLogo.qml \
+	ui/components/ProviderHero.qml \
+	ui/components/LinkLabel.qml \
+	ui/components/MailboxSidebar.qml \
+	ui/components/MailboxTabs.qml \
+	ui/components/MessageList.qml \
+	ui/components/ListSkeleton.qml \
+	ui/components/MessageRow.qml \
+	ui/components/MessageMenu.qml \
+	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
+	ui/components/KeyRouter.qml \
+	ui/components/WheelScroller.qml \
+	ui/components/ActionIcon.qml \
+	ui/components/IconButton.qml \
+	ui/components/IconTextButton.qml \
+	ui/components/ImagePopover.qml \
+	ui/components/AttachmentRow.qml \
+  ui/components/KeyHints.qml \
+	ui/components/MessageReader.qml \
+	ui/components/ConversationRail.qml \
+	ui/components/ReaderNotice.qml \
+	ui/components/InviteCard.qml \
+	ui/components/SwitcherSearch.qml \
+	ui/components/AccountNameField.qml \
+	ui/components/ReaderBlankSlate.qml \
+	ui/components/ReaderSkeleton.qml \
+	ui/components/ComposeView.qml \
+	ui/components/RecipientSuggestions.qml \
+	ui/components/ContactsPicker.qml \
+	ui/components/LabelPicker.qml \
+	ui/components/UndoSendToast.qml \
+	ui/components/DraftSavedToast.qml \
+	ui/components/SearchBar.qml \
+	ui/components/AppMenu.qml \
+	ui/components/AccountSwitcher.qml \
+	ui/components/AgentPrompt.qml ui/agent/PendingMessages.qml \
+	ui/components/LabelMenu.qml \
+	ui/components/LabelMovePicker.qml \
+	ui/components/NamePrompt.qml \
+	ui/components/AddressMenu.qml \
+	ui/components/ComposeAgent.qml \
+	ui/agent/AgentRunner.qml ui/agent/AgentContext.qml \
+	ui/components/AccountRemovalDialog.qml \
+	ui/components/BackBar.qml \
+	ui/components/SettingsPage.qml \
+	ui/components/SettingsSidebar.qml \
+	ui/components/CalendarSettings.qml \
+	ui/components/CalendarEventComposer.qml \
+	ui/components/CalendarEventDetail.qml \
+	ui/components/CalendarPalette.qml \
+	ui/components/ConfirmDeleteDialog.qml \
+	ui/components/SetupPage.qml \
+	ui/components/ShortcutHelp.qml \
+	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml \
+	ui/components/CalendarView.qml \
+	ui/components/WeekCalendarView.qml \
+	ui/bar/BarPreview.qml
 
 .PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
 	test-qml qml-check validate bench install
 
-test: test-js test-shell test-qml
+test: test-rust test-js test-shell test-qml
+
+.PHONY: test-rust backend
+test-rust:
+	cargo test --locked
+
+backend:
+	cargo build --locked --release
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
-	node tests/test_compose_recovery.js
-	node tests/test_agent.js
-	node tests/test_chat_text.js
-	node tests/test_signature.js
-	node tests/test_outbox.js
-	node tests/test_recipients.js
-	node tests/test_senders.js
-	node tests/test_oauth.js
-	node tests/test_microsoft_oauth.js
-	node tests/test_credentials.js
-	node tests/test_secrets.js
-	node tests/test_gmail_api.js
-	node tests/test_message.js
-	node tests/test_calendar.js
-	node tests/test_calendar_cache.js
-	node tests/test_calendar_feed.js
-	node tests/test_calendar_sources.js
-	node tests/test_calendar_palette.js
-	node tests/test_bar_preview.js
-	node tests/test_unsubscribe.js
-	node tests/test_mailto.js
-	node tests/test_html.js
-	node tests/test_direction.js
-	node tests/test_cache.js
-	node tests/test_render_cache.js
-	node tests/test_model.js
-	node tests/test_icons.js
-	node tests/test_navigation.js
-	node tests/test_conversation.js
-	node tests/test_keymap.js
-	node tests/test_accounts.js
-	node tests/test_unified.js
-	node tests/test_aliases.js
-	node tests/test_menu.js
-	node tests/test_provider.js
-	node tests/test_imap.js
-	node tests/test_jmap.js
-	node tests/test_jmap_threads.js
-	node tests/test_jmap_helpers.js
-	node tests/test_hey.js
+	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_chunks.js
+	node tests/test_imap_backend.js
+	node tests/test_hey_backend.js
+	node ui/tests/test_compose_recovery.js
+	node ui/tests/test_agent.js
+	node ui/tests/test_chat_text.js
+	node ui/tests/test_signature.js
+	node ui/tests/test_outbox.js
+	node ui/tests/test_recipients.js
+	node ui/tests/test_senders.js
+	node ui/tests/test_oauth.js
+	node ui/tests/test_microsoft_oauth.js
+	node ui/tests/test_credentials.js
+	node ui/tests/test_secrets.js
+	node ui/tests/test_gmail_api.js
+	node ui/tests/test_message.js
+	node ui/tests/test_calendar.js
+	node ui/tests/test_calendar_cache.js
+	node ui/tests/test_calendar_feed.js
+	node ui/tests/test_calendar_sources.js
+	node ui/tests/test_calendar_palette.js
+	node ui/tests/test_bar_preview.js
+	node ui/tests/test_unsubscribe.js
+	node ui/tests/test_mailto.js
+	node ui/tests/test_html.js
+	node ui/tests/test_direction.js
+	node ui/tests/test_cache.js
+	node ui/tests/test_render_cache.js
+	node ui/tests/test_model.js
+	node ui/tests/test_icons.js
+	node ui/tests/test_navigation.js
+	node ui/tests/test_conversation.js
+	node ui/tests/test_keymap.js
+	node ui/tests/test_accounts.js
+	node ui/tests/test_unified.js
+	node ui/tests/test_aliases.js
+	node ui/tests/test_menu.js
+	node ui/tests/test_provider.js
+	node ui/tests/test_imap.js
+	node ui/tests/test_jmap.js
+	node ui/tests/test_jmap_threads.js
+	node ui/tests/test_jmap_helpers.js
+	node ui/tests/test_hey.js
 
 test-shell: test-shell-portable test-shell-libcurl
 
@@ -179,7 +191,7 @@ test-qml:
 		echo "  Ubuntu: qt6-declarative-dev-tools qml6-module-qttest" >&2; \
 		exit 1; }
 	QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-		$(QMLTESTRUNNER) -import $(CURDIR)/tests/qml/imports -input tests/qml
+		$(QMLTESTRUNNER) -import $(CURDIR)/ui/tests/qml/imports -input ui/tests/qml
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 
@@ -188,7 +200,7 @@ test-qml:
 # the shell runs on. Not part of `test`: it takes a few seconds and measures
 # rather than asserts.
 bench:
-	bash tests/bench.sh
+	bash ui/tests/bench.sh
 
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:

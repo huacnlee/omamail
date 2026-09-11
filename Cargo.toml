@@ -1,0 +1,18 @@
+[package]
+name = "omamail"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libc = "0.2"
+mailparse = "0.17"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

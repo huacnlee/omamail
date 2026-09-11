@@ -317,6 +317,13 @@ calendars and writes events.
 
 ## Development
 
+Rust sources live in `src/`: `cli/` handles commands, `backend/` handles the
+persistent stdio protocol, and business modules are shared by both. Qt/QML,
+JavaScript and runtime artwork live in `ui/`. UI unit tests are in `ui/tests/`,
+Rust unit tests live with their modules, and `tests/` holds integration tests.
+The Rust migration is still in progress; see [backend architecture](docs/BACKEND.md)
+for implemented capabilities and remaining work.
+
 ```bash
 make install          # symlink this checkout into ~/.config/omarchy/plugins
 make validate         # node tests, source regressions, qmllint, manifest check

@@ -160,7 +160,7 @@ Column {
   }
 
   readonly property string attachScript: {
-    var url = String(Qt.resolvedUrl("../scripts/attachment.sh"))
+    var url = String(Qt.resolvedUrl("../../scripts/attachment.sh"))
     return decodeURIComponent(url.replace(/^file:\/\//, ""))
   }
 

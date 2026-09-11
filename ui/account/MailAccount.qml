@@ -37,6 +37,7 @@ Item {
   height: 0
 
   required property string pluginDir
+  property var backend: null
   property string configuredEmail: ""
   property string oauthClientId: ""
 
@@ -2936,7 +2937,7 @@ Item {
 
   Component {
     id: heyClientComponent
-    HeyClient { auth: authLoader.item }
+    HeyClient { auth: authLoader.item; backend: root.backend }
   }
 
   Component {
@@ -2944,6 +2945,7 @@ Item {
     ImapClient {
       auth: authLoader.item
       email: root.configuredEmail
+      backend: root.backend
     }
   }
 
