@@ -144,7 +144,8 @@ Rectangle {
     anchors.right: parent.right
     // Align message text with the reader and header content.
     anchors.leftMargin: Style.space(14)
-    anchors.rightMargin: Style.space(8)
+    // Align text with the action glyph, rather than its padded hit target.
+    anchors.rightMargin: Style.space(6) + (Style.space(24) - Style.font.iconSmall) / 2
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(2)
 
@@ -306,6 +307,7 @@ Rectangle {
 
     IconButton {
       visible: root.hot && !root.selectionMode
+      objectName: "message-trash"
       iconName: "trash"
       tooltipText: "Move to trash · d"
       foreground: root.dimColor

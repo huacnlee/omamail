@@ -74,6 +74,13 @@ Item {
       if(actions.visible)
         compare(Math.round(actions.y+actions.height/2),Math.round((subjectPoint.y+descriptionPoint.y+description.height)/2),"actions center on title and description")
       verify(timePoint.x+time.width>=subjectPoint.x+subject.width,"time stays at the full row edge")
+      var trash=findChild(row,"message-trash")
+      if(trash.visible)
+        compare(Math.round(timePoint.x+time.width),Math.round(trash.mapToItem(row,(trash.width+trash.iconSize)/2,0).x),"date aligns with the trash glyph rather than its hit target")
+      if(!actions.visible) {
+        compare(Math.round(timePoint.x+time.width),Math.round(subjectPoint.x+subject.width))
+        compare(Math.round(timePoint.x+time.width),Math.round(descriptionPoint.x+description.width))
+      }
       verify(sender.width>0)
       verify(senderPoint.x+sender.width<=timePoint.x)
       compare(subject.font.bold,true,"unread emphasis survives reordering")
