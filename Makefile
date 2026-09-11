@@ -1,6 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml \
-	ui/backend/Backend.qml \
+	ui/backend/Backend.qml ui/backend/Runtime.qml \
+	ui/components/BackendSetup.qml \
 	ui/account/MailAccount.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
@@ -88,9 +89,12 @@ backend:
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_compatibility.js
+	node ui/tests/test_backend_runtime.js
 	node ui/tests/test_backend_chunks.js
 	node tests/test_imap_backend.js
 	node tests/test_hey_backend.js
+	node tests/test_gmail_backend.js
 	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
 	node ui/tests/test_chat_text.js
@@ -137,6 +141,11 @@ test-shell: test-shell-portable test-shell-libcurl
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
+	python3 tests/test_plugin_workflow.py
+	python3 tests/test_backend_runtime.py
+	python3 tests/test_backend_release.py
+	python3 tests/test_runtime_release_contract.py
+	sh tests/test_dev.sh
 	python3 tests/test_attachment_common.py
 	python3 tests/test_notification.py
 	python3 tests/test_curl_config.py
@@ -210,7 +219,6 @@ validate: test qml-check
 	omarchy plugin validate .
 	git diff --check
 
-# Symlinks this checkout into ~/.config/omarchy/plugins so QML edits are read
-# live. Development only — the marketplace installs the plugin itself.
+# Development only: the Marketplace installs the plugin for ordinary users.
 install:
 	bash scripts/link-plugin.sh

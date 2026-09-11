@@ -55,7 +55,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "methods": ["system.info", "system.quit", "accounts.list", "providers.list", "message.parse", "upload.begin", "upload.append", "upload.discard", "message.parseUpload", "hey.status", "hey.list", "hey.read", "hey.act", "hey.send", "gmail.list", "gmail.read", "gmail.attachment"]
+            "protocol": 1, "methods": ["system.info", "system.quit", "accounts.list", "providers.list", "message.parse", "upload.begin", "upload.append", "upload.discard", "message.parseUpload", "hey.status", "hey.list", "hey.read", "hey.act", "hey.send", "gmail.list", "gmail.read", "gmail.attachment", "gmail.invalidate", "gmail.labels", "gmail.labelCounts", "gmail.profile", "gmail.sendAs"]
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),

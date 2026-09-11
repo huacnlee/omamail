@@ -40,6 +40,7 @@ Item {
       textColor: Color.foreground
       accentColor: Color.accent
       dimColor: Color.foreground
+      urgentColor: Color.accent
       panelFontFamily: "monospace"
     }
   }

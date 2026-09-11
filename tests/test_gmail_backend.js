@@ -1,0 +1,94 @@
+const assert = require("assert")
+const fs = require("fs")
+const vm = require("vm")
+const { load } = require("../ui/tests/load")
+const source = fs.readFileSync(require("path").join(__dirname, "../ui/providers/GmailApiClient.qml"), "utf8")
+function method(name) {
+  const start = source.indexOf("  function " + name + "(")
+  assert(start >= 0, name)
+  return source.slice(start, source.indexOf("\n  function ", start + 1))
+}
+const context = { Api: load("providers/GmailApi.js"), inFlight: 0,
+  auth: { accountId: "a@example.org", loggedIn: true },
+  backendEpoch: 0, backendAccount: "", Qt: { callLater: fn => fn() } }
+context.root = context
+vm.createContext(context)
+for (const name of ["newHandle", "clearDeadline", "abortRequest", "listMessages", "getMessage", "getAttachment"])
+  vm.runInContext(method(name), context)
+// Load additional real helpers when present; the pre-migration implementation
+// fails at the forbidden network path, not because a helper is missing.
+for (const name of ["usesBackend", "invalidateBackend", "backendRequest"])
+  if (source.includes("  function " + name + "(")) vm.runInContext(method(name), context)
+let pending, request, calls = 0
+context.backend = { executable: "/test/omamail", call(method, params, cb) { calls++; request = { method, params }; pending = cb } }
+context.request = () => assert.fail("configured backend must not issue QML HTTP")
+context.listMessages("unread", 25, "cursor", (result, error) => { assert.strictEqual(error, ""); assert.strictEqual(result.ids[0], "one") })
+assert.strictEqual(request.method, "gmail.list")
+assert.strictEqual(request.params.accountId, "a@example.org")
+assert.strictEqual(request.params.pageToken, "cursor")
+assert.strictEqual(context.inFlight, 1)
+pending({ ids: ["one"], threadIds: ["thread"], nextPageToken: "", estimate: 1 }, null)
+assert.strictEqual(context.inFlight, 0)
+context.listMessages("", 25.5, "", () => {})
+assert.strictEqual(request.params.pageSize, 25)
+pending({ ids: [], threadIds: [], nextPageToken: "", estimate: 0 }, null)
+context.getMessage("one", false, (result, error) => assert.strictEqual(result.id, "one"))
+assert.strictEqual(request.params.full, false)
+pending({ id: "one" }, null)
+context.getAttachment("one", "part", (data, error) => { assert.strictEqual(data, "YWJj"); assert.strictEqual(error, "") })
+pending({ data: "YWJj" }, null)
+const handle = context.getMessage("one", true, () => assert.fail("aborted callback"))
+context.abortRequest(handle)
+pending({}, null)
+assert.strictEqual(context.inFlight, 0)
+context.getMessage("one", true, () => assert.fail("stale session callback"))
+const stale = pending
+context.invalidateBackend()
+assert.strictEqual(request.method, "gmail.invalidate")
+assert.strictEqual(request.params.accountId, "a@example.org")
+stale({}, null)
+assert.strictEqual(context.inFlight, 0)
+context.auth.loggedIn = false
+const before = calls
+context.getMessage("one", true, (result, error) => assert(error))
+assert.strictEqual(calls, before)
+context.auth.loggedIn = true
+context.getMessage("one", true, (result, error) => { assert.strictEqual(result, null); assert(error) })
+pending(null, { message: "unavailable" })
+assert.strictEqual(context.inFlight, 0)
+pending(null, { message: "duplicate delivery" })
+assert.strictEqual(context.inFlight, 0)
+context.getMessage("one", true, () => assert.fail("another account's result"))
+context.auth.accountId = "b@example.org"
+pending({ id: "one" }, null)
+assert.strictEqual(context.inFlight, 0)
+for (const name of ["getLabels", "getLabelCounts", "getProfile", "getSendAs"])
+  vm.runInContext(method(name), context)
+for (const [name, rpc, params, result] of [
+  ["getLabels", "gmail.labels", [], [{ id: "INBOX", name: "Inbox", unread: 3 }]],
+  ["getLabelCounts", "gmail.labelCounts", ["INBOX"], { id: "INBOX", unread: 3, total: 10 }],
+  ["getProfile", "gmail.profile", [], { email: "b@example.org", messagesTotal: 10 }],
+  ["getSendAs", "gmail.sendAs", [], [{ email: "b@example.org", isPrimary: true }]]
+]) {
+  let received
+  context[name](...params, (value, error) => { assert.strictEqual(error, ""); received = value })
+  assert.strictEqual(request.method, rpc)
+  assert.strictEqual(request.params.accountId, "b@example.org")
+  if (name === "getLabelCounts") assert.strictEqual(request.params.id, "INBOX")
+  pending(result, null)
+  assert.strictEqual(received, result, "backend owns result normalization")
+  context[name](...params, (value, error) => {
+    assert(error)
+    if (name === "getLabels" || name === "getSendAs") assert.strictEqual(value.length, 0)
+    else assert.strictEqual(value, null)
+  })
+  pending(null, { message: "unavailable" })
+}
+context.backend = null
+let legacy = 0
+context.request = () => { legacy++ }
+context.getMessage("one", true, () => {})
+context.listMessages("", 25, "", () => {})
+context.getAttachment("one", "part", () => {})
+assert.strictEqual(legacy, 3)
+console.log("test_gmail_backend.js ok")

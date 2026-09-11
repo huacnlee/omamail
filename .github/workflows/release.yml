@@ -1,64 +1,133 @@
 name: Release
 
-# Tag-driven: pushing v1.2.3 publishes the release for that commit. Nothing
-# else creates one, so the tag is the single record of what shipped.
+# Dispatch on the explicit source branch, including a feature branch before merge.
 on:
+  workflow_dispatch:
+  # Explicit opt-in bootstrap branch; works before dispatch is on main.
   push:
-    tags:
-      - "v*"
+    branches: ['release/backend/**']
+    paths-ignore: ['backend-version']
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
+
+concurrency:
+  group: backend-release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Release notes are generated from the history since the last tag, so
-          # a shallow clone would produce an empty changelog.
-          fetch-depth: 0
-
+      - id: version
+        run: echo "version=$(python3 scripts/package-backend.py check)" >> "$GITHUB_OUTPUT"
+      - name: Require a branch and an unused release version
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = branch
+          test -n "$GH_TOKEN"
+          git check-ref-format "refs/heads/$GITHUB_REF_NAME"
+          source_sha="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
+          test "$source_sha" = "$GITHUB_SHA"
+          existing_tag="$(git ls-remote origin "refs/tags/v$VERSION")"
+          test -z "$existing_tag"
+          # Listing must succeed; network/authentication failures never mean absent.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
+          if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - run: make test-js test-shell-portable
+      - run: python3 tests/test_backend_release.py
 
-      # The manifest version is what Omarchy installs and what the marketplace
-      # lists. A tag that disagrees with it would publish a release describing a
-      # version nobody can install, so it fails here instead.
-      - name: Check the tag matches the manifest
-        run: |
-          set -eu
-          tag="${GITHUB_REF_NAME#v}"
-          manifest="$(node -p 'require("./manifest.json").version')"
-          if [ "$tag" != "$manifest" ]; then
-            echo "tag $GITHUB_REF_NAME does not match manifest version $manifest" >&2
-            exit 1
-          fi
-          echo "version $manifest"
-
-      # The parsing, formatting and decision rules are plain JS and the source
-      # checks are shell, so those need nothing at all and run here.
-      #
-      # Three gates stay local, and for one reason: each reports on a version of
-      # something the plugin does not run on. qmllint needs the Omarchy shell on
-      # the import path, which a runner does not have. The QML tests need the Qt
-      # the plugin actually runs on — Ubuntu ships 6.4 and Omarchy is current,
-      # and they exercise exactly the engine behaviour that differs between
-      # them: shortcut objects rebuilt when a context changes fire on one and
-      # not the other. `test-shell-libcurl` asserts which of libcurl's two
-      # output channels carries a fetched message, which its version decides.
-      #
-      # `make test` includes all three, so it is not what runs here.
-      - name: Test
-        run: make test-js test-shell-portable
-
-      - name: Publish the release
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: rustup target add "${{ matrix.target }}"
+      - name: Test and build native static Linux backend
         env:
-          GH_TOKEN: ${{ github.token }}
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+          RUSTFLAGS: -C linker=musl-gcc
         run: |
-          previous_tag="$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^")"
-          scripts/release-notes.sh "$previous_tag" "$GITHUB_REF_NAME" >release-notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          cargo test --locked
+          cargo build --release --locked
+      - name: Verify native version and static linkage, then package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          binary="target/$TARGET/release/omamail"
+          test "$("$binary" --version)" = "omamail $VERSION"
+          readelf -l "$binary" > program-headers.txt
+          readelf -d "$binary" > dynamic-headers.txt
+          if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
+          if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
+          python3 scripts/package-backend.py package "$binary" "$ARCH" artifact
+          python3 scripts/package-backend.py verify artifact --arch "$ARCH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.arch }}
+          path: artifact/*
+          if-no-files-found: error
+
+  publish-and-pin:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: backend-*
+          path: artifacts
+      - name: Publish complete release, verify downloads, then advance only the pin
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/package-backend.py check --tag "v$VERSION"
+          source_sha="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
+          test "$source_sha" = "$GITHUB_SHA"
+          existing_tag="$(git ls-remote origin "refs/tags/v$VERSION")"
+          test -z "$existing_tag"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
+          if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
+          mkdir release-assets
+          cp artifacts/backend-x86_64/omamail-linux-x86_64.tar.gz release-assets/
+          cp artifacts/backend-aarch64/omamail-linux-aarch64.tar.gz release-assets/
+          cat artifacts/backend-x86_64/SHA256SUMS artifacts/backend-aarch64/SHA256SUMS > release-assets/SHA256SUMS
+          python3 scripts/package-backend.py verify release-assets
+          gh release create "v$VERSION" release-assets/* --target "$GITHUB_SHA" --draft --title "v$VERSION" --generate-notes
+          gh release edit "v$VERSION" --draft=false
+          mkdir published
+          gh release download "v$VERSION" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS
+          python3 scripts/package-backend.py verify published
+          cmp release-assets/SHA256SUMS published/SHA256SUMS
+          # Refuse moved refs and push only a pin commit, without force.
+          python3 scripts/package-backend.py pin --branch "$GITHUB_REF_NAME" --expected "$GITHUB_SHA"

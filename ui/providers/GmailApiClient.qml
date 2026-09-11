@@ -13,6 +13,20 @@ Item {
   height: 0
 
   required property var auth
+  property var backend: null
+  property int backendEpoch: 0
+  property string backendAccount: ""
+  readonly property string backendIdentity: auth ? String(auth.accountId || "") : ""
+  onBackendIdentityChanged: invalidateBackend()
+  onAuthChanged: invalidateBackend()
+  Connections {
+    target: root.auth
+    function onLoggedOut() { root.invalidateBackend() }
+    function onLoggedInChanged() {
+      if (!root.auth || !root.auth.loggedIn) root.invalidateBackend()
+    }
+  }
+  Component.onDestruction: invalidateBackend()
 
   // Gmail's list endpoint returns ids only, so every page costs one list call
   // plus one metadata call per message. Those are fired together rather than
@@ -39,6 +53,48 @@ Item {
 
   function newHandle() {
     return { aborted: false, timedOut: false, xhr: null, deadline: null, children: [] }
+  }
+
+  function usesBackend() {
+    return backend && String(backend.executable || "") !== ""
+  }
+
+  function invalidateBackend() {
+    backendEpoch++
+    var old = backendAccount
+    backendAccount = ""
+    // Cache eviction only: queued requests and external keyring credentials
+    // are not revoked by this message. Epochs suppress stale UI delivery.
+    if (old !== "" && usesBackend())
+      backend.call("gmail.invalidate", { accountId: old }, function() {})
+  }
+
+  function backendRequest(method, params, callback) {
+    var handle = newHandle()
+    var account = auth ? String(auth.accountId || "") : ""
+    if (!auth || !auth.loggedIn || account === "") {
+      Qt.callLater(function() {
+        if (!handle.aborted && typeof callback === "function")
+          callback(null, "Sign in to the configured Gmail account first")
+      })
+      return handle
+    }
+    backendAccount = account
+    var epoch = backendEpoch
+    var session = auth
+    params.accountId = account
+    root.inFlight++
+    var settled = false
+    backend.call(method, params, function(result, error) {
+      if (!root || settled) return
+      settled = true
+      root.inFlight = Math.max(0, root.inFlight - 1)
+      if (handle.aborted || epoch !== root.backendEpoch || auth !== session
+          || !auth.loggedIn || String(auth.accountId || "") !== account) return
+      if (typeof callback === "function")
+        callback(error ? null : result, error ? "Gmail backend could not complete this request" : "")
+    })
+    return handle
   }
 
   // Stopped and destroyed together, because a Timer that outlives its request
@@ -153,6 +209,10 @@ Item {
   // ---------------------------------------------------------------- reads
 
   function listMessages(query, maxResults, pageToken, callback, progress) {
+    if (usesBackend()) return backendRequest("gmail.list", {
+      query: String(query || ""), pageToken: String(pageToken || ""),
+      pageSize: Math.max(1, Math.min(100, Math.floor(Number(maxResults) || 25)))
+    }, callback)
     return request("GET", Api.messagesPath(),
       Api.listQuery(query, maxResults, pageToken), null,
       function(status, payload, error) {
@@ -163,6 +223,9 @@ Item {
   }
 
   function getMessage(id, full, callback) {
+    if (usesBackend()) return backendRequest("gmail.read", {
+      id: String(id || ""), full: !!full
+    }, callback)
     return request("GET", Api.messagePath(id),
       full ? Api.fullQuery() : Api.metadataQuery(), null,
       function(status, payload, error) {
@@ -176,6 +239,12 @@ Item {
   // reader asks for one of them: the invitation, whose file has to be read
   // before a meeting can be drawn or answered.
   function getAttachment(messageId, attachmentId, callback) {
+    if (usesBackend()) return backendRequest("gmail.attachment", {
+      messageId: String(messageId || ""), attachmentId: String(attachmentId || "")
+    }, function(payload, error) {
+      if (typeof callback === "function")
+        callback(error || !payload ? "" : String(payload.data || ""), error)
+    })
     return request("GET", Api.attachmentPath(messageId, attachmentId), null, null,
       function(status, payload, error) {
         if (typeof callback !== "function") return
@@ -279,6 +348,9 @@ Item {
   }
 
   function getLabels(callback) {
+    if (usesBackend()) return backendRequest("gmail.labels", {}, function(result, error) {
+      if (typeof callback === "function") callback(error ? [] : result, error)
+    })
     return request("GET", Api.labelsPath(), null, null,
       function(status, payload, error) {
         if (typeof callback !== "function") return
@@ -287,6 +359,7 @@ Item {
   }
 
   function getLabelCounts(labelId, callback) {
+    if (usesBackend()) return backendRequest("gmail.labelCounts", { id: String(labelId || "") }, callback)
     return request("GET", Api.labelPath(labelId), null, null,
       function(status, payload, error) {
         if (typeof callback !== "function") return
@@ -295,6 +368,7 @@ Item {
   }
 
   function getProfile(callback) {
+    if (usesBackend()) return backendRequest("gmail.profile", {}, callback)
     return request("GET", Api.profilePath(), null, null,
       function(status, payload, error) {
         if (typeof callback !== "function") return
@@ -303,6 +377,9 @@ Item {
   }
 
   function getSendAs(callback) {
+    if (usesBackend()) return backendRequest("gmail.sendAs", {}, function(result, error) {
+      if (typeof callback === "function") callback(error ? [] : result, error)
+    })
     return request("GET", Api.sendAsPath(), null, null,
       function(status, payload, error) {
         if (typeof callback !== "function") return

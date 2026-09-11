@@ -278,7 +278,7 @@ Item {
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "bar,reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "backend,bar,reading,notifications,writing,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
@@ -293,7 +293,7 @@ Item {
       var view = flick()
       verify(view, "the page scrolls inside a Flickable")
       compare(view.contentY, 0)
-      compare(rail.activeKey, "bar",
+      compare(rail.activeKey, "backend",
         "the top of the page is the first section, whichever that is")
       compare(app.navKinds.join(","), "list,settings")
 
@@ -324,7 +324,7 @@ Item {
       // Scrolled by other means — the wheel, say — the highlight still
       // follows the page, because the page is what it describes.
       view.contentY = 0
-      tryCompare(rail, "activeKey", "bar")
+      tryCompare(rail, "activeKey", "backend")
       view.contentY = sectionY(page, "mailboxes") + 5
       tryCompare(rail, "activeKey", "mailboxes")
     }

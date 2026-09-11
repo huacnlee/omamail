@@ -43,7 +43,7 @@ it, described in terms of what it protects rather than what it opens.
 
 Omamail is a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell]. Changes should extend that plugin's service or interface, not turn this repository into a second application.
 
-Helper scripts that let the plugin perform its own work belong here. A standalone CLI, agent skill, daemon, SDK, or other independently consumed interface does not. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
+Helper scripts and the plugin's private Rust backend belong here. The same executable may expose CLI commands over its shared business modules; an optional user command is an explicitly requested symlink to that executable. Separate applications, daemons, SDKs and automatic global integrations remain outside this boundary. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
 
 Programmatic access to mail may be useful, but it needs an integration boundary designed independently from the Quickshell plugin. Omarchy defines [IPC as the standard boundary for commands that communicate with the running shell][shell-ipc]; proposals that need a different lifecycle or ownership model should begin with a design discussion.
 
@@ -52,7 +52,8 @@ Programmatic access to mail may be useful, but it needs an integration boundary 
 [shell-ipc]: https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md#ipc
 
 ```bash
-make install     # symlink this checkout into ~/.config/omarchy/plugins
+./dev backend    # build the private backend for development
+./dev run        # build and print shell environment/start instructions
 make validate    # node tests, source regressions, QML tests, qmllint, manifest
 ```
 
@@ -106,8 +107,8 @@ code once and watch it fail, and say so in the pull request.
   *Popups* sections are the same rules where they are specific to this
   codebase, and `tests/test_source.sh` enforces the part of them that grep can.
 - **Test it on a screen, by hand. This is required and nothing substitutes for
-  it.** `make install` symlinks this checkout into
-  `~/.config/omarchy/plugins`, so QML edits are read live; click the envelope
+  it.** Register your development checkout with the Omarchy shell and follow
+  [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope
   in the bar and drive the change with the mouse and with the keyboard, in a
   light theme and in a dark one, and at both window sizes — three columns and
   mini. The offscreen QML tests prove focus and routing; they cannot see that a

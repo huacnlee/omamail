@@ -437,7 +437,11 @@ Item {
   // what spares each of them a null check of its own. It is not redundant with
   // the sign-in state: the two loaders build in sequence, so there is a frame
   // where the account is signed in and has nothing to fetch with.
+  // Authentication can finish before the private runtime is installed or its
+  // handshake lands. Waiting here makes that later transition run the same
+  // metadata and active-list initialization as a restored sign-in.
   readonly property bool ready: setupState === "ready" && !!api
+    && (!backend || !backend.executable || backend.ready === true)
   readonly property bool busy: listLoading || detailLoading || countLoading
     || (auth ? auth.sessionBusy : false) || sending || pendingAction !== ""
   // The provider decides what a mailbox and a typed search amount to: Gmail's
@@ -2932,7 +2936,7 @@ Item {
 
   Component {
     id: gmailClientComponent
-    GmailApiClient { auth: authLoader.item }
+    GmailApiClient { auth: authLoader.item; backend: root.backend }
   }
 
   Component {

@@ -1,6 +1,7 @@
 *.log
 node_modules/
 /target/
+/runtime/
 .DS_Store
 .claude/worktrees/
 
@@ -9,6 +10,7 @@ node_modules/
 # repository; see AGENTS.md for what is kept and why.
 docs/design/
 docs/superpowers/
+.superpowers/
 
 # Python leaves these beside the harvester scripts.
 __pycache__/

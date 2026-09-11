@@ -2,7 +2,11 @@
 
 **Your mail as a native Omarchy window — not a browser tab.**
 
-Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages, and answers your mail over the official Gmail API, through Microsoft OAuth for Outlook, over the HEY CLI client 37signals publish, over JMAP, or over IMAP and SMTP for every other mailbox. It runs inside the `omarchy-shell` process you already have, follows your active theme, and puts an unread count in the bar.
+Omamail is an Omarchy desktop email client: a Quickshell plugin
+that reads, triages, and answers your mail over the official Gmail API, through
+Microsoft OAuth for Outlook, over the HEY CLI client 37signals publish, over
+JMAP, or over IMAP and SMTP for every other mailbox. It follows your active
+theme and uses one private, exactly versioned Rust backend inside the plugin.
 
 
 <img width="800" alt="Omamail - Reading mail with AI assistance for selected messages" src="docs/images/full-mail.webp" />
@@ -69,21 +73,29 @@ Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yah
 
 ## What it is
 
-Three parts, one plugin:
+One installed application with three cooperating parts:
 
-- an **unread badge** in the bar, which keeps counting whether or not the
-  window is open
+- a **background service**, which keeps counting whether or not the window is
+  open
 - an **application window** — a real Hyprland window, tiled like any other,
   with your mailboxes, the message list, and the reader side by side
 - **compose and reply inside that same window**, because a second window would
-  take a region of its own under Omarchy's panel mechanism. A `mailto:` link
-  from elsewhere on the desktop opens that same compose form.
+  take a region of its own. A `mailto:` link from elsewhere on the desktop
+  opens that same compose form.
 
-## Add it to Omarchy
+## Install the plugin
 
 ```bash
 omarchy plugin add https://github.com/huacnlee/omamail.git --enable
 ```
+
+Open Omamail and explicitly install its backend when prompted. Loading the
+plugin never downloads a binary. The installer uses the exact `backend-version`
+release for Linux x86_64 or aarch64 and keeps it at `runtime/bin/omamail` inside
+the plugin. No system package or second Quickshell process is installed.
+See [backend installation and releases](docs/BACKEND-RUNTIME.md) for updates,
+optional CLI access and recovery. This branch's initial release gate is pending:
+v0.8.2 has no backend assets; a new version must be published before merge.
 
 Then click the envelope in the bar. To open it from the keyboard, add this to
 `~/.config/hypr/bindings.lua`:
@@ -176,14 +188,17 @@ server is set.
 
 The sent copy is filed by Omamail rather than left to the server: a message handed to SMTP submission lands nowhere on its own. It goes to the server's own Sent folder, named by the server rather than guessed, and arrives already marked read; a server that reports no Sent folder holds no copy, and the status row says so. One thing worth knowing: a Gmail account read over IMAP has Google file its own copy of anything sent through Gmail's SMTP, so those accounts hold two.
 
-To remove it:
+If you enabled the optional CLI link, first run
+`python3 scripts/backend-runtime.py disable-cli` from the plugin directory.
+Omarchy has no verified uninstall hook to remove that external link for you.
+Then remove the plugin:
 
 ```bash
 omarchy plugin remove omamail
 ```
 
-That takes the plugin itself. Nothing it wrote lives inside your Omarchy
-config, so removing those is separate and entirely up to you:
+That removes the plugin and its private runtime. Account data, caches, drafts
+and keyring entries stay in place. Removing those is separate and up to you:
 
 ```bash
 secret-tool clear service omamail    # refresh tokens and JMAP and IMAP passwords
@@ -325,9 +340,15 @@ The Rust migration is still in progress; see [backend architecture](docs/BACKEND
 for implemented capabilities and remaining work.
 
 ```bash
-make install          # symlink this checkout into ~/.config/omarchy/plugins
-make validate         # node tests, source regressions, qmllint, manifest check
+./dev backend         # build the development Rust executable
+./dev run             # build and print shell environment/start instructions
+make validate         # tests, source regressions, qmllint, manifest check
 ```
+
+`OMAMAIL_BIN` is an explicit development override; a running shell must receive
+that environment before constructing the plugin. See
+[the runtime guide](docs/BACKEND-RUNTIME.md) for the restart limitation and the
+publish-before-pin release workflow.
 
 How to send a change — there is no issue tracker — is in
 [CONTRIBUTING.md](CONTRIBUTING.md). Working agreements are in

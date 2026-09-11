@@ -91,7 +91,9 @@ Item {
       mailService.manifest = {id:"omamail",name:"Omamail"}
       verify(mailService.pluginDir !== "", "Modern shell removes internal source metadata")
       verify(mailService.pluginDir.indexOf("file:") !== 0)
-      verify(mailService.pluginDir.indexOf("/omamail") >= 0)
+      var pluginRoot = decodeURIComponent(String(Qt.resolvedUrl("../../.."))
+        .replace(/^file:\/\//, "")).replace(/\/$/, "")
+      compare(mailService.pluginDir, pluginRoot)
       mailService.manifest = saved
     }
 

@@ -38,9 +38,9 @@ Item {
       verify(scopedMailService.pluginDir !== "")
       verify(scopedMailService.pluginDir.indexOf("%") < 0,
         "the filesystem path must be decoded before it is used as a process command")
-      var componentDir = decodeURIComponent(String(Qt.resolvedUrl("../.."))
+      var pluginRoot = decodeURIComponent(String(Qt.resolvedUrl("../../.."))
         .replace(/^file:\/\//, "")).replace(/\/$/, "")
-      compare(scopedMailService.pluginDir, componentDir,
+      compare(scopedMailService.pluginDir, pluginRoot,
         "the helper directory comes from Service.qml itself")
     }
 

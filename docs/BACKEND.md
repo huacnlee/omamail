@@ -2,12 +2,18 @@
 
 The intended architecture has one Rust domain implementation consumed by the
 headless CLI and the Omarchy QML plugin. The shell still constructs Service.qml;
-the plugin entry point is not replaced by Flea's standalone GUI launcher.
-Service will own the backend process so opening or closing a window does not
-restart accounts. QML will retain theme, focus, layout and rendering state.
+the plugin entry point stays owned by the existing shell. Service owns the
+backend process so opening or closing a window does not restart it. QML retains
+theme, focus, layout and rendering state.
 
 Migration is incomplete. The versioned protocol, CLI entry point and read-only
-account listing exist. Service.qml owns a persistent Backend component; setting `OMAMAIL_BIN` to the built executable enables it during migration. It performs a protocol handshake and exposes correlated calls with pending-request limits and deadlines. No mail operation has moved to Rust. `info` reports the implemented methods, not planned features.
+account listing exist, and Gmail fetching is moving into shared Rust modules.
+Service.qml owns a persistent Backend component using the plugin-private exact
+version. `OMAMAIL_BIN` selects an explicit development executable. It performs a
+version and protocol handshake and exposes correlated calls with pending-request
+limits and deadlines. Unmigrated providers retain their existing implementations;
+migrated calls do not silently fall back when the backend is unavailable.
+`info` reports the implemented methods, not planned features.
 
 ## Build and protocol
 
@@ -19,8 +25,10 @@ dispatch, pipes and uploads. Shared account and MIME logic live in
 `ui/`, with artwork in `ui/assets/` and unit tests in `ui/tests/`. Rust unit
 tests stay with their modules; `tests/` holds integration tests.
 
-Run `make backend` and `make test-rust`. The binary is `target/release/omamail`.
-`omamail info` prints JSON; `omamail --backend` reads newline-terminated JSON
+Run `./dev backend` and `make test-rust`; `./dev run` builds and prints instructions
+for starting the plugin through the existing shell. It does not open or restart it.
+See [runtime ownership and development](BACKEND-RUNTIME.md).
+`omamail info` prints JSON; `omamail serve` (also `--backend`) reads newline-terminated JSON
 requests on persistent stdin/stdout pipes using JSON-RPC 2.0 envelopes. QML will start one backend and communicate directly through these pipes, without invoking CLI commands for data operations. Unix sockets are not used. CLI commands share the Rust domain implementation; they do not currently attach to the GUI process.
 
 Example request:
@@ -31,7 +39,7 @@ Example request:
 
 Replies contain `jsonrpc: "2.0"`, the original `id`, and either `result` or an `error` object with a numeric code and static message. Clients should use string IDs to avoid QML number precision issues. Notifications omit `id` and receive no response, including on method failures. Explicit null IDs receive responses. Batches contain at most 128 entries and return only non-notification responses. Invalid envelopes return null IDs; unknown fields and duplicate envelope keys are refused. Frames are bounded to 1 MiB including the newline. Oversized or unterminated frames return an error and end the stream. Invalid complete frames allow the next request. Errors never include input bytes.
 
-Four worker threads process frames from a bounded 16-frame queue. Responses can arrive out of order and must be matched by ID. Writes are serialized to prevent interleaved JSON. `system.quit` drains earlier frames, acknowledges `quitReady`, then ends processing. A batch containing quit completes the batch before exiting. EOF also drains accepted work. Methods currently require empty object params, which may be omitted. This is bounded threaded dispatch; cancellation, asynchronous network I/O and mutation ordering are still pending.
+Four worker threads process frames from a bounded 16-frame queue. Responses can arrive out of order and must be matched by ID. Writes are serialized to prevent interleaved JSON. `system.quit` drains earlier frames, acknowledges `quitReady`, then ends processing. A batch containing quit completes the batch before exiting. EOF also drains accepted work. Metadata and registry-list methods such as `system.info`, `accounts.list` and `providers.list` require empty object params, which may be omitted. Other calls accept method-specific parameters; `omamail info` lists the implemented methods. This is bounded threaded dispatch; cancellation, asynchronous network I/O and mutation ordering are still pending.
 
 Responses up to 1 MiB including their newline retain the ordinary JSON-RPC
 envelope. Larger serialized responses, including batches, use contiguous
@@ -81,5 +89,9 @@ The Rust HEY adapter exposes `hey.status`, `hey.list` (`query`, `pageToken`, `pa
 
 Existing credential scope, byte validation, SSRF, redirect and raster policies
 remain acceptance requirements. Rust alone is not evidence of security. The
-current protocol tests cover framing and error disclosure only; network and
-credential boundaries are not yet implemented or verified in Rust.
+protocol tests cover framing and error disclosure; migrated provider network and
+credential paths have their own implementations and regression coverage.
+Migration remains partial, and each provider's affected boundaries still require
+specific validation, including live integration where synthetic tests cannot
+establish compatibility. The method list from `omamail info` describes what is
+implemented; it does not certify a complete security audit.

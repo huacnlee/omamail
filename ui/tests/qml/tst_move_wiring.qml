@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 
 // The move route through the real objects. Unit tests own each rule; this one
 // catches a forwarding argument or property dropped between App, Service and
@@ -29,6 +30,8 @@ Item {
   TestCase {
     name: "MoveWiring"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(mailService) }
 
     function named(item, objectName) {
       if (!item) return null

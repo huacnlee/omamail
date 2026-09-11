@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "transports.js" as Transports
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 
 // Connect on an edited mailbox signs *that* mailbox in.
 //
@@ -36,6 +37,8 @@ Item {
   TestCase {
     name: "AppEditConnect"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(mailService) }
 
     readonly property string imapId: "imap:shawn@example.test"
     readonly property string jmapId: "jmap:admin@example.test"

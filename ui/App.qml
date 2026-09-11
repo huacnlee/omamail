@@ -28,6 +28,8 @@ Item {
   property bool opened: false
   property bool closingFromHost: false
   property string draftSavedNotice: ""
+  readonly property bool backendUnavailable: !!service && !!service.backendRuntime
+    && (service.backendRuntime.state !== "ready" || !service.backend.ready)
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
@@ -1587,8 +1589,26 @@ Item {
       if (!visible && root.opened && !root.closingFromHost) root.requestClose()
     }
 
+    Rectangle {
+      anchors.fill: parent
+      z: 200
+      visible: root.backendUnavailable
+      color: root.background
+      BackendSetup {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Style.space(48), Style.space(480))
+        runtime: root.service ? root.service.backendRuntime || null : null
+        backendError: root.service && root.service.backend ? root.service.backend.failure : ""
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        panelFontFamily: root.fontFamily
+      }
+    }
+
     FocusScope {
       id: focusScope
+      enabled: !root.backendUnavailable
       anchors.fill: parent
       focus: true
 
@@ -3028,7 +3048,7 @@ Item {
       KeyRouter {
         id: keyRouter
         objectName: "key-router"
-        context: focusScope.keyContext
+        context: root.backendUnavailable ? "" : focusScope.keyContext
         overlay: root.shortcutHelpVisible
         onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }

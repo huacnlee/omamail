@@ -65,7 +65,12 @@ if printf '\n' | "$store" accounts.json >/dev/null 2>&1; then
   echo 'config-store.sh: an empty payload must be refused' >&2
   exit 1
 fi
-[ "$(stat -c '%a' "$target")" = 600 ] \
+if stat -c '%a' "$target" >/dev/null 2>&1; then
+  account_mode=$(stat -c '%a' "$target")
+else
+  account_mode=$(stat -f '%Lp' "$target")
+fi
+[ "$account_mode" = 600 ] \
   || { echo 'config-store.sh: the account list must stay owner-only' >&2; exit 1; }
 
 echo 'config-store.sh ok'

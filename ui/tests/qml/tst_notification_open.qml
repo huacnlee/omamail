@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import qs.Commons
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
 
 Item {
@@ -31,6 +32,8 @@ Item {
   TestCase {
     name: "NotificationOpen"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(service) }
     readonly property string first: "ada@example.org"
     readonly property string second: "bob@example.org"
 

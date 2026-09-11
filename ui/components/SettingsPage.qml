@@ -41,6 +41,7 @@ Column {
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
   readonly property var sections: [
+    { key: "backend", title: "Mail backend", y: backendSetup.y },
     { key: "bar", title: "Bar", y: barHeading.y },
     { key: "reading", title: "Reading", y: readingHeading.y },
     { key: "notifications", title: "Notifications", y: notificationsHeading.y },
@@ -160,8 +161,7 @@ Column {
   }
 
   readonly property string attachScript: {
-    var url = String(Qt.resolvedUrl("../../scripts/attachment.sh"))
-    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+    return service && service.pluginDir ? String(service.pluginDir) + "/scripts/attachment.sh" : ""
   }
 
   Process {
@@ -207,6 +207,17 @@ Column {
   }
 
   spacing: Style.space(16)
+
+  BackendSetup {
+    id: backendSetup
+    width: parent.width
+    runtime: root.service ? root.service.backendRuntime || null : null
+    backendError: root.service && root.service.backend ? root.service.backend.failure : ""
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    panelFontFamily: root.panelFontFamily
+  }
 
   Text {
     text: "Settings"

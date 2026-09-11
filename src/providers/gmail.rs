@@ -3,18 +3,85 @@ use super::{gmail_credentials, gmail_http};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
+#[path = "gmail_resources.rs"]
+mod resources;
+#[cfg(test)]
+#[path = "gmail_tests.rs"]
+mod tests;
 struct Token {
     value: String,
     expires: Instant,
 }
 
+struct AccountSession {
+    valid: AtomicBool,
+    token: Mutex<Option<Arc<Token>>>,
+}
+
+impl AccountSession {
+    fn check(&self) -> Result<(), &'static str> {
+        if self.valid.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err("gmail_session_invalidated")
+        }
+    }
+
+    fn token_with(
+        &self,
+        refresh: impl FnOnce() -> Result<Value, &'static str>,
+    ) -> Result<Arc<Token>, &'static str> {
+        // Refresh coalesces per account. Invalidation never waits on this lock.
+        let mut cached = self.token.lock().map_err(|_| "session_failed")?;
+        self.check()?;
+        if let Some(token) = cached.as_ref().filter(|t| t.expires > Instant::now()) {
+            return Ok(Arc::clone(token));
+        }
+        let answer = refresh();
+        self.check()?;
+        let answer = answer?;
+        let value = answer["access_token"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 16384 && !s.chars().any(char::is_control))
+            .ok_or("gmail_invalid_token")?
+            .to_owned();
+        let lifetime = answer["expires_in"]
+            .as_u64()
+            .unwrap_or(3600)
+            .min(86400)
+            .saturating_sub(60);
+        let token = Arc::new(Token {
+            value,
+            expires: Instant::now() + Duration::from_secs(lifetime),
+        });
+        *cached = Some(Arc::clone(&token));
+        Ok(token)
+    }
+
+    fn reject(&self, rejected: &Arc<Token>) -> Result<(), &'static str> {
+        let mut cached = self.token.lock().map_err(|_| "session_failed")?;
+        self.check()?;
+        // An old 401 cannot evict a new grant, even with identical token bytes.
+        if cached
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, rejected))
+        {
+            *cached = None;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct Session {
-    tokens: Mutex<HashMap<String, Token>>,
+    accounts: Mutex<HashMap<String, Arc<AccountSession>>>,
 }
 
 fn field<'a>(params: &'a Value, key: &str, required: bool) -> Result<&'a str, &'static str> {
@@ -33,44 +100,62 @@ fn field<'a>(params: &'a Value, key: &str, required: bool) -> Result<&'a str, &'
 }
 
 impl Session {
-    fn token(&self, account: &str) -> Result<String, &'static str> {
-        // Holding this lock through refresh coalesces concurrent callers rather
-        // than racing a rotating refresh token. Only authentication is serialized.
-        let mut tokens = self.tokens.lock().map_err(|_| "session_failed")?;
-        if let Some(token) = tokens.get(account).filter(|t| t.expires > Instant::now()) {
-            return Ok(token.value.clone());
+    fn account(&self, account: &str) -> Result<Arc<AccountSession>, &'static str> {
+        let mut accounts = self.accounts.lock().map_err(|_| "session_failed")?;
+        if let Some(session) = accounts.get(account) {
+            return Ok(Arc::clone(session));
         }
-        let client = gmail_credentials::read_for_account(account)?;
-        let refresh = gmail_credentials::lookup_refresh_token(&client, account)?;
-        let answer = gmail_http::refresh(&client.client_id, &client.client_secret, &refresh)?;
-        let value = answer["access_token"]
-            .as_str()
-            .filter(|s| !s.is_empty() && s.len() <= 16384 && !s.chars().any(char::is_control))
-            .ok_or("gmail_invalid_token")?
-            .to_owned();
-        let lifetime = answer["expires_in"]
-            .as_u64()
-            .unwrap_or(3600)
-            .min(86400)
-            .saturating_sub(60);
-        if tokens.len() >= 32 {
-            tokens.retain(|_, t| t.expires > Instant::now());
+        if accounts.len() >= 32 {
+            accounts.retain(|_, session| {
+                Arc::strong_count(session) > 1
+                    || session.token.try_lock().map_or(true, |token| {
+                        token
+                            .as_ref()
+                            .is_some_and(|token| token.expires > Instant::now())
+                    })
+            });
         }
-        if tokens.len() >= 32 {
+        if accounts.len() >= 32 {
             return Err("gmail_session_limit");
         }
-        tokens.insert(
-            account.to_owned(),
-            Token {
-                value: value.clone(),
-                expires: Instant::now() + Duration::from_secs(lifetime),
-            },
-        );
-        Ok(value)
+        let session = Arc::new(AccountSession {
+            valid: AtomicBool::new(true),
+            token: Mutex::new(None),
+        });
+        accounts.insert(account.into(), Arc::clone(&session));
+        Ok(session)
+    }
+
+    fn get_with(
+        &self,
+        account: &str,
+        refresh: impl Fn() -> Result<Value, &'static str>,
+        get: impl Fn(&str) -> Result<Value, &'static str>,
+    ) -> Result<Value, &'static str> {
+        let session = self.account(account)?;
+        let token = session.token_with(&refresh)?;
+        session.check()?;
+        let answer = get(&token.value);
+        session.check()?;
+        if answer != Err("gmail_unauthorized") {
+            return answer;
+        }
+        session.reject(&token)?;
+        let replacement = session.token_with(refresh)?;
+        session.check()?;
+        let answer = get(&replacement.value);
+        session.check()?;
+        if answer == Err("gmail_unauthorized") {
+            session.reject(&replacement)?;
+        }
+        answer
     }
 
     pub fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
         let allowed: &[&str] = match method {
+            "gmail.invalidate" => &["accountId"],
+            "gmail.labels" | "gmail.profile" | "gmail.sendAs" => &["accountId"],
+            "gmail.labelCounts" => &["accountId", "id"],
             "gmail.list" => &["accountId", "query", "pageSize", "pageToken"],
             "gmail.read" => &["accountId", "id", "full"],
             "gmail.attachment" => &["accountId", "messageId", "attachmentId"],
@@ -85,8 +170,26 @@ impl Session {
             return Err("invalid_params");
         }
         let account = field(params, "accountId", true)?.to_lowercase();
+        if method == "gmail.invalidate" {
+            // Cache eviction, not keyring logout or an IPC ordering barrier.
+            // New calls can authenticate again. In-flight HTTP cannot be recalled;
+            // retired leases refuse its result and never refresh for a retry.
+            if let Some(session) = self
+                .accounts
+                .lock()
+                .map_err(|_| "session_failed")?
+                .remove(&account)
+            {
+                session.valid.store(false, Ordering::Release);
+            }
+            return Ok(json!({"invalidated":true}));
+        }
         let mut query = Vec::new();
         let path = match method {
+            "gmail.labels" => vec!["labels"],
+            "gmail.labelCounts" => vec!["labels", field(params, "id", true)?],
+            "gmail.profile" => vec!["profile"],
+            "gmail.sendAs" => vec!["settings", "sendAs"],
             "gmail.list" => {
                 let size = match params.get("pageSize") {
                     None => 25,
@@ -136,10 +239,17 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
-        let token = self.token(&account)?;
-        let answer = gmail_http::get(&path, &query, &token)?;
+        let answer = self.get_with(
+            &account,
+            || {
+                let client = gmail_credentials::read_for_account(&account)?;
+                let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
+                gmail_http::refresh(&client.client_id, &client.client_secret, &refresh)
+            },
+            |token| gmail_http::get(&path, &query, token),
+        )?;
         if method != "gmail.list" {
-            return Ok(answer);
+            return Ok(resources::normalize(method, answer));
         }
         let messages = match answer.get("messages") {
             None => Vec::new(),

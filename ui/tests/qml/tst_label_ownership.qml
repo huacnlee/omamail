@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
 
 // A label change goes to the account whose menu asked for it. Ada and Bob
@@ -95,6 +96,8 @@ Item {
   TestCase {
     name: "LabelOwnership"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(mailService) }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"

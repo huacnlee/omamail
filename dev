@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+binary="$root/target/debug/omamail"
+
+build_backend() {
+  cargo build --locked \
+    --manifest-path "$root/Cargo.toml" \
+    --target-dir "$root/target" \
+    --bin omamail
+}
+
+case "${1-}" in
+  backend)
+    build_backend
+    printf 'Built %s\n' "$binary"
+    ;;
+  run)
+    build_backend
+    cat <<EOF
+Built $binary
+
+Development run prepared; the installed private runtime was not changed.
+OMAMAIL_BIN=$binary
+
+The already-running shell cannot receive OMAMAIL_BIN from a summon command.
+Export that value in the environment used to start omarchy-shell, then restart the existing Omarchy shell through your normal session method. After restart, open the plugin with:
+  omarchy shell shell toggle omamail '{}'
+EOF
+    ;;
+  *)
+    printf 'Usage: ./dev backend | run\n' >&2
+    exit 2
+    ;;
+esac

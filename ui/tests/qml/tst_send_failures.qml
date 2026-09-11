@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
 
 // Delivery failures cross two ownership boundaries: a MailAccount reports the
@@ -34,6 +35,8 @@ Item {
   TestCase {
     name: "SendFailures"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(mailService) }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"

@@ -2,6 +2,10 @@
 use serde_json::Value;
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "gmail_http_runtime_tests.rs"]
+mod runtime_tests;
+
 struct Request {
     args: Vec<String>,
     input: Vec<u8>,
@@ -160,6 +164,9 @@ fn response(bytes: &[u8]) -> Result<Value, &'static str> {
     if status.len() != 3 || !status.iter().all(u8::is_ascii_digit) {
         return Err("gmail_invalid_response");
     }
+    if status == b"401" {
+        return Err("gmail_unauthorized");
+    }
     if status[0] != b'2' {
         return Err("gmail_http_failed");
     }
@@ -174,6 +181,14 @@ fn response(bytes: &[u8]) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unauthorized_is_distinct_without_echoing_server_body() {
+        assert_eq!(
+            response(b"synthetic-secret\n401"),
+            Err("gmail_unauthorized")
+        );
+        assert_eq!(response(b"synthetic-secret\n403"), Err("gmail_http_failed"));
+    }
     #[test]
     fn get_encodes_untrusted_path_and_query_without_exposing_token() {
         let request = prepare_get(

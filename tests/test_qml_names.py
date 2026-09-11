@@ -44,8 +44,7 @@ for key, entry in (("service", "Service.qml"), ("barWidget", "BarWidget.qml"), (
     if not (root / entry).is_file():
         failures.append(f"{entry} is declared in the manifest but missing")
 
-# Everything else belongs in a directory. A stray .qml at the root is either a
-# fourth entry point nobody declared, or a file that was meant to be filed.
+# Only the three shell-owned manifest entry points belong at the UI root.
 for stray in sorted(root.glob("*.qml")):
     if stray.name not in ("Service.qml", "BarWidget.qml", "App.qml"):
         failures.append(f"{stray.name} sits at the root; it belongs in a module directory")

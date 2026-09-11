@@ -46,12 +46,20 @@ Item {
   property var pluginRegistry: null
   property var barWidgetRegistry: null
 
-  // Migration entry point. One service-owned process survives window openings.
-  // An explicit binary enables development before packaging installs the backend.
+  // One plugin-owned runtime and persistent process survive window openings.
+  readonly property var backendRuntime: privateRuntime
+  Runtime {
+    id: privateRuntime
+    pluginDir: root.pluginDir
+    developmentExecutable: Quickshell.env("OMAMAIL_BIN") || ""
+    onValidated: Qt.callLater(rustBackend.reconcileProcess)
+  }
   readonly property var backend: rustBackend
   Backend {
     id: rustBackend
-    executable: Quickshell.env("OMAMAIL_BIN") || ""
+    executable: privateRuntime.developmentExecutable || root.pluginDir + "/runtime/bin/omamail"
+    launchEnabled: privateRuntime.state === "ready" && privateRuntime.executable === executable
+    expectedVersion: privateRuntime.requiredVersion
   }
 
   readonly property string pluginId: manifest && manifest.id

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
 
 // The batch's two boundaries, driven against a client the test controls.
@@ -86,6 +87,8 @@ Item {
   TestCase {
     name: "BatchActions"
     when: windowShown
+
+    function initTestCase() { BackendFixture.markReady(mailService) }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"

@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -17,22 +16,58 @@ jobs:
   portable-tests:
     name: Portable tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # Version-sensitive QML/libcurl checks remain on the Omarchy host.
+      - run: make test-rust test-js test-shell-portable
+      - run: python3 tests/test_backend_release.py
+      - run: git diff --check
 
-      # QML engine behavior and libcurl output routing are version-sensitive.
-      # The Makefile deliberately keeps those checks on the Omarchy host; this
-      # runner executes the repository's portable test boundary only.
-      - name: Run portable tests
-        run: make test-js test-shell-portable
+  published-assets:
+    name: Verify published backend (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require exact pin and verify actual published archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/package-backend.py check --require-pin)"
+          # Missing bootstrap assets intentionally fail this required check.
+          test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = false
+          mkdir published
+          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS
+          python3 scripts/package-backend.py verify published
+          mkdir probe
+          tar -xzf "published/omamail-linux-$ARCH.tar.gz" -C probe
+          test "$(probe/omamail --version)" = "omamail $version"
+          readelf -l probe/omamail > program-headers.txt
+          readelf -d probe/omamail > dynamic-headers.txt
+          if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
+          if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
 
-      - name: Check whitespace
-        run: git diff --check
+  published-backend:
+    name: Published backend merge gate
+    needs: published-assets
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both published native binaries to verify
+        env:
+          RESULT: ${{ needs.published-assets.result }}
+        run: test "$RESULT" = success
