@@ -254,9 +254,12 @@ assert.strictEqual(message.relativeTime(ago(59 * 60000), now), "59m")
 // Past an hour a clock time is more useful than "3h", and it matches how
 // Gmail's own list reads.
 assert.ok(/^\d\d:\d\d$/.test(message.relativeTime(ago(3 * 3600 * 1000), now)))
-assert.ok(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/.test(message.relativeTime(ago(3 * 86400000), now)))
+assert.ok(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/.test(message.relativeTime(ago(2 * 86400000), now)))
 assert.ok(/^[A-Z][a-z]{2} \d+$/.test(message.relativeTime(ago(40 * 86400000), now)))
 assert.ok(/^[A-Z][a-z]{2} \d+, \d{4}$/.test(message.relativeTime(ago(500 * 86400000), now)))
+assert.strictEqual(message.relativeTime(ago(3 * 86400000), now), "Aug 16")
+assert.strictEqual(message.relativeTime(new Date(2025, 11, 21, 15), now), "Dec 21")
+assert.strictEqual(message.relativeTime(new Date(2025, 7, 18, 15), now), "Aug 18, 2025")
 assert.strictEqual(message.relativeTime(null, now), "")
 // A message dated in the future must not render as a negative age.
 assert.strictEqual(message.relativeTime(new Date(now.getTime() + 60000), now), "now")

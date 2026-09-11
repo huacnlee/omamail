@@ -17,6 +17,32 @@ Item {
   TestCase {
     name: "MessageRowLayout"
     when: windowShown
+    function test_time_stays_fixed_when_actions_appear() {
+      row.hasCursor=false
+      row.checked=false
+      row.width=600
+      row.summary={id:"one",subject:"Title",from:{display:"Sender"},snippet:"Description",time:"Sep 10, 2025",unread:false,starred:false}
+      mouseMove(row, -20, -20)
+      waitForRendering(row)
+      var time=findChild(row,"message-time")
+      var before=time.mapToItem(row,0,0)
+      row.hasCursor=true
+      waitForRendering(row)
+      compare(time.mapToItem(row,0,0).x,before.x)
+      compare(time.mapToItem(row,0,0).y,before.y)
+      row.hasCursor=false
+      row.checked=true
+      waitForRendering(row)
+      compare(time.mapToItem(row,0,0).x,before.x)
+      compare(time.mapToItem(row,0,0).y,before.y)
+      var check=findChild(row,"message-check")
+      var subject=findChild(row,"message-subject")
+      var description=findChild(row,"message-description")
+      verify(check.visible)
+      compare(Math.round(check.mapToItem(row,0,check.height/2).y),
+        Math.round((subject.mapToItem(row,0,0).y+description.mapToItem(row,0,description.height).y)/2))
+      row.checked=false
+    }
     function test_sender_and_time_lead_title_and_description_data() {
       return [{tag:"normal",width:600,actions:false,source:"",conversation:false},
         {tag:"actions",width:360,actions:true,source:"",conversation:false},
@@ -44,7 +70,10 @@ Item {
       compare(Math.round(senderPoint.y+sender.baselineOffset),Math.round(timePoint.y+time.baselineOffset))
       verify(subjectPoint.y>=senderPoint.y+sender.height,"title occupies the second line")
       verify(descriptionPoint.y>=subjectPoint.y+subject.height,"description occupies the third line")
-      compare(Math.round(timePoint.x+time.width),Math.round(subjectPoint.x+subject.width),"time aligns with the text area's right edge")
+      var actions=findChild(row,"message-actions")
+      if(actions.visible)
+        compare(Math.round(actions.y+actions.height/2),Math.round((subjectPoint.y+descriptionPoint.y+description.height)/2),"actions center on title and description")
+      verify(timePoint.x+time.width>=subjectPoint.x+subject.width,"time stays at the full row edge")
       verify(sender.width>0)
       verify(senderPoint.x+sender.width<=timePoint.x)
       compare(subject.font.bold,true,"unread emphasis survives reordering")

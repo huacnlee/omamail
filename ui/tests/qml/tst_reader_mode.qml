@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import qs.Commons
 import "../../components" as Omamail
 import "../../message/Html.js" as Html
 
@@ -180,10 +181,11 @@ Item {
       verify(edit.width < reader.bodyWidth,
         "a wide panel does not become a wide line of text")
       verify(reader.bodyOffset > 0, "and the column is centred in what is left")
-      // Sixty-five to seventy-five characters of the face it is drawn in.
-      var perCharacter = reader.readingMeasure / 70
-      var characters = edit.width / perCharacter
-      verify(characters > 60 && characters < 80, "the measure is a readable one: " + characters)
+      verify(edit.width >= Style.space(800), "a wide reader uses at least 800 logical pixels")
+      reader.width = 1600
+      verify(body().width >= Style.space(800), "fullscreen keeps a usable content width")
+      verify(body().width <= reader.bodyWidth, "content remains inside the panel")
+      reader.width = 900
 
       // The other two start at the page inset, because a sender's own layout
       // and a plain-text body both begin at the left edge.
@@ -242,23 +244,24 @@ Item {
       mailService.selectedInvite = null
     }
 
-    function test_zoom_moves_the_type_and_the_column_with_it() {
+    function test_all_modes_keep_the_content_limit_when_zooming() {
       var wasFont = body().font.pixelSize
-      var wasWidth = body().width
-      reader.zoom = 2.0
-      verify(body().font.pixelSize > wasFont, "the message is read at the size asked for")
-      verify(body().width >= wasWidth, "and the column follows the measure")
-      verify(body().width <= reader.bodyWidth, "without leaving the panel")
-      verify(body().text.indexOf("Activity on Sprint board") > 0)
-
-      // Far past what the panel can hold, the column stops rather than
-      // overflowing, and stays where the page inset put it.
-      reader.zoom = 4.0
-      compare(body().width, reader.bodyWidth)
-      compare(reader.bodyOffset, 0)
+      reader.width = 1600
+      var modes = ["reader", "original", "plain"]
+      for (var i = 0; i < modes.length; i++) {
+        reader.bodyMode = modes[i]
+        reader.zoom = 2.0
+        verify(body().font.pixelSize > wasFont)
+        verify(body().width <= Style.space(800), modes[i] + " keeps its maximum width")
+        reader.width = 420
+        verify(body().width <= reader.bodyWidth, modes[i] + " fits a narrow panel")
+        reader.width = 1600
+      }
       reader.zoom = 1.0
+      reader.width = 900
+      reader.bodyMode = "reader"
       compare(body().font.pixelSize, wasFont)
-      compare(body().width, wasWidth)
+      compare(body().width, Style.space(800))
     }
 
     function test_a_message_too_heavy_to_draw_says_so_rather_than_showing_nothing() {

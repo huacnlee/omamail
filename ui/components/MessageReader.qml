@@ -237,19 +237,13 @@ Item {
   readonly property int pageInset: narrowBody ? Style.space(8) : Style.space(14)
   readonly property int bodyInset: pageInset
   readonly property int bodyWidth: Math.max(80, bodyFlick.width - bodyInset * 2)
-  // The size the message itself is read at, which the chrome around it does not
-  // follow. Named here because the reading measure is derived from it.
+  // Zoom changes the message type without changing the surrounding chrome.
   readonly property int bodyFontSize: Math.max(7, Math.round(Style.font.body * root.zoom))
-  // Sixty-five to seventy-five characters, measured in the face the message is
-  // actually drawn in rather than guessed from its pixel size — a monospace
-  // face and a proportional one disagree about that by half.
-  readonly property int readingMeasure: Math.ceil(readingSample.advanceWidth)
-  readonly property int preferredBodyWidth: root.shownMode === "reader"
-    ? Html.readingColumnWidth(root.bodyWidth, root.readingMeasure)
-    : (root.shownMode === "original"
-      ? Html.preferredContentWidth(
-          root.bodyDocument, root.bodyWidth)
-      : root.bodyWidth)
+  // All three modes share the same maximum; narrow panels use what fits.
+  readonly property int contentWidthLimit: Html.readingColumnWidth(root.bodyWidth, Style.space(800))
+  readonly property int preferredBodyWidth: root.shownMode === "original"
+    ? Html.preferredContentWidth(root.bodyDocument, root.contentWidthLimit)
+    : root.contentWidthLimit
   // Reading mode centres its column in whatever the panel has spare. The other
   // two start at the page inset, because the sender's own layout and a
   // plain-text body both begin at the left edge.
@@ -259,16 +253,6 @@ Item {
   // the exact width, dragging the splitter would rebuild and re-lay-out the
   // whole message on every frame.
   readonly property int imageWidth: Math.round(root.preferredBodyWidth / 20) * 20
-
-  // Seventy characters of ordinary prose. Not a repeated letter: a run of the
-  // same glyph measures the widest or the narrowest one in the face rather than
-  // anything a sentence is made of.
-  TextMetrics {
-    id: readingSample
-    font.family: root.panelFontFamily
-    font.pixelSize: root.bodyFontSize
-    text: "The quick brown fox jumps over the lazy dog and keeps on running away."
-  }
 
   ReaderBlankSlate {
     anchors.fill: parent
@@ -571,10 +555,7 @@ Item {
     WheelScroller { view: bodyFlick }
     anchors.top: notices.bottom
     anchors.left: parent.left
-    // The rail takes its width out of the body's, which is what keeps the
-    // message's own measure honest: `readingMeasure` is derived from this
-    // flickable's width, so a body that ran under the rail would be centred on
-    // a column that is not there.
+    // The content limit uses the space remaining beside the conversation rail.
     anchors.right: rail.visible ? rail.left : parent.right
     anchors.bottom: footerBackdrop.visible ? footerBackdrop.top : parent.bottom
     contentWidth: width

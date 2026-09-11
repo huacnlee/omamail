@@ -289,10 +289,10 @@ fn relative(date: Option<&DateTime<Local>>, now: i64) -> String {
     if date.date_naive() == reference.date_naive() {
         return date.format("%H:%M").to_string();
     }
-    if elapsed / 86400000 < 7 {
+    if elapsed / 86400000 < 3 {
         return date.format("%a").to_string();
     }
-    if date.year() == reference.year() {
+    if elapsed / 86400000 < 365 {
         return format!("{} {}", date.format("%b"), date.day());
     }
     format!("{} {}, {}", date.format("%b"), date.day(), date.year())
@@ -516,5 +516,24 @@ pub fn request(method: &str, params: &Value) -> Result<Value> {
             )
         }
         _ => Err("unknown_method"),
+    }
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn list_dates_show_month_after_three_days_and_year_after_one_year() {
+        let now = Local.with_ymd_and_hms(2026, 9, 12, 15, 0, 0).unwrap();
+        for (year, month, day, expected) in [
+            (2026, 9, 9, "Sep 9"),
+            (2025, 12, 21, "Dec 21"),
+            (2025, 9, 10, "Sep 10, 2025"),
+        ] {
+            let date = Local.with_ymd_and_hms(year, month, day, 15, 0, 0).unwrap();
+            assert_eq!(relative(Some(&date), now.timestamp_millis()), expected);
+        }
     }
 }

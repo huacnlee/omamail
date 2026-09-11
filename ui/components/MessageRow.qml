@@ -141,7 +141,7 @@ Rectangle {
   Column {
     id: body
     anchors.left: parent.left
-    anchors.right: actions.visible ? actions.left : parent.right
+    anchors.right: parent.right
     // Align message text with the reader and header content.
     anchors.leftMargin: Style.space(14)
     anchors.rightMargin: Style.space(8)
@@ -237,7 +237,7 @@ Rectangle {
     Text {
       id: subject
       objectName: "message-subject"
-      width: parent.width
+      width: parent.width - (actions.visible ? actions.width + Style.space(4) : 0)
       // Sender-controlled text must never activate Qt's rich-text loader.
       textFormat: Text.PlainText
       text: root.summary.subject
@@ -251,7 +251,7 @@ Rectangle {
 
     Text {
       objectName: "message-description"
-      width: parent.width
+      width: subject.width
       visible: root.summary.snippet !== ""
       textFormat: Text.PlainText
       text: root.summary.snippet
@@ -269,9 +269,10 @@ Rectangle {
   // than an affordance.
   Row {
     id: actions
+    objectName: "message-actions"
     anchors.right: parent.right
     anchors.rightMargin: Style.space(6)
-    anchors.verticalCenter: parent.verticalCenter
+    y: body.y + subject.y + (body.height - subject.y - height) / 2
     spacing: Style.space(1)
     visible: root.hot || root.summary.starred || root.selectionMode
 

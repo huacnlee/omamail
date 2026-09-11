@@ -770,7 +770,7 @@ function pad(value) {
 }
 
 // Compact enough for a list row: minutes for the last hour, then the clock
-// time for today, a weekday inside the week, and a date beyond it.
+// time for today, a weekday for the last two days, and a date beyond it.
 function relativeTime(date, now) {
   if (!date) return ""
   var reference = now instanceof Date ? now : new Date(Number(now) || Date.now())
@@ -784,8 +784,8 @@ function relativeTime(date, now) {
     && date.getDate() === reference.getDate()
   if (sameDay) return pad(date.getHours()) + ":" + pad(date.getMinutes())
   var days = Math.floor(elapsed / 86400000)
-  if (days < 7) return WEEKDAYS[date.getDay()]
-  if (date.getFullYear() === reference.getFullYear())
+  if (days < 3) return WEEKDAYS[date.getDay()]
+  if (days < 365)
     return MONTHS[date.getMonth()] + " " + date.getDate()
   return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear()
 }

@@ -1635,6 +1635,8 @@ function activityMail() {
 {
   // A wide panel gives the column what it needs and keeps the rest.
   assert.strictEqual(html.readingColumnWidth(1200, 640), 640)
+  assert.strictEqual(html.readingColumnWidth(1600, 800), 800)
+  assert.strictEqual(html.readingColumnWidth(600, 800), 600)
   assert.strictEqual(html.readingColumnOffset(1200, 640), 280)
   // A narrow one has nothing to give up, so the column is the panel.
   assert.strictEqual(html.readingColumnWidth(380, 640), 380)

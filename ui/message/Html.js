@@ -2897,15 +2897,10 @@ function bodyModeRefused(wanted, available) {
 
 // ------------------------------------------------------------- the measure
 //
-// A reading column is bounded by how far the eye can travel and still find the
-// start of the next line, which is sixty-five to seventy-five characters — the
-// same rule a book obeys and the reason a browser's reading mode is a column
-// rather than a window. `measured` is that many characters of the reader's own
-// font, measured by Qt rather than guessed from the pixel size: a monospace
-// face and a proportional one disagree about it by half.
-function readingColumnWidth(available, measured) {
+// Fit the chosen content-width ceiling inside the available panel space.
+function readingColumnWidth(available, maximum) {
   var room = Math.max(80, Math.floor(Number(available) || 0))
-  var ideal = Math.floor(Number(measured) || 0)
+  var ideal = Math.floor(Number(maximum) || 0)
   // A narrow window has no width to give up, so the column is the window.
   return ideal > 0 ? Math.min(room, ideal) : room
 }
