@@ -9,6 +9,7 @@ macro_rules! re {
         pattern
     }};
 }
+mod formatting;
 mod policy;
 mod reader;
 #[cfg(test)]
@@ -109,17 +110,17 @@ fn flatten_parts(n: &mut Node) {
         }
     }
 }
-fn flatten_tables(n: &mut Node, limit: usize, depth: usize) {
+fn flatten_tables(n: &mut Node, limit: usize, depth: usize, layout: bool) {
     for c in &mut n.children {
         if c.kind == "text" {
             continue;
         }
         if c.name != "table" {
-            flatten_tables(c, limit, depth);
+            flatten_tables(c, limit, depth, layout);
             continue;
         }
-        let keep = depth < limit && grid(c);
-        flatten_tables(c, limit, depth + usize::from(keep));
+        let keep = depth < limit && (layout || grid(c) || formatting::status_table(c));
+        flatten_tables(c, limit, depth + usize::from(keep), layout);
         if !keep {
             flatten_parts(c);
             as_block(c)
@@ -185,8 +186,8 @@ fn resource(n: &str) -> bool {
             | "cite"
     )
 }
-fn clean_attrs(n: &mut Node, colors: bool, styles: Vec<(String, String)>) {
-    let centre = !matches!(n.name.as_str(), "td" | "th");
+fn clean_attrs(n: &mut Node, colors: bool, styles: Vec<(String, String)>, alignment: bool) {
+    let centre = !alignment && !matches!(n.name.as_str(), "td" | "th");
     let mut seen = HashSet::new();
     let is_img = n.name == "img";
     let is_link = n.name == "a";
@@ -293,7 +294,7 @@ impl<'a> Images<'a> {
         }
     }
 }
-fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool) {
+fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool, formatting: bool) {
     let mut kept = vec![];
     for mut c in std::mem::take(&mut n.children) {
         if c.kind == "text" {
@@ -303,7 +304,7 @@ fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool) {
         if dropped(&c.name) {
             continue;
         }
-        if c.name == "center" {
+        if c.name == "center" && !formatting {
             c.name = "div".into()
         }
         let styles = declarations(c.attr("style"));
@@ -334,11 +335,11 @@ fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool) {
                 c.set("dir", &value.trim().to_ascii_lowercase())
             }
         }
-        clean_attrs(&mut c, colors, styles);
+        clean_attrs(&mut c, colors, styles, formatting);
         if c.name == "img" && !images.keep(&mut c) {
             continue;
         }
-        clean(&mut c, images, colors);
+        clean(&mut c, images, colors, formatting);
         if c.children.iter().any(|c| c.name == "img") {
             let styles = declarations(c.attr("style"))
                 .into_iter()
@@ -348,6 +349,9 @@ fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool) {
                 })
                 .collect::<Vec<_>>();
             set_style(&mut c, &styles)
+        }
+        if formatting {
+            formatting::align_image_cell(&mut c);
         }
         kept.push(c)
     }
@@ -445,12 +449,21 @@ pub fn sanitize(source: &str, options: &Value) -> Result<Value, &'static str> {
         Value::Null
     };
     let mut images = Images::new(options);
-    clean(&mut root, &mut images, options["keepColors"] == true);
-    if options["keepTables"] != true {
+    let formatting = options["preserveFormatting"] == true;
+    clean(
+        &mut root,
+        &mut images,
+        formatting || options["keepColors"] == true,
+        formatting,
+    );
+    if formatting {
+        flatten_tables(&mut root, 4, 0, true);
+    } else if options["keepTables"] != true {
         flatten_tables(
             &mut root,
             bounded_option(options, "keepTableDepth", 2, 128),
             0,
+            false,
         )
     }
     collapse(&mut root);

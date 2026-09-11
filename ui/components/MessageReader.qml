@@ -244,10 +244,8 @@ Item {
   readonly property int preferredBodyWidth: root.shownMode === "original"
     ? Html.preferredContentWidth(root.bodyDocument, root.contentWidthLimit)
     : root.contentWidthLimit
-  // Reading mode centres its column in whatever the panel has spare. The other
-  // two start at the page inset, because the sender's own layout and a
-  // plain-text body both begin at the left edge.
-  readonly property int bodyOffset: root.shownMode === "reader"
+  // Centre the page, not its paragraphs. Plain text keeps its left inset.
+  readonly property int bodyOffset: root.shownMode !== "plain"
     ? Html.readingColumnOffset(root.bodyWidth, root.preferredBodyWidth) : 0
   // Quantised, because this is a dependency of the document itself: bound to
   // the exact width, dragging the splitter would rebuild and re-lay-out the
@@ -626,6 +624,7 @@ Item {
           }))
         : (root.shownMode === "original"
           ? Html.documentFor(root.bodyDocument, ({
+              preserveFormatting: true,
               foreground: root.textColor,
               background: root.backgroundColor,
               link: root.linkColor,

@@ -2,10 +2,11 @@
 // and large-message fixtures. This is a migration oracle, never runtime code.
 const loader = require(process.cwd() + '/ui/tests/load.js');
 const original = loader.load;
-const baseline = require(process.cwd() + '/benchmarks/mail/baseline/ui/tests/load.js');
 const cases = [];
 loader.load = function(path) {
-  const module = path === 'message/Html.js' ? baseline.load(path) : original(path);
+  // Compare the maintained oracle, including formatting regressions. The
+  // benchmark snapshot intentionally predates these fixes and stays immutable.
+  const module = original(path);
   if (path === 'message/Html.js') {
     const sanitize = module.sanitize;
     module.sanitize = function(source, options) {

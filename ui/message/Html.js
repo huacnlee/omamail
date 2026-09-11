@@ -1,15 +1,12 @@
 .pragma library
 
 .import "Direction.js" as Direction
+.import "ImageAlignment.js" as ImageAlignment
 
 // Message HTML, reduced to what Qt's rich text engine may safely be handed.
 //
-// This is not a renderer. Qt already is one: a QTextDocument behind the
-// reader's TextEdit parses HTML 4 and CSS 2.1 and lays it out, which is most of
-// what real mail needs, because real mail is still table-and-inline-style HTML
-// written for Outlook. What Qt does not give a QML plugin is any say over what
-// that renderer does while it works, and it does three things a mail client
-// cannot allow it to do unsupervised:
+// Qt renders the sanitized document. Its implicit resource loading and limited
+// HTML/CSS support require these protections before content reaches TextEdit:
 //
 //   - it fetches <img src="https://..."> for real, so every tracking pixel in
 //     the message fires the moment the document is set, and a source aimed at
@@ -1059,6 +1056,45 @@ function isGrid(node) {
   return false
 }
 
+// Original mode also needs a compact status strip's column relationships.
+// This runs after cleaning: preserve only one row of short labels and bounded
+// icons, never a surrounding card or nested layout table. Resource policy is
+// still decided by clean(), independently of whether the table survives.
+function isCompactStatusTable(node) {
+  var rows = rowsOf(node, [])
+  if (rows.length !== 1) return false
+  var cells = rows[0].children.filter(function(child) { return child.type !== "text" })
+  if (cells.length < 2 || cells.length > MAX_READER_TABLE_COLUMNS) return false
+  var width = 0
+  for (var i = 0; i < cells.length; i++) {
+    if (cells[i].name !== "td" && cells[i].name !== "th") return false
+    var content = { text: "", images: 0, width: 0 }
+    if (!statusCellContent(cells[i], content)) return false
+    var label = decodeReferences(content.text).replace(SOURCE_WHITESPACE, " ")
+      .replace(/^ +| +$/g, "")
+    if (label.length < 1 || label.length > 4 || content.images !== 1) return false
+    width += content.width + 4
+  }
+  return width <= 256
+}
+
+function statusCellContent(node, content) {
+  for (var i = 0; i < node.children.length; i++) {
+    var child = node.children[i]
+    if (child.type === "text") content.text += child.text
+    else if (child.name === "img") {
+      var width = readerStatusIconWidth(child)
+      if (width === 0) return false
+      content.width += width
+      content.images++
+    } else {
+      if (!/^(div|span|p|b|strong|em|i|a|br)$/.test(child.name)) return false
+      if (!statusCellContent(child, content)) return false
+    }
+  }
+  return true
+}
+
 // What is worth keeping off a table that was the layout is the styling that
 // rode on it, not the table semantics.
 function asBlock(node) {
@@ -1082,16 +1118,16 @@ function flattenPartsOf(node) {
 // down are not tables by the time this returns, and charging them against a
 // budget meant for competing column widths is what put the budget on the
 // wrong two levels in the first place.
-function flattenTablesIn(node, limit, depth) {
+function flattenTablesIn(node, limit, depth, keepLayout) {
   for (var i = 0; i < node.children.length; i++) {
     var child = node.children[i]
     if (child.type === "text") continue
     if (child.name !== "table") {
-      flattenTablesIn(child, limit, depth)
+      flattenTablesIn(child, limit, depth, keepLayout)
       continue
     }
-    var keep = depth < limit && isGrid(child)
-    flattenTablesIn(child, limit, keep ? depth + 1 : depth)
+    var keep = depth < limit && (keepLayout || isGrid(child) || isCompactStatusTable(child))
+    flattenTablesIn(child, limit, keep ? depth + 1 : depth, keepLayout)
     if (keep) continue
     flattenPartsOf(child)
     asBlock(child)
@@ -1128,8 +1164,8 @@ var HANDLER_ATTRIBUTE = /^on[a-z]+$/
 var CENTRED = /^center\b/i
 var ALIGNED_BY_COLUMN = { td: true, th: true }
 
-function cleanAttributes(node, keepColors, declarations) {
-  var uncentre = ALIGNED_BY_COLUMN[node.name] !== true
+function cleanAttributes(node, keepColors, declarations, keepAlignment) {
+  var uncentre = !keepAlignment && ALIGNED_BY_COLUMN[node.name] !== true
   var attrs = node.attrs
   var kept = attrs
   var dropped = false
@@ -1242,6 +1278,17 @@ function hasDirectImage(node) {
   return false
 }
 
+function alignImageCell(node) {
+  ImageAlignment.alignImageCell(node, {
+    hasDirectImage: hasDirectImage, attributeValue: attributeValue,
+    sourceDeclarations: sourceDeclarations, decodeReferences: decodeReferences,
+    isBlock: function(name) {
+      return BLOCK_ELEMENTS[name] === true || READER_BLOCK[name] === true
+        || TABLE_PARTS[name] === true || name === "pre" || name === "hr"
+    }
+  })
+}
+
 // Browser email templates use a zero line height around adjacent images to
 // remove the small inline-image baseline gap. QTextDocument instead collapses
 // the whole row and paints the following block over those images.
@@ -1326,7 +1373,8 @@ function collapse(node) {
 function sanitize(html, options) {
   var settings = options || {}
   var source = String(html === undefined || html === null ? "" : html)
-  var keepColors = settings.keepColors === true
+  var preserveFormatting = settings.preserveFormatting === true
+  var keepColors = preserveFormatting || settings.keepColors === true
   var allowImages = settings.allowRemoteImages === true
   var imageData = settings.remoteImageData && typeof settings.remoteImageData === "object"
     ? settings.remoteImageData : null
@@ -1395,7 +1443,7 @@ function sanitize(html, options) {
       if (DROPPED_ELEMENTS[child.name] === true) continue
       // <center> is the same instruction spelled as an element, and Qt honours
       // it. As a plain box it is one more wrapper for `collapse` to fold away.
-      if (child.name === "center") child.name = "div"
+      if (child.name === "center" && !preserveFormatting) child.name = "div"
 
       // The style attribute is the only one worth parsing, and it is parsed
       // once per element: whether the sender marked this hidden and what
@@ -1421,12 +1469,13 @@ function sanitize(html, options) {
 
       promoteImageDimensions(child, declarations)
       promoteDirection(child, declarations)
-      cleanAttributes(child, keepColors, declarations)
+      cleanAttributes(child, keepColors, declarations, preserveFormatting)
 
       if (child.name === "img" && !keepImage(child)) continue
 
       clean(child)
       keepImageRowOpen(child)
+      if (preserveFormatting) alignImageCell(child)
       survivors.push(child)
     }
     node.children = survivors
@@ -1457,7 +1506,11 @@ function sanitize(html, options) {
     : null
 
   clean(root)
-  if (settings.keepTables !== true) {
+  if (preserveFormatting) {
+    // Original retains layout tables, but never grants unbounded nesting to
+    // the synchronous Qt renderer. Reader was rebuilt independently above.
+    flattenTablesIn(root, MAX_TABLE_DEPTH, 0, true)
+  } else if (settings.keepTables !== true) {
     flattenTablesIn(root, settings.keepTableDepth === undefined
       ? KEEP_TABLE_DEPTH : Math.max(0, settings.keepTableDepth), 0)
   }
@@ -1797,12 +1850,15 @@ function baseDirectionAttribute(palette) {
 
 // Wraps the sanitised body in a document. `colors` styles the parts the sender
 // did not: the ground, the default text, links and quoted replies.
+var PAPER = "#ffffff"
+var INK = "#000000"
 function documentFor(bodyHtml, colors) {
   var palette = colors || {}
-  var foreground = String(palette.foreground || "")
-  var background = String(palette.background || "")
-  var link = String(palette.link || foreground)
-  var quote = String(palette.quote || foreground)
+  var original = palette.preserveFormatting === true
+  var foreground = original ? INK : String(palette.foreground || "")
+  var background = original ? PAPER : String(palette.background || "")
+  var link = original ? "#1155cc" : String(palette.link || foreground)
+  var quote = original ? INK : String(palette.quote || foreground)
   // Margin on body is ignored by Qt's rich text engine, so the padding lives
   // on a wrapper the sender's markup sits inside.
   var pad = Math.max(0, Math.floor(Number(palette.padding) || 0))
@@ -1814,10 +1870,7 @@ function documentFor(bodyHtml, colors) {
   // No parse at all when the caller kept the document: this is rebuilt on every
   // relayout, and the body it is built from has not changed.
   var root = documentTree(bodyHtml)
-  // The gutters go only when the window is too narrow to spare them, because a
-  // wide one reads better with the sender's own spacing. A width the window
-  // cannot hold goes at every width: there is no horizontal scroll here, so
-  // what overflows is not read at all.
+  // Reclaim gutters only in narrow panes; always fit widths to the viewport.
   var fit = fitting(true, palette.compact === true,
     maxImage >= MIN_IMAGE_WIDTH, maxImage, true)
 
@@ -1827,9 +1880,9 @@ function documentFor(bodyHtml, colors) {
     // The quote rule indents from the side the text starts on. Qt reads only
     // physical properties — there is no `margin-inline-start` in a
     // QTextDocument — so the side is chosen here rather than by the renderer.
-    + "blockquote{color:" + quote + ";margin-" + quoteEdge + ":8px;padding-"
+    + "blockquote{" + (original ? "" : "color:" + quote + ";") + "margin-" + quoteEdge + ":8px;padding-"
       + quoteEdge + ":8px;}"
-    + "td,th{padding:2px;}"
+    + (palette.preserveFormatting === true ? "" : "td,th{padding:2px;}")
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body" + baseDirectionAttribute(palette) + ">"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
@@ -1861,7 +1914,7 @@ function documentFor(bodyHtml, colors) {
 //
 // Every element the reader emits is constructed here with an empty attribute
 // list and only these checked values are added. The reader may also add fixed
-// layout attributes of its own to a compact avatar row; none is copied from
+// layout attributes of its own to compact avatar and status rows; none is copied from
 // the sender. A class, an id, a bgcolor, an align, a style, a background or a
 // url() therefore cannot survive this pass by being missed. That is the whole
 // security argument for reading mode: structural, with a narrow numeric
@@ -2397,12 +2450,9 @@ function readerDataTable(node, ctx) {
 
 // A row of a layout table is a line, not a stack.
 //
-// Every cell made into a block of its own is exactly what turns an avatar, a
-// name and "moved 4 cards" into three paragraphs — the loose vertical stream a
-// reading mode exists to stop producing. So a row whose cells each hold one
-// short run of inline content becomes one line, and a row holding anything
-// larger or more structured than that keeps the blocks, because at that size
-// the cells really were the sender stacking things up.
+// Short cells may share a line; structured cells keep their blocks. Inside an
+// inherited link/style only bounded status strips change layout, and rebuilt
+// cells inherit the already-checked inline wrappers so links remain clickable.
 //
 // Both answers come out of one walk over the cells, and that is not a tidiness
 // point. Building the cells to find out and then walking them again to lay them
@@ -2426,23 +2476,38 @@ function readerBroken(children) {
 }
 
 function readerRow(node, state, ctx) {
-  // Everything that can refuse a row is asked before anything is built.
+  // Reject before building.
   var cells = []
   for (var i = 0; i < node.children.length; i++) {
     var cell = node.children[i]
     if (cell.type === "text") continue
+    if (readerHidden(cell)) continue
     if (cell.name !== "td" && cell.name !== "th") return false
     // A cell the sender set heading type on is a heading, and joining the row
     // would walk past the one piece of evidence there is for that.
     if (readerHeadingOf(cell) !== "") return false
     // The "|" between two links is the sender drawing a line, not something
     // anybody reads out. In a row of its own it is all that is left of one.
-    if (readerFurniture(cell)) continue
+    if (state.chain.length === 0 && readerFurniture(cell)) continue
     cells.push(cell)
   }
 
   var built = []
-  for (var j = 0; j < cells.length; j++) built.push(readerBuild(cells[j], ctx))
+  for (var j = 0; j < cells.length; j++) built.push(readerBuild(cells[j], ctx, state.chain))
+
+  var statusRow = ctx.tables ? readerStatusRow(built) : null
+  if (statusRow !== null) {
+    readerFlush(state, "p")
+    state.blocks.push(statusRow)
+    return true
+  }
+
+  if (state.chain.length > 0) {
+    readerFlush(state, "p")
+    for (var b = 0; b < built.length; b++)
+      for (var c = 0; c < built[b].length; c++) state.blocks.push(built[b][c])
+    return true
+  }
 
   var line = []
   for (var k = 0; k < built.length && line !== null; k++) {
@@ -2469,6 +2534,53 @@ function readerRow(node, state, ctx) {
     for (var b = 0; b < built[n].length; b++) state.blocks.push(built[n][b])
   }
   return true
+}
+
+// A short label above one small icon is still a cell in a status strip, not
+// two unrelated paragraphs. Judge only rebuilt content, then make a bounded
+// table with our own spacing. Sender layout attributes never enter the result.
+function readerStatusRow(cells) {
+  if (cells.length < 2 || cells.length > MAX_READER_TABLE_COLUMNS) return null
+  var width = 0
+  for (var i = 0; i < cells.length; i++) {
+    var blocks = cells[i]
+    if (blocks.length !== 2 || blocks[0].name !== "p" || blocks[1].name !== "p") return null
+    var label = blocks[0].children
+    if (readerContainsImage(label) || readerBroken(label)
+      || readerLength(label) < 1 || readerLength(label) > 4
+      || readerSmallImageCount(blocks[1].children) !== 1) return null
+    var iconWidth = readerStatusIconWidth(blocks[1])
+    if (iconWidth === 0) return null
+    width += iconWidth + 4
+  }
+  // Fit compact mail panes without preserving arbitrary newsletter columns.
+  if (width > 256) return null
+  var table = readerElement("table")
+  table.attrs = [{ name: "cellspacing", value: "0" }, { name: "cellpadding", value: "0" }]
+  var row = readerElement("tr")
+  for (var c = 0; c < cells.length; c++) {
+    var cell = readerElement("td")
+    cell.attrs = [{ name: "align", value: "center" }, { name: "valign", value: "top" },
+      { name: "style", value: "padding:0px 2px" }]
+    cell.children = cells[c][0].children.concat([readerElement("br")], cells[c][1].children)
+    row.children.push(cell)
+  }
+  table.children.push(row)
+  return table
+}
+
+function readerStatusIconWidth(node) {
+  if (node.name === "img") {
+    var width = Number(attributeValue(node, "width"))
+    var height = Number(attributeValue(node, "height"))
+    return width > 2 && width <= MAX_READER_INLINE_IMAGE
+      && height > 2 && height <= MAX_READER_INLINE_IMAGE ? width : 0
+  }
+  for (var i = 0; i < (node.children || []).length; i++) {
+    var found = readerStatusIconWidth(node.children[i])
+    if (found > 0) return found
+  }
+  return 0
 }
 
 // A cell or a list item holding one paragraph holds inline content, not a
@@ -2597,10 +2709,8 @@ function readerNode(child, state, ctx) {
     return
   }
 
-  // Only with nothing open around it, for the same reason the heading below
-  // says so: joining a row recurses into a document of its own, and a link
-  // opened outside it would not survive that.
-  if (name === "tr" && state.chain.length === 0 && readerRow(child, state, ctx)) return
+  // Row cells inherit checked inline wrappers, including an enclosing link.
+  if (name === "tr" && readerRow(child, state, ctx)) return
 
   if (TABLE_PARTS[name] === true || READER_BLOCK[name] === true) {
     // Only with nothing open around it. Inferring a heading recurses into a
@@ -2645,8 +2755,13 @@ function readerPreText(node, out) {
   return out
 }
 
-function readerBuild(node, ctx) {
+function readerBuild(node, ctx, chain) {
   var state = readerState()
+  for (var i = 0; i < (chain || []).length; i++) {
+    var wrapper = readerElement(chain[i].name)
+    wrapper.attrs = chain[i].attrs
+    readerOpen(state, wrapper)
+  }
   readerWalk(node, state, ctx)
   readerFlush(state, "p")
   return state.blocks

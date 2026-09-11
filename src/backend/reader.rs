@@ -469,6 +469,8 @@ fn render_prepared(
     let html_body = prepared.base["nativeContent"]["body"]["source"] == "html";
     options["withPlainText"] = json!(html_body);
     options["withReader"] = json!(true);
+    // Original keeps the sender's sanitized layout; Reader is rebuilt separately.
+    options["preserveFormatting"] = json!(true);
     let mut revision = Sha256::new();
     revision.update(prepared.source_hash);
     revision.update(serde_json::to_vec(&options).map_err(|_| "invalid_params")?);
@@ -663,6 +665,30 @@ mod tests {
             message::content::prepare(&plain, 0).unwrap(),
             message::content::prepare_for_render(&plain, 0).unwrap()
         );
+    }
+    #[test]
+    fn prepared_original_preserves_sender_layout_without_styling_reader() {
+        let mut prepared = prepare(&fixture(), "m", 0).unwrap();
+        prepared.source = "<center><table bgcolor=\"#234567\"><tr><td><p align=\"center\">Heading</p></td></tr></table></center>".into();
+        let result = render_prepared(
+            &prepared,
+            "a",
+            "m",
+            "key",
+            json!({}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        let original: message::html::Node =
+            serde_json::from_value(result["nativeRender"]["document"].clone()).unwrap();
+        let reader: message::html::Node =
+            serde_json::from_value(result["nativeRender"]["reader"]["document"].clone()).unwrap();
+        let original = message::html::serialize(&original).unwrap();
+        let reader = message::html::serialize(&reader).unwrap();
+        assert!(original.contains("<center><table bgcolor=\"#234567\">"));
+        assert!(original.contains("align=\"center\""));
+        assert_eq!(reader, "<p>Heading</p>");
     }
     #[test]
     fn compact_render_preserves_both_documents_and_every_policy_field() {

@@ -388,17 +388,32 @@ fn row(n: &Node, s: &mut State, ctx: &mut Images<'_>, tables: bool) -> bool {
         if c.kind == "text" {
             continue;
         }
+        if hidden_reader(c) {
+            continue;
+        }
         if !matches!(c.name.as_str(), "td" | "th") || !heading(c).is_empty() {
             return false;
         }
-        if !furniture(c) {
+        if !s.chain.is_empty() || !furniture(c) {
             cells.push(c)
         }
     }
     let built = cells
         .into_iter()
-        .map(|c| build(c, ctx, tables))
+        .map(|c| build_in_chain(c, ctx, tables, &s.chain))
         .collect::<Vec<_>>();
+    if tables && let Some(status) = status_row(&built) {
+        s.flush("p");
+        s.blocks.push(status);
+        return true;
+    }
+    // Only compact status strips change layout inside an existing link/style.
+    // Keep the old block boundaries for other linked rows, without walking twice.
+    if !s.chain.is_empty() {
+        s.flush("p");
+        s.blocks.extend(built.into_iter().flatten());
+        return true;
+    }
     let eligible = built
         .iter()
         .all(|b| b.is_empty() || (b.len() == 1 && b[0].name == "p" && !broken(&b[0].children)));
@@ -428,6 +443,52 @@ fn row(n: &Node, s: &mut State, ctx: &mut Images<'_>, tables: bool) -> bool {
     }
     true
 }
+// Judge rebuilt content, then create our own bounded layout. No sender
+// attributes are copied into Reader's status strip.
+fn status_row(cells: &[Vec<Node>]) -> Option<Node> {
+    if !(2..=8).contains(&cells.len()) {
+        return None;
+    }
+    let mut width = 0.0;
+    for blocks in cells {
+        if blocks.len() != 2 || blocks[0].name != "p" || blocks[1].name != "p" {
+            return None;
+        }
+        let label = &blocks[0].children;
+        if contains_image(label)
+            || broken(label)
+            || !(1..=4).contains(&length(label))
+            || small_images(&blocks[1].children) != 1
+        {
+            return None;
+        }
+        let icon_width = formatting::icon_width(&blocks[1]);
+        if icon_width == 0.0 {
+            return None;
+        }
+        width += icon_width + 4.0;
+    }
+    if width > 256.0 {
+        return None;
+    }
+    let mut table = Node::element("table");
+    table.set("cellspacing", "0");
+    table.set("cellpadding", "0");
+    let mut row = Node::element("tr");
+    for blocks in cells {
+        let mut cell = Node::element("td");
+        cell.set("align", "center");
+        cell.set("valign", "top");
+        cell.set("style", "padding:0px 2px");
+        cell.children = blocks[0].children.clone();
+        cell.children.push(Node::element("br"));
+        cell.children.extend(blocks[1].children.clone());
+        row.children.push(cell);
+    }
+    table.children.push(row);
+    Some(table)
+}
+
 fn list_items(n: &Node, list: &mut Node, ctx: &mut Images<'_>, tables: bool) {
     for c in &n.children {
         if c.kind == "text" || drop_reader(&c.name) {
@@ -560,7 +621,7 @@ fn node(n: &Node, s: &mut State, ctx: &mut Images<'_>, tables: bool) {
             s.flush("p")
         }
         _ => {
-            if name == "tr" && s.chain.is_empty() && row(n, s, ctx, tables) {
+            if name == "tr" && row(n, s, ctx, tables) {
                 return;
             }
             if table_part(name)
@@ -609,7 +670,15 @@ fn node(n: &Node, s: &mut State, ctx: &mut Images<'_>, tables: bool) {
     }
 }
 fn build(n: &Node, ctx: &mut Images<'_>, tables: bool) -> Vec<Node> {
+    build_in_chain(n, ctx, tables, &[])
+}
+fn build_in_chain(n: &Node, ctx: &mut Images<'_>, tables: bool, chain: &[Node]) -> Vec<Node> {
     let mut s = State::default();
+    for parent in chain {
+        let mut wrapper = Node::element(&parent.name);
+        wrapper.attrs = parent.attrs.clone();
+        s.open(wrapper);
+    }
     walk(n, &mut s, ctx, tables);
     s.flush("p");
     s.blocks

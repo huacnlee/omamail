@@ -222,13 +222,15 @@ fn native_output_cannot_trigger_qt_resource_requests() {
     ];
     let mut documents = vec![];
     for attack in attacks {
-        let result = sanitize(
+        for preserve in [false, true] {
+            let result = sanitize(
             &attack,
-            &json!({"withReader":true,"keepColors":true,"allowRemoteImages":true}),
+            &json!({"withReader":true,"keepColors":true,"allowRemoteImages":true,"preserveFormatting":preserve}),
         )
         .unwrap();
-        documents.push(result["html"].as_str().unwrap().into());
-        documents.push(result["reader"]["html"].as_str().unwrap().into());
+            documents.push(result["html"].as_str().unwrap().into());
+            documents.push(result["reader"]["html"].as_str().unwrap().into());
+        }
     }
     run(documents);
     let actual = count.load(Ordering::SeqCst);
