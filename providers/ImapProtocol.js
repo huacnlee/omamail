@@ -241,8 +241,23 @@ function normalizeSettings(raw) {
     // Loopback only. A plaintext session to anywhere else is a password on the
     // wire, and the one legitimate case — a local bridge — never leaves the
     // machine.
-    insecure: values.insecure === true && isLoopback(values.imapHost)
+    insecure: values.insecure === true && isLoopback(values.imapHost),
+    send: normalizeSend(values.send)
   }
+}
+
+// How a message leaves: SMTP, or Microsoft Graph's sendMail for a Microsoft
+// 365 tenant that has switched authenticated SMTP off. Graph takes the same
+// MIME the SMTP path builds and files the sent copy itself. Empty or missing
+// is SMTP, which is what every mailbox already on disk means.
+var GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
+
+function normalizeSend(value) {
+  return trimmed(value).toLowerCase() === "graph" ? "graph" : ""
+}
+
+function sendsViaGraph(raw) {
+  return normalizeSend((raw || {}).send) === "graph"
 }
 
 function isLoopback(host) {
@@ -263,7 +278,8 @@ function setupSettings(raw) {
     smtpPort: values.smtpPort,
     username: trimmed(values.username) || trimmed(values.address),
     aliases: values.aliases,
-    insecure: isLoopback(values.imapHost)
+    insecure: isLoopback(values.imapHost),
+    send: values.send
   })
 }
 
@@ -1039,6 +1055,82 @@ function decodeMailbox(name) {
     at = close + 1
   }
   return out
+}
+
+// The other direction, for a name the user typed that is about to be sent in
+// CREATE or RENAME: printable US-ASCII passes through, "&" is spelled "&-",
+// and everything else goes into a base64 run of its UTF-16 code units with
+// "," standing in for "/" and no padding — RFC 3501 section 5.1.3. What comes
+// back from LIST decodes to the same text, and `tests/test_imap.js` holds the
+// round trip.
+function encodeMailbox(name) {
+  var text = String(name === undefined || name === null ? "" : name)
+  var out = ""
+  var run = ""
+  function flush() {
+    if (run === "") return
+    var bytes = []
+    for (var i = 0; i < run.length; i++) {
+      var code = run.charCodeAt(i)
+      bytes.push((code >> 8) & 0xff, code & 0xff)
+    }
+    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,"
+    var encoded = ""
+    for (var b = 0; b < bytes.length; b += 3) {
+      var n = (bytes[b] << 16) | ((b + 1 < bytes.length ? bytes[b + 1] : 0) << 8)
+        | (b + 2 < bytes.length ? bytes[b + 2] : 0)
+      encoded += alphabet.charAt((n >> 18) & 63) + alphabet.charAt((n >> 12) & 63)
+      if (b + 1 < bytes.length) encoded += alphabet.charAt((n >> 6) & 63)
+      if (b + 2 < bytes.length) encoded += alphabet.charAt(n & 63)
+    }
+    out += "&" + encoded + "-"
+    run = ""
+  }
+  for (var at = 0; at < text.length; at++) {
+    var ch = text.charAt(at)
+    var code = text.charCodeAt(at)
+    if (code >= 0x20 && code <= 0x7e) {
+      flush()
+      out += ch === "&" ? "&-" : ch
+    } else {
+      run += ch
+    }
+  }
+  flush()
+  return out
+}
+
+// The three commands that change the folder list. A name the server already
+// has travels exactly as LIST spelled it — the wire name, encoded once by
+// the server — and a name the user typed is encoded here. Encoding a wire
+// name again turns its "&" into "&-" and names a folder that does not exist.
+// A RENAME carries every folder beneath the old name with it, which is what
+// moving a folder under another parent is.
+// Refuse an unrepresentable identity before quoting or encoding can change it.
+function validFolderName(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+  if (text === "" || /[\x00-\x1f\x7f]/.test(text)) return false
+  for (var i = 0; i < text.length; i++) {
+    var code = text.charCodeAt(i)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      var next = text.charCodeAt(++i)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false
+  }
+  return true
+}
+
+function createCommand(name) {
+  return validFolderName(name) ? "CREATE " + quote(encodeMailbox(name)) : ""
+}
+
+function renameCommand(fromWire, toName) {
+  if (!validFolderName(fromWire) || !validFolderName(toName)) return ""
+  return "RENAME " + quote(fromWire) + " " + quote(encodeMailbox(toName))
+}
+
+function deleteCommand(wireName) {
+  return validFolderName(wireName) ? "DELETE " + quote(wireName) : ""
 }
 
 // The SPECIAL-USE attributes this plugin cares about, mapped to the folder the

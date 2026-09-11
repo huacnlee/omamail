@@ -3,16 +3,21 @@ import "Model.js" as Model
 import "../providers/Registry.js" as Provider
 
 // Several rows at once: the ticked ones. One optimistic edit for the lot,
-// one request where the client takes a list and one per row where it
-// answers per message. Each row expands to its counted members the way a
-// single action does, so a conversation row marked read reads as one
-// across the rail as well as in the list. A second caller of the account's
-// optimistic and restore machinery, kept beside it rather than in it: the
-// account file is at its size ceiling.
+// taken at the keystroke whatever is in flight, and one send that waits for
+// the slot behind whatever holds it — one request where the client takes a
+// list, one per row where it answers per message. Each row expands to its
+// counted members the way a single action does, so a conversation row marked
+// read reads as one across the rail as well as in the list. Each row's edit
+// is its own intent under the batch's token, so a refusal on one row puts
+// back that row and no other, and an edit taken on a row after the batch
+// stays where a snapshot of the list would have lost it. A second caller of
+// the account's queue and its `Intents`, kept beside it rather than in it:
+// the account file is at its size ceiling.
 QtObject {
   id: batch
 
   required property var account
+  required property var intents
 
   function run(ids, action) {
     var wanted = []
@@ -20,13 +25,8 @@ QtObject {
     for (var g = 0; g < given.length; g++) wanted.push(String(given[g]))
     if (!account.ready || wanted.length === 0) return false
     if (account.refuseUnavailableAction(action)) return false
-    // One mutation in flight at a time, for the same reason `act` waits: the
-    // rows go back by the index they held. The line is per row, so a batch
-    // asked for while another action finishes joins it one row at a time.
-    if (account.pendingAction !== "") {
-      for (var q = 0; q < wanted.length; q++) account.queueAction(wanted[q], action, account.cacheKey, false, false)
-      return true
-    }
+    // Only the send waits for the slot; the rows move now, as one row does.
+    var slotTaken = account.pendingAction !== ""
     var sourceLabelId = account.hasLabels ? account.rawLabelId : ""
     var change = action === "trash" || action === "untrash"
       ? { add: [], remove: [] } : Model.labelChangesFor(action, sourceLabelId)
@@ -40,7 +40,7 @@ QtObject {
     }
     if (listed.length === 0) return false
 
-    // The account.messages this action is sent for: every row's counted members, as
+    // The messages this action is sent for: every row's counted members, as
     // for a single action, so no client expands anything.
     var conversationAction = Model.actionScope(action) === "conversation"
     var targets = []
@@ -57,12 +57,12 @@ QtObject {
     var actionQuery = account.cacheKey
     var actionEstimate = account.resultEstimate
     var actionToken = account.nextPageToken
-    var before = account.messages.slice()
-    var beforePreview = account.previewMessages.slice()
-    var beforeSelected = account.selectedMessage
-    var selectedWas = account.selectedId
-    var interrupted = account.listLoading
-    if (interrupted) {
+    // A live list owns snapshots taken before this action, for the reason
+    // `act` gives. Stopped now, and again when a queued send goes out.
+    var interrupted = false
+    function stopLiveList() {
+      if (account.cacheKey !== actionQuery || !account.listLoading) return
+      interrupted = true
       account.listSerial++
       account.abortRequest(account.listHandle)
       account.listHandle = null
@@ -70,26 +70,38 @@ QtObject {
       account.nextPageToken = ""
       actionToken = ""
     }
+    stopLiveList()
+    var token = intents.nextToken()
+    intents.holdLists(actionQuery)
 
     // Every member summary the rail holds for a target takes the change; a
     // representative takes its row's, block and all. What each was is kept
     // so a refusal can put it back.
     var memberBefore = ({})
     var memberAfter = ({})
-    var changedMembers = []
-    function rememberBefore(id, summary) {
-      if (changedMembers.indexOf(id) < 0) {
-        changedMembers.push(id)
-        memberBefore[id] = summary
-      }
+    function memberAfterOf(summary) {
+      return Model.applyLabelChange(summary, action, sourceLabelId)
     }
     for (var t = 0; t < targets.length; t++) {
       var known = account.memberSummaries[targets[t]]
       if (!known) continue
-      var after = Model.applyLabelChange(known, action, sourceLabelId)
+      var after = memberAfterOf(known)
       if (!after || after === known) continue
-      rememberBefore(targets[t], known)
+      memberBefore[targets[t]] = known
       memberAfter[targets[t]] = after
+    }
+    // What the action makes of a row, from whichever state it is applied to:
+    // its own now, an earlier one if an edit ahead of it fails.
+    function rowAfterOf(row) {
+      if (conversationAction) {
+        // Every counted member was sent the same patch, so the row says so
+        // at once rather than waiting for the next read to agree.
+        return Model.applyLabelChange(row, action, sourceLabelId,
+          Model.threadAfterAction(row, action))
+      }
+      var id = String(row.id)
+      return Model.rowAfterMemberEdit(row, Model.applyLabelChange(row, action, sourceLabelId),
+        id, account.memberSummaries, targetsOf[id] || [], memberAfterOf)
     }
 
     var next = []
@@ -97,6 +109,9 @@ QtObject {
     var unreadDelta = 0
     var selectedGone = false
     var removedIds = []
+    var edits = []
+    var readerKey = ""
+    var readerRow = ""
     for (var j = 0; j < account.messages.length; j++) {
       var row = account.messages[j]
       var rowId = String(row.id)
@@ -104,23 +119,9 @@ QtObject {
         next.push(row)
         continue
       }
-      var updated
-      if (conversationAction) {
-        // Every counted member was sent the same patch, so the row says so
-        // at once rather than waiting for the next read to agree.
-        updated = Model.applyLabelChange(row, action, sourceLabelId,
-          Model.threadAfterAction(row, action))
-      } else {
-        var ownLabels = Model.applyLabelChange(row, action, sourceLabelId)
-        var nextMembers = ({})
-        for (var held in account.memberSummaries) nextMembers[held] = account.memberSummaries[held]
-        for (var changed in memberAfter) nextMembers[changed] = memberAfter[changed]
-        nextMembers[rowId] = ownLabels
-        updated = Model.rowWithThread(ownLabels,
-          Model.threadAfterMemberChange(row, nextMembers))
-      }
+      var updated = rowAfterOf(row)
       if (account.memberSummaries[rowId]) {
-        rememberBefore(rowId, account.memberSummaries[rowId])
+        memberBefore[rowId] = account.memberSummaries[rowId]
         memberAfter[rowId] = updated
       }
       if (action === "markRead" && row.unread && !updated.unread) unreadDelta--
@@ -129,20 +130,44 @@ QtObject {
         sourceLabelId, updated)
       if (survives) next.push(updated)
       else removedIds.push(rowId)
-      if (Model.indexById(nextPreview, rowId) >= 0) {
+      var previewIndex = Model.indexById(account.previewMessages, rowId)
+      if (previewIndex >= 0) {
         nextPreview = updated.unread
           ? Model.replaceById(nextPreview, updated)
           : Model.removeById(nextPreview, rowId)
       }
+      // The reader's copy takes the edit of what it shows.
       if (Model.rowHoldsMember(row, account.selectedId)) {
         if (!survives) selectedGone = true
-        else if (account.selectedId === rowId) account.selectedMessage = updated
-        else if (memberAfter[account.selectedId]) account.selectedMessage = memberAfter[account.selectedId]
-        else if (targets.indexOf(account.selectedId) >= 0 && account.selectedMessage)
-          account.selectedMessage = Model.applyLabelChange(account.selectedMessage, action, sourceLabelId)
+        else if (account.selectedMessage) {
+          var readerAfter = account.selectedId === rowId ? rowAfterOf
+            : (memberAfter[account.selectedId] || targetsOf[rowId].indexOf(account.selectedId) >= 0
+              ? memberAfterOf : null)
+          if (readerAfter) {
+            readerKey = "reader:" + account.selectedId
+            readerRow = rowId
+            intents.add(readerKey, { token: token, before: account.selectedMessage, apply: readerAfter })
+            account.selectedMessage = readerAfter(account.selectedMessage)
+          }
+        }
       }
+      var members = []
+      var owned = targetsOf[rowId]
+      for (var m = 0; m < owned.length; m++) {
+        if (memberBefore[owned[m]] !== undefined) members.push(owned[m])
+      }
+      // Held until answered; the row's says whether it left the list.
+      intents.add(rowId, { token: token, before: row, apply: rowAfterOf, removed: !survives })
+      edits.push({ token: token, query: actionQuery, rowId: rowId, before: row, removed: !survives,
+        index: j, previewIndex: previewIndex, members: members, memberBefore: memberBefore })
     }
-    if (changedMembers.length > 0) account.mergeMembers(memberAfter)
+    var changedMembers = false
+    for (var held in memberBefore) {
+      changedMembers = true
+      if (listed.indexOf(held) < 0)
+        intents.add(held, { token: token, before: memberBefore[held], apply: memberAfterOf })
+    }
+    if (changedMembers) account.mergeMembers(memberAfter)
     account.inboxUnread = Math.max(0, account.inboxUnread + unreadDelta)
     var opaqueQuery = account.effectiveQuery
       !== Provider.query(account.providerId, account.mailboxKey, "", "")
@@ -154,86 +179,51 @@ QtObject {
     var optimistic = account.messages.slice()
     var optimisticToken = account.nextPageToken
     if (!interrupted) account.rememberList()
-    account.pendingActionQuery = actionQuery
-    account.pendingAction = action
 
-    // The member summaries behind a set of rows go back with them.
-    function restoreMembersOf(rowIds) {
-      for (var f = 0; f < rowIds.length; f++) {
-        var owned = targetsOf[rowIds[f]] || []
-        for (var m = 0; m < owned.length; m++) {
-          if (memberBefore[owned[m]] !== undefined) account.rememberMember(memberBefore[owned[m]])
-        }
-        if (memberBefore[rowIds[f]] !== undefined) account.rememberMember(memberBefore[rowIds[f]])
+    // Answered row by row: a refused row's edit comes off, replayed over
+    // whatever was taken on it since, and the rest are agreed to. The list
+    // is built once — on screen, or in the cache of a query navigated away
+    // from — and assigned once.
+    function settleAll(refused, pageToken) {
+      var lists = refused.length > 0 ? intents.listsOf(actionQuery) : null
+      for (var e = 0; e < edits.length; e++) {
+        if (lists && refused.indexOf(edits[e].rowId) >= 0) lists = intents.restore(edits[e], lists)
+        else intents.keep(edits[e])
       }
+      if (lists) intents.commit(actionQuery, lists, actionEstimate, pageToken)
+      intents.settleReader(readerKey, token, refused.indexOf(readerRow) >= 0)
+      intents.releaseLists(actionQuery)
     }
 
     // A failure is not proof that nothing changed. One request per row
     // reports each on its own, and only the rows whose request failed go
     // back where they were. A provider that answers a whole batch with one
     // word — Gmail's batchModify, IMAP's plan across folders — may have done
-    // part of it, so its failure is answered by reading the list again from
-    // the server rather than by restoring rows the server may no longer have.
+    // part of it, so every row goes back and the list is read again from the
+    // server, which settles whatever it did do.
     var done = function(payload, error, failedIds) {
       account.pendingAction = ""
       account.pendingActionQuery = ""
+      account.runQueuedAction()
       if (error) {
         var partial = Array.isArray(failedIds)
-        if (partial && account.cacheKey === actionQuery
-            && !account.deferredLoadCleared(actionQuery)) {
-          account.messages = Model.restoreRows(account.messages, before, failedIds)
-          account.previewMessages = Model.restoreRows(account.previewMessages, beforePreview, failedIds)
-          restoreMembersOf(failedIds)
-          if (!selectedGone && beforeSelected && beforeSelected.id === account.selectedId)
-            account.selectedMessage = beforeSelected
-          if (!interrupted) account.rememberList()
-          account.refreshCounts()
-          var note = Model.batchFailureNote(listed.length, failedIds.length, account.actionLabel(action), error)
-          account.fail(note)
-          // The refused rows are back, but the page is not whole: a refresh
-          // that waited on this action still has to run, and a page token
-          // the optimistic update cleared is read again from the server
-          // rather than put back, because the rows that did go are gone and
-          // the old token names a page that no longer starts where it did.
-          if (account.resumeDeferredListLoad(actionQuery, note)) return
-          if (invalidatesPage) account.loadMessages(false, true, note)
-          return
-        }
-        if (partial) {
-          // The view moved on while the batch ran — to another query, or
-          // cleared for a reload of this one — so the pre-action page must
-          // not come back, on screen or in the cache: the rows that did go
-          // are gone from the server. Only the refused rows are put back,
-          // into the cache that the next look at this query paints from
-          // before it reads the server, and the page token is left empty
-          // so that read starts from the top.
-          restoreMembersOf(failedIds)
-          var partNote = Model.batchFailureNote(listed.length, failedIds.length, account.actionLabel(action), error)
-          account.fail(partNote)
-          if (account.cache.loaded) {
-            account.cache.putQuery(actionQuery, ({
-              summaries: Model.restoreRows(optimistic, before, failedIds),
-              estimate: actionEstimate, nextPageToken: ""
-            }))
-          }
-          if (account.resumeDeferredListLoad(actionQuery, partNote)) return
-          if (account.cacheKey === actionQuery) account.loadMessages(false, true, partNote)
-          return
-        }
-        restoreMembersOf(listed)
-        if (selectedWas !== "" && account.selectedId === selectedWas) account.selectedMessage = beforeSelected
-        account.fail(error)
-        if (account.resumeDeferredListLoad(actionQuery, error)) return
-        if (account.cacheKey === actionQuery) account.loadMessages(false, true, error)
-        else if (account.cache.loaded) {
-          // Not on screen: the old page goes back into the cache so the next
-          // visit reads the server rather than the optimistic guess.
-          account.cache.putQuery(actionQuery, ({
-            summaries: before, estimate: actionEstimate, nextPageToken: actionToken
-          }))
-        }
+        var note = partial
+          ? Model.batchFailureNote(listed.length, failedIds.length, account.actionLabel(action), error)
+          : String(error)
+        // After a partial refusal the page is not whole: the rows that did go
+        // are gone, and a page token the optimistic update cleared names a
+        // page that no longer starts where it did, so it is read again from
+        // the server rather than put back.
+        settleAll(partial ? failedIds : listed, partial ? "" : actionToken)
+        if (intents.showing(actionQuery) && !interrupted) account.rememberList()
+        account.refreshCounts()
+        account.fail(note)
+        if (account.resumeDeferredListLoad(actionQuery, note)) return
+        if (account.cacheKey === actionQuery && (!partial || invalidatesPage))
+          account.loadMessages(false, true, note)
         return
       }
+      settleAll([], optimisticToken)
       account.note(Model.batchNote(listed.length, account.actionLabel(action)))
       account.refreshCounts()
       if (interrupted && account.deferredLoadCleared(actionQuery)
@@ -261,31 +251,39 @@ QtObject {
         account.loadMessages(false, true, "")
     }
 
-    if (action === "trash" || action === "untrash") {
-      // One request per row, so each answers for itself: `trashMessage` and
-      // `untrashMessage` take a row's whole list of members on every client.
-      var remaining = listed.length
-      var firstError = ""
-      var failed = []
-      var each = function(rowId) {
-        return function(payload, error) {
-          if (error) {
-            if (firstError === "") firstError = String(error)
-            failed.push(rowId)
+    function dispatch() {
+      stopLiveList()
+      account.pendingActionQuery = actionQuery
+      account.pendingAction = action
+      if (action === "trash" || action === "untrash") {
+        // One request per row, so each answers for itself: `trashMessage` and
+        // `untrashMessage` take a row's whole list of members on every client.
+        var remaining = listed.length
+        var firstError = ""
+        var failed = []
+        var each = function(id) {
+          return function(payload, error) {
+            if (error) {
+              if (firstError === "") firstError = String(error)
+              failed.push(id)
+            }
+            remaining--
+            if (remaining === 0) done(null, firstError, failed)
           }
-          remaining--
-          if (remaining === 0) done(null, firstError, failed)
         }
+        for (var d = 0; d < listed.length; d++) {
+          var sent = targetsOf[listed[d]].length > 1 ? targetsOf[listed[d]] : targetsOf[listed[d]][0]
+          if (action === "trash") account.api.trashMessage(sent, each(listed[d]))
+          else account.api.untrashMessage(sent, each(listed[d]))
+        }
+        return
       }
-      for (var d = 0; d < listed.length; d++) {
-        var owned = targetsOf[listed[d]]
-        var sent = owned.length > 1 ? owned : owned[0]
-        if (action === "trash") account.api.trashMessage(sent, each(listed[d]))
-        else account.api.untrashMessage(sent, each(listed[d]))
-      }
-    } else {
       account.api.batchModify(targets, change.add, change.remove, done)
     }
+    // A send already queued for these rows and this verb took its place.
+    function discard() { settleAll([], "") }
+    if (slotTaken) account.queueAction(listed.join(","), action, actionQuery, false, false, dispatch, discard)
+    else dispatch()
     return true
   }
 }

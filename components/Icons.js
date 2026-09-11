@@ -31,6 +31,9 @@ var GLYPHS = {
   undo: 0xF054C,         // undo
   menu: 0xF035C,         // menu
   plus: 0xF0415,         // plus
+  more: 0xF01D9,        // dots-vertical
+  stop: 0xF04DB,        // stop
+  copy: 0xF018F,        // content-copy
   close: 0xF0156,        // close
   back: 0xF004D,         // arrow-left
   chevronLeft: 0xF0141,  // chevron-left
@@ -50,7 +53,8 @@ var GLYPHS = {
   calendar: 0xF0B66,     // calendar-blank-outline
   video: 0xF0BDC,        // video-outline
   pin: 0xF0931,          // pin-outline
-  people: 0xF000F        // account-multiple-outline
+  people: 0xF000F,       // account-multiple-outline
+  agent: 0xF167A         // robot-outline — the message agent
 }
 
 // The filled form, for the names that have a state to show. A filled star

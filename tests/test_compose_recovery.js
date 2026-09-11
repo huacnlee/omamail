@@ -74,3 +74,13 @@ unsafe.draft.draftAttachments[0].extra = "drop me"
 const cleaned = recovery.parse(JSON.stringify(unsafe))
 assert.strictEqual(cleaned.draft.extra, undefined)
 assert.strictEqual(cleaned.draft.draftAttachments[0].extra, undefined)
+
+// ------------------------------------------------------- several parked sends
+
+{
+  const withParked = recovery.parse(recovery.serialize("reader", draft, [draft, { to: "" }]))
+  assert.strictEqual(withParked.parked.length, 1, "other parked drafts ride along; empty ones do not")
+  assert.strictEqual(withParked.parked[0].to, draft.to)
+  assert.strictEqual(recovery.parse(recovery.serialize("reader", draft)).parked.length, 0)
+  assert.strictEqual(recovery.empty().parked.length, 0)
+}

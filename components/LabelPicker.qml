@@ -133,7 +133,7 @@ Item {
         accent: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        placeholderText: "Filter labels..."
+        placeholderText: "Filter folders or labels..."
         onTextChanged: {
           root.searchQuery = text
           root.cursorIndex = 0
@@ -173,7 +173,7 @@ Item {
           id: labelRow
           required property var modelData
           required property int index
-
+          objectName: "label-picker-row-" + index
           readonly property bool hasCursor: root.cursorIndex === labelRow.index
 
           width: labelList.width
@@ -184,14 +184,16 @@ Item {
           border.width: labelRow.hasCursor ? Style.normalBorderWidth : 0
           border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
 
+          // A child steps in under its parent, and is named by its own
+          // leaf; a match to typed letters shows its whole path, flat.
           Text {
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(10)
+            anchors.leftMargin: Style.space(10) + Math.min(8, Number(labelRow.modelData.depth) || 0) * Style.space(12)
             anchors.right: parent.right
             anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: String(labelRow.modelData.name || "")
+            text: String(labelRow.modelData.leaf || labelRow.modelData.name || "")
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -200,9 +202,16 @@ Item {
 
           HoverHandler { id: rowHover }
 
-          TapHandler {
-            gesturePolicy: TapHandler.ReleaseWithinBounds
-            onTapped: {
+          MouseArea {
+            anchors.fill: parent
+            // A click moves the same cursor the arrow keys do. Activation is
+            // deliberately a second gesture — Return or a double-click — so
+            // a pointer user can inspect the highlighted destination before
+            // moving mail there.
+            onClicked: {
+              root.cursorIndex = labelRow.index
+            }
+            onDoubleClicked: {
               root.cursorIndex = labelRow.index
               root.chooseCursor()
             }
@@ -219,7 +228,8 @@ Item {
         visible: root.matchingLabels.length === 0
         textFormat: Text.PlainText
         text: root.searchQuery === ""
-          ? "No labels to move into" : "No label matches that"
+          ? "No folders or labels to move into"
+          : "No folder or label matches that"
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
