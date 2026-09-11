@@ -23,21 +23,25 @@ Item {
   // What the marker pointed at, shown whether or not it was fetched, so a
   // refusal names the thing it refused.
   property string requested: ""
-  // A sender's src is not a picture until something has decided it is safe to
-  // fetch. Loopback and private addresses are the network behind the user's
-  // front door, and file: is their disk; neither is a picture, and opening one
-  // is the request itself.
+  // A sender's src is not a picture until it has been prepared as raster
+  // bytes. Qt fetches a remote Image source itself, so an http(s) address
+  // is refused here even if a caller forgets to go through the worker.
   property bool refused: false
 
   anchors.fill: parent
   z: 60
 
   function show(url) {
-    var wanted = String(url || "")
+    showPrepared(url, url)
+  }
+
+  function showPrepared(requestedUrl, prepared) {
+    var wanted = String(requestedUrl || "")
     if (wanted === "") return
     requested = wanted
-    refused = !Html.isDisplayableImageUrl(wanted)
-    source = refused ? "" : wanted
+    var data = String(prepared || "")
+    refused = !Html.isRasterDataImage(data)
+    source = refused ? "" : data
     sheet.open()
   }
 
@@ -94,7 +98,7 @@ Item {
           wrapMode: Text.WordWrap
           visible: root.refused || picture.status !== Image.Ready
           text: root.refused
-            ? "That image is not on the public internet, so it was not fetched"
+            ? "That image is not a picture this can show"
             : (picture.status === Image.Error ? "That image could not be loaded" : "Loading")
           color: root.dimColor
           font.family: root.panelFontFamily

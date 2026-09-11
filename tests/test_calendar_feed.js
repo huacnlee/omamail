@@ -237,6 +237,35 @@ const utcRecurringEvents = feed.eventsFromCaldav(utcRecurringXml, "work",
 assert.strictEqual(utcRecurringEvents.length, 1)
 assert.strictEqual(utcRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 12, 0))
 
+// A rule from long ago is walked from the range it is asked for, not from its
+// DTSTART. Walking from 1990 hit the loop's 10 000-day ceiling twenty-seven
+// years in and returned nothing for 2026; the rules that did reach the range
+// paid for every day since they began, on the shell's main thread, on every
+// refresh — a weekly event from 2023 cost a quarter of a second each.
+const ancientXml = recurringXml
+  .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH")
+  .replace(/20240208T140000/g, "19900104T140000")
+  .replace(/20240208T150000/g, "19900104T150000")
+const ancientEvents = feed.eventsFromCaldav(ancientXml, "work",
+  Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.start.ms }))), [
+  Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 10, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+], "every Thursday in range, minus the EXDATE, plus the moved one")
+assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.summary }))),
+  ["Standup", "Standup", "Moved standup"])
+
+// COUNT is the one rule that has to be counted from the start, so it still is:
+// ten Thursdays from July reach 3 September and no further, whatever the range.
+const countedXml = recurringXml
+  .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=10")
+  .replace(/20240208T140000/g, "20260702T140000")
+  .replace(/20240208T150000/g, "20260702T150000")
+const countedEvents = feed.eventsFromCaldav(countedXml, "work",
+  Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+assert.deepStrictEqual(JSON.parse(JSON.stringify(countedEvents.map(function(event) { return event.start.ms }))), [
+  Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+], "27 August is the ninth, 3 September the tenth and excluded, 17 September is past COUNT")
+
 const days = feed.monthDays(2026, 7, 1)
 assert.strictEqual(days.length, 42)
 assert.strictEqual(days[0].isoDate, "2026-07-27")
@@ -444,6 +473,13 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
 assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
   { href: "https://dav.example/cal/me/a.ics" }), "",
   "a different port is a different origin")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+  { href: "/cal/me/a.ics" }),
+  "https://dav.example:8443/cal/me/a.ics",
+  "a path-absolute href keeps the collection port")
+assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]:8443/cal/",
+  { href: "/cal/a.ics" }),
+  "https://[2001:db8::1]:8443/cal/a.ics")
 assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
   { href: "https://dav.example:443/cal/me/a.ics" }),
   "https://dav.example:443/cal/me/a.ics",
@@ -455,6 +491,18 @@ assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
   { href: "//dav.example/cal/me/a.ics" }),
   "https://dav.example/cal/me/a.ics",
   "a scheme-relative href on the same host resolves")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://dav.example:443@evil.example/steal.ics" }), "",
+  "userinfo is not the collection host")
+assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+  { href: "https://user@dav.example/cal/me/a.ics" }),
+  "https://dav.example/cal/me/a.ics",
+  "userinfo on the collection host is dropped, not sent as the user")
+assert.strictEqual(feed.urlOrigin("https://[2001:db8::1]/cal/"),
+  "https://[2001:db8::1]:443")
+assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]/cal/",
+  { href: "https://[2001:db8::2]/cal/a.ics" }), "",
+  "a different IPv6 host is another origin")
 
 // Raw whitespace is refused: a URL's spaces arrive percent-encoded, and the
 // resolved address becomes one quoted line of the transport's curl config,
@@ -471,3 +519,63 @@ assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
 console.log("test_calendar_feed.js ok")
+
+// -------------------------------------------------------------- Microsoft
+{
+  const view = {
+    value: [
+      { id: "AAMk1", iCalUId: "040000008200E00074C5B7101A82E008", subject: "Standup", bodyPreview: "Daily",
+        location: { displayName: "Teams" }, isAllDay: false, isCancelled: false,
+        start: { dateTime: "2026-09-08T13:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-08T13:15:00.0000000", timeZone: "UTC" },
+        organizer: { emailAddress: { name: "Ada", address: "ada@contoso.com" } },
+        attendees: [{ emailAddress: { name: "Bob", address: "bob@contoso.com" }, status: { response: "accepted" } }],
+        onlineMeeting: { joinUrl: "https://teams.microsoft.com/l/meetup-join/x" },
+        webLink: "https://outlook.office365.com/owa/?itemid=AAMk1" },
+      { id: "AAMk2", subject: "Offsite", isAllDay: true, isCancelled: false,
+        start: { dateTime: "2026-09-10T00:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-11T00:00:00.0000000", timeZone: "UTC" } },
+      { id: "AAMk3", subject: "Gone", isCancelled: true,
+        start: { dateTime: "2026-09-12T09:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-09-12T10:00:00.0000000", timeZone: "UTC" } }
+    ]
+  }
+  const events = feed.eventsFromGraph(view, "microsoft:outlook:me@contoso.com")
+  assert.strictEqual(events.length, 2, "a cancelled event is left out")
+  assert.strictEqual(events[0].summary, "Standup")
+  assert.strictEqual(events[0].graphId, "AAMk1")
+  assert.strictEqual(events[0].uid, "040000008200E00074C5B7101A82E008")
+  assert.strictEqual(events[0].start.ms, Date.UTC(2026, 8, 8, 13, 0, 0), "a UTC moment without its Z still parses as UTC")
+  assert.strictEqual(events[0].end.ms - events[0].start.ms, 15 * 60 * 1000)
+  assert.strictEqual(events[0].location, "Teams")
+  assert.strictEqual(events[0].meetLink, "https://teams.microsoft.com/l/meetup-join/x")
+  assert.strictEqual(events[0].organizer.email, "ada@contoso.com")
+  assert.strictEqual(events[0].attendees[0].displayName, "Bob")
+  assert.strictEqual(events[0].href.indexOf("https://outlook.office365.com/"), 0)
+  assert.strictEqual(events[1].start.allDay, true)
+  assert.strictEqual(events[1].start.ms, new Date(2026, 8, 10).getTime(), "an all-day event is its local midnight")
+
+  const url = feed.graphEventsUrl(Date.UTC(2026, 8, 7), Date.UTC(2026, 8, 14))
+  assert.ok(url.indexOf("https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=2026-09-07T00%3A00%3A00.000Z") === 0)
+  assert.ok(url.indexOf("endDateTime=2026-09-14T00%3A00%3A00.000Z") > 0)
+  assert.strictEqual(feed.graphEventUrl("AAMk1/x"), "https://graph.microsoft.com/v1.0/me/events/AAMk1%2Fx", "an id is one path segment")
+
+  const timed = feed.graphEventBody({ title: "Call", description: "Notes", location: "Room 1",
+    start: Date.UTC(2026, 8, 9, 14, 30), end: Date.UTC(2026, 8, 9, 15, 0) }, false)
+  assert.strictEqual(timed.subject, "Call")
+  assert.strictEqual(timed.start.dateTime, "2026-09-09T14:30:00")
+  assert.strictEqual(timed.start.timeZone, "UTC")
+  assert.strictEqual(timed.isAllDay, false)
+  assert.strictEqual(timed.location.displayName, "Room 1")
+  const allDay = feed.graphEventBody({ title: "Day", start: new Date(2026, 8, 10).getTime(), end: new Date(2026, 8, 11).getTime() }, true)
+  assert.strictEqual(allDay.isAllDay, true)
+  assert.ok(/^2026-09-10T00:00:00$/.test(allDay.start.dateTime))
+
+  assert.strictEqual(feed.graphResponseError(401, "{}"), "Microsoft refused the calendar request. Sign in again")
+  assert.ok(feed.graphResponseError(400, JSON.stringify({ error: { code: "ErrorInvalidRequest", message: "Bad start" } })).indexOf("Bad start") > 0)
+  assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
+
+  const made = feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000)
+  assert.strictEqual(made.graph.subject, "Plan")
+  assert.strictEqual(made.recurring, false)
+}

@@ -117,7 +117,8 @@ Column {
         }
         Text {
           width: parent.width
-          text: modelData.kind === "google" ? "Google Calendar" : String(modelData.url || "CalDAV")
+          text: modelData.kind === "google" ? "Google Calendar"
+            : modelData.kind === "microsoft" ? "Microsoft calendar" : String(modelData.url || "CalDAV")
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption

@@ -398,6 +398,7 @@ deepEqual(message.draftFields({
   to: "first@example.com, second@example.com",
   cc: "copy@example.com",
   bcc: "hidden@example.com",
+  replyTo: "",
   subject: "Saved subject",
   body: "Saved body",
   threadId: "thread-7",
@@ -444,6 +445,71 @@ assert.ok(message.buildRawMessage({
   to: "jane@example.com", bcc: "hidden@example.com", body: "x"
 }).indexOf("Bcc: hidden@example.com\r\n") >= 0,
   "a mailto bcc has to leave as a Bcc header or it is not blind")
+assert.ok(message.buildRawMessage({
+  to: "jane@example.com", replyTo: "team@example.com", body: "x"
+}).indexOf("Reply-To: team@example.com\r\n") >= 0, "a reply-to leaves as its header")
+assert.ok(message.buildRawMessage({ to: "jane@example.com", body: "x" }).indexOf("Reply-To") < 0,
+  "and no header at all when none was given")
+{
+  const injected = message.buildRawMessage({
+    to: "jane@example.com", replyTo: "team@example.com\r\nBcc: attacker@example.net", body: "x"
+  })
+  assert.ok(injected.indexOf("\r\nBcc: attacker@example.net\r\n") < 0,
+    "a line break in the reply-to cannot smuggle a header")
+}
+// An HTML signature makes the message two readings and, with a picture, a
+// related part per picture: the text part still carries the plain signature,
+// the HTML part carries the markup with the picture by cid.
+{
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+  const signed = message.buildRawMessage({
+    to: "jane@example.com", subject: "Hi", body: "Hello <you>\n\nAda\nAnalyst",
+    signature: "Ada\nAnalyst",
+    signatureHtml: '<p><b>Ada</b><br>Analyst</p><p><img src="data:image/png;base64,' + PNG + '"></p>'
+  })
+  assert.ok(signed.indexOf("Content-Type: multipart/related;") > 0, "a picture makes it related")
+  assert.ok(signed.indexOf("Content-Type: multipart/alternative;") > 0)
+  assert.ok(signed.indexOf("Content-ID: <sig1@omamail>") > 0)
+  assert.ok(signed.indexOf("Content-Disposition: inline") > 0)
+  const html = Buffer.from(signed.split("Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n")[1].split("\r\n--")[0].replace(/\r\n/g, ""), "base64").toString("utf8")
+  assert.ok(html.indexOf("Hello &lt;you&gt;") >= 0, "the body is escaped in the HTML part")
+  assert.ok(html.indexOf("<b>Ada</b>") > 0, "and the signature markup replaces the plain signature")
+  assert.ok(html.indexOf('src="cid:sig1@omamail"') > 0)
+  assert.strictEqual(html.indexOf("data:"), -1)
+  assert.strictEqual((html.match(/Analyst/g) || []).length, 1, "the plain signature is not repeated under the markup")
+  // The two readings agree: a sign-off the writer removed is not put back
+  // in the HTML, the writer's own sign-off is the one replaced rather than a
+  // quoted copy, and a picture-only signature sits before the quote.
+  const removed = message.buildRawMessage({
+    to: "jane@example.com", body: "Hi Jane, thanks", signature: "Ada", signatureHtml: "<p><b>Ada</b></p>"
+  })
+  const removedHtml = Buffer.from(removed.split("Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n")[1].split("\r\n--")[0].replace(/\r\n/g, ""), "base64").toString("utf8")
+  assert.strictEqual(removedHtml.indexOf("<b>Ada</b>"), -1, "a removed sign-off stays removed")
+  const quoted = message.buildRawMessage({
+    to: "jane@example.com", body: "Thanks\n\nAda\n\n> hi\n> Ada", signature: "Ada", signatureHtml: "<p><b>Ada</b></p>"
+  })
+  const quotedHtml = Buffer.from(quoted.split("Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n")[1].split("\r\n--")[0].replace(/\r\n/g, ""), "base64").toString("utf8")
+  assert.ok(quotedHtml.indexOf("<b>Ada</b>") < quotedHtml.indexOf("&gt; hi"), "the writer's own sign-off is the one replaced")
+  assert.ok(quotedHtml.indexOf("&gt; Ada") > 0, "and the quoted copy stays quoted")
+  const picture = message.buildRawMessage({
+    to: "jane@example.com", body: "Thanks\n\n> hi", signature: "", signatureHtml: '<p><img src="data:image/png;base64,' + PNG + '"></p>'
+  })
+  const pictureHtml = Buffer.from(picture.split("Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n")[1].split("\r\n--")[0].replace(/\r\n/g, ""), "base64").toString("utf8")
+  assert.ok(pictureHtml.indexOf("<img") < pictureHtml.indexOf("&gt; hi"), "a picture signature sits before the quote")
+  const plainOnly = message.buildRawMessage({
+    to: "jane@example.com", body: "Hi\n\nAda", signature: "Ada", signatureHtml: "<p><b>Ada</b></p>"
+  })
+  assert.ok(plainOnly.indexOf("multipart/related") < 0, "no picture, no related part")
+  assert.ok(plainOnly.indexOf("multipart/alternative") > 0)
+  const withFile = message.buildRawMessage({
+    to: "jane@example.com", body: "Hi", signatureHtml: "<p>Ada</p>",
+    attachments: [{ filename: "a.txt", mimeType: "text/plain", data: "aGk=" }]
+  })
+  assert.ok(withFile.indexOf("multipart/mixed") > 0 && withFile.indexOf("multipart/alternative") > 0,
+    "an attachment wraps the signed body in mixed")
+  assert.ok(message.buildRawMessage({ to: "j@e.com", body: "Hi" }).indexOf("text/html") < 0,
+    "no signature markup, no HTML part, as before")
+}
 // A non-ASCII subject has to go back out as an encoded word or Gmail rejects
 // the whole raw message.
 assert.ok(raw.indexOf("Subject: =?UTF-8?B?" + Buffer.from("你好", "utf8").toString("base64") + "?=") >= 0)
@@ -1214,3 +1280,6 @@ assert.strictEqual(message.composeBody("   \n  ", "> quoted"), "\n\n> quoted")
 assert.strictEqual(message.composeBody("\n\n", ""), "")
 
 console.log("test_message.js ok")
+// A draft reopened from the server keeps the Reply-To it was saved with.
+assert.strictEqual(message.draftFields({ replyTo: { email: "team@example.com" }, to: [] }, "x").replyTo, "team@example.com")
+assert.strictEqual(message.draftFields({ replyTo: { email: "" }, to: [] }, "x").replyTo, "")

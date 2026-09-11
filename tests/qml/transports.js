@@ -53,3 +53,8 @@ function answer(process, status, body) {
   process.stdout.text = ["0", String(status) + " ", text, ""].join("\n")
   process.exited(0)
 }
+
+function answerText(process, status, body) {
+  process.stdout.text = ["0", String(status) + " ", Qt.btoa(String(body || "")), ""].join("\n")
+  process.exited(0)
+}

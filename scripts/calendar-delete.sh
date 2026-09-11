@@ -27,6 +27,7 @@ build_config() {
   printf 'request = "DELETE"\n'
   printf 'proto = "=https"\n'
   printf 'proto-redir = "=https"\n'
+  printf 'max-redirs = 0\n'
 }
 
 build_config | curl -q --globoff --config - --silent --show-error --fail-with-body \

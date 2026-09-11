@@ -52,6 +52,15 @@ Item {
   signal composeRequested(string mode)
   signal mailtoRequested(string url)
   signal actionRequested(string action)
+  signal agentRequested(real sceneX, real sceneY)
+  // A right-click on the From line or the To line: the addresses on it, and
+  // where the menu goes. What is done with them is the window's decision.
+  signal addressMenuRequested(var addresses, real sceneX, real sceneY)
+  // Whether the agent popup is up for this message, and whether a job is
+  // running on it — passed down like every other fact the reader draws.
+  property bool agentOpen: false
+  property bool agentWorking: false
+  property bool agentAttention: false
 
   // ------------------------------------------------------- the conversation
 
@@ -91,6 +100,28 @@ Item {
     var opened = Html.publicHttpUrl(url)
     if (opened === "") return
     Qt.openUrlExternally(opened)
+  }
+
+  function openImageMarker(source) {
+    var wanted = String(source || "")
+    if (Html.isRasterDataImage(wanted)) {
+      imagePopover.show(wanted)
+      return
+    }
+    if (!root.service || typeof root.service.fetchDisplayImage !== "function") {
+      imagePopover.showPrepared(wanted, "")
+      return
+    }
+    root.service.fetchDisplayImage(wanted, function(data) {
+      if (!root) return
+      imagePopover.showPrepared(wanted, data)
+    })
+  }
+
+  function scrollBy(steps) {
+    var maximum = Math.max(0, bodyFlick.contentHeight - bodyFlick.height)
+    bodyFlick.contentY = Math.max(0, Math.min(maximum,
+      bodyFlick.contentY + steps * Style.space(20)))
   }
 
   readonly property var summary: service ? service.selectedMessage : null
@@ -340,6 +371,7 @@ Item {
       }
 
       Text {
+        id: fromLine
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
@@ -350,9 +382,20 @@ Item {
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideRight
         horizontalAlignment: root.headerAlignment
+
+        TapHandler {
+          acceptedButtons: Qt.RightButton
+          onTapped: function(eventPoint) {
+            var scene = fromLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
+            root.addressMenuRequested(root.summary ? [root.summary.from] : [], scene.x, scene.y)
+          }
+        }
       }
 
+      // Everyone the message went to — To, Cc and Bcc, which a sent message
+      // carries — so a right-click on the line can name any of them.
       Text {
+        id: toLine
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
@@ -363,6 +406,16 @@ Item {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
         horizontalAlignment: root.headerAlignment
+
+        TapHandler {
+          acceptedButtons: Qt.RightButton
+          onTapped: function(eventPoint) {
+            if (!root.summary) return
+            var all = (root.summary.to || []).concat(root.summary.cc || [], root.summary.bcc || [])
+            var scene = toLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
+            root.addressMenuRequested(all, scene.x, scene.y)
+          }
+        }
       }
     }
   }
@@ -515,6 +568,7 @@ Item {
 
   Flickable {
     id: bodyFlick
+    objectName: "messageBodyScroller"
 
     WheelScroller { view: bodyFlick }
     anchors.top: notices.bottom
@@ -623,10 +677,9 @@ Item {
         var image = Html.imageLinkIndex(link)
         if (image > 0) {
           var sources = root.imageSources
-          // A marker in a plain-text body opens the picture it stands for, and
-          // "the picture" is whatever the sender wrote in the src. Opening one
-          // is a fetch, so it obeys the same rule the document does.
-          if (image <= sources.length) imagePopover.show(sources[image - 1])
+          // The marker names the sender's src. Qt must not fetch that URL
+          // itself: the account prepares raster bytes, or the popover refuses.
+          if (image <= sources.length) root.openImageMarker(sources[image - 1])
           return
         }
         root.openLink(link)
@@ -814,11 +867,27 @@ Item {
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
           onClicked: root.actionRequested("archive")
         }
+        // Archive under a label, or move to a folder: the same picker `v`
+        // opens, one press away in the reader too.
         IconButton {
-          id: trashButton
+          id: moveButton
+          objectName: "reader-move-button"
           x: (archiveButton.visible
             ? archiveButton.x + archiveButton.width
             : actionGap.x + actionGap.width) + messageActions.gap
+          y: Math.round((parent.height - height) / 2)
+          visible: !!root.service && root.service.canMoveToLabel
+          iconName: "label"; tooltipText: "Move to... · v"
+          foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
+          onClicked: root.actionRequested("moveToLabel")
+        }
+        IconButton {
+          id: trashButton
+          x: (moveButton.visible
+            ? moveButton.x + moveButton.width
+            : (archiveButton.visible
+              ? archiveButton.x + archiveButton.width
+              : actionGap.x + actionGap.width)) + messageActions.gap
           y: Math.round((parent.height - height) / 2)
           iconName: "trash"; tooltipText: "Move to trash · d"
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily

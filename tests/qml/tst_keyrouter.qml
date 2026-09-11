@@ -137,9 +137,9 @@ Item {
       keyClick(Qt.Key_Z, Qt.AltModifier)
       compare(host.lastId, "undoSend")
       host.lastId = ""
-      keyClick(Qt.Key_Down)
-      compare(host.lastId, "cursorDown",
-        "the undo window must not stand mailbox navigation down")
+      keyClick(Qt.Key_J, Qt.ShiftModifier)
+      compare(host.lastId, "scrollDown",
+        "the undo window must not stand Shift+J reader scrolling")
     }
 
     function test_escape_is_the_way_out_of_every_context() {

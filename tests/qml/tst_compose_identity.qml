@@ -106,6 +106,24 @@ Item {
       compose.opened = false
     }
 
+    function test_ai_edit_can_be_undone_and_draft_key_survives_restore() {
+      compose.begin("new", null, "", [])
+      compose.replaceBody("Original body")
+      var snapshot = compose.snapshotDraft()
+      var key = compose.currentFields().draftKey
+      compose.replaceBody("AI replacement")
+      var editor = named(compose, "compose-body-editor")
+      verify(editor.canUndo)
+      editor.undo()
+      if (editor.text === "") editor.undo()
+      compare(editor.text,"Original body")
+      compose.begin("new", null, "", [])
+      verify(compose.currentFields().draftKey !== key)
+      compose.restoreDraft(snapshot)
+      compare(compose.currentFields().draftKey,key)
+      compare(compose.currentFields().accountId,adaId)
+    }
+
     function named(item, objectName) {
       if (!item) return null
       if (item.objectName === objectName) return item

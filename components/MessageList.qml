@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "../account/Unified.js" as Unified
+import "../agent/Agent.js" as Agent
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it
@@ -21,6 +22,7 @@ Column {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  required property color urgentColor
   required property string panelFontFamily
   property string cursorId: ""
   // The rows ticked for a bulk action, by id. Held above the list, like the
@@ -31,6 +33,7 @@ Column {
   signal messageActivated(string id)
   signal checkToggled(string id)
   signal checkRangeRequested(string id)
+  signal agentRequested(string id, real sceneX, real sceneY)
   // A row's own star, archive and trash buttons. Routed up rather than
   // straight to the service so a ticked row's button means the selection.
   signal rowActionRequested(string id, string action)
@@ -62,7 +65,11 @@ Column {
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
+      urgentColor: root.urgentColor
       panelFontFamily: root.panelFontFamily
+      agentState: Agent.glyphState(root.service.agentJobs[modelData.id])
+      agentProgress: Agent.progressText(root.service.agentJobs[modelData.id])
+      agentAttention: root.service.agentAttentionByMessage[modelData.id] === true
       hasCursor: root.cursorId === modelData.id
       selected: root.service.selectedId === modelData.id
       checked: root.checkedIds.indexOf(modelData.id) >= 0
@@ -74,6 +81,7 @@ Column {
       onActivated: root.messageActivated(modelData.id)
       onCheckToggled: root.checkToggled(modelData.id)
       onCheckRangeRequested: root.checkRangeRequested(modelData.id)
+      onAgentRequested: function(sceneX, sceneY) { root.agentRequested(modelData.id, sceneX, sceneY) }
       onStarToggled: root.rowActionRequested(modelData.id, "star")
       onArchiveRequested: root.rowActionRequested(modelData.id, "archive")
       onTrashRequested: root.rowActionRequested(modelData.id, "trash")
@@ -115,12 +123,17 @@ Column {
   // Pagination is the only thing this footer needs to say. A result estimate
   // promoted an unreliable server number into interface hierarchy it did not
   // deserve, and repeated it again in the window status line.
+  //
+  // The next page is asked for as the list is scrolled to its foot, so the
+  // button is for the page that did not come — a refusal, a slow server —
+  // rather than the way every page is reached.
   Item {
     width: parent.width
     visible: root.service.hasMore
     implicitHeight: Style.space(40)
 
     Button {
+      objectName: "load-more"
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
@@ -131,6 +144,56 @@ Column {
       fontSize: Style.font.caption
       enabled: !root.service.listLoading
       onClicked: root.service.loadMore()
+    }
+  }
+
+  // The scroller this list sits in, handed over by the panel that owns it:
+  // when its foot comes into view and there is more, the next page is asked
+  // for without a press, and never while a page is on its way, which is
+  // what keeps a slow server from being asked twice. A page that lands and
+  // still leaves the foot in view — a short mailbox, a merged list held
+  // back by a mailbox that has not caught up — is followed by the next
+  // once the list settles, until the foot is out of view or there is no
+  // more. Asked a moment later rather than in the signal itself: a cached
+  // page painted on the way into a live load can put the foot in view
+  // before that load has said it is running, and a page asked for from
+  // inside the load would race it.
+  property var scroller: null
+  property int loadStartCount: -1
+
+  function loadMoreIfAtFoot() {
+    if (!root.scroller || !root.service) return false
+    if (!root.scroller.atYEnd || !root.service.hasMore || root.service.listLoading) return false
+    root.service.loadMore()
+    return true
+  }
+
+  function loadMoreSoon() { Qt.callLater(root.loadMoreIfAtFoot) }
+
+  function continueAfterLoad(startCount) {
+    // MailAccount ends the loading state before it applies the summaries.
+    // Judge growth after that callback has finished, when the page is visible.
+    Qt.callLater(function() {
+      if (!root.service || root.service.messages.length <= startCount) return
+      root.loadMoreIfAtFoot()
+    })
+  }
+
+  Connections {
+    target: root.scroller
+    function onAtYEndChanged() { root.loadMoreSoon() }
+  }
+
+  Connections {
+    target: root.service
+    function onListLoadingChanged() {
+      if (root.service.listLoading) {
+        root.loadStartCount = root.service.messages.length
+        return
+      }
+      var startCount = root.loadStartCount
+      root.loadStartCount = -1
+      if (startCount >= 0) root.continueAfterLoad(startCount)
     }
   }
 }

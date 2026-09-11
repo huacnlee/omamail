@@ -526,6 +526,17 @@ Item {
     return act(verb, ids, callback)
   }
 
+  // HEY's labels are HEY's own. The capability is off, so no button reaches
+  // these; they exist so every client answers the same calls.
+  function createLabel(name, callback) { return refuseLabelChange(callback) }
+  function renameLabel(id, name, callback) { return refuseLabelChange(callback) }
+  function deleteLabel(id, callback) { return refuseLabelChange(callback) }
+  function refuseLabelChange(callback) {
+    if (typeof callback === "function")
+      Qt.callLater(function() { if (root) callback(null, "HEY labels are managed on HEY") })
+    return newHandle()
+  }
+
   // One id or a list of them. A HEY message id is `<posting>:<topic>`, and a
   // conversation's members all share the topic — so a list arriving from a row
   // that stands for a conversation can name the same posting more than once.
@@ -626,6 +637,11 @@ Item {
       if (typeof callback === "function") callback(error ? null : {}, error)
     }, handle)
     return handle
+  }
+
+  function deleteDraft(messageId, callback) {
+    if (typeof callback === "function") Qt.callLater(function() { if (root) callback(null, "") })
+    return newHandle()
   }
 
   function saveDraft(payload, callback) {
