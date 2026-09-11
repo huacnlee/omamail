@@ -38,7 +38,7 @@
     "defaultSection": "right",
     "defaults": {
       "refreshIntervalSec": 120,
-      "maxMessages": 25,
+      "maxMessages": 50,
       "heavyMessageRendering": "Show plain text first",
       "contentDirection": "Auto",
       "defaultQuery": "in:inbox",
@@ -76,7 +76,7 @@
         "min": 5,
         "max": 100,
         "step": 5,
-        "defaultValue": 25
+        "defaultValue": 50
       },
       {
         "key": "previewOnCursor",

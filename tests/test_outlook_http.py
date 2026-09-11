@@ -19,6 +19,21 @@ ROOT = Path(__file__).resolve().parents[1]
 received = threading.Event()
 release = threading.Event()
 requests = []
+# Two exchanges in flight at once, one held open while the other answers, in
+# either order: the held one is the mail refresh under /pair and the Graph
+# exchange under /pair2.
+pair_seen = {"/pair": threading.Event(), "/pair2": threading.Event()}
+pair_release = {"/pair": threading.Event(), "/pair2": threading.Event()}
+
+GRAPH_TOKEN = json.dumps({
+    "access_token": "graph-access", "refresh_token": "graph-refresh",
+    "expires_in": 3600, "scope": "https://graph.microsoft.com/Mail.Send",
+}).encode()
+MAIL_TOKEN = json.dumps({
+    "access_token": "mail-access", "refresh_token": "mail-refresh",
+    "expires_in": 3600,
+    "scope": "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
+}).encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -46,13 +61,27 @@ class Handler(BaseHTTPRequestHandler):
             release.wait(5)
             self.answer(b'{"access_token":"stale-access","refresh_token":"stale-refresh"}')
             return
+        if self.path in pair_seen:
+            forGraph = b"graph.microsoft.com" in body
+            held = forGraph if self.path == "/pair2" else not forGraph
+            if held:
+                pair_seen[self.path].set()
+                pair_release[self.path].wait(10)
+            self.answer(GRAPH_TOKEN if forGraph else MAIL_TOKEN)
+            return
         self.send_error(404)
 
     def do_GET(self):
-        if self.path == "/received":
+        path, _, query = self.path.partition("?")
+        if path == "/received":
             self.answer(b"true" if received.wait(5) else b"false")
-        elif self.path == "/release":
+        elif path == "/release":
             release.set()
+            self.answer(b"true")
+        elif path == "/pair-seen":
+            self.answer(b"true" if pair_seen[query].wait(5) else b"false")
+        elif path == "/pair-release":
+            pair_release[query].set()
             self.answer(b"true")
         else:
             self.send_error(404)
@@ -103,7 +132,7 @@ Item {
       var started = Date.now()
       auth.refreshWithToken("synthetic-refresh", auth.sessionContext())
       verify(auth.refreshBusy)
-      verify(auth.tokenRequest !== null)
+      verify(auth.tokenRequests.length === 1)
       var calls = 0
       auth.withCredentials(function(token, error) {
         compare(token, "")
@@ -114,7 +143,7 @@ Item {
       verify(Date.now() - started >= 29000, "The fixture must reach the actual deadline")
       compare(calls, 1)
       compare(auth.tokenWaiters.length, 0)
-      compare(auth.tokenRequest, null)
+      compare(auth.tokenRequests.length, 0)
       compare(auth.loggedIn, false)
       compare(auth.accessToken, "")
       compare(auth.keyringJob, null)
@@ -133,7 +162,7 @@ Item {
       control("/received")
       auth.cancelLogin()
       compare(calls, 1)
-      compare(auth.tokenRequest, null)
+      compare(auth.tokenRequests.length, 0)
       compare(auth.refreshBusy, false)
       control("/release")
       wait(300)
@@ -143,6 +172,51 @@ Item {
       compare(auth.accessToken, "")
       compare(auth.keyringJob, null, "A cancelled response must never save a refresh token")
       compare(auth.keyringJobs.length, 0)
+    }
+    // A mail refresh and a Graph exchange are independent requests through the
+    // one postForm. Neither may take the other's answer for its own, and the
+    // one still out must leave the session busy until it lands.
+    function test_3_a_graph_exchange_does_not_swallow_a_mail_refresh() {
+      var auth = readyAuth("/pair")
+      var mailCalls = 0
+      auth.refreshWithToken("synthetic-refresh", auth.sessionContext())
+      verify(auth.refreshBusy)
+      auth.withCredentials(function(token, error) { mailCalls++ })
+      control("/pair-seen?/pair")
+      var graphCalls = 0
+      var graphToken = ""
+      auth.graphWaiters = [function(token, error) { graphCalls++; graphToken = token }]
+      auth.handleGraphLookup("synthetic-graph-refresh", auth.sessionContext())
+      tryVerify(function() { return graphCalls === 1 }, 8000, "the Graph exchange is answered while the refresh is out")
+      compare(graphToken, "graph-access")
+      compare(auth.refreshBusy, true, "the mail refresh is still its own request")
+      compare(mailCalls, 0)
+      compare(auth.tokenRequests.length, 1, "the refresh alone is still open")
+      control("/pair-release?/pair")
+      tryCompare(auth, "refreshBusy", false, 8000)
+      compare(mailCalls, 1, "and keeps its own answer")
+      compare(auth.accessToken, "mail-access")
+      compare(auth.tokenRequests.length, 0)
+    }
+    function test_4_a_mail_refresh_does_not_swallow_a_graph_exchange() {
+      var auth = readyAuth("/pair2")
+      var graphCalls = 0
+      var graphToken = ""
+      auth.graphWaiters = [function(token, error) { graphCalls++; graphToken = token }]
+      auth.handleGraphLookup("synthetic-graph-refresh", auth.sessionContext())
+      control("/pair-seen?/pair2")
+      var mailCalls = 0
+      auth.refreshWithToken("synthetic-refresh", auth.sessionContext())
+      auth.withCredentials(function(token, error) { mailCalls++ })
+      tryCompare(auth, "refreshBusy", false, 8000)
+      compare(mailCalls, 1, "the refresh that came second is answered")
+      compare(auth.accessToken, "mail-access")
+      compare(graphCalls, 0, "and does not finish the Graph exchange for it")
+      compare(auth.tokenRequests.length, 1, "the Graph exchange is still open")
+      control("/pair-release?/pair2")
+      tryVerify(function() { return graphCalls === 1 }, 8000)
+      compare(graphToken, "graph-access")
+      compare(auth.tokenRequests.length, 0)
     }
   }
 }
@@ -164,10 +238,17 @@ def main():
             env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        QT_QPA_PLATFORMTHEME="", NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
             subprocess.run([runner, "-import", str(ROOT / "tests/qml/imports"),
-                            "-input", str(fixture)], env=env, check=True, timeout=50)
-        assert [path for path, _ in requests] == ["/hang", "/delayed"], requests
-        assert all(b"refresh_token=synthetic-refresh" in body for _, body in requests)
-        print("Outlook native HTTP: deadline and cancellation passed with synthetic credentials")
+                            "-input", str(fixture)], env=env, check=True, timeout=90)
+        paths = [path for path, _ in requests]
+        assert paths[:2] == ["/hang", "/delayed"], requests
+        # Each overlapping pair is one mail refresh and one Graph exchange.
+        assert sorted(paths[2:]) == ["/pair", "/pair", "/pair2", "/pair2"], requests
+        for path, body in requests:
+            expected = b"refresh_token=synthetic-graph-refresh" if b"graph.microsoft.com" in body \
+                else b"refresh_token=synthetic-refresh"
+            assert expected in body, (path, body)
+        print("Outlook native HTTP: deadline, cancellation and overlapping exchanges "
+              "passed with synthetic credentials")
     finally:
         release.set()
         server.shutdown()

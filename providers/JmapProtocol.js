@@ -634,6 +634,37 @@ function redirectHop(status, redirectUrl) {
   return url
 }
 
+function discoveryHop(status, redirectUrl) {
+  // This Location came from the address domain's authenticated HTTPS
+  // well-known response, so that response is the authority that delegates to
+  // a hosted provider. `redirectHop` still requires HTTPS and no userinfo.
+  return redirectHop(status, redirectUrl)
+}
+
+function looksLikeSessionDocument(body) {
+  var doc = parseJson(body)
+  if (!doc) return false
+  return hasCapability(doc.capabilities, CAPABILITY_CORE)
+}
+
+function looksLikeJmapChallenge(body) {
+  var text = trimmed(body)
+  var doc = parseJson(text)
+  if (doc) {
+    var type = trimmed(doc.type)
+    return type.indexOf("urn:ietf:params:jmap:error:") === 0
+  }
+  // Fastmail's session 401 is text/plain, not a problem document.
+  return text === "No Authorization header"
+}
+
+function sessionProbeAccepts(status, body) {
+  var code = Number(status)
+  if (code === 200) return looksLikeSessionDocument(body)
+  if (code === 401) return looksLikeJmapChallenge(body)
+  return false
+}
+
 // ------------------------------------------------------------ the session
 
 // The two capabilities a mailbox needs the server to have, and the key

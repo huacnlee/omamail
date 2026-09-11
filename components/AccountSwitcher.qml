@@ -24,6 +24,15 @@ Item {
 
   // [{ id, email, label, unread, active, signedIn, busy, error }]
   property var accounts: []
+  // What has been typed, and the mailboxes it leaves — matched on the name
+  // they were given and their address — best first; every one, in order,
+  // with nothing typed. The combined row is offered only then: it is not a
+  // mailbox anyone types the name of.
+  property string query: ""
+  readonly property var shownAccounts: Model.filterRows(accounts, query)
+  // Typing puts the cursor on the best match; typing it all away puts it
+  // back where it rests, on the mailbox in use.
+  onQueryChanged: if (query.trim() === "") restCursorOnActive(); else cursorIndex = 0
 
   readonly property bool opened: menu.opened
 
@@ -44,8 +53,8 @@ Item {
 
   // One mailbox has nothing to combine, so the row is not offered: choosing it
   // would land on the same list under a different name.
-  readonly property int accountRowCount: root.accounts ? root.accounts.length : 0
-  readonly property bool unifiedOffered: accountRowCount > 1
+  readonly property int accountRowCount: root.shownAccounts.length
+  readonly property bool unifiedOffered: (root.accounts ? root.accounts.length : 0) > 1 && root.query.trim() === ""
   readonly property int rowOffset: unifiedOffered ? 1 : 0
   readonly property int rowCount: accountRowCount + rowOffset
 
@@ -109,7 +118,7 @@ Item {
       root.unifiedChosen()
       return
     }
-    root.accountChosen(cursorIndex - root.rowOffset)
+    root.accountChosen(root.shownAccounts[cursorIndex - root.rowOffset].sourceIndex)
   }
 
   // Opening puts the keyboard on the mailbox you are already in, so the first
@@ -119,9 +128,12 @@ Item {
       cursorIndex = 0
       return
     }
-    var accounts = root.accounts || []
+    // Read afresh rather than through `shownAccounts`: called as the query
+    // changes, when that binding may not have caught up yet.
+    var accounts = Model.filterRows(root.accounts, root.query)
+    var offset = (root.accounts ? root.accounts.length : 0) > 1 && root.query.trim() === "" ? 1 : 0
     for (var i = 0; i < accounts.length; i++) {
-      if (accounts[i].active) { cursorIndex = i + root.rowOffset; return }
+      if (accounts[i].active) { cursorIndex = i + offset; return }
     }
     cursorIndex = 0
   }
@@ -136,8 +148,10 @@ Item {
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     onHeightChanged: root.place()
     onOpened: {
+      search.reset()
       root.restCursorOnActive()
       root.place()
+      search.takeFocus()
     }
     background: Rectangle {
       radius: Style.cornerRadius
@@ -152,32 +166,33 @@ Item {
     // and never runs. Inside an open `QQC.Popup` it is the other way round: the
     // popup takes every key before the shortcut map sees it — with `focus` true
     // or false, bare or modified — so a `KeyRouter` binding is the thing that
-    // would look live and never run. `tst_account_switcher.qml` holds both
-    // halves of that, so the next person to reach for `survivesOverlay` finds
-    // out from a test rather than from a menu that does not move.
+    // would look live and never run. The keys live on the search line at the
+    // top, which takes focus as the popup opens; the column forwards to it.
+    // `tst_account_switcher.qml` holds both halves of that, so the next person
+    // to reach for `survivesOverlay` finds out from a test rather than from a
+    // menu that does not move.
     contentItem: Column {
       id: rows
-      focus: true
       spacing: Style.space(2)
-
-      Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_J || event.key === Qt.Key_Down) {
-          root.moveCursor(1)
-          event.accepted = true
-        } else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) {
-          root.moveCursor(-1)
-          event.accepted = true
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-            || event.key === Qt.Key_O) {
-          root.chooseCursor()
-          event.accepted = true
-        }
-        // Escape is not here: the popup's own CloseOnEscape is already the one
-        // mechanism that closes it, and a second would be one too many.
-      }
+      // A key that reaches the column — the field lost focus to a click on
+      // the padding, say — still goes to the search line.
+      Keys.forwardTo: [search]
 
       // Every mailbox at once, above the mailboxes it is made of: it is the
       // widest of the choices here, and a list is read from the top.
+      SwitcherSearch {
+        id: search
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        foreground: root.textColor
+        accent: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Type a name or address"
+        onTextChanged: root.query = text
+        onMoved: function(delta) { root.moveCursor(delta) }
+        onChosen: root.chooseCursor()
+      }
+
       Rectangle {
         id: unifiedRow
         visible: root.unifiedOffered
@@ -255,7 +270,7 @@ Item {
       }
 
       Repeater {
-        model: root.accounts
+        model: root.shownAccounts
 
         Rectangle {
           id: row
@@ -381,7 +396,7 @@ Item {
             gesturePolicy: TapHandler.ReleaseWithinBounds
             onTapped: {
               menu.close()
-              root.accountChosen(row.index)
+              root.accountChosen(row.modelData.sourceIndex)
             }
           }
         }

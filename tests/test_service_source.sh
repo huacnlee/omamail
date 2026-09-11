@@ -9,7 +9,7 @@ fail() { printf 'test_service_source.sh: %s\n' "$1" >&2; exit 1; }
 
 grep -q 'property var shell' Service.qml || fail "Service.qml must accept an injected shell"
 grep -q 'property var manifest' Service.qml || fail "Service.qml must accept an injected manifest"
-grep -q '__sourceDir' Service.qml || fail "pluginDir must come from manifest.__sourceDir"
+grep -Fq 'Qt.resolvedUrl(".")' Service.qml || fail "pluginDir must resolve locally without private manifest metadata"
 grep -q 'function applySettings' Service.qml || fail "the bar widget pushes settings in via applySettings"
 grep -q 'function setUndoSendSeconds' Service.qml \
   || fail "the in-app settings page must be able to change the undo window"

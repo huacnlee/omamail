@@ -25,8 +25,24 @@ Item {
     manifest: ({ id: "omamail", __sourceDir: "/tmp/omamail-test" })
   }
 
+  Omamail.Service {
+    id: scopedMailService
+    shell: shellStore
+    manifest: ({ id: "omamail" })
+  }
+
   TestCase {
     name: "ServiceSettings"
+
+    function test_scoped_manifest_resolves_bundled_helpers_without_private_metadata() {
+      verify(scopedMailService.pluginDir !== "")
+      verify(scopedMailService.pluginDir.indexOf("%") < 0,
+        "the filesystem path must be decoded before it is used as a process command")
+      var componentDir = decodeURIComponent(String(Qt.resolvedUrl("../.."))
+        .replace(/^file:\/\//, "")).replace(/\/$/, "")
+      compare(scopedMailService.pluginDir, componentDir,
+        "the helper directory comes from Service.qml itself")
+    }
 
     // On unless a stored `false` says otherwise. Settings written before this
     // existed name no key at all and so keep their icon, and a value of some

@@ -32,6 +32,7 @@ build_config() {
   printf 'upload-file = "%s"\n' "$(escape "$work/event.ics")"
   printf 'proto = "=https"\n'
   printf 'proto-redir = "=https"\n'
+  printf 'max-redirs = 0\n'
 }
 
 build_config | curl -q --globoff --config - --silent --show-error --fail-with-body \

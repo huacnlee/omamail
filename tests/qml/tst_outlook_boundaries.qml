@@ -125,5 +125,23 @@ Item {
       page.signIn()
       compare(service.starts, 1)
     }
+    function test_graph_consent_is_offered_while_signed_in() {
+      var host = readyHost()
+      var service = createTemporaryObject(serviceFactory, parent, { auth: host.auth })
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      var signIn = findChild(page, "outlook-sign-in")
+      host.auth.loggedIn = true
+      compare(signIn.visible, false, "a signed-in mailbox has nothing to sign in to")
+      host.auth.graphConsentNeeded = true
+      compare(signIn.visible, true)
+      compare(signIn.text, "Allow Microsoft Graph...")
+      host.auth.loggedIn = false
+      compare(signIn.text, "Sign in with Microsoft...",
+        "signed out, the button is the sign-in whatever Graph said")
+      host.auth.loggedIn = true
+      compare(signIn.enabled, true)
+      host.auth.refreshBusy = true
+      compare(signIn.enabled, false, "not offered while a refresh is under way, which would make it do nothing")
+    }
   }
 }

@@ -313,9 +313,10 @@ Item {
     }
 
     // One unauthenticated GET, and at most one redirect hop taken from the
-    // reply rather than by curl. A 200 means the session is served here; a 401
-    // means it is served here and wants the credential, which is the answer
-    // the reference hosted server gives. Anything else is not a JMAP server.
+    // reply rather than by curl. A 200 is a candidate only when the body is a
+    // JMAP session; a 401 only when it is a JMAP challenge, not an HTML page.
+    // The address domain's authenticated HTTPS reply may delegate to a hosted
+    // provider; the hop itself still has to be HTTPS and carry no userinfo.
     function probe(url, hops, found) {
       request("session", url, null, null, handle, function(reply) {
         if (handle.aborted) return
@@ -323,12 +324,12 @@ Item {
           found("")
           return
         }
-        var hop = Jmap.redirectHop(reply.status, reply.redirect)
+        var hop = Jmap.discoveryHop(reply.status, reply.redirect)
         if (hop !== "" && hops > 0) {
           probe(hop, hops - 1, found)
           return
         }
-        found(reply.status === 200 || reply.status === 401 ? url : "")
+        found(Jmap.sessionProbeAccepts(reply.status, reply.body) ? url : "")
       })
     }
 

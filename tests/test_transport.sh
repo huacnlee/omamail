@@ -101,6 +101,52 @@ check "the credentials reach curl" "$config" 'user = "jane@example.org:hunter2"'
 check "the command reaches curl" "$config" 'request = "UID SEARCH UNSEEN"'
 check "mail transport bypasses desktop HTTP/SOCKS proxies" "$config" 'noproxy = "*"'
 
+# ------------------------------------------------------------- Graph send
+
+graph="graph-send $(b64 'https://graph.microsoft.com/v1.0/me/sendMail') $(b64 'tok.en-value') $(b64 'Subject: via graph
+
+body')"
+config=$(config_for "$graph")
+check "Graph is POSTed to its one address" "$config" 'url = "https://graph.microsoft.com/v1.0/me/sendMail"'
+check "as a POST" "$config" 'request = "POST"'
+check "with the token as a bearer header, never a user field" "$config" 'header = "Authorization: Bearer tok.en-value"'
+check_absent "and no curl user field" "$config" 'user = '
+check "as base64 MIME in a text/plain body" "$config" 'header = "Content-Type: text/plain"'
+check "read from the private working file" "$config" 'data-binary = "@'
+check "Graph keeps its transfer deadline" "$config" 'max-time = 60'
+check_absent "Graph does not emit --next sections" "$config" 'next'
+if printf '%s\n' "graph-send $(b64 'https://evil.example.net/sendMail') $(b64 't') $(b64 'x')" | "$script" >/dev/null 2>&1; then
+  echo "mail-transport.sh: graph-send must refuse any address but Graph's" >&2
+  exit 1
+fi
+if printf '%s\n' "smtp $(b64 'https://graph.microsoft.com/v1.0/me/sendMail') $(b64 'u:p') $(b64 'a@b') $(b64 'x') $(b64 'c@d')" | "$script" >/dev/null 2>&1; then
+  echo "mail-transport.sh: only graph-send may address Graph" >&2
+  exit 1
+fi
+
+# Graph answers with an HTTP status rather than a curl error. Only an explicit
+# 2xx is a sent message; a missing status line is a failure, not a pass.
+graph_reply() {
+  printf '%s\n' "$graph" | CURL_STUB_HEADER="$1" PATH="$work/bin:$PATH" sh "$script"
+}
+graph_case() {
+  reply=$(graph_reply "$2")
+  st=$(printf '%s\n' "$reply" | sed -n '1p')
+  err=$(printf '%s\n' "$reply" | sed -n '3p' | base64 -d 2>/dev/null)
+  if [ "$st" = "$3" ] && { [ -z "$4" ] || printf '%s' "$err" | grep -q "$4"; }; then
+    printf '  ok   %s\n' "$1"
+  else
+    printf '  FAIL %s (status %s: %s)\n' "$1" "$st" "$err"
+    failures=$(( failures + 1 ))
+  fi
+}
+graph_case "Graph 202 is a sent message" 'HTTP/1.1 202 Accepted' 0 ''
+graph_case "Graph status is read after a 100 Continue" 'HTTP/1.1 100 Continue
+
+HTTP/1.1 202 Accepted' 0 ''
+graph_case "Graph 401 is a failure carrying the status" 'HTTP/1.1 401 Unauthorized' 22 'Graph answered 401'
+graph_case "Graph with no status line is a failure" '' 22 'no HTTP status'
+
 oauth_request="imap-oauth $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 'jane@hotmail.com') $(b64 'access-token') $(b64 'UID SEARCH UNSEEN')"
 oauth_config=$(config_for "$oauth_request")
 check "OAuth keeps the username separate" "$oauth_config" 'user = "jane@hotmail.com"'
