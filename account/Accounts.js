@@ -113,7 +113,11 @@ function makeImapSettings(raw) {
     smtpPort: portOr(values.smtpPort, 465),
     username: trimmed(values.username),
     aliases: Aliases.parse(values.aliases),
-    insecure: values.insecure === true
+    insecure: values.insecure === true,
+    // An Outlook mailbox's tenant and how it sends; neither is a secret and
+    // both are empty for every other kind of mailbox.
+    tenant: trimmed(values.tenant),
+    send: trimmed(values.send)
   }
 }
 
@@ -196,6 +200,13 @@ function makeAccount(account) {
     jmap: makeJmapSettings(raw.jmap),
     label: trimmed(raw.label),
     signature: trimmed(raw.signature),
+    // The signature as markup, imported from a file and rebuilt by
+    // `Signature.js` before it is stored: never the file's own bytes. Sent as
+    // the HTML alternative under the plain signature above.
+    signatureHtml: trimmed(raw.signatureHtml),
+    // The labels watched for new mail, by id. A fact about the mailbox, so
+    // it lives beside its name rather than in the window's file.
+    monitored: idList(raw.monitored),
     // Whether this row is the setup form's working state rather than a
     // mailbox. It used to be inferred from the id being empty, and that read
     // a mailbox whose address had been corrupted as a draft and dropped it at
@@ -323,29 +334,67 @@ function add(list, account) {
   return next
 }
 
-// One row edited in place: the setup form's save, or a host learning its own
-// address. The list is rebuilt through `add`, so a row that now names a
-// mailbox already in the list folds into that one rather than standing beside
-// it — but `add`'s rule for the selection is written for a list being built,
-// not for one being copied. Given no active row yet, it hands the selection to
-// the first named row it meets, and while a copy is half done that is row 0
-// whatever row was active. Editing a mailbox below the first used to move the
-// selection there, and the sign-in that followed the save went to the wrong
-// server. The selection is decided here instead: it stays with the row that
-// had it, under whatever id the edit gave that row.
-function replaceAt(list, index, entry) {
-  var source = copyList(list)
+// The id `account` would take at `index`, if another row already holds it.
+// Empty means the write is safe: a new address, or the same row keeping its
+// own id. The setup form used to rebuild the list with `add`, which treats a
+// colliding id as "replace that other mailbox" and drops the row being
+// edited — so re-authing Proton while iCloud was on screen deleted iCloud.
+function collidingId(list, index, account) {
+  var entry = makeAccount(account)
+  if (!entry.id) return ""
+  var other = indexOfId((list || {}).accounts || [], entry.id)
   var at = Math.floor(Number(index))
-  if (!isFinite(at) || at < 0 || at >= source.accounts.length) return source
-  var replaced = source.accounts[at]
-  var replacement = makeAccount(entry)
-  var next = emptyList()
-  for (var i = 0; i < source.accounts.length; i++)
-    next = add(next, i === at ? replacement : source.accounts[i])
-  var wasActive = source.activeId !== "" && replaced.id === source.activeId
-  if (wasActive && replacement.id !== "") next.activeId = replacement.id
-  else if (indexOfId(next.accounts, source.activeId) >= 0) next.activeId = source.activeId
+  if (other >= 0 && other !== at) return entry.id
+  return ""
+}
+
+// Put `account` at `index` and nowhere else. Unlike `add`, a colliding id is
+// a no-op rather than a silent merge, so a save cannot delete a mailbox that
+// was not the one being edited.
+function replaceAt(list, index, account) {
+  var next = copyList(list)
+  var at = Math.floor(Number(index))
+  if (!isFinite(at) || at < 0 || at >= next.accounts.length) return next
+  if (collidingId(next, at, account)) return next
+  var entry = makeAccount(account)
+  next.accounts[at] = entry
+  if (entry.id && (next.activeId === "" || indexOfId(next.accounts, next.activeId) < 0))
+    next.activeId = entry.id
   return next
+}
+
+function namedIds(list) {
+  var values = Array.isArray((list || {}).accounts) ? list.accounts : []
+  var ids = []
+  for (var i = 0; i < values.length; i++) {
+    var id = trimmed((values[i] || {}).id)
+    if (id) ids.push(id)
+  }
+  return ids
+}
+
+// The persisted set less one id: the one a row gave up when its address was
+// corrected, released on purpose rather than lost.
+function withoutId(ids, id) {
+  var kept = []
+  var values = Array.isArray(ids) ? ids : []
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] !== id) kept.push(values[i])
+  }
+  return kept
+}
+
+function dropsAnyId(ids, payload) {
+  var wanted = Array.isArray(ids) ? ids : []
+  var kept = namedIds(payload)
+  for (var i = 0; i < wanted.length; i++) {
+    var found = false
+    for (var j = 0; j < kept.length; j++) {
+      if (kept[j] === wanted[i]) { found = true; break }
+    }
+    if (!found) return true
+  }
+  return false
 }
 
 // The neighbour that slides into the removed row is the least surprising
@@ -431,6 +480,54 @@ function discardDraftAt(list, index) {
 // Empty is not a name and clears it, which is what puts the address back:
 // `label()` falls through to the local part, so there is no state in which a
 // mailbox has nothing to be called.
+// What to call this mailbox.
+//
+// Two of these can differ only in their domain, and be elided to the same
+// handful of characters in a list, so a name is the one thing that reliably
+// tells them apart at a glance. The field has been on an account entry and
+// preferred by `label()` since accounts were a list; nothing ever offered a
+// way to set it.
+//
+// Empty is not a name and clears it, which is what puts the address back:
+// `label()` falls through to the local part, so there is no state in which a
+// mailbox has nothing to be called.
+function idList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = trimmed(list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
+// The watched list replaced whole: what a rename or a move leaves it as,
+// once the ids it held have followed the folders they named.
+function setMonitored(list, id, labelIds) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  entry.monitored = idList(labelIds)
+  next.accounts[at] = entry
+  return next
+}
+
+// A label watched, or no longer: the id toggled in the account's list.
+function toggleMonitored(list, id, labelId) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  var key = trimmed(labelId)
+  if (key === "") return next
+  var index = entry.monitored.indexOf(key)
+  if (index >= 0) entry.monitored.splice(index, 1)
+  else entry.monitored.push(key)
+  next.accounts[at] = entry
+  return next
+}
+
 function setLabel(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)
@@ -452,6 +549,25 @@ function setLabel(list, id, text) {
 // Stored as typed, with no separator added. A client that inserts "-- " turns
 // every signature into two decisions — what it says, and whether the line it
 // grew is wanted — and the user who wants one can type it.
+// The sign-off belongs to the mailbox rather than to the window. Two accounts
+// are two identities, and one signature under both is wrong for whichever it
+// was not written for — so it sits beside the label, which is the other thing
+// here the user chose and the server did not. Nothing about it is secret; the
+// keyring holds what is.
+//
+// Stored as typed, with no separator added. A client that inserts "-- " turns
+// every signature into two decisions — what it says, and whether the line it
+// grew is wanted — and the user who wants one can type it.
+function setSignatureHtml(list, id, html) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  entry.signatureHtml = trimmed(html)
+  next.accounts[at] = entry
+  return next
+}
+
 function setSignature(list, id, text) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)

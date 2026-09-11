@@ -21,9 +21,14 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property string menuLabelPath: ""
 
   signal mailboxSelected(string key)
   signal labelSelected(string labelId, string name)
+  signal folderToggled(string path)
+  // A right-click on a label row: the label's id ("" for an ancestor no label
+  // names), its path, and where the menu goes.
+  signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
@@ -31,7 +36,10 @@ Item {
   property var slots: []
   property bool numbersVisible: false
 
-  readonly property var userLabels: Model.railLabels(root.service ? root.service.labels : [])
+  // The labels as a tree: a child indented under its parent, a parent that
+  // folds. Model.labelTree decides the shape; this draws it.
+  readonly property var userLabels: root.service
+    ? Model.labelTree(root.service.labels, root.service.collapsedFolders) : []
 
   // The rail's own edge. The list already draws one on its far side, so
   // without this the icons sit on the same surface as the messages.
@@ -119,13 +127,30 @@ Item {
           // label is not written in the Latin alphabet — a Chinese label would
           // put a single hanzi in a 16px slot, which is neither an icon nor a
           // readable name. The tooltip carries the name instead.
-          icon: "label"
-          slotNumber: Model.slotNumberOf(root.slots, "label", modelData.id)
+          icon: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0 ? "eye" : "label"
+          depth: modelData.depth
+          foldable: modelData.hasChildren
+          expanded: modelData.expanded
+          selectable: modelData.selectable
+          fullPath: modelData.path
+          monitored: modelData.selectable && !!root.service
+            && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0
+          onMenuRequested: function(sceneX, sceneY) {
+            root.labelMenuRequested(modelData.selectable ? modelData.id : "", modelData.path, sceneX, sceneY)
+          }
+          slotNumber: modelData.selectable ? Model.slotNumberOf(root.slots, "label", modelData.id) : 0
           count: modelData.unread
-          selected: !root.calendarSelected && !!root.service && root.service.rawQuery !== ""
-            && root.service.rawQuery
-              === Provider.labelQuery(root.service.providerId, modelData.rawName)
-          onActivated: root.labelSelected(modelData.id, modelData.rawName)
+          selected: root.menuLabelPath === modelData.path
+            || (modelData.selectable && !root.calendarSelected && !!root.service
+              && root.service.rawQuery !== ""
+              && root.service.rawQuery
+                === Provider.labelQuery(root.service.providerId, modelData.rawName))
+          onActivated: {
+            if (modelData.selectable) root.labelSelected(modelData.id, modelData.rawName)
+            else root.folderToggled(modelData.path)
+          }
+          onFoldRequested: root.folderToggled(modelData.path)
         }
       }
     }
@@ -162,7 +187,20 @@ Item {
     property int count: 0
     property bool selected: false
     property int slotNumber: 0
+    // A label under another is stepped in one indent per level; a parent
+    // carries a chevron that folds its children. An ancestor no label names
+    // is drawn dim and opens nothing — tapping it folds instead.
+    property int depth: 0
+    property bool foldable: false
+    property bool expanded: true
+    property bool selectable: true
+    property string fullPath: ""
     signal activated()
+    signal foldRequested()
+    signal menuRequested(real sceneX, real sceneY)
+    // Watched for new mail: the row keeps its count in the accent even while
+    // it is not the one open, and the glyph says so.
+    property bool monitored: false
 
     // The badge names the key, not the position: the tenth row is opened by
     // Alt+0, so it says 0. A row past the tenth has no key and no badge.
@@ -180,12 +218,37 @@ Item {
       id: glyph
       anchors.left: parent.left
       anchors.leftMargin: root.collapsed
-        ? (parent.width - width) / 2 : Style.space(8)
+        ? (parent.width - width) / 2 : Style.space(8) + entry.depth * Style.space(12)
       anchors.verticalCenter: parent.verticalCenter
       name: entry.icon
       iconSize: Style.font.icon
-      color: entry.selected ? root.textColor : root.dimColor
+      color: entry.selected ? root.textColor
+        : (entry.selectable ? root.dimColor
+          : Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, root.dimColor.a * 0.6))
       visible: !(entry.showsNumber && root.collapsed)
+    }
+
+    // The fold, at the end of the row so the name keeps its column. Its own
+    // tap target, so folding a parent does not also open it.
+    Item {
+      id: fold
+      objectName: "fold"
+      visible: entry.foldable && !root.collapsed && !entry.showsNumber
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(4)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(18)
+      height: Style.space(22)
+
+      ActionIcon {
+        anchors.centerIn: parent
+        name: entry.expanded ? "chevronDown" : "chevronRight"
+        iconSize: Style.font.iconSmall
+        color: foldHover.hovered ? root.textColor : root.dimColor
+      }
+
+      HoverHandler { id: foldHover }
+      TapHandler { onTapped: entry.foldRequested() }
     }
 
     // Held Alt names every row. Collapsed there is no room beside the glyph, so
@@ -219,12 +282,14 @@ Item {
       anchors.left: glyph.right
       anchors.leftMargin: Style.space(9)
       anchors.right: slotChip.visible ? slotChip.left
-        : (badge.visible ? badge.left : parent.right)
+        : (badge.visible ? badge.left : (fold.visible ? fold.left : parent.right))
       anchors.rightMargin: Style.space(6)
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
       text: entry.label
-      color: entry.selected ? root.textColor : root.dimColor
+      color: entry.selected ? root.textColor
+        : (entry.selectable ? root.dimColor
+          : Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, root.dimColor.a * 0.6))
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       font.bold: entry.selected
@@ -234,8 +299,8 @@ Item {
     Text {
       id: badge
       visible: entry.count > 0 && !root.collapsed && !entry.showsNumber
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(8)
+      anchors.right: fold.visible ? fold.left : parent.right
+      anchors.rightMargin: fold.visible ? Style.space(2) : Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
       text: Model.badgeText(entry.count, 999)
       color: root.accentColor
@@ -257,13 +322,32 @@ Item {
     }
 
     HoverHandler { id: hover }
-    TapHandler { onTapped: entry.activated() }
+    // The fold's handler sits inside this one and both see the same tap,
+    // so the row asks where it landed before opening anything: folding a
+    // parent must not also open it.
+    TapHandler {
+      onTapped: function(eventPoint) {
+        var at = eventPoint.position
+        if (fold.visible && at.x >= fold.x && at.x < fold.x + fold.width
+            && at.y >= fold.y && at.y < fold.y + fold.height) return
+        entry.activated()
+      }
+    }
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      onTapped: {
+        var scene = entry.mapToGlobal(0, entry.height)
+        entry.menuRequested(scene.x, scene.y)
+      }
+    }
 
     // The tooltip is how the rail stays usable while collapsed, and it carries
     // the count too, which the dot can only hint at.
     PanelToolTip {
+      objectName: "label-tooltip"
       visible: hover.hovered
-      text: entry.count > 0 ? entry.label + " · " + entry.count : entry.label
+      text: (entry.fullPath !== "" ? entry.fullPath : entry.label)
+        + (entry.count > 0 ? " · " + entry.count : "")
       fontFamily: root.panelFontFamily
     }
   }

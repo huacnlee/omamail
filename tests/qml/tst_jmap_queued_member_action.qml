@@ -97,7 +97,10 @@ Item {
     function test_queued_rail_action_stays_one_message() {
       account.pendingAction = "markRead"
       verify(account.act("m3", "trash", false, true))
-      verify(account.act("m3", "trash", false, true))
+      compare(account.messages.length, 0,
+        "the row leaves at the keystroke, however long the slot stays taken")
+      verify(!account.act("m3", "trash", false, true),
+        "a row that has already left is nothing to act on")
       compare(account.queuedActions.length, 1)
       var before = Transports.transports(account.api)
       account.pendingAction = ""

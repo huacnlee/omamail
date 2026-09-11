@@ -5,7 +5,7 @@
 Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages, and answers your mail over the official Gmail API, through Microsoft OAuth for Outlook, over the HEY CLI client 37signals publish, over JMAP, or over IMAP and SMTP for every other mailbox. It runs inside the `omarchy-shell` process you already have, follows your active theme, and puts an unread count in the bar.
 
 
-<img width="800" alt="Omamail - Reading a message in the three-column window" src="docs/images/full-mail.webp" />
+<img width="800" alt="Omamail - Reading mail with AI assistance for selected messages" src="docs/images/full-mail.webp" />
 
 The calendar, a new message, and the question every new mailbox starts with:
 
@@ -112,7 +112,9 @@ project, so this route needs an OAuth client you create once — the setup page
 walks through it. In exchange it gets labels, conversations, Gmail's own search
 syntax, and a "report spam" that Google actually learns from.
 
-**Outlook** signs in on Microsoft's own page and uses [Microsoft's supported OAuth route for IMAP and SMTP][microsoft-mail-oauth]. It works with Outlook.com, Hotmail, Live and MSN accounts; Omamail never asks for the Microsoft account password. Until Omamail ships a maintainer-owned public client, the setup page asks for an Application (client) ID from a one-time Microsoft Entra app registration. Make it a public client for personal Microsoft accounts; the sign-in asks for `IMAP.AccessAsUser.All`, `SMTP.Send` and `offline_access` and shows the device code to enter in the Microsoft page it opens.
+**Outlook** signs in on Microsoft's own page and uses [Microsoft's supported OAuth route for IMAP and SMTP][microsoft-mail-oauth]. It works with Outlook.com, Hotmail, Live and MSN accounts; Omamail never asks for the Microsoft account password. Until Omamail ships a maintainer-owned public client, the setup page asks for an Application (client) ID from a one-time Microsoft Entra app registration. Make it a public client for personal Microsoft accounts; the sign-in asks for `IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access` and `openid` and shows the device code to enter in the Microsoft page it opens. Microsoft Graph — sending where the tenant has SMTP off, the calendar — is a second code for `Mail.Send` and `Calendars.ReadWrite`, asked for once, when Microsoft refuses the Graph exchange for want of consent: straight after the sign-in where the mailbox sends through Graph, else from the mailbox's settings (*Allow Microsoft Graph...*).
+
+A **work or school** mailbox (Microsoft 365) is the same sign-in addressed to its own tenant: turn on *Work or school account* on the setup page, and register the client in that tenant, or as multi-tenant. Where the tenant has switched authenticated SMTP off — the common Microsoft 365 default, which fails a send with "SmtpClientAuthentication is disabled" — turn on *Send through Microsoft Graph*: the same message goes to Graph's `sendMail` with a token of Graph's own audience, obtained with the same refresh token, and Graph files the sent copy itself. That needs the `Mail.Send` permission on the registration.
 
 Before signing in, enable IMAP in Outlook.com: **Settings > Mail > Forwarding and IMAP > Let devices and apps use IMAP**, then save. Microsoft disables IMAP by default; OAuth consent alone does not enable mailbox access. See [Microsoft's IMAP setup instructions](https://support.microsoft.com/en-us/outlook/pop-imap-and-smtp-settings-for-outlook-com).
 
@@ -221,6 +223,8 @@ and the client itself are console-only; there is no CLI for them.
 
 ## Using it
 
+Right-click does the rest. On a label in the rail: rename it, make a label beside or beneath it, move it under another, delete it, or watch it for new mail — a watched label counts its unread on every refresh and shows an eye. On the reader's From or To line: copy the address, or search the mailbox for mail from it or to it.
+
 | Key | What it does |
 | --- | --- |
 | `j` / `k` | Move down / up |
@@ -238,11 +242,18 @@ and the client itself are console-only; there is no CLI for them.
 | `/` | Search |
 | `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
+| `Space` / `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
+| `Ctrl+A` | Select every message loaded, or none |
+| `Alt+G` | Open AI assistance for the message, selection, or draft in the right dock |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the message body, or reset it |
 | `F5` / `Ctrl+R` | Check for mail |
 | `?` | Every shortcut |
 
+To act on several messages, hold Ctrl to replace the row actions with checkboxes, or Ctrl+click a row to select or deselect it without opening it. Checkboxes stay visible while any message is selected; releasing Ctrl with no selection restores the usual actions. `Space` or `x` toggles the keyboard cursor's row. Shift+click selects the range from the cursor to an unchecked row, or clears that range when the clicked row is already checked; other selections stay as they are. In the list, `Ctrl+A` selects every loaded message or clears the selection, and `Esc` clears an active selection before going back. The status bar shows how many messages are selected; archive, trash, star, move and read/unread actions apply to that selection while the list is visible.
+
 Search paints matching cached rows first and adds server results as they arrive. It takes Gmail's own operator syntax straight through — `from:jane`, `has:attachment`, `older_than:7d`. The Unread mailbox leaves Promotions, Social and Forums out rather than asking for Primary: Gmail's categories do not remove the `INBOX` label, so an unread filter without that exclusion comes back as the whole promotional backlog rather than the mail you have not read — while one that asks for Primary comes back empty on any account where Gmail is not applying the category labels, which is unread mail with nothing left to say so. Updates stays in, because receipts, deliveries and notifications land there. Right-click any row in the list for archive, trash, spam, star and read/unread without leaving the keyboard cursor behind.
+
+AI assistance uses the default AI selected in Omarchy, with no separate Omamail AI settings. Use the outline **AI icon** button beside Compose, the message menu, or `Alt+G`. Type a multiline question or use `/` for common commands, then Enter to send or Shift+Enter for a new line. The **…** menu opens new chats and conversation history. Results return to the right dock; draft suggestions can be inserted or replace the body after review. The panel streams the conversation and supports follow-up questions without opening a terminal. The background adapter currently supports Claude. See [AI assistance](docs/AGENT.md).
 
 A signature is set per mailbox on the settings page, under Writing. It is placed under a new message and above the quoted text in a reply, so a sign-off stays next to the words it signs rather than stranded below a screen of somebody else's message. It is sent exactly as typed — no `-- ` line is added in front of it, because a client that adds one turns a signature into two decisions, and the line is one keystroke away for anybody who wants it. Each mailbox keeps its own: two addresses are two identities, and one sign-off under both is wrong for whichever it was not written for. A saved draft is reopened as it was written, so resuming one never signs it twice.
 

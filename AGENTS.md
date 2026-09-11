@@ -30,6 +30,7 @@ three directories away from the client that calls it.
 | `calendar/` | The calendars an account serves and their events: the sources in `Sources.js`, the rules in `Calendar.js`, the controller that reads and writes them, and the range cache. |
 | `message/` | A message's own content: parsing it (`Message.js`) and making it safe to draw (`Html.js`). |
 | `components/` | Views. They draw what they are given and decide nothing. |
+| `agent/` | The message agent: the rules in `Agent.js`, the runner object in `AgentRunner.qml` that starts, lists and stops jobs through `scripts/agent-job.py`. Each job is a transient systemd user unit; see `docs/AGENT.md`. |
 
 - `tests/test_qml_names.py` fails on a fourth `.qml` at the root, and on any QML
   file the Makefile does not list — a file `qmllint` never sees is a file nobody
@@ -207,8 +208,9 @@ key. What matters while working:
   place the rule above inverts. It takes the key before the shortcut map sees
   it — `focus` true or false, bare or modified — so inside a popup a `KeyRouter`
   binding is what looks live and never runs, and a `Keys` handler on the
-  popup's `contentItem` is the only thing that works. The account switcher is
-  the one component that answers keys itself, for this reason.
+  popup's `contentItem` is the only thing that works. The account switcher
+  and the agent prompt are the components that answer keys themselves, for
+  this reason.
   `tests/qml/tst_popup_keys.qml` asserts both halves, so the exception cannot
   be tidied back into the rule by someone who only read the rule.
 - The mouse does not move the keyboard's cursor. Qt re-reports hover when
@@ -518,6 +520,8 @@ key. What matters while working:
   banned paths.
 
 ## Commits and pull requests
+
+- **Every PR that changes UI must include before-and-after screenshots in its description and explain the visible differences.** Label the screenshots clearly and capture the same view, state, window size, theme and scale so reviewers can compare them directly. Cover each changed view or interaction state; update the screenshots when later commits change the UI. Use synthetic or redacted mail data and upload images to GitHub's attachment host, never to the repository. A UI PR without this evidence is not ready for approval; passing tests do not replace the visual comparison.
 
 - **No scope prefix, and this is where the project departs from GPUI Component on purpose.** A title is the imperative outcome and nothing in front of it: `Read a message at a readable size`, not `reader: Read a message at a readable size`.
 

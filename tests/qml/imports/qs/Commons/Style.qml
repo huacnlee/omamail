@@ -30,6 +30,7 @@ QtObject {
   }
   function hoverFillFor(_foreground, accent) { return accent }
   function selectedFillFor(_foreground, accent) { return accent }
+  function selectedStateColor(foreground, _accent) { return foreground }
   function selectionFillFor(_foreground, accent) { return accent }
   function pressedFillFor(_foreground, accent) { return accent }
   function normalFillFor(_foreground, _accent) { return "transparent" }

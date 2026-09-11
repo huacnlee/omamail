@@ -37,5 +37,12 @@ Rectangle {
   }
 
   HoverHandler { id: hover }
-  TapHandler { onTapped: root.activated() }
+  // The exclusive grab on press, not a passive one: a menu can sit over a
+  // message row, whose MouseArea takes the exclusive grab if this does not,
+  // and the release then opens the message under the menu instead of
+  // running the row that was clicked.
+  TapHandler {
+    gesturePolicy: TapHandler.ReleaseWithinBounds
+    onTapped: root.activated()
+  }
 }

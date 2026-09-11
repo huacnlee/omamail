@@ -30,7 +30,7 @@ Item {
   property int cursorIndex: -1
   readonly property var menuRows: [replyRow, replyAllRow, forwardRow, archiveRow,
     unarchiveRow,
-    trashRow, spamRow, readRow, starRow, browserRow]
+    trashRow, spamRow, readRow, starRow, browserRow, aiRow]
   // Whether this message is archived — out of the inbox and not somewhere
   // that has its own verb. Read off the summary the menu was opened on rather
   // than asked of the service, because the menu is about one message. IMAP
@@ -65,6 +65,7 @@ Item {
     return null
   }
 
+  signal agentRequested(string id, real sceneX, real sceneY)
   signal composeRequested(string mode, string id)
   signal actionRequested(string action, string id)
   // The same two, from a menu opened on a rail stop, so the owner can keep the
@@ -229,6 +230,18 @@ Item {
       MenuSeparatorLine {
         width: menu.width - menu.leftPadding - menu.rightPadding
         lineColor: root.textColor
+      }
+
+      MenuRow {
+        id: aiRow
+        objectName: "message-menu-ai"
+        text: "Ask AI..."
+        onActivated: {
+          var id = root.messageId
+          var scene = root.mapToGlobal(root.anchorX, root.anchorY)
+          menu.close()
+          root.agentRequested(id, scene.x, scene.y)
+        }
       }
 
       // Only where there is a web mailbox to open. An IMAP account has no

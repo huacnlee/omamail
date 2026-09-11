@@ -69,6 +69,7 @@ Column {
   }
 
   function syncFromStore() {
+    nameField.syncFromStore()
     if (!auth || !auth.settings) return
     var settings = auth.settings
     addressField.text = service ? service.accountAddress : ""
@@ -125,7 +126,8 @@ Column {
     service.configureCurrentAccount({
       provider: "imap",
       email: address,
-      imap: check.settings
+      imap: check.settings,
+      label: nameField.value()
     })
   }
 
@@ -142,7 +144,8 @@ Column {
     service.configureCurrentAccountAndSignIn({
       provider: "imap",
       email: address,
-      imap: check.settings
+      imap: check.settings,
+      label: nameField.value()
     }, passwordField.text)
   }
 
@@ -212,6 +215,16 @@ Column {
   Column {
     width: parent.width
     spacing: Style.space(10)
+
+    AccountNameField {
+      id: nameField
+      service: root.service
+      width: parent.width
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      onAccepted: addressField.forceActiveFocus()
+    }
 
     TextField {
       id: addressField

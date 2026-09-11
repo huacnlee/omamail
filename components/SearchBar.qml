@@ -39,6 +39,13 @@ Item {
     root.cleared()
   }
 
+  // A search the app built shows its words here, so the field and the list
+  // agree about what is on screen. Nothing is submitted: the caller has run
+  // the search already.
+  function setQuery(text) {
+    field.text = String(text || "")
+  }
+
   TextField {
     id: field
     anchors.fill: parent

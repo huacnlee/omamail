@@ -23,6 +23,10 @@ Item {
   // glyph turns while it is, and stays at full strength: a button that only
   // went dim said "you cannot" when the truth was "already doing it".
   property bool busy: false
+  // Something behind this button wants the owner — an agent's question, a
+  // job that finished unseen. A slow pulse of the accent around the glyph,
+  // and nothing else changes: the button still says what it always said.
+  property bool attention: false
   property real iconSize: Style.font.icon
   property real size: Math.max(Style.space(24), iconSize + Style.spacing.sm * 2)
   property real visualInset: Style.space(2)
@@ -37,6 +41,28 @@ Item {
   width: size
   height: size
   opacity: enabled || busy ? 1.0 : 0.4
+
+  // The pulse: a ring of the accent that breathes while attention is asked
+  // for, drawn under the fill so a hover still reads as a hover.
+  Rectangle {
+    id: halo
+    anchors.fill: parent
+    anchors.margins: root.visualInset - Style.space(1)
+    radius: Style.cornerRadius + Style.space(1)
+    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+    border.width: Style.normalBorderWidth
+    border.color: root.accent
+    visible: root.attention
+    opacity: 0
+
+    SequentialAnimation on opacity {
+      running: root.attention
+      loops: Animation.Infinite
+      NumberAnimation { from: 0.15; to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+      NumberAnimation { from: 1.0; to: 0.15; duration: 900; easing.type: Easing.InOutSine }
+      onRunningChanged: if (!running) halo.opacity = 0
+    }
+  }
 
   Rectangle {
     anchors.fill: parent

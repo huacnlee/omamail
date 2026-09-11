@@ -68,8 +68,8 @@ Item {
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
   property bool eventWriting: false
-  readonly property var availableSources: Sources.withGoogleAccounts(
-    sourceList, service ? service.accountSummaries : [])
+  readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
+    sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
@@ -153,8 +153,8 @@ Item {
   }
 
   function sourcesForAccount(wantedAccountId) {
-    var available = Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : [])
+    var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
+      sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
@@ -189,7 +189,15 @@ Item {
     eventSource = source
     eventDraft = built
     creatingEvent = true
+    if (source.kind === "microsoft" && built.recurring) {
+      creatingEvent = false
+      eventSource = null
+      eventDraft = null
+      eventCreated(false, "A repeating event on a Microsoft calendar is made in Outlook")
+      return false
+    }
     if (source.kind === "google") createGoogleEvent()
+    else if (source.kind === "microsoft") createGraphEvent()
     else {
       eventPasswordLookup.command = ["secret-tool", "lookup"]
         .concat(Sources.keyringAttributes(source.id))
@@ -225,6 +233,7 @@ Item {
     writeDraft = built
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
+    else if (source.kind === "microsoft") startGraphWrite()
     else startCaldavWrite()
     return true
   }
@@ -243,6 +252,7 @@ Item {
     writeDraft = null
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
+    else if (source.kind === "microsoft") startGraphWrite()
     else startCaldavWrite()
     return true
   }
@@ -308,6 +318,73 @@ Item {
   // The address is judged before the keyring is touched: a write URL that
   // does not resolve to the source's own origin stops the operation here,
   // not after a password has been read for it.
+  // Graph's calendar, written the way Google's is: one request against the
+  // event's own id, with the mailbox's Graph token, under the same deadline.
+  function startGraphWrite() {
+    var eventId = String(writeEvent && writeEvent.graphId || "")
+    if (eventId === "") { finishWrite(false, "This event has no Microsoft id to write against"); return }
+    service.withMicrosoftAccessToken(writeSource.accountId, function(token, error) {
+      if (!token) { root.finishWrite(false, error); return }
+      var request = new XMLHttpRequest()
+      root.eventRequest = request
+      root.eventRequestTimedOut = false
+      if (root.writeOp === "delete") {
+        request.open("DELETE", Calendar.graphEventUrl(eventId))
+      } else {
+        request.open("PATCH", Calendar.graphEventUrl(eventId))
+        request.setRequestHeader("Content-Type", "application/json")
+      }
+      request.setRequestHeader("Authorization", "Bearer " + token)
+      request.onreadystatechange = function() {
+        if (request.readyState !== XMLHttpRequest.DONE) return
+        eventDeadline.stop()
+        root.eventRequest = null
+        var timedOut = root.eventRequestTimedOut
+        root.eventRequestTimedOut = false
+        if (request.status < 200 || request.status >= 300) {
+          root.finishWrite(false, timedOut
+            ? "The Microsoft calendar request timed out"
+            : Calendar.graphResponseError(request.status, request.responseText))
+          return
+        }
+        root.finishWrite(true, "")
+      }
+      eventDeadline.restart()
+      if (root.writeOp === "delete") request.send()
+      else request.send(JSON.stringify(root.writeDraft.graph))
+      token = ""
+    })
+  }
+
+  function createGraphEvent() {
+    service.withMicrosoftAccessToken(eventSource.accountId, function(token, error) {
+      if (!token) { root.finishEvent(false, error); return }
+      var request = new XMLHttpRequest()
+      root.eventRequest = request
+      root.eventRequestTimedOut = false
+      request.open("POST", Calendar.graphEventsCreateUrl())
+      request.setRequestHeader("Authorization", "Bearer " + token)
+      request.setRequestHeader("Content-Type", "application/json")
+      request.onreadystatechange = function() {
+        if (request.readyState !== XMLHttpRequest.DONE) return
+        eventDeadline.stop()
+        root.eventRequest = null
+        var timedOut = root.eventRequestTimedOut
+        root.eventRequestTimedOut = false
+        if (request.status < 200 || request.status >= 300) {
+          root.finishEvent(false, timedOut
+            ? "The Microsoft calendar request timed out"
+            : Calendar.graphResponseError(request.status, request.responseText))
+          return
+        }
+        root.finishEvent(true, "")
+      }
+      eventDeadline.restart()
+      request.send(JSON.stringify(root.eventDraft.graph))
+      token = ""
+    })
+  }
+
   function startCaldavWrite() {
     var url = Calendar.caldavEventUrl(writeSource ? writeSource.url : "", writeEvent)
     if (url === "") {
@@ -529,6 +606,7 @@ Item {
     activeSource = pending.shift()
     queue = pending
     if (activeSource.kind === "google") startGoogle()
+    else if (activeSource.kind === "microsoft") startGraph()
     else if (activeSource.kind === "caldav") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
@@ -555,6 +633,43 @@ Item {
     credentials = ""
     lookedUpPassword = ""
     calendarTransport.running = true
+  }
+
+  function startGraph() {
+    if (!service || typeof service.withMicrosoftAccessToken !== "function") {
+      failSource("Microsoft calendar access is unavailable")
+      return
+    }
+    service.withMicrosoftAccessToken(activeSource.accountId, function(token, error) {
+      if (!token) { root.failSource(error); return }
+      var request = new XMLHttpRequest()
+      root.googleRequest = request
+      root.googleRequestTimedOut = false
+      request.open("GET", Calendar.graphEventsUrl(root.rangeStart, root.rangeEnd))
+      request.setRequestHeader("Authorization", "Bearer " + token)
+      // Moments in UTC, so they parse without a timezone table.
+      request.setRequestHeader("Prefer", "outlook.timezone=\"UTC\"")
+      request.onreadystatechange = function() {
+        if (request.readyState !== XMLHttpRequest.DONE) return
+        googleDeadline.stop()
+        root.googleRequest = null
+        var timedOut = root.googleRequestTimedOut
+        root.googleRequestTimedOut = false
+        if (request.status < 200 || request.status >= 300) {
+          root.failSource(timedOut ? "The Microsoft calendar request timed out"
+            : Calendar.graphResponseError(request.status, request.responseText))
+          return
+        }
+        var payload = null
+        try { payload = JSON.parse(request.responseText) } catch (e) {}
+        if (!payload) { root.failSource("Microsoft Graph returned an unreadable response"); return }
+        root.replaceActiveSourceEvents(Calendar.eventsFromGraph(payload, root.activeSource.id))
+        root.processNext()
+      }
+      googleDeadline.restart()
+      request.send()
+      token = ""
+    })
   }
 
   function startGoogle() {

@@ -16,6 +16,129 @@ assert.strictEqual(memberAgain.length, 1)
 assert.strictEqual(memberAgain[0].memberOnly, true)
 deepEqual(model.enqueueAction([memberRead], rowRead), [memberRead, rowRead])
 
+// A repeat keeps the first send; an explicit press behind a quiet one is its own.
+const firstSend = () => {}
+const secondSend = () => {}
+const coalesced = model.enqueueAction([{ ...rowRead, dispatch: firstSend }],
+  { ...rowRead, dispatch: secondSend })
+assert.strictEqual(coalesced.length, 1)
+assert.strictEqual(coalesced[0].dispatch, firstSend)
+const inTurn = model.enqueueAction([{ ...rowRead, quiet: true, dispatch: firstSend }],
+  { ...rowRead, dispatch: secondSend })
+assert.strictEqual(inTurn.length, 2)
+assert.strictEqual(inTurn[1].dispatch, secondSend)
+
+// A failed row is anchored by its surviving neighbour, not its stale index.
+const listBefore = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]
+deepEqual(model.restoreRow([{ id: "a" }, { id: "d" }], listBefore[2], listBefore, 2),
+  [{ id: "a" }, listBefore[2], { id: "d" }], "the first surviving follower anchors the row")
+deepEqual(model.restoreRow([{ id: "x" }, { id: "a" }, { id: "d" }], listBefore[1], listBefore, 1),
+  [{ id: "x" }, { id: "a" }, listBefore[1], { id: "d" }],
+  "a row that arrived above since does not push it past its follower")
+deepEqual(model.restoreRow([{ id: "a" }], listBefore[2], listBefore, 2),
+  [{ id: "a" }, listBefore[2]], "with no follower left the index is clamped")
+deepEqual(model.restoreRow([], listBefore[0], listBefore, 0), [listBefore[0]])
+// The order is the settled list, not the list the failed edit saw. Two rows
+// removed in turn and refused in turn: the second saw a list the first had
+// already left, and anchored to that it went back above the first.
+deepEqual(model.restoreRow([listBefore[0]], listBefore[1], listBefore, 0).map(r => r.id),
+  ["a", "b"], "with no follower left, the last surviving predecessor anchors the row")
+deepEqual(model.restoreRow([listBefore[0]], listBefore[1], [listBefore[1]], 0).map(r => r.id),
+  ["b", "a"], "which the failed edit's own snapshot could not have said")
+deepEqual(model.restoreRow([listBefore[3]], { id: "n" }, listBefore, 1).map(r => r.id),
+  ["d", "n"], "a row the settled list never held falls back to its index, clamped")
+
+const sendA = () => {}
+const sendB = () => {}
+assert.strictEqual(model.holdsDispatch([{ dispatch: sendA }], sendA), true)
+assert.strictEqual(model.holdsDispatch([{ dispatch: sendA }], sendB), false,
+  "a coalesced repeat's send is not in the queue")
+assert.strictEqual(model.holdsDispatch(null, sendA), false)
+
+const previews = [{ id: "a", unread: true }, { id: "c", unread: true }]
+deepEqual(model.previewAfterRestore(previews, { id: "b", unread: true }, true, listBefore, 1).map(r => r.id),
+  ["a", "b", "c"], "an unread row goes back into the preview where the order says")
+deepEqual(model.previewAfterRestore(previews, { id: "a", unread: true, starred: true }, true, listBefore, 0)[0].starred,
+  true, "a row still listed is replaced")
+deepEqual(model.previewAfterRestore(previews, { id: "a" }, false, listBefore, 0).map(r => r.id),
+  ["c"], "a row that should not be there comes out")
+deepEqual(model.previewAfterRestore(previews, { id: "b" }, false, listBefore, 1), previews)
+
+// A refused edit's row goes back into whichever list holds the query now —
+// the screen or the cached copy — by the same rule: replaced while listed,
+// put back in the settled order when this edit took it off and no edit still
+// waiting has, else the list untouched.
+{
+  const order = [{ id: "a" }, { id: "b" }, { id: "c" }]
+  const row = { id: "b", unread: true }
+  deepEqual(model.listAfterRestore([{ id: "a" }, { id: "c" }], row, true, false, order, 1).map(r => r.id),
+    ["a", "b", "c"], "a removed row goes back where the settled order says")
+  deepEqual(model.listAfterRestore([{ id: "a" }, { id: "b", unread: false }], row, false, false, order, 1)[1],
+    row, "a row still listed is replaced by its replay")
+  deepEqual(model.listAfterRestore([{ id: "a" }], row, true, true, order, 1).map(r => r.id),
+    ["a"], "a row an edit behind this one took off stays off")
+  deepEqual(model.listAfterRestore([{ id: "a" }], row, false, false, order, 1).map(r => r.id),
+    ["a"], "a row this edit never removed is not put in")
+  deepEqual(model.listAfterRestore(null, row, true, false, order, 0).map(r => r.id), ["b"])
+  deepEqual(model.listAfterRestore([{ id: "a" }], null, true, false, order, 0).map(r => r.id), ["a"])
+}
+
+// ------------------------------------------------------------------ intents
+//
+// One row, two edits taken at the keystroke, the first refused: what stays is
+// the second edit applied to the state the first started from.
+{
+  const star = s => ({ ...s, starred: true })
+  const read = s => ({ ...s, unread: false })
+  const held = [
+    { token: 1, before: { id: "m", unread: true, starred: false }, apply: star },
+    { token: 2, before: { id: "m", unread: true, starred: true }, apply: read, removed: false }
+  ]
+  const rebased = model.rebaseIntents(held, 1)
+  deepEqual(rebased.summary, { id: "m", unread: false, starred: false },
+    "the star comes off and the read stays")
+  assert.strictEqual(rebased.entries.length, 1)
+  assert.strictEqual(rebased.entries[0].token, 2)
+  deepEqual(rebased.entries[0].before, { id: "m", unread: true, starred: false },
+    "the edit behind now starts from where the failed one did")
+  deepEqual(held[1].before, { id: "m", unread: true, starred: true }, "the held entry is not written to")
+  deepEqual(model.rebaseIntents(held, 2).summary, { id: "m", unread: true, starred: true },
+    "the last edit failing leaves the first")
+  assert.strictEqual(model.rebaseIntents(held, 9), null, "an answer nobody waited for")
+  deepEqual(model.withoutIntent(held, 1).map(e => e.token), [2])
+  deepEqual(model.withoutIntent(null, 1), [])
+  assert.strictEqual(model.anyIntentRemoved(held), false)
+  assert.strictEqual(model.anyIntentRemoved(held.concat([{ token: 3, removed: true }])), true)
+
+  let intents = model.intentsWith({}, "m", held[0])
+  intents = model.intentsWith(intents, "m", held[1])
+  assert.strictEqual(intents.m.length, 2)
+  const failed = model.intentsSettled(intents, "m", 1, true, null)
+  deepEqual(failed.outcome.summary, { id: "m", unread: false, starred: false })
+  assert.strictEqual(failed.intents.m.length, 1, "the failed intent is gone, the other is held")
+  const kept = model.intentsSettled(failed.intents, "m", 2, false, null)
+  assert.strictEqual(kept.intents.m, undefined, "nothing held once every edit is answered")
+  assert.strictEqual(kept.outcome.summary, null)
+  const unknown = model.intentsSettled({}, "m", 7, true, { id: "m" })
+  deepEqual(unknown.outcome.summary, { id: "m" }, "an id nothing was held for answers with the fallback")
+  deepEqual(unknown.intents, {})
+}
+
+// The settled lists are taken at the first edit in flight on a query and held
+// through the rest, so a later edit cannot re-take a list an earlier one has
+// already shortened.
+{
+  let lists = model.settledListsHeld({}, "q", [{ id: "a" }, { id: "b" }], [])
+  lists = model.settledListsHeld(lists, "q", [{ id: "b" }], [])
+  deepEqual(lists.q.messages.map(r => r.id), ["a", "b"], "the second hold keeps the first list")
+  assert.strictEqual(lists.q.pending, 2)
+  lists = model.settledListsReleased(lists, "q")
+  assert.strictEqual(lists.q.pending, 1)
+  lists = model.settledListsReleased(lists, "q")
+  assert.strictEqual(lists.q, undefined, "released once nothing is in flight")
+  deepEqual(model.settledListsReleased({}, "q"), {})
+}
+
 // ------------------------------------------------------------ setup state
 
 assert.strictEqual(model.setupState({ toolsPresent: false }), "tools_missing")
@@ -619,13 +742,26 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
     { id: "L1", name: "Work", rawName: "Work" },
     { id: "L2", name: "Bills", rawName: "Bills" }
   ]
-  const slots = model.sidebarSlots(boxes, labels, 10)
+  // What App hands over is the rail's own order — the tree, siblings A to
+  // Z — and the slots keep it, so a digit and the row beside it agree.
+  const slots = model.sidebarSlots(boxes, model.visibleLabels(labels, []), 10)
   assert.strictEqual(slots.length, 5, "system labels are not rows and get no number")
   assert.strictEqual(slots[0].kind, "mailbox")
   assert.strictEqual(slots[0].key, "inbox")
   assert.strictEqual(slots[3].kind, "label")
   assert.strictEqual(slots[3].id, "L2",
     "Bills is numbered before Work: the digits follow the rail, and the rail is A to Z")
+  assert.strictEqual(model.sidebarSlots(boxes, labels, 10)[3].id, "L1",
+    "in the order given: the caller says what the rail draws")
+  // A child is numbered right after its parent, before a sibling the
+  // alphabet would put between them.
+  const treeLabels = [
+    { id: "Work (old)", name: "Work (old)", delimiter: "/" }, { id: "Work/Invoices", name: "Work/Invoices", delimiter: "/" },
+    { id: "Work", name: "Work", delimiter: "/" }]
+  deepEqual(model.sidebarSlots([], model.visibleLabels(treeLabels, []), 10).map(function (s) { return s.id }),
+    ["Work", "Work/Invoices", "Work (old)"])
+  deepEqual(model.sidebarSlots([], model.visibleLabels(treeLabels, ["Work"]), 10).map(function (s) { return s.id }),
+    ["Work", "Work (old)"], "a folded child has no number: a digit never opens a row that is not on screen")
   assert.strictEqual(slots[3].name, "Bills", "the name a provider selects a label by")
 
   assert.strictEqual(model.slotNumberOf(slots, "mailbox", "inbox"), 1)
@@ -719,7 +855,7 @@ assert.strictEqual(model.clampZoom(0), 0.6, "but zero is a number, and clamps")
 assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
-  sidebarCollapsed: false, bodyZoom: 1, bodyMode: "reader",
+  sidebarCollapsed: false, sidebarWidth: 0, listWidth: 0, collapsedFolders: [], bodyZoom: 1, bodyMode: "reader",
   alwaysShowImages: false, windowOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
@@ -727,6 +863,13 @@ assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plai
 assert.strictEqual(model.windowPrefs('{"bodyMode":"original"}').bodyMode, "original")
 assert.strictEqual(model.windowPrefs('{"bodyMode":"unknown"}').bodyMode, "reader")
 assert.strictEqual(model.windowPrefs('{"windowOpen":true}').windowOpen, true)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').sidebarWidth, 180)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":180,"listWidth":"420"}').listWidth, 420)
+assert.strictEqual(model.windowPrefs('{"sidebarWidth":-3,"listWidth":"wide"}').sidebarWidth, 0,
+  "a bad width is a default, not a pane of no width")
+assert.strictEqual(model.paneWidth(99999), 4000)
+assert.strictEqual(model.paneWidth(0), 0)
+deepEqual(model.windowPrefs('{"collapsedFolders":["Archive","",3,"Archive"]}').collapsedFolders, ["Archive", "3"])
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
 
 // ------------------------------------------------- what a detail read carries
@@ -1107,3 +1250,375 @@ assert.strictEqual(model.previewReadable(dwelt, "gone"), false,
   "a search or a mailbox switch takes the row out from under the dwell")
 assert.strictEqual(model.previewReadable([], "m1"), false)
 assert.strictEqual(model.previewReadable(dwelt, ""), false)
+
+// ------------------------------------------------------------ selection
+{
+  const list = [{ id: "a", starred: true }, { id: "b" }, { id: "c", starred: true }, { id: "d" }]
+
+  deepEqual(model.toggleId([], "b"), ["b"])
+  deepEqual(model.toggleId(["b", "c"], "b"), ["c"])
+  deepEqual(model.toggleId(["b"], ""), ["b"], "an empty id toggles nothing")
+
+  deepEqual(model.idsBetween(list, "b", "d"), ["b", "c", "d"])
+  deepEqual(model.idsBetween(list, "d", "b"), ["b", "c", "d"], "either direction")
+  deepEqual(model.idsBetween(list, "", "c"), ["c"], "no anchor means the row itself")
+  deepEqual(model.idsBetween(list, "zz", "yy"), [])
+  deepEqual(model.unionIds(["a"], ["a", "c"]), ["a", "c"])
+
+  deepEqual(model.toggleRange(["a"], list, "b", "d"), ["a", "b", "c", "d"],
+    "an unchecked endpoint selects the range and keeps selections outside it")
+  deepEqual(model.toggleRange(["a", "b", "c", "d"], list, "d", "b"), ["a"],
+    "a checked endpoint clears the range in either direction")
+  deepEqual(model.toggleRange(["b", "d"], list, "b", "d"), [],
+    "a checked endpoint clears a mixed range instead of inverting its gaps")
+  deepEqual(model.toggleRange(["a"], list, "", "a"), [],
+    "without an anchor the endpoint can still be unchecked")
+  deepEqual(model.toggleRange(["a"], list, "a", "gone"), ["a"],
+    "an endpoint removed from the list leaves selection alone")
+
+  deepEqual(model.retainIds(["a", "gone", "c"], list), ["a", "c"])
+  deepEqual(model.allIds(list), ["a", "b", "c", "d"])
+  deepEqual(model.summariesById(list, ["c", "nope", "a"]), [list[2], list[0]])
+
+  // The cursor steps over every departing row to the first that stays, and
+  // back up the list only when nothing below survives.
+  assert.strictEqual(model.cursorAfterRemovals(list, ["b", "c"], "b"), "d")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["c", "d"], "c"), "b")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a", "b", "c", "d"], "b"), "")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "b"), "b", "a cursor off the selection stays")
+  assert.strictEqual(model.cursorAfterRemovals(list, ["a"], "nope"), "")
+
+  assert.strictEqual(model.starActionFor([list[0], list[2]]), "unstar")
+  assert.strictEqual(model.starActionFor([list[0], list[1]]), "star", "a mixed selection stars")
+  assert.strictEqual(model.starActionFor([]), "star")
+
+  assert.strictEqual(model.batchNote(3, "Archived"), "3 messages archived")
+  assert.strictEqual(model.batchNote(1, "Moved to Todo"), "1 message moved to Todo")
+  assert.strictEqual(model.selectionStatus(0), "")
+  assert.strictEqual(model.selectionStatus(2), "2 selected")
+}
+
+// A partly failed batch puts back only the rows that failed, in their old places.
+{
+  const before = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]
+  const afterAction = [{ id: "a" }, { id: "d" }]
+  deepEqual(model.restoreRows(afterAction, before, ["c"]).map(function (r) { return r.id }), ["a", "c", "d"])
+  deepEqual(model.restoreRows(afterAction, before, ["b", "c"]).map(function (r) { return r.id }), ["a", "b", "c", "d"])
+  deepEqual(model.restoreRows([{ id: "a" }], before, ["d"]).map(function (r) { return r.id }), ["a", "d"], "no later row left means the end")
+  deepEqual(model.restoreRows([{ id: "a", unread: false }], [{ id: "a", unread: true }], ["a"]), [{ id: "a", unread: true }],
+    "a row still listed is put back as it was")
+  deepEqual(model.restoreRows(afterAction, before, []).map(function (r) { return r.id }), ["a", "d"])
+  assert.strictEqual(model.batchFailureNote(5, 2, "Moved to trash", "server said no"), "2 of 5 could not be moved to trash: server said no")
+  assert.strictEqual(model.batchFailureNote(3, 1, "Archived", ""), "1 of 3 could not be archived")
+}
+
+// ------------------------------------------------------------ folder tree
+{
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive/2025", name: "Archive/2025", rawName: "Archive/2025", delimiter: "/", unread: 2 },
+    { id: "Archive", name: "Archive", rawName: "Archive", delimiter: "/", unread: 1 },
+    { id: "Archive/2026/Q1", name: "Archive/2026/Q1", rawName: "Archive/2026/Q1", delimiter: "/", unread: 4 },
+    { id: "Receipts", name: "Receipts", rawName: "Receipts", delimiter: "/", unread: 0 },
+    { id: "Label_3", name: "todo", rawName: "todo", unread: 1 }]
+
+  const open = model.labelTree(labels, [])
+  deepEqual(open.map(function (r) { return [r.path, r.depth, r.selectable, r.hasChildren, r.unread] }), [
+    ["Archive", 0, true, true, 1],
+    ["Archive/2025", 1, true, false, 2],
+    ["Archive/2026", 1, false, true, 0],
+    ["Archive/2026/Q1", 2, true, false, 4],
+    ["Receipts", 0, true, false, 0],
+    ["todo", 0, true, false, 1]],
+    "children hang under parents, a missing ancestor is a row of its own, siblings sort by name")
+  assert.strictEqual(open[0].name, "Archive")
+  assert.strictEqual(open[3].name, "Q1", "a row shows its own segment")
+  assert.strictEqual(open[3].id, "Archive/2026/Q1", "and keeps the whole id")
+
+  const folded = model.labelTree(labels, ["Archive"])
+  deepEqual(folded.map(function (r) { return r.path }), ["Archive", "Receipts", "todo"])
+  assert.strictEqual(folded[0].expanded, false)
+  assert.strictEqual(folded[0].unread, 7, "a folded parent counts its subtree")
+
+  const partly = model.labelTree(labels, ["Archive/2026"])
+  deepEqual(partly.map(function (r) { return r.path }), ["Archive", "Archive/2025", "Archive/2026", "Receipts", "todo"])
+  assert.strictEqual(partly[2].unread, 4)
+
+  // A server delimiter that is not a slash, and a Gmail label with none.
+  const dotted = model.labelTree([
+    { id: "a.b", name: "a.b", delimiter: "." }, { id: "a", name: "a", delimiter: "." },
+    { id: "x/y", name: "x/y" }], [])
+  deepEqual(dotted.map(function (r) { return [r.path, r.depth] }), [["a", 0], ["a.b", 1], ["x", 0], ["x/y", 1]])
+
+  deepEqual(model.visibleLabels(labels, ["Archive"]).map(function (l) { return l.id }),
+    ["Archive", "Receipts", "Label_3"], "the digits follow what is on screen")
+  deepEqual(model.visibleLabels(labels, []).map(function (l) { return l.id }),
+    ["Archive", "Archive/2025", "Archive/2026/Q1", "Receipts", "Label_3"])
+  deepEqual(model.togglePath(["Archive"], "Archive"), [])
+  deepEqual(model.togglePath([], "Archive/2026"), ["Archive/2026"])
+  deepEqual(model.labelTree(null, null), [])
+  // A label named like an Object property is still a label.
+  const odd = model.labelTree([{ id: "constructor", name: "constructor" },
+    { id: "constructor/2026", name: "constructor/2026" }, { id: "__proto__", name: "__proto__" },
+    { id: "toString", name: "toString" }], [])
+  deepEqual(odd.map(function (r) { return r.path }), ["__proto__", "constructor", "constructor/2026", "toString"])
+
+  // The delimiter is the server's word. Reported: nest on it. Not reported:
+  // "/", which is what Gmail nests with. Reported as none — IMAP's NIL, which
+  // the provider passes on as "" — no nesting at all, so a folder named
+  // "a/b" is one folder and a dot in a name is only a dot.
+  assert.strictEqual(model.labelDelimiter({ delimiter: "." }), ".")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "/" }), "/")
+  assert.strictEqual(model.labelDelimiter({ name: "todo" }), "/")
+  assert.strictEqual(model.labelDelimiter(null), "/")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "" }), "")
+  const flat = model.labelTree([
+    { id: "a/b", name: "a/b", rawName: "a/b", delimiter: "" },
+    { id: "a", name: "a", rawName: "a", delimiter: "" },
+    { id: "x.y", name: "x.y", rawName: "x.y", delimiter: "" }], [])
+  deepEqual(flat.map(function (r) { return [r.path, r.depth, r.hasChildren, r.selectable] }),
+    [["a", 0, false, true], ["a/b", 0, false, true], ["x.y", 0, false, true]],
+    "a NIL delimiter makes a flat list, slashes and all")
+  deepEqual(model.visibleLabels([{ id: "a/b", name: "a/b", delimiter: "" }, { id: "a", name: "a", delimiter: "" }], ["a"])
+    .map(function (l) { return l.id }), ["a", "a/b"], "and nothing folds under anything")
+  const slashed = model.labelTree([{ id: "a.b", name: "a.b", delimiter: "/" }, { id: "a", name: "a", delimiter: "/" }], [])
+  deepEqual(slashed.map(function (r) { return [r.path, r.depth] }), [["a", 0], ["a.b", 0]],
+    "a slash server does not nest on a dot")
+}
+
+// A cache-first paint restores rows the list is usually already showing, and
+// `Cache.hydrate` rebuilds every one of them, so the rows are never the same
+// objects. Only their values can say whether anything changed.
+function summaryRows() {
+  return [
+    { id: "m1", subject: "One", unread: true, from: { email: "a@x", display: "A" },
+      to: [{ name: "Me", email: "me@x", display: "Me" }],
+      thread: { id: "t1", count: 2, memberIds: ["m1", "m0"] }, date: new Date(3000) },
+    { id: "m2", subject: "Two", unread: false, from: { email: "b@x", display: "B" },
+      to: [], thread: { id: "t2", count: 0, memberIds: [] }, date: new Date(2000) }
+  ]
+}
+
+const painted = summaryRows()
+assert.strictEqual(model.sameSummaries(painted, summaryRows()), true,
+  "rebuilt rows carrying the same values are the same list")
+assert.strictEqual(model.sameSummaries(painted, painted), true)
+assert.strictEqual(model.sameSummaries([], []), true)
+assert.strictEqual(model.sameSummaries(null, undefined), true, "neither list has rows")
+
+// Anything a row says differently is a change, however deep it sits. The
+// deepest a summary actually goes is a thread's member ids and a recipient's
+// own fields, so the comparison has to reach both.
+const markedRead = summaryRows()
+markedRead[0].unread = false
+assert.strictEqual(model.sameSummaries(painted, markedRead), false, "a row was read")
+
+const renamed = summaryRows()
+renamed[0].from.display = "Someone else"
+assert.strictEqual(model.sameSummaries(painted, renamed), false,
+  "a nested field is still a field")
+
+const addressed = summaryRows()
+addressed[0].to[0].email = "someone@else"
+assert.strictEqual(model.sameSummaries(painted, addressed), false,
+  "a recipient's own field, two levels down")
+
+const grown = summaryRows()
+grown[0].to.push({ email: "cc@x" })
+assert.strictEqual(model.sameSummaries(painted, grown), false, "a recipient arrived")
+
+const answered = summaryRows()
+answered[0].thread.memberIds.push("m3")
+assert.strictEqual(model.sameSummaries(painted, answered), false,
+  "a conversation gained a member, three levels down")
+
+// A field the new row carries and the old one does not is a change the
+// comparison has to see, which reading only the old row's keys would miss.
+const tagged = summaryRows()
+tagged[0].pinned = true
+assert.strictEqual(model.sameSummaries(painted, tagged), false, "a field appeared")
+
+// Where a row sits is part of what the list says: the cursor steps by index.
+const reordered = summaryRows()
+reordered.reverse()
+assert.strictEqual(model.sameSummaries(painted, reordered), false,
+  "the same rows in another order are another list")
+
+// A date is the instant it names: hydrate builds a new Date on every read.
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: new Date(1000) }]), true)
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: new Date(2000) }]), false)
+assert.strictEqual(model.sameSummaries([{ id: "m", date: new Date(1000) }],
+  [{ id: "m", date: null }]), false, "a row that lost its date changed")
+
+// The answer cannot depend on which list was handed in first. A field holding
+// `undefined` is a field the row does not have — `JSON.stringify` drops the key
+// on the way to the cache, so a live row carrying one and the copy restored
+// from disk are the same row — and a field that holds a value is a difference
+// read from either side.
+const withUndefined = [{ id: "m1", subject: "One", snippet: undefined }]
+const withoutKey = [{ id: "m1", subject: "One" }]
+assert.strictEqual(model.sameSummaries(withUndefined, withoutKey), true,
+  "a key the cache drops is not a change")
+assert.strictEqual(model.sameSummaries(withoutKey, withUndefined), true,
+  "and it is not a change the other way round either")
+
+const withValue = [{ id: "m1", subject: "One", snippet: "new" }]
+assert.strictEqual(model.sameSummaries(withValue, withoutKey), false)
+assert.strictEqual(model.sameSummaries(withoutKey, withValue), false,
+  "a field that arrived is a change read from either side")
+
+// A shorter or longer list is a different list without looking at a row.
+assert.strictEqual(model.sameSummaries(painted, [painted[0]]), false)
+assert.strictEqual(model.sameSummaries([painted[0]], painted), false)
+
+// Deeper than the bound reads as changed rather than as equal: repainting a
+// list that did not need it is recoverable, hiding mail that did is not. A
+// summary nests three deep at most, so the bound is not in a row's way.
+const deep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
+const alsoDeep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
+assert.strictEqual(model.sameSummaries([deep], [alsoDeep]), false,
+  "the comparison stops rather than following an unbounded structure")
+
+assert.strictEqual(model.activityStatus({}), "", "nothing in flight says nothing")
+assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
+assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")
+assert.strictEqual(model.activityStatus({ running: 1, waiting: 4 }), "1 action running \u00b7 4 waiting")
+assert.strictEqual(model.activityStatus({ sending: "x", waiting: -2 }), "", "nonsense counts are zero")
+
+// ------------------------------------------------------------ label names
+{
+  assert.strictEqual(model.labelLeaf("Archive/2026/Q1", "/"), "Q1")
+  assert.strictEqual(model.labelLeaf("Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelParent("Archive/2026/Q1", "/"), "Archive/2026")
+  assert.strictEqual(model.labelParent("Receipts", "/"), "")
+  assert.strictEqual(model.labelPathJoin("Archive", " 2026 ", "/"), "Archive/2026")
+  assert.strictEqual(model.labelPathJoin("", "Receipts", "/"), "Receipts")
+  assert.strictEqual(model.labelPathJoin("a", "b", "."), "a.b")
+  assert.strictEqual(model.labelDelimiter({ delimiter: "." }), ".")
+  assert.strictEqual(model.labelDelimiter({}), "/")
+  assert.strictEqual(model.labelNameProblem("  ", "/"), "A label needs a name")
+  assert.strictEqual(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") > 0, true)
+  assert.strictEqual(model.labelNameProblem("Receipts", "/"), "")
+
+  const labels = [
+    { id: "INBOX", name: "INBOX", system: true },
+    { id: "Archive", rawName: "Archive" },
+    { id: "Archive/2026", rawName: "Archive/2026" },
+    { id: "Archive/2026/Q1", rawName: "Archive/2026/Q1" },
+    { id: "Receipts", rawName: "Receipts" }]
+  deepEqual(model.labelMoveTargets(labels, "Archive/2026", "/").map(function (t) { return t.path }),
+    ["", "Receipts"], "not itself, not its children, not its current parent, never a system label")
+  deepEqual(model.labelMoveTargets(labels, "Receipts", "/").map(function (t) { return t.path }),
+    ["", "Archive", "Archive/2026", "Archive/2026/Q1"])
+  assert.strictEqual(model.labelMoveTargets(labels, "Receipts", "/")[0].name, "Top level")
+}
+
+assert.strictEqual(model.monitoredNote([{ name: "Receipts", delta: 3 }]), "3 new in Receipts")
+assert.strictEqual(model.monitoredNote([{ name: "A", delta: 1 }, { name: "B", delta: 4 }, { name: "C", delta: 2 }]),
+  "4 new in B, 2 new in C and 1 more")
+assert.strictEqual(model.monitoredNote([]), "")
+
+// ------------------------------------------------------------ label paths
+{
+  // A server with no hierarchy — IMAP's NIL delimiter, passed on as "" —
+  // has leaves only: nothing has a parent and nothing goes under anything.
+  assert.strictEqual(model.labelLeaf("a/b", ""), "a/b")
+  assert.strictEqual(model.labelParent("a/b", ""), "")
+  assert.strictEqual(model.labelPathJoin("", "a/b", ""), "a/b")
+  assert.strictEqual(model.labelNameProblem("a/b", ""), "", "a slash is only a slash")
+  assert.ok(model.labelNameProblem("a/b", "/").indexOf("cannot contain /") >= 0)
+  assert.strictEqual(model.labelNestProblem("", ""), "")
+  assert.strictEqual(model.labelNestProblem("Work", "/"), "")
+  assert.ok(model.labelNestProblem("Work", "").indexOf("flat list") >= 0)
+  deepEqual(model.labelMoveTargets([{ id: "a", name: "a" }, { id: "b", name: "b" }], "a", ""),
+    [{ id: "", name: "Top level", path: "" }], "nowhere to move to but where it is")
+  assert.strictEqual(model.labelLeaf("a.b", "."), "b")
+  assert.strictEqual(model.labelParent("a.b", "."), "a")
+  assert.strictEqual(model.labelLeaf("a.b", undefined), "a.b", "no word from the provider means a slash")
+  assert.strictEqual(model.labelPathJoin("a", "b", undefined), "a/b")
+}
+
+// ------------------------------------------------------------ watched ids
+{
+  // On IMAP a folder's id is its wire name: a rename changes it, and every
+  // folder beneath it. The watch follows to the id the fresh listing gives
+  // the same path.
+  const before = [
+    { id: "Work", name: "Work", delimiter: "/" }, { id: "Work/2026", name: "Work/2026", delimiter: "/" },
+    { id: "Work/2026/Q1", name: "Work/2026/Q1", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  const after = [
+    { id: "Jobs", name: "Jobs", delimiter: "/" }, { id: "Jobs/2026", name: "Jobs/2026", delimiter: "/" },
+    { id: "Jobs/2026/Q1", name: "Jobs/2026/Q1", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Receipts", "Work/2026/Q1"], before, after, "Work", "Jobs", "/"),
+    ["Jobs", "Receipts", "Jobs/2026/Q1"])
+  deepEqual(model.migrateMonitoredIds(["Work/2026"], before, after, "Work", "Jobs", "/"), ["Jobs/2026"])
+  // A move: the same, with the new path under another parent.
+  const moved = [
+    { id: "Archive", name: "Archive", delimiter: "/" }, { id: "Archive/Work", name: "Archive/Work", delimiter: "/" },
+    { id: "Archive/Work/2026", name: "Archive/Work/2026", delimiter: "/" }, { id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work/2026", "Receipts"], before, moved, "Work", "Archive/Work", "/"),
+    ["Archive/Work/2026", "Receipts"])
+  // A watch on a folder the listing no longer has is dropped, deleted
+  // parent and children alike; the rest stay.
+  const gone = [{ id: "Receipts", name: "Receipts", delimiter: "/" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Work/2026", "Receipts"], before, gone, "Work", "", "/"), ["Receipts"])
+  // The same array back when nothing it held was touched: Gmail keeps its
+  // ids across a rename, and a watch on a folder beside the renamed one is
+  // not a change either.
+  const same = ["Receipts"]
+  assert.strictEqual(model.migrateMonitoredIds(same, before, after, "Work", "Jobs", "/"), same)
+  const gmail = [{ id: "Label_1", name: "Work" }, { id: "Label_2", name: "Work/2026" }]
+  const gmailAfter = [{ id: "Label_1", name: "Jobs" }, { id: "Label_2", name: "Jobs/2026" }]
+  const kept = ["Label_2"]
+  assert.strictEqual(model.migrateMonitoredIds(kept, gmail, gmailAfter, "Work", "Jobs", "/"), kept)
+  // With no hierarchy only the folder itself is renamed; "Work/2026" is
+  // another folder and stays watched under its own id.
+  const flatBefore = [{ id: "Work", name: "Work", delimiter: "" }, { id: "Work/2026", name: "Work/2026", delimiter: "" }]
+  const flatAfter = [{ id: "Jobs", name: "Jobs", delimiter: "" }, { id: "Work/2026", name: "Work/2026", delimiter: "" }]
+  deepEqual(model.migrateMonitoredIds(["Work", "Work/2026"], flatBefore, flatAfter, "Work", "Jobs", ""), ["Jobs", "Work/2026"])
+  deepEqual(model.migrateMonitoredIds(null, before, after, "Work", "Jobs", "/"), [])
+}
+
+// A queued chain is resolved against the final list only.
+{
+  const old = [{id: "Work", name: "Work"}, {id: "Receipts", name: "Receipts"}]
+  const moves = [
+    {before: old, oldPath: "Work", newPath: "Jobs", delimiter: "/"},
+    {before: old, oldPath: "Receipts", newPath: "Bills", delimiter: "/"},
+    {before: [{id: "Jobs", name: "Jobs"}], oldPath: "Jobs", newPath: "Tasks", delimiter: "/"}
+  ]
+  deepEqual(model.migrateMonitoredChanges(["Work", "Receipts"], moves,
+    [{id: "Tasks", name: "Tasks"}, {id: "Bills", name: "Bills"}]), ["Tasks", "Bills"])
+}
+
+// ------------------------------------------------------------ type to find
+{
+  assert.ok(model.fuzzyScore("sfl", "SFL") > 0)
+  assert.ok(model.fuzzyScore("sfl", "jack@the-sfl.com") > 0)
+  assert.ok(model.fuzzyScore("sfl", "jack@example.com") === 0)
+  assert.ok(model.fuzzyScore("wk", "Work") > 0, "letters in order, not adjacent")
+  assert.ok(model.fuzzyScore("kw", "Work") === 0, "but in order")
+  assert.ok(model.fuzzyScore("work", "Work") > model.fuzzyScore("work", "Homework"), "the start of the text beats the middle")
+  assert.ok(model.fuzzyScore("inv", "Work/Invoices") > model.fuzzyScore("inv", "Convinced"), "the start of a word beats the middle of one")
+  assert.strictEqual(model.fuzzyScore("", "anything"), 1)
+  assert.strictEqual(model.fuzzyScore("a", ""), 0)
+
+  const rows = [
+    { name: "Inbox", key: "inbox" },
+    { name: "Work", id: "Work" },
+    { name: "Work/Invoices", id: "Work/Invoices" },
+    { label: "SFL", email: "jack@the-sfl.com", name: "" },
+    { label: "jack", email: "jack@icloud.com", name: "jack" }]
+  deepEqual(model.filterRows(rows, "").map(r => r.sourceIndex), [0, 1, 2, 3, 4], "nothing typed keeps every row in place")
+  deepEqual(model.filterRows(rows, "inv").map(r => r.sourceIndex), [2])
+  deepEqual(model.filterRows(rows, "work").map(r => r.sourceIndex), [1, 2], "the shorter name first, then its child")
+  deepEqual(model.filterRows(rows, "sfl").map(r => r.sourceIndex), [3], "an address is searched too")
+  deepEqual(model.filterRows(rows, "jack").map(r => r.sourceIndex), [4, 3], "the name outranks an address that only contains it")
+  deepEqual(model.filterRows(rows, "zzz"), [])
+  deepEqual(model.filterRows(null, "x"), [])
+  assert.strictEqual(model.filterRows(rows, "  ").length, 5, "blank is nothing typed")
+  assert.strictEqual(model.filterRows(rows, "inv")[0].index, undefined, "no `index` on a row: a Repeater owns that word")
+  assert.strictEqual(rows[2].sourceIndex, undefined, "the rows given are not written on")
+}

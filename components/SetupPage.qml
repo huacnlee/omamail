@@ -44,13 +44,28 @@ Column {
   // The fields show what is on disk, so the page always says what the app is
   // actually using rather than going blank after a save.
   function syncFromStore() {
+    nameField.syncFromStore()
     if (!auth) return
     clientIdField.text = String(auth.clientId || "")
     clientSecretField.text = auth.credentials ? String(auth.credentials.clientSecret || "") : ""
   }
 
+  // The name goes on the entry whenever the page acts — saving the client,
+  // or signing in — since either may be the only button pressed.
+  function saveName() {
+    if (service && nameField.value() !== String(service.accountName || ""))
+      service.configureCurrentAccount({ label: nameField.value() })
+  }
+
+  function signInNamed() {
+    if (!service) return
+    saveName()
+    service.signIn()
+  }
+
   function save() {
     if (!auth) return
+    saveName()
     var secret = clientSecretField.text.trim()
     // The secret stays in the field. Clearing it on success looked exactly
     // like losing it, which is a bad thing for a credential to look like.
@@ -87,6 +102,18 @@ Column {
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily
     onWebsiteRequested: if (root.service) root.service.openProviderWebsite("gmail")
+  }
+
+  // Above the steps rather than in one: the OAuth client is shared by every
+  // Gmail mailbox and its step folds away once it exists, which is exactly
+  // when a second mailbox is being added and wants a name.
+  AccountNameField {
+    id: nameField
+    service: root.service
+    width: parent.width
+    foreground: root.textColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.bodySmall
   }
 
   // Missing dependencies come first: neither step below can finish without
@@ -250,7 +277,7 @@ Column {
           bordered: true
           fontSize: Style.font.bodySmall
           enabled: !!root.auth && !root.auth.loginBusy
-          onClicked: root.service.signIn()
+          onClicked: root.signInNamed()
         }
 
         Button {

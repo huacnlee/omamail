@@ -3,6 +3,13 @@
 Uses synthetic provider data and shell styling stubs; Qt's Text/image loader is
 real. A positive control proves that the loopback observer sees native image
 requests. This does not claim any public provider delivers these label names.
+
+The rail draws labels as a tree, so a name with the provider's delimiter in it
+becomes several rows — a parent the server never named and the leaf under it —
+and every one of those rows is a Text that has to stay plain. The tooltip is
+the shell's PanelToolTip, which draws Text.PlainText; here it is a stub, so
+the check is that the path reaches it as the same string, unescaped and
+unshortened.
 """
 import json
 import os
@@ -62,6 +69,12 @@ Item {
       }
       return null
     }
+    function named(item, name, out) {
+      if (item.objectName === name) out.push(item)
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) named(children[i], name, out)
+      return out
+    }
     function test_1_observer_positive_control() {
       var item = createTemporaryObject(controlFactory, host, {
         text: '<img src="' + endpoint + '/control">'
@@ -86,7 +99,10 @@ Item {
       for (var i = 0; i < names.length; i++) {
         var providers = ["raw", "gmail", "jmap", "imap", "hey"]
         for (var j = 0; j < providers.length; j++)
-          rows.push({tag: providers[j] + "-" + i, provider: providers[j], name: names[i]})
+          rows.push({tag: providers[j] + "-" + i, provider: providers[j], name: names[i], delimiter: undefined})
+        // An IMAP server with no hierarchy: LIST answered NIL, the provider
+        // passes "" on, and the name is one row however many slashes it has.
+        rows.push({tag: "imap-nil-" + i, provider: "imap", name: names[i], delimiter: ""})
       }
       return rows
     }
@@ -101,17 +117,36 @@ Item {
         labels = Jmap.mailboxLabels([{id: "probe", name: name}], {})
       else if (data.provider === "imap") labels[0].name = Imap.decodeMailbox(name)
       else if (data.provider === "hey") labels = Hey.parseLabels([{id: "probe", name: name}])
-      var service = {labels: labels, mailboxes: [], rawQuery: "",
+      if (data.delimiter !== undefined) labels[0].delimiter = data.delimiter
+      var service = {labels: labels, mailboxes: [], rawQuery: "", collapsedFolders: [],
         mailboxKey: "inbox", searchQuery: "", providerId: "imap"}
       var sidebar = createTemporaryObject(sidebarFactory, host)
       verify(sidebar !== null)
       sidebar.service = service
       wait(50)
-      compare(sidebar.userLabels.length, 1)
       var expected = labels[0].name
-      var drawn = textItem(sidebar, expected)
-      verify(drawn !== null, "The provider's name must reach the visible Text unchanged")
-      compare(drawn.textFormat, Text.PlainText, "A mailbox name is never HTML")
+      var tree = sidebar.userLabels
+      var nested = data.delimiter === undefined && expected.indexOf("/") >= 0
+      if (data.delimiter === "") compare(tree.length, 1, "no hierarchy: the whole name is one row")
+      else verify(tree.length >= 1)
+      if (nested) verify(tree.length > 1, "a delimiter in the name nests")
+      var leaf = tree[tree.length - 1]
+      compare(leaf.selectable, true, "the last row is the label itself")
+      compare(leaf.id, "probe")
+      if (!nested) compare(leaf.name, expected, "The provider's name must reach the row unchanged")
+      for (var r = 0; r < tree.length; r++) {
+        var drawn = textItem(sidebar, tree[r].name)
+        verify(drawn !== null, "Row " + r + " must reach a visible Text unchanged: " + tree[r].name)
+        compare(drawn.textFormat, Text.PlainText, "A mailbox name is never HTML, at any depth")
+      }
+      // The calendar row at the foot of the rail carries a tooltip too, so
+      // the rows are matched to theirs rather than counted.
+      var tips = named(sidebar, "label-tooltip", [])
+      for (var k = 0; k < tree.length; k++) {
+        var carried = false
+        for (var t = 0; t < tips.length; t++) if (tips[t].text === tree[k].path) carried = true
+        verify(carried, "the tooltip carries the row's path as one plain string: " + tree[k].path)
+      }
     }
     function test_3_drain_network() { wait(300) }
   }

@@ -255,6 +255,7 @@ Item {
 
           HoverHandler { id: contactHover }
           TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds
             onTapped: {
               root.contactChosen(contactRow.modelData, "to")
               menu.close()

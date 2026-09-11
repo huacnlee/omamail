@@ -341,8 +341,7 @@ function survivesAction(mailboxKey, action, rawQuery, labels, sourceLabelId, row
 }
 
 // Only the most recent intent for a message may be coalesced. Searching past
-// an opposite action would turn read/unread/read into read/unread. Explicit
-// intent wins over an automatic read because it may evict the open row.
+// an opposite action would turn read/unread/read into read/unread.
 function enqueueAction(requests, request) {
   var queued = requests.slice()
   for (var i = queued.length - 1; i >= 0; i--) {
@@ -350,12 +349,16 @@ function enqueueAction(requests, request) {
     if (previous.id !== request.id) continue
     if (previous.action === request.action && previous.cacheKey === request.cacheKey
         && previous.sourceLabelId === request.sourceLabelId
-        && (previous.memberOnly === true) === (request.memberOnly === true)) {
+        && (previous.memberOnly === true) === (request.memberOnly === true)
+        && (previous.quiet === true) === (request.quiet === true)) {
+      // A true repeat keeps the first send and its rollback. A quiet press and
+      // an explicit one differ in scope and note, so they queue in turn.
       queued[i] = {
         id: request.id, action: request.action, cacheKey: request.cacheKey,
         sourceLabelId: request.sourceLabelId,
         memberOnly: request.memberOnly === true,
-        quiet: previous.quiet === true && request.quiet === true
+        quiet: request.quiet === true,
+        dispatch: previous.dispatch
       }
       return queued
     }
@@ -363,6 +366,15 @@ function enqueueAction(requests, request) {
   }
   queued.push(request)
   return queued
+}
+
+// Whether a queue still carries this send, or coalesced it into an earlier one.
+function holdsDispatch(requests, dispatch) {
+  var queued = Array.isArray(requests) ? requests : []
+  for (var i = 0; i < queued.length; i++) {
+    if (queued[i] && queued[i].dispatch === dispatch) return true
+  }
+  return false
 }
 
 function labelChangesFor(action, sourceLabelId) {
@@ -514,6 +526,29 @@ function rowWithThread(summary, thread) {
   return next
 }
 
+// A row after one of its messages changed — its own labels already applied
+// in `ownLabels`, or the row untouched when the message is a member. The block
+// is recomputed from the members rather than asserted. An unknown member never
+// flips a flag off, which is what keeps a row in the Unread view while a reply
+// nobody has read is still in it — and what stops the quiet mark-read on
+// opening a thread from clearing the dot of every other member with it. The
+// representative's own state is evidence whether or not the rail ever drew it,
+// so it goes in rather than counting as an unknown member.
+//
+// `after` is the edit on a member; it is applied to each target the rail
+// holds as the rail holds it now, so a replay after a failure reads the
+// members already put right rather than the state the failed edit left.
+function rowAfterMemberEdit(row, ownLabels, rowId, memberSummaries, targets, after) {
+  var nextMembers = {}
+  for (var held in memberSummaries) nextMembers[held] = memberSummaries[held]
+  var ids = Array.isArray(targets) ? targets : []
+  for (var i = 0; i < ids.length; i++) {
+    if (ids[i] !== rowId && memberSummaries[ids[i]]) nextMembers[ids[i]] = after(memberSummaries[ids[i]])
+  }
+  nextMembers[rowId] = ownLabels
+  return rowWithThread(ownLabels, threadAfterMemberChange(row, nextMembers))
+}
+
 // The summary an action leaves behind. `sourceLabelId` is the label whose
 // list the row was found in, which a move or an unarchive takes off. The
 // optional block is the conversation asserted outright — `threadAfterAction`
@@ -574,12 +609,34 @@ function clampZoom(value) {
     Math.round(zoom * ZOOM_STEPS_PER_UNIT) / ZOOM_STEPS_PER_UNIT))
 }
 
+// A dragged pane width as stored: a whole number of pixels, or 0 for "never
+// dragged". Anything else — a string, a negative, NaN from an old file — is 0,
+// so a bad value costs a default rather than a pane of no width.
+function paneWidth(value) {
+  var n = Math.floor(Number(value))
+  if (!isFinite(n) || n <= 0) return 0
+  return Math.min(n, 4000)
+}
+
+function stringList(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = String(list[i] === undefined || list[i] === null ? "" : list[i])
+    if (item !== "" && out.indexOf(item) < 0) out.push(item)
+  }
+  return out
+}
+
 function windowPrefs(raw) {
   var parsed = null
   try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
   if (!parsed || typeof parsed !== "object") {
     return {
       sidebarCollapsed: false,
+      sidebarWidth: 0,
+      listWidth: 0,
+      collapsedFolders: [],
       bodyZoom: 1,
       bodyMode: "reader",
       alwaysShowImages: false,
@@ -591,6 +648,9 @@ function windowPrefs(raw) {
     bodyMode = parsed.plainTextForced === true ? "plain" : "reader"
   return {
     sidebarCollapsed: parsed.sidebarCollapsed === true,
+    sidebarWidth: paneWidth(parsed.sidebarWidth),
+    listWidth: paneWidth(parsed.listWidth),
+    collapsedFolders: stringList(parsed.collapsedFolders),
     bodyZoom: clampZoom(parsed.bodyZoom),
     bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
@@ -611,6 +671,76 @@ function showListFooter(messageCount) {
   return Math.max(0, Number(messageCount) || 0) > 0
 }
 
+// Whether two summaries carry the same values, one field at a time.
+//
+// Rows arrive rebuilt rather than reused: `Cache.hydrate` copies every entry
+// out of the store on every read, so two paints of an unchanged mailbox share
+// no object and `===` on the rows themselves always says "different". The
+// comparison has to look at what a row says, not at which object says it.
+//
+// Depth-limited rather than open-ended, and the bound is what keeps a cycle —
+// or a provider payload nobody anticipated — from hanging the list. A summary
+// reaches three levels down at its deepest, a thread's member ids and a
+// recipient's own fields, and the bound is four: one level of headroom, not a
+// snug fit. A structure deeper than that reads as changed, which repaints a
+// list that may not have needed it; the opposite default would hide real mail.
+function sameSummaryValue(left, right, depth) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (typeof left !== "object" || typeof right !== "object") return false
+  // A date is a value here, not a structure: `Cache.hydrate` builds a new one
+  // out of `dateMs` on every read, so only the instant it names can be equal.
+  if (typeof left.getTime === "function" || typeof right.getTime === "function") {
+    return typeof left.getTime === "function" && typeof right.getTime === "function"
+      && left.getTime() === right.getTime()
+  }
+  if (depth <= 0) return false
+  var leftIsList = Array.isArray(left)
+  if (leftIsList !== Array.isArray(right)) return false
+  if (leftIsList) {
+    if (left.length !== right.length) return false
+    for (var i = 0; i < left.length; i++) {
+      if (!sameSummaryValue(left[i], right[i], depth - 1)) return false
+    }
+    return true
+  }
+  // Both key sets, and a field holding `undefined` counts as one the row does
+  // not have. That is what a round trip through the cache does to it —
+  // `JSON.stringify` drops the key — so a live row carrying one and the
+  // restored copy of it are the same row, and reading only the left side's
+  // keys would have made this answer differently depending on which list was
+  // handed in first.
+  for (var key in left) {
+    if (!Object.prototype.hasOwnProperty.call(left, key)) continue
+    if (!sameSummaryValue(left[key], right[key], depth - 1)) return false
+  }
+  for (var extra in right) {
+    if (!Object.prototype.hasOwnProperty.call(right, extra)) continue
+    if (Object.prototype.hasOwnProperty.call(left, extra)) continue
+    if (right[extra] !== undefined) return false
+  }
+  return true
+}
+
+// Whether a list of summaries says what the list already on screen says.
+//
+// Cache-first painting runs on every visit to a query, and what it restores is
+// usually exactly what is already drawn — the service keeps running while the
+// window is shut, so reopening it, or stepping back to a mailbox, restores the
+// rows that never went away. Assigning them anyway is not free: every consumer
+// of the list recomputes, which on this list is measured in tenths of a
+// second. So the assignment is made only when a row actually differs.
+function sameSummaries(previous, next) {
+  var before = Array.isArray(previous) ? previous : []
+  var after = Array.isArray(next) ? next : []
+  if (before === after) return true
+  if (before.length !== after.length) return false
+  for (var i = 0; i < after.length; i++) {
+    if (!sameSummaryValue(before[i], after[i], 4)) return false
+  }
+  return true
+}
+
 function removeById(list, id) {
   var source = Array.isArray(list) ? list : []
   var out = []
@@ -619,6 +749,157 @@ function removeById(list, id) {
     out.push(source[i])
   }
   return out
+}
+
+// A failed row goes back where the settled order says: before the first of
+// its followers still listed, else after the last of its predecessors, else at
+// the index it held. The order is the list as it stood before the first edit
+// still in flight — not the list this edit saw. With two removals queued, the
+// second saw a list the first had already shortened, and a row anchored to
+// that had no neighbour left to name: the pair came back reversed.
+function restoreRow(list, row, order, index) {
+  var source = Array.isArray(list) ? list : []
+  var settled = Array.isArray(order) ? order : []
+  var pos = indexById(settled, row ? row.id : "")
+  var at
+  for (var after = pos + 1; pos >= 0 && after < settled.length; after++) {
+    at = indexById(source, settled[after] ? settled[after].id : "")
+    if (at >= 0) return source.slice(0, at).concat([row], source.slice(at))
+  }
+  for (var ahead = pos - 1; ahead >= 0; ahead--) {
+    at = indexById(source, settled[ahead] ? settled[ahead].id : "")
+    if (at >= 0) return source.slice(0, at + 1).concat([row], source.slice(at + 1))
+  }
+  var held = pos >= 0 ? pos : (Number(index) || 0)
+  var clamped = Math.max(0, Math.min(held, source.length))
+  return source.slice(0, clamped).concat([row], source.slice(clamped))
+}
+
+// A list after a refused edit on one of its rows: the row's replayed summary
+// in place while it is still listed; back where the settled order says if the
+// edit took it off and no edit still waiting behind it has; else untouched.
+// The same rule for the list on screen and for the cached copy of a query
+// navigated away from, so a refusal answered late repairs whichever one holds
+// the row now.
+function listAfterRestore(list, row, removed, stillRemoved, order, index) {
+  var source = Array.isArray(list) ? list : []
+  if (!row) return source
+  if (indexById(source, row.id) >= 0) return replaceById(source, row)
+  if (removed === true && stillRemoved !== true) return restoreRow(source, row, order, index)
+  return source
+}
+
+// ----------------------------------------------------------------- intents
+//
+// An optimistic edit is an intent: what a summary should say if the server
+// agrees. Edits are taken at the keystroke, so one row can carry several
+// before the first is answered, and the answer to one must not undo the
+// others. Each summary an edit touched — the row, a member the rail draws,
+// the reader's copy — keeps its intents in the order they were taken, each
+// with the summary as it stood before it and the function that made the edit.
+//
+// A success drops its intent and nothing else: the summary the later ones
+// started from already holds it. A failure drops its intent and replays the
+// later ones from the state the failed one started from, so what stays on
+// screen is exactly the edits still waiting for an answer — a star that
+// failed comes off, and the read taken a keystroke later stays.
+
+function withoutIntent(entries, token) {
+  var list = Array.isArray(entries) ? entries : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i] || list[i].token === token) continue
+    out.push(list[i])
+  }
+  return out
+}
+
+// The intents left after `token` failed, rebased, and the summary they add up
+// to. Null when no such intent is held.
+function rebaseIntents(entries, token) {
+  var list = Array.isArray(entries) ? entries : []
+  var at = -1
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].token === token) { at = i; break }
+  }
+  if (at < 0) return null
+  var out = list.slice(0, at)
+  var summary = list[at].before
+  for (var j = at + 1; j < list.length; j++) {
+    var entry = {}
+    for (var key in list[j]) entry[key] = list[j][key]
+    entry.before = summary
+    summary = typeof entry.apply === "function" ? entry.apply(summary) : summary
+    out.push(entry)
+  }
+  return { entries: out, summary: summary }
+}
+
+// The held intents with one more, by the id of the summary it changed.
+function intentsWith(intents, id, entry) {
+  var all = {}
+  for (var key in intents) all[key] = intents[key]
+  all[id] = (all[id] || []).concat([entry])
+  return all
+}
+
+// The held intents after `token` on `id` is answered, and what that answer
+// leaves: a success drops the intent; a failure replays the rest. `fallback`
+// is the summary when nothing was held for this id.
+function intentsSettled(intents, id, token, failed, fallback) {
+  var all = {}
+  for (var key in intents) all[key] = intents[key]
+  var held = all[id] || []
+  var outcome = failed ? rebaseIntents(held, token) : null
+  if (!outcome) outcome = { entries: withoutIntent(held, token), summary: fallback }
+  if (outcome.entries.length === 0) delete all[id]
+  else all[id] = outcome.entries
+  return { intents: all, outcome: outcome }
+}
+
+// Whether an edit still waiting has taken the row off the list, in which case
+// a failure ahead of it puts the row back nowhere.
+function anyIntentRemoved(entries) {
+  var list = Array.isArray(entries) ? entries : []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].removed === true) return true
+  }
+  return false
+}
+
+// The lists as they stood before the first edit still in flight on a query,
+// held while any is. This is the order a failed row goes back into; the list
+// the failed edit itself saw may already have been shortened by the edits
+// ahead of it.
+function settledListsHeld(lists, query, messages, previews) {
+  var all = {}
+  for (var key in lists) all[key] = lists[key]
+  var held = all[query]
+  all[query] = {
+    messages: held ? held.messages : (Array.isArray(messages) ? messages.slice() : []),
+    previews: held ? held.previews : (Array.isArray(previews) ? previews.slice() : []),
+    pending: (held ? held.pending : 0) + 1
+  }
+  return all
+}
+
+function settledListsReleased(lists, query) {
+  var all = {}
+  for (var key in lists) all[key] = lists[key]
+  var held = all[query]
+  if (!held) return all
+  if (held.pending <= 1) delete all[query]
+  else all[query] = { messages: held.messages, previews: held.previews, pending: held.pending - 1 }
+  return all
+}
+
+// The preview list after a failed edit: the row back in, where the settled
+// order says, if it should still be there; out if it should not.
+function previewAfterRestore(list, row, present, order, index) {
+  var source = Array.isArray(list) ? list : []
+  var at = indexById(source, row ? row.id : "")
+  if (present) return at >= 0 ? replaceById(source, row) : restoreRow(source, row, order, index)
+  return at >= 0 ? removeById(source, row.id) : source
 }
 
 function replaceById(list, summary) {
@@ -768,10 +1049,10 @@ function messageById(primary, fallback, id) {
 }
 
 // The rail as one numbered list, in the order it is drawn: the provider's
-// mailboxes first, then the user's labels or folders as `railLabels` orders
-// them. Both the sidebar's badges and the keys that jump read this, so the
-// number beside a row and the row a number opens cannot disagree — describing
-// the order twice is how they would.
+// mailboxes first, then the user's labels or folders in the order the rail
+// draws them (`visibleLabels`, the tree). Both the sidebar's badges and the
+// keys that jump read this, so the number beside a row and the row a number
+// opens cannot disagree — describing the order twice is how they would.
 //
 // Ten because the keys are digits. Past that a row simply has no number: a
 // mailbox nobody can reach by keyboard is honest, and renumbering the rail
@@ -782,10 +1063,18 @@ function sidebarSlots(mailboxes, labels, limit) {
   var boxes = Array.isArray(mailboxes) ? mailboxes : []
   for (var i = 0; i < boxes.length && out.length < max; i++) {
     if (!boxes[i] || !boxes[i].key) continue
-    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || "") })
+    out.push({ kind: "mailbox", key: String(boxes[i].key), name: String(boxes[i].label || ""),
+      icon: String(boxes[i].icon || "mail") })
   }
-  var all = railLabels(labels)
+  // The labels in the order given, which is the order the rail draws them:
+  // App hands over `visibleLabels`, the tree with its folded rows left out,
+  // where a child follows its parent whatever the alphabet says. Sorting
+  // here again would number "Work (old)" before "Work/Invoices" while the
+  // rail draws them the other way round, and the digit beside a row would
+  // open a different one. System labels are not rows and get no number.
+  var all = Array.isArray(labels) ? labels : []
   for (var j = 0; j < all.length && out.length < max; j++) {
+    if (!all[j] || all[j].system === true) continue
     out.push({ kind: "label", id: String(all[j].id || ""),
       name: String(all[j].rawName || all[j].name || "") })
   }
@@ -1321,4 +1610,488 @@ function previewReadable(messages, id) {
 // the message, or asking for them in the reader, loads them.
 function showsRemoteImages(alwaysShow, isPreview) {
   return alwaysShow === true && isPreview !== true
+}
+
+// ------------------------------------------------------------ selection
+
+// The rows checked for a bulk action. A list of ids rather than a flag on the
+// summaries, because a summary is what the provider said about a message and
+// which rows the user has ticked is not that.
+function toggleId(ids, id) {
+  var list = Array.isArray(ids) ? ids.slice() : []
+  var key = String(id || "")
+  if (key === "") return list
+  var at = list.indexOf(key)
+  if (at >= 0) list.splice(at, 1)
+  else list.push(key)
+  return list
+}
+
+// Every id from one row to another, inclusive, in list order — what a
+// Shift+click means. Either end unknown to the list means just the other.
+function idsBetween(list, fromId, toId) {
+  var source = Array.isArray(list) ? list : []
+  var a = indexById(source, fromId)
+  var b = indexById(source, toId)
+  if (a < 0 && b < 0) return []
+  if (a < 0) a = b
+  if (b < 0) b = a
+  var lo = Math.min(a, b)
+  var hi = Math.max(a, b)
+  var out = []
+  for (var i = lo; i <= hi; i++) out.push(source[i].id)
+  return out
+}
+
+function unionIds(ids, more) {
+  var out = Array.isArray(ids) ? ids.slice() : []
+  var extra = Array.isArray(more) ? more : []
+  for (var i = 0; i < extra.length; i++) {
+    if (out.indexOf(extra[i]) < 0) out.push(extra[i])
+  }
+  return out
+}
+
+// Shift-click applies the endpoint's next checked state to the whole range.
+// Clearing a range never adds its unchecked gaps or touches rows outside it.
+function toggleRange(ids, list, fromId, toId) {
+  var checked = Array.isArray(ids) ? ids : []
+  if (indexById(list, toId) < 0) return checked.slice()
+  var range = idsBetween(list, fromId, toId)
+  if (checked.indexOf(toId) < 0) return unionIds(checked, range)
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (range.indexOf(checked[i]) < 0) out.push(checked[i])
+  }
+  return out
+}
+
+// The checked ids that are still listed. A reload, a search or an action can
+// take rows away, and a selection that kept naming them would act on messages
+// the user can no longer see.
+function retainIds(ids, list) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    if (indexById(source, checked[i]) >= 0) out.push(checked[i])
+  }
+  return out
+}
+
+function allIds(list) {
+  var source = Array.isArray(list) ? list : []
+  var out = []
+  for (var i = 0; i < source.length; i++) out.push(source[i].id)
+  return out
+}
+
+function summariesById(list, ids) {
+  var source = Array.isArray(list) ? list : []
+  var checked = Array.isArray(ids) ? ids : []
+  var out = []
+  for (var i = 0; i < checked.length; i++) {
+    var index = indexById(source, checked[i])
+    if (index >= 0) out.push(source[index])
+  }
+  return out
+}
+
+// Where the cursor goes when several rows leave at once: the first survivor
+// after it, or the last one before it. Worked out on the list as it still is,
+// like cursorAfterRemoval, and for the same reason.
+function cursorAfterRemovals(list, removedIds, cursorId) {
+  var source = Array.isArray(list) ? list : []
+  var gone = Array.isArray(removedIds) ? removedIds : []
+  var index = indexById(source, cursorId)
+  if (index < 0) return ""
+  var i
+  for (i = index; i < source.length; i++) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  for (i = index - 1; i >= 0; i--) {
+    if (gone.indexOf(source[i].id) < 0) return source[i].id
+  }
+  return ""
+}
+
+// One star key over several rows: they all go the way the majority has not
+// gone yet. All starred means unstar; anything else means star, so a mixed
+// selection lands in one state rather than swapping every row.
+function starActionFor(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  if (rows.length === 0) return "star"
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !rows[i].starred) return "star"
+  }
+  return "unstar"
+}
+
+// "3 messages archived": the count, then the single-message note with its
+// capital taken off. One rule for every action, so a new action's note only
+// has to be written once.
+function batchNote(count, actionLabel) {
+  var label = String(actionLabel || "")
+  if (label === "") return pluralize(count, "message")
+  return pluralize(count, "message") + " " + label.charAt(0).toLowerCase() + label.slice(1)
+}
+
+function selectionStatus(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  return n === 0 ? "" : n + " selected"
+}
+
+// The rows whose request failed, put back where they were: each is taken
+// from the list as it stood before the action and inserted at its old
+// place, or as near as the rows still around it allow. Rows whose request
+// succeeded are left as the action left them.
+function restoreRows(current, before, failedIds) {
+  var now = Array.isArray(current) ? current.slice() : []
+  var was = Array.isArray(before) ? before : []
+  var ids = Array.isArray(failedIds) ? failedIds : []
+  for (var i = 0; i < was.length; i++) {
+    var row = was[i]
+    if (!row || ids.indexOf(String(row.id)) < 0) continue
+    var at = indexById(now, row.id)
+    if (at >= 0) { now[at] = row; continue }
+    // The first later row of the old order that is still present decides
+    // where this one goes back; none means the end.
+    var insertAt = now.length
+    for (var j = i + 1; j < was.length; j++) {
+      var later = indexById(now, was[j].id)
+      if (later >= 0) { insertAt = later; break }
+    }
+    now.splice(insertAt, 0, row)
+  }
+  return now
+}
+
+// "2 of 5 could not be moved to trash: <reason>" — the count that failed,
+// the count asked, the action in the words its note uses, and why.
+function batchFailureNote(asked, failed, actionLabel, error) {
+  var label = String(actionLabel || "")
+  var verb = label === "" ? "acted on" : label.charAt(0).toLowerCase() + label.slice(1)
+  var reason = String(error || "").trim()
+  return failed + " of " + asked + " could not be " + verb + (reason === "" ? "" : ": " + reason)
+}
+
+// ------------------------------------------------------------ folder tree
+
+// The rail's labels as a tree: "Archive/2026" sits under "Archive", indented,
+// and a parent can be folded. The delimiter is the server's own where the
+// provider reported one and "/" where it said nothing, which is what Gmail
+// nests with. An IMAP server that answers LIST with a NIL delimiter has no
+// hierarchy at all, and the provider passes that on as "": then a folder
+// named "a/b" is one folder, not a parent and a child.
+//
+// An ancestor no label names — a folder the server marked \Noselect, or a
+// Gmail label whose parent was never created — is still a row, because its
+// children have to hang from something; it has no id, opens nothing, and
+// folds like any other parent.
+//
+// Rows come back depth-first, siblings in name order, with the rows under a
+// folded parent left out. `unread` on a folded parent is its subtree's, so
+// folding a queue does not hide that it has mail in it.
+function labelTree(labels, collapsedPaths) {
+  var all = Array.isArray(labels) ? labels : []
+  var folded = Array.isArray(collapsedPaths) ? collapsedPaths : []
+  // Children keyed on a prototype-less object: a label named "constructor"
+  // or "__proto__" is a label, not a property of Object.
+  var root = { children: Object.create(null), order: [] }
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var delimiter = labelDelimiter(label)
+    var full = String(label.name || label.rawName || "")
+    if (full === "") continue
+    var parts = delimiter === "" ? [full] : full.split(delimiter)
+    var node = root
+    var path = ""
+    for (var p = 0; p < parts.length; p++) {
+      var part = parts[p]
+      if (part === "" && p > 0) continue
+      path = path === "" ? part : path + delimiter + part
+      if (!node.children[part]) {
+        node.children[part] = { name: part, path: path, label: null,
+          unread: 0, children: Object.create(null), order: [] }
+        node.order.push(part)
+      }
+      node = node.children[part]
+    }
+    node.label = label
+    node.unread = Math.max(0, Math.floor(Number(label.unread) || 0))
+  }
+
+  function subtreeUnread(node) {
+    var sum = node.unread
+    for (var c = 0; c < node.order.length; c++) sum += subtreeUnread(node.children[node.order[c]])
+    return sum
+  }
+
+  var out = []
+  function walk(node, depth) {
+    var names = node.order.slice().sort(function(a, b) {
+      var left = a.toLowerCase(), right = b.toLowerCase()
+      return left < right ? -1 : (left > right ? 1 : 0)
+    })
+    for (var n = 0; n < names.length; n++) {
+      var child = node.children[names[n]]
+      var hasChildren = child.order.length > 0
+      var expanded = !hasChildren || folded.indexOf(child.path) < 0
+      out.push({
+        id: child.label ? String(child.label.id || "") : "",
+        rawName: child.label ? String(child.label.rawName || child.label.name || "") : "",
+        name: child.name,
+        path: child.path,
+        depth: depth,
+        hasChildren: hasChildren,
+        expanded: expanded,
+        selectable: !!child.label,
+        unread: expanded ? child.unread : subtreeUnread(child)
+      })
+      if (expanded) walk(child, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return out
+}
+
+// The labels in the order the rail draws them, folded rows left out — what
+// the Ctrl digits number, so a digit never opens a row that is not on screen.
+function visibleLabels(labels, collapsedPaths) {
+  var rows = labelTree(labels, collapsedPaths)
+  var all = Array.isArray(labels) ? labels : []
+  // One pass over the labels, not one per row: a rail of thousands of
+  // folders is rebuilt on every fold.
+  var byId = Object.create(null)
+  for (var l = 0; l < all.length; l++) {
+    if (all[l] && byId[String(all[l].id || "")] === undefined) byId[String(all[l].id || "")] = all[l]
+  }
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].selectable) continue
+    var label = byId[rows[i].id]
+    if (label !== undefined) out.push(label)
+  }
+  return out
+}
+
+// The separator a provider nests with: its own where it reported one, "/"
+// where it reported nothing, and "" where it said in so many words that
+// there is no hierarchy — IMAP's NIL delimiter.
+function labelDelimiter(label) {
+  if (!label || label.delimiter === undefined || label.delimiter === null) return "/"
+  return String(label.delimiter)
+}
+
+function togglePath(paths, path) {
+  return toggleId(paths, path)
+}
+
+function activityStatus(counts) {
+  var c = counts || {}
+  function count(value) { return Math.max(0, Math.floor(Number(value)) || 0) }
+  var sending = count(c.sending)
+  var queuedSends = count(c.queuedSends)
+  var running = count(c.running)
+  var waiting = count(c.waiting)
+  var parts = []
+  if (sending > 0) parts.push(sending === 1 ? "Sending" : "Sending " + sending)
+  if (queuedSends > 0) parts.push(queuedSends + " queued to send")
+  if (running > 0) parts.push(running === 1 ? "1 action running" : running + " actions running")
+  if (waiting > 0) parts.push(waiting + " waiting")
+  return parts.join(" \u00b7 ")
+}
+
+// ------------------------------------------------------------ label names
+
+// A label's path taken apart and put together with the delimiter its
+// provider nests with: "/" for Gmail, whatever the server said for IMAP.
+// The path helpers take the delimiter `labelDelimiter` gives: a separator
+// to split on, or "" for a server with no hierarchy, where every path is a
+// leaf, nothing has a parent, and nothing can be put under anything.
+function labelLeaf(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep === "") return text
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? text : text.slice(at + sep.length)
+}
+
+function labelParent(path, delimiter) {
+  var text = String(path || "")
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep === "") return ""
+  var at = text.lastIndexOf(sep)
+  return at < 0 ? "" : text.slice(0, at)
+}
+
+function labelPathJoin(parent, leaf, delimiter) {
+  var head = String(parent || "")
+  var tail = String(leaf || "").trim()
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (head === "" || sep === "") return tail
+  return head + sep + tail
+}
+
+// Whether a name typed for a label is one the provider can take: not empty,
+// and not carrying the delimiter, which would make two labels of one.
+function labelNameProblem(name, delimiter) {
+  var text = String(name || "").trim()
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (text === "") return "A label needs a name"
+  if (sep !== "" && text.indexOf(sep) >= 0) return "A name cannot contain " + sep + "; use New sub-label to nest"
+  return ""
+}
+
+// What a server with no hierarchy says to a label asked to go under
+// another, or "" where nesting is possible.
+function labelNestProblem(parentPath, delimiter) {
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  if (sep !== "" || String(parentPath || "") === "") return ""
+  return "This server keeps its folders in one flat list, so nothing can go under " + String(parentPath)
+}
+
+// Where a label may be moved: every other label that is not beneath it, plus
+// the top level. Moving a label under its own descendant would swallow it.
+function labelMoveTargets(labels, movingPath, delimiter) {
+  var all = Array.isArray(labels) ? labels : []
+  var sep = String(delimiter === undefined || delimiter === null ? "/" : delimiter)
+  var moving = String(movingPath || "")
+  var out = [{ id: "", name: "Top level", path: "" }]
+  // No hierarchy: the top level is the only place, and the label is there.
+  if (sep === "") return out
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i]
+    if (!label || label.system) continue
+    var path = String(label.name || label.rawName || "")
+    if (path === "" || path === moving) continue
+    if (moving !== "" && path.indexOf(moving + sep) === 0) continue
+    if (path === labelParent(moving, sep)) continue
+    out.push({ id: String(label.id || ""), name: path, path: path })
+  }
+  return out
+}
+
+// The watched ids after a folder was renamed or moved, or deleted. An IMAP
+// folder's id is its wire name, so a rename changes the id of the folder
+// and of every folder beneath it; a watch on any of them follows to the id
+// the fresh listing gives that path. A Gmail id survives a rename and is
+// kept as it is. A watch on a folder the listing no longer has — deleted,
+// or gone with its parent — is dropped rather than polled forever. The
+// same array comes back when nothing changed, so a caller can tell.
+function migrateMonitoredIds(monitored, before, after, oldPath, newPath, delimiter) {
+  return migrateMonitoredChanges(monitored, [{ before: before, oldPath: oldPath,
+    newPath: newPath, delimiter: delimiter }], after)
+}
+
+// Apply every pending path change before consulting the final listing. An
+// intermediate name need never appear in that listing, and a surviving child
+// remains watched when its parent alone was deleted.
+function migrateMonitoredChanges(monitored, moves, after) {
+  var ids = Array.isArray(monitored) ? monitored : []
+  var now = Array.isArray(after) ? after : []
+  var out = []
+  function pathOf(label) { return label ? String(label.name || label.rawName || "") : "" }
+  for (var k = 0; k < ids.length; k++) {
+    var id = String(ids[k] || "")
+    if (id === "") continue
+    if (indexById(now, id) >= 0) { out.push(id); continue }
+    var path = ""
+    for (var m = 0; m < moves.length; m++) {
+      var move = moves[m]
+      var before = Array.isArray(move.before) ? move.before : []
+      if (path === "") {
+        var old = indexById(before, id)
+        if (old >= 0) path = pathOf(before[old])
+      }
+      var from = String(move.oldPath || "")
+      var to = String(move.newPath || "")
+      var sep = String(move.delimiter === undefined || move.delimiter === null ? "/" : move.delimiter)
+      if (from !== "" && path !== "" && (path === from || (sep !== "" && path.indexOf(from + sep) === 0))) {
+        if (to === "") { path = ""; break }
+        path = to + path.slice(from.length)
+      }
+    }
+    if (path === "") continue
+    for (var j = 0; j < now.length; j++) {
+      if (pathOf(now[j]) === path && String(now[j].id || "") !== "") {
+        if (out.indexOf(String(now[j].id)) < 0) out.push(String(now[j].id))
+        break
+      }
+    }
+  }
+  if (out.length === ids.length) {
+    var same = true
+    for (var n = 0; n < ids.length; n++) if (out[n] !== ids[n]) same = false
+    if (same) return ids
+  }
+  return out
+}
+
+// "3 new in Receipts", or the two labels with the most, for the status line.
+function monitoredNote(grown) {
+  var list = Array.isArray(grown) ? grown.slice() : []
+  if (list.length === 0) return ""
+  list.sort(function(a, b) { return Number(b.delta || 0) - Number(a.delta || 0) })
+  var parts = []
+  for (var i = 0; i < list.length && i < 2; i++)
+    parts.push(Math.max(1, Math.floor(Number(list[i].delta) || 1)) + " new in " + String(list[i].name || ""))
+  var more = list.length - parts.length
+  return parts.join(", ") + (more > 0 ? " and " + more + " more" : "")
+}
+
+
+// ------------------------------------------------------------ type to find
+
+// How well a few typed letters name a row. Every letter must appear in the
+// text, in order; the closer together and the nearer the start of words they
+// fall, the better. Zero is no match. The letters are compared case-folded,
+// so "sfl" finds "SFL" and "the-sfl.com" alike.
+function fuzzyScore(query, text) {
+  var needle = String(query || "").toLowerCase().replace(/\s+/g, "")
+  var hay = String(text || "").toLowerCase()
+  if (needle === "") return 1
+  if (hay === "") return 0
+  var at = hay.indexOf(needle)
+  if (at >= 0) return 1000 - at + (at === 0 || /[^a-z0-9]/.test(hay.charAt(at - 1)) ? 200 : 0)
+  var score = 0
+  var from = 0
+  var last = -2
+  for (var i = 0; i < needle.length; i++) {
+    var found = hay.indexOf(needle.charAt(i), from)
+    if (found < 0) return 0
+    score += 10
+    if (found === last + 1) score += 8
+    if (found === 0 || /[^a-z0-9]/.test(hay.charAt(found - 1))) score += 12
+    last = found
+    from = found + 1
+  }
+  return score
+}
+
+// The rows a typed query keeps, best first, each remembering where it sat
+// in the full list — `sourceIndex`, not `index`, which a Repeater hands its
+// delegate for the row's place on screen — so choosing one still names the
+// same thing. An empty query keeps every row in its own order. A row is
+// matched on whatever it carries: its name, the name it was given, its
+// address.
+function filterRows(rows, query) {
+  var list = Array.isArray(rows) ? rows : []
+  var typed = String(query || "").trim()
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (!row) continue
+    var text = [row.name, row.label, row.email].filter(function(v) { return v !== undefined && v !== null && String(v) !== "" }).join(" ")
+    var score = typed === "" ? 1 : fuzzyScore(typed, text)
+    if (score <= 0) continue
+    var kept = {}
+    for (var key in row) kept[key] = row[key]
+    kept.sourceIndex = i
+    kept.score = score
+    out.push(kept)
+  }
+  if (typed !== "") out.sort(function(a, b) { return b.score - a.score || a.sourceIndex - b.sourceIndex })
+  return out
 }
