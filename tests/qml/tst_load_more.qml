@@ -39,6 +39,7 @@ Item {
       service: fakeService
       textColor: Color.foreground
       accentColor: Color.accent
+      urgentColor: Color.accent
       dimColor: Color.foreground
       panelFontFamily: "monospace"
     }
