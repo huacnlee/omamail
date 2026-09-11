@@ -142,6 +142,19 @@ a contents-write token as described above.
 
 ## Local verification
 
+`make install-plugin` removes the old private backend and its local-build marker,
+then links and reloads only the plugin. It does not compile or download a backend.
+Accounts, drafts and caches are preserved. Use it to test a fresh backend setup:
+
+```sh
+make install-plugin
+```
+
+Then open Omamail and choose Install backend. Any optional CLI symlink still points
+to the same private binary location and works again after installation. Ensure the
+shell has no `OMAMAIL_BIN` development override, which would otherwise select that
+binary instead of testing the missing-runtime screen.
+
 To try the latest checkout in the desktop, run `make install`. It first builds
 with `cargo build --locked --release` into this checkout's `target/` directory,
 regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary before

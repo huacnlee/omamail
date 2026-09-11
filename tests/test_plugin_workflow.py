@@ -17,6 +17,14 @@ class PluginWorkflow(unittest.TestCase):
             'bash scripts/link-plugin.sh',
         ])
 
+    def test_install_plugin_does_not_build_or_install_backend(self):
+        result = subprocess.run(["make", "--no-print-directory", "-n", "install-plugin"], cwd=ROOT,
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.strip().splitlines(), [
+            'python3 scripts/backend-runtime.py uninstall',
+            'bash scripts/link-plugin.sh',
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

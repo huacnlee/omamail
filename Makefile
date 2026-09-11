@@ -232,9 +232,14 @@ validate: test qml-check
 	git diff --check
 
 # Development only: the Marketplace installs the plugin for ordinary users.
-.PHONY: install-backend-local
+.PHONY: install-backend-local install-plugin
 install-backend-local: backend
 	python3 scripts/backend-runtime.py install-local
 
 install: install-backend-local
+	bash scripts/link-plugin.sh
+
+# Reset the private runtime so the setup page exercises a fresh installation.
+install-plugin:
+	python3 scripts/backend-runtime.py uninstall
 	bash scripts/link-plugin.sh
