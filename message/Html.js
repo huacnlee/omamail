@@ -574,10 +574,12 @@ function isPublicUrl(value) {
   return true
 }
 
-// What a click may hand to xdg-open. mailto: is a draft, not a page, and is
-// handled before this is asked. Everything else has to be http(s) at a
-// public host — the same judgement that decides whether a picture may load.
-function publicHttpUrl(value) {
+// A cheap spelling gate before a deliberate click leaves through the system
+// browser. It rejects unsafe schemes and names that explicitly describe this
+// machine or its private network. It is not the network boundary used for
+// automatic requests: the browser resolves DNS and follows redirects itself,
+// so only public_http.py can pin a checked destination.
+function externallyOpenableHttpUrl(value) {
   var text = String(value || "").trim()
   if (!/^https?:\/\//i.test(text)) return ""
   return isPublicUrl(text) ? text : ""

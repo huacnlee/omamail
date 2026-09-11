@@ -47,8 +47,8 @@ function upcomingEvents(events, nowMs, limit) {
     for (var key in item) copy[key] = item[key]
     copy.sourceLabel = String(item.sourceName || item.sourceId || "Calendar")
     var location = String(item.location || "").trim()
-    copy.callUrl = Html.publicHttpUrl(item.meetLink)
-      || Html.publicHttpUrl(/^https?:\/\/\S+$/i.test(location) ? location : "")
+    copy.callUrl = Html.externallyOpenableHttpUrl(item.meetLink)
+      || Html.externallyOpenableHttpUrl(/^https?:\/\/\S+$/i.test(location) ? location : "")
     out.push(copy)
   }
   out.sort(function(left, right) { return Number(left.start.ms) - Number(right.start.ms) })

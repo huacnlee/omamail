@@ -97,7 +97,7 @@ Item {
       root.mailtoRequested(url)
       return
     }
-    var opened = Html.publicHttpUrl(url)
+    var opened = Html.externallyOpenableHttpUrl(url)
     if (opened === "") return
     Qt.openUrlExternally(opened)
   }

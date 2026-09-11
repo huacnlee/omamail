@@ -61,7 +61,7 @@ Rectangle {
   color: root.backgroundColor
 
   function httpLink(value) {
-    return Html.publicHttpUrl(value)
+    return Html.externallyOpenableHttpUrl(value)
   }
 
   function dateSummary() {
