@@ -36,7 +36,7 @@ Item {
 
     function test_prepared_raster_bytes_are_shown() {
       var sheet = popover()
-      var data = "data:image/png;base64,AAAA"
+      var data = "data:image/png;base64,iVBORw0KGgo="
       sheet.showPrepared("https://cdn.example.com/a.png", data)
       compare(sheet.source, data)
       compare(sheet.refused, false)
@@ -45,6 +45,14 @@ Item {
     function test_svg_data_is_not_a_picture() {
       var sheet = popover()
       sheet.show("data:image/svg+xml;base64,AAA")
+      compare(sheet.source, "")
+      compare(sheet.refused, true)
+    }
+
+    function test_svg_disguised_as_png_is_not_a_picture() {
+      var data = "data:image/png;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnPjwvU3ZnPg=="
+      var sheet = popover()
+      sheet.show(data)
       compare(sheet.source, "")
       compare(sheet.refused, true)
     }

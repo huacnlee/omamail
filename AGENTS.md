@@ -391,7 +391,7 @@ key. What matters while working:
   one-click unsubscribe goes out through `scripts/unsubscribe.py`, whose HTTP client never follows redirects. A 3xx is reported as a list that did not unsubscribe rather than as an address to chase. No sender-controlled value is interpolated into a shell or curl config.
 - **Qt never fetches a remote message image itself.** Its loader takes no policy
   from QML, follows redirects, and draws a broken placeholder while a resource
-  is pending. Once the reader has allowed images, `scripts/image-fetch.py`
+  is pending. Once the reader has allowed images, `scripts/image_fetch.py`
   fetches each approved public HTTP(S) source through `public_http.py`, with checked DNS answers, pinned connections, no redirects, a size ceiling and a whole-process request deadline covering DNS too. The declared image type must match a supported raster signature; an SVG labelled PNG is refused. Only a successful supported image comes back as a
   `data:` URI; until then the source is absent from both rich documents. Do not
   hand the original remote URL back to Qt or replace this with a QML request,

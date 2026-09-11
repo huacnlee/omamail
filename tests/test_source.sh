@@ -123,7 +123,7 @@ grep -q 'onAccountIdChanged: renderCache = RenderCache.create(12)' account/MailA
   || fail "the render cache must not cross account identities"
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
-grep -q 'command: \["python3", pluginDir + "/scripts/image-fetch.py"\]' account/MailAccount.qml \
+grep -q 'command: \["python3", pluginDir + "/scripts/image_fetch.py"\]' account/MailAccount.qml \
   || fail "remote images must use the public-IP-checked Python transport"
 grep -q 'function isDisplayableImageUrl(value) {' message/Html.js \
   || fail "isDisplayableImageUrl must remain the Image-element gate"

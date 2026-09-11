@@ -342,11 +342,11 @@ assert.strictEqual(html.sanitize(many, { allowRemoteImages: true, maxImages: 3 }
 
   const ready = html.sanitize(source, {
     allowRemoteImages: true,
-    remoteImageData: ({ "https://cdn.example.com/photo.png": "data:image/png;base64,AAAA" }),
+    remoteImageData: ({ "https://cdn.example.com/photo.png": "data:image/png;base64,iVBORw0KGgo=" }),
     withReader: true
   })
-  assert.ok(ready.html.indexOf("data:image/png;base64,AAAA") > 0)
-  assert.ok(ready.reader.html.indexOf("data:image/png;base64,AAAA") > 0)
+  assert.ok(ready.html.indexOf("data:image/png;base64,iVBORw0KGgo=") > 0)
+  assert.ok(ready.reader.html.indexOf("data:image/png;base64,iVBORw0KGgo=") > 0)
 }
 
 // -------------------------------------------------------------- complexity
@@ -480,12 +480,27 @@ assert.ok(html.sanitize("<div style=\"background-image:url(https://track.example
 assert.strictEqual(html.isDisplayableImageUrl("https://cdn.example.com/a.png"), false)
 assert.strictEqual(html.isDisplayableImageUrl("http://127.0.0.1/a.png"), false)
 assert.strictEqual(html.isDisplayableImageUrl("file:///etc/hostname"), false)
-assert.strictEqual(html.isDisplayableImageUrl("data:image/png;base64,AAA"), true)
+const tinyPng = "data:image/png;base64,iVBORw0KGgo="
+assert.strictEqual(html.isDisplayableImageUrl(tinyPng), true)
 assert.strictEqual(html.isDisplayableImageUrl("data:image/svg+xml;base64,AAA"), false)
 assert.strictEqual(html.isDisplayableImageUrl("cid:logo"), false)
 assert.strictEqual(html.isDisplayableImageUrl(""), false)
-assert.strictEqual(html.isRasterDataImage("data:image/png;base64,AAA"), true)
+assert.strictEqual(html.isRasterDataImage(tinyPng), true)
 assert.strictEqual(html.isRasterDataImage("data:image/svg+xml;base64,AAA"), false)
+const disguisedSvg = "data:image/png;base64," + Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg"><image href="http://127.0.0.1/private"/></svg>'
+).toString("base64")
+assert.strictEqual(html.isRasterDataImage(disguisedSvg), false,
+  "a sender's MIME spelling is not evidence of raster bytes")
+assert.strictEqual(html.isDisplayableImageUrl(disguisedSvg), false,
+  "disguised SVG must not reach a Qt Image source")
+for (const invalid of [
+  "data:image/png;base64,iVBORw0KGgo",       // truncated quartet
+  "data:image/png;base64,iVBORw0KGgo===",    // excess padding
+  "data:image/png;base64,iVBORw0KGgo=tail",  // trailing bytes after padding
+  "data:image/jpeg;base64,iVBORw0KGgo=",     // declaration does not match bytes
+  "data:image/png;base64,iVBORw0KGgp="        // noncanonical padding bits
+]) assert.strictEqual(html.isRasterDataImage(invalid), false, invalid)
 
 assert.strictEqual(html.hasRemoteImages(tracked), true)
 assert.strictEqual(html.hasRemoteImages("<p>none</p>"), false)
@@ -604,7 +619,9 @@ for (const source of ["<input type=\"image\" src=\"https://x.example.com/a.png\"
 // A data: URL is the message's own bytes only when it is a raster picture.
 // SVG is a document with references of its own; the fetch worker refuses it
 // and so does the sanitiser, even with remote images off.
-assert.ok(html.sanitize("<img src=\"data:image/png;base64,AAA\">").html.indexOf("data:image/png") > 0)
+assert.ok(html.sanitize("<img src=\"" + tinyPng + "\">").html.indexOf("data:image/png") > 0)
+assert.strictEqual(html.sanitize("<img src=\"" + disguisedSvg + "\">").html, "",
+  "a disguised document must be removed before rendering")
 assert.strictEqual(html.sanitize("<img src=\"data:text/html,<b>x\">").html, "")
 assert.strictEqual(html.sanitize("<img src=\"data:image/svg+xml;base64,AAA\">").html, "")
 assert.strictEqual(html.imageSourceKind("data:image/svg+xml;base64,AAA"), "unsafe")
@@ -1290,12 +1307,12 @@ function activityMail() {
   const shown = reading("<p><img src=\"https://cdn.example.com/hero.png\" alt=\"Hero\">"
     + "<img src=\"file:///etc/x.png\"><img src=\"http://127.0.0.1/a.png\">"
     + "<img src=\"//cdn.example.com/protocol.png\">"
-    + "<img src=\"data:image/png;base64,AAAA\">"
+    + "<img src=\"data:image/png;base64,iVBORw0KGgo=\">"
     + "<img src=\"cid:part1\"></p>", { allowRemoteImages: true })
   assert.strictEqual(shown.html,
     "<p><img src=\"https://cdn.example.com/hero.png\">"
     + "<img src=\"//cdn.example.com/protocol.png\">"
-    + "<img src=\"data:image/png;base64,AAAA\">"
+    + "<img src=\"data:image/png;base64,iVBORw0KGgo=\">"
     + "<img src=\"cid:part1\"></p>")
   assert.strictEqual(shown.images, 2)
 

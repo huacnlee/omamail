@@ -668,13 +668,62 @@ function isRemoteSource(value) {
 //           base URL, which for a TextEdit is the QML file's own directory —
 //           a read of whatever sits next to the plugin.
 // Raster bytes already in the message, or already fetched through
-// scripts/image-fetch.py. SVG is a document with its own hrefs, and Qt's
+// scripts/image_fetch.py. SVG is a document with its own hrefs, and Qt's
 // image plugins may follow them; the fetch worker refuses it for the same
 // reason. Anything else with a data: prefix is not a picture.
-var RASTER_DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i
+var BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+function base64Prefix(payload, byteLimit) {
+  var text = String(payload || "")
+  if (text === "" || text.length % 4 !== 0
+      || !/^[A-Za-z0-9+/]*={0,2}$/.test(text)) return []
+  var padding = text.slice(-2) === "==" ? 2 : (text.slice(-1) === "=" ? 1 : 0)
+  if (padding === 2 && BASE64_ALPHABET.indexOf(text.charAt(text.length - 3)) % 16 !== 0)
+    return []
+  if (padding === 1 && BASE64_ALPHABET.indexOf(text.charAt(text.length - 2)) % 4 !== 0)
+    return []
+  var out = []
+  for (var i = 0; i < text.length && out.length < byteLimit; i += 4) {
+    var a = BASE64_ALPHABET.indexOf(text.charAt(i))
+    var b = BASE64_ALPHABET.indexOf(text.charAt(i + 1))
+    var c = text.charAt(i + 2) === "=" ? 0 : BASE64_ALPHABET.indexOf(text.charAt(i + 2))
+    var d = text.charAt(i + 3) === "=" ? 0 : BASE64_ALPHABET.indexOf(text.charAt(i + 3))
+    if (a < 0 || b < 0 || c < 0 || d < 0) return []
+    out.push((a << 2) | (b >> 4))
+    if (text.charAt(i + 2) !== "=" && out.length < byteLimit)
+      out.push(((b & 15) << 4) | (c >> 2))
+    if (text.charAt(i + 3) !== "=" && out.length < byteLimit)
+      out.push(((c & 3) << 6) | d)
+  }
+  return out
+}
+
+function bytesStartWith(bytes, expected) {
+  if (bytes.length < expected.length) return false
+  for (var i = 0; i < expected.length; i++) {
+    if (bytes[i] !== expected[i]) return false
+  }
+  return true
+}
 
 function isRasterDataImage(value) {
-  return RASTER_DATA_IMAGE.test(String(value || ""))
+  var match = String(value || "").match(
+    /^data:image\/(png|jpe?g|gif|webp|bmp);base64,([A-Za-z0-9+/]*={0,2})$/i)
+  if (!match) return false
+  var bytes = base64Prefix(match[2], 12)
+  var kind = match[1].toLowerCase()
+  if (kind === "png")
+    return bytesStartWith(bytes, [137, 80, 78, 71, 13, 10, 26, 10])
+  if (kind === "jpg" || kind === "jpeg")
+    return bytesStartWith(bytes, [255, 216, 255])
+  if (kind === "gif")
+    return bytesStartWith(bytes, [71, 73, 70, 56, 55, 97])
+      || bytesStartWith(bytes, [71, 73, 70, 56, 57, 97])
+  if (kind === "webp")
+    return bytesStartWith(bytes, [82, 73, 70, 70])
+      && bytes.length >= 12
+      && bytes[8] === 87 && bytes[9] === 69 && bytes[10] === 66 && bytes[11] === 80
+  return kind === "bmp" && bytesStartWith(bytes, [66, 77])
 }
 
 function imageSourceKind(value) {

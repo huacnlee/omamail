@@ -1337,7 +1337,7 @@ Item {
     var source = String(queue.shift())
     imageFetchQueue = queue
     var request = imageFetchComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/image-fetch.py"],
+      command: ["python3", pluginDir + "/scripts/image_fetch.py"],
       requestLine: Mail.encodeBase64(source)
     })
     imageFetchProcess = request
@@ -1382,7 +1382,7 @@ Item {
       return
     }
     var request = imageFetchComponent.createObject(root, {
-      command: ["python3", pluginDir + "/scripts/image-fetch.py"],
+      command: ["python3", pluginDir + "/scripts/image_fetch.py"],
       requestLine: Mail.encodeBase64(wanted)
     })
     if (!request) {
