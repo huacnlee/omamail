@@ -181,3 +181,79 @@ console.log("test_calendar_sources.js ok")
   assert.strictEqual(mine.sources.length, 2, "another account's Microsoft calendar is left out, a CalDAV one kept")
   assert.strictEqual(sources.forAccount(withMicrosoft, "me@gmail.com").sources.length, 1)
 }
+
+// Provider discovery replaces only the account-owned calendars, preserves the
+// user's choices and adopts a manually assembled iCloud URL without duplication.
+{
+  let before = sources.add(sources.emptyList(), {
+    id: "manual-icloud", kind: "caldav", name: "Old Personal",
+    url: "https://p37-caldav.icloud.com/123/calendars/personal/",
+    username: "person@icloud.com", enabled: false, colorKey: "cyan"
+  })
+  before = sources.add(before, {
+    id: "unrelated", kind: "caldav", name: "Work",
+    url: "https://dav.example/work/", username: "person", enabled: true
+  })
+  const found = sources.applyDiscovery(before, {
+    provider: "icloud", accountId: "imap:person@icloud.com", calendars: [{
+      sourceId: "icloud:stable-personal", name: "Personal",
+      url: "https://p37-caldav.icloud.com/123/calendars/personal",
+      username: "person@icloud.com", readOnly: true
+    }, {
+      sourceId: "icloud:stable-family", name: "Family",
+      url: "https://p37-caldav.icloud.com/123/calendars/family/",
+      username: "person@icloud.com", readOnly: false
+    }]
+  })
+  assert.strictEqual(found.sources.length, 3)
+  assert.strictEqual(found.sources[0].id, "unrelated")
+  assert.strictEqual(found.sources[1].id, "icloud:stable-personal")
+  assert.strictEqual(found.sources[1].enabled, false)
+  assert.strictEqual(found.sources[1].colorKey, "cyan")
+  assert.strictEqual(found.sources[1].readOnly, true)
+  assert.strictEqual(found.sources[1].accountId, "imap:person@icloud.com")
+  assert.strictEqual(found.sources[1].discovered, true)
+  assert.strictEqual(found.sources[2].enabled, true)
+  assert.strictEqual(sources.providerLabel("icloud"), "iCloud")
+  assert.strictEqual(sources.forAccount(found, "imap:person@icloud.com").sources.length, 3)
+
+  const refreshed = sources.applyDiscovery(found, {
+    provider: "icloud", accountId: "imap:person@icloud.com", calendars: [{
+      sourceId: "icloud:stable-personal", name: "Personal renamed",
+      url: "https://p37-caldav.icloud.com/123/calendars/personal/",
+      username: "person@icloud.com", readOnly: false
+    }]
+  })
+  assert.strictEqual(refreshed.sources.length, 2, "a calendar no longer returned is removed")
+  assert.strictEqual(refreshed.sources[1].enabled, false, "refresh keeps visibility")
+  assert.strictEqual(refreshed.sources[1].colorKey, "cyan", "refresh keeps color")
+  assert.strictEqual(refreshed.sources[1].name, "Personal renamed")
+}
+
+{
+  let saved = sources.add(sources.emptyList(), {
+    id: "microsoft:outlook:me@contoso.com", kind: "microsoft", name: "Calendar",
+    accountId: "outlook:me@contoso.com", calendarId: "default-id", enabled: false,
+    readOnly: false, discovered: true, colorKey: "blue"
+  })
+  const found = sources.applyDiscovery(saved, {
+    provider: "microsoft", accountId: "outlook:me@contoso.com", calendars: [{
+      sourceId: "microsoft:outlook:me@contoso.com", calendarId: "default-id",
+      name: "Calendar", readOnly: false, isDefault: true
+    }, {
+      sourceId: "microsoft:holiday-hash", calendarId: "holiday-id",
+      name: "Holidays", readOnly: true
+    }]
+  })
+  assert.strictEqual(found.sources.length, 2)
+  assert.strictEqual(found.sources[0].enabled, false)
+  assert.strictEqual(found.sources[0].calendarId, "default-id")
+  assert.strictEqual(found.sources[1].readOnly, true)
+  const available = sources.withMicrosoftAccounts(found, [{
+    id: "outlook:me@contoso.com", email: "me@contoso.com",
+    provider: "outlook", signedIn: true
+  }])
+  assert.strictEqual(available.sources.length, 2, "the synthesized default does not duplicate discovery")
+  assert.strictEqual(available.sources[0].calendarId, "default-id")
+  assert.strictEqual(available.sources[0].enabled, false)
+}

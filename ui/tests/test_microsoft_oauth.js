@@ -58,6 +58,12 @@ assert.strictEqual(microsoft.missingGraphScope("openid profile User.Read"), true
 deepEqual(microsoft.missingMailScopes(""), [])
 deepEqual(microsoft.missingMailScopes("IMAP.AccessAsUser.All SMTP.Send"), [])
 assert.ok(microsoft.graphScopeMessage().indexOf("Mail.Send") >= 0)
+assert.strictEqual(microsoft.connectionReady({ mail: true, graph: true, calendar: true }), true)
+assert.strictEqual(microsoft.connectionReady({ mail: true, graph: true, calendar: false }), false)
+assert.strictEqual(microsoft.connectionStatus({ mail: true, graph: true, calendar: true }, true, true),
+  "Account type: Work or school\nMail access: Connected\nMicrosoft Graph: Mail.Send and Calendars.ReadWrite granted\nCalendar: Reachable\nSending: Microsoft Graph selected")
+assert.ok(microsoft.connectionStatus({ mail: false, graph: false, calendar: false }, false)
+  .indexOf("SMTP selected") >= 0)
 assert.strictEqual(microsoft.isValidClientId(clientId), true)
 assert.strictEqual(microsoft.isValidClientId("not-a-guid"), false)
 assert.strictEqual(microsoft.isValidClientId(""), false)

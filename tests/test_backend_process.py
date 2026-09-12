@@ -50,7 +50,7 @@ Scope {
     id: backend
     executable: __BINARY__
     expectedVersion: __VERSION__
-    expectedApiVersion: 1
+    expectedApiVersion: __API_VERSION__
     onReadyChanged: {
       if (!ready || root.began) return
       root.began = true
@@ -153,6 +153,7 @@ def main():
         raise SystemExit("Quickshell is required: install it, then rerun make test-backend-process")
     binary = ROOT / "target/debug/omamail"
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
+    api_version = json.loads((ROOT / "backend-api.json").read_text())["apiVersion"]
     with tempfile.TemporaryDirectory(prefix="omamail-backend-process-") as directory:
         temporary = Path(directory)
         env = os.environ.copy()
@@ -178,6 +179,7 @@ def main():
         qml = QML.replace("__MODULE__", '"backend"')
         qml = qml.replace("__BINARY__", json.dumps(str(binary)))
         qml = qml.replace("__VERSION__", json.dumps(version))
+        qml = qml.replace("__API_VERSION__", str(api_version))
         expected = base64.urlsafe_b64encode(b"\x00\xff\r\n" + b"abc123" * 200000).decode().rstrip("=")
         qml = qml.replace("__EXPECTED__", json.dumps(expected))
         config = temporary / "shell.qml"

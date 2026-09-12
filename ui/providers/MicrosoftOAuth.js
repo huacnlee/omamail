@@ -375,6 +375,29 @@ function missingScopeMessage(missing) {
     + " permission. Check the app registration and sign in again"
 }
 
+// A connection check reports capabilities, never provider diagnostics. Keep
+// its wording here with the rest of Microsoft's presentation rules so the
+// setup page only owns the asynchronous button state.
+function connectionStatus(report, graphSend, workAccount) {
+  var value = report || {}
+  return [
+    "Account type: " + (workAccount === true ? "Work or school" : "Personal Microsoft account"),
+    "Mail access: " + (value.mail === true ? "Connected" : "Check the sign-in and IMAP access"),
+    "Microsoft Graph: " + (value.graph === true
+      ? "Mail.Send and Calendars.ReadWrite granted"
+      : "Check the app permissions and sign in again"),
+    "Calendar: " + (value.calendar === true
+      ? "Reachable"
+      : "Check Calendars.ReadWrite and sign in again"),
+    "Sending: " + (graphSend === true ? "Microsoft Graph selected" : "SMTP selected")
+  ].join("\n")
+}
+
+function connectionReady(report) {
+  var value = report || {}
+  return value.mail === true && value.graph === true && value.calendar === true
+}
+
 function refreshFailureDisposition(result) {
   return result && result.invalidGrant ? "signed_out" : "retry"
 }

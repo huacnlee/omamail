@@ -185,6 +185,9 @@ impl Session {
         if method == "outlook.graphSend" {
             return Box::pin(self.auth.call(method, params)).await;
         }
+        if method == "outlook.connectionCheck" {
+            return Box::pin(crate::providers::outlook::connection_check(params)).await;
+        }
         if method == "attachment.read" {
             let params = params.clone();
             return tokio::task::spawn_blocking(move || crate::attachment::read(&params))
@@ -304,6 +307,9 @@ impl Session {
             };
             return Box::pin(crate::calendar::call(params, token.as_deref())).await;
         }
+        if method == "calendar.discover" {
+            return Box::pin(crate::calendar::discover(params)).await;
+        }
         if method == "cache.bodyPutUpload" {
             let mut params = params.as_object().cloned().ok_or("invalid_params")?;
             if params
@@ -400,7 +406,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 1, "methods": methods::ALL
+            "protocol": 1, "apiVersion": 3, "methods": methods::ALL
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),

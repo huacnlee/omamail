@@ -671,7 +671,7 @@ function createEvent(fields, nowMs) {
 function writeRefusal(source, event) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
-  if (source.kind !== "caldav") return ""
+  if (source.kind !== "caldav" && source.kind !== "icloud") return ""
   // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
   // the event's href still names the series' shared file — the raw line the
   // parser kept answers for it.

@@ -3,7 +3,7 @@
 .import "Palette.js" as Palette
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "microsoft", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -43,7 +43,9 @@ function makeSource(raw) {
     id: id, kind: kind, name: trimmed(value.name),
     url: trimmed(value.url), username: trimmed(value.username),
     accountId: trimmed(value.accountId), enabled: value.enabled !== false,
-    readOnly: value.readOnly === true, colorKey: colorKey
+    calendarId: trimmed(value.calendarId),
+    readOnly: value.readOnly === true, discovered: value.discovered === true,
+    colorKey: colorKey
   }
 }
 
@@ -114,6 +116,12 @@ function validate(raw) {
     return source.accountId !== ""
       ? { ok: true, source: source }
       : { ok: false, error: "Choose a signed-in Google account" }
+  }
+  if (source.kind === "icloud") {
+    if (source.accountId === "") return { ok: false, error: "Choose a signed-in iCloud account" }
+    if (source.name === "") return { ok: false, error: "That iCloud calendar has no name" }
+    if (!/^https:\/\//i.test(source.url)) return { ok: false, error: "That iCloud calendar has no address" }
+    return { ok: true, source: source }
   }
   if (source.kind === "hey")
     return { ok: false, error: "The HEY CLI does not expose calendar events" }
@@ -202,7 +210,9 @@ function withMicrosoftAccounts(list, accountSummaries) {
       name: trimmed(account.email || account.label || "Microsoft Calendar"),
       accountId: accountId,
       enabled: saved ? saved.enabled !== false : true,
-      readOnly: false,
+      calendarId: saved ? trimmed(saved.calendarId) : "",
+      readOnly: saved && saved.discovered === true ? saved.readOnly === true : false,
+      discovered: saved ? saved.discovered === true : false,
       colorKey: saved ? saved.colorKey : Palette.defaultKey("microsoft:" + accountId)
     })
   }
@@ -210,7 +220,61 @@ function withMicrosoftAccounts(list, accountSummaries) {
 }
 
 function comesWithAccount(source) {
-  return !!source && (source.kind === "google" || source.kind === "microsoft")
+  return !!source && (source.kind === "google" || source.kind === "microsoft"
+    || source.kind === "icloud")
+}
+
+function sameUrl(left, right) {
+  return trimmed(left).replace(/\/+$/, "").toLowerCase()
+    === trimmed(right).replace(/\/+$/, "").toLowerCase()
+}
+
+// Replace the account-owned part of a source list with one bounded discovery
+// result. Saved visibility and theme colors follow a calendar's stable source
+// id; a hand-added iCloud CalDAV URL is adopted instead of drawn twice.
+function applyDiscovery(list, result) {
+  var value = result || {}
+  var provider = trimmed(value.provider).toLowerCase()
+  var accountId = trimmed(value.accountId)
+  var kind = provider === "microsoft" ? "microsoft"
+    : (provider === "icloud" ? "icloud" : "")
+  if (kind === "" || accountId === "" || !Array.isArray(value.calendars))
+    return copyList(list)
+  var current = list && Array.isArray(list.sources) ? list.sources : []
+  var discovered = []
+  for (var i = 0; i < value.calendars.length; i++) {
+    var remote = value.calendars[i] || {}
+    var id = trimmed(remote.sourceId)
+    if (id === "") continue
+    var saved = null
+    for (var s = 0; s < current.length; s++) {
+      var candidate = current[s] || {}
+      if (trimmed(candidate.id) === id
+          || (kind === "icloud" && trimmed(remote.url) !== ""
+            && sameUrl(candidate.url, remote.url))) {
+        saved = candidate
+        break
+      }
+    }
+    discovered.push(makeSource({
+      id: id, kind: kind, name: remote.name,
+      accountId: accountId, calendarId: remote.calendarId,
+      url: remote.url, username: remote.username,
+      enabled: saved ? saved.enabled !== false : true,
+      readOnly: remote.readOnly === true, discovered: true,
+      colorKey: saved ? saved.colorKey : Palette.defaultKey(id)
+    }))
+  }
+  var next = emptyList()
+  for (var c = 0; c < current.length; c++) {
+    var source = current[c] || {}
+    var owned = source.kind === kind && trimmed(source.accountId) === accountId
+    var adopted = kind === "icloud" && source.kind === "caldav"
+      && discovered.some(function(item) { return sameUrl(item.url, source.url) })
+    if (!owned && !adopted) next = add(next, source)
+  }
+  for (var d = 0; d < discovered.length; d++) next = add(next, discovered[d])
+  return next
 }
 
 function forAccount(list, accountId) {
@@ -231,6 +295,7 @@ function providerLabel(kind) {
   var value = trimmed(kind).toLowerCase()
   if (value === "google" || value === "gmail") return "Google"
   if (value === "microsoft" || value === "outlook") return "Microsoft"
+  if (value === "icloud") return "iCloud"
   if (value === "hey") return "HEY"
   return "CalDAV"
 }
@@ -319,6 +384,7 @@ function calendarEditorUrl(list) {
     if (source.enabled === false) continue
     if (source.kind === "google")
       return "https://calendar.google.com/calendar/u/0/r/eventedit"
+    if (source.kind === "icloud") return "https://www.icloud.com/calendar/"
     if (source.kind === "caldav") {
       var match = /^(https:\/\/[^/]+)/i.exec(String(source.url || ""))
       if (match) return match[1] + "/apps/calendar/"
