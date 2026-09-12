@@ -122,6 +122,54 @@ Item {
       compare(label.textFormat, Text.PlainText,
         "Server error messages must not be interpreted as resource-bearing HTML")
     }
+    function outlookValues(page, tenant) {
+      var address = findChild(page, "outlook-address-field")
+      var client = findChild(page, "outlook-client-id-field")
+      var work = findChild(page, "outlook-work-switch")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      verify(address !== null)
+      verify(client !== null)
+      verify(work !== null)
+      verify(tenantField !== null)
+      address.text = "alice@marketing.contoso.com"
+      client.text = "12345678-1234-4abc-9def-1234567890ab"
+      work.checked = true
+      tenantField.text = tenant
+      return page.accountValues()
+    }
+    function test_work_account_targets_the_configured_tenant() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      var values = outlookValues(page, "contoso.onmicrosoft.com")
+      verify(values !== null)
+      compare(values.imap.tenant, "contoso.onmicrosoft.com",
+        "the mailbox suffix need not be the single-tenant registration's authority")
+      values = outlookValues(page, "")
+      compare(values.imap.tenant, "organizations",
+        "blank keeps the generic authority for a multi-tenant registration")
+    }
+    function test_work_account_refuses_an_invalid_tenant() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      compare(outlookValues(page, "evil.example/../consumers"), null)
+      compare(outlookValues(page, "contoso-.com"), null)
+      var error = findChild(page, "outlook-error")
+      verify(error.text.indexOf("tenant") >= 0)
+    }
+    function test_work_account_setup_names_the_right_registration() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      var work = findChild(page, "outlook-work-switch")
+      var help = findChild(page, "outlook-app-setup-help")
+      verify(work !== null)
+      verify(help !== null)
+      work.checked = false
+      verify(help.text.indexOf("personal Microsoft accounts") >= 0)
+      work.checked = true
+      verify(help.text.indexOf("this Microsoft Entra tenant, or as multitenant") >= 0)
+      verify(help.text.indexOf("Directory (tenant) ID") >= 0)
+      verify(help.text.indexOf("personal Microsoft accounts") < 0)
+    }
     function test_cancel_matches_google_signin_and_allows_retry() {
       var host = readyHost()
       var service = createTemporaryObject(serviceFactory, parent, { auth: host.auth })
