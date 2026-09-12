@@ -279,12 +279,7 @@ Item {
     service.backend.call("calendar.request", params, function(result, error) {
       var reason = ""
       if (error) {
-        var code = String(error.code || error)
-        if (code === "calendar_auth_required" || code === "calendar_auth_refused")
-          reason = "Sign in again to access this calendar"
-        else if (code === "calendar_password_missing") reason = "Set this calendar's password in Settings"
-        else if (code === "calendar_origin_refused") reason = "The event's address is outside this calendar's server"
-        else reason = "The calendar request failed"
+        reason = Calendar.nativeRequestError(String(source && source.kind || ""))
       }
       callback(result, reason)
     })

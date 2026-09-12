@@ -10,9 +10,11 @@ Item {
     id: mailService
 
     property var requests: []
+    property var nextResult: ({ body: "{}", status: 200 })
+    property var nextError: null
     property var backend: ({ call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
-      callback({ body: "{}", status: 200 }, null)
+      callback(mailService.nextResult, mailService.nextError)
     } })
     property bool unifiedCalendarView: false
     property var accountSummaries: [
@@ -52,6 +54,8 @@ Item {
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
       mailService.requests = []
+      mailService.nextResult = ({ body: "{}", status: 200 })
+      mailService.nextError = null
       mailService.unifiedCalendarView = false
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
@@ -76,6 +80,29 @@ Item {
       compare(mailService.requests[0].method, "calendar.request")
       compare(mailService.requests[0].params.source.accountId, "one@gmail.com")
       verify(mailService.requests[0].params.token === undefined)
+    }
+
+    function test_native_request_explains_microsoft_recovery() {
+      mailService.nextResult = null
+      mailService.nextError = ({ code: -32000, message: "calendar_auth_refused" })
+      var called = false
+      controller.nativeRequest({ kind: "microsoft" }, "list", {}, function(result, error) {
+        compare(result, null)
+        compare(error, "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+        called = true
+      })
+      verify(called)
+    }
+
+    function test_native_request_does_not_display_backend_diagnostics() {
+      mailService.nextResult = null
+      mailService.nextError = ({ code: -32000, message: "private backend diagnostic" })
+      var called = false
+      controller.nativeRequest({ kind: "microsoft" }, "list", {}, function(_result, error) {
+        compare(error, "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+        called = true
+      })
+      verify(called)
     }
 
     function sourceIds(list) {
