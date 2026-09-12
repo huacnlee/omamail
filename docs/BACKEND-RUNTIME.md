@@ -124,7 +124,7 @@ required merge check must pass before merging. Publishing after merging would
 leave plugin users exposed to the mismatch. Runtime handshake still requires the
 exact plugin-local binary pin, even when a newer release reports the same API.
 
-The contract runner currently exercises 14 methods and checks the full advertised
+The contract runner currently exercises 15 methods and checks the full advertised
 inventory. It covers representative mail processing and cached reader behavior,
 not every provider operation or every possible QML argument. API reviewers must
 extend fixtures for newly used behavior; passing these tests is not a proof of

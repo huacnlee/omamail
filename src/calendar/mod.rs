@@ -3,10 +3,13 @@ use reqwest::{Client, Method, Url};
 use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
+mod discovery;
+pub use discovery::discover;
+
 const LIMIT: usize = 16 * 1024 * 1024;
 static CLIENT: OnceLock<Result<Client, &'static str>> = OnceLock::new();
 
-fn client() -> Result<&'static Client, &'static str> {
+pub(super) fn client() -> Result<&'static Client, &'static str> {
     CLIENT
         .get_or_init(|| {
             Client::builder()
@@ -77,6 +80,7 @@ struct Request {
     kind: String,
     source_id: String,
     username: String,
+    account_id: String,
 }
 
 fn prepare(params: &Value) -> Result<Request, &'static str> {
@@ -101,16 +105,39 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         kind: kind.into(),
         source_id: String::new(),
         username: String::new(),
+        account_id: String::new(),
     };
     match kind {
         "google" | "microsoft" => {
             if kind == "microsoft" {
-                request.url = Url::parse(if op == "list" {
-                    "https://graph.microsoft.com/v1.0/me/calendarView"
+                let calendar_id = source.get("calendarId").and_then(Value::as_str);
+                if let Some(calendar_id) = calendar_id {
+                    if calendar_id.is_empty()
+                        || calendar_id.len() > 8192
+                        || calendar_id.chars().any(char::is_control)
+                    {
+                        return Err("calendar_invalid_input");
+                    }
+                    request.url =
+                        Url::parse("https://graph.microsoft.com/v1.0/me/calendars").unwrap();
+                    request
+                        .url
+                        .path_segments_mut()
+                        .unwrap()
+                        .push(calendar_id)
+                        .push(if op == "list" {
+                            "calendarView"
+                        } else {
+                            "events"
+                        });
                 } else {
-                    "https://graph.microsoft.com/v1.0/me/events"
-                })
-                .unwrap();
+                    request.url = Url::parse(if op == "list" {
+                        "https://graph.microsoft.com/v1.0/me/calendarView"
+                    } else {
+                        "https://graph.microsoft.com/v1.0/me/events"
+                    })
+                    .unwrap();
+                }
             }
             if op == "update" || op == "delete" {
                 let id = text(params, "eventId")?;
@@ -148,10 +175,15 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                 }
             }
         }
-        "caldav" => {
-            request.source_id = text(source, "id")?.into();
-            request.username = text(source, "username")?.into();
-            let base = configured_url(text(source, "url")?)?;
+        "caldav" | "icloud" => {
+            let base = if kind == "icloud" {
+                request.account_id = text(source, "accountId")?.into();
+                discovery::icloud_url(text(source, "url")?)?
+            } else {
+                request.source_id = text(source, "id")?.into();
+                request.username = text(source, "username")?.into();
+                configured_url(text(source, "url")?)?
+            };
             request.url = if op == "list" {
                 base
             } else {
@@ -177,7 +209,7 @@ pub async fn call(params: &Value, token: Option<&str>) -> Result<Value, &'static
 }
 
 async fn call_inner(params: &Value, token: Option<&str>) -> Result<Value, &'static str> {
-    let request = prepare(params)?;
+    let mut request = prepare(params)?;
     let password = if request.kind == "caldav" {
         let id = request.source_id.clone();
         Some(
@@ -203,10 +235,14 @@ async fn call_inner(params: &Value, token: Option<&str>) -> Result<Value, &'stat
             .await
             .map_err(|_| "calendar_password_missing")??,
         )
+    } else if request.kind == "icloud" {
+        request.username = discovery::icloud_username(&request.account_id)?;
+        Some(crate::auth::password("imap", &request.account_id).await?)
     } else {
         None
     };
-    let paginated = params["operation"] == "list" && request.kind != "caldav";
+    let paginated =
+        params["operation"] == "list" && !matches!(request.kind.as_str(), "caldav" | "icloud");
     let origin = request.url.clone();
     let mut result = execute(client()?, request, token, password.as_deref()).await?;
     if !paginated {
@@ -279,7 +315,7 @@ async fn execute(
     password: Option<&str>,
 ) -> Result<Value, &'static str> {
     let mut builder = client.request(request.method.clone(), request.url);
-    if request.kind == "caldav" {
+    if matches!(request.kind.as_str(), "caldav" | "icloud") {
         builder = builder.basic_auth(request.username, password);
         if request.method.as_str() == "REPORT" {
             builder = builder

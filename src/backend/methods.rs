@@ -84,6 +84,7 @@ pub const ALL: &[&str] = &[
     "public.image",
     "public.unsubscribe",
     "calendar.request",
+    "calendar.discover",
     "auth.form",
     "auth.begin",
     "auth.poll",

@@ -1,6 +1,6 @@
 [package]
 name = "omamail"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 publish = false
 
@@ -20,6 +20,7 @@ futures-util = "0.3"
 libc = "0.2"
 mailparse = "0.17"
 regex = "1"
+quick-xml = "0.38"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 serde = { version = "1", features = ["derive"] }

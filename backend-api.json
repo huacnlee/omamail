@@ -1,5 +1,5 @@
 {
-  "apiVersion": 2,
+  "apiVersion": 3,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -86,6 +86,7 @@
     "public.image",
     "public.unsubscribe",
     "calendar.request",
+    "calendar.discover",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -174,6 +175,12 @@
     "jmap.stream.close"
   ],
   "contractCases": [
+    {
+      "name": "strict calendar discovery parameters",
+      "method": "calendar.discover",
+      "params": {},
+      "errorCode": -32602
+    },
     {
       "name": "missing Outlook connection",
       "method": "outlook.connectionCheck",

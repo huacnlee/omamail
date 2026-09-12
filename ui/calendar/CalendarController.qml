@@ -43,6 +43,12 @@ Item {
   property string sourceSecret: ""
   property var sourceBeingSaved: null
   property bool savingSource: false
+  property bool discoveringCalendars: false
+  property string discoveringAccountId: ""
+  property string discoveryError: ""
+  property int discoverySerial: 0
+  property bool discoverySaving: false
+  property int discoveryPendingCount: 0
   property bool clockRunning: false
   property double nowMs: Date.now()
   property bool refreshAfterSourceWrite: false
@@ -108,6 +114,7 @@ Item {
 
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
+  signal discoveryFinished(bool ok, string error, int count)
   signal eventCreated(bool ok, string error)
   signal eventUpdated(bool ok, string error)
   signal eventDeleted(bool ok, string error)
@@ -148,6 +155,76 @@ Item {
     var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
       sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
+  }
+
+  function discoverableAccount(accountId) {
+    var accounts = service && Array.isArray(service.accountSummaries)
+      ? service.accountSummaries : []
+    for (var i = 0; i < accounts.length; i++) {
+      var account = accounts[i] || {}
+      if (String(account.id || "") !== String(accountId || "")) continue
+      return account.signedIn === true
+        && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud")
+    }
+    return false
+  }
+
+  function discoveredCount(accountId) {
+    var values = availableSources && Array.isArray(availableSources.sources)
+      ? availableSources.sources : []
+    var count = 0
+    for (var i = 0; i < values.length; i++) {
+      var source = values[i] || {}
+      if (String(source.accountId || "") === String(accountId || "")
+          && source.discovered === true) count++
+    }
+    return count
+  }
+
+  function discoveryFailure(error) {
+    var code = String(error && error.code || error || "")
+    if (code === "auth_signed_out" || code === "calendar_auth_refused")
+      return "Sign in to this mailbox again"
+    if (code === "calendar_provider_unsupported")
+      return "This mailbox does not provide iCloud or Microsoft calendars"
+    if (code === "calendar_timeout") return "Calendar discovery timed out"
+    return "Calendars could not be discovered"
+  }
+
+  function discoverAccountCalendars(accountId) {
+    var wanted = String(accountId || "")
+    if (discoveringCalendars || savingSource || !discoverableAccount(wanted)) return false
+    if (!service || !service.backend || !service.backend.ready) {
+      discoveryError = "Calendar backend is unavailable"
+      discoveryFinished(false, discoveryError, 0)
+      return false
+    }
+    var serial = ++discoverySerial
+    discoveringCalendars = true
+    discoveringAccountId = wanted
+    discoveryError = ""
+    service.backend.call("calendar.discover", { accountId: wanted }, function(result, error) {
+      if (serial !== root.discoverySerial || root.discoveringAccountId !== wanted) return
+      root.discoveringCalendars = false
+      root.discoveringAccountId = ""
+      if (error || !result || String(result.accountId || "") !== wanted
+          || !Array.isArray(result.calendars) || !root.discoverableAccount(wanted)) {
+        root.discoveryError = root.discoveryFailure(error)
+        root.discoveryFinished(false, root.discoveryError, 0)
+        return
+      }
+      var next = Sources.applyDiscovery(root.sourceList, result)
+      root.discoveryPendingCount = result.calendars.length
+      root.discoverySaving = true
+      root.sourceBeingSaved = null
+      root.sourceSecret = ""
+      root.sourceWritePayload = Sources.serialize(next)
+      root.refreshAfterSourceWrite = true
+      root.savingSource = true
+      sourceWriter.command = [root.pluginDir + "/scripts/config-store.sh", "calendars.json"]
+      sourceWriter.running = true
+    })
+    return true
   }
 
   // `scope` rather than an account id: in the unified view every mailbox reads
@@ -292,7 +369,7 @@ Item {
 
   function createNativeEvent() {
     var fields = {}
-    if (eventSource.kind === "caldav") {
+    if (eventSource.kind === "caldav" || eventSource.kind === "icloud") {
       var base = String(eventSource.url || "")
       if (base.charAt(base.length - 1) !== "/") base += "/"
       fields.href = base + encodeURIComponent(eventDraft.uid) + ".ics"
@@ -303,7 +380,7 @@ Item {
 
   function startNativeWrite() {
     var fields = {}
-    if (writeSource.kind === "caldav") {
+    if (writeSource.kind === "caldav" || writeSource.kind === "icloud") {
       fields.href = String(writeEvent.href || Calendar.caldavEventUrl(writeSource.url, writeEvent))
       if (!fields.href) { finishWrite(false, "The event's address is outside this calendar's server"); return }
       if (writeDraft) fields.body = writeDraft.ics
@@ -315,6 +392,7 @@ Item {
   }
 
   function saveCalDavPassword(secret) {
+    if (discoveringCalendars) return
     var password = String(secret || "")
     if (password === "") { passwordSaved(false, "Enter the calendar password"); return }
     var values = sourceList && Array.isArray(sourceList.sources) ? sourceList.sources : []
@@ -331,7 +409,7 @@ Item {
   }
 
   function addCalDavCalendar(raw, secret) {
-    if (savingSource) return
+    if (savingSource || discoveringCalendars) return
     var candidate = raw || {}
     candidate.kind = "caldav"
     candidate.id = Sources.sourceId(candidate)
@@ -351,7 +429,7 @@ Item {
   }
 
   function removeCalendar(sourceId) {
-    if (savingSource) return
+    if (savingSource || discoveringCalendars) return
     sourceBeingSaved = null
     sourceSecret = ""
     sourceWritePayload = Sources.serialize(Sources.remove(sourceList, sourceId))
@@ -362,7 +440,7 @@ Item {
   }
 
   function setSourceEnabled(sourceId, enabled) {
-    if (savingSource) return
+    if (savingSource || discoveringCalendars) return
     var values = availableSources && Array.isArray(availableSources.sources)
       ? availableSources.sources : []
     var source = null
@@ -391,7 +469,7 @@ Item {
   }
 
   function setSourceColor(sourceId, colorKey) {
-    if (savingSource) return
+    if (savingSource || discoveringCalendars) return
     var values = availableSources && Array.isArray(availableSources.sources)
       ? availableSources.sources : []
     var source = null
@@ -411,7 +489,7 @@ Item {
   }
 
   function updateCalendarPassword(source, secret) {
-    if (savingSource) return
+    if (savingSource || discoveringCalendars) return
     if (!source || source.kind !== "caldav") {
       calendarSaved(false, "Choose a CalDAV calendar")
       return
@@ -495,7 +573,7 @@ Item {
     queue = pending
     if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
-    else if (activeSource.kind === "caldav") startPasswordLookup()
+    else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
 
@@ -503,12 +581,13 @@ Item {
 
   function startNativeList() {
     var fields = { start: new Date(rangeStart).toISOString(), end: new Date(rangeEnd).toISOString() }
-    if (activeSource.kind === "caldav") fields.body = Calendar.caldavReport(rangeStart, rangeEnd)
+    if (activeSource.kind === "caldav" || activeSource.kind === "icloud")
+      fields.body = Calendar.caldavReport(rangeStart, rangeEnd)
     nativeRequest(activeSource, "list", fields, function(result, error) {
       if (error) { root.failSource(error); return }
       var body = String(result && result.body || "")
       var values = []
-      if (root.activeSource.kind === "caldav")
+      if (root.activeSource.kind === "caldav" || root.activeSource.kind === "icloud")
         values = Calendar.eventsFromCaldav(body, root.activeSource.id, root.rangeStart, root.rangeEnd)
       else {
         var payload = null
@@ -574,12 +653,24 @@ Item {
         root.sourceSecret = ""
         root.refreshAfterSourceWrite = false
         root.calendarSaved(false, String(sourceWriteError.text || "Could not save the calendar"))
+        if (root.discoverySaving) {
+          root.discoverySaving = false
+          root.discoveryPendingCount = 0
+          root.discoveryError = "The discovered calendars could not be saved"
+          root.discoveryFinished(false, root.discoveryError, 0)
+        }
         return
       }
       root.sourceList = Sources.load(root.sourceWritePayload)
       if (!root.sourceBeingSaved) {
         root.savingSource = false
         root.calendarSaved(true, "")
+        if (root.discoverySaving) {
+          var count = root.discoveryPendingCount
+          root.discoverySaving = false
+          root.discoveryPendingCount = 0
+          root.discoveryFinished(true, "", count)
+        }
         if (root.refreshAfterSourceWrite && root.rangeStart && root.rangeEnd)
           root.refresh(root.rangeStart, root.rangeEnd)
         root.refreshAfterSourceWrite = false

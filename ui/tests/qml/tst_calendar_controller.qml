@@ -10,8 +10,13 @@ Item {
     id: mailService
 
     property var requests: []
-    property var backend: ({ call: function(method, params, callback) {
+    property var discoveryCallback: null
+    property var backend: ({ ready: false, call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
+      if (method === "calendar.discover") {
+        mailService.discoveryCallback = callback
+        return
+      }
       callback({ body: "{}", status: 200 }, null)
     } })
     property bool unifiedCalendarView: false
@@ -52,6 +57,16 @@ Item {
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
       mailService.requests = []
+      mailService.discoveryCallback = null
+      mailService.backend.ready = false
+      mailService.accountSummaries = [
+        { id: "imap:work@example.com", email: "work@example.com",
+          provider: "imap", signedIn: true },
+        { id: "one@gmail.com", email: "one@gmail.com",
+          provider: "gmail", signedIn: true },
+        { id: "two@gmail.com", email: "two@gmail.com",
+          provider: "gmail", signedIn: true }
+      ]
       mailService.unifiedCalendarView = false
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
@@ -76,6 +91,42 @@ Item {
       compare(mailService.requests[0].method, "calendar.request")
       compare(mailService.requests[0].params.source.accountId, "one@gmail.com")
       verify(mailService.requests[0].params.token === undefined)
+    }
+
+    function test_z_icloud_requests_and_discovery_never_carry_credentials() {
+      var source = {kind: "icloud", accountId: "imap:person@icloud.com",
+        id: "icloud:one", url: "https://p37-caldav.icloud.com/123/calendars/one/"}
+      controller.nativeRequest(source, "list", {start: "a", end: "b", body: "report"},
+        function(_result, error) { compare(error, "") })
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.request")
+      compare(mailService.requests[0].params.source.accountId, "imap:person@icloud.com")
+      verify(mailService.requests[0].params.password === undefined)
+      verify(mailService.requests[0].params.credentials === undefined)
+
+      mailService.accountSummaries = [{ id: "imap:person@icloud.com",
+        email: "person@icloud.com", provider: "imap", calendarProvider: "icloud",
+        signedIn: true }]
+      mailService.backend.ready = true
+      verify(controller.discoverAccountCalendars("imap:person@icloud.com"))
+      compare(mailService.requests.length, 2)
+      compare(mailService.requests[1].method, "calendar.discover")
+      compare(JSON.stringify(mailService.requests[1].params),
+        JSON.stringify({accountId: "imap:person@icloud.com"}))
+      verify(mailService.discoveryCallback !== null)
+      controller.setSourceEnabled("caldav:team", false)
+      compare(controller.savingSource, false,
+        "calendar settings cannot race the discovery result writer")
+      mailService.discoveryCallback(null, {code: "calendar_auth_refused"})
+      compare(controller.discoveringCalendars, false)
+      compare(controller.discoveryError, "Sign in to this mailbox again")
+
+      verify(controller.discoverAccountCalendars("imap:person@icloud.com"))
+      mailService.accountSummaries = []
+      mailService.discoveryCallback({ provider: "icloud",
+        accountId: "imap:person@icloud.com", calendars: [] }, null)
+      compare(controller.savingSource, false)
+      compare(controller.discoveryError, "Calendars could not be discovered")
     }
 
     function sourceIds(list) {

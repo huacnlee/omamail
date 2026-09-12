@@ -50,6 +50,45 @@ fn provider_chooses_origin_and_encodes_event_id() {
 }
 
 #[test]
+fn microsoft_calendar_identity_is_one_encoded_path_segment() {
+    let list = prepare(&json!({
+        "source":{"kind":"microsoft","calendarId":"A/B?C"},
+        "operation":"list","start":"2026-09-01T00:00:00Z","end":"2026-10-01T00:00:00Z"
+    }))
+    .unwrap();
+    assert_eq!(list.url.path(), "/v1.0/me/calendars/A%2FB%3FC/calendarView");
+    let update = prepare(&json!({
+        "source":{"kind":"microsoft","calendarId":"A/B?C"},
+        "operation":"update","eventId":"event/one","body":"{}"
+    }))
+    .unwrap();
+    assert_eq!(
+        update.url.path(),
+        "/v1.0/me/calendars/A%2FB%3FC/events/event%2Fone"
+    );
+}
+
+#[test]
+fn icloud_calendar_refuses_non_apple_destinations_before_credentials() {
+    assert!(
+        prepare(&json!({
+            "source":{"kind":"icloud","accountId":"imap:person@icloud.com",
+              "url":"https://evil.example/calendars/private/"},
+            "operation":"list","body":"report"
+        }))
+        .is_err()
+    );
+    assert!(
+        prepare(&json!({
+            "source":{"kind":"icloud","accountId":"imap:person@icloud.com",
+              "url":"https://p37-caldav.icloud.com/123/calendars/private/"},
+            "operation":"list","body":"report"
+        }))
+        .is_ok()
+    );
+}
+
+#[test]
 fn pagination_cannot_change_credential_destination_or_resource() {
     let base =
         Url::parse("https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=now").unwrap();
@@ -96,6 +135,7 @@ fn local_request(url: Url) -> Request {
         kind: "google".into(),
         source_id: String::new(),
         username: String::new(),
+        account_id: String::new(),
     }
 }
 

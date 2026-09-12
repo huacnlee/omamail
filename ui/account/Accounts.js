@@ -53,6 +53,18 @@ function isValidEmail(value) {
   return EMAIL_PATTERN.test(trimmed(value))
 }
 
+function calendarProvider(raw) {
+  var account = raw || {}
+  var provider = trimmed(account.provider).toLowerCase()
+  if (provider === "outlook") return "microsoft"
+  if (provider !== "imap") return ""
+  var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
+  var email = trimmed(account.email).toLowerCase()
+  var domain = email.lastIndexOf("@") >= 0 ? email.substring(email.lastIndexOf("@") + 1) : ""
+  return host === "imap.mail.me.com" || ["icloud.com", "me.com", "mac.com"].indexOf(domain) >= 0
+    ? "icloud" : ""
+}
+
 // Addresses are case-insensitive in practice and a server echoes the address
 // back in whatever case it was typed, so it is normalised once here and
 // everything downstream compares ids rather than emails.

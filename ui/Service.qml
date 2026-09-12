@@ -1077,6 +1077,7 @@ Item {
         id: accounts[i].id,
         email: accounts[i].email,
         provider: accounts[i].provider,
+        calendarProvider: Accounts.calendarProvider(accounts[i]),
         label: Accounts.label(accounts[i]),
         // The name that was chosen, if one was. `label` always answers —
         // falling through to the local part — so it cannot say whether
