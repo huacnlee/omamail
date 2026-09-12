@@ -29,6 +29,9 @@ Column {
   readonly property bool graphConsentNeeded: root.signedIn && !!auth && auth.graphConsentNeeded === true
   readonly property bool usingBuiltinClient: Microsoft.isValidClientId(Microsoft.BUILTIN_CLIENT_ID)
   readonly property bool toolsMissing: !!auth && auth.toolsChecked && auth.missingTools.length > 0
+  property bool connectionBusy: false
+  property var connectionReport: null
+  property int connectionSerial: 0
 
   spacing: Style.space(16)
 
@@ -90,6 +93,23 @@ Column {
     service.configureCurrentAccountAndSignInOAuth(values)
   }
 
+  function checkConnection() {
+    if (!root.signedIn || root.connectionBusy || !root.service) return
+    var serial = ++root.connectionSerial
+    root.connectionBusy = true
+    root.connectionReport = null
+    errorText.text = ""
+    root.service.checkMicrosoftConnection(function(report) {
+      if (serial !== root.connectionSerial) return
+      root.connectionBusy = false
+      root.connectionReport = ({
+        mail: !!report && report.mail === true,
+        graph: !!report && report.graph === true,
+        calendar: !!report && report.calendar === true
+      })
+    })
+  }
+
   function syncFromStore() {
     if (!service) return
     addressField.text = String(service.accountAddress || "")
@@ -101,7 +121,12 @@ Column {
 
   // The auth object is rebuilt when the entry is saved, so the switches are
   // read again from whichever one is current.
-  onAuthChanged: syncFromStore()
+  onAuthChanged: {
+    connectionSerial++
+    connectionBusy = false
+    connectionReport = null
+    syncFromStore()
+  }
   Component.onCompleted: syncFromStore()
 
   Connections {
@@ -109,6 +134,12 @@ Column {
     ignoreUnknownSignals: true
     function onLastErrorChanged() {
       if (root.auth && root.auth.lastError !== "") errorText.text = root.auth.lastError
+    }
+    function onLoggedInChanged() {
+      if (root.signedIn) return
+      root.connectionSerial++
+      root.connectionBusy = false
+      root.connectionReport = null
     }
     function onGraphRefused(reason) { errorText.text = String(reason || "") }
   }
@@ -256,6 +287,20 @@ Column {
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
     }
+
+    Text {
+      objectName: "outlook-connection-status"
+      textFormat: Text.PlainText
+      width: parent.width
+      visible: root.connectionReport !== null
+      text: visible ? Microsoft.connectionStatus(root.connectionReport,
+        !!root.auth && String(root.auth.configuredSend || "") === "graph",
+        !!root.auth && Microsoft.isWorkTenant(root.auth.tenant)) : ""
+      color: Microsoft.connectionReady(root.connectionReport) ? root.textColor : root.dangerColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
   }
 
   Column {
@@ -361,6 +406,17 @@ Column {
         onActivated: Qt.openUrlExternally(tooltipText)
       }
     }
+  }
+
+  Button {
+    objectName: "outlook-check-connection"
+    visible: root.signedIn
+    text: root.connectionBusy ? "Checking Microsoft 365..." : "Check Microsoft 365"
+    enabled: !root.connectionBusy && !root.busy && !(root.auth && root.auth.refreshBusy === true)
+    foreground: root.textColor
+    bordered: true
+    fontSize: Style.font.bodySmall
+    onClicked: root.checkConnection()
   }
 
   Row {

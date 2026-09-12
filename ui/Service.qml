@@ -2031,6 +2031,16 @@ Item {
   function signIn() { if (current) current.signIn() }
   function cancelSignIn() { if (current) current.cancelSignIn() }
   function signOut() { if (current) current.signOut() }
+  function checkMicrosoftConnection(callback) {
+    var host = current
+    if (!host || typeof host.checkMicrosoftConnection !== "function") {
+      if (typeof callback === "function") callback({ mail: false, graph: false, calendar: false })
+      return
+    }
+    host.checkMicrosoftConnection(function(report) {
+      if (root.current === host && typeof callback === "function") callback(report)
+    })
+  }
 
   // The password providers' sign-in. Gmail's is a browser and answers false,
   // which is what lets one setup page ask without checking first.

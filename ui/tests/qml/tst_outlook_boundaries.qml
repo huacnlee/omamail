@@ -37,8 +37,10 @@ Item {
       property var auth
       property string accountAddress: "alice@hotmail.com"
       property int starts: 0
+      property var connectionCallback: null
       function cancelSignIn() { auth.cancelLogin() }
       function configureCurrentAccountAndSignInOAuth(values) { starts++ }
+      function checkMicrosoftConnection(callback) { connectionCallback = callback }
     }
   }
   TestCase {
@@ -164,6 +166,82 @@ Item {
       compare(signIn.enabled, true)
       host.auth.refreshBusy = true
       compare(signIn.enabled, false, "not offered while a refresh is under way, which would make it do nothing")
+    }
+    function test_connection_check_reports_capabilities_without_provider_diagnostics() {
+      var host = readyHost()
+      var service = createTemporaryObject(serviceFactory, parent, { auth: host.auth })
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      host.auth.loggedIn = true
+      var button = findChild(page, "outlook-check-connection")
+      var status = findChild(page, "outlook-connection-status")
+      verify(button !== null)
+      verify(status !== null)
+      compare(button.visible, true)
+      button.clicked()
+      compare(button.enabled, false)
+      compare(button.text, "Checking Microsoft 365...")
+      verify(service.connectionCallback !== null)
+      service.connectionCallback({ mail: true, graph: true, calendar: true,
+        privateDiagnostic: "synthetic provider secret" })
+      compare(button.enabled, true)
+      compare(button.text, "Check Microsoft 365")
+      compare(status.visible, true)
+      verify(status.text.indexOf("Mail access: Connected") >= 0)
+      verify(status.text.indexOf("Microsoft Graph: Mail.Send and Calendars.ReadWrite granted") >= 0)
+      verify(status.text.indexOf("Calendar: Reachable") >= 0)
+      verify(status.text.indexOf("synthetic provider secret") < 0,
+        "provider diagnostics must not reach the setup page")
+      service.connectionCallback = null
+      button.clicked()
+      verify(service.connectionCallback !== null)
+      host.auth.loggedIn = false
+      compare(button.visible, false)
+      compare(status.visible, false)
+      compare(page.connectionBusy, false,
+        "signing out must invalidate an outstanding diagnostic")
+      service.connectionCallback({ mail: true, graph: true, calendar: true })
+      compare(status.visible, false,
+        "a late diagnostic must not reappear after sign-out")
+    }
+    function test_account_connection_check_uses_only_saved_boundaries() {
+      var host = readyHost()
+      var backend = Transports.install(host.api)
+      host.backend = backend
+      host.api.backend = backend
+      host.auth.backend = backend
+      host.auth.loggedIn = true
+      wait(1)
+      backend.testCalls = []
+      var report = null
+      host.checkMicrosoftConnection(function(value) { report = value })
+      compare(backend.testCalls.length, 1)
+      compare(backend.testCalls[0].method, "outlook.connectionCheck")
+      compare(backend.testCalls[0].params.accountId, "outlook:alice@hotmail.com")
+      verify(JSON.stringify(backend.testCalls[0].params).indexOf("synthetic") < 0,
+        "the connection check must forward only the saved account identity")
+      Transports.reply(backend.testCalls[0], { mail: true, graph: true, calendar: true,
+        privateDiagnostic: "must not cross the account boundary" }, "")
+      verify(report !== null)
+      compare(report.mail, true)
+      compare(report.graph, true)
+      compare(report.calendar, true)
+      compare(report.privateDiagnostic, undefined)
+
+      report = null
+      host.checkMicrosoftConnection(function(value) { report = value })
+      compare(backend.testCalls.length, 2)
+      host.auth.loggedIn = false
+      Transports.reply(backend.testCalls[1], { mail: true, graph: true, calendar: true }, "")
+      compare(report, null, "a result arriving after sign-out must be discarded")
+
+      host.auth.loggedIn = true
+      host.checkMicrosoftConnection(function(value) { report = value })
+      compare(backend.testCalls.length, 3)
+      Transports.reply(backend.testCalls[2], null, "synthetic failure")
+      verify(report !== null)
+      compare(report.mail, false)
+      compare(report.graph, false)
+      compare(report.calendar, false)
     }
   }
 }
