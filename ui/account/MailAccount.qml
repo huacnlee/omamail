@@ -617,6 +617,32 @@ Item {
     })
   }
 
+  // The Outlook settings page asks Rust to prove each boundary without sending
+  // a message or changing a calendar. Rust returns only capability booleans;
+  // credentials and provider responses never cross into QML.
+  function checkMicrosoftConnection(callback) {
+    if (typeof callback !== "function") return
+    var report = { mail: false, graph: false, calendar: false }
+    if (providerId !== "outlook" || !auth || !auth.loggedIn || !backend || !backend.ready) {
+      callback(report)
+      return
+    }
+    var owner = auth
+    var expectedAccount = accountId
+    function current() {
+      return providerId === "outlook" && auth === owner && owner.loggedIn
+        && accountId === expectedAccount
+    }
+    backend.call("outlook.connectionCheck", { accountId: expectedAccount }, function(result, error) {
+      if (!current()) return
+      callback({
+        mail: !error && !!result && result.mail === true,
+        graph: !error && !!result && result.graph === true,
+        calendar: !error && !!result && result.calendar === true
+      })
+    })
+  }
+
   function loadProfile() {
     if (!ready || profile) return
     if (cacheStore.loaded && cacheStore.store.profile) profile = cacheStore.store.profile
