@@ -533,6 +533,19 @@ function graphResponseError(status, responseText) {
   return detail !== "" ? "Microsoft Graph answered: " + detail : "Microsoft Graph answered " + status
 }
 
+// Keep native backend diagnostics private while giving each provider an
+// actionable recovery path. This deliberately does not depend on backend
+// error-message semantics, so it remains compatible with the pinned API.
+function nativeRequestError(kind) {
+  if (kind === "microsoft")
+    return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
+  if (kind === "google")
+    return "Google calendar request failed. Sign in again and check Calendar access"
+  if (kind === "caldav")
+    return "CalDAV calendar request failed. Check its server address and password in Settings"
+  return "The calendar request failed"
+}
+
 function googleEventsUrl(startMs, endMs) {
   return "https://www.googleapis.com/calendar/v3/calendars/primary/events?"
     + "singleEvents=true&orderBy=startTime&maxResults=2500"

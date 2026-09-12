@@ -27,6 +27,8 @@ assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
 })), "Google Calendar permission is missing. Sign out and sign in again")
 assert.strictEqual(feed.googleResponseError(500, "not json"),
   "Google Calendar returned HTTP 500")
+assert.strictEqual(feed.nativeRequestError("google"),
+  "Google calendar request failed. Sign in again and check Calendar access")
 
 const week = feed.weekDays(new Date(2026, 7, 23).getTime(), 1)
 assert.strictEqual(week.length, 7)
@@ -574,6 +576,12 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(feed.graphResponseError(401, "{}"), "Microsoft refused the calendar request. Sign in again")
   assert.ok(feed.graphResponseError(400, JSON.stringify({ error: { code: "ErrorInvalidRequest", message: "Bad start" } })).indexOf("Bad start") > 0)
   assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
+  assert.strictEqual(feed.nativeRequestError("microsoft"),
+    "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+  assert.strictEqual(feed.nativeRequestError("caldav"),
+    "CalDAV calendar request failed. Check its server address and password in Settings")
+  assert.strictEqual(feed.nativeRequestError("unknown"),
+    "The calendar request failed")
 
   const made = feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000)
   assert.strictEqual(made.graph.subject, "Plan")
