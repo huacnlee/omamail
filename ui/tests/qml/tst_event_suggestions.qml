@@ -382,22 +382,20 @@ Item {
       compare(bridge.starts[1].messageId, "61:INBOX")
     }
 
-    // The look is the unreleased step of the API. With the pinned backend
-    // connected — API 1, the checkout at 2 — nothing is read and nothing is
-    // asked, however the setting stands; a backend that has the step is asked.
-    function test_the_pinned_backend_without_the_step_is_not_asked() {
+    // Event suggestions shipped in API 2. A later, unrelated unreleased
+    // step must not disable a feature the pinned backend already supports.
+    function test_a_later_api_step_does_not_block_released_event_suggestions() {
       var agent = seed(ada)
       var adas = mailService.accountAt(0)
       mailService.settings = ({ suggestEvents: true })
-      mailService.backendRuntime.latestApiVersion = 2
+      mailService.backend.protocolInfo = { apiVersion: 2, protocol: 1, version: "0.0.0" }
+      mailService.backendRuntime.latestApiVersion = 3
       tryCompare(mailService, "backendNeedsUpdate", true)
       open(adas, "70:INBOX", "Dinner?", "Dinner on Thursday at 7pm?")
-      wait(20)
-      compare(bridge.starts.length, 0, "the pinned backend has no look to run")
-      compare(contexts.length, 0, "and the message is not read for it")
+      compare(lastStart().messageId, "70:INBOX", "the released feature still starts")
+      compare(contexts.length, 1, "the message is read once")
       mailService.backendRuntime.latestApiVersion = 1
-      tryCompare(mailService, "backendNeedsUpdate", false)
-      compare(lastStart().messageId, "70:INBOX", "a backend with the step is asked as soon as it is there")
+      mailService.backend.protocolInfo = { apiVersion: 1, protocol: 1, version: "0.0.0" }
     }
 
     function test_the_card_draws_text_and_asks_the_reader() {

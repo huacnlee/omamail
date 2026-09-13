@@ -562,20 +562,6 @@ Column {
         wrapMode: Text.WordWrap
         textFormat: Text.PlainText
       }
-
-      // The unreleased step: the owner's backend cannot look yet. Said
-      // here, and the switch waits, rather than a switch that does nothing.
-      Text {
-        objectName: "suggestEventsNeedsUpdate"
-        width: parent.width
-        visible: !!root.service && root.service.backendNeedsUpdate
-        text: "Needs a backend update: available after the next backend release."
-        color: root.accentColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-      }
     }
 
     Text {
@@ -597,7 +583,7 @@ Column {
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
       checked: !!root.service && root.service.suggestEvents === true
-      enabled: !!root.service && !root.service.backendNeedsUpdate
+      enabled: !!root.service
       opacity: enabled ? 1 : 0.5
       foreground: root.textColor
       accent: root.accentColor
