@@ -129,6 +129,49 @@ fn readonly_requests(report: &Value) -> bool {
 }
 
 #[tokio::test]
+async fn production_jmap_star_ignores_oversized_conversations_but_unstar_does_not() {
+    if isolated() {
+        return;
+    }
+    let fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
+        "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
+    let before = fixture_tree(&fixture.root);
+    for operation in ["star", "unstar"] {
+        let (peer, session) = Peer::start("oversized-thread", true).await;
+        let result = session
+            .dispatch("mail.act", &json!({"operation":operation,"ids":["e1"]}))
+            .await;
+        if operation == "star" {
+            assert_eq!(
+                result,
+                Ok(json!({"dryRun":true,"executed":false,"operation":"star",
+                "accountId":ACCOUNT,"requestedIds":["e1"],"targetIds":["e1"]}))
+            );
+        } else {
+            assert_eq!(result, Err("mail_action_target_limit"));
+        }
+        let report = peer.report().await;
+        assert!(readonly_requests(&report), "{report}");
+        let methods: Vec<_> = report
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|request| request["calls"].as_array().unwrap())
+            .map(|call| call[0].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            methods,
+            if operation == "star" {
+                vec!["Mailbox/get", "Email/get"]
+            } else {
+                vec!["Mailbox/get", "Email/get", "Thread/get"]
+            }
+        );
+        assert_eq!(fixture_tree(&fixture.root), before);
+    }
+}
+
+#[tokio::test]
 async fn production_jmap_dispatch_previews_all_actions_and_refuses_execution_without_local_writes()
 {
     if isolated() {
@@ -202,9 +245,10 @@ async fn production_jmap_dispatch_previews_all_actions_and_refuses_execution_wit
         .iter()
         .flat_map(|request| request["calls"].as_array().unwrap())
         .collect();
-    // Each accepted preview: availability, representatives, threads, members.
+    // Star reads only availability and representatives; the six conversation
+    // actions also read threads and members.
     // Invalid batches and execute=true must cause no extra provider request.
-    assert_eq!(calls.len(), 7 * 2 * 4, "{report}");
+    assert_eq!(calls.len(), 6 * 2 * 4 + 2 * 2, "{report}");
     assert_eq!(fixture_tree(&fixture.root), before);
 }
 

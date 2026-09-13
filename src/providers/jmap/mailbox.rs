@@ -169,6 +169,7 @@ impl Session {
     ) -> Result<Value, &'static str> {
         let requested = action_ids(&params["ids"])?;
         let operation = params["operation"].as_str().ok_or("invalid_params")?;
+        let action = crate::account::model::domain_action(operation)?;
         let roles = params["roles"]
             .as_object()
             .ok_or("mail_action_invalid_target")?;
@@ -177,20 +178,29 @@ impl Session {
             .get_emails(context, snapshot, &requested, false, true)
             .await?;
         let mut by_id = Map::new();
-        let mut thread_ids = Vec::new();
         for email in emails {
             let id = action_id(&email["id"])?;
             if !requested.contains(&id) || by_id.contains_key(&id) {
                 return Err("mail_action_invalid_target");
             }
-            let thread = action_id(&email["threadId"])?;
-            if !thread_ids.contains(&thread) {
-                thread_ids.push(thread);
-            }
             by_id.insert(id, email);
         }
         if by_id.len() != requested.len() {
             return Err("mail_action_target_unknown");
+        }
+        // A message-scoped action needs only the validated representatives.
+        // Unrelated conversation size and membership cannot prevent starring.
+        if crate::account::model::action_scope(action) == "message" {
+            return Ok(
+                json!({"rows":requested.iter().map(|id| json!({"id":id})).collect::<Vec<_>>()}),
+            );
+        }
+        let mut thread_ids = Vec::new();
+        for id in &requested {
+            let thread = action_id(&by_id[id]["threadId"])?;
+            if !thread_ids.contains(&thread) {
+                thread_ids.push(thread);
+            }
         }
         let mut members = Map::new();
         let mut all_member_ids = Vec::new();

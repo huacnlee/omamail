@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-mailbox-") as directory:
         if scenario == "bad-membership": result["mailboxIds"] = {"I": "true"}
         return result
     def members(thread):
+        if scenario == "oversized-thread": return ["e1"] + ["m" + str(i) for i in range(2000)]
         if scenario == "occurrences": return ["e1"] * (1000 if thread == "t1" else 1001)
         if scenario == "member-bytes": return [("x" * 5990) + thread + str(i) for i in range(400)]
         if scenario == "projection-bytes": return [("x" * 5990) + str(i) for i in range(400)]
