@@ -98,6 +98,7 @@ backend:
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
