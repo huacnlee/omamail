@@ -74,8 +74,14 @@ fn gmail_registry_and_private_credentials_gate_keyring_access() {
     ));
     let config = dir.join(".config/omamail");
     fs::create_dir_all(&config).unwrap();
-    fs::write(config.join("accounts.json"),
-        br#"{"version":1,"accounts":[{"provider":"gmail","email":"a@example.org"},{"provider":"imap","email":"b@example.org"}]}"#).unwrap();
+    let accounts = config.join("accounts.json");
+    fs::write(
+        &accounts,
+        br#"{"version":1,"accounts":[{"provider":"gmail","email":"a@example.org"},{"provider":"imap","email":"b@example.org"}]}"#,
+    )
+    .unwrap();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&accounts, fs::Permissions::from_mode(0o600)).unwrap();
     let credentials = config.join("credentials.json");
     fs::write(&credentials, br#"{"installed":{"client_id":"123-test.apps.googleusercontent.com","client_secret":"synthetic-client-secret"}}"#).unwrap();
     fs::set_permissions(&credentials, fs::Permissions::from_mode(0o644)).unwrap();

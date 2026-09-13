@@ -355,8 +355,8 @@ async fn resolve_account(p: &Value, method: &str) -> Result<Value> {
             crate::auth::settings(provider, &owned)
         }
     })
-        .await
-        .map_err(|_| "worker_failed")??;
+    .await
+    .map_err(|_| "worker_failed")??;
     let mut result = p.clone();
     let credential = if provider == "outlook" {
         let username = account.strip_prefix("outlook:").ok_or("invalid_params")?;
