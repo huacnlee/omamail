@@ -187,7 +187,11 @@ printf 'Hello,\nThe report is ready.\n' | omamail send --account me@example.org 
 ```
 
 Executed actions report confirmed `succeededIds` and `failedIds`; partial
-failure exits 1 and retains the result beside the JSON error. Executed sends
+failure exits 1 and retains the result beside the JSON error. IMAP and Outlook
+retain each fully acknowledged folder group even if a later group fails or
+times out, invalidate action caches after confirmed success, and never retry
+acknowledged targets. An unfinished group is not claimed as successful even
+if some of its commands were accepted. Executed sends
 use the durable outbox. `executed: true` means execution was requested;
 delivery is authoritative only through the returned `outbox` entry matching
 `sendId`. The CLI waits for that entry: `sent` exits 0, while failure,
@@ -202,7 +206,9 @@ the persisted terminal entry; a lost reply reuses the same send ID and digest.
 If the owner crashes, recovery cancels queued entries and marks interrupted
 delivery unknown, without retrying it. Both processes must support this owner
 protocol; an older owner without it is refused safely. The socket stops with
-the backend's existing stdin session.
+the backend's existing stdin session. The lease remains held until its last
+owner/writer reference drops, then explicitly unlocks in the owning process;
+a forked child's pre-exec descriptor cannot prolong or release that ownership.
 
 `--json` works before or after the command. Operation errors exit 1 with
 `{"ok":false,"error":{"code":"..."}}` on stdout; human-readable errors use

@@ -20,7 +20,27 @@ pub(super) fn home() -> Result<PathBuf, &'static str> {
     }
     Ok(home)
 }
-pub(super) fn lease(root: &Path) -> Result<File, &'static str> {
+pub(super) struct Lease {
+    file: File,
+    owner: libc::pid_t,
+}
+impl AsRawFd for Lease {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.file.as_raw_fd()
+    }
+}
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // flock belongs to the open-file description, including a forked
+        // child's copy before exec closes CLOEXEC descriptors. Release it
+        // explicitly when the last legitimate Arc (including writers) drops.
+        // A child must never unlock its parent's lease.
+        if unsafe { libc::getpid() } == self.owner {
+            unsafe { libc::flock(self.as_raw_fd(), libc::LOCK_UN) };
+        }
+    }
+}
+pub(super) fn lease(root: &Path) -> Result<Lease, &'static str> {
     let dir =
         crate::cache::directories(root, &["omamail"], true)?.ok_or("outbox_storage_unavailable")?;
     crate::cache::regular(&dir, "outbox.lock", false)?;
@@ -44,7 +64,10 @@ pub(super) fn lease(root: &Path) -> Result<File, &'static str> {
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("outbox_in_use");
     }
-    Ok(file)
+    Ok(Lease {
+        file,
+        owner: unsafe { libc::getpid() },
+    })
 }
 pub(super) fn read(root: &Path) -> Result<Value, &'static str> {
     let Some(dir) = crate::cache::directories(root, &["omamail"], false)? else {

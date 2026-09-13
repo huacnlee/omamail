@@ -36,7 +36,7 @@ struct Inner {
     wake: Notify,
     stopping: AtomicBool,
     root: Option<PathBuf>,
-    lease: Mutex<Option<Arc<std::fs::File>>>,
+    lease: Mutex<Option<Arc<storage::Lease>>>,
     writer: Arc<storage::Writer>,
     jobs: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }

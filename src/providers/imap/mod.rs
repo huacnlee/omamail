@@ -330,25 +330,47 @@ pub(crate) async fn execute_planned_action(
     params: &Value,
     context: &Value,
 ) -> Result<Value> {
-    if context.is_null() {
-        return call(method, params).await;
+    if !matches!(method, "imap.modify" | "imap.trash" | "imap.untrash") {
+        return Err("method_not_found");
     }
-    let boxes: read::Mailboxes =
-        serde_json::from_value(context.clone()).map_err(|_| "invalid_params")?;
+    let boxes: Option<read::Mailboxes> = if context.is_null() {
+        None
+    } else {
+        Some(serde_json::from_value(context.clone()).map_err(|_| "invalid_params")?)
+    };
     mutation::validate(method, params)?;
-    tokio::time::timeout(Duration::from_secs(22), async {
+    let ids: Vec<_> = params["ids"]
+        .as_array()
+        .ok_or("invalid_params")?
+        .iter()
+        .map(|id| {
+            let id = id.as_str().ok_or("invalid_params")?;
+            Ok((id, read::message_id(id)?.1))
+        })
+        .collect::<Result<_>>()?;
+    let mut completed = Vec::new();
+    let result = tokio::time::timeout(Duration::from_secs(22), async {
         let params = resolve_account(params, method).await?;
         credentials(&params)?;
         mutation::call_planned(
             method,
             &params,
             &std::sync::atomic::AtomicBool::new(false),
-            Some(&boxes),
+            boxes.as_ref(),
+            Some(&mut completed),
         )
         .await
     })
     .await
-    .unwrap_or(Err("request_timed_out"))
+    .unwrap_or(Err("request_timed_out"));
+    let (succeeded, failed): (Vec<_>, Vec<_>) = ids
+        .into_iter()
+        .partition(|(_, folder)| completed.contains(folder));
+    Ok(json!({
+        "succeededIds":succeeded.iter().map(|(id,_)|id).collect::<Vec<_>>(),
+        "failedIds":failed.iter().map(|(id,_)|id).collect::<Vec<_>>(),
+        "error":result.err(),
+    }))
 }
 
 pub async fn call(method: &str, p: &Value) -> Result<Value> {

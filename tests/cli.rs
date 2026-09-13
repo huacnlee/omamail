@@ -1278,6 +1278,106 @@ async fn imap_action_preview_requires_discovered_destinations_and_execution_uses
 }
 
 #[tokio::test]
+async fn imap_archive_keeps_confirmed_folder_results_when_later_select_refuses() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+    let seeded = root_mail(&fixture.0, &["call", "cache.bodyPut", "--json"],
+        serde_json::json!({"accountId":"imap:imap@example.org","id":"7:INBOX","body":{"text":"cached body"}}).to_string().as_bytes());
+    assert!(seeded.status.success(), "{seeded:?}");
+    let read_cache = || {
+        let output = root_mail(
+            &fixture.0,
+            &["call", "cache.bodyRead", "--json"],
+            serde_json::json!({"accountId":"imap:imap@example.org","id":"7:INBOX"})
+                .to_string()
+                .as_bytes(),
+        );
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone()
+    };
+    assert_eq!(read_cache()["text"], "cached body");
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"* OK ready\r\n").await.unwrap();
+        let mut commands = Vec::new();
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            let response = if line.starts_with("O1 LOGIN ") {
+                "O1 OK login\r\n"
+            } else if line == "O1 CAPABILITY\r\n" {
+                "* CAPABILITY IMAP4rev1 MOVE\r\nO1 OK caps\r\n"
+            } else if line == "O1 LIST \"\" \"*\"\r\n" {
+                "* LIST () \"/\" INBOX\r\n* LIST () \"/\" ZOther\r\n* LIST (\\Archive) \"/\" Archive\r\nO1 OK folders\r\n"
+            } else {
+                commands.push(line.clone());
+                match line.as_str() {
+                    "O1 SELECT \"INBOX\"\r\n" | "O1 UID MOVE 7 \"Archive\"\r\n" => "O1 OK done\r\n",
+                    "O1 SELECT \"ZOther\"\r\n" => "O1 NO refused\r\n",
+                    _ => panic!("unexpected or repeated mutation: {line:?}"),
+                }
+            };
+            writer.write_all(response.as_bytes()).await.unwrap();
+        }
+        assert_eq!(
+            commands,
+            [
+                "O1 SELECT \"INBOX\"\r\n",
+                "O1 UID MOVE 7 \"Archive\"\r\n",
+                "O1 SELECT \"ZOther\"\r\n"
+            ]
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                .await
+                .is_err(),
+            "acknowledged IDs must not be retried"
+        );
+    });
+    let root = fixture.0.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        root_mail(
+            &root,
+            &[
+                "archive",
+                "7:INBOX",
+                "8:ZOther",
+                "--account",
+                "imap:imap@example.org",
+                "--execute",
+                "--json",
+            ],
+            b"",
+        )
+    })
+    .await
+    .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(value["error"]["code"], "mail_action_failed");
+    assert_eq!(
+        value["result"]["succeededIds"],
+        serde_json::json!(["7:INBOX"]),
+        "{value}"
+    );
+    assert_eq!(
+        value["result"]["failedIds"],
+        serde_json::json!(["8:ZOther"])
+    );
+    let cached = read_cache();
+    assert!(
+        cached.is_null(),
+        "confirmed success must invalidate cache: {cached}"
+    );
+    peer.await.unwrap();
+}
+
+#[tokio::test]
 async fn root_list_and_read_use_active_account_and_safe_provider_results() {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     for read in [false, true] {

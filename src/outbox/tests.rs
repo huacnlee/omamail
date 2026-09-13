@@ -269,6 +269,117 @@ async fn mail_send_preview_is_write_free_and_execute_keeps_one_durable_job() {
 }
 struct Temp(PathBuf);
 
+struct ForkedDescriptors(i32, std::os::unix::net::UnixStream);
+impl ForkedDescriptors {
+    fn new() -> Self {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        let (mut parent, child) = std::os::unix::net::UnixStream::pair().unwrap();
+        let child_fd = child.as_raw_fd();
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            // Between fork and exec only async-signal-safe syscalls are allowed.
+            // Keep all inherited descriptors open until the parent ends the test.
+            let mut byte = 1u8;
+            unsafe {
+                libc::write(child_fd, (&byte as *const u8).cast(), 1);
+                libc::read(child_fd, (&mut byte as *mut u8).cast(), 1);
+                libc::_exit(0);
+            }
+        }
+        let mut ready = [0];
+        parent.read_exact(&mut ready).unwrap();
+        Self(pid, parent)
+    }
+}
+impl Drop for ForkedDescriptors {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _ = self.1.write_all(&[1]);
+        unsafe {
+            libc::waitpid(self.0, std::ptr::null_mut(), 0);
+        }
+    }
+}
+
+#[test]
+fn forked_child_drop_cannot_unlock_its_parent_lease() {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    let dir = Temp::new();
+    let lease = storage::lease(&dir.0).unwrap();
+    let (mut parent, child) = std::os::unix::net::UnixStream::pair().unwrap();
+    let child_fd = child.as_raw_fd();
+    let pid = unsafe { libc::fork() };
+    assert!(pid >= 0);
+    if pid == 0 {
+        // Lease/File destruction uses only getpid/flock/close, not allocation.
+        drop(lease);
+        let byte = 1u8;
+        unsafe {
+            libc::write(child_fd, (&byte as *const u8).cast(), 1);
+            libc::_exit(0);
+        }
+    }
+    drop(child);
+    let mut ready = [0];
+    parent.read_exact(&mut ready).unwrap();
+    unsafe {
+        libc::waitpid(pid, std::ptr::null_mut(), 0);
+    }
+    assert!(
+        matches!(storage::lease(&dir.0), Err("outbox_in_use")),
+        "a child destructor must not release its parent's lease"
+    );
+    drop(lease);
+    assert!(storage::lease(&dir.0).is_ok());
+}
+
+#[test]
+fn forked_child_descriptor_cannot_extend_the_last_owner_lease() {
+    use std::os::fd::AsRawFd;
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    let dir = Temp::new();
+    let lease = Arc::new(storage::lease(&dir.0).unwrap());
+    let writer = lease.clone();
+    let fd = lease.as_raw_fd();
+    assert_ne!(
+        unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC,
+        0
+    );
+    let child = ForkedDescriptors::new();
+    let inherited = format!("/proc/{}/fd/{fd}", child.0);
+    let lock_path = dir.0.join("omamail/outbox.lock");
+    assert_eq!(std::fs::read_link(&inherited).unwrap(), lock_path);
+    drop(lease);
+    assert!(
+        matches!(storage::lease(&dir.0), Err("outbox_in_use")),
+        "an active writer must retain exclusivity"
+    );
+    drop(writer);
+    assert!(
+        std::fs::read_link(format!("/proc/self/fd/{fd}")).is_err(),
+        "the parent closed its final descriptor"
+    );
+    assert_eq!(
+        std::fs::read_link(&inherited).unwrap(),
+        lock_path,
+        "the pre-exec child still holds its inherited descriptor"
+    );
+    let successor = storage::lease(&dir.0);
+    assert!(
+        successor.is_ok(),
+        "the child retained the parent's flock after its final legitimate owner closed: {:?}",
+        successor.err()
+    );
+}
+
 #[tokio::test]
 async fn mail_send_idempotency_survives_sent_payload_removal_and_restart() {
     use crate::mail::{Account, Provider, SendRequest};
@@ -618,6 +729,10 @@ async fn rust_timer_delivers_without_any_ui_flush_or_poll_command() {
 
 #[tokio::test]
 async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
+    use std::os::fd::AsRawFd;
+    if crate::mail::tests::isolated() {
+        return;
+    }
     let dir = Temp::new();
     let outbox = Outbox::with_root(
         Arc::new(|_| {
@@ -633,6 +748,18 @@ async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
         .await
         .unwrap();
     wait_state(&outbox, "inflight", "a@example.org", "sending").await;
+    let lease_fd = outbox
+        .inner
+        .lease
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .as_raw_fd();
+    let child = ForkedDescriptors::new();
+    let inherited = format!("/proc/{}/fd/{lease_fd}", child.0);
+    let lock_path = dir.0.join("omamail/outbox.lock");
+    assert_eq!(std::fs::read_link(&inherited).unwrap(), lock_path);
     outbox.shutdown().await.unwrap();
     assert_eq!(state(&outbox, "inflight", "a@example.org").await, "unknown");
     assert_eq!(
@@ -642,6 +769,11 @@ async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
         Err("outbox_stopping")
     );
     drop(outbox);
+    assert_eq!(
+        std::fs::read_link(&inherited).unwrap(),
+        lock_path,
+        "reopen must work even while a pre-exec child keeps the original lease descriptor"
+    );
     let restarted = Outbox::with_root(
         Arc::new(|_| Box::pin(async { panic!("must never resume delivery") })),
         Some(dir.0.clone()),

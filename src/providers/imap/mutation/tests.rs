@@ -71,6 +71,124 @@ async fn initialize(w: &mut Wire) {
 fn params(port: u16) -> Value {
     json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:secret","oauth":false})
 }
+async fn planned_group_failure(failure: &str, use_move: bool, flags_only: bool, stall: bool) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let failure = failure.to_owned();
+    let peer = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        if flags_only {
+            initialize(&mut w).await;
+        } else {
+            write(&mut w, b"* OK ready\r\n").await.unwrap();
+            assert!(line(&mut w).await.unwrap().starts_with(b"O1 LOGIN"));
+            write(&mut w, b"O1 OK login\r\n").await.unwrap();
+            assert_eq!(line(&mut w).await.unwrap(), b"O1 CAPABILITY\r\n");
+            write(&mut w, b"* CAPABILITY IMAP4rev1\r\nO1 OK capabilities\r\n")
+                .await
+                .unwrap();
+        }
+        'groups: for (folder, set) in [("INBOX", "7,9"), ("ZOther", "8")] {
+            let mut commands = vec![
+                format!("SELECT \"{folder}\""),
+                format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"),
+                format!("UID STORE {set} -FLAGS.SILENT (\\Flagged)"),
+            ];
+            if !flags_only {
+                if use_move {
+                    commands.push(format!("UID MOVE {set} \"Archive\""));
+                } else {
+                    commands.extend([
+                        format!("UID COPY {set} \"Archive\""),
+                        format!("UID STORE {set} +FLAGS.SILENT (\\Deleted)"),
+                        format!("UID EXPUNGE {set}"),
+                    ]);
+                }
+            }
+            for command in commands {
+                assert_eq!(
+                    line(&mut w).await.unwrap(),
+                    format!("O1 {command}\r\n").as_bytes()
+                );
+                if folder == "ZOther" && command == failure {
+                    if !stall {
+                        write(
+                            &mut w,
+                            b"O1 NO synthetic failure with private diagnostic\r\n",
+                        )
+                        .await
+                        .unwrap();
+                    }
+                    break 'groups;
+                }
+                write(&mut w, b"O1 OK acknowledged\r\n").await.unwrap();
+            }
+        }
+        let mut byte = [0];
+        assert_eq!(
+            w.read(&mut byte).await.unwrap(),
+            0,
+            "no retry or later group after failure"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let mut p = params(port);
+    // Preserve input order and spelling, not the BTreeMap's folder/UID order.
+    p["ids"] = json!(["8:ZOther", "007:INBOX", "9:INBOX", "10:ZZLast"]);
+    p["addLabelIds"] = json!([]);
+    p["removeLabelIds"] = if flags_only {
+        json!(["UNREAD", "STARRED"])
+    } else {
+        json!(["INBOX", "UNREAD", "STARRED"])
+    };
+    let context = if flags_only {
+        Value::Null
+    } else {
+        json!({"folders":[],"special":{"\\archive":"Archive"},"capabilities":if use_move {vec!["MOVE"]} else {vec![]}})
+    };
+    let result = super::super::execute_planned_action("imap.modify", &p, &context)
+        .await
+        .unwrap();
+    assert_eq!(result["succeededIds"], json!(["007:INBOX", "9:INBOX"]));
+    assert_eq!(result["failedIds"], json!(["8:ZOther", "10:ZZLast"]));
+    assert_eq!(
+        result["error"],
+        if stall {
+            "request_timed_out"
+        } else {
+            "imap_command_failed"
+        }
+    );
+    assert!(!result.to_string().contains("private diagnostic"));
+    peer.await.unwrap();
+}
+
+#[tokio::test]
+async fn planned_groups_preserve_acknowledgements_at_every_later_failure_boundary() {
+    for failure in [
+        "SELECT \"ZOther\"",
+        "UID STORE 8 +FLAGS.SILENT (\\Seen)",
+        "UID STORE 8 -FLAGS.SILENT (\\Flagged)",
+        "UID COPY 8 \"Archive\"",
+        "UID STORE 8 +FLAGS.SILENT (\\Deleted)",
+        "UID EXPUNGE 8",
+    ] {
+        planned_group_failure(failure, false, false, false).await;
+    }
+    planned_group_failure("UID MOVE 8 \"Archive\"", true, false, false).await;
+    planned_group_failure("UID STORE 8 -FLAGS.SILENT (\\Flagged)", false, true, false).await;
+}
+
+#[tokio::test]
+async fn planned_groups_preserve_acknowledgements_when_later_group_exceeds_deadline() {
+    planned_group_failure("SELECT \"ZOther\"", true, false, true).await;
+}
+
 #[tokio::test]
 async fn archive_without_move_sets_flags_then_copy_then_uid_expunge() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -244,13 +244,14 @@ pub(super) async fn call(
     p: &Value,
     sent: &std::sync::atomic::AtomicBool,
 ) -> Result<Value> {
-    call_planned(method, p, sent, None).await
+    call_planned(method, p, sent, None, None).await
 }
 pub(super) async fn call_planned(
     method: &str,
     p: &Value,
     sent: &std::sync::atomic::AtomicBool,
     planned: Option<&Mailboxes>,
+    mut completed_folders: Option<&mut Vec<String>>,
 ) -> Result<Value> {
     if method == "imap.send" {
         let body = raw(p)?;
@@ -370,6 +371,12 @@ pub(super) async fn call_planned(
                         .await?;
                         command(&mut w, &format!("UID EXPUNGE {set}")).await?;
                     }
+                }
+                // Record only a fully acknowledged group. Keep the ledger
+                // outside this future so later errors and deadline cancellation
+                // cannot discard earlier successes or invite their retry.
+                if let Some(completed) = completed_folders.as_mut() {
+                    completed.push(folder);
                 }
             }
             json!({})
