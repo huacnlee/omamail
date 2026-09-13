@@ -154,10 +154,10 @@ impl Session {
         let boxes = argument(&result, "0", "Mailbox/get")?["list"]
             .as_array()
             .ok_or("jmap_invalid_response")?;
-        Ok(Self::action_availability_for(
-            snapshot,
-            &query::roles(boxes),
-        ))
+        let roles = query::roles(boxes);
+        let mut availability = Self::action_availability_for(snapshot, &roles);
+        availability["roles"] = roles;
+        Ok(availability)
     }
 
     pub(super) async fn action_rows(
@@ -167,6 +167,10 @@ impl Session {
         params: &Value,
     ) -> Result<Value, &'static str> {
         let requested = action_ids(&params["ids"])?;
+        let roles = params["roles"]
+            .as_object()
+            .ok_or("mail_action_invalid_target")?;
+        let roles = Value::Object(roles.clone());
         let emails = self
             .get_emails(context, snapshot, &requested, false, true)
             .await?;
@@ -249,33 +253,70 @@ impl Session {
         if member_by_id.len() != all_member_ids.len() {
             return Err("mail_action_target_unknown");
         }
-        let mut rows = Vec::new();
-        for id in requested {
-            let email = by_id.remove(&id).ok_or("mail_action_target_unknown")?;
+        // A response has one row per requested representative, so a server can
+        // otherwise make 1,000 representatives of one 2,000-member thread
+        // retain two million copied IDs. Share the expansion per thread/view
+        // and reject the aggregate projection before any row is built.
+        const ACTION_ROW_BYTES: usize = 4 * 1024 * 1024;
+        let mut scoped = std::collections::HashMap::<(String, String), (Vec<String>, usize)>::new();
+        let mut output_count = 0usize;
+        let mut output_bytes = 0usize;
+        for id in &requested {
+            let email = by_id.get(id).ok_or("mail_action_target_unknown")?;
             let thread = action_id(&email["threadId"])?;
             let raw_member_ids = members.get(&thread).ok_or("mail_action_target_unknown")?;
-            let viewed = if super::resource::in_mailbox(&email, string(&snapshot.roles["junk"])) {
-                string(&snapshot.roles["junk"])
-            } else if super::resource::in_mailbox(&email, string(&snapshot.roles["trash"])) {
-                string(&snapshot.roles["trash"])
+            let viewed = if super::resource::in_mailbox(&email, string(&roles["junk"])) {
+                string(&roles["junk"])
+            } else if super::resource::in_mailbox(&email, string(&roles["trash"])) {
+                string(&roles["trash"])
             } else {
                 ""
             };
-            let mut member_ids = Vec::new();
-            for member in raw_member_ids
-                .as_array()
-                .ok_or("mail_action_invalid_target")?
-            {
-                let member = action_id(member)?;
-                let member_row = member_by_id
-                    .get(&member)
-                    .ok_or("mail_action_target_unknown")?;
-                if super::resource::thread_member_visible(member_row, &snapshot.roles, viewed) {
-                    member_ids.push(member);
+            let key = (thread, viewed.to_owned());
+            if !scoped.contains_key(&key) {
+                let mut member_ids = Vec::new();
+                let mut bytes = 0usize;
+                for member in raw_member_ids
+                    .as_array()
+                    .ok_or("mail_action_invalid_target")?
+                {
+                    let member = action_id(member)?;
+                    let member_row = member_by_id
+                        .get(&member)
+                        .ok_or("mail_action_target_unknown")?;
+                    if super::resource::thread_member_visible(member_row, &roles, viewed) {
+                        bytes = bytes.saturating_add(member.len());
+                        member_ids.push(member);
+                    }
                 }
+                scoped.insert(key.clone(), (member_ids, bytes));
             }
-            rows.push(json!({"id":id,"thread":{"memberIds":member_ids}}));
+            let (member_ids, bytes) = scoped.get(&key).ok_or("mail_action_target_unknown")?;
+            output_count = output_count.saturating_add(member_ids.len());
+            output_bytes = output_bytes.saturating_add(*bytes);
+            if output_count > 2000 {
+                return Err("mail_action_target_limit");
+            }
+            if output_bytes > ACTION_ROW_BYTES {
+                return Err("jmap_response_too_large");
+            }
         }
+        let rows = requested
+            .iter()
+            .map(|id| {
+                let email = by_id.get(id).ok_or("mail_action_target_unknown")?;
+                let thread = action_id(&email["threadId"])?;
+                let viewed = if super::resource::in_mailbox(email, string(&roles["junk"])) {
+                    string(&roles["junk"])
+                } else if super::resource::in_mailbox(email, string(&roles["trash"])) {
+                    string(&roles["trash"])
+                } else {
+                    ""
+                };
+                let member_ids = &scoped[&(thread.clone(), viewed.to_owned())].0;
+                Ok(json!({"id":id,"thread":{"memberIds":member_ids}}))
+            })
+            .collect::<Result<Vec<_>, &'static str>>()?;
         Ok(json!({"rows":rows}))
     }
 

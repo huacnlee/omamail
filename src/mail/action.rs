@@ -25,6 +25,8 @@ pub(crate) struct ActionAvailability {
     /// A provider action may be direct (for example HEY spam) rather than a
     /// move to a listable mailbox. Missing entries retain mailbox semantics.
     pub mailbox_required: Value,
+    /// Opaque, freshly-read provider context for the matching `rows` lookup.
+    pub rows_context: Value,
 }
 
 /// Supplies only bounded, read-only action context. Implementations must not
@@ -39,6 +41,7 @@ pub(crate) trait ActionLookup: Send + Sync {
         &'a self,
         account: &'a Account,
         ids: &'a [String],
+        availability: &'a ActionAvailability,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>>;
 }
 
@@ -133,7 +136,9 @@ pub(crate) async fn plan_action(
     let change = crate::account::model::action_changes(action);
     let add_label_ids = label_ids(&change, "add")?;
     let remove_label_ids = label_ids(&change, "remove")?;
-    let rows = lookup.rows(&request.account, &unique_requested).await?;
+    let rows = lookup
+        .rows(&request.account, &unique_requested, &availability)
+        .await?;
     let mut target_ids = Vec::new();
     let mut seen = HashSet::new();
     for id in &unique_requested {

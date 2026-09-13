@@ -40,6 +40,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
                     refusals: value["data"]["refusals"].clone(),
                     mailboxes: value["data"]["mailboxes"].clone(),
                     mailbox_required: Value::Null,
+                    rows_context: value["data"]["roles"].clone(),
                 });
             }
             let mailboxes = ["archive", "trash", "spam"]
@@ -62,6 +63,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
                 } else {
                     Value::Null
                 },
+                rows_context: Value::Null,
             })
         })
     }
@@ -70,20 +72,26 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
         &'a self,
         account: &'a crate::mail::Account,
         ids: &'a [String],
+        availability: &'a crate::mail::action::ActionAvailability,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
         Box::pin(async move {
             if account.provider == Provider::Jmap {
-                let value = self
+                let mut value = self
                     .session
                     .jmap
                     .call(
                         "jmap.actionRows",
-                        &json!({"accountId":account.id,"ids":ids}),
+                        &json!({"accountId":account.id,"ids":ids,"roles":availability.rows_context}),
                     )
                     .await?;
-                return value["data"]["rows"]
-                    .as_array()
-                    .cloned()
+                return value
+                    .get_mut("data")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|data| data.remove("rows"))
+                    .and_then(|rows| match rows {
+                        Value::Array(rows) => Some(rows),
+                        _ => None,
+                    })
                     .ok_or("mail_action_invalid_target");
             }
             Ok(ids.iter().map(|id| json!({"id":id})).collect())
@@ -715,6 +723,12 @@ mod tests {
             .await
             .unwrap();
         let report: Value = serde_json::from_slice(&report).unwrap();
+        assert!(
+            report.as_array().unwrap().iter().all(|request| {
+                request["path"] == "/api" && request["calls"].as_array().is_some()
+            }),
+            "preview used an upload, GET, or unrecognized endpoint: {report}"
+        );
         assert!(
             report
                 .as_array()
