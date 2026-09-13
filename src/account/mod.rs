@@ -13,10 +13,15 @@ pub mod intents;
 #[cfg(test)]
 mod tests;
 pub use storage::call;
-pub(crate) use storage::raw_registry;
+pub(crate) use storage::{raw_registry, raw_registry_readonly};
 
 pub fn list() -> Result<Value, &'static str> {
     let raw = raw_registry()?;
+    summarize(&serde_json::to_vec(&raw).map_err(|_| "accounts_invalid")?)
+}
+
+pub(crate) fn list_readonly() -> Result<Value, &'static str> {
+    let raw = raw_registry_readonly()?;
     summarize(&serde_json::to_vec(&raw).map_err(|_| "accounts_invalid")?)
 }
 

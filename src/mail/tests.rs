@@ -6,6 +6,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
     path::PathBuf,
     sync::{
         Mutex, MutexGuard,
@@ -22,6 +23,39 @@ struct AccountFixture {
     root: PathBuf,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct MetadataState {
+    mode: u32,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct RegistryState {
+    directory: MetadataState,
+    registry: MetadataState,
+    bytes: Vec<u8>,
+}
+
+fn metadata_state(path: &std::path::Path) -> MetadataState {
+    let metadata = fs::metadata(path).unwrap();
+    MetadataState {
+        mode: metadata.mode(),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    }
+}
+
+fn registry_state(fixture: &AccountFixture) -> RegistryState {
+    let directory = fixture.root.join("omamail");
+    let registry = directory.join("accounts.json");
+    RegistryState {
+        directory: metadata_state(&directory),
+        registry: metadata_state(&registry),
+        bytes: fs::read(registry).unwrap(),
+    }
+}
+
 impl Drop for AccountFixture {
     fn drop(&mut self) {
         unsafe {
@@ -36,7 +70,9 @@ impl Drop for AccountFixture {
 }
 
 fn account_fixture(registry: Value) -> AccountFixture {
-    let environment = ENVIRONMENT.lock().unwrap();
+    let environment = ENVIRONMENT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let root = env::temp_dir().join(format!(
         "omamail-mail-tests-{}-{}",
         std::process::id(),
@@ -44,6 +80,12 @@ fn account_fixture(registry: Value) -> AccountFixture {
     ));
     fs::create_dir_all(root.join("omamail")).unwrap();
     fs::write(root.join("omamail/accounts.json"), registry.to_string()).unwrap();
+    fs::set_permissions(root.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        root.join("omamail/accounts.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
     let previous = env::var_os("XDG_CONFIG_HOME");
     unsafe { env::set_var("XDG_CONFIG_HOME", &root) };
     AccountFixture {
@@ -79,6 +121,43 @@ fn omitted_account_uses_active_and_explicit_account_never_falls_back() {
         resolve_account("missing@example.org"),
         Err("mail_account_unknown")
     );
+}
+
+#[test]
+fn account_resolution_never_changes_registry_or_directory_metadata() {
+    let fixture = account_fixture(json!({
+        "version": 1,
+        "activeId": "active@example.org",
+        "accounts": [{"provider":"gmail","email":"active@example.org"}]
+    }));
+    let before = registry_state(&fixture);
+    assert_eq!(resolve_account("").unwrap().id, "active@example.org");
+    assert_eq!(registry_state(&fixture), before);
+
+    assert_eq!(
+        resolve_account("missing@example.org"),
+        Err("mail_account_unknown")
+    );
+    assert_eq!(registry_state(&fixture), before);
+}
+
+#[test]
+fn empty_or_pending_only_registries_never_resolve_an_empty_account_id() {
+    for registry in [
+        json!({"version":1, "activeId":"", "accounts":[]}),
+        json!({
+            "version": 1,
+            "activeId": "",
+            "accounts": [{"provider":"hey", "email":"", "pending":true}]
+        }),
+    ] {
+        let _fixture = account_fixture(registry);
+        assert_eq!(resolve_account(""), Err("mail_account_unknown"));
+        assert_eq!(
+            resolve_account("missing@example.org"),
+            Err("mail_account_unknown")
+        );
+    }
 }
 
 #[test]

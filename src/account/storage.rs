@@ -34,8 +34,27 @@ pub fn call(method: &str, params: &Value) -> Result<Value> {
 pub(crate) fn raw_registry() -> Result<Value> {
     Ok(call("accounts.read", &json!({}))?["registry"].clone())
 }
+pub(crate) fn raw_registry_readonly() -> Result<Value> {
+    let Some(dir) = crate::cache::directories_readonly(&home()?, &["omamail"])? else {
+        return registry(&[]);
+    };
+    registry(&read_readonly(&dir)?)
+}
 fn read(dir: &File) -> Result<Vec<u8>> {
     let Some(file) = crate::cache::regular(dir, "accounts.json", false)? else {
+        return Ok(Vec::new());
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_CONFIG + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "accounts_unreadable")?;
+    if bytes.len() as u64 > MAX_CONFIG {
+        return Err("accounts_too_large");
+    }
+    Ok(bytes)
+}
+fn read_readonly(dir: &File) -> Result<Vec<u8>> {
+    let Some(file) = crate::cache::regular_readonly(dir, "accounts.json")? else {
         return Ok(Vec::new());
     };
     let mut bytes = Vec::new();

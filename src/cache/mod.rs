@@ -173,6 +173,30 @@ fn open_dir(
     Ok(Some(file))
 }
 
+fn open_dir_readonly(parent: &File, name: &std::ffi::OsStr, private: bool) -> Result<Option<File>> {
+    let name = cstr(name)?;
+    let access = libc::O_RDONLY
+        | libc::O_DIRECTORY
+        | libc::O_NOFOLLOW
+        | libc::O_CLOEXEC
+        | if private { libc::O_NOATIME } else { 0 };
+    let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), access) };
+    if fd < 0 {
+        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        return Err("cache_unsafe_path");
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    if private {
+        let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
+        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+            return Err("cache_unsafe_path");
+        }
+    }
+    Ok(Some(file))
+}
+
 fn directory(root: &Path, account: &str, create: bool) -> Result<Option<File>> {
     directories(root, &["omamail", "bodies", account], create)
 }
@@ -196,6 +220,32 @@ pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<
     }
     for name in suffix {
         let Some(next) = open_dir(&dir, name.as_ref(), create, true)? else {
+            return Ok(None);
+        };
+        dir = next;
+    }
+    Ok(Some(dir))
+}
+
+pub(crate) fn directories_readonly(root: &Path, suffix: &[&str]) -> Result<Option<File>> {
+    if !root.is_absolute() {
+        return Err("cache_home_invalid");
+    }
+    let mut dir = File::open("/").map_err(|_| "cache_unavailable")?;
+    for component in root.components() {
+        match component {
+            Component::RootDir => (),
+            Component::Normal(name) => {
+                let Some(next) = open_dir_readonly(&dir, name, false)? else {
+                    return Ok(None);
+                };
+                dir = next;
+            }
+            _ => return Err("cache_home_invalid"),
+        }
+    }
+    for name in suffix {
+        let Some(next) = open_dir_readonly(&dir, name.as_ref(), true)? else {
             return Ok(None);
         };
         dir = next;
@@ -231,6 +281,37 @@ pub(crate) fn regular(dir: &File, name: &str, writable: bool) -> Result<Option<F
     }
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .map_err(|_| "cache_unavailable")?;
+    Ok(Some(file))
+}
+
+pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
+    let name = CString::new(name).map_err(|_| "cache_invalid_input")?;
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY
+                | libc::O_NOFOLLOW
+                | libc::O_NONBLOCK
+                | libc::O_CLOEXEC
+                | libc::O_NOATIME,
+        )
+    };
+    if fd < 0 {
+        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        return Err("cache_unsafe_path");
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err("cache_unsafe_path");
+    }
     Ok(Some(file))
 }
 
