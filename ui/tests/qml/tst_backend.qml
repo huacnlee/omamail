@@ -14,6 +14,25 @@ Item {
 
   TestCase {
     name: "BackendLifecycle"
+    SignalSpy { id: errors; signalName: "requestFailed" }
+
+    function test_failed_request_reports_operation_without_payload() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      errors.target = backend
+      errors.clear()
+      var received = null
+      backend.call("agent.jobStart", {payload: "SECRET-MAIL"}, function(result, error) { received = error })
+      var all = requests(process)
+      var request = all[all.length - 1]
+      backend.receive(JSON.stringify({jsonrpc:"2.0",id:request.id,error:{code:-32000,message:"agent_invalid_state"}}))
+      compare(received.message, "agent_invalid_state")
+      compare(errors.count, 1)
+      compare(errors.signalArguments[0][0], "agent.jobStart")
+      compare(errors.signalArguments[0].length, 2)
+      verify(JSON.stringify(errors.signalArguments).indexOf("SECRET-MAIL") < 0)
+      errors.target = null
+    }
 
     function test_agent_context_deadline_includes_uploaded_operation() {
       var backend = makeBackend()

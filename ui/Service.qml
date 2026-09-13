@@ -6,6 +6,7 @@ import "account"
 import "calendar"
 import "agent"
 import "backend"
+import "diagnostics"
 import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
@@ -53,6 +54,13 @@ Item {
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
   }
   readonly property var backend: rustBackend
+  readonly property bool diagnosing: diagnostics.busy
+  function diagnoseError() { diagnostics.open() }
+  Diagnostics {
+    id: diagnostics
+    pluginDir: root.pluginDir
+    onFailed: function(message) { if (root.current) root.current.fail(message) }
+  }
   Backend {
     id: rustBackend
     // The runtime manager resolves symlinks. Launch its validated path rather
@@ -64,6 +72,7 @@ Item {
     latestApiVersion: privateRuntime.latestApiVersion
     unreleasedMethods: privateRuntime.unreleasedMethods
     onReadyChanged: root.scheduleUnifiedSnapshot()
+    onRequestFailed: function(method, error) { diagnostics.record(method, error) }
   }
 
   // The checkout is a step ahead of the backend the owner has: a feature on

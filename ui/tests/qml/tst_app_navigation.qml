@@ -48,6 +48,9 @@ Item {
 
   QtObject {
     id: mailService
+    property bool diagnosing: false
+    property int diagnosisCalls: 0
+    function diagnoseError() { diagnosisCalls++; diagnosing = true }
 
     property bool ready: true
     property bool anyAccountReady: true
@@ -576,6 +579,23 @@ Item {
       verify(createEvent && createEvent.visible)
       compare(createEvent.text, "Create event")
       compare(typeof createEvent.iconName, "undefined")
+    }
+    function test_status_error_opens_external_diagnosis_once() {
+      mailService.lastError = "Could not confirm AI started. Check the conversation before retrying."
+      mailService.actionStatus = ""
+      mailService.diagnosing = false
+      mailService.diagnosisCalls = 0
+      var button = named(app, "diagnose-error-button")
+      verify(button !== null)
+      verify(waitForRendering(app))
+      verify(button.visible)
+      verify(button.width > 0 && button.height > 0)
+      mouseClick(button, button.width / 2, button.height / 2)
+      compare(mailService.diagnosisCalls, 1)
+      compare(button.enabled, false)
+      mailService.diagnosing = false
+      mailService.lastError = ""
+      compare(button.visible, false)
     }
 
     function test_an_event_opened_for_reading_is_a_place() {

@@ -330,7 +330,7 @@ FocusScope {
     padding: Style.space(4)
     focus: true
     property int cursorIndex: -1
-    readonly property var rows: [newChatRow, historyRow]
+    readonly property var rows: [newChatRow, historyRow, diagnoseRow]
     closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
     function place() {
       var anchor = closeButton.mapToItem(root, 0, 0)
@@ -376,6 +376,19 @@ FocusScope {
         collection: moreMenu.rows
         cursorIndex: moreMenu.cursorIndex
         onActivated: { moreMenu.close(); root.showHistory() }
+      }
+      MenuActionRow {
+        id: diagnoseRow
+        objectName: "agent-diagnose-menu-row"
+        width: moreMenu.availableWidth
+        text: "Diagnose..."
+        textColor: root.textColor
+        panelFontFamily: root.panelFontFamily
+        collection: moreMenu.rows
+        cursorIndex: moreMenu.cursorIndex
+        enabled: !!root.service && typeof root.service.diagnoseError === "function"
+          && !root.service.diagnosing
+        onActivated: { moreMenu.close(); root.service.diagnoseError() }
       }
     }
   }

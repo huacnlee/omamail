@@ -10,6 +10,9 @@ Column {
   required property color accentColor
   required property string panelFontFamily
   property string backendError: ""
+  property bool diagnosisAvailable: false
+  property bool diagnosing: false
+  signal diagnosisRequested()
   spacing: Style.space(12)
   onVisibleChanged: {
     if (visible && runtime && !runtime.busy && typeof runtime.refresh === "function") runtime.refresh()
@@ -89,7 +92,21 @@ Column {
       foreground: root.accentColor
       onClicked: root.runtime.install()
     }
-
+    IconButton {
+      objectName: "backend-diagnose"
+      visible: root.diagnosisAvailable
+      enabled: !root.diagnosing
+      iconName: "agent"
+      iconSize: Style.font.iconSmall
+      size: Style.space(24)
+      tooltipText: "Diagnose with AI..."
+      Accessible.role: Accessible.Button
+      Accessible.name: "Diagnose with AI..."
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.diagnosisRequested()
+    }
   }
   Column {
     width: parent.width

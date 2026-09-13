@@ -47,6 +47,7 @@ Item {
 
   signal shutdownComplete(var error)
   signal notification(string method, var params)
+  signal requestFailed(string method, var error)
 
   function parseMessage(raw, callback) {
     Upload.parse(raw, function(method, params, done) {
@@ -83,7 +84,11 @@ Item {
   }
 
   function request(method, params, callback, internal) {
-    var done = typeof callback === "function" ? callback : function() {}
+    var operation = method === "request.upload" && params ? params.method : method
+    var done = function(result, error) {
+      if (error) root.requestFailed(operation, error)
+      if (typeof callback === "function") callback(result, error)
+    }
     var message = Compatibility.dispatchError(
       connected, ready, stopping, method, internal)
     if (message !== null) {

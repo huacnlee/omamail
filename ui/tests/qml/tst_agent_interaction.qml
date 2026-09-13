@@ -23,6 +23,8 @@ Item {
     readonly property var agentAllJobs: jobs
     property bool accept: true
     property int calls: 0
+    property int diagnoses: 0
+    function diagnoseError() { diagnoses++ }
     property string requestedId: ""
     property string requestedPrompt: ""
     function agentJobFor(id, account) { return Oracle.selectionJob(jobs,[id],account) }
@@ -215,6 +217,19 @@ Item {
       tryCompare(findChild(popup, "agent-more-menu"), "visible", true)
       compare(more.selected, true)
       compare(popup.opened, true)
+    }
+    function test_error_has_independent_diagnosis_entry() {
+      service.diagnoses = 0
+      service.agentError = "Could not confirm AI started."
+      popup.openCenteredFor("m1", "Mail")
+      var more = findChild(popup, "agent-more-button")
+      mouseClick(more, more.width / 2, more.height / 2)
+      var diagnose = findChild(popup, "agent-diagnose-menu-row")
+      verify(diagnose !== null)
+      diagnose.activated()
+      compare(service.diagnoses, 1)
+      compare(service.calls, 0)
+      compare(findChild(popup, "agent-more-menu").visible, false)
     }
     function test_copy_raw_reply_and_show_check_without_button_chrome() {
       service.jobs=[{id:"reply",messageId:"m1",accountId:service.activeAccountId,state:"done"}]

@@ -33,11 +33,28 @@ Item {
   TestCase {
     name: "BackendSetup"
     when: windowShown
+    SignalSpy { id: diagnosis; target: page; signalName: "diagnosisRequested" }
+    function test_diagnosis_does_not_require_a_ready_backend() {
+      runtime.state = "error"
+      page.diagnosisAvailable = true
+      diagnosis.clear()
+      var button = findChild(page, "backend-diagnose")
+      verify(waitForRendering(page))
+      verify(button.visible && button.enabled)
+      mouseClick(button)
+      compare(diagnosis.count, 1)
+      page.diagnosing = true
+      compare(button.enabled, false)
+      page.diagnosing = false
+      page.diagnosisAvailable = false
+      runtime.state = "ready"
+    }
     function init() {
       runtime.cliInstalled=false
       runtime.installs=0
       runtime.busy=false
       page.visible=true
+      verify(waitForRendering(page))
     }
     function test_check_is_ghost_beside_version() {
       var check=findChild(page,"backend-refresh")

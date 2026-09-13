@@ -251,6 +251,9 @@ Column {
     width: parent.width
     runtime: root.service ? root.service.backendRuntime || null : null
     backendError: root.service && root.service.backend ? root.service.backend.failure : ""
+    diagnosisAvailable: !!root.service && typeof root.service.diagnoseError === "function"
+    diagnosing: !!root.service && !!root.service.diagnosing
+    onDiagnosisRequested: root.service.diagnoseError()
     textColor: root.textColor
     dimColor: root.dimColor
     accentColor: root.accentColor
