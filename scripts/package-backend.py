@@ -65,11 +65,17 @@ def read_api(path):
     except (UnicodeError, RecursionError) as error:
         raise ValueError('malformed backend API contract') from error
     if (not isinstance(contract, dict)
-            or set(contract) != {'apiVersion', 'protocolVersion', 'methods', 'contractCases'}):
+            or set(contract) != {'apiVersion', 'releasedApiVersion', 'protocolVersion', 'methods',
+                                 'contractCases', 'unreleased'}):
         raise ValueError('invalid backend API contract fields')
-    for key in ('apiVersion', 'protocolVersion'):
+    for key in ('apiVersion', 'releasedApiVersion', 'protocolVersion'):
         if type(contract[key]) is not int or not 1 <= contract[key] <= 2147483647:
             raise ValueError('invalid backend API revision: ' + key)
+    # Two states and no history: the API the pinned binary speaks, and at most
+    # one step ahead of it that this checkout implements but has not shipped.
+    # A third step waits for a release, which is what makes releases batches.
+    if contract['apiVersion'] - contract['releasedApiVersion'] not in (0, 1):
+        raise ValueError('apiVersion must equal releasedApiVersion or be one step ahead; release first')
     methods = contract['methods']
     if (not isinstance(methods, list) or not methods
             or any(not isinstance(method, str) or not re.fullmatch(r'[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+', method)
@@ -97,7 +103,58 @@ def read_api(path):
         if any(value not in ('null', 'boolean', 'number', 'string', 'array', 'object')
                for value in case.get('types', {}).values()):
             raise ValueError('invalid API expected type')
+    unreleased = contract['unreleased']
+    if (not isinstance(unreleased, dict) or set(unreleased) != {'methods', 'cases'}
+            or any(not isinstance(unreleased[key], list) for key in ('methods', 'cases'))):
+        raise ValueError('invalid unreleased API description')
+    for key, known in (('methods', set(methods)), ('cases', names)):
+        entries = unreleased[key]
+        if (any(not isinstance(entry, str) or entry not in known for entry in entries)
+                or len(set(entries)) != len(entries)):
+            raise ValueError('unreleased API ' + key + ' must name entries of this contract, once each')
+    if contract['apiVersion'] == contract['releasedApiVersion'] and (unreleased['methods'] or unreleased['cases']):
+        raise ValueError('an unreleased API change requires apiVersion one ahead of releasedApiVersion')
+    unreleased_methods = set(unreleased['methods'])
+    for case in cases:
+        if case['method'] in unreleased_methods and case['name'] not in unreleased['cases']:
+            raise ValueError('a case on an unreleased method is itself unreleased: ' + case['name'])
     return contract
+
+
+def released_view(contract):
+    """What the pinned, published binary speaks: the contract less its unreleased step."""
+    unreleased = contract.get('unreleased', {'methods': [], 'cases': []})
+    methods = [m for m in contract['methods'] if m not in set(unreleased['methods'])]
+    cases = [c for c in contract['contractCases'] if c['name'] not in set(unreleased['cases'])]
+    return {'apiVersion': contract.get('releasedApiVersion', contract['apiVersion']),
+            'protocolVersion': contract['protocolVersion'], 'methods': methods, 'contractCases': cases}
+
+
+def full_view(contract):
+    """Everything a binary built from this contract's checkout speaks."""
+    return {'apiVersion': contract['apiVersion'], 'protocolVersion': contract['protocolVersion'],
+            'methods': contract['methods'], 'contractCases': contract['contractCases']}
+
+
+def read_published_api(path):
+    """A published contract: this shape, or the shape before the split had a name."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('published backend API contract must be a regular file')
+    raw = path.read_bytes()
+    try:
+        value = json.loads(raw)
+    except ValueError as error:
+        raise ValueError('malformed published backend API contract') from error
+    if isinstance(value, dict) and 'releasedApiVersion' not in value and 'unreleased' not in value:
+        value = dict(value, releasedApiVersion=value.get('apiVersion'), unreleased={'methods': [], 'cases': []})
+        # Anything the old binary advertised it also speaks; the split is ours.
+        rewritten = path.with_name(path.name + '.split')
+        rewritten.write_text(json.dumps(value))
+        try:
+            return read_api(rewritten)
+        finally:
+            rewritten.unlink()
+    return read_api(path)
 
 
 def check_api(root, published=None, baseline=None):
@@ -112,15 +169,20 @@ def check_api(root, published=None, baseline=None):
     methods = re.findall(r'"([a-zA-Z0-9.]+)"', entries)
     if len(set(methods)) != len(methods) or set(methods) != set(contract['methods']):
         raise ValueError('public method inventory differs from backend-api.json; update the API contract')
+    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     if published is not None:
-        expected = read_api(published)
-        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
-        if canonical(contract) != canonical(expected):
-            raise ValueError('published backend API contract differs; publish and pin a compatible backend')
+        # The pinned binary must speak exactly what this checkout calls its
+        # released API. The unreleased step is checked against a binary built
+        # from the checkout instead, so it may stand here unshipped.
+        expected = read_published_api(published)
+        if canonical(released_view(contract)) != canonical(full_view(expected)):
+            raise ValueError('the released API differs from the published backend; release it or pin it')
     if baseline is not None:
-        previous = read_api(baseline)
-        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
-        if canonical(contract) != canonical(previous) and contract['apiVersion'] <= previous['apiVersion']:
+        # What the release under preparation would change against the last one.
+        previous = read_published_api(baseline)
+        if canonical(released_view(contract)) != canonical(full_view(previous)):
+            raise ValueError('the released API must equal the pinned release before a new one is prepared')
+        if canonical(full_view(contract)) != canonical(full_view(previous)) and contract['apiVersion'] <= previous['apiVersion']:
             raise ValueError('changed API contract requires a newer apiVersion')
     return contract['apiVersion']
 
@@ -323,12 +385,18 @@ def pin(root, branch, expected):
     git('diff', '--exit-code')
     git('diff', '--cached', '--exit-code')
     (root / 'backend-version').write_text(version + '\n')
-    if not git('diff', '--', 'backend-version'):
+    # The release just published speaks the whole contract: the unreleased step
+    # becomes released, and the checks that read this file relax with it.
+    contract = read_api(root / 'backend-api.json')
+    contract['releasedApiVersion'] = contract['apiVersion']
+    contract['unreleased'] = {'methods': [], 'cases': []}
+    (root / 'backend-api.json').write_text(json.dumps(contract, indent=2) + '\n')
+    if not git('diff', '--', 'backend-version', 'backend-api.json'):
         return
-    git('add', 'backend-version')
+    git('add', 'backend-version', 'backend-api.json')
     git('-c', 'user.name=Omamail Release', '-c',
         'user.email=41898282+github-actions[bot]@users.noreply.github.com',
-        'commit', '-m', 'chore: pin published backend ' + version, '--only', 'backend-version')
+        'commit', '-m', 'chore: pin published backend ' + version, '--only', 'backend-version', 'backend-api.json')
     git('push', 'origin', 'HEAD:refs/heads/' + branch)
 
 

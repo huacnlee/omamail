@@ -23,7 +23,16 @@ const {spawn} = require('child_process');
 const {load} = require(process.env.CONTRACT_ROOT + '/ui/tests/load.js');
 const Wire = load('backend/Wire.js');
 const Chunks = load('backend/Chunks.js');
-const contract = JSON.parse(fs.readFileSync(process.env.CONTRACT_ROOT + '/backend-api.json'));
+const whole = JSON.parse(fs.readFileSync(process.env.CONTRACT_ROOT + '/backend-api.json'));
+// The pinned, published binary is asked only for the released API; a binary
+// built from this checkout for all of it.
+const released = process.env.CONTRACT_RELEASED === '1';
+const unreleased = whole.unreleased || {methods: [], cases: []};
+const contract = released ? {
+  apiVersion: whole.releasedApiVersion, protocolVersion: whole.protocolVersion,
+  methods: whole.methods.filter(m => !unreleased.methods.includes(m)),
+  contractCases: whole.contractCases.filter(c => !unreleased.cases.includes(c.name))
+} : whole;
 const child = spawn(process.env.CONTRACT_BINARY, ['serve'], {stdio:['pipe','pipe','pipe']});
 let buffer = '', state = null, serial = 0, finished = false;
 const pending = new Map();
@@ -139,7 +148,7 @@ function safeDocument(value) {
   assert.equal((await call('cache.bodyRead', {accountId,id:'chunked'})).text, large);
   assert.equal((await call('cache.bodyClear', {accountId})).cleared, true);
   assert.equal(await call('cache.bodyRead', {accountId,id:'chunked'}), null);
-  console.log(`Backend API ${api} contract PASS: ${tested.size} methods, ${contract.methods.length} advertised methods; binary ${info.version}`);
+  console.log(`Backend API ${api}${released ? ' (released view)' : ''} contract PASS: ${tested.size} methods, ${contract.methods.length} advertised methods; binary ${info.version}`);
   finished = true;
   child.stdin.end();
   child.kill('SIGTERM');
@@ -151,6 +160,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--expected-version')
+    parser.add_argument('--released', action='store_true',
+                        help='check only the released API, as the pinned published binary speaks it')
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     contract = json.loads((ROOT / 'backend-api.json').read_text())
@@ -168,7 +179,8 @@ def main():
                    XDG_CACHE_HOME=str(home / 'cache'), XDG_DATA_HOME=str(home / 'data'),
                    XDG_STATE_HOME=str(home / 'state'), XDG_RUNTIME_DIR=str(home / 'run'),
                    CONTRACT_ROOT=str(ROOT), CONTRACT_BINARY=str(binary),
-                   CONTRACT_VERSION=args.expected_version or '')
+                   CONTRACT_VERSION=args.expected_version or '',
+                   CONTRACT_RELEASED='1' if args.released else '')
         (home / 'run').mkdir(mode=0o700)
         registry = home / 'config/omamail/accounts.json'
         registry.parent.mkdir(parents=True)

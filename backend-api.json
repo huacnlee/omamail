@@ -1,5 +1,6 @@
 {
   "apiVersion": 1,
+  "releasedApiVersion": 1,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -227,7 +228,7 @@
         "now": 1700000000000
       },
       "equals": {
-        "body.text": "Hello 合成",
+        "body.text": "Hello \u5408\u6210",
         "summary.subject": "API fixture",
         "summary.id": "fixture"
       },
@@ -319,5 +320,9 @@
         "": null
       }
     }
-  ]
+  ],
+  "unreleased": {
+    "methods": [],
+    "cases": []
+  }
 }

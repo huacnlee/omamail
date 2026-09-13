@@ -47,12 +47,22 @@ def pin():
 
 
 def api_pin():
+    """The API the pinned binary speaks, the one this checkout implements, and
+    the methods only the latter has. The handshake accepts the former; a call
+    to one of the latter on the pinned binary is refused in the UI instead."""
     with (ROOT / "backend-api.json").open("rb") as source:
         raw = source.read(1024 * 1024 + 1)
     require(len(raw) <= 1024 * 1024, "Backend API contract is too large.")
-    version = json.loads(raw).get("apiVersion")
-    require(type(version) is int and 0 < version <= 2147483647, "Invalid backend API version.")
-    return version
+    contract = json.loads(raw)
+    require(isinstance(contract, dict), "Invalid backend API contract.")
+    released = contract.get("releasedApiVersion")
+    latest = contract.get("apiVersion")
+    for value in (released, latest):
+        require(type(value) is int and 0 < value <= 2147483647, "Invalid backend API version.")
+    require(latest - released in (0, 1), "Invalid backend API version.")
+    unreleased = contract.get("unreleased", {}).get("methods", []) if isinstance(contract.get("unreleased"), dict) else None
+    require(isinstance(unreleased, list) and all(isinstance(m, str) for m in unreleased), "Invalid backend API contract.")
+    return released, latest, unreleased
 
 
 def safe_path(path, directory=False, create=False):
@@ -330,11 +340,11 @@ def cli_installed():
 
 
 def run(command):
-    result = dict(state="error", requiredVersion="", requiredApiVersion=0, installedVersion="", executable=str(BINARY), error="", cliInstalled=False)
+    result = dict(state="error", requiredVersion="", requiredApiVersion=0, latestApiVersion=0, unreleasedMethods=[], installedVersion="", executable=str(BINARY), error="", cliInstalled=False)
     try:
         required = pin()
         result["requiredVersion"] = required
-        result["requiredApiVersion"] = api_pin()
+        result["requiredApiVersion"], result["latestApiVersion"], result["unreleasedMethods"] = api_pin()
         development = os.environ.get("OMAMAIL_BIN", "")
         executable = Path(development) if development else BINARY
         result["executable"] = str(executable)

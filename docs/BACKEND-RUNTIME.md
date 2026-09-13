@@ -55,12 +55,47 @@ QML presentation changes can likewise reuse the existing backend.
 
 The contract records the public method inventory and representative request/response
 fixtures. Changes to methods, accepted parameters, returned fields, errors or their
-meaning require contract review, updated fixtures and a higher API revision. Even an
-additive method needs a release before QML can depend on it. Maintain backwards
-compatibility where practical, but never use it as a reason to silently replace an
-old plugin's binary. `system.info.apiVersion` states the API revision. The initial
-published binary 0.9.0 predates this field; only that exact version is recognized as
-legacy API 1. Missing revision information from any other version is refused.
+meaning require contract review, updated fixtures and a higher API revision.
+`system.info.apiVersion` states the API revision. The initial published binary 0.9.0
+predates this field; only that exact version is recognized as legacy API 1. Missing
+revision information from any other version is refused.
+
+## Released and unreleased: one step ahead of the pin
+
+Backends ship in batches, not per merge, so `main` may implement an API the pinned
+binary does not have yet. The contract names that difference and nothing more:
+
+- `releasedApiVersion` is the API the pinned, published binary speaks; the runtime
+  handshake accepts exactly that. `apiVersion` is what this checkout's Rust
+  implements, equal to it or **one step ahead** — a second step is refused by
+  `check-api` until the first is released, which is what makes releases batches.
+- `unreleased.methods` and `unreleased.cases` name what the step adds: methods
+  only the step has, and contract cases only a binary from this checkout passes.
+  A case on an unreleased method is itself unreleased. With `apiVersion` equal to
+  `releasedApiVersion` both lists are empty.
+- CI runs two gates on every revision, and the required check needs both. The
+  **Released backend gate** downloads the pinned release and checks that its
+  contract equals the checkout's released view (`check-api --published`), then
+  runs the released view of the fixtures against that binary
+  (`test_backend_api.py --released`). The **Unreleased API gate** builds the
+  backend from the revision and runs the whole contract and the native agent
+  bridge against it. A merge into `main` can therefore carry an unreleased step
+  and still leave every fresh install working.
+- The plugin's runtime status reports `latestApiVersion` and `unreleasedMethods`
+  beside the required revision. `Backend` exposes `needsUpdate` when the
+  connected binary lacks the step, and refuses a call to an unreleased method on
+  it with `backend_needs_update` (code -32012) — so a feature that forgot to
+  look before asking fails the way it already handles, never as a request the old
+  binary would misread. `Service.backendNeedsUpdate` is the same flag for views:
+  a feature on the step says "the backend needs an update" and waits. Absent or
+  malformed step information reads as no step.
+- `tests/test_source.sh` allows `backend.call` only on declared methods, and
+  once nothing is unreleased allows no `backendNeedsUpdate` outside `Backend`
+  and `Service`: the check written for a step goes when the step ships, so the
+  code carries at most one step of "does the backend have this yet".
+- The pin commit made by a release folds the step: `releasedApiVersion` becomes
+  `apiVersion`, both `unreleased` lists empty. Published contracts from before
+  the split are read as all released.
 
 ## Release before pin
 
@@ -117,15 +152,16 @@ not require future PRs to contain identical Rust source. Cargo and Cargo.lock mu
 still agree for builds, but their development version need not equal the pinned
 published binary.
 
-For a combined QML/Rust PR requiring an API change: update the API revision and
-contract fixtures, test locally, prepare a new binary version and publish it from
-the trusted PR source, then advance `backend-version` after verification. The
-required merge check must pass before merging. Publishing after merging would
-leave plugin users exposed to the mismatch. Runtime handshake still requires the
+For a combined QML/Rust PR requiring an API change: raise `apiVersion` one step
+past `releasedApiVersion`, name the new methods and cases under `unreleased`, and
+let the feature wait on `Service.backendNeedsUpdate`. Both gates run on the PR and
+it merges into `main` without a release; the next release from `main` publishes
+the binary and its pin commit folds the step. Runtime handshake still requires the
 exact plugin-local binary pin, even when a newer release reports the same API.
 
-The contract runner currently exercises 13 methods and checks the full advertised
-inventory. It covers representative mail processing and cached reader behavior,
+The contract runner exercises the contract's cases and checks the advertised
+inventory — the released view against the pinned binary, everything against a
+binary built from the checkout. It covers representative mail processing and cached reader behavior,
 not every provider operation or every possible QML argument. API reviewers must
 extend fixtures for newly used behavior; passing these tests is not a proof of
 complete semantic compatibility. Contract fixtures, API revisions, workflows and

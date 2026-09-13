@@ -143,7 +143,9 @@ jobs:
           cat artifacts/backend-x86_64/SHA256SUMS artifacts/backend-aarch64/SHA256SUMS > release-assets/SHA256SUMS
           cmp artifacts/backend-x86_64/backend-api.json artifacts/backend-aarch64/backend-api.json
           cp artifacts/backend-x86_64/backend-api.json release-assets/
-          python3 scripts/package-backend.py check-api --published release-assets/backend-api.json
+          # The asset is this revision's own contract, byte for byte; the pin
+          # step below is what turns its unreleased step into the released API.
+          cmp backend-api.json release-assets/backend-api.json
           cmp artifacts/backend-x86_64/backend-build.json artifacts/backend-aarch64/backend-build.json
           cp artifacts/backend-x86_64/backend-build.json release-assets/
           python3 scripts/package-backend.py check-provenance release-assets/backend-build.json
@@ -157,5 +159,7 @@ jobs:
           cmp release-assets/backend-api.json published/backend-api.json
           cmp release-assets/backend-build.json published/backend-build.json
           cmp release-assets/SHA256SUMS published/SHA256SUMS
-          # Refuse moved refs and push only a pin commit, without force.
+          # Refuse moved refs and push only a pin commit, without force. The
+          # commit advances backend-version and folds the contract's unreleased
+          # step into its released API, which the published binary now speaks.
           python3 scripts/package-backend.py pin --branch "$GITHUB_REF_NAME" --expected "$GITHUB_SHA"

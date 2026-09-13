@@ -28,8 +28,30 @@ jobs:
       - run: python3 scripts/package-backend.py check-api
       - run: git diff --check
 
+  # The unreleased step, if the checkout has one, against a backend built from
+  # this very revision: the whole contract, and the native worker with it.
+  # A step nobody has shipped is still a step that has to work.
+  unreleased-api:
+    name: Unreleased API gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build this revision's backend and run the whole contract against it
+        run: |
+          set -euo pipefail
+          cargo build --locked --bin omamail
+          python3 scripts/package-backend.py check-api
+          python3 tests/test_backend_api.py --binary target/debug/omamail
+          python3 tests/test_agent_native_bridge.py
+
+  # The released API, against the binary the pin names as every user gets it:
+  # what the checkout calls released must be exactly what that binary speaks.
   published-assets:
-    name: Verify published backend (${{ matrix.arch }})
+    name: Released backend gate (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +67,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Require exact pin and verify published API compatibility
+      - name: Require exact pin and verify the released API against the published binary
         env:
           GH_TOKEN: ${{ github.token }}
           ARCH: ${{ matrix.arch }}
@@ -62,19 +84,23 @@ jobs:
           mkdir probe
           tar -xzf "published/omamail-linux-$ARCH.tar.gz" -C probe
           test "$(probe/omamail --version)" = "omamail $version"
-          python3 tests/test_backend_api.py --binary probe/omamail --expected-version "$version"
+          python3 tests/test_backend_api.py --binary probe/omamail --expected-version "$version" --released
           readelf -l probe/omamail > program-headers.txt
           readelf -d probe/omamail > dynamic-headers.txt
           if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
           if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
 
+  # The one required check: both gates, always. A revision merges only when
+  # the pinned binary still speaks the released API and a binary built from
+  # the revision speaks all of it.
   published-backend:
     name: Published backend merge gate
-    needs: published-assets
+    needs: [published-assets, unreleased-api]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require both published native binaries to verify
+      - name: Require the released and the unreleased gates
         env:
-          RESULT: ${{ needs.published-assets.result }}
-        run: test "$RESULT" = success
+          RELEASED: ${{ needs.published-assets.result }}
+          UNRELEASED: ${{ needs.unreleased-api.result }}
+        run: test "$RELEASED" = success && test "$UNRELEASED" = success
