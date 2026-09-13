@@ -13,6 +13,16 @@ fn provider(value: &Value) -> &str {
 pub fn mailbox_query(id: &str, mailbox: &str) -> Option<&'static str> {
     QUERIES.get(id)?.get(mailbox)?.as_str()
 }
+/// Canonical mailbox names are public; provider query keys may use an alias.
+pub fn query_mailbox(id: &str, mailbox: &str) -> Option<String> {
+    let mapped = match (id, mailbox) {
+        ("gmail", "archive") => "all",
+        _ => mailbox,
+    };
+    mailbox_query(id, mapped)
+        .is_some()
+        .then(|| mapped.to_owned())
+}
 fn quoted(text: &str) -> String {
     serde_json::to_string(text).unwrap()
 }

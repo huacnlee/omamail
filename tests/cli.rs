@@ -1,6 +1,9 @@
 use serde_json::Value;
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static EMPTY_HOME: AtomicU64 = AtomicU64::new(0);
 
 fn omamail(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_omamail"))
@@ -89,6 +92,29 @@ fn call(method: &str, params: &[u8]) -> Output {
     child.wait_with_output().unwrap()
 }
 
+fn call_in_empty_home(method: &str, params: &[u8]) -> Output {
+    let home = std::env::temp_dir().join(format!(
+        "omamail-cli-empty-home-{}-{}",
+        std::process::id(),
+        EMPTY_HOME.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["call", method, "--json"])
+        .env("XDG_CONFIG_HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(params).unwrap();
+    drop(child.stdin.take());
+    let output = child.wait_with_output().unwrap();
+    assert!(std::fs::read_dir(&home).unwrap().next().is_none());
+    std::fs::remove_dir_all(home).unwrap();
+    output
+}
+
 #[test]
 fn generic_call_dispatches_and_defaults_empty_input() {
     let output = call("system.info", b"");
@@ -144,6 +170,17 @@ fn generic_call_uses_stateful_session_dispatcher() {
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["ok"], true);
     assert!(value["result"]["upload"].is_string());
+}
+
+#[test]
+fn list_without_a_configured_account_is_a_stable_json_error() {
+    let output = call_in_empty_home("mail.list", b"{}");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        serde_json::json!({"ok":false,"error":{"code":"mail_account_unknown"}})
+    );
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
