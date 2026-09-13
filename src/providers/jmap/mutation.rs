@@ -83,6 +83,16 @@ pub(super) fn learns_junk(snapshot: &Snapshot) -> bool {
     snapshot.document["capabilities"]["urn:stalwart:jmap"].is_object()||snapshot.document["accounts"][&snapshot.account]["accountCapabilities"]["urn:stalwart:jmap"].is_object()
         ||url(string(&snapshot.document["apiUrl"])).ok().and_then(|u|u.host_str().map(str::to_owned)).is_some_and(|h|h.ends_with(".fastmail.com"))
 }
+/// Whether a conversation member has a real provider mutation for this action.
+/// Shared by preview expansion and Task 5's patch path.
+pub(super) fn applies_to_action(action: &str, roles: &Value, membership: &Value) -> bool {
+    let has = |role: &str| membership[string(&roles[role])] == true;
+    match action {
+        "archive" => !string(&roles["inbox"]).is_empty() && has("inbox"),
+        "spam" => !has("sent"),
+        _ => true,
+    }
+}
 impl Session {
     pub(super) async fn mutation(
         &self,

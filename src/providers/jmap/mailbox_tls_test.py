@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-mailbox-") as directory:
         def do_GET(self):
             if self.path=="/report":
                 self.answer(requests);threading.Thread(target=self.server.shutdown,daemon=True).start();return
-            requests.append({"path":self.path,"authorization":bool(self.headers.get("Authorization"))})
+            requests.append({"method":"GET","path":self.path,"authorization":bool(self.headers.get("Authorization"))})
             if self.path=="/events":
                 payload=b'event: state\r\ndata: {"changed":{"account":{"Email":"e2","Mailbox":"m2"}}}\r\n\r\n'
                 self.send_response(200);self.send_header("Content-Type","text/event-stream");self.send_header("Content-Length",str(len(payload)));self.end_headers();self.wfile.write(payload);return
@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-mailbox-") as directory:
                 requests.append({"path":self.path,"mode":mode,"authorization":bool(self.headers.get("Authorization"))});self.answer({"blobId":"uploaded"});return
             if self.path=="/refused":
                 requests.append({"path":self.path,"authorization":bool(self.headers.get("Authorization"))});self.answer({},401);return
-            body=json.loads(raw);requests.append({"path":self.path,"calls":body["methodCalls"],"authorization":bool(self.headers.get("Authorization"))})
+            body=json.loads(raw);requests.append({"method":"POST","path":self.path,"calls":body["methodCalls"],"authorization":bool(self.headers.get("Authorization"))})
             replies=[]
             for method,args,id in body["methodCalls"]:
                 if method=="Email/query":

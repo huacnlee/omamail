@@ -167,6 +167,7 @@ impl Session {
         params: &Value,
     ) -> Result<Value, &'static str> {
         let requested = action_ids(&params["ids"])?;
+        let operation = params["operation"].as_str().ok_or("invalid_params")?;
         let roles = params["roles"]
             .as_object()
             .ok_or("mail_action_invalid_target")?;
@@ -194,6 +195,7 @@ impl Session {
         let mut all_member_ids = Vec::new();
         let mut seen_members = std::collections::HashSet::new();
         let mut member_bytes = 0usize;
+        let mut member_occurrences = 0usize;
         for chunk in thread_ids.chunks(snapshot.limit("maxObjectsInGet", 256)) {
             let result = self
                 .api(
@@ -215,6 +217,10 @@ impl Session {
                     .as_array()
                     .ok_or("mail_action_invalid_target")?;
                 if values_json.len() > 2000 {
+                    return Err("mail_action_target_limit");
+                }
+                member_occurrences = member_occurrences.saturating_add(values_json.len());
+                if member_occurrences > 2000 {
                     return Err("mail_action_target_limit");
                 }
                 let mut values = Vec::with_capacity(values_json.len());
@@ -284,7 +290,13 @@ impl Session {
                     let member_row = member_by_id
                         .get(&member)
                         .ok_or("mail_action_target_unknown")?;
-                    if super::resource::thread_member_visible(member_row, &roles, viewed) {
+                    if super::resource::thread_member_visible(member_row, &roles, viewed)
+                        && super::mutation::applies_to_action(
+                            operation,
+                            &roles,
+                            &member_row["mailboxIds"],
+                        )
+                    {
                         bytes = bytes.saturating_add(member.len());
                         member_ids.push(member);
                     }

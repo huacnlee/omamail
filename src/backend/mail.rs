@@ -73,6 +73,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
         account: &'a crate::mail::Account,
         ids: &'a [String],
         availability: &'a crate::mail::action::ActionAvailability,
+        operation: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
         Box::pin(async move {
             if account.provider == Provider::Jmap {
@@ -81,7 +82,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
                     .jmap
                     .call(
                         "jmap.actionRows",
-                        &json!({"accountId":account.id,"ids":ids,"roles":availability.rows_context}),
+                        &json!({"accountId":account.id,"ids":ids,"roles":availability.rows_context,"operation":operation}),
                     )
                     .await?;
                 return value
@@ -707,7 +708,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(preview["targetIds"], json!(["e1", "e2"]));
+        assert_eq!(preview["targetIds"], json!(["e1"]));
         let report_client = reqwest::Client::builder()
             .add_root_certificate(
                 reqwest::Certificate::from_pem(&fs::read(certificate.trim()).unwrap()).unwrap(),
@@ -725,7 +726,9 @@ mod tests {
         let report: Value = serde_json::from_slice(&report).unwrap();
         assert!(
             report.as_array().unwrap().iter().all(|request| {
-                request["path"] == "/api" && request["calls"].as_array().is_some()
+                request["method"] == "POST"
+                    && request["path"] == "/api"
+                    && request["calls"].as_array().is_some()
             }),
             "preview used an upload, GET, or unrecognized endpoint: {report}"
         );

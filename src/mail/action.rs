@@ -42,6 +42,7 @@ pub(crate) trait ActionLookup: Send + Sync {
         account: &'a Account,
         ids: &'a [String],
         availability: &'a ActionAvailability,
+        operation: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>>;
 }
 
@@ -137,7 +138,12 @@ pub(crate) async fn plan_action(
     let add_label_ids = label_ids(&change, "add")?;
     let remove_label_ids = label_ids(&change, "remove")?;
     let rows = lookup
-        .rows(&request.account, &unique_requested, &availability)
+        .rows(
+            &request.account,
+            &unique_requested,
+            &availability,
+            &request.operation,
+        )
         .await?;
     let mut target_ids = Vec::new();
     let mut seen = HashSet::new();

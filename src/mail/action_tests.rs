@@ -37,6 +37,7 @@ impl ActionLookup for RecordingLookup {
         _account: &'a Account,
         ids: &'a [String],
         _availability: &'a ActionAvailability,
+        _operation: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
         self.effects.lookup.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
