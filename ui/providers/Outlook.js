@@ -14,6 +14,9 @@ var SUMMARY = "Outlook.com and Hotmail, signed in securely with Microsoft."
 
 var AUTH = "oauth"
 
+// The Outlook.com envelope, square, so it serves the list row and the page.
+var MARK = "outlook.svg"
+
 var MAILBOXES = [
   {
     "key": "inbox",

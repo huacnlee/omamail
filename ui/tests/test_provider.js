@@ -386,7 +386,8 @@ assert.strictEqual(provider.mark("hey"), "hey-mark.png")
 assert.strictEqual(provider.logo("hey"), "hey.png")
 assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
-assert.strictEqual(provider.logo("outlook"), "")
+assert.strictEqual(provider.mark("outlook"), "outlook.svg")
+assert.strictEqual(provider.logo("outlook"), "outlook.svg", "one square mark serves both")
 
 // ------------------------------------------------------------------- auth
 
