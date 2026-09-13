@@ -10,6 +10,13 @@ Item {
   required property string executable
   required property string expectedVersion
   property int expectedApiVersion: 0
+  // The step the checkout is ahead of the pin by, if any: `needsUpdate` says
+  // the connected binary lacks it, and a call to one of its methods is
+  // refused here rather than sent to a binary that never heard of it.
+  property int latestApiVersion: 0
+  property var unreleasedMethods: []
+  readonly property int apiVersion: Compatibility.connectedApiVersion(protocolInfo)
+  readonly property bool needsUpdate: ready && Compatibility.needsUpdate(protocolInfo, latestApiVersion)
   property bool launchEnabled: true
   onLaunchEnabledChanged: Qt.callLater(reconcileProcess)
   onExecutableChanged: Qt.callLater(reconcileProcess)
@@ -87,9 +94,14 @@ Item {
       done(null, { code: -32011, message: "Too many pending requests" })
       return
     }
+    var operation = method === "request.upload" && params ? params.method : method
+    var refusal = Compatibility.unreleasedRefusal(operation, unreleasedMethods, needsUpdate)
+    if (refusal !== null) {
+      done(null, refusal)
+      return
+    }
     var id = "qml-" + (++sequence)
     var next = Object.assign({}, pending)
-    var operation = method === "request.upload" && params ? params.method : method
     var timeout = operation === "agent.context" ? 65000 : 30000
     next[id] = { callback: done, deadline: Date.now() + timeout }
     pending = next

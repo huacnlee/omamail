@@ -9,6 +9,10 @@ Item {
   state: "checking"
   property string requiredVersion: ""
   property int requiredApiVersion: 0
+  // One step past the pin, when the checkout has one, and the methods only
+  // that step has. The handshake does not read these; `Backend` does.
+  property int latestApiVersion: 0
+  property var unreleasedMethods: []
   property string installedVersion: ""
   property string executable: ""
   property string error: ""
@@ -48,6 +52,9 @@ Item {
   function applyResult(result, exitCode) {
     requiredVersion = result.requiredVersion
     requiredApiVersion = result.requiredApiVersion
+    // A status from before the step was reported, or a harness's, has no step.
+    latestApiVersion = typeof result.latestApiVersion === "number" ? result.latestApiVersion : result.requiredApiVersion
+    unreleasedMethods = Array.isArray(result.unreleasedMethods) ? result.unreleasedMethods : []
     installedVersion = result.installedVersion
     executable = exitCode === 0 ? result.executable : ""
     error = result.error

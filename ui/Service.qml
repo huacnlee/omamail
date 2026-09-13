@@ -61,8 +61,16 @@ Item {
     launchEnabled: privateRuntime.state === "ready" && executable !== ""
     expectedVersion: privateRuntime.requiredVersion
     expectedApiVersion: privateRuntime.requiredApiVersion
+    latestApiVersion: privateRuntime.latestApiVersion
+    unreleasedMethods: privateRuntime.unreleasedMethods
     onReadyChanged: root.scheduleUnifiedSnapshot()
   }
+
+  // The checkout is a step ahead of the backend the owner has: a feature on
+  // that step says so and waits, instead of asking a binary that lacks it.
+  // Empty of meaning once the pin catches up, which is when the feature
+  // drops the check.
+  readonly property bool backendNeedsUpdate: backend.needsUpdate
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"

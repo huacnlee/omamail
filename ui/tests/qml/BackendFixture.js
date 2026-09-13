@@ -62,6 +62,8 @@ function markReady(service) {
   install(service)
   service.backendRuntime.requiredVersion = "0.0.0"
   service.backendRuntime.requiredApiVersion = 1
+  service.backendRuntime.latestApiVersion = 1
+  service.backendRuntime.unreleasedMethods = []
   service.backendRuntime.executable = "/synthetic/runtime/bin/omamail"
   service.backendRuntime.state = "ready"
   service.backend.connected = true
