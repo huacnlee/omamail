@@ -158,6 +158,35 @@ Item {
       verify(widget.implicitWidth > 0)
     }
 
+    function test_normal_bar_keeps_direct_service_when_bridge_is_available() {
+      var bridgeCalls = 0
+      var api = BarBridge.publish(function() { return { ready: false, unreadTotal: 0 } },
+        function(_values) { bridgeCalls += 1 },
+        function() { bridgeCalls += 1 },
+        function() { bridgeCalls += 1 })
+      widget.syncBridge()
+      compare(widget.gmail, fakeService)
+      compare(widget.gmail.ready, true)
+      fakeService.applyCount = 0
+      widget.pushSettings()
+      compare(fakeService.applyCount, 1)
+      var icon = button().iconComponent.createObject(widget)
+      compare(icon.children[0].crossed, false)
+      compare(icon.children[0].dot, true)
+      fakeService.ready = false
+      fakeService.unreadTotal = 0
+      compare(icon.children[0].crossed, true)
+      compare(icon.children[0].dot, false)
+      button().pressed(Qt.MiddleButton)
+      button().pressed(Qt.RightButton)
+      compare(fakeService.refreshCount, 1)
+      compare(fakeService.calendarRefreshCount, 1)
+      compare(bridgeCalls, 0, "normal bar actions must use the direct service")
+      icon.destroy()
+      fakeService.unreadTotal = 3
+      BarBridge.clear(api)
+    }
+
     // Not merely invisible: it gives up its width too, so the bar closes over
     // the gap rather than leaving a hole where the envelope was.
     function test_turning_it_off_takes_the_width_with_it() {
