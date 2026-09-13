@@ -457,6 +457,31 @@ mod tests {
         (opened, result)
     }
 
+    fn document_node_count(node: &Value) -> usize {
+        1 + node
+            .get("children")
+            .and_then(Value::as_array)
+            .map(|children| children.iter().map(document_node_count).sum())
+            .unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn mail_read_keeps_actual_reader_documents_above_the_former_node_limit() {
+        let (opened, result) =
+            actual_mail_read(reader_resource(&"<p>x</p>".repeat(4096), false)).await;
+        assert_eq!(
+            document_node_count(&opened["nativeRender"]["document"]),
+            8193
+        );
+        assert_eq!(
+            result["message"]["nativeRender"]["document"]["children"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4096
+        );
+    }
+
     #[tokio::test]
     async fn mail_read_keeps_empty_body_metadata_from_an_attachment_only_reader_result() {
         let resource = json!({"id":"message-1","payload":{"mimeType":"multipart/mixed","headers":[],"parts":[

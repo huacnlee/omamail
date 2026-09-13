@@ -1,4 +1,5 @@
 use super::ReadRequest;
+use crate::message::html::{MAX_DEPTH, MAX_NODES};
 use serde_json::{Value, json};
 use std::{
     future::Future,
@@ -96,7 +97,7 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
         .filter(|document| document.is_object())
         .ok_or("mail_read_invalid_reader")?;
     fn document_node(value: &Value, depth: usize, left: &mut usize) -> Result<Value, &'static str> {
-        if depth > 64 || *left == 0 {
+        if depth > MAX_DEPTH || *left == 0 {
             return Err("mail_read_invalid_reader");
         }
         *left -= 1;
@@ -139,7 +140,8 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
             "children":children,
         }))
     }
-    Ok(json!({"document":document_node(document, 0, &mut 8192)?}))
+    let mut nodes_left = MAX_NODES;
+    Ok(json!({"document":document_node(document, 0, &mut nodes_left)?}))
 }
 
 fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<String>), &'static str> {
@@ -236,6 +238,51 @@ async fn conversation(
         return Err("mail_read_conversation_mismatch");
     }
     Ok(members.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaf_nodes(count: usize) -> Vec<Value> {
+        (0..count)
+            .map(|_| json!({"type":"text","text":"x"}))
+            .collect()
+    }
+
+    fn nested_document(depth: usize) -> Value {
+        let mut node = json!({"type":"element","name":"span","children":[]});
+        for _ in 1..depth {
+            node = json!({"type":"element","name":"span","children":[node]});
+        }
+        json!({"type":"root","children":[node]})
+    }
+
+    #[test]
+    fn safe_render_matches_the_native_document_node_limit() {
+        let at_limit = json!({"document":{"type":"root","children":leaf_nodes(MAX_NODES - 1)}});
+        let projected = safe_render(&at_limit).unwrap();
+        assert_eq!(
+            projected["document"]["children"].as_array().unwrap().len(),
+            MAX_NODES - 1
+        );
+        drop(projected);
+
+        let above_limit = json!({"document":{"type":"root","children":leaf_nodes(MAX_NODES)}});
+        assert_eq!(
+            safe_render(&above_limit).unwrap_err(),
+            "mail_read_invalid_reader"
+        );
+    }
+
+    #[test]
+    fn safe_render_matches_the_native_document_depth_limit() {
+        assert!(safe_render(&json!({"document":nested_document(MAX_DEPTH)})).is_ok());
+        assert_eq!(
+            safe_render(&json!({"document":nested_document(MAX_DEPTH + 1)})).unwrap_err(),
+            "mail_read_invalid_reader"
+        );
+    }
 }
 
 pub(crate) async fn read_with(

@@ -19,6 +19,7 @@ use policy::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 pub use tree::{Attr, Node, parse, serialize};
+pub(crate) use tree::{MAX_DEPTH, MAX_NODES};
 
 pub fn dropped(name: &str) -> bool {
     matches!(
