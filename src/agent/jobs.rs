@@ -967,8 +967,10 @@ mod tests {
     }
     #[test]
     fn a_look_is_found_by_its_message_and_draws_no_row() {
-        let look = |id: &str, account: &str, message: &str, state: &str, order: u64| json!({"id":id,"accountId":account,"kind":"events","messageId":message,"messageIds":[message],"state":state,"createdOrder":order,"created":order,
-            "events":if state=="done"{json!([{"title":"Dinner","startMs":1_789_232_400_000i64,"endMs":1_789_239_600_000i64,"allDay":false}])}else{json!([])}});
+        let look = |id: &str, account: &str, message: &str, state: &str, order: u64| {
+            json!({"id":id,"accountId":account,"kind":"events","messageId":message,"messageIds":[message],"state":state,"createdOrder":order,"created":order,
+            "events":if state=="done"{json!([{"title":"Dinner","startMs":1_789_232_400_000i64,"endMs":1_789_239_600_000i64,"allDay":false}])}else{json!([])}})
+        };
         let ask = json!({"id":"ask","accountId":"a","kind":"message","messageId":"42","messageIds":["42"],"state":"done","resultReady":true,"createdOrder":9});
         let jobs = json!([
             look("old", "a", "42", "done", 1),
@@ -984,7 +986,10 @@ mod tests {
         assert_eq!(p["byMessage"]["42"]["id"], "ask");
         assert_eq!(p["byMessage"].get("43"), None);
         assert_eq!(p["attentionIds"], json!(["ask"]));
-        assert!(p["scopesByAccount"]["a"].get("[\"43\"]").is_none(), "a look has no scope");
+        assert!(
+            p["scopesByAccount"]["a"].get("[\"43\"]").is_none(),
+            "a look has no scope"
+        );
         // But it is polled while it runs, and it is counted.
         assert_eq!(p["anyActive"], true);
         assert_eq!(p["activeIds"], json!(["run"]));

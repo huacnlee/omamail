@@ -507,6 +507,11 @@ async fn production_jmap_send_preview_only_reads_identity_and_preserves_storage(
         assert_eq!(fixture_tree(&fixture.root), before);
     }
     let report = peer.report().await;
+    assert_eq!(
+        report.as_array().unwrap().len(),
+        2,
+        "one valid preview and one encoded-header rejection read identities; control characters are rejected before provider access"
+    );
     assert!(
         report
             .as_array()
@@ -514,10 +519,10 @@ async fn production_jmap_send_preview_only_reads_identity_and_preserves_storage(
                 && requests.iter().all(|request| request["method"] == "POST"
                     && request["path"] == "/api"
                     && request["authorization"] == true
-                    && request["calls"]
-                        .as_array()
-                        .is_some_and(|calls| !calls.is_empty()
-                            && calls.iter().all(|call| call[0] == "Identity/get")))),
+                    && request["calls"].as_array().is_some_and(|calls| calls
+                        == &vec![json!([
+                            "Identity/get", {"accountId":"account","ids":null}, "0"
+                        ])]))),
         "{report}"
     );
     assert_eq!(fixture_tree(&fixture.root), before);
