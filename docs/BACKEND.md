@@ -172,6 +172,10 @@ Provider capabilities can refuse an operation. `--execute` is an execution
 switch, not proof of human approval; there is no confirmation code. Automation
 must obtain any approval its own workflow requires before setting it.
 
+Archive and trash previews for IMAP and Outlook read the server's current
+LIST/SPECIAL-USE folders. Missing destinations are refused, and execution uses
+the same discovered folder names without another destination lookup.
+
 `send` reads a UTF-8 body from stdin, up to 16 MiB. There is no body argument.
 Repeat `--to`, `--cc`, `--bcc`, or `--attach` as needed. Attachments require
 absolute regular-file paths. `--from` must identify a sender belonging to the
@@ -190,6 +194,15 @@ delivery is authoritative only through the returned `outbox` entry matching
 cancellation or uncertain delivery exits 1. Check Sent before retrying an
 uncertain delivery. Direct RPC callers must inspect the returned outbox state
 and use `outbox.snapshot` to follow entries still queued or sending.
+
+When a running backend owns the queue, the CLI submits to that owner through
+a private Unix socket in the outbox state directory. The owner retains the
+exclusive lease and performs all delivery and persistence. The CLI waits for
+the persisted terminal entry; a lost reply reuses the same send ID and digest.
+If the owner crashes, recovery cancels queued entries and marks interrupted
+delivery unknown, without retrying it. Both processes must support this owner
+protocol; an older owner without it is refused safely. The socket stops with
+the backend's existing stdin session.
 
 `--json` works before or after the command. Operation errors exit 1 with
 `{"ok":false,"error":{"code":"..."}}` on stdout; human-readable errors use

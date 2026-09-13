@@ -295,6 +295,62 @@ async fn login(w: &mut Wire, p: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// Read live LIST/SPECIAL-USE facts without touching the folder cache or
+/// persistent account metadata. Execution retains these exact destinations.
+pub(crate) async fn planned_action_availability(
+    account: &str,
+    refusals: Value,
+) -> Result<crate::mail::action::ActionAvailability> {
+    tokio::time::timeout(Duration::from_secs(22), async {
+        let params = resolve_account(
+            &json!({"accountId":account,"readOnly":true}),
+            "imap.folders",
+        )
+        .await?;
+        let (mut wire, key) = acquire(&params).await?;
+        let boxes = read::discover_mailboxes(&mut wire).await?;
+        release(wire, key).await;
+        Ok(crate::mail::action::ActionAvailability {
+            refusals,
+            mailboxes: json!({
+                "archive":boxes.special.contains_key("\\archive"),
+                "trash":boxes.special.contains_key("\\trash"),
+                "spam":boxes.special.contains_key("\\junk"),
+            }),
+            mailbox_required: Value::Null,
+            rows_context: serde_json::to_value(boxes).map_err(|_| "imap_invalid_response")?,
+        })
+    })
+    .await
+    .unwrap_or(Err("request_timed_out"))
+}
+
+pub(crate) async fn execute_planned_action(
+    method: &str,
+    params: &Value,
+    context: &Value,
+) -> Result<Value> {
+    if context.is_null() {
+        return call(method, params).await;
+    }
+    let boxes: read::Mailboxes =
+        serde_json::from_value(context.clone()).map_err(|_| "invalid_params")?;
+    mutation::validate(method, params)?;
+    tokio::time::timeout(Duration::from_secs(22), async {
+        let params = resolve_account(params, method).await?;
+        credentials(&params)?;
+        mutation::call_planned(
+            method,
+            &params,
+            &std::sync::atomic::AtomicBool::new(false),
+            Some(&boxes),
+        )
+        .await
+    })
+    .await
+    .unwrap_or(Err("request_timed_out"))
+}
+
 pub async fn call(method: &str, p: &Value) -> Result<Value> {
     read::validate(method, p)?;
     mutation::validate(method, p)?;

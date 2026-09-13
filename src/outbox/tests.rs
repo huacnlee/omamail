@@ -2,6 +2,158 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
+async fn owner_submission_ack_loss_replays_one_durable_id_without_another_delivery() {
+    use tokio::io::AsyncWriteExt;
+    let dir = Temp::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let owner = Outbox::with_root(
+        Arc::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err("outbox_delivery_unknown") })
+        }),
+        Some(dir.0.clone()),
+    );
+    owner
+        .call("outbox.snapshot", &json!({"accountId":"a@example.org"}))
+        .await
+        .unwrap();
+    let params = enqueue("lost-reply", "a@example.org", 0);
+    let mut socket = tokio::net::UnixStream::connect(dir.0.join("omamail/outbox.sock"))
+        .await
+        .unwrap();
+    let bytes = json!({"method":"outbox.enqueue","params":params})
+        .to_string()
+        .into_bytes();
+    socket.write_u32(bytes.len() as u32).await.unwrap();
+    socket.write_all(&bytes).await.unwrap();
+    // Deliberately abandon the IPC acknowledgement after writing the request.
+    drop(socket);
+    wait_state(&owner, "lost-reply", "a@example.org", "unknown").await;
+    let submitter = Outbox::with_root(
+        Arc::new(|_| Box::pin(async { panic!("submitter must never deliver") })),
+        Some(dir.0.clone()),
+    );
+    let replay = submitter
+        .shared_call("outbox.enqueue", &params)
+        .await
+        .unwrap();
+    assert_eq!(replay["duplicate"], true);
+    let result = submitter
+        .wait_for_send("a@example.org", "lost-reply")
+        .await
+        .unwrap();
+    assert_eq!(result["entries"][0]["state"], "unknown");
+    assert!(result["entries"][0].get("payload").is_none());
+    let stored = storage::read(&dir.0).unwrap();
+    assert_eq!(stored.as_array().unwrap().len(), 1);
+    assert_eq!(stored[0]["state"], "unknown");
+    let mut conflicting = params;
+    conflicting["payload"]["raw"] = json!("different");
+    assert_eq!(
+        submitter.shared_call("outbox.enqueue", &conflicting).await,
+        Err("outbox_send_id_conflict")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn owner_bridge_rejects_unbounded_frames_unkeyed_mutations_and_payload_reads() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = Temp::new();
+    let owner = Outbox::with_root(
+        Arc::new(|_| Box::pin(async { panic!("invalid bridge request must not deliver") })),
+        Some(dir.0.clone()),
+    );
+    owner
+        .call("outbox.snapshot", &json!({"accountId":"a@example.org"}))
+        .await
+        .unwrap();
+    let before = storage::read(&dir.0).unwrap();
+    for (method, params) in [
+        (
+            "outbox.flush",
+            json!({"accountId":"a@example.org","sendId":"one"}),
+        ),
+        (
+            "outbox.snapshot",
+            json!({"accountId":"a@example.org","sendId":"one","includePayloads":true}),
+        ),
+        (
+            "outbox.enqueue",
+            json!({"accountId":"a@example.org","provider":"gmail","payload":{"raw":"private"}}),
+        ),
+        ("outbox.enqueue", enqueue("one\0", "a@example.org", 0)),
+        ("outbox.enqueue", enqueue("one\r\n", "a@example.org", 0)),
+        ("outbox.enqueue", enqueue("one\n", "a@example.org", 0)),
+    ] {
+        assert_eq!(
+            ipc::request(&dir.0, method, &params).await,
+            Err("outbox_invalid_params")
+        );
+    }
+    for (length, bytes) in [(u32::MAX, b"".as_slice()), (1, b"{".as_slice())] {
+        let mut socket = tokio::net::UnixStream::connect(dir.0.join("omamail/outbox.sock"))
+            .await
+            .unwrap();
+        socket.write_u32(length).await.unwrap();
+        socket.write_all(bytes).await.unwrap();
+        let mut reply = [0; 1];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), socket.read(&mut reply))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(storage::read(&dir.0).unwrap(), before);
+}
+
+#[tokio::test]
+async fn owner_socket_refuses_symlinks_and_non_socket_entries_without_removing_them() {
+    use std::os::unix::fs::symlink;
+    for link in [true, false] {
+        let dir = Temp::new();
+        std::fs::create_dir(dir.0.join("omamail")).unwrap();
+        let target = dir.0.join("sentinel");
+        std::fs::write(&target, b"private sentinel").unwrap();
+        let socket = dir.0.join("omamail/outbox.sock");
+        if link {
+            symlink(&target, &socket).unwrap();
+        } else {
+            std::fs::write(&socket, b"socket sentinel").unwrap();
+        }
+        let owner = Outbox::with_root(
+            Arc::new(|_| Box::pin(async { panic!("unsafe socket must not deliver") })),
+            Some(dir.0.clone()),
+        );
+        assert_eq!(
+            owner
+                .call("outbox.enqueue", &enqueue("one", "a@example.org", 0))
+                .await,
+            Err("outbox_storage_unsafe")
+        );
+        assert_eq!(std::fs::read(target).unwrap(), b"private sentinel");
+        assert_eq!(
+            std::fs::symlink_metadata(&socket)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            link
+        );
+        assert_eq!(
+            std::fs::read(socket).unwrap(),
+            if link {
+                b"private sentinel".as_slice()
+            } else {
+                b"socket sentinel".as_slice()
+            }
+        );
+    }
+}
+
+#[tokio::test]
 async fn one_shot_wait_does_not_claim_a_terminal_state_when_final_persistence_fails() {
     let dir = Temp::new();
     let target = dir.0.join("omamail/outbox.json");
@@ -232,9 +384,8 @@ async fn state(outbox: &Outbox, id: &str, account: &str) -> String {
         .unwrap()
         .iter()
         .find(|entry| entry["id"] == id)
-        .unwrap()["state"]
-        .as_str()
-        .unwrap()
+        .and_then(|entry| entry["state"].as_str())
+        .unwrap_or("")
         .into()
 }
 async fn wait_state(outbox: &Outbox, id: &str, account: &str, wanted: &str) {

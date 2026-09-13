@@ -244,6 +244,14 @@ pub(super) async fn call(
     p: &Value,
     sent: &std::sync::atomic::AtomicBool,
 ) -> Result<Value> {
+    call_planned(method, p, sent, None).await
+}
+pub(super) async fn call_planned(
+    method: &str,
+    p: &Value,
+    sent: &std::sync::atomic::AtomicBool,
+    planned: Option<&Mailboxes>,
+) -> Result<Value> {
     if method == "imap.send" {
         let body = raw(p)?;
         if p["oauth"] == true && p["settings"]["send"] == "graph" {
@@ -322,7 +330,10 @@ pub(super) async fn call(
         read::invalidate().await;
         json!({})
     } else {
-        let boxes = mailboxes(&mut w, p).await?;
+        let boxes = match planned {
+            Some(boxes) => boxes.clone(),
+            None => mailboxes(&mut w, p).await?,
+        };
         if let Some(groups) = groups {
             let (add, remove, destination) = plan(method, p, &boxes)?;
             for (folder, uids) in groups {

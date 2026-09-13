@@ -62,9 +62,9 @@ child.stdout.on('data', chunk => {
     assert.ok(buffer.length < 1048576, 'bounded unfinished frame');
   } catch (error) { fail(error); }
 });
-async function call(method, params = {}, errorCode = null) {
-  assert.ok(contract.methods.includes(method), 'tested method belongs to contract: ' + method);
-  tested.add(method);
+async function call(method, params = {}, errorCode = null, advertised = true) {
+  assert.equal(contract.methods.includes(method), advertised, 'method inventory: ' + method);
+  if (advertised) tested.add(method);
   const id = String(++serial);
   const reply = await new Promise(resolve => {
     pending.set(id, {resolve, timer:setTimeout(() => fail(new Error('RPC deadline: ' + method)), 10000)});
@@ -98,6 +98,15 @@ function storageSnapshot(directory = process.env.HOME) {
   assert.equal(api, contract.apiVersion, 'API version (only released 0.9.0 has a legacy fallback)');
   assert.ok(Array.isArray(info.methods));
   for (const method of contract.methods) assert.ok(info.methods.includes(method), 'advertised API method: ' + method);
+  if (!released) {
+    for (const method of ['jmap.actionAvailability', 'jmap.actionRows']) {
+      assert.ok(!info.methods.includes(method), 'internal planner is not advertised');
+      const before = storageSnapshot();
+      const error = await call(method, {}, -32000, false);
+      assert.equal(error.message, 'method_not_found');
+      assert.deepEqual(storageSnapshot(), before, 'unknown method has no account or provider effects');
+    }
+  }
   // Versioned request/response fixtures live with the published API inventory.
   function at(value, path) { return path ? path.split('.').reduce((v, key) => v === undefined || v === null ? undefined : v[key], value) : value; }
   assert.ok(Array.isArray(contract.contractCases) && contract.contractCases.length);

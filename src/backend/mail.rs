@@ -91,7 +91,13 @@ impl MutationAdapter for ProviderMutation<'_> {
                 let checked = crate::providers::hey_access::checked_params(&params).await?;
                 crate::providers::hey_actions::call(method, &checked).await
             } else {
-                imap_call(method, &params).await
+                let method = method.to_owned();
+                let context = context.clone();
+                tokio::spawn(async move {
+                    crate::providers::imap::execute_planned_action(&method, &params, &context).await
+                })
+                .await
+                .map_err(|_| "worker_failed")?
             }
         })
     }
@@ -208,6 +214,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
     fn availability<'a>(
         &'a self,
         account: &'a crate::mail::Account,
+        operation: &'a str,
     ) -> Pin<
         Box<
             dyn Future<Output = Result<crate::mail::action::ActionAvailability, &'static str>>
@@ -217,17 +224,26 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
     > {
         Box::pin(async move {
             if account.provider == Provider::Jmap {
-                let value = self
+                return self
                     .session
                     .jmap
-                    .call("jmap.actionAvailability", &json!({"accountId":account.id}))
-                    .await?;
-                return Ok(crate::mail::action::ActionAvailability {
-                    refusals: value["data"]["refusals"].clone(),
-                    mailboxes: value["data"]["mailboxes"].clone(),
-                    mailbox_required: Value::Null,
-                    rows_context: value["data"]["roles"].clone(),
-                });
+                    .planned_action_availability(&account.id)
+                    .await;
+            }
+            let refusals = crate::account::refusals_readonly(&account.id)?;
+            let action = crate::mail::action::domain_action(operation)?;
+            let capability = crate::account::model::capability(action);
+            if matches!(account.provider, Provider::Imap | Provider::Outlook)
+                && crate::account::model::action_mailbox(action).is_some()
+                && (capability.is_empty()
+                    || crate::providers::can(account.provider.id(), capability, &refusals))
+            {
+                let account = account.clone();
+                return tokio::spawn(async move {
+                    crate::providers::imap::planned_action_availability(&account.id, refusals).await
+                })
+                .await
+                .map_err(|_| "worker_failed")?;
             }
             let mailboxes = ["archive", "trash", "spam"]
                 .iter()
@@ -242,7 +258,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
                 })
                 .collect();
             Ok(crate::mail::action::ActionAvailability {
-                refusals: crate::account::refusals_readonly(&account.id)?,
+                refusals,
                 mailboxes: Value::Object(mailboxes),
                 mailbox_required: if account.provider == Provider::Hey {
                     json!({"spam":false})
@@ -263,23 +279,11 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
         Box::pin(async move {
             if account.provider == Provider::Jmap {
-                let mut value = self
+                return self
                     .session
                     .jmap
-                    .call(
-                        "jmap.actionRows",
-                        &json!({"accountId":account.id,"ids":ids,"roles":availability.rows_context,"operation":operation}),
-                    )
-                    .await?;
-                return value
-                    .get_mut("data")
-                    .and_then(Value::as_object_mut)
-                    .and_then(|data| data.remove("rows"))
-                    .and_then(|rows| match rows {
-                        Value::Array(rows) => Some(rows),
-                        _ => None,
-                    })
-                    .ok_or("mail_action_invalid_target");
+                    .planned_action_rows(&account.id, ids, &availability.rows_context, operation)
+                    .await;
             }
             Ok(ids.iter().map(|id| json!({"id":id})).collect())
         })
@@ -936,9 +940,10 @@ mod tests {
             provider: Provider::Jmap,
         };
         let lookup = AccountActionLookup { session: &session };
-        let availability = crate::mail::action::ActionLookup::availability(&lookup, &account)
-            .await
-            .unwrap();
+        let availability =
+            crate::mail::action::ActionLookup::availability(&lookup, &account, "archive")
+                .await
+                .unwrap();
         assert_eq!(availability.mailboxes["archive"], true);
         assert_ne!(availability.refusals["spam"], Value::Null);
         let preview = crate::mail::action::dry_run(

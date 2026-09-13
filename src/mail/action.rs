@@ -34,7 +34,11 @@ pub(crate) struct ActionAvailability {
 /// Supplies only bounded, read-only action context. Implementations must not
 /// call provider mutation adapters or change cache/account/outbox state.
 pub(crate) trait ActionLookup: Send + Sync {
-    fn availability<'a>(&'a self, account: &'a Account) -> LookupFuture<'a, ActionAvailability>;
+    fn availability<'a>(
+        &'a self,
+        account: &'a Account,
+        operation: &'a str,
+    ) -> LookupFuture<'a, ActionAvailability>;
 
     fn rows<'a>(
         &'a self,
@@ -121,7 +125,9 @@ pub(crate) async fn plan_action(
 ) -> Result<ActionPlan, &'static str> {
     let unique_requested = requested_ids(&request.ids)?;
     let action = domain_action(&request.operation)?;
-    let availability = lookup.availability(&request.account).await?;
+    let availability = lookup
+        .availability(&request.account, &request.operation)
+        .await?;
     let capability = crate::account::model::capability(action);
     if !capability.is_empty()
         && !crate::providers::can(

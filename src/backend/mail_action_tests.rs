@@ -655,10 +655,15 @@ async fn native_action_rows_bound_aggregate_members_and_projection_before_retent
         assert_eq!(
             session
                 .jmap
-                .call(
-                    "jmap.actionRows",
-                    &json!({"accountId":ACCOUNT,"operation":"read","ids":ids,
-            "roles":{"inbox":"I","sent":"S","trash":"T","junk":"J"}})
+                .planned_action_rows(
+                    ACCOUNT,
+                    &ids.as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|id| id.as_str().unwrap().to_owned())
+                        .collect::<Vec<_>>(),
+                    &json!({"inbox":"I","sent":"S","trash":"T","junk":"J"}),
+                    "read",
                 )
                 .await,
             Err(error),
@@ -679,15 +684,11 @@ async fn native_action_rows_bound_aggregate_members_and_projection_before_retent
         );
     }
     let (peer, session) = Peer::start("projection-at-limit", true).await;
-    let result = session
+    let rows = session
         .jmap
-        .call(
-            "jmap.actionRows",
-            &json!({"accountId":ACCOUNT,"operation":"read","ids":["e1","e2"],"roles":{}}),
-        )
+        .planned_action_rows(ACCOUNT, &["e1".into(), "e2".into()], &json!({}), "read")
         .await
         .unwrap();
-    let rows = result["data"]["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0]["thread"]["memberIds"].as_array().unwrap().len(),
@@ -718,10 +719,7 @@ async fn native_action_rows_reject_malformed_missing_and_unsolicited_responses()
         assert_eq!(
             session
                 .jmap
-                .call(
-                    "jmap.actionRows",
-                    &json!({"accountId":ACCOUNT,"operation":"read","ids":["e1"],"roles":{}})
-                )
+                .planned_action_rows(ACCOUNT, &["e1".into()], &json!({}), "read",)
                 .await,
             Err(error),
             "{scenario}"

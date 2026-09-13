@@ -125,6 +125,60 @@ impl Snapshot {
     }
 }
 impl Session {
+    pub(crate) async fn planned_action_availability(
+        &self,
+        account: &str,
+    ) -> Result<crate::mail::action::ActionAvailability, &'static str> {
+        let context = self.context(account)?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+            if context.rejected.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("jmap_unauthorized");
+            }
+            let snapshot = self.snapshot(account, &context).await?;
+            let value = self.action_availability(&context, &snapshot).await?;
+            Ok(crate::mail::action::ActionAvailability {
+                refusals: value["refusals"].clone(),
+                mailboxes: value["mailboxes"].clone(),
+                mailbox_required: Value::Null,
+                rows_context: value["roles"].clone(),
+            })
+        })
+        .await
+        .unwrap_or(Err("jmap_timeout"));
+        if matches!(result, Err("jmap_unauthorized")) {
+            context
+                .rejected
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        result
+    }
+
+    pub(crate) async fn planned_action_rows(
+        &self,
+        account: &str,
+        ids: &[String],
+        roles: &Value,
+        operation: &str,
+    ) -> Result<Vec<Value>, &'static str> {
+        let context = self.context(account)?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+            if context.rejected.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("jmap_unauthorized");
+            }
+            let snapshot = self.snapshot(account, &context).await?;
+            self.action_rows(&context, &snapshot, ids, roles, operation)
+                .await
+        })
+        .await
+        .unwrap_or(Err("jmap_timeout"));
+        if matches!(result, Err("jmap_unauthorized")) {
+            context
+                .rejected
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        result
+    }
+
     fn action_availability_for(snapshot: &Snapshot, roles: &Value) -> Value {
         json!({
             "refusals":{
@@ -165,14 +219,13 @@ impl Session {
         &self,
         context: &Context,
         snapshot: &Snapshot,
-        params: &Value,
-    ) -> Result<Value, &'static str> {
-        let requested = action_ids(&params["ids"])?;
-        let operation = params["operation"].as_str().ok_or("invalid_params")?;
+        ids: &[String],
+        roles: &Value,
+        operation: &str,
+    ) -> Result<Vec<Value>, &'static str> {
+        let requested = action_ids(&json!(ids))?;
         let action = crate::account::model::domain_action(operation)?;
-        let roles = params["roles"]
-            .as_object()
-            .ok_or("mail_action_invalid_target")?;
+        let roles = roles.as_object().ok_or("mail_action_invalid_target")?;
         let roles = Value::Object(roles.clone());
         let emails = self
             .get_emails(context, snapshot, &requested, false, true)
@@ -191,9 +244,7 @@ impl Session {
         // A message-scoped action needs only the validated representatives.
         // Unrelated conversation size and membership cannot prevent starring.
         if crate::account::model::action_scope(action) == "message" {
-            return Ok(
-                json!({"rows":requested.iter().map(|id| json!({"id":id})).collect::<Vec<_>>()}),
-            );
+            return Ok(requested.iter().map(|id| json!({"id":id})).collect());
         }
         let mut thread_ids = Vec::new();
         for id in &requested {
@@ -345,7 +396,7 @@ impl Session {
                 Ok(json!({"id":id,"thread":{"memberIds":member_ids}}))
             })
             .collect::<Result<Vec<_>, &'static str>>()?;
-        Ok(json!({"rows":rows}))
+        Ok(rows)
     }
 
     pub(super) fn context(&self, id: &str) -> Result<Arc<Context>, &'static str> {
@@ -588,8 +639,6 @@ impl Session {
             "jmap.list",
             "jmap.messages",
             "jmap.read",
-            "jmap.actionAvailability",
-            "jmap.actionRows",
             "jmap.attachment",
             "jmap.labels",
             "jmap.labelCounts",
@@ -638,8 +687,6 @@ impl Session {
             "jmap.list" => self.list(&context, &snapshot, params).await?,
             "jmap.messages" => self.messages(&context, &snapshot, params).await?,
             "jmap.read" => self.read(&context, &snapshot, params).await?,
-            "jmap.actionAvailability" => self.action_availability(&context, &snapshot).await?,
-            "jmap.actionRows" => self.action_rows(&context, &snapshot, params).await?,
             "jmap.attachment" => {
                 self.attachment(&snapshot, text(params, "attachmentId")?)
                     .await?

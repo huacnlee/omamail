@@ -27,6 +27,7 @@ impl ActionLookup for RecordingLookup {
     fn availability<'a>(
         &'a self,
         _account: &'a Account,
+        _operation: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<ActionAvailability, &'static str>> + Send + 'a>> {
         self.effects.refusal_lookup.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move { Ok(self.availability.clone()) })

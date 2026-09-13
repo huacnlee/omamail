@@ -151,13 +151,13 @@ fn nodes(data: &[u8]) -> Result<Vec<Vec<Node>>> {
         .map(|row| row.to_vec())
         .collect())
 }
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Folder {
     name: String,
     delimiter: String,
     flags: Vec<String>,
 }
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Mailboxes {
     folders: Vec<Folder>,
     pub(super) special: BTreeMap<String, String>,
@@ -263,6 +263,11 @@ fn parse_folders(data: &[u8]) -> Result<Mailboxes> {
         capabilities,
     })
 }
+pub(super) async fn discover_mailboxes(w: &mut Wire) -> Result<Mailboxes> {
+    let mut data = command(w, "CAPABILITY").await?;
+    data.extend(command(w, "LIST \"\" \"*\"").await?);
+    parse_folders(&data)
+}
 pub(super) async fn mailboxes(w: &mut Wire, p: &Value) -> Result<Mailboxes> {
     let key = cache_key(p);
     {
@@ -273,9 +278,7 @@ pub(super) async fn mailboxes(w: &mut Wire, p: &Value) -> Result<Mailboxes> {
         }
     }
     let epoch = EPOCH.load(std::sync::atomic::Ordering::SeqCst);
-    let mut data = command(w, "CAPABILITY").await?;
-    data.extend(command(w, "LIST \"\" \"*\"").await?);
-    let boxes = parse_folders(&data)?;
+    let boxes = discover_mailboxes(w).await?;
     let mut cache = BOXES.get_or_init(Default::default).lock().await;
     if cache.len() >= 32 {
         cache.remove(0);
