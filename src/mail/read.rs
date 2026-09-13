@@ -71,12 +71,12 @@ fn safe_body(value: &Value) -> Result<Value, &'static str> {
     let source = body
         .get("source")
         .and_then(Value::as_str)
-        .filter(|source| matches!(*source, "plain" | "html"))
+        .filter(|source| matches!(*source, "" | "plain" | "html"))
         .ok_or("mail_read_invalid_reader")?;
     let direction = body
         .get("bodyDirection")
         .and_then(Value::as_str)
-        .filter(|direction| matches!(*direction, "ltr" | "rtl"))
+        .filter(|direction| matches!(*direction, "" | "ltr" | "rtl"))
         .ok_or("mail_read_invalid_reader")?;
     Ok(json!({"text":text,"source":source,"bodyDirection":direction}))
 }

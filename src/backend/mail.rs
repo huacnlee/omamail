@@ -425,6 +425,73 @@ mod tests {
         assert_eq!(&*calls.lock().unwrap(), &["reader.open"]);
     }
 
+    async fn actual_mail_read(resource: Value) -> (Value, Value) {
+        let opened = super::super::reader::projection(
+            &resource,
+            "reader@example.org",
+            "message-1",
+            "test-reader-key",
+            0,
+            json!({"allowRemoteImages":false,"withReader":true}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let result = crate::mail::read::read_with(
+            ReadRequest {
+                account: Account {
+                    id: "reader@example.org".into(),
+                    provider: Provider::Gmail,
+                },
+                id: "message-1".into(),
+            },
+            &ReaderProjectionAdapter {
+                opened: opened.clone(),
+                calls: calls.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(&*calls.lock().unwrap(), &["reader.open"]);
+        (opened, result)
+    }
+
+    #[tokio::test]
+    async fn mail_read_keeps_empty_body_metadata_from_an_attachment_only_reader_result() {
+        let resource = json!({"id":"message-1","payload":{"mimeType":"multipart/mixed","headers":[],"parts":[
+            {"mimeType":"application/octet-stream","filename":"brief.bin","body":{"data":URL_SAFE_NO_PAD.encode("attachment-bytes"),"attachmentId":"download-1","size":16}}
+        ]}});
+        let (opened, result) = actual_mail_read(resource).await;
+        assert_eq!(opened["nativeContent"]["body"]["source"], "");
+        assert_eq!(opened["nativeContent"]["body"]["bodyDirection"], "");
+        assert_eq!(result["message"]["nativeContent"]["body"]["source"], "");
+        assert_eq!(
+            result["message"]["nativeContent"]["body"]["bodyDirection"],
+            ""
+        );
+        assert_eq!(
+            result["message"]["attachments"][0]["attachmentId"],
+            "download-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn mail_read_keeps_empty_direction_for_direction_neutral_text() {
+        let resource = json!({"id":"message-1","payload":{"mimeType":"text/plain","headers":[],"body":{"data":URL_SAFE_NO_PAD.encode("  123 😀  \n")}}});
+        let (opened, result) = actual_mail_read(resource).await;
+        assert_eq!(opened["nativeContent"]["body"]["source"], "plain");
+        assert_eq!(opened["nativeContent"]["body"]["bodyDirection"], "");
+        assert_eq!(
+            result["message"]["nativeContent"]["body"]["text"],
+            "  123 😀  \n"
+        );
+        assert_eq!(
+            result["message"]["nativeContent"]["body"]["bodyDirection"],
+            ""
+        );
+    }
+
     #[tokio::test]
     async fn jmap_adapter_keeps_thread_state_from_nonrepresentative_members() {
         let mut peer = Command::new("python3")

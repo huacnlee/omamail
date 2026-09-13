@@ -147,6 +147,25 @@ async fn read_refuses_raw_html_that_escaped_the_reader_boundary() {
 }
 
 #[tokio::test]
+async fn read_rejects_unrecognized_nonempty_body_metadata() {
+    for (field, value) in [("source", "unknown"), ("bodyDirection", "diagonal")] {
+        let mut response = cached_mime_reader_fixture();
+        response["nativeContent"]["body"][field] = json!(value);
+        let error = read_with(
+            request(),
+            &RecordingAdapter {
+                open_response: response,
+                conversation_response: json!({}),
+                calls: Arc::new(Mutex::new(Vec::new())),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "mail_read_invalid_reader", "{field}");
+    }
+}
+
+#[tokio::test]
 async fn read_returns_reader_bound_conversation_members() {
     let mut response = cached_mime_reader_fixture();
     response["nativeSummary"]["thread"] =
