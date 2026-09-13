@@ -371,6 +371,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mail_read_drops_inline_raster_data_from_actual_reader_document() {
+        let image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL6fQAAAABJRU5ErkJggg==";
+        let opened = super::super::reader::projection(
+            &reader_resource(
+                &format!("<p>Visible image text</p><img src=\"{image}\">"),
+                false,
+            ),
+            "reader@example.org",
+            "message-1",
+            "test-reader-key",
+            0,
+            json!({"allowRemoteImages":false,"withReader":true}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        assert!(
+            opened["nativeRender"]["document"]
+                .to_string()
+                .contains(image)
+        );
+
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let result = crate::mail::read::read_with(
+            ReadRequest {
+                account: Account {
+                    id: "reader@example.org".into(),
+                    provider: Provider::Gmail,
+                },
+                id: "message-1".into(),
+            },
+            &ReaderProjectionAdapter {
+                opened,
+                calls: calls.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            result["message"]["nativeContent"]["body"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Visible image text"))
+        );
+        let document = &result["message"]["nativeRender"]["document"];
+        assert_eq!(document["children"][0]["name"], "p");
+        assert!(document.to_string().contains("Visible image text"));
+        assert_eq!(document["children"][1]["name"], "img");
+        assert_eq!(document["children"][1]["attrs"], json!([]));
+        let serialized = result.to_string();
+        assert!(!serialized.contains(image));
+        assert!(!serialized.contains("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"));
+        assert_eq!(&*calls.lock().unwrap(), &["reader.open"]);
+    }
+
+    #[tokio::test]
     async fn jmap_adapter_keeps_thread_state_from_nonrepresentative_members() {
         let mut peer = Command::new("python3")
             .arg(concat!(

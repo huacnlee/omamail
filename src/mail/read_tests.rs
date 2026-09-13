@@ -63,7 +63,7 @@ fn cached_mime_reader_fixture() -> Value {
                 "data": attachment
             }]
         },
-        "nativeRender": {"document": {"type": "safe-document"}}
+        "nativeRender": {"document": {"type":"root","children":[]}}
     })
 }
 

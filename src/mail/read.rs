@@ -95,7 +95,51 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
         .get("document")
         .filter(|document| document.is_object())
         .ok_or("mail_read_invalid_reader")?;
-    Ok(json!({"document":document}))
+    fn document_node(value: &Value, depth: usize, left: &mut usize) -> Result<Value, &'static str> {
+        if depth > 64 || *left == 0 {
+            return Err("mail_read_invalid_reader");
+        }
+        *left -= 1;
+        let node = value.as_object().ok_or("mail_read_invalid_reader")?;
+        let kind = node
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or("mail_read_invalid_reader")?;
+        if kind == "text" {
+            return Ok(json!({
+                "type":"text",
+                "text":node.get("text").and_then(Value::as_str).ok_or("mail_read_invalid_reader")?,
+            }));
+        }
+        if !matches!(kind, "root" | "element") {
+            return Err("mail_read_invalid_reader");
+        }
+        let children = node
+            .get("children")
+            .and_then(Value::as_array)
+            .ok_or("mail_read_invalid_reader")?
+            .iter()
+            .map(|child| document_node(child, depth + 1, left))
+            .collect::<Result<Vec<_>, _>>()?;
+        if kind == "root" {
+            return Ok(json!({"type":"root","children":children}));
+        }
+        let name = node
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| {
+                !name.is_empty() && name.len() <= 128 && !name.chars().any(char::is_control)
+            })
+            .ok_or("mail_read_invalid_reader")?;
+        Ok(json!({
+            "type":"element",
+            "name":name,
+            "selfClosing":node.get("selfClosing").and_then(Value::as_bool).unwrap_or(false),
+            "attrs":[],
+            "children":children,
+        }))
+    }
+    Ok(json!({"document":document_node(document, 0, &mut 8192)?}))
 }
 
 fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<String>), &'static str> {
