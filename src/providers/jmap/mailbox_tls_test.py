@@ -15,7 +15,8 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-mailbox-") as directory:
     mode = "success"
     def email(id):
         folder = {"e1":"I", "e2":"S", "e3":"T"}.get(id,"I")
-        return {"id":id,"threadId":"t1","mailboxIds":{folder:True},"keywords":{} if id != "e2" else {"$seen":True},"from":[{"email":"a@example.test","name":"Ada"}],"to":[{"email":"user@example.test"}],"subject":"Native test", "preview":"<3 native", "receivedAt":"2026-09-11T00:00:00Z", "bodyStructure":{"partId":"1","blobId":"tail","type":"text/plain","charset":"utf-8","size":13},"bodyValues":{"1":{"value":"short","isTruncated":True}}}
+        keywords = {"$seen":True} if id == "e1" else {"$flagged":True} if id == "e2" else {}
+        return {"id":id,"threadId":"t1","mailboxIds":{folder:True},"keywords":keywords,"from":[{"email":"a@example.test","name":"Ada"}],"to":[{"email":"user@example.test"}],"subject":"Native test", "preview":"<3 native", "receivedAt":"2026-09-11T00:00:00Z", "bodyStructure":{"partId":"1","blobId":"tail","type":"text/plain","charset":"utf-8","size":13},"bodyValues":{"1":{"value":"short","isTruncated":True}}}
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self,*_args):
             pass

@@ -347,7 +347,14 @@ async fn resolve_account(p: &Value, method: &str) -> Result<Value> {
         return Err("invalid_params");
     };
     let owned = account.to_owned();
-    let entry = tokio::task::spawn_blocking(move || crate::auth::settings(provider, &owned))
+    let read_only = p["readOnly"] == true;
+    let entry = tokio::task::spawn_blocking(move || {
+        if read_only {
+            crate::auth::settings_readonly(provider, &owned)
+        } else {
+            crate::auth::settings(provider, &owned)
+        }
+    })
         .await
         .map_err(|_| "worker_failed")??;
     let mut result = p.clone();

@@ -2,6 +2,14 @@
 use super::*;
 
 pub fn settings(provider: &str, account: &str) -> Result<Value, &'static str> {
+    settings_with(provider, account, crate::account::raw_registry()?)
+}
+
+pub fn settings_readonly(provider: &str, account: &str) -> Result<Value, &'static str> {
+    settings_with(provider, account, crate::account::raw_registry_readonly()?)
+}
+
+fn settings_with(provider: &str, account: &str, raw: Value) -> Result<Value, &'static str> {
     if !["gmail", "outlook", "imap", "jmap"].contains(&provider)
         || account.is_empty()
         || account.len() > 1024
@@ -9,7 +17,6 @@ pub fn settings(provider: &str, account: &str) -> Result<Value, &'static str> {
     {
         return Err("auth_account_invalid");
     }
-    let raw = crate::account::raw_registry()?;
     if raw["version"] != 1 {
         return Err("accounts_version_unsupported");
     }

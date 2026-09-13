@@ -146,9 +146,10 @@ impl Session {
             return Ok(snapshot.clone());
         }
         let lookup = id.to_owned();
-        let settings = tokio::task::spawn_blocking(move || crate::auth::settings("jmap", &lookup))
-            .await
-            .map_err(|_| "worker_failed")??;
+        let settings =
+            tokio::task::spawn_blocking(move || crate::auth::settings_readonly("jmap", &lookup))
+                .await
+                .map_err(|_| "worker_failed")??;
         let secret = crate::auth::password("jmap", id).await?;
         let username = settings["jmap"]["username"]
             .as_str()

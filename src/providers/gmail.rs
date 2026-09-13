@@ -271,7 +271,7 @@ impl Session {
             ],
         };
         // Resolve the registered provider before any credential or network read.
-        let accounts = tokio::task::spawn_blocking(crate::account::list)
+        let accounts = tokio::task::spawn_blocking(crate::account::list_readonly)
             .await
             .map_err(|_| "session_failed")??;
         if !accounts["accounts"].as_array().is_some_and(|entries| {
