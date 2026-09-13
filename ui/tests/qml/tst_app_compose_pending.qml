@@ -213,6 +213,9 @@ Item {
 
     function init() {
       mailService.backendRuntime = null
+      app.draftSavedToast = ""
+      app.composeRecoveryNotice = ""
+      app.composeRecoveryUpdateNoticePending = false
       var exitDialog = named(app, "compose-exit-dialog")
       if (exitDialog) exitDialog.close()
       recoveryBackend.ready = false
@@ -329,7 +332,6 @@ Item {
     }
     function test_offline_recovery_warns_on_old_backend_connection(data) {
       recoveryBackend.apiVersion = 0
-      app.draftSavedNotice = ""
       var record = {version:1,active:true,draft:{userModified:true,body:"Offline edit"}}
       var raw = JSON.stringify(record)
       app.writeComposeRecovery(raw)
@@ -364,6 +366,39 @@ Item {
     }
     function recoveredPending() {
       return {version:1,active:true,returnView:"list",draft:{body:"Recovered queued message",accountId:"me@example.com",pendingSendId:"receipt-one"},parked:[]}
+    }
+    function test_recovery_update_notice_survives_saved_toast_timeout() {
+      app.startCompose("new")
+      named(composeView(), "compose-subject-field").text = "Prior saved draft"
+      app.saveAndLeaveCompose(true)
+      verify(mailService.lastSavedDraft !== null)
+      compare(app.draftSavedNotice, "Draft saved")
+      var priorRequests = recoveryBackend.requests.length
+
+      recoveryBackend.apiVersion = 2
+      recoveryBackend.ready = true
+      var record = {version:1,active:true,draft:{userModified:true,body:"Keep this draft"}}
+      var raw = JSON.stringify(record)
+      app.writeComposeRecovery(raw)
+      var warning = app.draftSavedNotice
+      verify(warning.indexOf("Keep this window open") >= 0)
+      wait(4200)
+      compare(app.draftSavedNotice, warning, "the prior save's timer cannot dismiss a recovery warning")
+      compare(recoveryBackend.requests.length, priorRequests, "the old connection receives no recovery RPC")
+      verify(app.composeWriteQueued)
+      compare(app.composeWritePayload, raw)
+
+      recoveryBackend.apiVersion = 3
+      tryCompare(recoveryBackend.requests, "length", priorRequests + 1)
+      lastNativeRequest("compose.recoveryRead").done({record:{active:false},revision:"initial"}, null)
+      var saved = lastNativeRequest("compose.recoverySave")
+      verify(saved !== null)
+      compare(saved.params.record, record)
+      compare(app.draftSavedNotice, warning)
+      saved.done({record:saved.params.record,revision:"durable"}, null)
+      compare(app.composeWriteQueued, false)
+      compare(app.composeWritePayload, "")
+      compare(app.draftSavedNotice, "")
     }
     function test_sent_receipt_is_not_restored_and_is_acknowledged_only_after_durable_save() {
       recoveryBackend.ready = true

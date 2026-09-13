@@ -22,7 +22,11 @@ QtObject {
   readonly property string recoveryUpdateNotice: "Draft recovery needs an updated backend. Keep this window open."
   onRecoverySupportedChanged: { if (recoverySupported) root.readComposeRecovery() }
   onRecoveryNeedsUpdateChanged: {
-    if (recoveryNeedsUpdate && root.composeWriteQueued) root.draftSavedNotice = recoveryUpdateNotice
+    if (recoveryNeedsUpdate && root.composeWriteQueued) showRecoveryNotice(recoveryUpdateNotice, true)
+  }
+  function showRecoveryNotice(message, needsUpdate) {
+    root.composeRecoveryUpdateNoticePending = needsUpdate === true
+    root.composeRecoveryNotice = message
   }
   function reconcileComposeReceipts() {
     if (root.composeReceiptChecking) return
@@ -44,7 +48,7 @@ QtObject {
         if (!root || typeof root.restoreComposeRecovery !== "function") return
         if (error || !result || !Array.isArray(result.entries)) {
           root.composeReceiptChecking = false
-          root.draftSavedNotice = "Checking whether the recovered message was sent. Reconnect the mail backend."
+          showRecoveryNotice("Checking whether the recovered message was sent. Reconnect the mail backend.")
           return
         }
         states[String(draft.accountId) + "\n" + String(draft.pendingSendId)] = result.entries.length ? String(result.entries[0].state || "unknown") : "missing"
@@ -140,12 +144,12 @@ QtObject {
     if (root.composeReceiptChecking || !root.opened || !root.composeRecoveryLoaded || root.composeRecovery.active !== true
         || compose.opened || !root.composeRecovery.draft) return false
     if (String(root.composeRecovery.draft.pendingSendId || "") !== "") return false
-    if (root.composeRecovery.draft.deliveryUnknown === true) root.draftSavedNotice = "Delivery status is unknown. Check Sent before trying again."
+    if (root.composeRecovery.draft.deliveryUnknown === true) showRecoveryNotice("Delivery status is unknown. Check Sent before trying again.")
     var accountId = String(root.composeRecovery.draft.accountId || "")
     if (accountId !== "" && root.service
         && String(root.service.activeAccountId || "") !== accountId
         && typeof root.service.switchTo === "function" && root.service.switchTo(accountId) === false) {
-      root.draftSavedNotice = "This draft belongs to an unavailable account."
+      showRecoveryNotice("This draft belongs to an unavailable account.")
       return false
     }
     root.pendingComposeReturnTo = root.composeRecovery.returnView === "reader" ? Nav.depth(root.nav) : 1
@@ -212,7 +216,7 @@ QtObject {
     root.composeWritePayload = String(raw || "")
     root.composeWriteQueued = true
     if (recoveryNeedsUpdate)
-      root.draftSavedNotice = recoveryUpdateNotice
+      showRecoveryNotice(recoveryUpdateNotice, true)
     if (!root.composeRecoveryLoaded || root.composeStorageRevision === "") root.readComposeRecovery()
     else root.drainComposeRecovery()
   }
@@ -232,12 +236,12 @@ QtObject {
         // instance's saved recovery just by retrying with a fresh revision.
         root.composeWriteQueued = true
         root.composeRecoveryConflict = !!error && error.message === "recovery_conflict"
-        root.draftSavedNotice = "Draft recovery could not be saved. Keep this window open."
+        showRecoveryNotice("Draft recovery could not be saved. Keep this window open.")
         return
       }
       root.composeStorageRevision = String(result.revision || "")
       root.composeCommittedRevision = Math.max(root.composeCommittedRevision, mine)
-      if (root.draftSavedNotice === controller.recoveryUpdateNotice) root.draftSavedNotice = ""
+      if (root.composeRecoveryUpdateNoticePending) controller.showRecoveryNotice("")
       root.acknowledgeComposeReceipts()
       if (mine === root.composeRecoveryRevision && !root.composeWriteQueued) {
         root.composeRecovery = result.record

@@ -27,7 +27,10 @@ Item {
   property var service: null
   property bool opened: false
   property bool closingFromHost: false
-  property string draftSavedNotice: ""
+  property string draftSavedToast: ""
+  property string composeRecoveryNotice: ""
+  property bool composeRecoveryUpdateNoticePending: false
+  readonly property string draftSavedNotice: composeRecoveryNotice || draftSavedToast
   readonly property bool backendUnavailable: !!service && !!service.backendRuntime
     && (service.backendRuntime.state !== "ready" || !service.backend.ready)
 
@@ -740,7 +743,7 @@ Item {
       if (compose.opened) root.scheduleComposeRecovery()
       else root.clearComposeRecovery(recoveryRevision)
       var warning = String(result && result.warning || "")
-      root.draftSavedNotice = warning === "" ? "Draft saved" : warning
+      root.draftSavedToast = warning === "" ? "Draft saved" : warning
       if (warning !== "" && service && typeof service.note === "function")
         service.note(warning)
       draftSavedTimer.restart()
@@ -764,7 +767,7 @@ Item {
         return
       }
       if (!compose.completeInterruptedSave(interrupted)) return
-      root.draftSavedNotice = "Draft saved"
+      root.draftSavedToast = "Draft saved"
       draftSavedTimer.restart()
     })
     return true
@@ -781,7 +784,7 @@ Item {
     id: draftSavedTimer
     interval: 4000
     repeat: false
-    onTriggered: root.draftSavedNotice = ""
+    onTriggered: root.draftSavedToast = ""
   }
 
   // Opened on the cursor rather than on the selection, the way every other
