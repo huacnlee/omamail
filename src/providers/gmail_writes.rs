@@ -29,6 +29,9 @@ fn strings(params: &Value, key: &str, max: usize) -> Result<Value, &'static str>
     }
     for value in values {
         let s = value.as_str().ok_or("invalid_params")?;
+        if key == "ids" {
+            validate_message_id(s)?;
+        }
         if s.is_empty() || s.len() > 8192 || s.chars().any(char::is_control) {
             return Err("invalid_params");
         }
@@ -155,9 +158,7 @@ fn plan(method: &str, params: &Value) -> Result<Plan, &'static str> {
     }
     // Validate path spelling before reading credentials, including dot segments.
     for part in &result.path {
-        if part == "." || part == ".." {
-            return Err("invalid_params");
-        }
+        super::super::gmail_http::validate_path_part(part).map_err(|_| "invalid_params")?;
     }
     Ok(result)
 }

@@ -19,8 +19,7 @@ pub(super) const BOX_PROPERTIES: &[&str] = &[
 pub(super) const MEMBER_PROPERTIES: &[&str] = &["id", "threadId", "mailboxIds", "keywords"];
 const ACTION_ROW_BYTES: usize = 4 * 1024 * 1024;
 
-fn action_id(value: &Value) -> Result<String, &'static str> {
-    let id = value.as_str().ok_or("mail_action_invalid_target")?;
+pub(crate) fn validate_action_id(id: &str) -> Result<(), &'static str> {
     if id.is_empty()
         || id.len() > 8192
         || id.chars().any(|character| {
@@ -37,6 +36,12 @@ fn action_id(value: &Value) -> Result<String, &'static str> {
     {
         return Err("mail_action_invalid_target");
     }
+    Ok(())
+}
+
+fn action_id(value: &Value) -> Result<String, &'static str> {
+    let id = value.as_str().ok_or("mail_action_invalid_target")?;
+    validate_action_id(id)?;
     Ok(id.to_owned())
 }
 

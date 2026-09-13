@@ -3,6 +3,7 @@ mod cancel;
 mod mutation;
 mod read;
 use base64::{Engine, engine::general_purpose::STANDARD};
+pub(crate) use read::message_id;
 use serde_json::{Value, json};
 use std::{
     sync::{Arc, OnceLock},

@@ -100,6 +100,188 @@ fn row(id: &str) -> Value {
     json!({"id":id})
 }
 
+#[tokio::test]
+async fn provider_message_ids_are_validated_before_any_action_lookup() {
+    for (provider, id) in [
+        (Provider::Hey, "1:INBOX"),
+        (Provider::Hey, "1"),
+        (Provider::Hey, "1:2:3"),
+        (Provider::Hey, "draft:2"),
+        (Provider::Hey, "١:2"),
+        (Provider::Hey, "1:+2"),
+        (Provider::Hey, "1:2 "),
+        (Provider::Hey, "123456789012345678901234567890123:2"),
+        (Provider::Gmail, "   "),
+        (Provider::Gmail, "."),
+        (Provider::Gmail, ".."),
+    ]
+    .into_iter()
+    .chain(
+        [Provider::Imap, Provider::Outlook]
+            .into_iter()
+            .flat_map(|provider| {
+                [
+                    "message",
+                    "0:INBOX",
+                    "4294967296:INBOX",
+                    ":INBOX",
+                    "1:",
+                    "+1:INBOX",
+                    "١:INBOX",
+                    " 1:INBOX",
+                    "1 :INBOX",
+                ]
+                .into_iter()
+                .map(move |id| (provider, id))
+            }),
+    ) {
+        for execute in [false, true] {
+            let effects = Arc::new(Effects::default());
+            let mut request = request(provider, "read", &[id]);
+            request.execute = execute;
+            let error = plan_action(&request, &lookup(Value::Null, &[row(id)], effects.clone()))
+                .await
+                .unwrap_err();
+            assert_eq!(error, "invalid_params", "{provider:?} {id:?}");
+            assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
+            assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
+        }
+    }
+    for provider in [
+        Provider::Gmail,
+        Provider::Hey,
+        Provider::Jmap,
+        Provider::Imap,
+        Provider::Outlook,
+    ] {
+        for suffix in ["\r", "\n", "\r\n", "\0", "\u{0085}", "\u{202e}"] {
+            let id = format!("1:2{suffix}");
+            let effects = Arc::new(Effects::default());
+            assert_eq!(
+                plan_action(
+                    &request(provider, "read", &[&id]),
+                    &lookup(Value::Null, &[row(&id)], effects.clone())
+                )
+                .await
+                .unwrap_err(),
+                "invalid_params"
+            );
+            assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn provider_id_validation_preserves_valid_opaque_spelling() {
+    for (provider, ids) in [
+        (
+            Provider::Gmail,
+            vec![" quote\"slash\\工 ", "abc-123_", " e\u{301} ", "a/b?x#y%2e"],
+        ),
+        (
+            Provider::Jmap,
+            vec![" quote\"slash\\工 ", "abc-123_", " e\u{301} ", "."],
+        ),
+        (
+            Provider::Hey,
+            vec!["001:002", "0:0", "12345678901234567890123456789012:2"],
+        ),
+        (
+            Provider::Imap,
+            vec![
+                "007:INBOX",
+                "4294967295:工\\\"/Mail:box ",
+                "1:&ZeVnLIqe-",
+                "2: e\u{301} ",
+            ],
+        ),
+        (
+            Provider::Outlook,
+            vec![
+                "007:INBOX",
+                "4294967295:工\\\"/Mail:box ",
+                "1:&ZeVnLIqe-",
+                "2: e\u{301} ",
+            ],
+        ),
+    ] {
+        let rows: Vec<_> = ids.iter().map(|id| row(id)).collect();
+        let preview = super::action::dry_run(
+            &request(provider, "read", &ids),
+            &lookup(Value::Null, &rows, Default::default()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview["requestedIds"], json!(ids));
+        assert_eq!(preview["targetIds"], json!(ids));
+    }
+}
+
+#[tokio::test]
+async fn malformed_final_imap_id_is_rejected_before_any_chunk_or_lookup() {
+    for provider in [Provider::Imap, Provider::Outlook] {
+        let mut ids: Vec<_> = (1..=501).map(|id| format!("{id}:INBOX")).collect();
+        ids.push("malformed-final-id".into());
+        let refs: Vec<_> = ids.iter().map(String::as_str).collect();
+        let rows: Vec<_> = refs.iter().map(|id| row(id)).collect();
+        let effects = Arc::new(Effects::default());
+        let mut request = request(provider, "read", &refs);
+        request.execute = true;
+        let mutation = RecordingMutation::new(vec![Ok(json!({})), Ok(json!({}))]);
+        let result = super::action::act(
+            &request,
+            &lookup(Value::Null, &rows, effects.clone()),
+            &mutation,
+        )
+        .await;
+        assert_eq!(result, Err("invalid_params"));
+        assert!(mutation.calls.lock().unwrap().is_empty());
+        assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
+        assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn invalid_provider_ids_in_expanded_targets_cannot_reach_execution() {
+    for (provider, id, bad) in [
+        (Provider::Imap, "1:INBOX", "bad"),
+        (Provider::Outlook, "1:INBOX", "0:INBOX"),
+        (Provider::Hey, "1:2", "1:INBOX"),
+    ] {
+        let expanded = json!({"id":id,"thread":{"memberIds":[id,bad]}});
+        assert_eq!(
+            plan_action(
+                &request(provider, "read", &[id]),
+                &lookup(Value::Null, &[expanded], Default::default())
+            )
+            .await
+            .unwrap_err(),
+            "mail_action_invalid_target"
+        );
+    }
+}
+
+#[tokio::test]
+async fn chunk_dispatch_validates_all_plan_targets_before_the_first_provider_call() {
+    let ids: Vec<_> = (1..=501).map(|id| format!("{id}:INBOX")).collect();
+    let refs: Vec<_> = ids.iter().map(String::as_str).collect();
+    let rows: Vec<_> = refs.iter().map(|id| row(id)).collect();
+    let mut plan = plan_action(
+        &request(Provider::Imap, "read", &refs),
+        &lookup(Value::Null, &rows, Default::default()),
+    )
+    .await
+    .unwrap();
+    plan.target_ids.push("malformed-final-id".into());
+    let mutation = RecordingMutation::new(vec![Ok(json!({})), Ok(json!({}))]);
+    assert!(
+        crate::backend::mail::mutate_plan(&plan, &mutation)
+            .await
+            .is_empty()
+    );
+    assert!(mutation.calls.lock().unwrap().is_empty());
+}
+
 #[test]
 fn mark_vocabulary_maps_once_to_domain_actions() {
     assert_eq!(domain_action("read"), Ok("markRead"));
@@ -209,9 +391,14 @@ async fn capability_ceilings_and_account_refusals_precede_target_lookup() {
         ),
     ] {
         let effects = Arc::new(Effects::default());
+        let id = match provider {
+            Provider::Hey => "1:2",
+            Provider::Imap | Provider::Outlook => "1:INBOX",
+            _ => "message-1",
+        };
         let error = plan_action(
-            &request(provider, operation, &["message-1"]),
-            &lookup(refusals, &[row("message-1")], effects.clone()),
+            &request(provider, operation, &[id]),
+            &lookup(refusals, &[row(id)], effects.clone()),
         )
         .await
         .unwrap_err();
@@ -248,7 +435,7 @@ async fn hey_spam_is_a_direct_provider_action_not_a_listable_mailbox_move() {
     let planner = lookup_with_mailboxes(
         Value::Null,
         json!({"archive":false,"trash":true,"spam":false}),
-        &[row("message-1")],
+        &[row("1:2")],
         effects,
     );
     let mut availability = planner.availability.clone();
@@ -258,11 +445,11 @@ async fn hey_spam_is_a_direct_provider_action_not_a_listable_mailbox_move() {
         ..planner
     };
     assert_eq!(
-        plan_action(&request(Provider::Hey, "spam", &["message-1"]), &planner)
+        plan_action(&request(Provider::Hey, "spam", &["1:2"]), &planner)
             .await
             .unwrap()
             .target_ids,
-        ["message-1"]
+        ["1:2"]
     );
 }
 

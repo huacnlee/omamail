@@ -93,13 +93,23 @@ fn field<'a>(params: &'a Value, key: &str, required: bool) -> Result<&'a str, &'
         None if !required => "",
         _ => return Err("invalid_params"),
     };
+    validate_field(value, required)?;
+    Ok(value)
+}
+
+fn validate_field(value: &str, required: bool) -> Result<(), &'static str> {
     if value.len() > 8192
         || value.chars().any(char::is_control)
         || (required && value.trim().is_empty())
     {
         return Err("invalid_params");
     }
-    Ok(value)
+    Ok(())
+}
+
+pub(crate) fn validate_message_id(id: &str) -> Result<(), &'static str> {
+    validate_field(id, true)?;
+    super::gmail_http::validate_path_part(id).map_err(|_| "invalid_params")
 }
 
 impl Session {

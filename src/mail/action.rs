@@ -1,6 +1,6 @@
 //! Normalize once, then preview or consume that exact plan for execution.
 use super::types::opaque_id;
-use super::{Account, ActRequest};
+use super::{Account, ActRequest, Provider};
 use serde_json::{Value, json};
 use std::{collections::HashSet, future::Future, pin::Pin};
 
@@ -77,12 +77,25 @@ fn label_ids(change: &Value, name: &str) -> Result<Vec<String>, &'static str> {
         .collect()
 }
 
-fn requested_ids(ids: &[String]) -> Result<Vec<String>, &'static str> {
+/// Validation only: retain the exact opaque spelling used in the request and
+/// provider acknowledgements. Reuse the same pure parsers as native execution.
+pub(crate) fn validate_message_id(provider: Provider, id: &str) -> Result<(), &'static str> {
+    opaque_id(id)?;
+    match provider {
+        Provider::Gmail => crate::providers::gmail::validate_message_id(id),
+        Provider::Jmap => crate::providers::jmap::validate_action_id(id),
+        Provider::Hey => crate::providers::hey_actions::message_id(id).map(|_| ()),
+        Provider::Imap | Provider::Outlook => crate::providers::imap::message_id(id).map(|_| ()),
+    }
+    .map_err(|_| "invalid_params")
+}
+
+fn requested_ids(provider: Provider, ids: &[String]) -> Result<Vec<String>, &'static str> {
     if ids.is_empty() || ids.len() > 1_000 {
         return Err("invalid_params");
     }
     for id in ids {
-        opaque_id(id)?;
+        validate_message_id(provider, id)?;
     }
     let mut unique = Vec::with_capacity(ids.len());
     let mut seen = HashSet::new();
@@ -101,6 +114,7 @@ fn row_for<'a>(rows: &'a [Value], id: &str) -> Result<&'a Value, &'static str> {
 }
 
 fn append_targets(
+    provider: Provider,
     row: &Value,
     action: &str,
     targets: &mut Vec<String>,
@@ -108,7 +122,7 @@ fn append_targets(
 ) -> Result<(), &'static str> {
     let expanded = crate::account::model::action_targets_checked(row, action)?;
     for target in &expanded {
-        opaque_id(target).map_err(|_| "mail_action_invalid_target")?;
+        validate_message_id(provider, target).map_err(|_| "mail_action_invalid_target")?;
         if seen.insert(target.to_owned()) {
             if targets.len() == MAX_TARGETS {
                 return Err("mail_action_target_limit");
@@ -123,7 +137,7 @@ pub(crate) async fn plan_action(
     request: &ActRequest,
     lookup: &impl ActionLookup,
 ) -> Result<ActionPlan, &'static str> {
-    let unique_requested = requested_ids(&request.ids)?;
+    let unique_requested = requested_ids(request.account.provider, &request.ids)?;
     let action = domain_action(&request.operation)?;
     let availability = lookup
         .availability(&request.account, &request.operation)
@@ -158,7 +172,13 @@ pub(crate) async fn plan_action(
     let mut target_ids = Vec::new();
     let mut seen = HashSet::new();
     for id in &unique_requested {
-        append_targets(row_for(&rows, id)?, action, &mut target_ids, &mut seen)?;
+        append_targets(
+            request.account.provider,
+            row_for(&rows, id)?,
+            action,
+            &mut target_ids,
+            &mut seen,
+        )?;
     }
     if target_ids.is_empty() {
         return Err("mail_action_target_unknown");

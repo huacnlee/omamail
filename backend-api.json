@@ -179,6 +179,27 @@
   ],
   "contractCases": [
     {
+      "name": "mail action rejects malformed HEY IDs before preview",
+      "method": "mail.act",
+      "params": {"account": "hey:sender@example.org", "operation": "read", "ids": ["1:INBOX"]},
+      "errorCode": -32602,
+      "equals": {"message": "Invalid params"}
+    },
+    {
+      "name": "mail action rejects malformed IMAP IDs before execution",
+      "method": "mail.act",
+      "params": {"account": "imap:sender@example.org", "operation": "read", "ids": ["1:INBOX", "bad"], "execute": true},
+      "errorCode": -32602,
+      "equals": {"message": "Invalid params"}
+    },
+    {
+      "name": "mail action rejects out-of-range Outlook UIDs before preview",
+      "method": "mail.act",
+      "params": {"account": "outlook:sender@example.org", "operation": "trash", "ids": ["4294967296:INBOX"]},
+      "errorCode": -32602,
+      "equals": {"message": "Invalid params"}
+    },
+    {
       "name": "mail list requires an account",
       "method": "mail.list",
       "params": {},
@@ -603,6 +624,9 @@
       "mail.send"
     ],
     "cases": [
+      "mail action rejects malformed HEY IDs before preview",
+      "mail action rejects malformed IMAP IDs before execution",
+      "mail action rejects out-of-range Outlook UIDs before preview",
       "mail list requires an account",
       "mail read requires an account",
       "mail action dry run",

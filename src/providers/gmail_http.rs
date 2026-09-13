@@ -171,6 +171,14 @@ fn valid(value: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub(super) fn validate_path_part(value: &str) -> Result<(), &'static str> {
+    valid(value)?;
+    if value.is_empty() || matches!(value, "." | "..") {
+        return Err("gmail_invalid_input");
+    }
+    Ok(())
+}
+
 fn encode(value: &str) -> String {
     const HEX: &[u8] = b"0123456789ABCDEF";
     let mut result = String::new();
@@ -197,10 +205,7 @@ fn prepare_get(
     }
     let mut url = String::from("https://gmail.googleapis.com/gmail/v1/users/me/");
     for (index, part) in path.iter().enumerate() {
-        valid(part)?;
-        if part.is_empty() || *part == "." || *part == ".." {
-            return Err("gmail_invalid_input");
-        }
+        validate_path_part(part)?;
         if index != 0 {
             url.push('/');
         }

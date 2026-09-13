@@ -12,6 +12,7 @@ use tokio::{
 mod check;
 mod discovery;
 mod mailbox;
+pub(crate) use mailbox::validate_action_id;
 mod mutation;
 mod query;
 mod read;

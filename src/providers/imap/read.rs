@@ -551,8 +551,11 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
     }
     Ok(json!({"page":page(&found,&folder,offset,limit,false)}))
 }
-pub(super) fn message_id(id: &str) -> Result<(u32, String)> {
+pub(crate) fn message_id(id: &str) -> Result<(u32, String)> {
     let (uid, folder) = id.split_once(':').ok_or("invalid_params")?;
+    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("invalid_params");
+    }
     let uid = uid
         .parse::<u32>()
         .ok()

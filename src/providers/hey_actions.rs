@@ -8,6 +8,14 @@ fn numeric(value: &str) -> bool {
     !value.is_empty() && value.len() <= 32 && value.bytes().all(|b| b.is_ascii_digit())
 }
 
+pub(crate) fn message_id(id: &str) -> Result<(&str, &str), &'static str> {
+    let (posting, topic) = id.split_once(':').ok_or("Invalid HEY message id")?;
+    if !numeric(posting) || !numeric(topic) {
+        return Err("Invalid HEY message id");
+    }
+    Ok((posting, topic))
+}
+
 fn field<'a>(params: &'a Value, key: &str) -> Result<&'a str, &'static str> {
     match params.get(key) {
         None => Ok(""),
@@ -59,13 +67,7 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
             return Err("Invalid HEY message ids");
         }
         for id in ids {
-            let (posting, topic) = id
-                .as_str()
-                .and_then(|id| id.split_once(':'))
-                .ok_or("Invalid HEY message id")?;
-            if !numeric(posting) || !numeric(topic) {
-                return Err("Invalid HEY message id");
-            }
+            let (posting, _) = message_id(id.as_str().ok_or("Invalid HEY message id")?)?;
             if !args.iter().any(|arg| arg == posting) {
                 args.push(posting.into());
             }

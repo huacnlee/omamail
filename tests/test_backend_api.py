@@ -220,10 +220,15 @@ def main():
         (home / 'run').mkdir(mode=0o700)
         registry = home / 'config/omamail/accounts.json'
         registry.parent.mkdir(parents=True)
-        registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org', 'accounts': [
+        accounts = [
             {'email': 'contract@example.org'},
             {'provider': 'imap', 'email': 'sender@example.org',
-             'imap': {'username': 'sender@example.org'}}]}))
+             'imap': {'username': 'sender@example.org'}}]
+        if not args.released:
+            accounts.extend([{'provider': 'hey', 'email': 'sender@example.org'},
+                             {'provider': 'outlook', 'email': 'sender@example.org'}])
+        registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',
+                                        'accounts': accounts}))
         registry.chmod(0o600)
         for name in ('cache', 'state', 'data'):
             sentinel = home / name / 'omamail/sentinel'

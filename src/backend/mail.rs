@@ -142,6 +142,15 @@ pub(crate) async fn mutate_plan(
     plan: &crate::mail::action::ActionPlan,
     adapter: &impl MutationAdapter,
 ) -> Vec<String> {
+    // Validate the complete plan before chunking: a malformed later target
+    // must never permit an earlier chunk to mutate the provider or caches.
+    if plan
+        .target_ids
+        .iter()
+        .any(|id| crate::mail::action::validate_message_id(plan.account.provider, id).is_err())
+    {
+        return Vec::new();
+    }
     let mut succeeded = Vec::new();
     // Gmail trash is a single-message primitive. Other operations preserve the
     // provider's batch primitive, including HEY posting batches and IMAP UIDs.

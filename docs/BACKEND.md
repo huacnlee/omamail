@@ -162,6 +162,11 @@ metadata without marking the message read or exporting attachment files.
 `mark` accepts exactly `read`, `unread`, `star`, and `unstar`. Actions accept
 multiple message IDs. Their previews retain `requestedIds` and show the resolved
 `targetIds`, including expanded conversation members where applicable.
+The complete ID list is validated against the provider's syntax before any
+provider lookup or mutation chunk. HEY uses numeric `posting:topic` IDs;
+IMAP/Outlook use a positive 32-bit `UID:folder`. Validation never rewrites ID
+spelling, folder bytes, or leading zeroes. A malformed later ID refuses the
+whole request without executing earlier valid IDs.
 
 Every state-changing command is a dry run unless `--execute` is present.
 JSON previews return `{"ok":true,"result":{"dryRun":true,"executed":false,...}}`

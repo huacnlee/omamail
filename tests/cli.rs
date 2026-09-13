@@ -233,6 +233,154 @@ fn metadata(path: &Path) -> (u32, (i64, i64), (i64, i64)) {
     )
 }
 
+type FixtureSnapshot = Vec<(
+    std::path::PathBuf,
+    (u32, (i64, i64), (i64, i64)),
+    Option<Vec<u8>>,
+)>;
+fn fixture_snapshot(root: &Path) -> FixtureSnapshot {
+    fn visit(path: &Path, snapshot: &mut FixtureSnapshot) {
+        snapshot.push((
+            path.to_owned(),
+            metadata(path),
+            path.is_file().then(|| fs::read(path).unwrap()),
+        ));
+        if path.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                visit(&entry.unwrap().path(), snapshot);
+            }
+        }
+    }
+    let mut snapshot = Vec::new();
+    visit(root, &mut snapshot);
+    snapshot.sort_by(|a, b| a.0.cmp(&b.0));
+    snapshot
+}
+
+#[test]
+fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
+    let fixture = mail_list_fixture(9, true);
+    let registry = fixture.0.join("config/omamail/accounts.json");
+    let mut accounts: Value = serde_json::from_slice(&fs::read(&registry).unwrap()).unwrap();
+    accounts["accounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"provider":"hey","email":"hey@example.org"}));
+    fs::write(registry, accounts.to_string()).unwrap();
+    let touched = fixture.0.join("credential-touched");
+    fs::write(
+        fixture.0.join("bin/secret-tool"),
+        format!("#!/bin/sh\n: > '{}'\nexit 1\n", touched.display()),
+    )
+    .unwrap();
+    let before = fixture_snapshot(&fixture.0);
+    for (account, bad) in [
+        ("hey:hey@example.org", "1:INBOX"),
+        ("hey:hey@example.org", "1:2:3"),
+        ("imap:imap@example.org", "not-a-uid"),
+        ("imap:imap@example.org", "0:INBOX"),
+        ("outlook:outlook@example.org", "4294967296:INBOX"),
+        ("outlook:outlook@example.org", "1:"),
+    ] {
+        for operation in ["read", "trash"] {
+            let output = root_mail(
+                &fixture.0,
+                &["call", "mail.act", "--json"],
+                serde_json::json!({"account":account,"operation":operation,"ids":[bad]})
+                    .to_string()
+                    .as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(1), "{account} {bad}: {output:?}");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                serde_json::json!({"ok":false,"error":{"code":"invalid_params"}})
+            );
+            assert_eq!(fixture_snapshot(&fixture.0), before);
+        }
+    }
+}
+
+#[tokio::test]
+async fn malformed_final_imap_action_id_prevents_all_network_and_cache_changes() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+    let seeded = root_mail(&fixture.0, &["call","cache.bodyPut","--json"],serde_json::json!({"accountId":"imap:imap@example.org","id":"1:INBOX","body":{"text":"preserve cached body"}}).to_string().as_bytes());
+    assert!(seeded.status.success());
+    let before = fixture_snapshot(&fixture.0);
+    let (finished, completion) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let accepted = tokio::select! {
+            socket = listener.accept() => Some(socket.unwrap().0),
+            _ = completion => None,
+        };
+        let Some(socket) = accepted else {
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(20), listener.accept())
+                    .await
+                    .is_err()
+            );
+            return (false, 0);
+        };
+        let (reader, mut writer) = socket.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"* OK ready\r\n").await.unwrap();
+        let mut mutations = 0;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            let response = if line.starts_with("O1 LOGIN ") {
+                "O1 OK login\r\n"
+            } else if line == "O1 CAPABILITY\r\n" {
+                "* CAPABILITY IMAP4rev1\r\nO1 OK capabilities\r\n"
+            } else if line == "O1 LIST \"\" \"*\"\r\n" {
+                "* LIST () \"/\" INBOX\r\nO1 OK folders\r\n"
+            } else if line == "O1 SELECT \"INBOX\"\r\n" {
+                "O1 OK selected\r\n"
+            } else if line.starts_with("O1 UID STORE ") {
+                mutations += 1;
+                "O1 OK mutated\r\n"
+            } else {
+                panic!("unexpected request {line:?}")
+            };
+            writer.write_all(response.as_bytes()).await.unwrap();
+        }
+        (true, mutations)
+    });
+    let root = fixture.0.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        let mut ids: Vec<_> = (1..=501).map(|id| format!("{id}:INBOX")).collect();
+        ids.push("malformed-final-id".into());
+        let mut args = vec![
+            "mark",
+            "read",
+            "--account",
+            "imap:imap@example.org",
+            "--execute",
+            "--json",
+        ];
+        args.extend(ids.iter().map(String::as_str));
+        root_mail(&root, &args, b"")
+    })
+    .await
+    .unwrap();
+    let _ = finished.send(());
+    let effects = peer.await.unwrap();
+    assert_eq!(
+        effects,
+        (false, 0),
+        "a malformed tail must prevent even the first mutation chunk"
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        serde_json::json!({"ok":false,"error":{"code":"invalid_params"}})
+    );
+    assert_eq!(fixture_snapshot(&fixture.0), before);
+}
+
 #[test]
 fn configured_list_failures_do_not_repair_registry_metadata() {
     let fixture = mail_list_fixture(9, false);
