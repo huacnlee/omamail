@@ -89,6 +89,18 @@ Item {
       reply(runtime, "ready", "0.8.2", "", false)
       compare(runtime.cliInstalled, false)
     }
+    function test_failed_cli_install_keeps_the_validated_backend_ready() {
+      var runtime = make()
+      reply(runtime, "ready", "0.8.2")
+      var executable = runtime.executable
+      runtime.enableCli()
+      reply(runtime, "error", "0.8.2", "CLI path belongs to another installation.")
+      compare(runtime.state, "ready")
+      compare(runtime.executable, executable)
+      compare(runtime.installedVersion, "0.8.2")
+      compare(runtime.error, "CLI path belongs to another installation.")
+      compare(runtime.cliInstalled, false)
+    }
     function test_initial_status_recognizes_existing_cli_link() {
       var runtime = make()
       reply(runtime, "ready", "0.8.2", "", true)

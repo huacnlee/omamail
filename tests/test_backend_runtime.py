@@ -510,6 +510,23 @@ touch linked
         self.assertEqual(os.readlink(link), str(self.binary))
         self.assertEqual(legacy.read_text(), "old plugin-owned runtime")
 
+    def test_cli_install_recognizes_a_previous_omamail_checkout(self):
+        self.release(self.archive())
+        self.assertEqual(self.manager.run("install")["state"], "ready")
+        previous = Path(self.tmp.name).resolve() / "previous-plugin"
+        legacy = previous / "runtime/bin/omamail"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("old plugin-owned runtime")
+        legacy.chmod(0o700)
+        (previous / "manifest.json").write_text('{"id":"omamail"}')
+        link = self.home / ".local/bin/omamail"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(legacy)
+        result = self.manager.run("enable-cli")
+        self.assertEqual(result["state"], "ready", result)
+        self.assertEqual(os.readlink(link), str(self.binary))
+        self.assertEqual(legacy.read_text(), "old plugin-owned runtime")
+
     def test_failed_legacy_cli_migration_preserves_the_owned_link(self):
         self.release(self.archive())
         self.assertEqual(self.manager.run("install")["state"], "ready")

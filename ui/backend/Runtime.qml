@@ -72,10 +72,12 @@ Item {
     interval: root.action === "install" ? 180000 : 15000
     onTriggered: {
       root.timedOut = true
-      root.state = "error"
-      root.executable = ""
-      root.cliInstalled = false
       root.error = "Backend runtime operation timed out. Retry the check."
+      if (root.action !== "enable-cli" && root.action !== "disable-cli") {
+        root.state = "error"
+        root.executable = ""
+        root.cliInstalled = false
+      }
       operation.running = false
     }
   }
@@ -93,6 +95,11 @@ Item {
       deadline.stop()
       if (root.timedOut) return
       var result = Rules.decode(root.response)
+      if ((root.action === "enable-cli" || root.action === "disable-cli") && exitCode !== 0) {
+        root.error = result.error
+        if (root.error === "") root.error = "Backend CLI operation failed"
+        return
+      }
       if (root.action === "install" && exitCode === 0 && result.state === "ready") {
         Qt.callLater(root.refresh)
         return

@@ -22,8 +22,8 @@ protect integrity, not against a compromised publisher.
 
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses
-an unrelated file or link. An owned link to the former plugin-local runtime is
-repointed without modifying that watched directory. Nothing edits PATH. Run `disable-cli` before removing
+an unrelated file or link. An owned link into a previous Omamail plugin checkout's
+runtime is repointed without modifying that watched directory. Nothing edits PATH. Run `disable-cli` before removing
 the plugin, since Omarchy has no verified uninstall hook for that external link.
 `scripts/uninstall-backend.sh` removes the runtime only. Neither operation deletes
 accounts, drafts, caches or keyring entries. Marketplace checkouts contain no

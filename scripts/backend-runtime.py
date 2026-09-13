@@ -319,15 +319,39 @@ def install_local(required):
         return version
 
 
+def legacy_cli_target(target):
+    if target == str(LEGACY_BINARY):
+        return True
+    candidate = Path(target)
+    if not candidate.is_absolute() or len(candidate.parents) < 3:
+        return False
+    plugin = candidate.parents[2]
+    if candidate != plugin / "runtime/bin/omamail":
+        return False
+    manifest = plugin / "manifest.json"
+    try:
+        safe_path(candidate)
+        safe_path(manifest)
+        with manifest.open("rb") as source:
+            raw = source.read(1025)
+        if len(raw) > 1024:
+            return False
+        value = json.loads(raw)
+        return isinstance(value, dict) and value.get("id") == "omamail"
+    except (OSError, Refused, UnicodeError, json.JSONDecodeError):
+        return False
+
+
 def cli_link(enable):
     link = Path.home() / ".local/bin/omamail"
     safe_path(link.parent, directory=True, create=enable)
     if link.is_symlink():
         target = os.readlink(link)
-        require(target in (str(BINARY), str(LEGACY_BINARY)), "CLI path belongs to another installation.")
+        require(target == str(BINARY) or legacy_cli_target(target),
+                "CLI path belongs to another installation.")
         if not enable:
             link.unlink()
-        elif target == str(LEGACY_BINARY):
+        elif target != str(BINARY):
             with tempfile.TemporaryDirectory(prefix=".omamail-cli-", dir=link.parent) as staging:
                 candidate = Path(staging) / "omamail"
                 os.symlink(str(BINARY), candidate)
