@@ -55,7 +55,11 @@ otherwise Escape closes the dock. An open command menu or history view is left f
 The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts
 a newline. Ctrl+Return/Enter also sends for compatibility.
 While `/` command candidates are visible, `assistantCommands` owns Up/Down and
-Return/Enter; choosing a command fills the input without sending it. Escape
+Return/Enter; choosing a command inserts a highlighted slash token without sending it.
+Tokens expand into their full instructions only when sent. Editing through a token
+(including Backspace, Delete, or a selection replacement) removes the whole command;
+ordinary text around it remains editable. This is text-edit normalization, not an
+additional key binding. Escape
 first dismisses those candidates, then closes the dock. Both contexts keep the
 keyboard in the AI text area.
 The `assistantSend` row's `sequenceContexts` restricts bare Return/Enter to

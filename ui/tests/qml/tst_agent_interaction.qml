@@ -24,13 +24,14 @@ Item {
     property bool accept: true
     property int calls: 0
     property string requestedId: ""
+    property string requestedPrompt: ""
     function agentJobFor(id, account) { return Oracle.selectionJob(jobs,[id],account) }
     function agentSelectionJob(ids, account) { return Oracle.selectionJob(jobs,ids,account) }
     function agentHistoryFor(fields, ids, account) { return Oracle.historyFor(jobs, fields ? fields.accountId : account, ids, fields ? fields.draftKey : "") }
     function agentJobsForDraft(fields) { return Oracle.draftJobs(jobs,fields.accountId,fields.draftKey) }
     function showAgentJob(id) { agentShownId=id }
     function acknowledgeAgentJob(id) {}
-    function askAgent(id, prompt, account) { requestedId=id; calls++; if (accept) agentStarting=true; return accept }
+    function askAgent(id, prompt, account) { requestedId=id; requestedPrompt=prompt; calls++; if (accept) agentStarting=true; return accept }
     function answerAgent(id, prompt) { parentId=id; calls++; if (!accept) return false; agentStarting=true;return true }
     function askAgentMany(ids, prompt, account) { return askAgent(ids[0],prompt,account) }
     function askAgentDraft(fields, prompt) { return askAgent("",prompt,fields.accountId) }
@@ -119,7 +120,8 @@ Item {
       tryCompare(popup, "commandsOpen", true)
       var prompt = popup.commandMatches.items[0].prompt
       verify(popup.chooseCommand(0))
-      compare(field.text, prompt)
+      compare(field.text, "/summarize")
+      compare(popup.commandTokens.length, 1)
       compare(service.calls, 0)
       compare(popup.commandsOpen, false)
       field.forceActiveFocus()
@@ -129,6 +131,68 @@ Item {
       compare(service.calls, 0)
       verify(popup.submitCurrent())
       compare(service.calls, 1)
+      compare(service.requestedPrompt, prompt)
+      compare(popup.commandTokens.length, 0)
+    }
+    function test_command_backspace_is_atomic_and_preserves_other_text() {
+      popup.openCenteredFor("m1", "Mail")
+      var field = findChild(popup, "agent-prompt-field")
+      field.text = "Please\n/sum"
+      verify(popup.chooseCommand(0))
+      compare(field.text, "Please\n/summarize")
+      field.forceActiveFocus()
+      keyClick(Qt.Key_Backspace)
+      compare(field.text, "Please\n")
+      compare(popup.commandTokens.length, 0)
+    }
+    function test_command_extra_text_and_rejected_submit() {
+      popup.openCenteredFor("m1", "Mail")
+      var field = findChild(popup, "agent-prompt-field")
+      field.text = "/sum"
+      var prompt = popup.commandMatches.items[0].prompt
+      verify(popup.chooseCommand(0))
+      field.insert(field.length, " 用中文")
+      field.cursorPosition = field.length
+      keyClick(Qt.Key_Backspace)
+      compare(field.text, "/summarize 用中")
+      compare(popup.commandTokens.length, 1)
+      service.accept = false
+      compare(popup.submitCurrent(), false)
+      compare(service.requestedPrompt, prompt + " 用中")
+      compare(field.text, "/summarize 用中")
+      compare(popup.commandTokens.length, 1)
+      field.select(2, 5)
+      keyClick(Qt.Key_Backspace)
+      compare(field.text, " 用中")
+      compare(popup.commandTokens.length, 0)
+    }
+    function test_command_highlight_and_async_restore() {
+      popup.openCenteredFor("m1", "Mail")
+      var field = findChild(popup, "agent-prompt-field")
+      field.text = "/sum"
+      verify(popup.chooseCommand(0))
+      field.deselect()
+      wait(50)
+      verify(waitForRendering(field))
+      var rect = field.positionToRectangle(1)
+      var point = field.mapToItem(popup, rect.x + 1, rect.y + 1)
+      var highlighted = grabImage(popup)
+      popup.commandTokens = []
+      wait(50)
+      verify(waitForRendering(field))
+      var plain = grabImage(popup)
+      verify(highlighted.pixel(Math.floor(point.x), Math.floor(point.y)) !== plain.pixel(Math.floor(point.x), Math.floor(point.y)))
+      field.text = "/sum"
+      verify(popup.chooseCommand(0))
+      verify(popup.submitCurrent())
+      service.agentStarting = false
+      service.agentError = "Synthetic launch failure"
+      compare(field.text, "/summarize")
+      compare(popup.commandTokens.length, 1)
+      field.cursorPosition = field.length
+      field.forceActiveFocus()
+      keyClick(Qt.Key_Backspace)
+      compare(field.text, "")
     }
     function test_more_menu_and_full_width_input() {
       popup.openCenteredFor("m1", "Mail")

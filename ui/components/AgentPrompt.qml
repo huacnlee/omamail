@@ -27,6 +27,8 @@ FocusScope {
   property var returnFocus: null
   property string localError: ""
   property string submittedPrompt: ""
+  property string submittedInput: ""
+  property var submittedTokens: []
   property string submittedJobId: ""
   property string submittedScope: ""
   readonly property string queueScope: JSON.stringify(composer
@@ -109,7 +111,14 @@ FocusScope {
   readonly property string errorText: localError || (service ? service.agentError || "" : "")
   onErrorTextChanged: {
     if (errorText !== "" && submittedPrompt !== "" && submittedScope === queueScope && !Agent.isActive(job) && !(service && service.agentStarting)) {
-      if (field.text === "") field.text = submittedPrompt
+      if (field.text === "") {
+        updatingCommands = true
+        field.text = submittedInput
+        commandText = field.text
+        commandTokens = submittedTokens
+        dismissedCommandText = field.text
+        updatingCommands = false
+      }
       submittedPrompt = ""
     }
   }
@@ -159,6 +168,21 @@ FocusScope {
   property string openedDraftKey: ""
 
   property string dismissedCommandText: ""
+  property var commandTokens: []
+  property string commandText: ""
+  property bool updatingCommands: false
+  function updateCommandText() {
+    if (updatingCommands) return
+    var edited = Agent.editCommands(commandText, field.text, commandTokens)
+    updatingCommands = true
+    commandTokens = edited.tokens
+    if (field.text !== edited.text) {
+      field.text = edited.text
+      field.cursorPosition = edited.cursor
+    }
+    commandText = field.text
+    updatingCommands = false
+  }
   property int commandIndex: 0
   readonly property var commandMatches: Agent.commandSuggestions(field.text,
     composer ? Agent.draftAsks() : Agent.mailAsks(overSelection))
@@ -173,7 +197,15 @@ FocusScope {
   function chooseCommand(index) {
     var selected = index === undefined ? commandIndex : index
     if (selected < 0 || selected >= commandMatches.items.length) return false
-    field.text = field.text.slice(0, commandMatches.start) + commandMatches.items[selected].prompt
+    var choice = commandMatches.items[selected]
+    var start = commandMatches.start
+    var label = "/" + choice.command
+    updatingCommands = true
+    field.text = field.text.slice(0, start) + label
+    commandTokens = commandTokens.concat([{start: start, end: start + label.length, prompt: choice.prompt}])
+    commandText = field.text
+    updatingCommands = false
+    dismissedCommandText = field.text
     field.cursorPosition = field.text.length
     takeFocus()
     return true
@@ -185,7 +217,7 @@ FocusScope {
       selectHistory(historyJobs[historyList.currentIndex].id)
       return true
     }
-    return submit(field.text)
+    return submit(Agent.expandCommands(field.text, commandTokens), true)
   }
   function newChat() {
     if (working || pending.busy) return
@@ -238,7 +270,7 @@ FocusScope {
       if (previous && previous.visible) previous.forceActiveFocus()
     })
   }
-  function submit(promptText) {
+  function submit(promptText, fromInput) {
     if (!service) return false
     var prompt = String(promptText || "").trim()
     if (prompt === "") return false
@@ -255,7 +287,9 @@ FocusScope {
       else localError = pending.error
       return queued
     }
-    field.text = prompt
+    if (!fromInput) field.text = prompt
+    var inputText = field.text
+    var inputTokens = commandTokens.slice()
     localError = ""
     if (job && !job.canContinue) {
       localError = "Start a new chat to ask again."
@@ -270,6 +304,8 @@ FocusScope {
       field.text = ""
       submittedScope = queueScope
       submittedPrompt = prompt
+      submittedInput = inputText
+      submittedTokens = inputTokens
       submittedJobId = job ? String(job.id) : ""
       answerFlick.followEnd = true
     }
@@ -651,6 +687,8 @@ FocusScope {
           QQC.TextArea {
             id: field
             objectName: "agent-prompt-field"
+            textFormat: TextEdit.PlainText
+            onTextChanged: root.updateCommandText()
             Keys.onPressed: function(event) { root.keyPressed(event) }
             width: inputScroll.availableWidth
             font.family: root.panelFontFamily
@@ -669,6 +707,30 @@ FocusScope {
             background: Rectangle {
               color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.06)
             }
+            // Paint each character so highlights follow wrapping and resizing.
+            // The text itself stays plain; user input never becomes markup.
+            Repeater {
+              model: root.commandTokens
+              delegate: Item {
+                required property var modelData
+                anchors.fill: parent
+                Repeater {
+                  model: parent.modelData.end - parent.modelData.start
+                  delegate: Rectangle {
+                    required property int index
+                    readonly property int position: parent.modelData.start + index
+                    readonly property rect first: { field.text; field.width; field.font; return field.positionToRectangle(position) }
+                    readonly property rect next: { field.text; field.width; field.font; return field.positionToRectangle(position + 1) }
+                    x: first.x
+                    y: first.y
+                    width: next.y === first.y ? Math.abs(next.x - first.x) : commandMetrics.advanceWidth(field.getText(position, position + 1))
+                    height: first.height
+                    color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24)
+                  }
+                }
+              }
+            }
+            FontMetrics { id: commandMetrics; font: field.font }
           }
         }
         Text {

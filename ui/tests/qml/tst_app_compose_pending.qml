@@ -492,9 +492,12 @@ Item {
       keyClick(Qt.Key_Return)
       tryCompare(dock, "commandsOpen", false)
       verify(field.text.length > 1)
-      verify(field.text.indexOf("/") !== 0)
+      compare(field.text, "/review")
       compare(mailService.agentRequests, 0)
       compare(field.activeFocus, true)
+      keyClick(Qt.Key_Backspace)
+      compare(field.text, "")
+      compare(dock.commandTokens.length, 0)
       field.text = "/"
       field.cursorPosition = field.length
       tryCompare(dock, "commandsOpen", true)
@@ -505,8 +508,9 @@ Item {
       tryCompare(dock, "commandsOpen", true)
       keyClick(Qt.Key_Enter)
       tryCompare(dock, "commandsOpen", false)
-      verify(field.text.indexOf("/") !== 0)
+      compare(field.text, "/review")
       compare(mailService.agentRequests, 0)
+      field.clear()
       field.text = "/"
       tryCompare(dock, "commandsOpen", true)
       wait(0)

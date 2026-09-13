@@ -163,6 +163,43 @@ function commandSuggestions(text, choices) {
   return {start: value.lastIndexOf("/"), items: items}
 }
 
+// Selected commands keep their prompt out of the editable presentation text.
+function expandCommands(text, tokens) {
+  var result = text
+  for (var i = tokens.length - 1; i >= 0; i--)
+    result = result.slice(0, tokens[i].start) + tokens[i].prompt + result.slice(tokens[i].end)
+  return result
+}
+
+function editCommands(before, after, tokens) {
+  var start = 0
+  while (start < before.length && start < after.length && before[start] === after[start]) start++
+  var oldEnd = before.length
+  var newEnd = after.length
+  while (oldEnd > start && newEnd > start && before[oldEnd - 1] === after[newEnd - 1]) { oldEnd--; newEnd-- }
+  var from = start
+  var to = oldEnd
+  var kept = []
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i]
+    if ((start < token.end && oldEnd > token.start)
+        || (start === oldEnd && start > token.start && start < token.end)) {
+      from = Math.min(from, token.start)
+      to = Math.max(to, token.end)
+    } else kept.push(token)
+  }
+  var inserted = after.slice(start, newEnd)
+  var delta = inserted.length - (to - from)
+  var shifted = []
+  for (var j = 0; j < kept.length; j++) {
+    var item = kept[j]
+    var offset = item.start >= to ? delta : 0
+    shifted.push({start: item.start + offset, end: item.end + offset, prompt: item.prompt})
+  }
+  return {text: before.slice(0, from) + inserted + before.slice(to), tokens: shifted,
+    cursor: from + inserted.length}
+}
+
 function historyLabel(job) {
   return new Date(Number(job.created || 0) * 1000).toLocaleString() + " · " + String(job.requestPreview || job.subject || "Conversation")
 }
