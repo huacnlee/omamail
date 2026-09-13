@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "../../bar/Bridge.js" as BarBridge
 
 // The bar widget with its icon turned off.
 //
@@ -23,6 +24,9 @@ Item {
     property string barTooltip: "Omamail"
     property var barMessages: []
     property var barEvents: []
+    property string contentDirection: "Auto"
+    property int refreshCount: 0
+    property int calendarRefreshCount: 0
 
     // What the widget pushed across, and how many times.
     property var appliedSettings: null
@@ -33,7 +37,8 @@ Item {
       applyCount += 1
     }
 
-    function refreshCalendarPreview() {}
+    function refresh() { refreshCount += 1 }
+    function refreshCalendarPreview() { calendarRefreshCount += 1 }
   }
 
   QtObject {
@@ -47,8 +52,9 @@ Item {
   // one — so a bar widget really can be asked to draw with nothing to ask.
   QtObject {
     id: startingShell
+    property string lastPayload: ""
     function serviceFor(_id) { return null }
-    function summon(_id, _payload) {}
+    function summon(_id, payload) { lastPayload = payload }
   }
 
   QtObject {
@@ -69,9 +75,81 @@ Item {
     when: windowShown
 
     function init() {
+      BarBridge.clear(BarBridge.current())
+      if (typeof widget.syncBridge === "function") widget.syncBridge()
       fakeBar.shell = fakeShell
+      fakeService.ready = true
+      fakeService.windowOpen = false
       fakeService.showBarIcon = true
       fakeService.applyCount = 0
+      fakeService.refreshCount = 0
+      fakeService.calendarRefreshCount = 0
+      widget.previewOpen = false
+    }
+
+    function cleanup() {
+      BarBridge.clear(BarBridge.current())
+      if (typeof widget.syncBridge === "function") widget.syncBridge()
+    }
+
+    function publishPreview() {
+      return BarBridge.publish(function() { return fakeService },
+        function(values) { fakeService.applySettings(values) },
+        function() { fakeService.refresh() },
+        function() { fakeService.refreshCalendarPreview() })
+    }
+
+    function button() {
+      for (var i = 0; i < widget.children.length; i++)
+        if (widget.children[i].iconComponent) return widget.children[i]
+      fail("bar button was not instantiated")
+    }
+
+    function test_replacement_bar_restores_status_settings_and_actions() {
+      fakeBar.shell = startingShell
+      var api = publishPreview()
+      tryVerify(function() { return widget.gmail !== null && widget.gmail.ready }, 2000,
+        "a connected mailbox must remain connected inside a restricted replacement bar")
+      tryCompare(widget, "bridgeApi", api, 2000)
+      verify(widget.gmail !== null)
+      verify(widget.gmail !== fakeService, "the full service must stay private")
+      compare(widget.gmail.ready, true)
+      compare(widget.gmail.unreadTotal, 3)
+      verify(fakeService.applyCount > 0, "settings reach the service through the bridge")
+
+      var icon = button().iconComponent.createObject(widget)
+      verify(icon !== null)
+      compare(icon.children[0].crossed, false)
+      compare(icon.children[0].dot, true)
+      fakeService.ready = false
+      fakeService.windowOpen = true
+      widget.syncBridge()
+      compare(icon.children[0].crossed, true, "real disconnects still show a slash")
+      compare(button().windowOpen, true)
+      icon.destroy()
+
+      button().pressed(Qt.MiddleButton)
+      compare(fakeService.refreshCount, 1)
+      button().pressed(Qt.RightButton)
+      compare(widget.previewOpen, true)
+      compare(fakeService.calendarRefreshCount, 1)
+      widget.openMessage("ada@example.org", "mail-1")
+      compare(JSON.parse(startingShell.lastPayload).messageId, "mail-1")
+
+      fakeService.showBarIcon = false
+      widget.syncBridge()
+      compare(widget.drawsIcon, false)
+      compare(widget.implicitWidth, 0)
+      fakeService.applyCount = 0
+      var replacement = publishPreview()
+      BarBridge.clear(api)
+      widget.syncBridge()
+      verify(fakeService.applyCount > 0, "hot reload reapplies the widget settings")
+      compare(widget.bridgeApi, replacement)
+      BarBridge.clear(replacement)
+      BarBridge.clear(api)
+      widget.syncBridge()
+      compare(widget.gmail, null, "no stale session survives service shutdown")
     }
 
     function test_the_icon_is_drawn_by_default() {
