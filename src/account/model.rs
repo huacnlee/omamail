@@ -99,8 +99,11 @@ pub(crate) fn action_targets_checked(
         .ok_or("mail_action_invalid_target")?
         .as_array()
         .ok_or("mail_action_invalid_target")?;
+    // An absent thread means this is an individual row. A present, empty
+    // member list is authoritative: provider applicability removed every
+    // member, so restoring the representative would mutate the wrong mail.
     if members.is_empty() {
-        return Ok(vec![own]);
+        return Ok(Vec::new());
     }
     members
         .iter()

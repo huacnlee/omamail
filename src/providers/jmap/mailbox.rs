@@ -17,6 +17,7 @@ pub(super) const BOX_PROPERTIES: &[&str] = &[
     "unreadThreads",
 ];
 pub(super) const MEMBER_PROPERTIES: &[&str] = &["id", "threadId", "mailboxIds", "keywords"];
+const ACTION_ROW_BYTES: usize = 4 * 1024 * 1024;
 
 fn action_id(value: &Value) -> Result<String, &'static str> {
     let id = value.as_str().ok_or("mail_action_invalid_target")?;
@@ -210,7 +211,7 @@ impl Session {
                 .ok_or("jmap_invalid_response")?;
             for thread in threads {
                 let id = action_id(&thread["id"])?;
-                if !thread_ids.contains(&id) || members.contains_key(&id) {
+                if !chunk.contains(&id) || members.contains_key(&id) {
                     return Err("mail_action_invalid_target");
                 }
                 let values_json = thread["emailIds"]
@@ -227,7 +228,7 @@ impl Session {
                 for value in values_json {
                     let raw = value.as_str().ok_or("mail_action_invalid_target")?;
                     member_bytes = member_bytes.saturating_add(raw.len());
-                    if member_bytes > super::MAX_BODY {
+                    if member_bytes > ACTION_ROW_BYTES {
                         return Err("jmap_response_too_large");
                     }
                     let member = action_id(value)?;
@@ -254,6 +255,12 @@ impl Session {
             if !seen_members.contains(&id) || member_by_id.contains_key(&id) {
                 return Err("mail_action_invalid_target");
             }
+            if !member["mailboxIds"]
+                .as_object()
+                .is_some_and(|mailboxes| mailboxes.values().all(|value| value == true))
+            {
+                return Err("mail_action_invalid_target");
+            }
             member_by_id.insert(id, member);
         }
         if member_by_id.len() != all_member_ids.len() {
@@ -263,7 +270,6 @@ impl Session {
         // otherwise make 1,000 representatives of one 2,000-member thread
         // retain two million copied IDs. Share the expansion per thread/view
         // and reject the aggregate projection before any row is built.
-        const ACTION_ROW_BYTES: usize = 4 * 1024 * 1024;
         let mut scoped = std::collections::HashMap::<(String, String), (Vec<String>, usize)>::new();
         let mut output_count = 0usize;
         let mut output_bytes = 0usize;
@@ -294,7 +300,7 @@ impl Session {
                         && super::mutation::applies_to_action(
                             operation,
                             &roles,
-                            &member_row["mailboxIds"],
+                            Some(&member_row["mailboxIds"]),
                         )
                     {
                         bytes = bytes.saturating_add(member.len());

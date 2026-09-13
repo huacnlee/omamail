@@ -48,11 +48,8 @@ fn patch(
         if destination.is_empty() {
             return Err("jmap_missing_mailbox");
         }
-        let member_has = |role: &str| membership.is_some_and(|v| v[string(&roles[role])] == true);
-        if membership.is_some()
-            && ((to == "archive" && !string(&roles["inbox"]).is_empty() && !member_has("inbox"))
-                || (to == "junk" && member_has("sent")))
-        {
+        let action = if to == "junk" { "spam" } else { to };
+        if !applies_to_action(action, roles, membership) {
             return Ok(Value::Object(result));
         }
         if replace {
@@ -85,10 +82,16 @@ pub(super) fn learns_junk(snapshot: &Snapshot) -> bool {
 }
 /// Whether a conversation member has a real provider mutation for this action.
 /// Shared by preview expansion and Task 5's patch path.
-pub(super) fn applies_to_action(action: &str, roles: &Value, membership: &Value) -> bool {
+/// Unknown membership (the desktop's direct-action path) does not exclude a
+/// target. Without an Inbox role we likewise cannot classify non-Inbox mail.
+/// A known empty membership is different: it excludes archive when Inbox exists.
+pub(super) fn applies_to_action(action: &str, roles: &Value, membership: Option<&Value>) -> bool {
+    let Some(membership) = membership else {
+        return true;
+    };
     let has = |role: &str| membership[string(&roles[role])] == true;
     match action {
-        "archive" => !string(&roles["inbox"]).is_empty() && has("inbox"),
+        "archive" => string(&roles["inbox"]).is_empty() || has("inbox"),
         "spam" => !has("sent"),
         _ => true,
     }
@@ -364,6 +367,46 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_applicability_and_patch_agree_for_missing_roles_and_membership() {
+        for roles in [
+            json!({"inbox":"I","archive":"A","sent":"S","junk":"J","trash":"T"}),
+            json!({"archive":"A","sent":"S","junk":"J","trash":"T"}),
+        ] {
+            for membership in [
+                None,
+                Some(json!({})),
+                Some(json!({"I":true})),
+                Some(json!({"S":true})),
+            ] {
+                for (action, added, removed) in [
+                    ("archive", json!([]), json!(["INBOX"])),
+                    ("spam", json!(["SPAM"]), json!([])),
+                ] {
+                    let expected = match action {
+                        "archive" => {
+                            membership.is_none()
+                                || roles["inbox"].is_null()
+                                || membership.as_ref().is_some_and(|m| m["I"] == true)
+                        }
+                        _ => !membership.as_ref().is_some_and(|m| m["S"] == true),
+                    };
+                    assert_eq!(
+                        applies_to_action(action, &roles, membership.as_ref()),
+                        expected
+                    );
+                    assert_eq!(
+                        !patch(&added, &removed, &roles, membership.as_ref())
+                            .unwrap()
+                            .as_object()
+                            .unwrap()
+                            .is_empty(),
+                        expected
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn conversation_move_does_not_archive_sent_or_train_on_own_reply() {
         let roles = json!({"inbox":"I","archive":"A","sent":"S","junk":"J","trash":"T"});

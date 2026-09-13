@@ -17,17 +17,38 @@ use std::{
 static ENVIRONMENT: Mutex<()> = Mutex::new(());
 static FIXTURE_SERIAL: AtomicU64 = AtomicU64::new(0);
 
-struct AccountFixture {
+// Environment changes must not leak to parallel tests or their child runtimes.
+// libtest names its worker after the exact test; reuse that name in the child.
+pub(crate) fn isolated() -> bool {
+    let name = std::thread::current().name().unwrap().to_owned();
+    if env::var("OMAMAIL_ACTION_TEST_CHILD").as_deref() == Ok(name.as_str()) {
+        return false;
+    }
+    let output = std::process::Command::new(env::current_exe().unwrap())
+        .args(["--exact", &name, "--test-threads=1", "--nocapture"])
+        .env("OMAMAIL_ACTION_TEST_CHILD", name)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    true
+}
+
+pub(crate) struct AccountFixture {
     _environment: MutexGuard<'static, ()>,
     previous: Option<OsString>,
     previous_cache: Option<OsString>,
     previous_state: Option<OsString>,
     previous_home: Option<OsString>,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct MetadataState {
+pub(crate) struct MetadataState {
     mode: u32,
     modified: (i64, i64),
     changed: (i64, i64),
@@ -59,7 +80,7 @@ fn registry_state(fixture: &AccountFixture) -> RegistryState {
     }
 }
 
-fn fixture_tree(root: &std::path::Path) -> Vec<(PathBuf, MetadataState, Vec<u8>)> {
+pub(crate) fn fixture_tree(root: &std::path::Path) -> Vec<(PathBuf, MetadataState, Vec<u8>)> {
     fn walk(
         root: &std::path::Path,
         current: &std::path::Path,
@@ -124,7 +145,7 @@ impl Drop for AccountFixture {
     }
 }
 
-fn account_fixture(registry: Value) -> AccountFixture {
+pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
     let environment = ENVIRONMENT
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -161,6 +182,9 @@ fn account_fixture(registry: Value) -> AccountFixture {
 
 #[tokio::test]
 async fn production_mail_action_dry_runs_all_operations_without_creating_local_state() {
+    if isolated() {
+        return;
+    }
     let fixture = account_fixture(json!({
         "version":1,
         "activeId":"person@example.org",
@@ -230,6 +254,9 @@ fn request_error<T>(result: Result<T, &'static str>) -> &'static str {
 
 #[test]
 fn omitted_account_uses_active_and_explicit_account_never_falls_back() {
+    if isolated() {
+        return;
+    }
     let _env = account_fixture(json!({
         "version": 1,
         "activeId": "imap:active@example.org",
@@ -251,6 +278,9 @@ fn omitted_account_uses_active_and_explicit_account_never_falls_back() {
 
 #[test]
 fn account_resolution_never_changes_registry_or_directory_metadata() {
+    if isolated() {
+        return;
+    }
     let fixture = account_fixture(json!({
         "version": 1,
         "activeId": "active@example.org",
@@ -269,6 +299,9 @@ fn account_resolution_never_changes_registry_or_directory_metadata() {
 
 #[test]
 fn empty_or_pending_only_registries_never_resolve_an_empty_account_id() {
+    if isolated() {
+        return;
+    }
     for registry in [
         json!({"version":1, "activeId":"", "accounts":[]}),
         json!({
@@ -288,6 +321,9 @@ fn empty_or_pending_only_registries_never_resolve_an_empty_account_id() {
 
 #[test]
 fn unknown_registry_provider_cannot_resolve_as_a_gmail_action_account() {
+    if isolated() {
+        return;
+    }
     let _env = account_fixture(json!({
         "version":1,
         "activeId":"person@example.org",
@@ -324,6 +360,9 @@ fn provider_vocabulary_is_closed() {
 
 #[test]
 fn request_parsers_resolve_an_omitted_account_and_preserve_canonical_values() {
+    if isolated() {
+        return;
+    }
     let _env = account_fixture(json!({
         "version": 1,
         "activeId": "active@example.org",
@@ -366,6 +405,9 @@ fn request_parsers_resolve_an_omitted_account_and_preserve_canonical_values() {
 
 #[test]
 fn request_parsers_reject_wrong_shapes_unknown_fields_and_unsafe_bounds() {
+    if isolated() {
+        return;
+    }
     let _env = account_fixture(json!({
         "version": 1,
         "activeId": "active@example.org",

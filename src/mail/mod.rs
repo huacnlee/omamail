@@ -11,7 +11,7 @@ pub use types::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod list_tests;

@@ -3,6 +3,10 @@ use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
+#[cfg(test)]
+#[path = "mail_action_tests.rs"]
+mod action_tests;
+
 struct ProviderList<'a> {
     session: &'a Session,
 }

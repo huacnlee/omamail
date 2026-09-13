@@ -180,6 +180,21 @@ async fn malformed_conversation_members_are_rejected_before_any_coercion_or_trim
 }
 
 #[tokio::test]
+async fn explicit_empty_applicable_conversation_has_no_fallback_representative_target() {
+    let effects = Arc::new(Effects::default());
+    let empty = json!({"id":"sent-only","thread":{"memberIds":[]}});
+    assert_eq!(
+        plan_action(
+            &request(Provider::Jmap, "archive", &["sent-only"]),
+            &lookup(Value::Null, &[empty], effects),
+        )
+        .await
+        .unwrap_err(),
+        "mail_action_target_unknown"
+    );
+}
+
+#[tokio::test]
 async fn capability_ceilings_and_account_refusals_precede_target_lookup() {
     for (provider, operation, refusals) in [
         (Provider::Hey, "archive", Value::Null),
