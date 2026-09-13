@@ -87,6 +87,48 @@ fn account_id(value: &str) -> Result<String, &'static str> {
     Ok(value.to_lowercase())
 }
 
+/// One listing page of the unread poll. Three would do for the preview, but
+/// Gmail's `resultSizeEstimate` on a truncated page is a placeholder — 201 on
+/// a three-id page whether four messages match or four thousand — so the
+/// count has to come from ids actually listed, and listing 100 at a time
+/// keeps a mailbox with a few dozen unread at one request.
+const UNREAD_PAGE: u64 = 100;
+/// Past this the exact number is not information anyone acts on, and a
+/// mailbox that far behind should not cost a poll one request per hundred.
+const UNREAD_CAP: u64 = 500;
+/// How many of the listed ids are hydrated for the bar preview.
+const UNREAD_PREVIEW: usize = 3;
+
+/// The unread total counted from listed ids rather than read off an estimate,
+/// with the first few ids kept for the preview. `list` is asked for one page
+/// per token, starting from "", until a page carries no continuation or the
+/// cap is reached.
+pub(crate) async fn count_listed<F, Fut>(list: F) -> Result<(u64, Vec<Value>), &'static str>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, &'static str>>,
+{
+    let mut token = String::new();
+    let mut total = 0u64;
+    let mut preview = Vec::new();
+    loop {
+        let page = list(token.clone()).await?;
+        let ids = page["ids"].as_array().ok_or("gmail_invalid_response")?;
+        if preview.is_empty() {
+            preview = ids.iter().take(UNREAD_PREVIEW).cloned().collect();
+        }
+        total += ids.len() as u64;
+        let next = page["nextPageToken"].as_str().unwrap_or("");
+        // An empty page with a continuation, or one that hands back the token
+        // it was given, is a server going in circles; the count so far is the
+        // honest answer rather than a poll that never ends.
+        if next.is_empty() || ids.is_empty() || next == token || total >= UNREAD_CAP {
+            return Ok((total, preview));
+        }
+        token = next.to_owned();
+    }
+}
+
 impl Sync {
     pub fn new(
         gmail: Arc<crate::providers::gmail::Session>,
@@ -139,16 +181,24 @@ impl Sync {
                     })).await?;
                     return crate::providers::hey::call("hey.list", &params).await;
                 }
-                let listing = gmail
-                    .call(
-                        "gmail.list",
-                        &json!({
-                            "accountId":account,"query":query,"pageSize":3
-                        }),
-                    )
-                    .await?;
-                let ids = listing["ids"].as_array().ok_or("gmail_invalid_response")?;
-                let messages = try_join_all(ids.iter().take(3).map(|id| {
+                let (estimate, ids) = count_listed(|token| {
+                    let gmail = gmail.clone();
+                    let account = account.clone();
+                    let query = query.clone();
+                    async move {
+                        gmail
+                            .call(
+                                "gmail.list",
+                                &json!({
+                                    "accountId":account,"query":query,
+                                    "pageSize":UNREAD_PAGE,"pageToken":token
+                                }),
+                            )
+                            .await
+                    }
+                })
+                .await?;
+                let messages = try_join_all(ids.iter().map(|id| {
                     let gmail = &gmail;
                     let account = &account;
                     async move {
@@ -161,7 +211,7 @@ impl Sync {
                     }
                 }))
                 .await?;
-                Ok(json!({"estimate":listing["estimate"],"messages":messages}))
+                Ok(json!({"estimate":estimate,"messages":messages}))
             })
         }));
         Arc::get_mut(&mut sync.inner).unwrap().warm = Some(warm);
@@ -534,6 +584,86 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
+
+    // Gmail's own shape: a truncated first page whose estimate is a
+    // placeholder, then a finished page. The count is the ids, the estimate
+    // is never read, and only the first three ids are kept for the preview.
+    #[tokio::test]
+    async fn unread_is_counted_from_listed_ids_not_the_estimate() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let (total, preview) = count_listed(|token| {
+            asked.lock().unwrap().push(token.clone());
+            async move {
+                Ok(match token.as_str() {
+                    "" => json!({"ids":["a","b","c","d"],"nextPageToken":"p2","estimate":201}),
+                    "p2" => json!({"ids":["e"],"nextPageToken":"","estimate":201}),
+                    _ => unreachable!(),
+                })
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(preview, vec![json!("a"), json!("b"), json!("c")]);
+        assert_eq!(*asked.lock().unwrap(), vec!["", "p2"]);
+    }
+
+    #[tokio::test]
+    async fn a_finished_page_is_exact_and_an_empty_one_is_zero() {
+        let (total, preview) = count_listed(|_| async {
+            Ok(json!({"ids":["a","b"],"nextPageToken":"","estimate":201}))
+        })
+        .await
+        .unwrap();
+        assert_eq!((total, preview.len()), (2, 2));
+        let (total, preview) =
+            count_listed(|_| async { Ok(json!({"ids":[],"nextPageToken":"","estimate":201})) })
+                .await
+                .unwrap();
+        assert_eq!((total, preview.len()), (0, 0));
+    }
+
+    // A mailbox thousands behind stops at the cap rather than paging to the
+    // end, and a server that keeps handing back the same token or an empty
+    // page with a continuation does not keep the poll going forever.
+    #[tokio::test]
+    async fn counting_stops_at_the_cap_and_on_a_server_going_in_circles() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (total, _) = count_listed(|token| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let ids: Vec<String> = (0..100).map(|i| format!("{token}-{i}")).collect();
+                Ok(json!({"ids":ids,"nextPageToken":format!("p{}", n + 1),"estimate":201}))
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(total, UNREAD_CAP);
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
+
+        let (total, _) = count_listed(|_| async {
+            Ok(json!({"ids":["a"],"nextPageToken":"same","estimate":201}))
+        })
+        .await
+        .unwrap();
+        assert_eq!(total, 2);
+
+        let (total, _) = count_listed(|token| async move {
+            Ok(if token.is_empty() {
+                json!({"ids":["a"],"nextPageToken":"p2","estimate":201})
+            } else {
+                json!({"ids":[],"nextPageToken":"p3","estimate":201})
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!(total, 1);
+
+        assert_eq!(
+            count_listed(|_| async { Ok(json!({"nextPageToken":""})) }).await,
+            Err("gmail_invalid_response")
+        );
+    }
 
     async fn event(events: &mut broadcast::Receiver<Event>) -> Event {
         tokio::time::timeout(Duration::from_secs(2), events.recv())
