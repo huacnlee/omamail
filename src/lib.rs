@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod cli;
 pub mod contacts;
 pub mod compose;
+pub mod mail;
 pub mod message;
 pub mod outbox;
 pub mod process;
