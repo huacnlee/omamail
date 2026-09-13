@@ -1,9 +1,15 @@
 use serde_json::Value;
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+    process::{Command, Output, Stdio},
+};
 
 static EMPTY_HOME: AtomicU64 = AtomicU64::new(0);
+static MAIL_LIST_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 fn omamail(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_omamail"))
@@ -113,6 +119,179 @@ fn call_in_empty_home(method: &str, params: &[u8]) -> Output {
     assert!(std::fs::read_dir(&home).unwrap().next().is_none());
     std::fs::remove_dir_all(home).unwrap();
     output
+}
+
+struct MailListFixture(PathBuf);
+
+impl Drop for MailListFixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+
+fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture {
+    let root = std::env::temp_dir().join(format!(
+        "omamail-cli-mail-list-{}-{}",
+        std::process::id(),
+        MAIL_LIST_FIXTURE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let config = root.join("config/omamail");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("accounts.json"),
+        serde_json::json!({
+            "version":1,
+            "activeId":"gmail@example.org",
+            "accounts":[
+                {"provider":"gmail","email":"gmail@example.org"},
+                {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true}},
+                {"provider":"jmap","email":"jmap@example.org","jmap":{"sessionUrl":"https://localhost:9/session","username":"jmap@example.org"}},
+                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}}
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        config.join("accounts.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let secret_tool = bin.join("secret-tool");
+    fs::write(
+        &secret_tool,
+        if keyring_succeeds {
+            "#!/bin/sh\nprintf 'synthetic\\n'\n"
+        } else {
+            "#!/bin/sh\nexit 1\n"
+        },
+    )
+    .unwrap();
+    fs::set_permissions(&secret_tool, fs::Permissions::from_mode(0o700)).unwrap();
+    MailListFixture(root)
+}
+
+fn call_mail_list(root: &Path, account: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["call", "mail.list", "--json"])
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("HOME", root.join("home"))
+        .env("PATH", root.join("bin"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({"account":account})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    drop(child.stdin.take());
+    child.wait_with_output().unwrap()
+}
+
+fn metadata(path: &Path) -> (u32, (i64, i64), (i64, i64)) {
+    let metadata = fs::metadata(path).unwrap();
+    (
+        metadata.mode(),
+        (metadata.mtime(), metadata.mtime_nsec()),
+        (metadata.ctime(), metadata.ctime_nsec()),
+    )
+}
+
+#[test]
+fn configured_list_failures_do_not_repair_registry_metadata() {
+    let fixture = mail_list_fixture(9, false);
+    let directory = fixture.0.join("config/omamail");
+    let registry = directory.join("accounts.json");
+    let before = (
+        metadata(&directory),
+        metadata(&registry),
+        fs::read(&registry).unwrap(),
+    );
+    for (account, expected_error) in [
+        ("gmail@example.org", None),
+        ("imap:imap@example.org", Some("auth_signed_out")),
+        ("jmap:jmap@example.org", Some("auth_signed_out")),
+        ("outlook:outlook@example.org", Some("auth_signed_out")),
+    ] {
+        let output = call_mail_list(&fixture.0, account);
+        assert!(!output.status.success(), "{account}: {output:?}");
+        if let Some(expected_error) = expected_error {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+                expected_error,
+                "{account} must stop at the synthetic keyring failure before a network request"
+            );
+        }
+        assert_eq!(
+            (
+                metadata(&directory),
+                metadata(&registry),
+                fs::read(&registry).unwrap()
+            ),
+            before,
+            "{account} changed the configured account registry"
+        );
+    }
+}
+
+#[tokio::test]
+async fn imap_adapter_lists_first_page_without_request_token() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"* OK ready\r\n").await.unwrap();
+        loop {
+            let mut line = Vec::new();
+            reader.read_until(b'\n', &mut line).await.unwrap();
+            let response = if line.starts_with(b"O1 LOGIN") {
+                b"O1 OK login\r\n".as_slice()
+            } else if line == b"O1 CAPABILITY\r\n" {
+                b"* CAPABILITY IMAP4rev1\r\nO1 OK caps\r\n".as_slice()
+            } else if line == b"O1 LIST \"\" \"*\"\r\n" {
+                b"* LIST () \"/\" INBOX\r\nO1 OK folders\r\n".as_slice()
+            } else if line == b"O1 SELECT \"INBOX\"\r\n" {
+                b"O1 OK selected\r\n".as_slice()
+            } else if line == b"O1 UID FETCH 1:* (UID)\r\n" {
+                b"* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".as_slice()
+            } else if line.starts_with(b"O1 UID FETCH 7 (UID FLAGS ") {
+                b"* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE 54 BODY[HEADER.FIELDS (FROM SUBJECT)] {54}\r\nFrom: Test <test@example.org>\r\nSubject: First page\r\n\r\n)\r\nO1 OK fetched\r\n".as_slice()
+            } else {
+                panic!(
+                    "unexpected IMAP command: {:?}",
+                    String::from_utf8_lossy(&line)
+                );
+            };
+            writer.write_all(response).await.unwrap();
+            if line.starts_with(b"O1 UID FETCH 7 (UID FLAGS ") {
+                return;
+            }
+        }
+    });
+    let root = fixture.0.clone();
+    let output =
+        tokio::task::spawn_blocking(move || call_mail_list(&root, "imap:imap@example.org"))
+            .await
+            .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["messages"][0]["id"], "7:INBOX");
+    peer.await.unwrap();
 }
 
 #[test]

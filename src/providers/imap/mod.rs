@@ -362,16 +362,16 @@ async fn resolve_account(p: &Value, method: &str) -> Result<Value> {
         let username = account.strip_prefix("outlook:").ok_or("invalid_params")?;
         result["settings"] = outlook_settings(&entry, username);
         result["oauth"] = json!(true);
-        crate::auth::access_token(
-            "outlook",
-            account,
-            if method == "imap.send" && result["settings"]["send"] == "graph" {
-                "graph"
-            } else {
-                "mail"
-            },
-        )
-        .await?
+        let resource = if method == "imap.send" && result["settings"]["send"] == "graph" {
+            "graph"
+        } else {
+            "mail"
+        };
+        if read_only {
+            crate::auth::access_token_readonly("outlook", account, resource).await?
+        } else {
+            crate::auth::access_token("outlook", account, resource).await?
+        }
     } else {
         result["settings"] = entry["imap"].clone();
         result["oauth"] = json!(false);

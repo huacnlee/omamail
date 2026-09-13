@@ -5,7 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 mod callback;
 mod credentials;
 mod graph;
-pub use credentials::{access_token, password, settings, settings_readonly};
+pub use credentials::{access_token, access_token_readonly, password, settings, settings_readonly};
 
 #[derive(Default)]
 pub struct Session {

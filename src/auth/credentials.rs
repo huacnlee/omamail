@@ -118,15 +118,38 @@ pub async fn access_token(
     account: &str,
     resource: &str,
 ) -> Result<String, &'static str> {
+    access_token_with(provider, account, resource, false).await
+}
+
+pub async fn access_token_readonly(
+    provider: &str,
+    account: &str,
+    resource: &str,
+) -> Result<String, &'static str> {
+    access_token_with(provider, account, resource, true).await
+}
+
+async fn access_token_with(
+    provider: &str,
+    account: &str,
+    resource: &str,
+    read_only: bool,
+) -> Result<String, &'static str> {
     if provider != "outlook" {
         return Err("auth_provider_invalid");
     }
     valid_account(provider, account)?;
     let scope = scope(resource)?;
     let owned = account.to_owned();
-    let entry = tokio::task::spawn_blocking(move || settings("outlook", &owned))
-        .await
-        .map_err(|_| "auth_account_invalid")??;
+    let entry = tokio::task::spawn_blocking(move || {
+        if read_only {
+            settings_readonly("outlook", &owned)
+        } else {
+            settings("outlook", &owned)
+        }
+    })
+    .await
+    .map_err(|_| "auth_account_invalid")??;
     let client_id = entry["clientId"].as_str().ok_or("auth_client_missing")?;
     if client_id.is_empty() || client_id.len() > 1024 || client_id.chars().any(char::is_control) {
         return Err("auth_client_invalid");
