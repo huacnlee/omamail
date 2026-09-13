@@ -177,12 +177,19 @@ Item {
       verify(waitForRendering(field))
       var rect = field.positionToRectangle(1)
       var point = field.mapToItem(popup, rect.x + 1, rect.y + 1)
+      // The middle of the separator's cell: its left edge is where the last
+      // highlighted glyph's rectangle ends, and a pixel on that boundary is
+      // whichever way the renderer rounds.
+      var separator = field.positionToRectangle(field.length - 1)
+      var separatorEnd = field.positionToRectangle(field.length)
+      var separatorPoint = field.mapToItem(popup, (separator.x + separatorEnd.x) / 2, separator.y + 1)
       var highlighted = grabImage(popup)
       popup.commandTokens = []
       wait(50)
       verify(waitForRendering(field))
       var plain = grabImage(popup)
       verify(highlighted.pixel(Math.floor(point.x), Math.floor(point.y)) !== plain.pixel(Math.floor(point.x), Math.floor(point.y)))
+      compare(highlighted.pixel(Math.floor(separatorPoint.x), Math.floor(separatorPoint.y)), plain.pixel(Math.floor(separatorPoint.x), Math.floor(separatorPoint.y)), "The trailing separator must not be highlighted")
       field.text = "/sum"
       verify(popup.chooseCommand(0))
       verify(popup.submitCurrent())
