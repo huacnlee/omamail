@@ -102,25 +102,13 @@ binary does not have yet. The contract names that difference and nothing more:
 
 ## Release before pin
 
-Release with `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main that is in
-sync with origin. It runs `scripts/bump.sh`, which edits only Cargo.toml, the
-omamail Cargo.lock record and manifest.json, commits `Version X.Y.Z`, tags that
-commit `vX.Y.Z` and pushes main and the tag in one atomic push, then follows
-the Release run to its end. Without `VERSION` it tags the version the checkout
-already carries. The tag push is what triggers Release: the tag must name the
-Cargo version and be main's head, or the run refuses before building. Do not
-create the tag by hand for a dispatch: a dispatch on a branch creates the tag
-itself and refuses a version whose tag exists. The plugin tolerates the pin
-landing after the tag because `Backend` refuses the unreleased step until the
-pinned binary has it, so nothing on main can depend on the pin being current.
+Run `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with origin. Without `VERSION`, it prepares the next patch version. The command creates `release/X.Y.Z`, prepares Cargo.toml, the omamail Cargo.lock record and manifest.json, and opens one PR targeting main. It pushes only that release branch, then follows its exact Release run. It never pushes main or a tag. `backend-version` and the released API contract stay unchanged during preparation.
 
-A dispatch on main or an explicit feature branch still works, as does pushing a
-branch named `release/backend/<name>` for a bootstrap before the workflow is on
-main. Ordinary feature branches do not publish automatically. Merge the
-resulting branch including its bot pin commit, or review and carry that
-pin-only commit into the original PR after its actual published-asset checks
-pass. A push changing only backend-version does not retrigger publication, so
-the bot's pin commit cannot recurse.
+A push to `release/**` starts Release. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. CI builds both backends, creates `vX.Y.Z` and publishes the assets, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
+
+The required **Published backend merge gate** refuses a release PR until its pin equals the prepared version, then verifies the actual released binaries and contract as usual. Once the pin commit and required checks pass, review and merge that PR once: main receives the version metadata and working backend dependency together. The command does not merge automatically. Features needing an unreleased API continue to wait on `Service.backendNeedsUpdate` until that release is installed.
+
+The repository's active main ruleset requires a PR and the Published backend merge gate and prohibits deletion and force pushes. Administrators currently have a pull-request-only bypass: direct pushes remain blocked, but an administrator can explicitly bypass checks when merging a PR. Never enable an always-on bypass or use the PR bypass for routine releases; neither a local push nor CI should advance main directly.
 
 The workflow tests and builds locked native musl binaries on Linux x86_64 and
 aarch64, executes each version probe, rejects dynamic ELF dependencies, and
@@ -132,7 +120,7 @@ release: a changed contract requires a higher API revision. Each native binary
 must also pass the contract runner before packaging.
 Both native build jobs produce identical source fingerprints before publication. The new draft
 release is completed, made public, downloaded again and verified before a
-follow-up commit changes only backend-version on the release's source branch.
+follow-up commit updates backend-version and folds backend-api.json on the release branch.
 
 Publication is serialized. Existing releases and tags are never overwritten;
 remote lookup errors fail closed. The branch must still equal the dispatch
@@ -140,15 +128,9 @@ revision before publication and before the pin commit. A normal fast-forward
 push rejects concurrent movement; there is no force push or branch-protection
 bypass. If publication succeeds but the branch moves or rejects the pin push,
 the release remains published and the pin stays unchanged. Inspect that failure
-and verify the already-published assets before preparing a reviewed pin-only
-change; rerunning publication refuses the existing version.
+and verify the already-published assets before preparing a reviewed pin-only change on the same release PR; rerunning publication refuses the existing version. If the branch push succeeded but PR creation failed, open the PR for that existing branch instead of invoking publish again. If tag creation succeeded but publication failed, inspect the retained tag and any draft; never delete or reuse a published version. Prepare a new release version when the existing attempt cannot be safely completed.
 
-Repository setup must provide `RELEASE_TOKEN`, an appropriately scoped GitHub
-App token or fine-grained token with contents write permission for this repo,
-permitted by branch rules. The default GITHUB_TOKEN cannot be used for the pin
-push because it suppresses subsequent workflow triggers. Release runs only by a
-`vX.Y.Z` tag push, an explicit dispatch, or a push to `release/backend/**` of
-trusted code; restrict who can push tags and these release branches. PR CI has read-only permissions and never
+Repository setup must provide `RELEASE_TOKEN`, an appropriately scoped GitHub App token or fine-grained token with contents write permission for this repo, permitted to push release branches and create tags and releases. Local `gh` needs permission to push the branch and open its PR. The default GITHUB_TOKEN cannot be used for the pin push because it suppresses subsequent workflow triggers. See [GitHub's workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow). Release runs only on versioned release branches, by push or explicit dispatch; restrict who can push these trusted branches and tags. PR CI has read-only permissions and never
 receives that secret. Require **Published backend merge gate** in branch
 protection. That check reads the plugin's exact pin independently of Cargo's
 current development version, verifies both published native archives, compares the

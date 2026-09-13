@@ -32,6 +32,6 @@ for name, pattern in patterns.items():
 for name, text in prepared.items():
     Path(name).write_text(text)
 print("Prepared " + version + "; backend-version remains on the published runtime.")
-print("Review, test, commit and push this branch; dispatch Release on that branch.")
+print("Use make publish from a clean main to create the release branch and PR.")
 print("CI publishes and verifies both assets before making a pin-only commit.")
 PY

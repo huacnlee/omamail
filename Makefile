@@ -183,6 +183,7 @@ test-shell-portable:
 	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh
 	bash tests/test_publish.sh
+	python3 tests/test_publish_backend.py
 	bash tests/test_release_source.sh
 
 # This one asserts libcurl's own behaviour rather than ours: which of its two
@@ -248,9 +249,8 @@ install-plugin:
 	python3 scripts/backend-runtime.py uninstall
 	bash scripts/link-plugin.sh
 
-# Release from main: `make publish VERSION=1.2.3` bumps, commits, tags and
-# pushes; the tag push runs Release, which publishes the assets and pushes the
-# pin commit back. Without VERSION it tags the version the checkout carries.
+# Prepare release/X.Y.Z and its PR; CI publishes, verifies, then updates its pin.
+# VERSION defaults to the next patch. Main changes only when the PR is merged.
 .PHONY: publish
 publish:
-	bash scripts/publish.sh $(VERSION)
+	bash scripts/publish.sh "$(VERSION)"

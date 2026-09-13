@@ -563,14 +563,9 @@ key. What matters while working:
 
 ## Releasing
 
-- `scripts/bump.sh 0.2.0` is the whole of it: it sets the manifest version,
-  commits, tags and pushes both. The release workflow refuses a tag that
-  disagrees with the manifest, and by then the tag is on the remote and has to
-  be deleted from it — deriving both from one argument is what stops that.
-- It refuses before it writes: a `v` prefix, a version that is not
-  MAJOR.MINOR.PATCH, one the manifest already carries, a branch that is not
-  main, a dirty tree, a tag that already exists here or on the remote, and a
-  main that is behind the remote. It runs `make test` before tagging.
+- `make publish VERSION=X.Y.Z` creates `release/X.Y.Z` and one PR from a clean, synchronized main; without VERSION it increments the patch. It prepares version metadata and pushes only the release branch. Never push main directly or bypass its PR requirement.
+- Release CI accepts only the matching versioned release branch. It builds both native backends, creates the tag, publishes and verifies public assets, then updates `backend-version` and folds `backend-api.json` on that same branch. Merge that PR once after the pin commit passes the required backend gate. Never update the QML backend pin before its release succeeds.
+- Pin-only pushes exclude both `backend-version` and `backend-api.json` from the Release trigger. Existing tags and releases are never overwritten; failures leave the pin unchanged. See `docs/BACKEND-RUNTIME.md` for recovery.
 - A user-visible pull request carries a `## Release Notes` section in its
   description. Write the shipped results there as concise user-facing bullets;
   implementation details and verification belong in their own sections.
@@ -579,7 +574,7 @@ key. What matters while working:
   `## Release Notes` section and builds the complete change list. Do not replace
   this with GitHub's generated notes: those do not read the PR descriptions and
   can omit a pull request that is present in the tagged history.
-- The tag is the only thing that publishes a release. Nothing else creates one.
+- Tags do not trigger publication. Only a versioned release branch runs Release; neither the local publish command nor CI pushes main.
 
 ## Verification
 

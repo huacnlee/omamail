@@ -190,29 +190,13 @@ A release is one command, run on a clean `main` that matches `origin/main`:
 make publish VERSION=0.11.0
 ```
 
-It bumps the version in `Cargo.toml`, `Cargo.lock` and `manifest.json`, commits
-`Version 0.11.0`, tags that commit `v0.11.0`, pushes `main` and the tag
-together, and then follows the Release run until it ends. Without `VERSION` it
-tags the version the checkout already carries. It needs `gh` logged in.
+The command requires a clean main synchronized with origin and an authenticated `gh`. It creates `release/0.11.0`, updates `Cargo.toml`, `Cargo.lock` and `manifest.json`, pushes that branch and opens one PR. Without `VERSION`, it increments the patch version. It never pushes main or creates a tag locally.
 
-The tag push is what triggers **Release**. That workflow tests and builds the
-static backend for x86_64 and aarch64, checks the API contract against the
-last release, publishes the GitHub release, verifies the published assets by
-downloading them again, and finally pushes one more commit to `main` that
-advances `backend-version` — the pin every installed plugin reads to know which
-backend to download. Fetch that commit with `git pull` when the run is green.
+The branch push triggers **Release**. CI tests and builds both native backends, creates the tag and GitHub release, downloads and verifies the published assets, then updates `backend-version` and the released API contract in the same PR. The required backend gate blocks that PR until the new pin is present and the actual released binaries pass. Review and merge the completed PR once; version metadata and the backend dependency reach main together.
 
-Three things to know:
+- Keep main's ruleset active without an always-on bypass. Every update, including a release, goes through a PR; the administrator's PR-only bypass is not part of the release workflow.
+- Never tag by hand or delete an existing release tag to reuse its version. If publication fails, inspect the retained tag, draft or release and follow the recovery instructions before choosing a new version.
+- Features may merge with one unreleased API step while waiting on `Service.backendNeedsUpdate`; publish a backend release to make that step available to users.
+- If publication succeeds but the pin push fails, keep the published assets and recover the pin on the same PR after verification.
 
-- **Do not tag by hand.** The tag has to be `main`'s head and name the Cargo
-  version, and Release refuses anything else before it builds. If a stray tag
-  exists, remove it with `git push origin :refs/tags/v0.11.0` and let
-  `make publish` make it again.
-- **Cut a release when a change needs the backend.** `main` may run one API
-  step ahead of the pinned backend, and the plugin refuses that step until the
-  binary has it, so merging is always safe — but the feature does not reach
-  users until this command runs.
-- **A failed run is not half a release.** Existing tags and releases are never
-  overwritten; read the failed step, fix it on `main`, and publish the next
-  patch version. [docs/BACKEND-RUNTIME.md](docs/BACKEND-RUNTIME.md) has the
-  full account of what each step checks and why.
+See [backend releases and recovery](docs/BACKEND-RUNTIME.md#release-before-pin) for the complete sequence and token requirements.

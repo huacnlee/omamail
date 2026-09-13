@@ -126,9 +126,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ARCH: ${{ matrix.arch }}
+          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py pin-version)"
+          # A release PR cannot merge its version bump while publication is
+          # still building or has failed. The final pin commit reruns this gate.
+          case "$SOURCE_BRANCH" in
+            release/*) python3 scripts/package-backend.py check --require-pin ;;
+          esac
           # Missing bootstrap assets intentionally fail this required check.
           test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = false
           mkdir published

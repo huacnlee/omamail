@@ -24,9 +24,11 @@ for pull_request in "${pull_requests[@]}"; do
     --json author,body,number,title,url >"$notes_dir/$pull_request.json"
 done
 
+source_sha="$(git rev-parse --verify "$current_tag^{commit}")"
 generated_notes="$(
   gh api --method POST "repos/$repository/releases/generate-notes" \
     -f tag_name="$current_tag" \
+    -f target_commitish="$source_sha" \
     -f previous_tag_name="$previous_tag" \
     --jq '.body'
 )"

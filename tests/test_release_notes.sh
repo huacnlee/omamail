@@ -10,6 +10,7 @@ mkdir -p "$fixture_dir/bin"
 cat >"$fixture_dir/bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -eu
+[ "$1" != "rev-parse" ] || { echo 0123456789012345678901234567890123456789; exit 0; }
 [ "$1" = "log" ] || exit 2
 cat <<'LOG'
 Add the first visible change (#11)
@@ -23,6 +24,7 @@ cat >"$fixture_dir/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 set -eu
 [ "$1" != "api" ] || {
+  [[ " $* " == *" target_commitish=0123456789012345678901234567890123456789 "* ]] || exit 2
   cat <<'NOTES'
 ## What's Changed
 * Generated list that omitted pull request 13

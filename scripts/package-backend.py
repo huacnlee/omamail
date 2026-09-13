@@ -376,6 +376,8 @@ def pin(root, branch, expected):
         return subprocess.run(['git', '-C', str(root), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
     version = check(root)
+    if branch != 'release/' + version:
+        raise ValueError('pin requires the versioned release branch; never main')
     git('check-ref-format', 'refs/heads/' + branch)
     if not re.fullmatch(r'[0-9a-f]{40,64}', expected) or git('rev-parse', 'HEAD') != expected:
         raise ValueError('checkout is not the expected release revision')

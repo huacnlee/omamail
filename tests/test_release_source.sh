@@ -30,36 +30,33 @@ refuses() {
   grep -F "$message" "$root/err" >/dev/null || { echo "missing refusal: $message" >&2; cat "$root/err" >&2; exit 1; }
 }
 
-# A branch dispatch publishes from that branch when nothing has moved.
-test "$(source_of branch main "$sha" 0.2.0)" = main
-git -C "$root/clone" checkout -q -b topic
-git -C "$root/clone" push -q -u origin topic
-test "$(source_of branch topic "$sha" 0.2.0)" = topic
-git -C "$root/clone" checkout -q main
+# Only the exact versioned release branch can publish; main, topics and tags cannot.
+refuses "expected release/0.2.0" branch main "$sha" 0.2.0
+refuses "expected release/0.2.0" branch topic "$sha" 0.2.0
+refuses "expected a release branch" tag v0.2.0 "$sha" 0.2.0
+git -C "$root/clone" checkout -q -b release/0.2.0
+git -C "$root/clone" push -q -u origin release/0.2.0
+test "$(source_of branch release/0.2.0 "$sha" 0.2.0)" = release/0.2.0
+refuses "expected release/0.3.0" branch release/0.2.0 "$sha" 0.3.0
 
-# A branch dispatch must see origin at the dispatched revision.
-git -C "$root/clone" commit -q --allow-empty -m "Moved"
+# Moving a source or reusing a tag fails before publication.
+git -C "$root/clone" commit -q --allow-empty -m Moved
 moved="$(git -C "$root/clone" rev-parse HEAD)"
-git -C "$root/clone" push -q origin main
-refuses "main is not at the run's revision" branch main "$sha" 0.2.0
+git -C "$root/clone" push -q origin release/0.2.0
+refuses "not at the run's revision" branch release/0.2.0 "$sha" 0.2.0
+git -C "$root/clone" push -q origin HEAD:refs/tags/v0.2.0
+refuses "tag v0.2.0 already exists" branch release/0.2.0 "$moved" 0.2.0
+refuses "expected a release branch" other release/0.2.0 "$moved" 0.2.0
 
-# A tag push publishes from main when the tag is main's head and names the version.
-git -C "$root/clone" tag v0.2.0 "$moved"
-git -C "$root/clone" push -q origin refs/tags/v0.2.0
-test "$(source_of tag v0.2.0 "$moved" 0.2.0)" = main
-refuses "tag v0.2.0 does not name version 0.3.0" tag v0.2.0 "$moved" 0.3.0
-
-# A branch dispatch refuses a version whose tag already exists; Release makes the tag.
-refuses "tag v0.2.0 already exists" branch main "$moved" 0.2.0
-
-# A tag that is not main's head cannot be published: the pin would not land.
-git -C "$root/clone" commit -q --allow-empty -m "Ahead of the tag"
-git -C "$root/clone" push -q origin main
-refuses "tag v0.2.0 is not the head of main" tag v0.2.0 "$moved" 0.2.0
-
-# A tag run must be at the tagged commit, whatever the event reported.
-refuses "revision is not the commit of tag v0.2.0" tag v0.2.0 "$sha" 0.2.0
-
-refuses "unsupported ref type" other v0.2.0 "$moved" 0.2.0
+# A remote lookup failure is not evidence of an unused tag.
+mkdir "$root/bin"
+export RELEASE_TEST_REAL_GIT="$(command -v git)"
+cat >"$root/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" = ls-remote ] && [[ "$3" == refs/tags/* ]]; then exit 1; fi
+exec "$RELEASE_TEST_REAL_GIT" "$@"
+GIT
+chmod +x "$root/bin/git"
+PATH="$root/bin:$PATH" refuses "cannot query remote tags" branch release/0.2.0 "$moved" 0.2.0
 
 echo "test_release_source: ok"
