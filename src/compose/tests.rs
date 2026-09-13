@@ -20,6 +20,55 @@ fn saved(body: &str) -> Value {
     json!({"version":1,"active":true,"returnView":"reader","draft":{"body":body,"accountId":"one@example.org"}})
 }
 #[test]
+fn user_edit_history_survives_durable_recovery_including_an_emptied_draft() {
+    let temp = Temp::new();
+    let mut value = saved("");
+    value["draft"]["userModified"] = json!(true);
+    value["draft"]["sourceDraftId"] = json!("draft-emptied");
+    value["parked"] = json!([
+        {"body":"Untouched prefill", "userModified":false},
+        {"userModified":true, "replyToVisible":true},
+        {"subject":"Legacy recovery"}
+    ]);
+    let answer = call_at(
+        &temp.0,
+        "compose.recoverySave",
+        &json!({"record":value,"expectedRevision":revision(&[])}),
+    )
+    .unwrap();
+    assert_eq!(answer["record"]["active"], true);
+    assert_eq!(answer["record"]["draft"]["userModified"], true);
+    assert_eq!(answer["record"]["draft"]["sourceDraftId"], "draft-emptied");
+    assert_eq!(answer["record"]["parked"][0]["userModified"], false);
+    assert_eq!(answer["record"]["parked"][1]["userModified"], true);
+    assert!(answer["record"]["parked"][2].get("userModified").is_none());
+    assert_eq!(
+        call_at(&temp.0, "compose.recoveryRead", &json!({})).unwrap(),
+        answer
+    );
+}
+
+#[test]
+fn malformed_edit_history_never_writes_recovery() {
+    for invalid in [json!(null), json!("true"), json!(1), json!([]), json!({})] {
+        let temp = Temp::new();
+        let mut value = saved("Keep me");
+        value["draft"]["userModified"] = invalid;
+        assert_eq!(
+            call_at(
+                &temp.0,
+                "compose.recoverySave",
+                &json!({
+                    "record":value,"expectedRevision":revision(&[])
+                })
+            ),
+            Err("recovery_invalid_user_modified")
+        );
+        assert!(!temp.0.join("omamail").exists());
+    }
+}
+
+#[test]
 fn meaningful_body_history_and_parked_identity_survive() {
     assert!(
         !normalize(&saved("  ")).unwrap()["active"]

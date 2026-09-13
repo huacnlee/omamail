@@ -431,7 +431,7 @@ Item {
       app.back()
       tryCompare(app, "composing", false)
       compare(kinds(), "list", "Back from the reply leaves the message it opened")
-      compare(mailService.count("saveDraft"), 1, "a reply has an address, so Back saves it")
+      compare(mailService.count("saveDraft"), 0, "an untouched reply leaves without saving")
     }
 
     function test_the_shortcut_sheet_closes_before_the_page_under_it() {

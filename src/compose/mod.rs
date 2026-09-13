@@ -78,6 +78,11 @@ fn draft(value: &Value) -> Result<Value> {
     if value["deliveryUnknown"] == true {
         out["deliveryUnknown"] = json!(true);
     }
+    // Absence belongs to legacy snapshots: the UI then derives whether the
+    // draft was edited from its contents. Preserve explicit false separately.
+    if let Some(modified) = value.get("userModified") {
+        out["userModified"] = json!(modified.as_bool().ok_or("recovery_invalid_user_modified")?);
+    }
     let mode = text(&value["mode"]);
     out["mode"] = json!(if mode.is_empty() {
         "new".to_owned()
@@ -145,6 +150,9 @@ fn draft(value: &Value) -> Result<Value> {
     Ok(out)
 }
 fn meaningful(d: &Value) -> bool {
+    if d["userModified"] == true {
+        return true;
+    }
     for key in ["to", "cc", "bcc", "subject"] {
         if !text(&d[key]).trim().is_empty() {
             return true;

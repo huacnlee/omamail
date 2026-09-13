@@ -36,6 +36,7 @@ DropArea {
   readonly property int formLabelGap: Style.space(10)
 
   property bool opened: false
+  property bool userModified: false
   // Drafts parked for their send's undo window, oldest first, each beside
   // the name of the send it belongs to. The timer owns them while the
   // visible composer stays free for the next message.
@@ -107,7 +108,7 @@ DropArea {
     bodyEdit.insert(0, String(text || ""))
     bodyWasEdited = true
     bodyEdit.cursorPosition = bodyEdit.length
-    noteDraftChanged()
+    noteUserModified()
   }
 
   function insertAtCursor(text) {
@@ -116,7 +117,7 @@ DropArea {
     var at = Math.max(0, Math.min(bodyEdit.length, bodyEdit.cursorPosition))
     bodyEdit.insert(at, insert)
     bodyWasEdited = true
-    noteDraftChanged()
+    noteUserModified()
   }
   property string fromEmail: ""
   property var replyRecipients: []
@@ -137,6 +138,14 @@ DropArea {
   function noteDraftChanged() {
     if (opened) draftChanged()
   }
+
+  function noteUserModified() {
+    if (!opened) return
+    userModified = true
+    draftChanged()
+  }
+
+  function hasUserChanges() { return userModified }
 
   onAccountIdChanged: noteDraftChanged()
   onModeChanged: noteDraftChanged()
@@ -238,6 +247,7 @@ DropArea {
     attachJobs = []
     attaching = false
     pasteInFlight = false
+    userModified = false
     if (forgetAttachments) forgetOwned(owned)
   }
 
@@ -297,6 +307,7 @@ DropArea {
       body: bodyEdit.text,
       placedBody: placedBody,
       bodyWasEdited: bodyWasEdited,
+      userModified: userModified,
       accountId: accountId,
       sourceDraftId: sourceDraftId,
       mode: mode,
@@ -304,6 +315,7 @@ DropArea {
       inReplyTo: inReplyTo,
       ccVisible: ccVisible,
       bccVisible: bccVisible,
+      replyToVisible: replyToVisible,
       fromEmail: fromEmail,
       replyRecipients: replyRecipients.slice(),
       fromWasChosen: fromWasChosen,
@@ -342,6 +354,8 @@ DropArea {
     bodyEdit.text = String(saved.body || "")
     placedBody = String(saved.placedBody || "")
     bodyWasEdited = saved.bodyWasEdited === true
+    userModified = typeof saved.userModified === "boolean"
+      ? saved.userModified : hasMeaningfulDraft()
     opened = true
     rehydrateDraftAttachments()
   }
@@ -386,6 +400,7 @@ DropArea {
     var row = identity && typeof identity === "object" ? identity : ({ email: identity })
     fromEmail = String(row.email || "")
     fromWasChosen = true
+    noteUserModified()
     fromMenu.close()
     var accountId = String(row.accountId || "")
     if (accountId === "" || !root.service) return
@@ -460,18 +475,21 @@ DropArea {
 
   function acceptTo(contact) {
     toField.text = Recipients.accept(toField.text, contact)
+    noteUserModified()
     toSuggestions = []
     toField.forceActiveFocus()
   }
 
   function acceptCc(contact) {
     ccField.text = Recipients.accept(ccField.text, contact)
+    noteUserModified()
     ccSuggestions = []
     ccField.forceActiveFocus()
   }
 
   function acceptBcc(contact) {
     bccField.text = Recipients.accept(bccField.text, contact)
+    noteUserModified()
     bccSuggestions = []
     bccField.forceActiveFocus()
   }
@@ -568,6 +586,7 @@ DropArea {
 
     selectPreferredFrom()
     if (root.service) root.service.refreshRecipientContacts()
+    userModified = false
 
     // Focus is not placed here. Opening this changes the window's key context,
     // and the context is what moves the keyboard — one mechanism, so the two
@@ -610,6 +629,7 @@ DropArea {
       fromWasChosen = true
     }
     if (mode === "draft") loadDraftAttachments(messageId, attachments)
+    userModified = false
   }
 
   // Where the keyboard goes when composing becomes the context. A reply starts
@@ -627,7 +647,7 @@ DropArea {
     }
   }
 
-  // The Back control asks the window to save. Discard stays local and
+  // The Back control asks the window to resolve user changes. Discard stays local and
   // destructive. The window owns the save because it owns the provider.
   // Which way what is being written runs. Qt resolves an editable field from
   // the text already in it, so Auto needs nothing added; a direction the writer
@@ -898,6 +918,7 @@ DropArea {
       return
     }
     var job = root.attachJobs[0]
+    var owner = root.draftKey
     var rest = root.attachJobs.slice(1)
     root.attachJobs = rest
     root.attaching = true
@@ -912,11 +933,12 @@ DropArea {
         var code = error ? String(error.message || "") : ""
         finishAttach(job.mode, JSON.stringify(error ? { ok: false,
           error: code === "attachment_too_large" ? "That file is larger than the 20 MB send limit"
-            : "That file could not be read" } : result))
+            : "That file could not be read" } : result), owner)
       })
       return
     }
     attacher.jobMode = job.mode
+    attacher.draftKey = owner
     if (job.mode === "clipboard")
       attacher.command = [root.attachScript, "clipboard", root.composeDir]
     else if (job.mode === "pick")
@@ -930,10 +952,20 @@ DropArea {
 
   property bool attachmentReadPending: false
 
-  function finishAttach(mode, text) {
+  function finishAttach(mode, text, owner) {
     var result = null
     try { result = JSON.parse(String(text || "")) }
     catch (e) { result = null }
+
+    // Helpers outlive the form they started from. A late read/picker/paste
+    // must not put an old draft's file or clipboard text into the next one.
+    if (mode !== "forget" && owner !== undefined && owner !== root.draftKey) {
+      if (mode === "clipboard" && result && result.ok === true && result.path)
+        root.forgetOwned([{owned:true,path:result.path}])
+      root.attaching = root.attachJobs.length > 0
+      pumpAttach()
+      return
+    }
 
     if (mode === "clipboard") root.pasteInFlight = false
 
@@ -982,6 +1014,7 @@ DropArea {
     var next = root.draftAttachments.slice()
     next.push(entry)
     root.draftAttachments = next
+    if (mode === "read" || mode === "clipboard") noteUserModified()
     root.attaching = root.attachJobs.length > 0
     pumpAttach()
   }
@@ -992,6 +1025,7 @@ DropArea {
     var entry = list[at]
     list.splice(at, 1)
     root.draftAttachments = list
+    noteUserModified()
     if (entry && entry.owned && entry.path)
       enqueueAttach("forget", entry.path)
   }
@@ -1213,7 +1247,7 @@ DropArea {
           foreground: root.ccVisible ? root.textColor : root.dimColor
           bordered: false
           fontSize: Style.font.caption
-          onClicked: root.ccVisible = !root.ccVisible
+          onClicked: { root.ccVisible = !root.ccVisible; root.noteUserModified() }
         }
 
         Button {
@@ -1223,7 +1257,7 @@ DropArea {
           foreground: root.bccVisible ? root.textColor : root.dimColor
           bordered: false
           fontSize: Style.font.caption
-          onClicked: root.bccVisible = !root.bccVisible
+          onClicked: { root.bccVisible = !root.bccVisible; root.noteUserModified() }
         }
 
         Button {
@@ -1234,13 +1268,14 @@ DropArea {
           foreground: root.replyToVisible ? root.textColor : root.dimColor
           bordered: false
           fontSize: Style.font.caption
-          onClicked: root.replyToVisible = !root.replyToVisible
+          onClicked: { root.replyToVisible = !root.replyToVisible; root.noteUserModified() }
         }
       }
 
       TextField {
         id: toField
         objectName: "compose-to-field"
+        onTextEdited: root.noteUserModified()
         anchors.left: toLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: copyToggles.left
@@ -1325,6 +1360,7 @@ DropArea {
       TextField {
         id: ccField
         objectName: "compose-cc-field"
+        onTextEdited: root.noteUserModified()
         anchors.left: ccLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -1403,6 +1439,7 @@ DropArea {
       TextField {
         id: bccField
         objectName: "compose-bcc-field"
+        onTextEdited: root.noteUserModified()
         anchors.left: bccLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -1481,6 +1518,7 @@ DropArea {
       TextField {
         id: replyToField
         objectName: "compose-reply-to-field"
+        onTextEdited: root.noteUserModified()
         anchors.left: replyToLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -1524,6 +1562,7 @@ DropArea {
       TextField {
         id: subjectField
         objectName: "compose-subject-field"
+        onTextEdited: root.noteUserModified()
         anchors.left: subjectLabel.right
         anchors.leftMargin: root.formLabelGap
         anchors.right: parent.right
@@ -1730,6 +1769,7 @@ DropArea {
     popupBorderColor: root.popupBorderColor
     panelFontFamily: root.panelFontFamily
     onContactChosen: function(contact, target) {
+      root.noteUserModified()
       if (target === "cc") {
         root.ccVisible = true
         ccField.text = Recipients.append(ccField.text, contact)
@@ -1787,7 +1827,7 @@ DropArea {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       onTextChanged: root.noteDraftChanged()
-      onTextEdited: root.bodyWasEdited = true
+      onTextEdited: { root.bodyWasEdited = true; root.noteUserModified() }
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }
@@ -1946,6 +1986,7 @@ DropArea {
       }
 
       Button {
+        objectName: "compose-discard-button"
         text: "Discard"
         foreground: root.dimColor
         bordered: false
@@ -1959,11 +2000,12 @@ DropArea {
   Process {
     id: attacher
     property string jobMode: ""
+    property string draftKey: ""
     stdinEnabled: false
     stdout: StdioCollector { id: attachOut; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      root.finishAttach(jobMode, String(attachOut.text || ""))
+      root.finishAttach(jobMode, String(attachOut.text || ""), draftKey)
     }
   }
 

@@ -353,7 +353,7 @@ Item {
   function back() {
     var leaving = Nav.top(nav)
     pendingComposeReturnTo = -1
-    if (leaving.kind === "compose") return saveAndLeaveCompose()
+    if (leaving.kind === "compose") return requestLeaveCompose()
     if (leaving.kind === "eventComposer") return eventComposer.close()
     if (leaving.kind === "calendarDetail") return calendarView.closeDetail()
     if (leaving.kind === "reader") {
@@ -704,8 +704,19 @@ Item {
     dropOverlay("compose")
   }
 
-  function saveAndLeaveCompose() {
-    if (!service || !compose.hasMeaningfulDraft()) {
+  function requestLeaveCompose() {
+    if (!compose.opened) return
+    if (!compose.hasUserChanges()) {
+      compose.finish()
+      return
+    }
+    composeExitDialog.open()
+  }
+
+  function saveAndLeaveCompose(force) {
+    if (!compose.opened) return
+    if (!service) return
+    if (force !== true && !compose.hasMeaningfulDraft()) {
       compose.finish()
       return
     }
@@ -1505,6 +1516,7 @@ Item {
         return false
       }
       function applyContextFocus() {
+        if (composeExitDialog.opened) return
         if (keyContext === "assistant" || keyContext === "assistantCommands") {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
@@ -2088,7 +2100,7 @@ Item {
           onClosed: {
             if (!root.composeDetachingForSave) root.clearComposeRecovery()
           }
-          onCloseRequested: root.saveAndLeaveCompose()
+          onCloseRequested: root.requestLeaveCompose()
           onSendQueued: {
             root.saveComposeRecovery(compose.pendingDraft)
             root.backToList()
@@ -2842,6 +2854,19 @@ Item {
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }
+      }
+
+      ComposeExitDialog {
+        id: composeExitDialog
+        objectName: "compose-exit-dialog"
+        textColor: root.foreground
+        dimColor: root.dim
+        dangerColor: root.urgent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onSaveRequested: root.saveAndLeaveCompose(true)
+        onDiscardRequested: compose.finish()
       }
 
       AccountRemovalDialog {
