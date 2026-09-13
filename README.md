@@ -10,6 +10,12 @@ Requires **Omarchy 4**.
 omarchy plugin add https://github.com/huacnlee/omamail.git --enable
 ```
 
+Update to new version:
+
+```bash
+omarchy plugin update omamail
+```
+
 Click the envelope in the bar, install the backend when prompted, and add your mailbox. Prebuilt backends are available for Linux x86_64 and aarch64.
 
 <img width="800" alt="Omamail — reading mail with AI assistance" src="docs/images/full-mail.webp" />
