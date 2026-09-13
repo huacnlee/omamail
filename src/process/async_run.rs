@@ -137,16 +137,19 @@ mod tests {
         let task = tokio::spawn(async move {
             run("python3", &["-c".into(), "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(30)".into(), path], b"", Duration::from_secs(30), 1024).await
         });
+        // The file exists from open() and holds the pid only after write(),
+        // so an empty read is the child mid-way, not a failure.
+        let mut pid = None;
         for _ in 0..100 {
-            if marker.exists() {
+            pid = std::fs::read_to_string(&marker)
+                .ok()
+                .and_then(|text| text.parse::<i32>().ok());
+            if pid.is_some() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let pid = std::fs::read_to_string(&marker)
-            .unwrap()
-            .parse::<i32>()
-            .unwrap();
+        let pid = pid.expect("child wrote its pid");
         task.abort();
         let _ = task.await;
         for _ in 0..100 {
