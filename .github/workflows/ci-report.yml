@@ -52,7 +52,7 @@ jobs:
           if [ -z "$pr" ]; then
             # No gate left a note: find the PR by head, and only update a
             # comment this workflow wrote before — never open a new one for a pass.
-            pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$HEAD_BRANCH" --json number,headRepository,headRefOid \
+            pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "${HEAD_REPO%%/*}:$HEAD_BRANCH" --json number,headRefOid \
               --jq "[.[] | select(.headRefOid == \"$HEAD_SHA\")][0].number // empty")"
             [ -n "$pr" ] || { echo 'No open PR for this run'; exit 0; }
           fi
