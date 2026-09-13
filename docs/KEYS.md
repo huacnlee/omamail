@@ -307,6 +307,8 @@ different row under the still pointer, and the cursor snapped back to it — so
 `j` and `k` stuck on whichever rows the mouse was resting near.
 `ui/tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
 
+A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `ui/components/MouseBack.qml` reports the press and `ui/App.qml` decides what it means, the same way `KeyRouter` does for keys.
+
 ## Adding a key
 
 1. Add a row to `BINDINGS` in `ui/keys/Keymap.js`. Name the contexts it means

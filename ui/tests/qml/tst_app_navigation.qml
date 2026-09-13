@@ -659,6 +659,85 @@ Item {
       compare(fakeShell.hidden.length, 1)
     }
 
+    // The mouse's back button carries the same intent Escape carries, and the
+    // reader is where it is reached for most: below `compact` the list is not
+    // beside the message but replaced by it.
+    function test_the_mouse_back_button_leaves_the_message() {
+      var area = named(app, "mouse-back")
+      verify(area, "the window carries a back-button area")
+
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(kinds(), "list", "the mouse's back button leaves the message")
+      compare(fakeShell.hidden.length, 0, "and does not close the window doing it")
+    }
+
+    // A button under the hand has no affordance saying the next press shuts
+    // the mailbox, so the one branch of `back()` that ends the window is the
+    // one it must not reach. Escape, which somebody pressed on purpose, still
+    // does — `test_the_calendar_is_the_other_root_and_back_on_a_root_closes`
+    // is that half.
+    function test_the_mouse_back_button_does_not_close_the_window() {
+      var area = named(app, "mouse-back")
+      verify(area, "the window carries a back-button area")
+      compare(kinds(), "list", "the root is where this starts")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(kinds(), "list", "the root is not popped")
+      compare(fakeShell.hidden.length, 0, "and the window is not closed")
+    }
+
+    // It is `goBack()` and not `back()`: with rows ticked, the nearer thing to
+    // leave is the selection. Routed to `back()` this press would pop the
+    // history out from under a selection nobody had dropped — and on the root,
+    // close the window instead.
+    function test_the_mouse_back_button_drops_a_selection_before_the_page() {
+      var area = named(app, "mouse-back")
+      app.checkedIds = ["message-1"]
+      verify(app.selectionActive, "the selection is live")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(app.checkedIds.length, 0, "the selection is what the press left")
+      compare(kinds(), "list", "and the page stayed")
+      compare(fakeShell.hidden.length, 0, "and the window stayed")
+    }
+
+    // Qt's overlay dismisses a non-modal popup on a press outside it and then
+    // delivers that same press to what lies beneath. Acted on twice, one press
+    // would close the menu and take the page under it back together, which is
+    // a gesture spent twice and the only place in the app where that happens.
+    function test_the_mouse_back_button_only_closes_an_open_menu() {
+      var area = named(app, "mouse-back")
+      var menu = named(app, "app-menu")
+      verify(menu, "the window carries the app menu")
+
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      menu.openAt(20, 20)
+      tryCompare(menu, "opened", true)
+
+      mouseClick(area, 300, 300, Qt.BackButton)
+      tryCompare(menu, "opened", false)
+      compare(kinds(), "list,reader", "the press closed the menu and nothing else")
+    }
+
+    // Only the back button. The area lies under the whole window, so a left
+    // click that reached it would be a click taken from whatever the pointer
+    // was actually on.
+    function test_the_mouse_back_area_takes_no_other_button() {
+      var area = named(app, "mouse-back")
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      mouseClick(area, 40, 40, Qt.LeftButton)
+      compare(kinds(), "list,reader", "a left click is not a step back")
+      mouseClick(area, 40, 40, Qt.MiddleButton)
+      compare(kinds(), "list,reader", "and neither is a middle click")
+    }
+
     function test_first_run_stacks_follow_what_the_service_knows() {
       mailService.anyAccountReady = false
       mailService.hasSavedAccounts = false

@@ -1455,6 +1455,13 @@ Item {
       anchors.fill: parent
       focus: true
 
+      MouseBack {
+        canGoBack: Nav.depth(root.nav) > 1 || root.assistantOpen
+          || root.selectionActive || searchBar.fieldFocused
+          || (!!root.service && root.service.searchQuery !== "")
+        onActivated: root.goBack()
+      }
+
       // Where the window is, and the only thing that says what a key means.
       // A page is a form before it is anything else, a draft beats reading, a
       // query being typed beats the list underneath it.
