@@ -235,6 +235,7 @@ Item {
       mailService.lastAgentPrompt = ""
       mailService.sending = false
       mailService.lastSavedDraft = null
+      mailService.activeAccountId = "me@example.com"
       mailService.failDraftSave = false
       mailService.deferDraftSave = false
       mailService.draftSaveCallbacks = []
@@ -779,6 +780,75 @@ Item {
         compare(compose.opened,true)
         compare(compose.snapshotDraft(),before)
       } finally { app.service = mailService }
+    }
+
+    function test_exit_choice_cannot_act_on_a_restored_send_data() {
+      return [{tag:"save"},{tag:"discard"},{tag:"cancel"},
+        {tag:"saveRequested"},{tag:"discardRequested"}]
+    }
+    function test_exit_choice_cannot_act_on_a_restored_send(data) {
+      app.open("{}")
+      app.startCompose("new")
+      var compose = composeView()
+      named(compose,"compose-to-field").text = "first@example.com"
+      named(compose,"compose-subject-field").text = "Queued A"
+      wait(0)
+      editField(compose,"compose-body-editor")
+      var first = compose.snapshotDraft()
+      compose.submit()
+
+      app.startCompose("new")
+      named(compose,"compose-subject-field").text = "Edited B"
+      wait(0)
+      editField(compose,"compose-body-editor")
+      var second = compose.snapshotDraft()
+      app.goBack()
+      var dialog = named(app,"compose-exit-dialog")
+      compare(dialog.opened,true)
+      mailService.deferDraftSave = true
+      mailService.replyFailed()
+      compare(compose.snapshotDraft(),first,"the failed send restores A")
+      compare(dialog.opened,false,"restoring A immediately invalidates B's choice")
+      compare(compose.interruptedDraft,second,"B remains held until its save succeeds")
+      compare(mailService.draftSaveCallbacks.length,1)
+      compare(mailService.lastSavedDraft.subject,"Edited B")
+
+      dialog[data.tag](second.draftKey)
+      compare(compose.snapshotDraft(),first,"B's old dialog cannot discard or save A")
+      compare(compose.opened,true)
+      compare(dialog.opened,false,"replacement invalidates the open choice")
+      compare(mailService.draftSaveCallbacks.length,1,"only displaced B is saved")
+      mailService.finishDraftSave(0,"server refused it")
+      compare(compose.interruptedDraft,second)
+      compose.finish()
+      compare(compose.snapshotDraft(),second,"B stays reachable through the existing recovery path")
+    }
+
+    function test_exit_choice_is_invalidated_by_compose_lifecycle_data() {
+      return [{tag:"begin"},{tag:"beginDraft"},{tag:"clear"},{tag:"account"},{tag:"window"}]
+    }
+    function test_exit_choice_is_invalidated_by_compose_lifecycle(data) {
+      app.open("{}")
+      app.startCompose("new")
+      var compose = composeView()
+      wait(0)
+      editField(compose,"compose-body-editor")
+      app.goBack()
+      var dialog = named(app,"compose-exit-dialog")
+      compare(dialog.opened,true)
+      if (data.tag === "begin") app.startCompose("new")
+      else if (data.tag === "beginDraft") compose.beginDraft({subject:"Replacement",body:"Preserve this"})
+      else if (data.tag === "clear") compose.clearCurrentDraft(true)
+      else if (data.tag === "window") app.close()
+      else mailService.activeAccountId = "other@example.com"
+      compare(dialog.opened,false)
+      var current = compose.snapshotDraft()
+      dialog.discard()
+      dialog.save()
+      dialog.cancel()
+      compare(compose.opened,true)
+      compare(compose.snapshotDraft(),current)
+      compare(mailService.lastSavedDraft,null)
     }
 
     function test_emptied_provider_draft_can_be_explicitly_saved() {

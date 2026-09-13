@@ -479,6 +479,7 @@ Item {
 
   function close() {
     closingFromHost = true
+    composeExitDialog.close()
     // Escape at the list root closes the window without clearing what the
     // cursor had previewed, so it reopened showing a stale message beside the
     // list. A preview is not a place the window was left in.
@@ -1135,6 +1136,7 @@ Item {
       // The agent popup is about one account's message too.
       agentPrompt.close()
       composeAgent.close()
+      composeExitDialog.close()
     }
     function onSidebarWidthChanged() { root.sidebarWidth = root.service.sidebarWidth }
     function onListWidthChanged() { root.listWidth = root.service.listWidth }
@@ -2859,14 +2861,19 @@ Item {
       ComposeExitDialog {
         id: composeExitDialog
         objectName: "compose-exit-dialog"
+        currentDraftKey: compose.opened ? compose.draftKey : ""
         textColor: root.foreground
         dimColor: root.dim
         dangerColor: root.urgent
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
-        onSaveRequested: root.saveAndLeaveCompose(true)
-        onDiscardRequested: compose.finish()
+        onSaveRequested: function(draftKey) {
+          if (compose.opened && compose.draftKey === draftKey) root.saveAndLeaveCompose(true)
+        }
+        onDiscardRequested: function(draftKey) {
+          if (compose.opened && compose.draftKey === draftKey) compose.finish()
+        }
       }
 
       AccountRemovalDialog {

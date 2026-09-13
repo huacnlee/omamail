@@ -11,26 +11,45 @@ Item {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  required property string currentDraftKey
   readonly property bool opened: dialog.opened
+  property string requestedDraftKey: ""
 
-  signal saveRequested()
-  signal discardRequested()
+  signal saveRequested(string draftKey)
+  signal discardRequested(string draftKey)
+
+  // A failed send can replace the composer while this modal owns the focus.
+  // Its choice belongs to the draft that opened it, not the next visible one.
+  onCurrentDraftKeyChanged: {
+    if (requestedDraftKey !== "" && requestedDraftKey !== currentDraftKey) close()
+  }
 
   anchors.fill: parent
   z: 80
 
-  function open() { dialog.open() }
-  function close() { dialog.close() }
-  function cancel() { dialog.close() }
-  function discard() {
-    if (!dialog.opened) return
+  function open() {
+    if (currentDraftKey === "") return
+    requestedDraftKey = currentDraftKey
+    dialog.open()
+  }
+  function close() {
+    requestedDraftKey = ""
     dialog.close()
-    discardRequested()
+  }
+  function cancel() { close() }
+  function takeDraftKey() {
+    var key = dialog.opened && requestedDraftKey === currentDraftKey
+      ? requestedDraftKey : ""
+    close()
+    return key
+  }
+  function discard() {
+    var key = takeDraftKey()
+    if (key !== "") discardRequested(key)
   }
   function save() {
-    if (!dialog.opened) return
-    dialog.close()
-    saveRequested()
+    var key = takeDraftKey()
+    if (key !== "") saveRequested(key)
   }
 
   QQC.Popup {
@@ -42,6 +61,7 @@ Item {
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape
     onOpened: saveButton.forceActiveFocus()
+    onClosed: root.requestedDraftKey = ""
     background: Rectangle {
       radius: Style.cornerRadius
       color: root.popupBackgroundColor
