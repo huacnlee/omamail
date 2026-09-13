@@ -1,5 +1,5 @@
 mod content;
-mod mail;
+pub(crate) mod mail;
 mod reader;
 mod methods;
 pub mod protocol;

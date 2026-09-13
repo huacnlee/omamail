@@ -1,5 +1,4 @@
-//! Read-only normalization for mail actions. Execution deliberately lives in a
-//! later layer so an API or CLI preview cannot mutate a mailbox by accident.
+//! Normalize once, then preview or consume that exact plan for execution.
 use super::types::opaque_id;
 use super::{Account, ActRequest};
 use serde_json::{Value, json};
@@ -15,6 +14,8 @@ pub(crate) struct ActionPlan {
     pub target_ids: Vec<String>,
     pub add_label_ids: Vec<String>,
     pub remove_label_ids: Vec<String>,
+    /// Opaque provider facts reviewed by the planner, such as destination IDs.
+    pub provider_context: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +45,15 @@ pub(crate) trait ActionLookup: Send + Sync {
         availability: &'a ActionAvailability,
         operation: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>>;
+}
+
+/// Returns only confirmed successful IDs. Unknown outcomes are failures for
+/// reporting purposes; they must never trigger an automatic retry.
+pub(crate) trait ActionMutation: Send + Sync {
+    fn execute<'a>(
+        &'a self,
+        plan: &'a ActionPlan,
+    ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>>;
 }
 
 pub(crate) fn domain_action(operation: &str) -> Result<&'static str, &'static str> {
@@ -111,9 +121,6 @@ pub(crate) async fn plan_action(
     request: &ActRequest,
     lookup: &impl ActionLookup,
 ) -> Result<ActionPlan, &'static str> {
-    if request.execute {
-        return Err("mail_action_execute_unsupported");
-    }
     let unique_requested = requested_ids(&request.ids)?;
     let action = domain_action(&request.operation)?;
     let availability = lookup.availability(&request.account).await?;
@@ -160,6 +167,7 @@ pub(crate) async fn plan_action(
         target_ids,
         add_label_ids,
         remove_label_ids,
+        provider_context: availability.rows_context,
     })
 }
 
@@ -174,10 +182,37 @@ pub(crate) fn dry_run_result(plan: &ActionPlan) -> Value {
     })
 }
 
+#[cfg(test)]
 pub(crate) async fn dry_run(
     request: &ActRequest,
     lookup: &impl ActionLookup,
 ) -> Result<Value, &'static str> {
     let plan = plan_action(request, lookup).await?;
     Ok(dry_run_result(&plan))
+}
+
+pub(crate) async fn execute_action(plan: ActionPlan, mutation: &impl ActionMutation) -> Value {
+    let confirmed = mutation.execute(&plan).await;
+    let (succeeded, failed): (Vec<_>, Vec<_>) = plan
+        .target_ids
+        .iter()
+        .partition(|id| confirmed.contains(id));
+    json!({
+        "dryRun":false,"executed":true,"operation":plan.operation,"accountId":plan.account.id,
+        "requestedIds":plan.requested_ids,"targetIds":plan.target_ids,
+        "succeededIds":succeeded,"failedIds":failed,
+    })
+}
+
+pub(crate) async fn act(
+    request: &ActRequest,
+    lookup: &impl ActionLookup,
+    mutation: &impl ActionMutation,
+) -> Result<Value, &'static str> {
+    let plan = plan_action(request, lookup).await?;
+    if request.execute {
+        Ok(execute_action(plan, mutation).await)
+    } else {
+        Ok(dry_run_result(&plan))
+    }
 }

@@ -6,6 +6,109 @@ use std::{
 };
 
 #[test]
+fn mail_actions_use_bound_official_cli_batches_and_never_retry_refusals() {
+    let temp = Command::new("mktemp").arg("-d").output().unwrap();
+    let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
+    fs::create_dir_all(dir.join("omamail")).unwrap();
+    fs::write(dir.join("omamail/accounts.json"),br#"{"version":1,"activeId":"hey:a@example.org","accounts":[{"provider":"hey","email":"a@example.org"}]}"#).unwrap();
+    fs::set_permissions(dir.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        dir.join("omamail/accounts.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let executable = dir.join("hey");
+    fs::write(
+        &executable,
+        br#"#!/bin/sh
+printf '%s\n' "$*" >> "$HEY_CALLS"
+if [ "$*" = 'accounts list --json' ]; then
+  printf '%s\n' '{"ok":true,"data":[{"id":1,"email":"a@example.org"}]}'
+  exit 0
+fi
+[ "$#" = 4 ] && [ "$2" = 1 ] && [ "$3" = 2 ] && [ "$4" = --json ] || exit 8
+if [ "$1" = trash ]; then
+  printf '%s\n' '{"ok":false,"error":"synthetic-secret"}'
+else
+  printf '%s\n' '{"ok":true}'
+fi
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let invoke = |operation: &str, execute: bool, ids: serde_json::Value| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+            .args(["call", "mail.act", "--json"])
+            .env("XDG_CONFIG_HOME", &dir)
+            .env("HOME", &dir)
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("XDG_STATE_HOME", dir.join("state"))
+            .env("PATH", &dir)
+            .env("HEY_CALLS", dir.join("calls"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        write!(
+            child.stdin.take().unwrap(),
+            "{}",
+            serde_json::json!({"operation":operation,"ids":ids,"execute":execute})
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-secret"));
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    for operation in ["read", "unread", "trash", "spam"] {
+        assert_eq!(
+            invoke(operation, false, serde_json::json!(["1:9", "2:9"]))["result"]["executed"],
+            false
+        );
+    }
+    for operation in ["archive", "star", "unstar"] {
+        assert_eq!(
+            invoke(operation, true, serde_json::json!(["1:9", "2:9"]))["error"]["code"],
+            "mail_action_unavailable"
+        );
+    }
+    for id in ["bad\r", "bad\n", "bad\r\n", "bad\0"] {
+        assert_eq!(
+            invoke("read", true, serde_json::json!(["1:9", id]))["error"]["code"],
+            "invalid_params"
+        );
+    }
+    assert!(!dir.join("calls").exists());
+    assert!(!dir.join("cache").exists());
+    assert!(!dir.join("state").exists());
+    for (operation, verb) in [
+        ("read", "seen"),
+        ("unread", "unseen"),
+        ("spam", "spam"),
+        ("trash", "trash"),
+    ] {
+        let result = invoke(operation, true, serde_json::json!(["1:9", "2:9", "1:9"]));
+        let ids = serde_json::json!(["1:9", "2:9"]);
+        assert_eq!(result["result"]["targetIds"], ids);
+        assert_eq!(
+            result["result"][if operation == "trash" {
+                "failedIds"
+            } else {
+                "succeededIds"
+            }],
+            ids
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("calls")).unwrap(),
+            format!("accounts list --json\n{verb} 1 2 --json\n")
+        );
+        fs::remove_file(dir.join("calls")).unwrap();
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn hey_send_keeps_body_on_stdin_and_checks_identity_before_sending() {
     let temp = Command::new("mktemp").arg("-d").output().unwrap();
     assert!(temp.status.success());

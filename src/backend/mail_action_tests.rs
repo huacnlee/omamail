@@ -65,6 +65,9 @@ impl Peer {
         if learns_junk {
             document["capabilities"]["urn:stalwart:jmap"] = json!({});
         }
+        if scenario == "action-unknown" {
+            document["capabilities"]["urn:ietf:params:jmap:core"]["maxObjectsInSet"] = json!(1);
+        }
         // Deliberately stale: production availability must read the live peer.
         let boxes = vec![
             json!({"id":"I","role":"inbox"}),
@@ -129,6 +132,227 @@ fn readonly_requests(report: &Value) -> bool {
 }
 
 #[tokio::test]
+async fn production_jmap_executes_all_planned_ids_and_reports_individual_failures() {
+    if isolated() {
+        return;
+    }
+    let _fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
+        "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
+    for operation in [
+        "read", "unread", "star", "unstar", "archive", "trash", "spam",
+    ] {
+        let (peer, session) = Peer::start("matrix", true).await;
+        let params = json!({"operation":operation,"ids":["e1"]});
+        let preview = session.dispatch("mail.act", &params).await.unwrap();
+        let mut params = params;
+        params["execute"] = json!(true);
+        let result = session.dispatch("mail.act", &params).await.unwrap();
+        assert_eq!(result["succeededIds"], preview["targetIds"], "{operation}");
+        assert_eq!(result["failedIds"], json!([]));
+        let report = peer.report().await;
+        let writes: Vec<_> = report
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["calls"].as_array().unwrap())
+            .filter(|c| c[0] == "Email/set")
+            .collect();
+        assert_eq!(writes.len(), 1, "{operation}");
+        let mut actual: Vec<_> = writes[0][1]["update"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        actual.sort();
+        let mut expected: Vec<_> = preview["targetIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+    let (peer, session) = Peer::start("partial-action", true).await;
+    let result = session
+        .dispatch(
+            "mail.act",
+            &json!({"operation":"read","ids":["e1"],"execute":true}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["targetIds"], json!(["e1", "e2"]));
+    assert_eq!(result["succeededIds"], json!(["e1"]));
+    assert_eq!(result["failedIds"], json!(["e2"]));
+    let report = peer.report().await;
+    assert_eq!(
+        report
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["calls"].as_array().unwrap())
+            .filter(|c| c[0] == "Email/set")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn native_jmap_execution_preserves_exact_id_bytes_and_ignores_cached_memberships() {
+    let (peer, session) = Peer::start("matrix", true).await;
+    // Populate the desktop's cache with e2 in Sent. An already reviewed plan
+    // remains authoritative if that cached membership would now exclude e2.
+    session
+        .jmap
+        .call(
+            "jmap.messages",
+            &json!({"accountId":ACCOUNT,"ids":["e1","e2"]}),
+        )
+        .await
+        .unwrap();
+    let opaque = format!(" quote\"slash\\世界{} ", "x".repeat(1100));
+    let result = session
+        .jmap
+        .execute_planned_action(
+            "jmap.batchModify",
+            &json!({"accountId":ACCOUNT,
+        "ids":["e2",opaque],"addLabelIds":[],"removeLabelIds":["INBOX"]}),
+            &json!({"archive":"A","inbox":"I"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["succeededIds"], json!(["e2", opaque]));
+    assert_eq!(result["failedIds"], json!([]));
+    let report = peer.report().await;
+    let writes: Vec<_> = report
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["calls"].as_array().unwrap())
+        .filter(|c| c[0] == "Email/set")
+        .collect();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0][1]["update"],
+        json!({"e2":{"mailboxIds/A":true,"mailboxIds/I":null},opaque:{"mailboxIds/A":true,"mailboxIds/I":null}})
+    );
+}
+
+#[tokio::test]
+async fn execution_uses_the_fresh_destination_reviewed_during_planning() {
+    if isolated() {
+        return;
+    }
+    let _fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
+        "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
+    let (peer, session) = Peer::start("roles", true).await;
+    let result = session
+        .dispatch(
+            "mail.act",
+            &json!({"operation":"archive","ids":["e1"],"execute":true}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["succeededIds"], json!(["e1"]));
+    let report = peer.report().await;
+    let writes: Vec<_> = report
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["calls"].as_array().unwrap())
+        .filter(|c| c[0] == "Email/set")
+        .collect();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0][1]["update"],
+        json!({"e1":{"mailboxIds/A":true,"mailboxIds/NEW":null}})
+    );
+}
+
+#[tokio::test]
+async fn jmap_unknown_delivery_stops_later_chunks_and_keeps_prior_acknowledgements() {
+    let (peer, session) = Peer::start("action-unknown", true).await;
+    let result = session
+        .jmap
+        .execute_planned_action(
+            "jmap.batchModify",
+            &json!({"accountId":ACCOUNT,
+        "ids":["e1","e2","e3"],"addLabelIds":[],"removeLabelIds":["UNREAD"]}),
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result,
+        json!({"succeededIds":["e1"],"failedIds":["e2","e3"]})
+    );
+    let report = peer.report().await;
+    let writes: Vec<_> = report
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["calls"].as_array().unwrap())
+        .filter(|c| c[0] == "Email/set")
+        .collect();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(
+        writes[0][1]["update"],
+        json!({"e1":{"keywords/$seen":true}})
+    );
+    assert_eq!(
+        writes[1][1]["update"],
+        json!({"e2":{"keywords/$seen":true}})
+    );
+}
+
+#[tokio::test]
+async fn mail_action_cache_invalidation_requires_confirmed_success() {
+    if isolated() {
+        return;
+    }
+    let fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
+        "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
+    for scenario in ["action-failed", "matrix"] {
+        crate::cache::call("cache.storePut",&json!({"accountId":ACCOUNT,"store":{"version":2,"account":"user@example.test",
+            "queries":{"page":{"at":1,"summaries":[{"id":"e1"}],"nextPageToken":"","estimate":1}}}})).unwrap();
+        crate::cache::call(
+            "cache.resourcePut",
+            &json!({"accountId":ACCOUNT,"id":"e1",
+            "resource":{"id":"e1","payload":{"headers":[],"body":{"data":"YQ"}}}}),
+        )
+        .unwrap();
+        let before = fixture_tree(&fixture.root);
+        let (_peer, session) = Peer::start(scenario, true).await;
+        let result = session
+            .dispatch(
+                "mail.act",
+                &json!({"operation":"star","ids":["e1"],"execute":true}),
+            )
+            .await
+            .unwrap();
+        if scenario == "action-failed" {
+            assert_eq!(result["failedIds"], json!(["e1"]));
+            assert_eq!(fixture_tree(&fixture.root), before);
+        } else {
+            assert_eq!(result["succeededIds"], json!(["e1"]));
+            assert_eq!(
+                crate::cache::call(
+                    "cache.resourceRead",
+                    &json!({"accountId":ACCOUNT,"id":"e1"})
+                )
+                .unwrap(),
+                Value::Null
+            );
+            assert_eq!(
+                crate::cache::call("cache.storeRead", &json!({"accountId":ACCOUNT})).unwrap()["queries"],
+                json!({})
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn production_jmap_star_ignores_oversized_conversations_but_unstar_does_not() {
     if isolated() {
         return;
@@ -172,8 +396,7 @@ async fn production_jmap_star_ignores_oversized_conversations_but_unstar_does_no
 }
 
 #[tokio::test]
-async fn production_jmap_dispatch_previews_all_actions_and_refuses_execution_without_local_writes()
-{
+async fn production_jmap_dispatch_previews_all_actions_without_local_writes() {
     if isolated() {
         return;
     }
@@ -201,15 +424,13 @@ async fn production_jmap_dispatch_previews_all_actions_and_refuses_execution_wit
     for operation in [
         "read", "unread", "star", "unstar", "archive", "trash", "spam",
     ] {
-        for execute in [None, Some(false), Some(true)] {
+        for execute in [None, Some(false)] {
             let mut params = json!({"operation":operation,"ids":["e1"]});
             if let Some(execute) = execute {
                 params["execute"] = json!(execute);
             }
             let result = session.dispatch("mail.act", &params).await;
-            if execute == Some(true) {
-                assert_eq!(result, Err("mail_action_execute_unsupported"));
-            } else {
+            {
                 let targets = if matches!(operation, "archive" | "spam" | "star") {
                     json!(["e1"])
                 } else {
@@ -247,7 +468,7 @@ async fn production_jmap_dispatch_previews_all_actions_and_refuses_execution_wit
         .collect();
     // Star reads only availability and representatives; the six conversation
     // actions also read threads and members.
-    // Invalid batches and execute=true must cause no extra provider request.
+    // Invalid batches must cause no extra provider request.
     assert_eq!(calls.len(), 6 * 2 * 4 + 2 * 2, "{report}");
     assert_eq!(fixture_tree(&fixture.root), before);
 }

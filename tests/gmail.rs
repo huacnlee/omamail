@@ -6,6 +6,69 @@ use std::{
 };
 
 #[test]
+fn mail_gmail_actions_default_to_preview_and_keep_credential_failures_explicit() {
+    let temp = Command::new("mktemp").arg("-d").output().unwrap();
+    let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
+    fs::create_dir(dir.join("omamail")).unwrap();
+    fs::write(dir.join("omamail/accounts.json"),br#"{"version":1,"activeId":"a@example.org","accounts":[{"provider":"gmail","email":"a@example.org"}]}"#).unwrap();
+    fs::set_permissions(dir.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        dir.join("omamail/accounts.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    // No client file is installed: execution must fail without reaching keyring.
+    fs::write(
+        dir.join("secret-tool"),
+        b"#!/bin/sh\nprintf touched > \"$HOME/keyring-touched\"\nexit 9\n",
+    )
+    .unwrap();
+    fs::set_permissions(dir.join("secret-tool"), fs::Permissions::from_mode(0o700)).unwrap();
+    for operation in [
+        "read", "unread", "star", "unstar", "archive", "trash", "spam",
+    ] {
+        for execute in [None, Some(false), Some(true)] {
+            let mut params = serde_json::json!({"operation":operation,"ids":["m1","m2","m1"]});
+            if let Some(execute) = execute {
+                params["execute"] = serde_json::json!(execute);
+            }
+            let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+                .args(["call", "mail.act", "--json"])
+                .env("XDG_CONFIG_HOME", &dir)
+                .env("HOME", &dir)
+                .env("XDG_CACHE_HOME", dir.join("cache"))
+                .env("XDG_STATE_HOME", dir.join("state"))
+                .env("PATH", &dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            write!(child.stdin.take().unwrap(), "{params}").unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.stderr.is_empty());
+            let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                reply["result"]["targetIds"],
+                serde_json::json!(["m1", "m2"])
+            );
+            assert_eq!(reply["result"]["executed"], execute == Some(true));
+            if execute == Some(true) {
+                assert_eq!(reply["result"]["succeededIds"], serde_json::json!([]));
+                assert_eq!(
+                    reply["result"]["failedIds"],
+                    serde_json::json!(["m1", "m2"])
+                );
+            }
+            assert!(!dir.join("keyring-touched").exists());
+            assert!(!dir.join("cache").exists());
+            assert!(!dir.join("state").exists());
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn malformed_gmail_requests_are_refused_before_credentials_or_network() {
     for (method, params) in [
         (

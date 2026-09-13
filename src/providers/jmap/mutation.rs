@@ -97,6 +97,106 @@ pub(super) fn applies_to_action(action: &str, roles: &Value, membership: Option<
     }
 }
 impl Session {
+    /// Internal mail executor: targets were already expanded and filtered by
+    /// the reviewed action plan. Never consult mutable membership caches here.
+    /// The desktop mutation entry point retains its established semantics.
+    pub(crate) async fn execute_planned_action(
+        &self,
+        method: &str,
+        params: &Value,
+        roles: &Value,
+    ) -> Result<Value, &'static str> {
+        if !matches!(method, "jmap.batchModify" | "jmap.trash") {
+            return Err("invalid_params");
+        }
+        let targets = super::mailbox::action_ids(&params["ids"])?;
+        let context = self.context(text(params, "accountId")?)?;
+        if context.rejected.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("jmap_unauthorized");
+        }
+        let snapshot = self.snapshot(text(params, "accountId")?, &context).await?;
+        let (added, removed) = if method == "jmap.trash" {
+            (json!(["TRASH"]), json!([]))
+        } else {
+            (
+                params["addLabelIds"].clone(),
+                params["removeLabelIds"].clone(),
+            )
+        };
+        if has(&added, "SPAM") && !learns_junk(&snapshot) {
+            return Err("jmap_spam_unavailable");
+        }
+        // All patches are validated before the first network mutation.
+        let change = patch(&added, &removed, roles, None)?;
+        if change.as_object().is_none_or(|change| change.is_empty()) {
+            return Err("invalid_params");
+        }
+        let mut succeeded = Vec::new();
+        for chunk in targets.chunks(snapshot.limit("maxObjectsInSet", 128)) {
+            let update: Map<String, Value> = chunk
+                .iter()
+                .map(|id| (id.clone(), change.clone()))
+                .collect();
+            let result = async {
+                let reply = self
+                    .api(
+                        &context,
+                        &snapshot,
+                        json!([["Email/set",{"accountId":snapshot.account,"update":update},"0"]]),
+                        false,
+                    )
+                    .await?;
+                let result = argument(&reply, "0", "Email/set")?;
+                let updated = match &result["updated"] {
+                    Value::Null => None,
+                    Value::Object(map) => Some(map),
+                    _ => return Err("jmap_invalid_response"),
+                };
+                let failed = match &result["notUpdated"] {
+                    Value::Null => None,
+                    Value::Object(map) => Some(map),
+                    _ => return Err("jmap_invalid_response"),
+                };
+                let mut seen = std::collections::HashSet::new();
+                for id in updated.into_iter().chain(failed).flat_map(|m| m.keys()) {
+                    if !chunk.contains(id) || !seen.insert(id) {
+                        return Err("jmap_invalid_response");
+                    }
+                }
+                if seen.len() != chunk.len() {
+                    return Err("jmap_invalid_response");
+                }
+                Ok::<_, &'static str>(
+                    chunk
+                        .iter()
+                        .filter(|id| updated.is_some_and(|m| m.contains_key(*id)))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            }
+            .await;
+            match result {
+                Ok(ids) => succeeded.extend(ids),
+                // Unknown delivery: retain earlier acknowledgements, stop, and
+                // report this chunk and every unsent target as failed.
+                Err(_) => break,
+            }
+        }
+        if !succeeded.is_empty() {
+            if let Ok(mut summaries) = context.summaries.lock() {
+                summaries.clear();
+            }
+            if let Ok(mut blocks) = context.blocks.lock() {
+                blocks.clear();
+            }
+        }
+        let failed: Vec<_> = targets
+            .iter()
+            .filter(|id| !succeeded.contains(id))
+            .collect();
+        Ok(json!({"succeededIds":succeeded,"failedIds":failed}))
+    }
+
     pub(super) async fn mutation(
         &self,
         context: &Context,

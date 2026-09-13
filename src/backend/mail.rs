@@ -15,6 +15,145 @@ struct ProviderRead<'a> {
     session: &'a Session,
 }
 
+pub(crate) trait MutationAdapter: Send + Sync {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+        context: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>>;
+}
+
+struct ProviderMutation<'a> {
+    session: &'a Session,
+}
+
+impl MutationAdapter for ProviderMutation<'_> {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        mut params: Value,
+        context: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            if method.starts_with("gmail.") {
+                self.session.gmail.call(method, &params).await
+            } else if method.starts_with("jmap.") {
+                self.session
+                    .jmap
+                    .execute_planned_action(method, &params, context)
+                    .await
+            } else if method == "hey.act" {
+                params["program"] = json!(crate::providers::hey_access::program()?);
+                let checked = crate::providers::hey_access::checked_params(&params).await?;
+                crate::providers::hey_actions::call(method, &checked).await
+            } else {
+                imap_call(method, &params).await
+            }
+        })
+    }
+}
+
+/// Provider results are acknowledgements, never diagnostics to forward. A
+/// partial response must name every requested ID exactly once; malformed or
+/// contradictory acknowledgements cannot confirm any member of that call.
+fn confirmed_ids(reply: Result<Value, &'static str>, ids: &[String]) -> Vec<String> {
+    let Ok(reply) = reply else {
+        return Vec::new();
+    };
+    if reply.get("succeededIds").is_none() && reply.get("failedIds").is_none() {
+        return ids.to_vec();
+    }
+    let (Some(succeeded), Some(failed)) = (
+        reply["succeededIds"].as_array(),
+        reply["failedIds"].as_array(),
+    ) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    for id in succeeded.iter().chain(failed) {
+        let Some(id) = id.as_str() else {
+            return Vec::new();
+        };
+        if !ids.iter().any(|target| target == id) || !seen.insert(id) {
+            return Vec::new();
+        }
+    }
+    if seen.len() != ids.len() {
+        return Vec::new();
+    }
+    succeeded
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+pub(crate) async fn mutate_plan(
+    plan: &crate::mail::action::ActionPlan,
+    adapter: &impl MutationAdapter,
+) -> Vec<String> {
+    let mut succeeded = Vec::new();
+    // Gmail trash is a single-message primitive. Other operations preserve the
+    // provider's batch primitive, including HEY posting batches and IMAP UIDs.
+    let chunk_size = if plan.account.provider == Provider::Gmail && plan.operation == "trash" {
+        1
+    } else if matches!(plan.account.provider, Provider::Imap | Provider::Outlook) {
+        500
+    } else {
+        1000
+    };
+    for ids in plan.target_ids.chunks(chunk_size) {
+        let mut params = json!({"accountId":plan.account.id,"ids":ids});
+        let method = match plan.account.provider {
+            Provider::Hey => {
+                params["verb"] = json!(
+                    crate::mail::action::domain_action(&plan.operation).expect("planned operation")
+                );
+                "hey.act"
+            }
+            Provider::Gmail if plan.operation == "trash" => {
+                params = json!({"accountId":plan.account.id,"id":ids[0]});
+                "gmail.trash"
+            }
+            Provider::Jmap if plan.operation == "trash" => "jmap.trash",
+            Provider::Imap | Provider::Outlook if plan.operation == "trash" => "imap.trash",
+            provider => {
+                params["addLabelIds"] = json!(plan.add_label_ids);
+                params["removeLabelIds"] = json!(plan.remove_label_ids);
+                match provider {
+                    Provider::Gmail => "gmail.batchModify",
+                    Provider::Jmap => "jmap.batchModify",
+                    Provider::Imap | Provider::Outlook => "imap.modify",
+                    Provider::Hey => unreachable!(),
+                }
+            }
+        };
+        succeeded.extend(confirmed_ids(
+            adapter.call(method, params, &plan.provider_context).await,
+            ids,
+        ));
+    }
+    succeeded
+}
+
+impl crate::mail::action::ActionMutation for ProviderMutation<'_> {
+    fn execute<'a>(
+        &'a self,
+        plan: &'a crate::mail::action::ActionPlan,
+    ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let succeeded = mutate_plan(plan, self).await;
+            if !succeeded.is_empty() {
+                self.session
+                    .invalidate_action_caches(&plan.account.id)
+                    .await;
+            }
+            succeeded
+        })
+    }
+}
+
 /// The shared planner is provider-neutral. This adapter may make bounded,
 /// read-only provider calls to learn live destination availability and expand
 /// listings that collapse conversations, but never invokes a mutation method.
@@ -137,10 +276,46 @@ impl Session {
             }
             "mail.act" => {
                 let request = ActRequest::try_from(params)?;
-                crate::mail::action::dry_run(&request, &AccountActionLookup { session: self }).await
+                crate::mail::action::act(
+                    &request,
+                    &AccountActionLookup { session: self },
+                    &ProviderMutation { session: self },
+                )
+                .await
             }
             _ => Err("unknown_method"),
         }
+    }
+
+    async fn invalidate_action_caches(&self, account: &str) {
+        let params = json!({"accountId":account});
+        // Cache failures cannot erase confirmed delivery or invite a retry.
+        if let Ok(restored) = self.queries.call("cache.queryRestore", &params).await {
+            let _ = self
+                .queries
+                .call(
+                    "cache.queryInvalidate",
+                    &json!({"accountId":account,"generation":restored["generation"],"ids":[]}),
+                )
+                .await;
+            // The one-shot CLI can exit before the cache's debounce fires.
+            let _ = self
+                .queries
+                .call(
+                    "cache.queryFlush",
+                    &json!({"accountId":account,"generation":restored["generation"]}),
+                )
+                .await;
+        }
+        if let Ok(mut renders) = self.renders.lock() {
+            renders.invalidate(account, None);
+        }
+        let _ = tokio::task::spawn_blocking(move || {
+            for method in ["cache.resourceClear", "cache.bodyClear"] {
+                let _ = crate::cache::call(method, &params);
+            }
+        })
+        .await;
     }
 
     async fn provider_list(

@@ -329,17 +329,241 @@ async fn unsafe_or_oversized_ids_fail_before_any_lookup_or_mutation() {
 }
 
 #[tokio::test]
-async fn execute_is_refused_before_availability_or_provider_mutation() {
+async fn execution_consumes_the_same_plan_without_repeating_target_lookup() {
     let effects = Arc::new(Effects::default());
     let mut action = request(Provider::Gmail, "archive", &["message-1"]);
     action.execute = true;
-    let error = plan_action(
+    let plan = plan_action(
         &action,
         &lookup(Value::Null, &[row("message-1")], effects.clone()),
     )
     .await
-    .unwrap_err();
-    assert_eq!(error, "mail_action_execute_unsupported");
-    assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
-    assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
+    .unwrap();
+    let mutation = RecordingMutation::new(vec![Ok(json!({}))]);
+    let result = super::action::execute_action(plan, &mutation).await;
+    assert_eq!(result["succeededIds"], json!(["message-1"]));
+    assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 1);
+    assert_eq!(effects.lookup.load(Ordering::SeqCst), 1);
+}
+
+struct RecordingMutation {
+    calls: std::sync::Mutex<Vec<(String, Value)>>,
+    replies: std::sync::Mutex<std::collections::VecDeque<Result<Value, &'static str>>>,
+}
+
+impl RecordingMutation {
+    fn new(replies: Vec<Result<Value, &'static str>>) -> Self {
+        Self {
+            calls: Default::default(),
+            replies: std::sync::Mutex::new(replies.into()),
+        }
+    }
+}
+
+impl crate::backend::mail::MutationAdapter for RecordingMutation {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+        _context: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+        self.calls.lock().unwrap().push((method.into(), params));
+        Box::pin(async move {
+            self.replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected retry")
+        })
+    }
+}
+
+impl super::action::ActionMutation for RecordingMutation {
+    fn execute<'a>(
+        &'a self,
+        plan: &'a super::action::ActionPlan,
+    ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
+        Box::pin(crate::backend::mail::mutate_plan(plan, self))
+    }
+}
+
+#[tokio::test]
+async fn routes_all_supported_actions_using_exact_provider_arguments() {
+    for (provider, prefix, ids) in [
+        (Provider::Gmail, "gmail", vec!["m1", "m2"]),
+        (Provider::Hey, "hey", vec!["1:9", "2:9"]),
+        (Provider::Jmap, "jmap", vec!["e1", "e2"]),
+        (Provider::Imap, "imap", vec!["7:INBOX", "8:INBOX"]),
+        (Provider::Outlook, "imap", vec!["7:INBOX", "8:INBOX"]),
+    ] {
+        for (operation, verb, add, remove) in [
+            ("read", "markRead", json!([]), json!(["UNREAD"])),
+            ("unread", "markUnread", json!(["UNREAD"]), json!([])),
+            ("star", "star", json!(["STARRED"]), json!([])),
+            ("unstar", "unstar", json!([]), json!(["STARRED"])),
+            ("archive", "archive", json!([]), json!(["INBOX"])),
+            ("trash", "trash", json!(["TRASH"]), json!([])),
+            ("spam", "spam", json!(["SPAM"]), json!(["INBOX"])),
+        ] {
+            let mut request = request(provider, operation, &ids);
+            request.execute = true;
+            let rows: Vec<_> = ids.iter().map(|id| row(id)).collect();
+            let mutation = RecordingMutation::new(vec![Ok(json!({})); 2]);
+            let result = super::action::act(
+                &request,
+                &lookup(Value::Null, &rows, Default::default()),
+                &mutation,
+            )
+            .await;
+            let unsupported = (provider == Provider::Hey
+                && matches!(operation, "star" | "unstar" | "archive"))
+                || (matches!(provider, Provider::Imap | Provider::Outlook) && operation == "spam");
+            if unsupported {
+                assert_eq!(result, Err("mail_action_unavailable"));
+                assert!(mutation.calls.lock().unwrap().is_empty());
+                continue;
+            }
+            let result = result.unwrap();
+            assert_eq!(
+                result,
+                json!({"dryRun":false,"executed":true,"operation":operation,
+                "accountId":request.account.id,"requestedIds":ids,"targetIds":ids,"succeededIds":ids,"failedIds":[]})
+            );
+            let expected = if provider == Provider::Hey {
+                vec![(
+                    "hey.act".into(),
+                    json!({"accountId":request.account.id,"verb":verb,"ids":ids}),
+                )]
+            } else if provider == Provider::Gmail && operation == "trash" {
+                vec![
+                    (
+                        "gmail.trash".into(),
+                        json!({"accountId":request.account.id,"id":"m1"}),
+                    ),
+                    (
+                        "gmail.trash".into(),
+                        json!({"accountId":request.account.id,"id":"m2"}),
+                    ),
+                ]
+            } else {
+                let mut params = json!({"accountId":request.account.id,"ids":ids});
+                let method = if operation == "trash" {
+                    "trash"
+                } else {
+                    params["addLabelIds"] = add;
+                    params["removeLabelIds"] = remove;
+                    if prefix == "imap" {
+                        "modify"
+                    } else {
+                        "batchModify"
+                    }
+                };
+                vec![(format!("{prefix}.{method}"), params)]
+            };
+            assert_eq!(
+                *mutation.calls.lock().unwrap(),
+                expected,
+                "{provider:?} {operation}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn dry_run_and_planning_failures_never_reach_mutations() {
+    for (execute, refusals, ids) in [
+        (false, Value::Null, vec!["m1"]),
+        (true, json!({"archive":"disabled"}), vec!["m1"]),
+        (true, Value::Null, vec!["m1", "missing"]),
+        (true, Value::Null, vec!["m1", "bad\n"]),
+    ] {
+        let mut request = request(Provider::Gmail, "archive", &ids);
+        request.execute = execute;
+        let mutation = RecordingMutation::new(vec![]);
+        let result = super::action::act(
+            &request,
+            &lookup(refusals, &[row("m1")], Default::default()),
+            &mutation,
+        )
+        .await;
+        if !execute {
+            assert_eq!(result.unwrap()["executed"], false);
+        } else {
+            assert!(result.is_err());
+        }
+        assert!(mutation.calls.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn partial_and_uncertain_results_keep_ids_explicit_without_retrying() {
+    for (provider, operation, replies, succeeded, failed) in [
+        (
+            Provider::Gmail,
+            "trash",
+            vec![Ok(json!({})), Err("gmail_timeout")],
+            json!(["m2"]),
+            json!(["m1"]),
+        ),
+        (
+            Provider::Gmail,
+            "star",
+            vec![Err("gmail_timeout")],
+            json!([]),
+            json!(["m2", "m1"]),
+        ),
+        (
+            Provider::Jmap,
+            "read",
+            vec![Ok(json!({"succeededIds":["m1"],"failedIds":["m2"]}))],
+            json!(["m1"]),
+            json!(["m2"]),
+        ),
+        (
+            Provider::Jmap,
+            "read",
+            vec![Ok(json!({"succeededIds":["unsolicited"],"failedIds":[]}))],
+            json!([]),
+            json!(["m2", "m1"]),
+        ),
+    ] {
+        let request = request(provider, operation, &["m2", "m1", "m2"]);
+        let plan = plan_action(
+            &request,
+            &lookup(Value::Null, &[row("m1"), row("m2")], Default::default()),
+        )
+        .await
+        .unwrap();
+        let count = replies.len();
+        let mutation = RecordingMutation::new(replies);
+        let result = super::action::execute_action(plan, &mutation).await;
+        assert_eq!(result["requestedIds"], json!(["m2", "m1", "m2"]));
+        assert_eq!(result["targetIds"], json!(["m2", "m1"]));
+        assert_eq!(result["succeededIds"], succeeded);
+        assert_eq!(result["failedIds"], failed);
+        assert_eq!(mutation.calls.lock().unwrap().len(), count);
+    }
+}
+
+#[tokio::test]
+async fn imap_batches_respect_the_native_limit_and_keep_later_failures_explicit() {
+    for provider in [Provider::Imap, Provider::Outlook] {
+        let ids: Vec<_> = (1..=501).map(|id| format!("{id}:INBOX")).collect();
+        let refs: Vec<_> = ids.iter().map(String::as_str).collect();
+        let rows: Vec<_> = refs.iter().map(|id| row(id)).collect();
+        let plan = plan_action(
+            &request(provider, "read", &refs),
+            &lookup(Value::Null, &rows, Default::default()),
+        )
+        .await
+        .unwrap();
+        let mutation = RecordingMutation::new(vec![Ok(json!({})), Err("imap_timeout")]);
+        let result = super::action::execute_action(plan, &mutation).await;
+        assert_eq!(result["succeededIds"], json!(&ids[..500]));
+        assert_eq!(result["failedIds"], json!(["501:INBOX"]));
+        let calls = mutation.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1["ids"], json!(&ids[..500]));
+        assert_eq!(calls[1].1["ids"], json!(["501:INBOX"]));
+    }
 }

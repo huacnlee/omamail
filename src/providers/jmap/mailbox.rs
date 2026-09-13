@@ -40,7 +40,7 @@ fn action_id(value: &Value) -> Result<String, &'static str> {
     Ok(id.to_owned())
 }
 
-fn action_ids(value: &Value) -> Result<Vec<String>, &'static str> {
+pub(super) fn action_ids(value: &Value) -> Result<Vec<String>, &'static str> {
     let values = value.as_array().ok_or("invalid_params")?;
     if values.is_empty() || values.len() > 1000 {
         return Err("invalid_params");

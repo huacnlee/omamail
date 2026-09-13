@@ -100,6 +100,9 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-mailbox-") as directory:
                     self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
                 elif method=="EmailSubmission/set": result={"notCreated":{"send":{"type":"forbiddenToSend"}}} if mode=="fail" else {"created":{"send":{"id":"submitted"}}}
                 elif method=="Email/set" and args.get("destroy")==["old-fail"]: result={"notDestroyed":{"old-fail":{"type":"forbidden"}}}
+                elif method=="Email/set" and scenario=="action-unknown" and "e2" in args.get("update",{}): result={"updated":[]}
+                elif method=="Email/set" and scenario=="action-failed": result={"notUpdated":{key:{"type":"forbidden","description":"synthetic-secret"} for key in args.get("update",{})}}
+                elif method=="Email/set" and scenario=="partial-action": result={"updated":{"e1":None},"notUpdated":{"e2":{"type":"notFound","description":"synthetic-secret"}}}
                 elif method=="Email/set": result={"updated":{key:None for key in args.get("update",{})},"destroyed":args.get("destroy",[])}
                 elif method=="Mailbox/get":
                     result={"list":[{"id":"I","role":"inbox"},{"id":"S","role":"sent"},{"id":"T","role":"trash"},{"id":"A","role":"archive"},{"id":"D","role":"drafts"}]}

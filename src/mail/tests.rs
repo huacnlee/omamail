@@ -237,7 +237,7 @@ async fn production_mail_action_dry_runs_all_operations_without_creating_local_s
     assert_eq!(fixture_tree(&fixture.root), before_tree);
     for params in [
         json!({"operation":"archive","ids":["valid","bad\n"]}),
-        json!({"operation":"archive","ids":["valid"],"execute":true}),
+        json!({"operation":"archive","ids":["valid","bad\n"],"execute":true}),
     ] {
         assert!(session.dispatch("mail.act", &params).await.is_err());
         assert_eq!(registry_state(&fixture), before);
