@@ -1,13 +1,20 @@
 .pragma library
 
-function accepts(info, expectedVersion, expectedApiVersion) {
+// The binary must be the pinned version exactly, and speak either the
+// released API or the one unreleased step past it: a local build of the
+// checkout is the step, and refusing it would leave the step untestable in
+// the desktop. Anything else — an older API, two steps, a version off the
+// pin — is refused, and `latestApiVersion` counts only as that one step.
+function accepts(info, expectedVersion, expectedApiVersion, latestApiVersion) {
+  var step = typeof latestApiVersion === "number" && latestApiVersion === expectedApiVersion + 1
+    ? latestApiVersion : expectedApiVersion
   return !!info && info.protocol === 1
     && typeof expectedVersion === "string" && expectedVersion.length > 0
     && typeof info.version === "string" && info.version === expectedVersion
     && typeof expectedApiVersion === "number" && expectedApiVersion > 0
     && expectedApiVersion <= 2147483647
     && Math.floor(expectedApiVersion) === expectedApiVersion
-    && (info.apiVersion === expectedApiVersion
+    && (info.apiVersion === expectedApiVersion || info.apiVersion === step
       || (info.apiVersion === undefined && info.version === "0.9.0" && expectedApiVersion === 1))
 }
 

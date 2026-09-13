@@ -260,7 +260,7 @@ Item {
       }
       root.failure = ""
       root.request("system.info", {}, function(info, error) {
-        if (error || !Compatibility.accepts(info, root.expectedVersion, root.expectedApiVersion))
+        if (error || !Compatibility.accepts(info, root.expectedVersion, root.expectedApiVersion, root.latestApiVersion))
           root.stopForFailure("Incompatible backend")
         else root.protocolInfo = info
       }, true)

@@ -160,7 +160,10 @@ past `releasedApiVersion`, name the new methods and cases under `unreleased`, an
 let the feature wait on `Service.backendNeedsUpdate`. Both gates run on the PR and
 it merges into `main` without a release; the next release from `main` publishes
 the binary and its pin commit folds the step. Runtime handshake still requires the
-exact plugin-local binary pin, even when a newer release reports the same API.
+exact plugin-local binary pin, even when a newer release reports the same API; at
+that version it accepts the released API or the one unreleased step, so a local
+build of the checkout (`make install`) runs the step in the desktop while the
+published binary of the same version keeps working without it.
 
 The contract runner exercises the contract's cases and checks the advertised
 inventory — the released view against the pinned binary, everything against a
