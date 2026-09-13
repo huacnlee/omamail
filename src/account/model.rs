@@ -71,6 +71,48 @@ pub fn action_targets(row: &Value, action: &str) -> Value {
         json!([own])
     }
 }
+
+/// Exact action targets for an untrusted provider row. Unlike the legacy view
+/// helper above this does not coerce JSON values or trim opaque IDs: a newline
+/// or a number must be refused, never silently rewritten into another ID.
+pub(crate) fn action_targets_checked(
+    row: &Value,
+    action: &str,
+) -> Result<Vec<String>, &'static str> {
+    let own = row["id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .ok_or("mail_action_invalid_target")?;
+    if action_scope(action) != "conversation" {
+        return Ok(vec![own]);
+    }
+    let Some(thread) = row.get("thread") else {
+        return Ok(vec![own]);
+    };
+    if thread.is_null() {
+        return Ok(vec![own]);
+    }
+    let members = thread
+        .as_object()
+        .and_then(|thread| thread.get("memberIds"))
+        .ok_or("mail_action_invalid_target")?
+        .as_array()
+        .ok_or("mail_action_invalid_target")?;
+    if members.is_empty() {
+        return Ok(vec![own]);
+    }
+    members
+        .iter()
+        .map(|member| {
+            member
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .ok_or("mail_action_invalid_target")
+        })
+        .collect()
+}
 fn target(action: &str) -> &str {
     action.strip_prefix("label:").unwrap_or("")
 }

@@ -17,10 +17,20 @@ pub(crate) struct ActionPlan {
     pub remove_label_ids: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ActionAvailability {
+    pub refusals: Value,
+    /// Canonical destination names whose live account state permits planning.
+    pub mailboxes: Value,
+}
+
 /// Supplies only bounded, read-only action context. Implementations must not
 /// call provider mutation adapters or change cache/account/outbox state.
 pub(crate) trait ActionLookup: Send + Sync {
-    fn refusals(&self, account: &Account) -> Result<Value, &'static str>;
+    fn availability<'a>(
+        &'a self,
+        account: &'a Account,
+    ) -> Pin<Box<dyn Future<Output = Result<ActionAvailability, &'static str>> + Send + 'a>>;
 
     fn rows<'a>(
         &'a self,
@@ -70,9 +80,8 @@ fn append_targets(
     targets: &mut Vec<String>,
     seen: &mut HashSet<String>,
 ) -> Result<(), &'static str> {
-    let expanded = crate::account::model::action_targets(row, action);
-    for target in expanded.as_array().ok_or("mail_action_invalid_target")? {
-        let target = target.as_str().ok_or("mail_action_invalid_target")?;
+    let expanded = crate::account::model::action_targets_checked(row, action)?;
+    for target in &expanded {
         opaque_id(target).map_err(|_| "mail_action_invalid_target")?;
         if seen.insert(target.to_owned()) {
             if targets.len() == MAX_TARGETS {
@@ -93,17 +102,21 @@ pub(crate) async fn plan_action(
     }
     requested_ids(&request.ids)?;
     let action = domain_action(&request.operation)?;
-    let refusals = lookup.refusals(&request.account)?;
+    let availability = lookup.availability(&request.account).await?;
     let capability = crate::account::model::capability(action);
     if !capability.is_empty()
-        && !crate::providers::can(request.account.provider.id(), capability, &refusals)
+        && !crate::providers::can(
+            request.account.provider.id(),
+            capability,
+            &availability.refusals,
+        )
     {
         return Err("mail_action_unavailable");
     }
-    if let Some(mailbox) = crate::account::model::action_mailbox(action)
-        && crate::providers::domain::query_mailbox(request.account.provider.id(), mailbox).is_none()
-    {
-        return Err("mail_mailbox_unavailable");
+    if let Some(mailbox) = crate::account::model::action_mailbox(action) {
+        if !availability.mailboxes[mailbox].as_bool().unwrap_or(false) {
+            return Err("mail_action_destination_unavailable");
+        }
     }
     let change = crate::account::model::action_changes(action);
     let add_label_ids = label_ids(&change, "add")?;

@@ -75,10 +75,11 @@ pub fn summarize(bytes: &[u8]) -> Result<Value, &'static str> {
     let entries = raw["accounts"].as_array().ok_or("accounts_invalid")?;
     let mut accounts = Vec::new();
     for entry in entries.iter().filter(|entry| entry.is_object()) {
-        let provider = text(&entry["provider"]).to_lowercase();
-        let provider = match provider.as_str() {
-            "outlook" | "hey" | "jmap" | "imap" => provider.as_str(),
-            _ => "gmail",
+        let declared = text(&entry["provider"]).to_lowercase();
+        let provider = match declared.as_str() {
+            "" | "gmail" => "gmail",
+            "outlook" | "hey" | "jmap" | "imap" => declared.as_str(),
+            _ => continue,
         };
         let mut email = text(&entry["email"]);
         if !valid_email(email) && matches!(provider, "imap" | "outlook") {

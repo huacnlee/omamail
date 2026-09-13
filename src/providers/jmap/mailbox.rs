@@ -17,6 +17,35 @@ pub(super) const BOX_PROPERTIES: &[&str] = &[
     "unreadThreads",
 ];
 pub(super) const MEMBER_PROPERTIES: &[&str] = &["id", "threadId", "mailboxIds", "keywords"];
+
+fn action_id(value: &Value) -> Result<String, &'static str> {
+    let id = value.as_str().ok_or("mail_action_invalid_target")?;
+    if id.is_empty()
+        || id.len() > 8192
+        || id.chars().any(|character| {
+            character.is_control()
+                || matches!(
+                    character,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        })
+    {
+        return Err("mail_action_invalid_target");
+    }
+    Ok(id.to_owned())
+}
+
+fn action_ids(value: &Value) -> Result<Vec<String>, &'static str> {
+    let values = value.as_array().ok_or("invalid_params")?;
+    if values.is_empty() || values.len() > 1000 {
+        return Err("invalid_params");
+    }
+    values.iter().map(action_id).collect()
+}
 #[derive(Default)]
 pub(super) struct Context {
     pub(super) rejected: std::sync::atomic::AtomicBool,
@@ -87,6 +116,106 @@ impl Snapshot {
     }
 }
 impl Session {
+    fn action_availability_for(snapshot: &Snapshot, roles: &Value) -> Value {
+        json!({
+            "refusals":{
+                "archive":if string(&roles["archive"]).is_empty(){json!("Archive mailbox unavailable")}else{Value::Null},
+                "spam":if string(&roles["junk"]).is_empty(){json!("Junk mailbox unavailable")}else if !super::mutation::learns_junk(snapshot){json!("This account cannot learn from Junk")}else{Value::Null},
+            },
+            "mailboxes":{
+                "archive":!string(&roles["archive"]).is_empty(),
+                "trash":!string(&roles["trash"]).is_empty(),
+                "spam":!string(&roles["junk"]).is_empty() && super::mutation::learns_junk(snapshot),
+            }
+        })
+    }
+
+    pub(super) async fn action_availability(
+        &self,
+        context: &Context,
+        snapshot: &Snapshot,
+    ) -> Result<Value, &'static str> {
+        let result = self
+            .api(
+                context,
+                snapshot,
+                json!([["Mailbox/get",{"accountId":snapshot.account,"ids":null,"properties":BOX_PROPERTIES},"0"]]),
+                false,
+            )
+            .await?;
+        let boxes = argument(&result, "0", "Mailbox/get")?["list"]
+            .as_array()
+            .ok_or("jmap_invalid_response")?;
+        Ok(Self::action_availability_for(
+            snapshot,
+            &query::roles(boxes),
+        ))
+    }
+
+    pub(super) async fn action_rows(
+        &self,
+        context: &Context,
+        snapshot: &Snapshot,
+        params: &Value,
+    ) -> Result<Value, &'static str> {
+        let requested = action_ids(&params["ids"])?;
+        let emails = self
+            .get_emails(context, snapshot, &requested, false, false)
+            .await?;
+        let mut by_id = Map::new();
+        let mut thread_ids = Vec::new();
+        for email in emails {
+            let id = action_id(&email["id"])?;
+            if !requested.contains(&id) {
+                return Err("mail_action_invalid_target");
+            }
+            let thread = action_id(&email["threadId"])?;
+            if !thread_ids.contains(&thread) {
+                thread_ids.push(thread);
+            }
+            by_id.insert(id, email);
+        }
+        let mut members = Map::new();
+        for chunk in thread_ids.chunks(snapshot.limit("maxObjectsInGet", 256)) {
+            let result = self
+                .api(
+                    context,
+                    snapshot,
+                    json!([["Thread/get",{"accountId":snapshot.account,"ids":chunk},"0"]]),
+                    false,
+                )
+                .await?;
+            let threads = argument(&result, "0", "Thread/get")?["list"]
+                .as_array()
+                .ok_or("jmap_invalid_response")?;
+            for thread in threads {
+                let id = action_id(&thread["id"])?;
+                let values = thread["emailIds"]
+                    .as_array()
+                    .ok_or("mail_action_invalid_target")?;
+                if values.len() > 2000 {
+                    return Err("mail_action_target_limit");
+                }
+                let values = values
+                    .iter()
+                    .map(action_id)
+                    .collect::<Result<Vec<_>, _>>()?;
+                members.insert(id, json!(values));
+            }
+        }
+        let mut rows = Vec::new();
+        for id in requested {
+            let email = by_id.remove(&id).ok_or("mail_action_target_unknown")?;
+            let thread = action_id(&email["threadId"])?;
+            let member_ids = members
+                .get(&thread)
+                .cloned()
+                .ok_or("mail_action_target_unknown")?;
+            rows.push(json!({"id":id,"thread":{"memberIds":member_ids}}));
+        }
+        Ok(json!({"rows":rows}))
+    }
+
     pub(super) fn context(&self, id: &str) -> Result<Arc<Context>, &'static str> {
         if !id.starts_with("jmap:") || id.len() > 512 {
             return Err("invalid_params");
@@ -327,6 +456,8 @@ impl Session {
             "jmap.list",
             "jmap.messages",
             "jmap.read",
+            "jmap.actionAvailability",
+            "jmap.actionRows",
             "jmap.attachment",
             "jmap.labels",
             "jmap.labelCounts",
@@ -375,6 +506,8 @@ impl Session {
             "jmap.list" => self.list(&context, &snapshot, params).await?,
             "jmap.messages" => self.messages(&context, &snapshot, params).await?,
             "jmap.read" => self.read(&context, &snapshot, params).await?,
+            "jmap.actionAvailability" => self.action_availability(&context, &snapshot).await?,
+            "jmap.actionRows" => self.action_rows(&context, &snapshot, params).await?,
             "jmap.attachment" => {
                 self.attachment(&snapshot, text(params, "attachmentId")?)
                     .await?

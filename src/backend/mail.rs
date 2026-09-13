@@ -11,22 +11,77 @@ struct ProviderRead<'a> {
     session: &'a Session,
 }
 
-/// Action planning has no provider call of its own. The caller's opaque IDs
-/// remain individual rows unless a read-only lookup supplies a collapsed
-/// conversation row to the shared planner.
-struct AccountActionLookup;
+/// The shared planner is provider-neutral. This adapter may make bounded,
+/// read-only provider calls to learn live destination availability and expand
+/// listings that collapse conversations, but never invokes a mutation method.
+struct AccountActionLookup<'a> {
+    session: &'a Session,
+}
 
-impl crate::mail::action::ActionLookup for AccountActionLookup {
-    fn refusals(&self, account: &crate::mail::Account) -> Result<Value, &'static str> {
-        crate::account::refusals_readonly(&account.id)
+impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
+    fn availability<'a>(
+        &'a self,
+        account: &'a crate::mail::Account,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::mail::action::ActionAvailability, &'static str>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if account.provider == Provider::Jmap {
+                let value = self
+                    .session
+                    .jmap
+                    .call("jmap.actionAvailability", &json!({"accountId":account.id}))
+                    .await?;
+                return Ok(crate::mail::action::ActionAvailability {
+                    refusals: value["data"]["refusals"].clone(),
+                    mailboxes: value["data"]["mailboxes"].clone(),
+                });
+            }
+            let mailboxes = ["archive", "trash", "spam"]
+                .iter()
+                .map(|mailbox| {
+                    (
+                        (*mailbox).to_owned(),
+                        Value::Bool(
+                            crate::providers::domain::query_mailbox(account.provider.id(), mailbox)
+                                .is_some(),
+                        ),
+                    )
+                })
+                .collect();
+            Ok(crate::mail::action::ActionAvailability {
+                refusals: crate::account::refusals_readonly(&account.id)?,
+                mailboxes: Value::Object(mailboxes),
+            })
+        })
     }
 
     fn rows<'a>(
         &'a self,
-        _account: &'a crate::mail::Account,
+        account: &'a crate::mail::Account,
         ids: &'a [String],
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
-        Box::pin(async move { Ok(ids.iter().map(|id| json!({"id":id})).collect()) })
+        Box::pin(async move {
+            if account.provider == Provider::Jmap {
+                let value = self
+                    .session
+                    .jmap
+                    .call(
+                        "jmap.actionRows",
+                        &json!({"accountId":account.id,"ids":ids}),
+                    )
+                    .await?;
+                return value["data"]["rows"]
+                    .as_array()
+                    .cloned()
+                    .ok_or("mail_action_invalid_target");
+            }
+            Ok(ids.iter().map(|id| json!({"id":id})).collect())
+        })
     }
 }
 
@@ -63,7 +118,7 @@ impl Session {
             }
             "mail.act" => {
                 let request = ActRequest::try_from(params)?;
-                crate::mail::action::dry_run(&request, &AccountActionLookup).await
+                crate::mail::action::dry_run(&request, &AccountActionLookup { session: self }).await
             }
             _ => Err("unknown_method"),
         }
@@ -617,6 +672,44 @@ mod tests {
         assert_eq!(result["messages"][0]["thread"]["count"], 2);
         assert_eq!(result["messages"][0]["unread"], true);
         assert_eq!(result["messages"][0]["starred"], true);
+        let account = Account {
+            id: "jmap:user@example.test".into(),
+            provider: Provider::Jmap,
+        };
+        let lookup = AccountActionLookup { session: &session };
+        let availability = crate::mail::action::ActionLookup::availability(&lookup, &account)
+            .await
+            .unwrap();
+        assert_eq!(availability.mailboxes["archive"], true);
+        assert_ne!(availability.refusals["spam"], Value::Null);
+        let rows = crate::mail::action::ActionLookup::rows(&lookup, &account, &["e1".into()])
+            .await
+            .unwrap();
+        assert_eq!(rows[0]["id"], "e1");
+        assert_eq!(rows[0]["thread"]["memberIds"], json!(["e1", "e2", "e3"]));
+        let report_client = reqwest::Client::builder()
+            .add_root_certificate(
+                reqwest::Certificate::from_pem(&fs::read(certificate.trim()).unwrap()).unwrap(),
+            )
+            .build()
+            .unwrap();
+        let report = report_client
+            .get(format!("https://localhost:{port}/report"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let report: Value = serde_json::from_slice(&report).unwrap();
+        assert!(
+            report
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|request| { request["calls"].as_array().into_iter().flatten() })
+                .all(|call| !matches!(call[0].as_str(), Some("Email/set")))
+        );
         let _ = peer.kill();
         let _ = peer.wait();
     }

@@ -1,11 +1,9 @@
-use super::action::{ActionLookup, domain_action, dry_run, plan_action};
+use super::action::{ActionAvailability, ActionLookup, domain_action, plan_action};
 use super::{Account, ActRequest, Provider};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    env, fs,
     future::Future,
-    path::PathBuf,
     pin::Pin,
     sync::{
         Arc,
@@ -17,27 +15,21 @@ use std::{
 struct Effects {
     refusal_lookup: AtomicUsize,
     lookup: AtomicUsize,
-    provider_mutation: AtomicUsize,
-    network: AtomicUsize,
-    process: AtomicUsize,
-    cache_write: AtomicUsize,
-    account_write: AtomicUsize,
-    outbox: AtomicUsize,
-    filesystem_write: AtomicUsize,
 }
 
-static SENTINEL_SERIAL: AtomicUsize = AtomicUsize::new(0);
-
 struct RecordingLookup {
-    refusals: Value,
+    availability: ActionAvailability,
     rows: HashMap<String, Value>,
     effects: Arc<Effects>,
 }
 
 impl ActionLookup for RecordingLookup {
-    fn refusals(&self, _account: &Account) -> Result<Value, &'static str> {
+    fn availability<'a>(
+        &'a self,
+        _account: &'a Account,
+    ) -> Pin<Box<dyn Future<Output = Result<ActionAvailability, &'static str>> + Send + 'a>> {
         self.effects.refusal_lookup.fetch_add(1, Ordering::SeqCst);
-        Ok(self.refusals.clone())
+        Box::pin(async move { Ok(self.availability.clone()) })
     }
 
     fn rows<'a>(
@@ -72,8 +64,25 @@ fn request(provider: Provider, operation: &str, ids: &[&str]) -> ActRequest {
 }
 
 fn lookup(refusals: Value, rows: &[Value], effects: Arc<Effects>) -> RecordingLookup {
-    RecordingLookup {
+    lookup_with_mailboxes(
         refusals,
+        json!({"archive":true,"trash":true,"spam":true}),
+        rows,
+        effects,
+    )
+}
+
+fn lookup_with_mailboxes(
+    refusals: Value,
+    mailboxes: Value,
+    rows: &[Value],
+    effects: Arc<Effects>,
+) -> RecordingLookup {
+    RecordingLookup {
+        availability: ActionAvailability {
+            refusals,
+            mailboxes,
+        },
         rows: rows
             .iter()
             .map(|row| (row["id"].as_str().unwrap().to_owned(), row.clone()))
@@ -84,17 +93,6 @@ fn lookup(refusals: Value, rows: &[Value], effects: Arc<Effects>) -> RecordingLo
 
 fn row(id: &str) -> Value {
     json!({"id":id})
-}
-
-fn sentinel_directory() -> PathBuf {
-    let directory = env::temp_dir().join(format!(
-        "omamail-action-sentinel-{}-{}",
-        std::process::id(),
-        SENTINEL_SERIAL.fetch_add(1, Ordering::SeqCst)
-    ));
-    fs::create_dir(&directory).unwrap();
-    fs::write(directory.join("unchanged"), "sentinel").unwrap();
-    directory
 }
 
 #[test]
@@ -159,6 +157,25 @@ async fn conversation_targets_are_deduplicated_in_first_appearance_order() {
 }
 
 #[tokio::test]
+async fn malformed_conversation_members_are_rejected_before_any_coercion_or_trim() {
+    for members in [
+        json!(["safe", "bad\n"]),
+        json!(["safe", 7]),
+        json!(["safe", null]),
+    ] {
+        let effects = Arc::new(Effects::default());
+        let conversation = json!({"id":"conversation-1","thread":{"memberIds":members}});
+        let error = plan_action(
+            &request(Provider::Jmap, "archive", &["conversation-1"]),
+            &lookup(Value::Null, &[conversation], effects),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "mail_action_invalid_target");
+    }
+}
+
+#[tokio::test]
 async fn capability_ceilings_and_account_refusals_precede_target_lookup() {
     for (provider, operation, refusals) in [
         (Provider::Hey, "archive", Value::Null),
@@ -188,39 +205,21 @@ async fn capability_ceilings_and_account_refusals_precede_target_lookup() {
 }
 
 #[tokio::test]
-async fn dry_runs_return_stable_json_without_provider_or_local_side_effects() {
+async fn dynamic_destination_availability_refuses_before_target_lookup() {
     let effects = Arc::new(Effects::default());
-    let directory = sentinel_directory();
-    let action = request(Provider::Gmail, "archive", &["message-1"]);
-    let action_lookup = lookup(Value::Null, &[row("message-1")], effects.clone());
-    let result = dry_run(&action, &action_lookup).await.unwrap();
-    assert_eq!(
-        result,
-        json!({
-            "dryRun":true,
-            "executed":false,
-            "operation":"archive",
-            "accountId":"gmail:me@example.org",
-            "requestedIds":["message-1"],
-            "targetIds":["message-1"]
-        })
-    );
-    for counter in [
-        &effects.provider_mutation,
-        &effects.network,
-        &effects.process,
-        &effects.cache_write,
-        &effects.account_write,
-        &effects.outbox,
-        &effects.filesystem_write,
-    ] {
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-    }
-    assert_eq!(
-        fs::read_to_string(directory.join("unchanged")).unwrap(),
-        "sentinel"
-    );
-    fs::remove_dir_all(directory).unwrap();
+    let error = plan_action(
+        &request(Provider::Jmap, "archive", &["message-1"]),
+        &lookup_with_mailboxes(
+            Value::Null,
+            json!({"archive":false,"trash":true,"spam":true}),
+            &[row("message-1")],
+            effects.clone(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "mail_action_destination_unavailable");
+    assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -243,7 +242,6 @@ async fn unsafe_or_oversized_ids_fail_before_any_lookup_or_mutation() {
         assert_eq!(error, "invalid_params");
         assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
         assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
-        assert_eq!(effects.provider_mutation.load(Ordering::SeqCst), 0);
     }
 
     let effects = Arc::new(Effects::default());
@@ -254,5 +252,20 @@ async fn unsafe_or_oversized_ids_fail_before_any_lookup_or_mutation() {
     .await
     .unwrap();
     assert_eq!(plan.target_ids, ["quote\"slash\\"]);
-    assert_eq!(effects.provider_mutation.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn execute_is_refused_before_availability_or_provider_mutation() {
+    let effects = Arc::new(Effects::default());
+    let mut action = request(Provider::Gmail, "archive", &["message-1"]);
+    action.execute = true;
+    let error = plan_action(
+        &action,
+        &lookup(Value::Null, &[row("message-1")], effects.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "mail_action_execute_unsupported");
+    assert_eq!(effects.refusal_lookup.load(Ordering::SeqCst), 0);
+    assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
 }

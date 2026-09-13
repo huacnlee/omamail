@@ -79,7 +79,7 @@ fn can_send(snapshot: &Snapshot) -> bool {
         && snapshot.document["accounts"][&snapshot.account]["accountCapabilities"][SUBMISSION]
             .is_object()
 }
-fn learns_junk(snapshot: &Snapshot) -> bool {
+pub(super) fn learns_junk(snapshot: &Snapshot) -> bool {
     snapshot.document["capabilities"]["urn:stalwart:jmap"].is_object()||snapshot.document["accounts"][&snapshot.account]["accountCapabilities"]["urn:stalwart:jmap"].is_object()
         ||url(string(&snapshot.document["apiUrl"])).ok().and_then(|u|u.host_str().map(str::to_owned)).is_some_and(|h|h.ends_with(".fastmail.com"))
 }

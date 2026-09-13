@@ -20,6 +20,7 @@ static FIXTURE_SERIAL: AtomicU64 = AtomicU64::new(0);
 struct AccountFixture {
     _environment: MutexGuard<'static, ()>,
     previous: Option<OsString>,
+    previous_cache: Option<OsString>,
     root: PathBuf,
 }
 
@@ -56,6 +57,39 @@ fn registry_state(fixture: &AccountFixture) -> RegistryState {
     }
 }
 
+fn fixture_tree(root: &std::path::Path) -> Vec<(PathBuf, MetadataState, Vec<u8>)> {
+    fn walk(
+        root: &std::path::Path,
+        current: &std::path::Path,
+        out: &mut Vec<(PathBuf, MetadataState, Vec<u8>)>,
+    ) {
+        let metadata = fs::metadata(current).unwrap();
+        let bytes = if metadata.is_file() {
+            fs::read(current).unwrap()
+        } else {
+            Vec::new()
+        };
+        out.push((
+            current.strip_prefix(root).unwrap().to_owned(),
+            metadata_state(current),
+            bytes,
+        ));
+        if metadata.is_dir() {
+            let mut children = fs::read_dir(current)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            children.sort();
+            for child in children {
+                walk(root, &child, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out
+}
+
 impl Drop for AccountFixture {
     fn drop(&mut self) {
         unsafe {
@@ -63,6 +97,13 @@ impl Drop for AccountFixture {
                 env::set_var("XDG_CONFIG_HOME", previous);
             } else {
                 env::remove_var("XDG_CONFIG_HOME");
+            }
+        }
+        unsafe {
+            if let Some(previous) = &self.previous_cache {
+                env::set_var("XDG_CACHE_HOME", previous);
+            } else {
+                env::remove_var("XDG_CACHE_HOME");
             }
         }
         fs::remove_dir_all(&self.root).unwrap();
@@ -87,11 +128,76 @@ fn account_fixture(registry: Value) -> AccountFixture {
     )
     .unwrap();
     let previous = env::var_os("XDG_CONFIG_HOME");
+    let previous_cache = env::var_os("XDG_CACHE_HOME");
     unsafe { env::set_var("XDG_CONFIG_HOME", &root) };
+    unsafe { env::set_var("XDG_CACHE_HOME", root.join("cache")) };
     AccountFixture {
         _environment: environment,
         previous,
+        previous_cache,
         root,
+    }
+}
+
+#[tokio::test]
+async fn production_mail_action_dry_runs_all_operations_without_creating_local_state() {
+    let fixture = account_fixture(json!({
+        "version":1,
+        "activeId":"person@example.org",
+        "accounts":[{"provider":"gmail","email":"person@example.org"}]
+    }));
+    let before = registry_state(&fixture);
+    let before_tree = fixture_tree(&fixture.root);
+    let session = crate::backend::Session::default();
+    for operation in [
+        "read", "unread", "star", "unstar", "archive", "trash", "spam",
+    ] {
+        let result = session
+            .dispatch(
+                "mail.act",
+                &json!({"operation":operation,"ids":["quote\\slash\""],"execute":false}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            json!({
+                "dryRun":true,
+                "executed":false,
+                "operation":operation,
+                "accountId":"person@example.org",
+                "requestedIds":["quote\\slash\""],
+                "targetIds":["quote\\slash\""]
+            }),
+            "{operation}"
+        );
+        assert_eq!(registry_state(&fixture), before, "{operation}");
+        assert_eq!(fixture_tree(&fixture.root), before_tree, "{operation}");
+    }
+    let result = session
+        .dispatch(
+            "mail.act",
+            &json!({"operation":"archive","ids":["quote\\slash\""]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result["dryRun"], true,
+        "omitted execute defaults to preview"
+    );
+    assert_eq!(
+        result["executed"], false,
+        "omitted execute defaults to preview"
+    );
+    assert_eq!(registry_state(&fixture), before);
+    assert_eq!(fixture_tree(&fixture.root), before_tree);
+    for params in [
+        json!({"operation":"archive","ids":["valid","bad\n"]}),
+        json!({"operation":"archive","ids":["valid"],"execute":true}),
+    ] {
+        assert!(session.dispatch("mail.act", &params).await.is_err());
+        assert_eq!(registry_state(&fixture), before);
+        assert_eq!(fixture_tree(&fixture.root), before_tree);
     }
 }
 
@@ -158,6 +264,21 @@ fn empty_or_pending_only_registries_never_resolve_an_empty_account_id() {
             Err("mail_account_unknown")
         );
     }
+}
+
+#[test]
+fn unknown_registry_provider_cannot_resolve_as_a_gmail_action_account() {
+    let _env = account_fixture(json!({
+        "version":1,
+        "activeId":"person@example.org",
+        "accounts":[{"provider":"mystery","email":"person@example.org"}]
+    }));
+    assert_eq!(
+        request_error(ActRequest::try_from(
+            &json!({"operation":"archive","ids":["one"]})
+        )),
+        "mail_account_unknown"
+    );
 }
 
 #[test]

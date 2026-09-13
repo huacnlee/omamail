@@ -30,3 +30,13 @@ fn corrupt_registry_is_an_error_not_empty_success() {
     );
     assert_eq!(summarize(b"{\"version\":1}"), Err("accounts_invalid"));
 }
+
+#[test]
+fn unknown_registry_provider_is_not_projected_as_gmail() {
+    let source = json!({"version":1,"activeId":"person@example.org","accounts":[
+        {"provider":"mystery","email":"person@example.org"}
+    ]});
+    let result = summarize(source.to_string().as_bytes()).unwrap();
+    assert_eq!(result["accounts"], json!([]));
+    assert_eq!(result["activeId"], "");
+}
