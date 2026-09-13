@@ -19,7 +19,7 @@ use std::{
     pin::Pin,
 };
 
-const MAX_BODY: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_HEADER: usize = 8192;
 const MAX_ATTACHMENTS: usize = 32;
 const MAX_BYTES: usize = crate::attachment::MAX_BYTES;

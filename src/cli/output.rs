@@ -8,8 +8,11 @@ use tabled::{
 pub(super) fn print_result(result: Result<Value, &'static str>, json: bool, envelope: bool) {
     match result {
         Ok(value) => {
+            let failure = result_failure(&value);
             if json {
-                let value = if envelope {
+                let value = if let Some(code) = failure {
+                    json!({"ok":false,"error":{"code":code},"result":value})
+                } else if envelope {
                     json!({"ok":true,"result":value})
                 } else {
                     value
@@ -17,6 +20,12 @@ pub(super) fn print_result(result: Result<Value, &'static str>, json: bool, enve
                 println!("{}", serde_json::to_string_pretty(&value).unwrap());
             } else {
                 print!("{}", pretty(&value));
+            }
+            if let Some(code) = failure {
+                if !json {
+                    eprintln!("omamail: {code}");
+                }
+                std::process::exit(1);
             }
         }
         Err(code) => {
@@ -32,6 +41,31 @@ pub(super) fn print_result(result: Result<Value, &'static str>, json: bool, enve
             std::process::exit(1);
         }
     }
+}
+
+fn result_failure(value: &Value) -> Option<&'static str> {
+    if value["failedIds"]
+        .as_array()
+        .is_some_and(|ids| !ids.is_empty())
+    {
+        return Some("mail_action_failed");
+    }
+    if value["executed"] == true && value["sendId"].is_string() {
+        let entry = value["outbox"]["entries"]
+            .as_array()?
+            .iter()
+            .find(|entry| entry["id"] == value["sendId"])?;
+        return match entry["state"].as_str() {
+            Some("sent") => None,
+            Some("failed") if entry["error"] == "outbox_storage_unavailable" => {
+                Some("outbox_storage_unavailable")
+            }
+            Some("failed") => Some("outbox_send_refused"),
+            Some("cancelled") => Some("outbox_stopped_unsent"),
+            _ => Some("outbox_delivery_unknown"),
+        };
+    }
+    None
 }
 
 // Sender-controlled text must not execute terminal escapes or inject table rows.
@@ -151,5 +185,29 @@ fn pretty(value: &Value) -> String {
             values.iter().map(|value| vec![cell(value)]).collect(),
         ),
         value => format!("{}\n", safe(&cell(value))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_storage_failure_is_not_reported_as_a_provider_refusal() {
+        let result = json!({"executed":true,"sendId":"one","outbox":{"entries":[{"id":"one","state":"failed","error":"outbox_storage_unavailable"}]}});
+        assert_eq!(result_failure(&result), Some("outbox_storage_unavailable"));
+    }
+
+    #[test]
+    fn sender_fields_cannot_control_the_terminal_or_inject_table_rows() {
+        let result = pretty(&json!({"messages":[{
+            "from":"Eve\u{1b}[31m\r\n|forged\trow\u{202e}\u{2067}工"
+        }]}));
+        for control in ['\u{1b}', '\r', '\t', '\u{202e}', '\u{2067}'] {
+            assert!(!result.contains(control));
+        }
+        assert!(result.contains("\\u{1b}") && result.contains("\\u{202e}"));
+        assert!(!result.lines().any(|line| line.starts_with("|forged")));
+        assert!(result.contains("工"));
     }
 }

@@ -3,6 +3,20 @@ use std::io::Read;
 
 const MAX_PARAMS: usize = 1024 * 1024;
 
+/// A one-shot process owns any worker it starts until delivery settles. RPC
+/// sessions keep their existing asynchronous enqueue response.
+pub(super) async fn dispatch(
+    session: &crate::backend::Session,
+    method: &str,
+    params: &Value,
+) -> Result<Value, &'static str> {
+    let mut result = session.dispatch(method, params).await?;
+    if method == "mail.send" && result["executed"] == true {
+        session.finish_cli_send(&mut result).await?;
+    }
+    Ok(result)
+}
+
 pub(super) fn read_params(input: impl Read) -> Result<Value, &'static str> {
     let mut bytes = Vec::new();
     input

@@ -185,6 +185,35 @@ impl Outbox {
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.inner.events.subscribe()
     }
+    /// Keep the owning runtime alive through the worker's durable terminal
+    /// transition. Subscribe before inspecting state to avoid a lost wakeup.
+    pub(crate) async fn wait_for_send(
+        &self,
+        account: &str,
+        id: &str,
+    ) -> Result<Value, &'static str> {
+        let mut events = self.subscribe();
+        loop {
+            let value = self
+                .call("outbox.snapshot", &json!({"accountId":account,"sendId":id}))
+                .await?;
+            let entry = value["entries"]
+                .as_array()
+                .and_then(|entries| entries.first())
+                .ok_or("outbox_not_found")?;
+            if terminal(entry["state"].as_str().unwrap_or("")) {
+                // A worker may have observed delivery but failed its final
+                // persistence. Do not report a durable result until it is saved.
+                let state = self.inner.state.lock().await;
+                save(&self.inner, &state.entries).await?;
+                return Ok(value);
+            }
+            match events.recv().await {
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => (),
+                Err(broadcast::error::RecvError::Closed) => return Err("outbox_stopping"),
+            }
+        }
+    }
     /// Serialize explicit-ID composition with its enqueue. Replays retain the
     /// original timestamp, MIME boundary and message ID; `call` remains the sole
     /// owner of digest conflict checks and exactly-once queue insertion.

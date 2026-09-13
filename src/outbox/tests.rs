@@ -2,6 +2,28 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
+async fn one_shot_wait_does_not_claim_a_terminal_state_when_final_persistence_fails() {
+    let dir = Temp::new();
+    let target = dir.0.join("omamail/outbox.json");
+    let outbox = Outbox::with_root(
+        Arc::new(move |_| {
+            let target = target.clone();
+            Box::pin(async move {
+                std::fs::remove_file(&target).unwrap();
+                std::fs::create_dir(&target).unwrap();
+                Ok(json!({"id":"delivered"}))
+            })
+        }),
+        Some(dir.0.clone()),
+    );
+    outbox.call("outbox.enqueue", &json!({"accountId":"a@example.org","provider":"gmail","payload":{"raw":"safe"},"sendId":"one","delaySeconds":0})).await.unwrap();
+    assert!(
+        outbox.wait_for_send("a@example.org", "one").await.is_err(),
+        "a failed terminal write cannot be an authoritative sent result"
+    );
+}
+
+#[tokio::test]
 async fn mail_send_preview_is_write_free_and_execute_keeps_one_durable_job() {
     use crate::mail::{Account, Provider, SendRequest};
     struct Identities;

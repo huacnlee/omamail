@@ -501,3 +501,602 @@ fn pretty_call_errors_go_to_stderr() {
     assert!(output.stdout.is_empty());
     assert_eq!(output.stderr, b"omamail: unknown_method\n");
 }
+
+fn root_mail(root: &Path, args: &[&str], body: &[u8]) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(args)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_CACHE_HOME", root.join("cache"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("HOME", root.join("home"))
+        .env("PATH", root.join("bin"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if args.contains(&"send") {
+        let argv = fs::read(format!("/proc/{}/cmdline", child.id())).unwrap();
+        assert!(
+            !argv
+                .windows(b"private body".len())
+                .any(|text| text == b"private body")
+        );
+        assert!(
+            !argv
+                .windows(b"synthetic".len())
+                .any(|text| text == b"synthetic")
+        );
+    }
+    let _ = child.stdin.take().unwrap().write_all(body);
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn task_commands_have_only_the_approved_vocabulary_and_execute_switch() {
+    let help = String::from_utf8(omamail(&["--help"]).stdout).unwrap();
+    for name in ["list", "read", "mark", "archive", "trash", "spam", "send"] {
+        assert!(
+            help.lines()
+                .any(|line| line.split_whitespace().next() == Some(name)),
+            "missing {name}"
+        );
+        let output = omamail(&[name, "--help"]);
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("--account"));
+        assert_eq!(text.contains("--execute"), !matches!(name, "list" | "read"));
+    }
+    for args in [
+        vec!["mail", "list"],
+        vec!["unstar", "m1"],
+        vec!["star", "m1"],
+        vec!["unread", "m1"],
+        vec!["show", "m1"],
+        vec!["mark", "starred", "m1"],
+        vec!["mark", "read"],
+        vec!["archive"],
+        vec!["list", "--execute"],
+        vec!["read", "m1", "--execute"],
+        vec!["send", "--body", "secret"],
+    ] {
+        assert_eq!(omamail(&args).status.code(), Some(2), "{args:?}");
+    }
+}
+
+#[test]
+fn root_mutations_preview_exact_intent_and_never_touch_storage_or_credentials() {
+    let fixture = mail_list_fixture(9, false);
+    let config = fixture.0.join("config/omamail/accounts.json");
+    let before = (metadata(&config), fs::read(&config).unwrap());
+    let sentinel = fixture.0.join("credential-touched");
+    fs::write(
+        fixture.0.join("bin/secret-tool"),
+        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
+    )
+    .unwrap();
+    for operation in [
+        "read", "unread", "star", "unstar", "archive", "trash", "spam",
+    ] {
+        let mut args = if matches!(operation, "read" | "unread" | "star" | "unstar") {
+            vec!["mark", operation]
+        } else {
+            vec![operation]
+        };
+        args.extend(["one", "two", "one"]);
+        for before_command in [true, false] {
+            let mut args = args.clone();
+            if before_command {
+                args.insert(0, "--json");
+            } else {
+                args.push("--json");
+            }
+            let output = root_mail(&fixture.0, &args, b"ignored stdin");
+            assert!(output.status.success(), "{args:?}: {output:?}");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                serde_json::json!({"ok":true,"result":{
+                    "dryRun":true,"executed":false,"operation":operation,"accountId":"gmail@example.org",
+                    "requestedIds":["one","two","one"],"targetIds":["one","two"]
+                }})
+            );
+            assert!(output.stderr.is_empty());
+        }
+    }
+    assert_eq!((metadata(&config), fs::read(&config).unwrap()), before);
+    assert!(!sentinel.exists());
+    for name in ["cache", "state", "home"] {
+        assert!(!fixture.0.join(name).exists());
+    }
+}
+
+#[test]
+fn root_mail_errors_use_stable_envelopes_and_never_fall_back_accounts() {
+    let fixture = mail_list_fixture(9, false);
+    for args in [
+        vec!["list"],
+        vec!["read", "one"],
+        vec!["mark", "read", "one"],
+        vec!["archive", "one"],
+        vec!["trash", "one"],
+        vec!["spam", "one"],
+        vec!["send"],
+    ] {
+        for before in [true, false] {
+            let mut args = args.clone();
+            args.extend(["--account", "missing@example.org"]);
+            if before {
+                args.insert(0, "--json");
+            } else {
+                args.push("--json");
+            }
+            let output = root_mail(&fixture.0, &args, b"");
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                serde_json::json!({"ok":false,"error":{"code":"mail_account_unknown"}})
+            );
+            assert!(output.stderr.is_empty());
+        }
+    }
+    let output = root_mail(&fixture.0, &["read", "secret\nvalue"], b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(output.stderr, b"omamail: invalid_params\n");
+}
+
+#[test]
+fn send_previews_repeatable_inputs_and_strict_bounded_utf8_without_writes() {
+    let fixture = mail_list_fixture(9, false);
+    let attachment = fixture.0.join("quoted\\工\".txt");
+    fs::write(&attachment, b"private attachment").unwrap();
+    let second = fixture.0.join("second.txt");
+    fs::write(&second, b"two").unwrap();
+    let args = [
+        "send",
+        "--account",
+        "imap:imap@example.org",
+        "--to",
+        "one@example.org",
+        "--to",
+        "two@example.org",
+        "--cc",
+        "three@example.org",
+        "--bcc",
+        "four@example.org",
+        "--subject",
+        "Unicode 工",
+        "--attach",
+        attachment.to_str().unwrap(),
+        "--attach",
+        second.to_str().unwrap(),
+        "--json",
+    ];
+    let body = "private body 工\nsecond\r\nthird\tline";
+    let output = root_mail(&fixture.0, &args, body.as_bytes());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        serde_json::json!({"ok":true,"result":{
+            "dryRun":true,"executed":false,"accountId":"imap:imap@example.org","from":"imap@example.org",
+            "to":["one@example.org","two@example.org"],"cc":["three@example.org"],"bcc":["four@example.org"],
+            "subject":"Unicode 工","body":body,"attachments":[{"name":"quoted\\工\".txt","size":18},{"name":"second.txt","size":3}]
+        }})
+    );
+    for body in [
+        b"private\xffsecret".to_vec(),
+        b"private\0secret".to_vec(),
+        vec![b'x'; 16 * 1024 * 1024 + 1],
+    ] {
+        let output = root_mail(&fixture.0, &args, &body);
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+            serde_json::json!({"ok":false,"error":{"code":"mail_send_invalid_body"}})
+        );
+        assert!(output.stderr.is_empty());
+    }
+    for name in ["cache", "state", "home"] {
+        assert!(!fixture.0.join(name).exists());
+    }
+}
+
+#[test]
+fn invalid_send_inputs_never_reach_credentials_or_outbox_even_with_execute() {
+    use std::os::unix::fs::symlink;
+    let fixture = mail_list_fixture(9, false);
+    let file = fixture.0.join("file.txt");
+    fs::write(&file, b"bytes").unwrap();
+    let link = fixture.0.join("link.txt");
+    symlink(&file, &link).unwrap();
+    let fifo = fixture.0.join("pipe.txt");
+    let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let sentinel = fixture.0.join("credential-touched");
+    fs::write(
+        fixture.0.join("bin/secret-tool"),
+        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
+    )
+    .unwrap();
+    for extra in [
+        vec!["--subject", "secret\r"],
+        vec!["--subject", "secret\n"],
+        vec!["--subject", "secret\r\n"],
+        vec!["--to", "secret\t@example.org"],
+        vec!["--from", "secret\n@example.org"],
+        vec!["--attach", "relative.txt"],
+        vec!["--attach", link.to_str().unwrap()],
+        vec!["--attach", fifo.to_str().unwrap()],
+        vec!["--attach", fixture.0.to_str().unwrap()],
+    ] {
+        for execute in [false, true] {
+            let mut args = vec![
+                "send",
+                "--account",
+                "imap:imap@example.org",
+                "--to",
+                "one@example.org",
+                "--json",
+            ];
+            args.extend(extra.iter().copied());
+            if execute {
+                args.push("--execute");
+            }
+            let output = root_mail(&fixture.0, &args, b"private body");
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["ok"], false);
+            assert!(value["error"]["code"].is_string());
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("secret"));
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("private body"));
+            assert!(output.stderr.is_empty());
+        }
+    }
+    assert!(!sentinel.exists());
+    for name in ["cache", "state", "home"] {
+        assert!(!fixture.0.join(name).exists());
+    }
+}
+
+#[test]
+fn only_send_consumes_stdin_and_human_previews_escape_untrusted_text() {
+    let fixture = mail_list_fixture(9, false);
+    for args in [
+        vec!["list"],
+        vec!["read", "one"],
+        vec!["mark", "read", "one"],
+        vec!["archive", "one"],
+        vec!["trash", "one"],
+        vec!["spam", "one"],
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+            .args(args)
+            .env("XDG_CONFIG_HOME", fixture.0.join("config"))
+            .env("HOME", fixture.0.join("home"))
+            .env("PATH", fixture.0.join("bin"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("read-only/action command consumed stdin");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        drop(input);
+    }
+    let output = root_mail(
+        &fixture.0,
+        &[
+            "send",
+            "--account",
+            "imap:imap@example.org",
+            "--to",
+            "one@example.org",
+        ],
+        "line\n\x1b[31mred\r\t|row\u{202e}工".as_bytes(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !text.contains('\x1b')
+            && !text.contains('\r')
+            && !text.contains('\t')
+            && !text.contains('\u{202e}')
+    );
+    assert!(text.contains("\\u{1b}") && text.contains("\\u{202e}") && text.contains("\\|row"));
+}
+
+#[test]
+fn failed_execution_retains_target_results_and_exits_one() {
+    let fixture = mail_list_fixture(9, false);
+    let output = root_mail(
+        &fixture.0,
+        &[
+            "mark",
+            "read",
+            "7:INBOX",
+            "8:INBOX",
+            "--account",
+            "imap:imap@example.org",
+            "--execute",
+            "--json",
+        ],
+        b"",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"ok":false,"error":{"code":"mail_action_failed"},"result":{
+            "dryRun":false,"executed":true,"accountId":"imap:imap@example.org","operation":"read",
+            "requestedIds":["7:INBOX","8:INBOX"],"targetIds":["7:INBOX","8:INBOX"],"succeededIds":[],"failedIds":["7:INBOX","8:INBOX"]
+        }})
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[tokio::test]
+async fn one_shot_send_owns_delivery_until_durable_terminal_result() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    for (generic, acknowledge) in [(false, true), (true, false)] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fixture = mail_list_fixture(9, true);
+        let config = fixture.0.join("config/omamail/accounts.json");
+        let mut registry: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+        registry["accounts"][1]["imap"]["smtpHost"] = serde_json::json!("127.0.0.1");
+        registry["accounts"][1]["imap"]["smtpPort"] =
+            serde_json::json!(listener.local_addr().unwrap().port());
+        fs::write(&config, registry.to_string()).unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) =
+                tokio::time::timeout(std::time::Duration::from_secs(20), listener.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            writer.write_all(b"220 ready\r\n").await.unwrap();
+            for (prefix, reply) in [
+                ("EHLO omamail", "250 ready\r\n"),
+                ("AUTH PLAIN ", "235 authenticated\r\n"),
+                ("MAIL FROM:<imap@example.org>", "250 sender\r\n"),
+                ("RCPT TO:<one@example.org>", "250 recipient\r\n"),
+                ("DATA", "354 go\r\n"),
+            ] {
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                assert!(line.starts_with(prefix), "{line:?}");
+                writer.write_all(reply.as_bytes()).await.unwrap();
+            }
+            let mut message = Vec::new();
+            loop {
+                let mut line = Vec::new();
+                assert!(reader.read_until(b'\n', &mut line).await.unwrap() > 0);
+                if line == b".\r\n" {
+                    break;
+                }
+                message.extend(line);
+            }
+            let parsed = mailparse::parse_mail(&message).unwrap();
+            assert_eq!(
+                parsed.get_body().unwrap().trim_end(),
+                "private body 工\nsecond line"
+            );
+            if acknowledge {
+                writer.write_all(b"250 accepted\r\n").await.unwrap();
+            }
+            drop(writer);
+            drop(reader);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err(),
+                "uncertain delivery was retried"
+            );
+        });
+        let root = fixture.0.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            let (args, body) = if generic {
+                (vec!["call", "mail.send", "--json"], serde_json::json!({"account":"imap:imap@example.org","to":["one@example.org"],"body":"private body 工\nsecond line","execute":true}).to_string().into_bytes())
+            } else {
+                (vec!["send", "--account", "imap:imap@example.org", "--to", "one@example.org", "--execute", "--json"], "private body 工\nsecond line".as_bytes().to_vec())
+            };
+            root_mail(&root, &args, &body)
+        }).await.unwrap();
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value["result"]["outbox"]["entries"][0]["state"],
+            if acknowledge { "sent" } else { "unknown" },
+            "{output:?}"
+        );
+        assert_eq!(output.status.code(), Some(if acknowledge { 0 } else { 1 }));
+        assert_eq!(value["ok"], acknowledge);
+        if !acknowledge {
+            assert_eq!(value["error"]["code"], "outbox_delivery_unknown");
+        }
+        let durable: Value =
+            serde_json::from_slice(&fs::read(fixture.0.join("state/omamail/outbox.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            durable[0]["state"],
+            value["result"]["outbox"]["entries"][0]["state"]
+        );
+        assert_eq!(durable[0]["id"], value["result"]["sendId"]);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("private body"));
+        assert!(output.stderr.is_empty());
+        peer.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn partial_batch_reports_confirmed_ids_and_does_not_retry_failed_chunk() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"* OK ready\r\n").await.unwrap();
+        let mut stores = 0;
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).await.unwrap() > 0);
+            let response = if line.starts_with("O1 LOGIN ") {
+                "O1 OK login\r\n"
+            } else if line == "O1 CAPABILITY\r\n" {
+                "* CAPABILITY IMAP4rev1\r\nO1 OK caps\r\n"
+            } else if line == "O1 LIST \"\" \"*\"\r\n" {
+                "* LIST () \"/\" INBOX\r\nO1 OK folders\r\n"
+            } else if line == "O1 SELECT \"INBOX\"\r\n" {
+                "O1 OK selected\r\n"
+            } else if line.starts_with("O1 UID STORE ") {
+                stores += 1;
+                if stores == 1 {
+                    assert!(line.starts_with("O1 UID STORE 1,2,3,"));
+                    assert!(line.ends_with(",500 +FLAGS.SILENT (\\Seen)\r\n"));
+                    "O1 OK stored\r\n"
+                } else {
+                    assert_eq!(line, "O1 UID STORE 501 +FLAGS.SILENT (\\Seen)\r\n");
+                    "O1 NO refused\r\n"
+                }
+            } else {
+                panic!("unexpected mutation command: {line:?}");
+            };
+            writer.write_all(response.as_bytes()).await.unwrap();
+            if stores == 2 {
+                break;
+            }
+        }
+        drop(writer);
+        drop(reader);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let root = fixture.0.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        let ids: Vec<_> = (1..=501).map(|id| format!("{id}:INBOX")).collect();
+        let mut args = vec![
+            "mark",
+            "read",
+            "--account",
+            "imap:imap@example.org",
+            "--execute",
+            "--json",
+        ];
+        args.extend(ids.iter().map(String::as_str));
+        root_mail(&root, &args, b"")
+    })
+    .await
+    .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(value["ok"], false);
+    assert_eq!(value["error"]["code"], "mail_action_failed");
+    assert_eq!(
+        value["result"]["succeededIds"].as_array().unwrap().len(),
+        500
+    );
+    assert_eq!(value["result"]["succeededIds"][0], "1:INBOX");
+    assert_eq!(value["result"]["succeededIds"][499], "500:INBOX");
+    assert_eq!(
+        value["result"]["failedIds"],
+        serde_json::json!(["501:INBOX"])
+    );
+    assert!(output.stderr.is_empty());
+    peer.await.unwrap();
+}
+
+#[tokio::test]
+async fn root_list_and_read_use_active_account_and_safe_provider_results() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    for read in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+        let config = fixture.0.join("config/omamail/accounts.json");
+        let mut registry: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+        registry["activeId"] = serde_json::json!("imap:imap@example.org");
+        fs::write(&config, registry.to_string()).unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            writer.write_all(b"* OK ready\r\n").await.unwrap();
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).await.unwrap() > 0);
+                let response = if line.starts_with("O1 LOGIN ") {
+                    "O1 OK login\r\n".into()
+                } else if line == "O1 CAPABILITY\r\n" {
+                    "* CAPABILITY IMAP4rev1\r\nO1 OK caps\r\n".into()
+                } else if line == "O1 LIST \"\" \"*\"\r\n" {
+                    "* LIST () \"/\" INBOX\r\nO1 OK folders\r\n".into()
+                } else if line == "O1 SELECT \"INBOX\"\r\n" {
+                    "O1 OK selected\r\n".into()
+                } else if line == "O1 UID FETCH 1:* (UID)\r\n" {
+                    "* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".into()
+                } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
+                    assert!(line.contains("BODY.PEEK["));
+                    assert_eq!(line.contains("BODY.PEEK[]"), read);
+                    let raw = "From: Writer <writer@example.org>\r\nSubject: Safe root result\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsafe body 工";
+                    format!(
+                        "* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE {} BODY[] {{{}}}\r\n{}\r\n)\r\nO1 OK fetched\r\n",
+                        raw.len(),
+                        raw.len(),
+                        raw
+                    )
+                } else {
+                    panic!("unexpected read command: {line:?}");
+                };
+                writer.write_all(response.as_bytes()).await.unwrap();
+                if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
+                    break;
+                }
+            }
+        });
+        let root = fixture.0.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            root_mail(
+                &root,
+                if read {
+                    &["read", "7:INBOX", "--json"]
+                } else {
+                    &["list", "--json"]
+                },
+                b"",
+            )
+        })
+        .await
+        .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["result"]["accountId"], "imap:imap@example.org");
+        if read {
+            assert_eq!(value["result"]["message"]["id"], "7:INBOX");
+            assert_eq!(
+                value["result"]["message"]["nativeContent"]["body"]["text"],
+                "safe body 工"
+            );
+        } else {
+            assert_eq!(value["result"]["messages"][0]["id"], "7:INBOX");
+            assert_eq!(value["result"]["mailbox"], "inbox");
+            assert_eq!(value["result"]["nextPageToken"], "");
+        }
+        assert!(output.stderr.is_empty());
+        peer.await.unwrap();
+    }
+}

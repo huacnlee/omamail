@@ -303,6 +303,19 @@ async fn imap_call(method: &str, params: &Value) -> Result<Value, &'static str> 
 }
 
 impl Session {
+    pub(crate) async fn finish_cli_send(&self, result: &mut Value) -> Result<(), &'static str> {
+        result["outbox"] = self
+            .outbox
+            .wait_for_send(
+                result["accountId"]
+                    .as_str()
+                    .ok_or("outbox_invalid_params")?,
+                result["sendId"].as_str().ok_or("outbox_invalid_params")?,
+            )
+            .await?;
+        Ok(())
+    }
+
     pub(super) async fn mail_call(
         &self,
         method: &str,
