@@ -182,6 +182,8 @@ test-shell-portable:
 	bash tests/test_calendar_write.sh
 	bash tests/test_calendar_delete.sh
 	bash tests/test_release_notes.sh
+	bash tests/test_publish.sh
+	bash tests/test_release_source.sh
 
 # This one asserts libcurl's own behaviour rather than ours: which of its two
 # output channels a single-UID BODY.PEEK fetch arrives on. That is a property
@@ -245,3 +247,10 @@ install: install-backend-local
 install-plugin:
 	python3 scripts/backend-runtime.py uninstall
 	bash scripts/link-plugin.sh
+
+# Release from main: `make publish VERSION=1.2.3` bumps, commits, tags and
+# pushes; the tag push runs Release, which publishes the assets and pushes the
+# pin commit back. Without VERSION it tags the version the checkout carries.
+.PHONY: publish
+publish:
+	bash scripts/publish.sh $(VERSION)

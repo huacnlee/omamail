@@ -1,10 +1,13 @@
 name: Release
 
-# Dispatch on the explicit source branch, including a feature branch before merge.
+# A `vX.Y.Z` tag on main's head publishes that version (`make publish`). A
+# dispatch on an explicit source branch, including a feature branch before
+# merge, publishes from that branch and creates the tag itself.
 on:
   workflow_dispatch:
-  # Explicit opt-in bootstrap branch; works before dispatch is on main.
   push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    # Explicit opt-in bootstrap branch; works before dispatch is on main.
     branches: ['release/backend/**']
     paths-ignore: ['backend-version']
 
@@ -20,26 +23,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      branch: ${{ steps.version.outputs.branch }}
     steps:
       - uses: actions/checkout@v4
       - id: version
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$GH_TOKEN"
           version="$(python3 scripts/package-backend.py check)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Require a branch and an unused release version
+          # A tag run publishes from main and must be its head; a branch run
+          # publishes from that branch, whose tag must not exist yet.
+          branch="$(VERSION="$version" bash scripts/release-source.sh)"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+      - name: Require an unused release version
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_TYPE" = branch
-          test -n "$GH_TOKEN"
-          git check-ref-format "refs/heads/$GITHUB_REF_NAME"
-          source_sha="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
-          test "$source_sha" = "$GITHUB_SHA"
-          existing_tag="$(git ls-remote origin "refs/tags/v$VERSION")"
-          test -z "$existing_tag"
           # Listing must succeed; network/authentication failures never mean absent.
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
           if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
@@ -128,13 +132,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
         run: |
           set -euo pipefail
           python3 scripts/package-backend.py check --tag "v$VERSION"
-          source_sha="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
-          test "$source_sha" = "$GITHUB_SHA"
-          existing_tag="$(git ls-remote origin "refs/tags/v$VERSION")"
-          test -z "$existing_tag"
+          # The source branch must still be at this revision, and the tag state
+          # unchanged since prepare: absent for a branch run, this commit for a tag run.
+          test "$(bash scripts/release-source.sh)" = "$BRANCH"
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
           if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
           mkdir release-assets
@@ -150,6 +154,7 @@ jobs:
           cp artifacts/backend-x86_64/backend-build.json release-assets/
           python3 scripts/package-backend.py check-provenance release-assets/backend-build.json
           python3 scripts/package-backend.py verify release-assets
+          # For a tag run the tag already exists at this commit; --target only matters for a branch run.
           gh release create "v$VERSION" release-assets/* --target "$GITHUB_SHA" --draft --title "v$VERSION" --generate-notes
           gh release edit "v$VERSION" --draft=false
           mkdir published
@@ -162,4 +167,4 @@ jobs:
           # Refuse moved refs and push only a pin commit, without force. The
           # commit advances backend-version and folds the contract's unreleased
           # step into its released API, which the published binary now speaks.
-          python3 scripts/package-backend.py pin --branch "$GITHUB_REF_NAME" --expected "$GITHUB_SHA"
+          python3 scripts/package-backend.py pin --branch "$BRANCH" --expected "$GITHUB_SHA"

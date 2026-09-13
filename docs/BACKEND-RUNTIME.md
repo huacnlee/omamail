@@ -102,17 +102,25 @@ binary does not have yet. The contract names that difference and nothing more:
 
 ## Release before pin
 
-Prepare a new version with `scripts/bump.sh MAJOR.MINOR.PATCH`. This edits only
-Cargo.toml, the omamail Cargo.lock record and manifest.json. It does not commit,
-tag, push or advance backend-version. Review and test the changes, then commit
-and push the explicit source branch. For the first release before this workflow
-is registered on main, use a branch named `release/backend/<name>`: pushing that
-explicit release branch triggers publication. Ordinary feature branches do not
-publish automatically. Merge the resulting branch including its bot pin commit,
-or review and carry that pin-only commit into the original PR after its actual
-published-asset checks pass. Future releases can dispatch Release on main or an
-explicit feature branch. A push changing only backend-version does not retrigger
-publication, so the bot's pin commit cannot recurse.
+Release with `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main that is in
+sync with origin. It runs `scripts/bump.sh`, which edits only Cargo.toml, the
+omamail Cargo.lock record and manifest.json, commits `Version X.Y.Z`, tags that
+commit `vX.Y.Z` and pushes main and the tag in one atomic push, then follows
+the Release run to its end. Without `VERSION` it tags the version the checkout
+already carries. The tag push is what triggers Release: the tag must name the
+Cargo version and be main's head, or the run refuses before building. Do not
+create the tag by hand for a dispatch: a dispatch on a branch creates the tag
+itself and refuses a version whose tag exists. The plugin tolerates the pin
+landing after the tag because `Backend` refuses the unreleased step until the
+pinned binary has it, so nothing on main can depend on the pin being current.
+
+A dispatch on main or an explicit feature branch still works, as does pushing a
+branch named `release/backend/<name>` for a bootstrap before the workflow is on
+main. Ordinary feature branches do not publish automatically. Merge the
+resulting branch including its bot pin commit, or review and carry that
+pin-only commit into the original PR after its actual published-asset checks
+pass. A push changing only backend-version does not retrigger publication, so
+the bot's pin commit cannot recurse.
 
 The workflow tests and builds locked native musl binaries on Linux x86_64 and
 aarch64, executes each version probe, rejects dynamic ELF dependencies, and
@@ -138,9 +146,9 @@ change; rerunning publication refuses the existing version.
 Repository setup must provide `RELEASE_TOKEN`, an appropriately scoped GitHub
 App token or fine-grained token with contents write permission for this repo,
 permitted by branch rules. The default GITHUB_TOKEN cannot be used for the pin
-push because it suppresses subsequent workflow triggers. Release runs only by
-explicit dispatch or a push to `release/backend/**` of trusted code; restrict
-write access to these release branches. PR CI has read-only permissions and never
+push because it suppresses subsequent workflow triggers. Release runs only by a
+`vX.Y.Z` tag push, an explicit dispatch, or a push to `release/backend/**` of
+trusted code; restrict who can push tags and these release branches. PR CI has read-only permissions and never
 receives that secret. Require **Published backend merge gate** in branch
 protection. That check reads the plugin's exact pin independently of Cargo's
 current development version, verifies both published native archives, compares the
