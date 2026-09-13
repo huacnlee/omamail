@@ -499,7 +499,7 @@ fn render_prepared(
 
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-fn projection(
+pub(super) fn projection(
     resource: &Value,
     account: &str,
     id: &str,

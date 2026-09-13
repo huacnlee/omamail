@@ -240,12 +240,135 @@ impl crate::mail::read::ReadAdapter for ProviderRead<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mail::{Account, Mailbox};
+    use crate::mail::{Account, Mailbox, Provider, ReadRequest};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use std::{
         fs,
+        future::Future,
         io::{BufRead, BufReader},
+        pin::Pin,
         process::{Command, Stdio},
+        sync::{Arc, Mutex},
     };
+
+    struct ReaderProjectionAdapter {
+        opened: Value,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl crate::mail::read::ReadAdapter for ReaderProjectionAdapter {
+        fn call<'a>(
+            &'a self,
+            method: &'a str,
+            _params: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+            self.calls.lock().unwrap().push(method.to_owned());
+            Box::pin(async move {
+                if method == "reader.open" {
+                    Ok(self.opened.clone())
+                } else {
+                    Err("unexpected_method")
+                }
+            })
+        }
+    }
+
+    fn reader_resource(html: &str, multipart: bool) -> Value {
+        let html = URL_SAFE_NO_PAD.encode(html);
+        let payload = if multipart {
+            json!({"mimeType":"multipart/alternative","headers":[],"parts":[
+                {"mimeType":"text/plain","body":{"data":URL_SAFE_NO_PAD.encode("Safe text")}},
+                {"mimeType":"text/html","body":{"data":html}}
+            ]})
+        } else {
+            json!({"mimeType":"text/html","headers":[],"body":{"data":html}})
+        };
+        json!({"id":"message-1","payload":payload})
+    }
+
+    async fn assert_closed_mail_read_projection(
+        resource: Value,
+        expected_text: &str,
+        has_plain_images: bool,
+    ) {
+        let tracker = "https://tracker.example/pixel";
+        let data_script = "data:text/html,&lt;script&gt;forbiddenDataScript&lt;/script&gt;";
+        let opened = super::super::reader::projection(
+            &resource,
+            "reader@example.org",
+            "message-1",
+            "test-reader-key",
+            0,
+            json!({"allowRemoteImages":false,"withReader":true}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        assert!(
+            opened["nativeRender"]["remoteImageSources"]
+                .to_string()
+                .contains(tracker)
+        );
+        if has_plain_images {
+            assert!(
+                opened["nativeRender"]["plainText"]["images"]
+                    .to_string()
+                    .contains(data_script)
+            );
+        }
+
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let result = crate::mail::read::read_with(
+            ReadRequest {
+                account: Account {
+                    id: "reader@example.org".into(),
+                    provider: Provider::Gmail,
+                },
+                id: "message-1".into(),
+            },
+            &ReaderProjectionAdapter {
+                opened,
+                calls: calls.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result["message"]["nativeContent"]["body"]["text"],
+            expected_text
+        );
+        assert!(result["message"]["nativeRender"]["document"].is_object());
+        let serialized = result.to_string();
+        assert!(!serialized.contains(tracker));
+        assert!(!serialized.contains(data_script));
+        assert_eq!(&*calls.lock().unwrap(), &["reader.open"]);
+    }
+
+    #[tokio::test]
+    async fn mail_read_projects_actual_multipart_reader_output_without_image_sources() {
+        assert_closed_mail_read_projection(
+            reader_resource(
+                "<p>Safe HTML</p><img src=\"https://tracker.example/pixel\"><img src=\"data:text/html,&lt;script&gt;forbiddenDataScript&lt;/script&gt;\">",
+                true,
+            ),
+            "Safe text",
+            false,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn mail_read_projects_actual_html_reader_output_without_image_sources() {
+        assert_closed_mail_read_projection(
+            reader_resource(
+                "<p>Safe HTML</p><img src=\"https://tracker.example/pixel\"><img src=\"data:text/html,&lt;script&gt;forbiddenDataScript&lt;/script&gt;\">",
+                false,
+            ),
+            "Safe HTML\n[image 1][image 2]",
+            true,
+        )
+        .await;
+    }
 
     #[tokio::test]
     async fn jmap_adapter_keeps_thread_state_from_nonrepresentative_members() {

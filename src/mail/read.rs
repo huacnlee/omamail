@@ -1,5 +1,5 @@
 use super::ReadRequest;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{
     future::Future,
     pin::Pin,
@@ -32,13 +32,70 @@ fn request_id() -> String {
 
 fn safe_attachment(value: &Value) -> Result<Value, &'static str> {
     let attachment = value.as_object().ok_or("mail_read_invalid_reader")?;
-    let mut result = Map::new();
-    for field in ["attachmentId", "filename", "mimeType", "size"] {
-        if let Some(value) = attachment.get(field) {
-            result.insert(field.to_owned(), value.clone());
-        }
+    let attachment_id = attachment
+        .get("attachmentId")
+        .and_then(Value::as_str)
+        .ok_or("mail_read_invalid_reader")?;
+    let filename = attachment
+        .get("filename")
+        .and_then(Value::as_str)
+        .ok_or("mail_read_invalid_reader")?;
+    let mime_type = attachment
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .ok_or("mail_read_invalid_reader")?;
+    let size = attachment
+        .get("size")
+        .and_then(Value::as_u64)
+        .ok_or("mail_read_invalid_reader")?;
+    if [attachment_id, filename, mime_type]
+        .iter()
+        .any(|value| value.chars().any(char::is_control))
+    {
+        return Err("mail_read_invalid_reader");
     }
-    Ok(Value::Object(result))
+    Ok(json!({
+        "attachmentId":attachment_id,
+        "filename":filename,
+        "mimeType":mime_type,
+        "size":size,
+    }))
+}
+
+fn safe_body(value: &Value) -> Result<Value, &'static str> {
+    let body = value.as_object().ok_or("mail_read_invalid_reader")?;
+    let text = body
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or("mail_read_invalid_reader")?;
+    let source = body
+        .get("source")
+        .and_then(Value::as_str)
+        .filter(|source| matches!(*source, "plain" | "html"))
+        .ok_or("mail_read_invalid_reader")?;
+    let direction = body
+        .get("bodyDirection")
+        .and_then(Value::as_str)
+        .filter(|direction| matches!(*direction, "ltr" | "rtl"))
+        .ok_or("mail_read_invalid_reader")?;
+    Ok(json!({"text":text,"source":source,"bodyDirection":direction}))
+}
+
+fn safe_render(value: &Value) -> Result<Value, &'static str> {
+    let render = value.as_object().ok_or("mail_read_invalid_reader")?;
+    if render.contains_key("html")
+        || render
+            .get("reader")
+            .and_then(Value::as_object)
+            .is_some_and(|reader| reader.contains_key("html"))
+    {
+        return Err("mail_read_unsafe_reader");
+    }
+    let document = render
+        .get("document")
+        .filter(|document| document.is_object())
+        .ok_or("mail_read_invalid_reader")?;
+    Ok(json!({"document":document}))
 }
 
 fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<String>), &'static str> {
@@ -54,17 +111,10 @@ fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<Strin
     let content = value["nativeContent"]
         .as_object()
         .ok_or("mail_read_invalid_reader")?;
-    if content.contains_key("html")
-        || value["nativeRender"].get("html").is_some()
-        || value["nativeRender"]["reader"].get("html").is_some()
-    {
+    if content.contains_key("html") {
         return Err("mail_read_unsafe_reader");
     }
-    let body = content
-        .get("body")
-        .filter(|body| body.is_object())
-        .cloned()
-        .ok_or("mail_read_invalid_reader")?;
+    let body = safe_body(content.get("body").ok_or("mail_read_invalid_reader")?)?;
     let attachments = content
         .get("attachments")
         .and_then(Value::as_array)
@@ -94,13 +144,14 @@ fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<Strin
         })
         .transpose()?
         .unwrap_or_default();
+    let render = safe_render(&value["nativeRender"])?;
     let content = json!({"body":body,"attachments":attachments});
     Ok((
         json!({
             "id":request.id,
             "summary":summary,
             "nativeContent":content,
-            "nativeRender":value["nativeRender"],
+            "nativeRender":render,
             "attachments":content["attachments"],
         }),
         members,

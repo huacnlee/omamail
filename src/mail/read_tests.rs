@@ -56,7 +56,7 @@ fn cached_mime_reader_fixture() -> Value {
         },
         "nativeSummary": {"id": "message-1"},
         "nativeContent": {
-            "body": {"text": "Safe text", "source": "plain"},
+            "body": {"text": "Safe text", "source": "plain", "bodyDirection":"ltr"},
             "attachments": [{
                 "attachmentId": "download-1", "filename": "brief.txt",
                 "mimeType": "text/plain", "size": 14,
@@ -144,6 +144,34 @@ async fn read_refuses_raw_html_that_escaped_the_reader_boundary() {
     .await
     .unwrap_err();
     assert_eq!(error, "mail_read_unsafe_reader");
+}
+
+#[tokio::test]
+async fn read_returns_reader_bound_conversation_members() {
+    let mut response = cached_mime_reader_fixture();
+    response["nativeSummary"]["thread"] =
+        json!({"id":"thread-1","memberIds":["message-1", "reply-2"]});
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let result = read_with(
+        request(),
+        &RecordingAdapter {
+            open_response: response,
+            conversation_response: json!({"memberIds":["message-1", "reply-2"]}),
+            calls: calls.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["conversation"], json!(["message-1", "reply-2"]));
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(method, _)| method.as_str())
+            .collect::<Vec<_>>(),
+        ["reader.open", "account.conversation"]
+    );
 }
 
 #[tokio::test]
