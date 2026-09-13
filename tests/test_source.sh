@@ -1293,14 +1293,13 @@ PREVIEWREAD
 # The backend a QML file calls is the contract's, by name: a method that is
 # not declared cannot be called at all, and one the checkout has not shipped
 # yet is declared unreleased so `Backend` can refuse it on the pinned binary.
-# And once the step is released the checks written for it are gone — the
-# code carries at most one step of "does the backend have this yet".
+# Feature requirements are fixed API revisions and survive release folding;
+# their connected-version behavior is covered by QML compatibility tests.
 python3 - <<'CONTRACTCALLS' || exit 1
 import json, pathlib, re
 root = pathlib.Path("..")
 contract = json.loads((root / "backend-api.json").read_text())
 methods = set(contract["methods"])
-unreleased = contract["unreleased"]
 files = [p for p in (root / "ui").rglob("*") if p.suffix in (".qml", ".js") and "tests" not in p.parts]
 called = {}
 for path in files:
@@ -1310,10 +1309,5 @@ unknown = sorted(set(called) - methods)
 if unknown:
     raise SystemExit("test_source.sh: QML calls backend methods the contract does not declare: "
                      + ", ".join(m + " (" + ", ".join(sorted(called[m])) + ")" for m in unknown))
-if not unreleased["methods"] and not unreleased["cases"]:
-    guarded = [str(p.relative_to(root)) for p in files
-               if "backendNeedsUpdate" in p.read_text() and p.name not in ("Service.qml", "Backend.qml")]
-    if guarded:
-        raise SystemExit("test_source.sh: nothing is unreleased, so no feature may still wait on backendNeedsUpdate: "
-                         + ", ".join(guarded))
+
 CONTRACTCALLS

@@ -92,13 +92,8 @@ binary does not have yet. The contract names that difference and nothing more:
   connected binary lacks the step, and refuses a call to an unreleased method on
   it with `backend_needs_update` (code -32012) — so a feature that forgot to
   look before asking fails the way it already handles, never as a request the old
-  binary would misread. `Service.backendNeedsUpdate` is the same flag for views:
-  a feature on the step says "the backend needs an update" and waits. Absent or
-  malformed step information reads as no step.
-- `tests/test_source.sh` allows `backend.call` only on declared methods, and
-  once nothing is unreleased allows no `backendNeedsUpdate` outside `Backend`
-  and `Service`: the check written for a step goes when the step ships, so the
-  code carries at most one step of "does the backend have this yet".
+  binary would misread. `Service.backendNeedsUpdate` is an overall update indicator, not a per-feature gate. A feature checks the connected backend against the fixed API revision that introduced it: event suggestions use `Service.backendCanSuggestEvents`, true only for a ready backend with API 2 or newer. That requirement remains correct before release, after the pin advances, and when a later unrelated API is introduced.
+- `tests/test_source.sh` permits calls only to declared backend methods. QML regression tests exercise fixed feature requirements across connected API versions and changing release metadata; a release must not require deleting compatibility checks from QML.
 - The pin commit made by a release folds the step: `releasedApiVersion` becomes
   `apiVersion`, both `unreleased` lists empty. Published contracts from before
   the split are read as all released.
@@ -109,7 +104,7 @@ Run `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with o
 
 A push to `release/**` starts Release. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. CI builds both backends, creates `vX.Y.Z` and publishes the assets, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
 
-The required **Published backend merge gate** refuses a release PR until its pin equals the prepared version, then verifies the actual released binaries and contract as usual. Once the pin commit and required checks pass, review and merge that PR once: main receives the version metadata and working backend dependency together. The command does not merge automatically. Features needing an unreleased API continue to wait on `Service.backendNeedsUpdate` until that release is installed.
+The required **Published backend merge gate** refuses a release PR until its pin equals the prepared version, then verifies the actual released binaries and contract as usual. Once the pin commit and required checks pass, review and merge that PR once: main receives the version metadata and working backend dependency together. The command does not merge automatically. Features wait until the connected backend meets their fixed minimum API revision, independently of whether that revision is currently labelled released or unreleased.
 
 The repository's active main ruleset requires a PR and the Published backend merge gate and prohibits deletion and force pushes. Administrators currently have a pull-request-only bypass: direct pushes remain blocked, but an administrator can explicitly bypass checks when merging a PR. Never enable an always-on bypass or use the PR bypass for routine releases; neither a local push nor CI should advance main directly.
 
@@ -150,7 +145,7 @@ published binary.
 
 For a combined QML/Rust PR requiring an API change: raise `apiVersion` one step
 past `releasedApiVersion`, name the new methods and cases under `unreleased`, and
-let the feature wait on `Service.backendNeedsUpdate`. Both gates run on the PR and
+let the feature wait until the connected backend reaches that feature's fixed minimum API revision. Both gates run on the PR and
 it merges into `main` without a release; the next release from `main` publishes
 the binary and its pin commit folds the step. Runtime handshake still requires the
 exact plugin-local binary pin, even when a newer release reports the same API; at

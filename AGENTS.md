@@ -55,8 +55,7 @@ three directories away from the client that calls it.
   not require a release, but new QML dependencies on methods, parameters,
   responses or error semantics require updated contract fixtures and a higher
   API revision — one step past `releasedApiVersion`, with the new methods and
-  cases named under `unreleased`, and the feature waiting on
-  `Service.backendNeedsUpdate` until a release folds the step. A second step
+  cases named under `unreleased`, and the feature checking the connected backend against its fixed minimum API revision (for example API 2 for event suggestions). Keep that requirement after release; `released` and `unreleased` describe publication state, not a feature's permanent capability. A second step
   waits for a release. See "Released and unreleased" in `docs/BACKEND-RUNTIME.md`.
 - The required Published backend merge gate tests the actual pinned release with
   current QML codecs. Extend the contract tests for changed behavior; an inventory

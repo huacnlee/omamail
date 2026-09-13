@@ -198,7 +198,7 @@ The branch push triggers **Release**. CI tests and builds both native backends, 
 
 - Keep main's ruleset active without an always-on bypass. Every update, including a release, goes through a PR; the administrator's PR-only bypass is not part of the release workflow.
 - Never tag by hand or delete an existing release tag to reuse its version. If publication fails, inspect the retained tag, draft or release and follow the recovery instructions before choosing a new version.
-- Features may merge with one unreleased API step while waiting on `Service.backendNeedsUpdate`; publish a backend release to make that step available to users.
+- Features may merge with one unreleased API step while checking the connected backend against their fixed minimum API revision. Publish a backend release to make that step available to users; the feature check remains valid after publication.
 - If publication succeeds but the pin push fails, keep the published assets and recover the pin on the same PR after verification.
 
 See [backend releases and recovery](docs/BACKEND-RUNTIME.md#release-before-pin) for the complete sequence and token requirements.

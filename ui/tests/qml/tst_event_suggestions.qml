@@ -171,7 +171,11 @@ Item {
       return out
     }
 
-    function init() { added.clear(); dismissed.clear(); card.suggestions = [] }
+    function init() {
+      added.clear(); dismissed.clear(); card.suggestions = []
+      mailService.backend.protocolInfo = { apiVersion: 2, protocol: 1, version: "0.0.0" }
+      mailService.backendRuntime.latestApiVersion = 2
+    }
 
     function test_a_dated_message_is_looked_at_once_when_asked() {
       var agent = seed(ada)
@@ -382,20 +386,27 @@ Item {
       compare(bridge.starts[1].messageId, "61:INBOX")
     }
 
-    // Event suggestions shipped in API 2. A later, unrelated unreleased
-    // step must not disable a feature the pinned backend already supports.
-    function test_a_later_api_step_does_not_block_released_event_suggestions() {
+    // API 2 is a fixed feature requirement. Moving the release labels or
+    // adding API 3 does not change what an API 2 backend can do.
+    function test_event_suggestions_require_api_two_across_releases() {
       var agent = seed(ada)
       var adas = mailService.accountAt(0)
-      mailService.settings = ({ suggestEvents: true })
-      mailService.backend.protocolInfo = { apiVersion: 2, protocol: 1, version: "0.0.0" }
-      mailService.backendRuntime.latestApiVersion = 3
-      tryCompare(mailService, "backendNeedsUpdate", true)
-      open(adas, "70:INBOX", "Dinner?", "Dinner on Thursday at 7pm?")
-      compare(lastStart().messageId, "70:INBOX", "the released feature still starts")
-      compare(contexts.length, 1, "the message is read once")
-      mailService.backendRuntime.latestApiVersion = 1
       mailService.backend.protocolInfo = { apiVersion: 1, protocol: 1, version: "0.0.0" }
+      mailService.backendRuntime.latestApiVersion = 2
+      mailService.settings = ({ suggestEvents: true })
+      open(adas, "70:INBOX", "Dinner?", "Dinner on Thursday at 7pm?")
+      wait(20)
+      compare(bridge.starts.length, 0, "API 1 cannot run event suggestions")
+      compare(contexts.length, 0, "no mail is read for an unsupported feature")
+      mailService.backendRuntime.latestApiVersion = 1
+      wait(20)
+      compare(bridge.starts.length, 0, "changing release labels cannot make API 1 support the feature")
+      mailService.backend.protocolInfo = { apiVersion: 2, protocol: 1, version: "0.0.0" }
+      compare(lastStart().messageId, "70:INBOX", "API 2 makes the pending feature available")
+      mailService.backendRuntime.latestApiVersion = 3
+      open(adas, "71:INBOX", "Dinner again?", "Dinner on Friday at 7pm?")
+      tryVerify(function() { return bridge.starts.length === 2 }, 1000)
+      compare(lastStart().messageId, "71:INBOX", "an unrelated API 3 does not disable API 2 features")
     }
 
     function test_the_card_draws_text_and_asks_the_reader() {

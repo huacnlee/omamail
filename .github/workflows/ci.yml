@@ -167,7 +167,7 @@ jobs:
           - raise `apiVersion` to exactly `releasedApiVersion + 1`;
           - list every new method under `unreleased.methods` and every new or changed contract case under `unreleased.cases`;
           - leave the released cases as they are — the pinned binary has to keep passing them;
-          - a feature that needs the step reads `Service.backendNeedsUpdate` and waits while it is true.
+          - a feature that needs the step checks the connected backend against its fixed minimum API revision and waits until that requirement is met.
           If `apiVersion` is already a step ahead, the released view still changed: compare `backend-api.json` with the pinned release's copy (`gh release download v$(cat backend-version) --pattern backend-api.json`). See "Released and unreleased" in `docs/BACKEND-RUNTIME.md`.
           NOTE
       - uses: actions/upload-artifact@v4

@@ -75,11 +75,11 @@ Item {
     onRequestFailed: function(method, error) { diagnostics.record(method, error) }
   }
 
-  // The checkout is a step ahead of the backend the owner has: a feature on
-  // that step says so and waits, instead of asking a binary that lacks it.
-  // Empty of meaning once the pin catches up, which is when the feature
-  // drops the check.
+  // Overall update status is diagnostic, not a feature requirement: its
+  // target moves whenever the checkout grows another API revision.
   readonly property bool backendNeedsUpdate: backend.needsUpdate
+  // Event suggestions require API 2 regardless of when that API is released.
+  readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
