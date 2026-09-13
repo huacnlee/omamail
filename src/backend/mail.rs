@@ -39,6 +39,7 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
                 return Ok(crate::mail::action::ActionAvailability {
                     refusals: value["data"]["refusals"].clone(),
                     mailboxes: value["data"]["mailboxes"].clone(),
+                    mailbox_required: Value::Null,
                 });
             }
             let mailboxes = ["archive", "trash", "spam"]
@@ -56,6 +57,11 @@ impl crate::mail::action::ActionLookup for AccountActionLookup<'_> {
             Ok(crate::mail::action::ActionAvailability {
                 refusals: crate::account::refusals_readonly(&account.id)?,
                 mailboxes: Value::Object(mailboxes),
+                mailbox_required: if account.provider == Provider::Hey {
+                    json!({"spam":false})
+                } else {
+                    Value::Null
+                },
             })
         })
     }
@@ -682,11 +688,18 @@ mod tests {
             .unwrap();
         assert_eq!(availability.mailboxes["archive"], true);
         assert_ne!(availability.refusals["spam"], Value::Null);
-        let rows = crate::mail::action::ActionLookup::rows(&lookup, &account, &["e1".into()])
-            .await
-            .unwrap();
-        assert_eq!(rows[0]["id"], "e1");
-        assert_eq!(rows[0]["thread"]["memberIds"], json!(["e1", "e2", "e3"]));
+        let preview = crate::mail::action::dry_run(
+            &ActRequest {
+                account: account.clone(),
+                operation: "archive".into(),
+                ids: vec!["e1".into()],
+                execute: false,
+            },
+            &lookup,
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview["targetIds"], json!(["e1", "e2"]));
         let report_client = reqwest::Client::builder()
             .add_root_certificate(
                 reqwest::Certificate::from_pem(&fs::read(certificate.trim()).unwrap()).unwrap(),
@@ -708,7 +721,10 @@ mod tests {
                 .unwrap()
                 .iter()
                 .flat_map(|request| { request["calls"].as_array().into_iter().flatten() })
-                .all(|call| !matches!(call[0].as_str(), Some("Email/set")))
+                .all(|call| matches!(
+                    call[0].as_str(),
+                    Some("Mailbox/get" | "Email/query" | "Email/get" | "Thread/get")
+                ))
         );
         let _ = peer.kill();
         let _ = peer.wait();

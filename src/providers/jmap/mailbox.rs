@@ -44,7 +44,15 @@ fn action_ids(value: &Value) -> Result<Vec<String>, &'static str> {
     if values.is_empty() || values.len() > 1000 {
         return Err("invalid_params");
     }
-    values.iter().map(action_id).collect()
+    let mut ids = Vec::with_capacity(values.len());
+    let mut seen = std::collections::HashSet::new();
+    for value in values {
+        let id = action_id(value)?;
+        if seen.insert(id.clone()) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 #[derive(Default)]
 pub(super) struct Context {
@@ -160,13 +168,13 @@ impl Session {
     ) -> Result<Value, &'static str> {
         let requested = action_ids(&params["ids"])?;
         let emails = self
-            .get_emails(context, snapshot, &requested, false, false)
+            .get_emails(context, snapshot, &requested, false, true)
             .await?;
         let mut by_id = Map::new();
         let mut thread_ids = Vec::new();
         for email in emails {
             let id = action_id(&email["id"])?;
-            if !requested.contains(&id) {
+            if !requested.contains(&id) || by_id.contains_key(&id) {
                 return Err("mail_action_invalid_target");
             }
             let thread = action_id(&email["threadId"])?;
@@ -175,7 +183,13 @@ impl Session {
             }
             by_id.insert(id, email);
         }
+        if by_id.len() != requested.len() {
+            return Err("mail_action_target_unknown");
+        }
         let mut members = Map::new();
+        let mut all_member_ids = Vec::new();
+        let mut seen_members = std::collections::HashSet::new();
+        let mut member_bytes = 0usize;
         for chunk in thread_ids.chunks(snapshot.limit("maxObjectsInGet", 256)) {
             let result = self
                 .api(
@@ -190,27 +204,76 @@ impl Session {
                 .ok_or("jmap_invalid_response")?;
             for thread in threads {
                 let id = action_id(&thread["id"])?;
-                let values = thread["emailIds"]
+                if !thread_ids.contains(&id) || members.contains_key(&id) {
+                    return Err("mail_action_invalid_target");
+                }
+                let values_json = thread["emailIds"]
                     .as_array()
                     .ok_or("mail_action_invalid_target")?;
-                if values.len() > 2000 {
+                if values_json.len() > 2000 {
                     return Err("mail_action_target_limit");
                 }
-                let values = values
-                    .iter()
-                    .map(action_id)
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut values = Vec::with_capacity(values_json.len());
+                for value in values_json {
+                    let raw = value.as_str().ok_or("mail_action_invalid_target")?;
+                    member_bytes = member_bytes.saturating_add(raw.len());
+                    if member_bytes > super::MAX_BODY {
+                        return Err("jmap_response_too_large");
+                    }
+                    let member = action_id(value)?;
+                    if seen_members.insert(member.clone()) {
+                        if all_member_ids.len() == 2000 {
+                            return Err("mail_action_target_limit");
+                        }
+                        all_member_ids.push(member.clone());
+                    }
+                    values.push(member);
+                }
                 members.insert(id, json!(values));
             }
+        }
+        if members.len() != thread_ids.len() {
+            return Err("mail_action_target_unknown");
+        }
+        let member_rows = self
+            .get_emails(context, snapshot, &all_member_ids, false, true)
+            .await?;
+        let mut member_by_id = Map::new();
+        for member in member_rows {
+            let id = action_id(&member["id"])?;
+            if !seen_members.contains(&id) || member_by_id.contains_key(&id) {
+                return Err("mail_action_invalid_target");
+            }
+            member_by_id.insert(id, member);
+        }
+        if member_by_id.len() != all_member_ids.len() {
+            return Err("mail_action_target_unknown");
         }
         let mut rows = Vec::new();
         for id in requested {
             let email = by_id.remove(&id).ok_or("mail_action_target_unknown")?;
             let thread = action_id(&email["threadId"])?;
-            let member_ids = members
-                .get(&thread)
-                .cloned()
-                .ok_or("mail_action_target_unknown")?;
+            let raw_member_ids = members.get(&thread).ok_or("mail_action_target_unknown")?;
+            let viewed = if super::resource::in_mailbox(&email, string(&snapshot.roles["junk"])) {
+                string(&snapshot.roles["junk"])
+            } else if super::resource::in_mailbox(&email, string(&snapshot.roles["trash"])) {
+                string(&snapshot.roles["trash"])
+            } else {
+                ""
+            };
+            let mut member_ids = Vec::new();
+            for member in raw_member_ids
+                .as_array()
+                .ok_or("mail_action_invalid_target")?
+            {
+                let member = action_id(member)?;
+                let member_row = member_by_id
+                    .get(&member)
+                    .ok_or("mail_action_target_unknown")?;
+                if super::resource::thread_member_visible(member_row, &snapshot.roles, viewed) {
+                    member_ids.push(member);
+                }
+            }
             rows.push(json!({"id":id,"thread":{"memberIds":member_ids}}));
         }
         Ok(json!({"rows":rows}))

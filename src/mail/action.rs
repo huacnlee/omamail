@@ -22,6 +22,9 @@ pub(crate) struct ActionAvailability {
     pub refusals: Value,
     /// Canonical destination names whose live account state permits planning.
     pub mailboxes: Value,
+    /// A provider action may be direct (for example HEY spam) rather than a
+    /// move to a listable mailbox. Missing entries retain mailbox semantics.
+    pub mailbox_required: Value,
 }
 
 /// Supplies only bounded, read-only action context. Implementations must not
@@ -58,14 +61,21 @@ fn label_ids(change: &Value, name: &str) -> Result<Vec<String>, &'static str> {
         .collect()
 }
 
-fn requested_ids(ids: &[String]) -> Result<(), &'static str> {
+fn requested_ids(ids: &[String]) -> Result<Vec<String>, &'static str> {
     if ids.is_empty() || ids.len() > 1_000 {
         return Err("invalid_params");
     }
     for id in ids {
         opaque_id(id)?;
     }
-    Ok(())
+    let mut unique = Vec::with_capacity(ids.len());
+    let mut seen = HashSet::new();
+    for id in ids {
+        if seen.insert(id.as_str()) {
+            unique.push(id.to_owned());
+        }
+    }
+    Ok(unique)
 }
 
 fn row_for<'a>(rows: &'a [Value], id: &str) -> Result<&'a Value, &'static str> {
@@ -100,7 +110,7 @@ pub(crate) async fn plan_action(
     if request.execute {
         return Err("mail_action_execute_unsupported");
     }
-    requested_ids(&request.ids)?;
+    let unique_requested = requested_ids(&request.ids)?;
     let action = domain_action(&request.operation)?;
     let availability = lookup.availability(&request.account).await?;
     let capability = crate::account::model::capability(action);
@@ -113,7 +123,9 @@ pub(crate) async fn plan_action(
     {
         return Err("mail_action_unavailable");
     }
-    if let Some(mailbox) = crate::account::model::action_mailbox(action) {
+    if let Some(mailbox) = crate::account::model::action_mailbox(action)
+        && availability.mailbox_required[&request.operation] != false
+    {
         if !availability.mailboxes[mailbox].as_bool().unwrap_or(false) {
             return Err("mail_action_destination_unavailable");
         }
@@ -121,10 +133,10 @@ pub(crate) async fn plan_action(
     let change = crate::account::model::action_changes(action);
     let add_label_ids = label_ids(&change, "add")?;
     let remove_label_ids = label_ids(&change, "remove")?;
-    let rows = lookup.rows(&request.account, &request.ids).await?;
+    let rows = lookup.rows(&request.account, &unique_requested).await?;
     let mut target_ids = Vec::new();
     let mut seen = HashSet::new();
-    for id in &request.ids {
+    for id in &unique_requested {
         append_targets(row_for(&rows, id)?, action, &mut target_ids, &mut seen)?;
     }
     if target_ids.is_empty() {

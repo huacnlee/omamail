@@ -82,6 +82,7 @@ fn lookup_with_mailboxes(
         availability: ActionAvailability {
             refusals,
             mailboxes,
+            mailbox_required: Value::Null,
         },
         rows: rows
             .iter()
@@ -220,6 +221,61 @@ async fn dynamic_destination_availability_refuses_before_target_lookup() {
     .unwrap_err();
     assert_eq!(error, "mail_action_destination_unavailable");
     assert_eq!(effects.lookup.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn hey_spam_is_a_direct_provider_action_not_a_listable_mailbox_move() {
+    let effects = Arc::new(Effects::default());
+    let planner = lookup_with_mailboxes(
+        Value::Null,
+        json!({"archive":false,"trash":true,"spam":false}),
+        &[row("message-1")],
+        effects,
+    );
+    let mut availability = planner.availability.clone();
+    availability.mailbox_required = json!({"spam":false});
+    let planner = RecordingLookup {
+        availability,
+        ..planner
+    };
+    assert_eq!(
+        plan_action(&request(Provider::Hey, "spam", &["message-1"]), &planner)
+            .await
+            .unwrap()
+            .target_ids,
+        ["message-1"]
+    );
+}
+
+#[tokio::test]
+async fn duplicate_requested_ids_are_deduplicated_before_provider_lookup() {
+    let effects = Arc::new(Effects::default());
+    let plan = plan_action(
+        &request(Provider::Jmap, "archive", &["one", "one", "two", "one"]),
+        &lookup(Value::Null, &[row("one"), row("two")], effects.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(plan.target_ids, ["one", "two"]);
+    assert_eq!(effects.lookup.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn aggregate_conversation_expansion_is_bounded_before_a_preview_is_retained() {
+    let effects = Arc::new(Effects::default());
+    let members = (0..2001)
+        .map(|n| json!(format!("m{n}")))
+        .collect::<Vec<_>>();
+    let oversized = json!({"id":"one","thread":{"memberIds":members}});
+    assert_eq!(
+        plan_action(
+            &request(Provider::Jmap, "archive", &["one"]),
+            &lookup(Value::Null, &[oversized], effects),
+        )
+        .await
+        .unwrap_err(),
+        "mail_action_target_limit"
+    );
 }
 
 #[tokio::test]

@@ -21,6 +21,8 @@ struct AccountFixture {
     _environment: MutexGuard<'static, ()>,
     previous: Option<OsString>,
     previous_cache: Option<OsString>,
+    previous_state: Option<OsString>,
+    previous_home: Option<OsString>,
     root: PathBuf,
 }
 
@@ -100,6 +102,18 @@ impl Drop for AccountFixture {
             }
         }
         unsafe {
+            if let Some(previous) = &self.previous_state {
+                env::set_var("XDG_STATE_HOME", previous);
+            } else {
+                env::remove_var("XDG_STATE_HOME");
+            }
+            if let Some(previous) = &self.previous_home {
+                env::set_var("HOME", previous);
+            } else {
+                env::remove_var("HOME");
+            }
+        }
+        unsafe {
             if let Some(previous) = &self.previous_cache {
                 env::set_var("XDG_CACHE_HOME", previous);
             } else {
@@ -129,12 +143,18 @@ fn account_fixture(registry: Value) -> AccountFixture {
     .unwrap();
     let previous = env::var_os("XDG_CONFIG_HOME");
     let previous_cache = env::var_os("XDG_CACHE_HOME");
+    let previous_state = env::var_os("XDG_STATE_HOME");
+    let previous_home = env::var_os("HOME");
     unsafe { env::set_var("XDG_CONFIG_HOME", &root) };
     unsafe { env::set_var("XDG_CACHE_HOME", root.join("cache")) };
+    unsafe { env::set_var("XDG_STATE_HOME", root.join("state")) };
+    unsafe { env::set_var("HOME", root.join("home")) };
     AccountFixture {
         _environment: environment,
         previous,
         previous_cache,
+        previous_state,
+        previous_home,
         root,
     }
 }

@@ -86,7 +86,7 @@ fn count(value: &Value) -> u64 {
 fn set(value: &Value) -> bool {
     !value.is_null() && value != false
 }
-fn in_mailbox(email: &Value, id: &str) -> bool {
+pub(super) fn in_mailbox(email: &Value, id: &str) -> bool {
     !id.is_empty() && set(&email["mailboxIds"][id])
 }
 fn keyword(email: &Value, key: &str) -> bool {
@@ -461,9 +461,6 @@ pub(super) fn thread_blocks(
     roles: &Value,
     viewed_mailbox: &str,
 ) -> Value {
-    let junk = trim(&roles["junk"]);
-    let trash = trim(&roles["trash"]);
-    let only = !viewed_mailbox.is_empty() && (viewed_mailbox == junk || viewed_mailbox == trash);
     let mut blocks = serde_json::Map::new();
     for representative in array(representatives) {
         let thread = trim(&representative["threadId"]);
@@ -475,11 +472,7 @@ pub(super) fn thread_blocks(
             if !member.is_object() {
                 continue;
             }
-            if if only {
-                !in_mailbox(member, viewed_mailbox)
-            } else {
-                in_mailbox(member, &junk) || in_mailbox(member, &trash)
-            } {
+            if !thread_member_visible(member, roles, viewed_mailbox) {
                 continue;
             }
             ids.push(trim(&member["id"]));
@@ -489,6 +482,19 @@ pub(super) fn thread_blocks(
         blocks.insert(trim(&representative["id"]),json!({"id":thread,"count":ids.len(),"unread":unread,"flagged":flagged,"memberIds":ids}));
     }
     Value::Object(blocks)
+}
+
+/// The desktop's conversation rail omits Trash and Junk unless that is the
+/// mailbox being viewed. Keep action expansion on this same rule.
+pub(super) fn thread_member_visible(member: &Value, roles: &Value, viewed_mailbox: &str) -> bool {
+    let junk = trim(&roles["junk"]);
+    let trash = trim(&roles["trash"]);
+    let only = !viewed_mailbox.is_empty() && (viewed_mailbox == junk || viewed_mailbox == trash);
+    if only {
+        in_mailbox(member, viewed_mailbox)
+    } else {
+        !in_mailbox(member, &junk) && !in_mailbox(member, &trash)
+    }
 }
 
 #[cfg(test)]
