@@ -27,6 +27,33 @@ jobs:
       - run: python3 tests/test_backend_release.py
       - run: python3 scripts/package-backend.py check-api
       - run: git diff --check
+      - name: Leave a note for the PR comment when this gate fails
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GATE: "Portable tests"
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-report
+          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
+          cat > "ci-report/portable.md" <<'NOTE'
+          ### Portable tests failed
+          The Rust, JavaScript and portable shell suites, the release checks or the contract inventory did not pass. Run the same set locally and read the first failing name in the log:
+          ```
+          make test-rust test-js test-shell-portable
+          python3 tests/test_backend_release.py
+          python3 scripts/package-backend.py check-api
+          git diff --check
+          ```
+          NOTE
+      - uses: actions/upload-artifact@v4
+        if: failure() && github.event_name == 'pull_request'
+        with:
+          name: ci-report-portable
+          path: ci-report
+          retention-days: 3
 
   # The unreleased step, if the checkout has one, against a backend built from
   # this very revision: the whole contract, and the native worker with it.
@@ -47,6 +74,34 @@ jobs:
           python3 scripts/package-backend.py check-api
           python3 tests/test_backend_api.py --binary target/debug/omamail
           python3 tests/test_agent_native_bridge.py
+      - name: Leave a note for the PR comment when this gate fails
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GATE: "Unreleased API gate"
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-report
+          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
+          cat > "ci-report/unreleased.md" <<'NOTE'
+          ### Unreleased API gate failed
+          A backend built from this branch does not pass the whole contract, or the native agent bridge. Build it and run the same checks locally:
+          ```
+          cargo build --locked --bin omamail
+          python3 scripts/package-backend.py check-api
+          python3 tests/test_backend_api.py --binary target/debug/omamail
+          python3 tests/test_agent_native_bridge.py
+          ```
+          A contract case you added under `unreleased.cases` must pass here; `check-api` also refuses a second unreleased step and an unreleased list that names nothing in the contract.
+          NOTE
+      - uses: actions/upload-artifact@v4
+        if: failure() && github.event_name == 'pull_request'
+        with:
+          name: ci-report-unreleased
+          path: ci-report
+          retention-days: 3
 
   # The released API, against the binary the pin names as every user gets it:
   # what the checkout calls released must be exactly what that binary speaks.
@@ -89,6 +144,32 @@ jobs:
           readelf -d probe/omamail > dynamic-headers.txt
           if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
           if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
+      - name: Leave a note for the PR comment when this gate fails
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GATE: "Released backend gate"
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-report
+          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
+          cat > "ci-report/released-${{ matrix.arch }}.md" <<'NOTE'
+          ### Released backend gate failed
+          The backend the plugin pins (`backend-version`) does not speak what `backend-api.json` calls its released API, or the released fixtures do not pass against it. Backends ship in batches, so an API change does not wait for a release — it is declared as the one unreleased step:
+          - raise `apiVersion` to exactly `releasedApiVersion + 1`;
+          - list every new method under `unreleased.methods` and every new or changed contract case under `unreleased.cases`;
+          - leave the released cases as they are — the pinned binary has to keep passing them;
+          - a feature that needs the step reads `Service.backendNeedsUpdate` and waits while it is true.
+          If `apiVersion` is already a step ahead, the released view still changed: compare `backend-api.json` with the pinned release's copy (`gh release download v$(cat backend-version) --pattern backend-api.json`). See "Released and unreleased" in `docs/BACKEND-RUNTIME.md`.
+          NOTE
+      - uses: actions/upload-artifact@v4
+        if: failure() && github.event_name == 'pull_request'
+        with:
+          name: ci-report-released-${{ matrix.arch }}
+          path: ci-report
+          retention-days: 3
 
   # The one required check: both gates, always. A revision merges only when
   # the pinned binary still speaks the released API and a binary built from

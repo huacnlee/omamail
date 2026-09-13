@@ -80,7 +80,10 @@ binary does not have yet. The contract names that difference and nothing more:
   (`test_backend_api.py --released`). The **Unreleased API gate** builds the
   backend from the revision and runs the whole contract and the native agent
   bridge against it. A merge into `main` can therefore carry an unreleased step
-  and still leave every fresh install working.
+  and still leave every fresh install working. A failed gate leaves a note,
+  and `ci-report.yml` — run after CI, with the one write permission the CI run
+  of a fork cannot have — posts it on the PR as a comment saying which gate
+  failed and what to do, updating the same comment on every push.
 - The plugin's runtime status reports `latestApiVersion` and `unreleasedMethods`
   beside the required revision. `Backend` exposes `needsUpdate` when the
   connected binary lacks the step, and refuses a call to an unreleased method on

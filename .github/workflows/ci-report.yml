@@ -1,0 +1,83 @@
+name: CI report
+
+# A failed gate is told to the PR in words, with what to do about it. The CI
+# run itself has a read-only token — a PR from a fork must — so this runs
+# after it, with the one permission it needs, and reads the notes the gates
+# left as artifacts. Nothing from the PR is checked out or executed here.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+concurrency:
+  group: ci-report-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    name: Tell the PR
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the gates' notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          mkdir notes
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'ci-report-*' --dir notes || true
+          ls -R notes
+      - name: Post or update the one CI comment on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          set -euo pipefail
+          marker='<!-- omamail-ci-report -->'
+          pr=''
+          for file in notes/*/pr.txt; do
+            [ -f "$file" ] || continue
+            pr="$(sed -n 1p "$file")"
+            break
+          done
+          if [ -z "$pr" ]; then
+            # No gate left a note: find the PR by head, and only update a
+            # comment this workflow wrote before — never open a new one for a pass.
+            pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$HEAD_BRANCH" --json number,headRepository,headRefOid \
+              --jq "[.[] | select(.headRefOid == \"$HEAD_SHA\")][0].number // empty")"
+            [ -n "$pr" ] || { echo 'No open PR for this run'; exit 0; }
+          fi
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1)"
+          body="$(mktemp)"
+          printf '%s\n' "$marker" > "$body"
+          if [ "$CONCLUSION" = success ] && ! ls notes/*/*.md >/dev/null 2>&1; then
+            [ -n "$existing" ] || exit 0
+            printf 'CI passed at %s — every gate is green. ([run](%s))\n' "$HEAD_SHA" "$RUN_URL" >> "$body"
+          else
+            printf 'CI failed at %s ([run](%s)). What each failed gate needs:\n\n' "$HEAD_SHA" "$RUN_URL" >> "$body"
+            found=0
+            for note in notes/*/*.md; do
+              [ -f "$note" ] || continue
+              found=1
+              cat "$note" >> "$body"
+              printf '\n' >> "$body"
+            done
+            if [ "$found" = 0 ]; then
+              printf 'A job failed before it could say why; the run log has the details.\n' >> "$body"
+            fi
+            printf '\nFix, push, and the gates run again; this comment updates itself.\n' >> "$body"
+          fi
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$body" >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@"$body" >/dev/null
+          fi
