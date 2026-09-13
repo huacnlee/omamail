@@ -30,6 +30,7 @@ LOCK = DATA_ROOT / "runtime.lock"
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
 ARCHIVE_LIMIT = 128 * 1024 * 1024
 BINARY_LIMIT = 256 * 1024 * 1024
+MANIFEST_LIMIT = 1024 * 1024
 
 
 class Refused(Exception):
@@ -333,8 +334,8 @@ def legacy_cli_target(target):
         safe_path(candidate)
         safe_path(manifest)
         with manifest.open("rb") as source:
-            raw = source.read(1025)
-        if len(raw) > 1024:
+            raw = source.read(MANIFEST_LIMIT + 1)
+        if len(raw) > MANIFEST_LIMIT:
             return False
         value = json.loads(raw)
         return isinstance(value, dict) and value.get("id") == "omamail"

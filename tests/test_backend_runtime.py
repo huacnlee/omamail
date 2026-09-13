@@ -518,7 +518,11 @@ touch linked
         legacy.parent.mkdir(parents=True)
         legacy.write_text("old plugin-owned runtime")
         legacy.chmod(0o700)
-        (previous / "manifest.json").write_text('{"id":"omamail"}')
+        (previous / "manifest.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "id": "omamail",
+            "description": "x" * 2048,
+        }))
         link = self.home / ".local/bin/omamail"
         link.parent.mkdir(parents=True)
         link.symlink_to(legacy)
