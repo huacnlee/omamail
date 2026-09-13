@@ -122,8 +122,9 @@ fn input_tree_and_expansion_have_explicit_bounds() {
         parse(&"x".repeat(tree::MAX_INPUT + 1)).err(),
         Some("html_too_large")
     );
+    assert_eq!(parse(&"<br>".repeat(tree::MAX_NODES - 1)).err(), None);
     assert_eq!(
-        parse(&"<br>".repeat(tree::MAX_NODES + 1)).err(),
+        parse(&"<br>".repeat(tree::MAX_NODES)).err(),
         Some("html_too_complex")
     );
     let deep = format!("{}kept{}", "<div>".repeat(5000), "</div>".repeat(5000));
@@ -137,6 +138,27 @@ fn input_tree_and_expansion_have_explicit_bounds() {
     );
     let result = sanitize(&links, &json!({"withReader":true})).unwrap();
     assert!(result["reader"]["complexity"]["tags"].as_u64().unwrap() < 10000);
+}
+
+fn rendered_node_count(node: &Value) -> usize {
+    1 + node
+        .get("children")
+        .and_then(Value::as_array)
+        .map(|children| children.iter().map(rendered_node_count).sum())
+        .unwrap_or(0)
+}
+
+#[test]
+fn rendered_documents_count_emitted_text_and_element_nodes() {
+    let at_limit = format!("{}x", "x<br>".repeat((tree::MAX_NODES - 2) / 2));
+    let rendered = sanitize(&at_limit, &json!({"withReader":true})).unwrap();
+    assert_eq!(rendered_node_count(&rendered["document"]), tree::MAX_NODES);
+
+    let over_limit = "x<br>".repeat(60_000);
+    assert_eq!(
+        sanitize(&over_limit, &json!({"withReader":true})).unwrap_err(),
+        "html_too_complex"
+    );
 }
 
 #[test]

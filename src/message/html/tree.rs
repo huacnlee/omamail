@@ -211,19 +211,23 @@ fn finish(stack: &mut Vec<Node>) {
     let n = stack.pop().unwrap();
     stack.last_mut().unwrap().children.push(n)
 }
+fn emitted(count: &mut usize, nodes: usize) -> Result<(), &'static str> {
+    *count = count.checked_add(nodes).ok_or("html_too_complex")?;
+    if *count > MAX_NODES {
+        return Err("html_too_complex");
+    }
+    Ok(())
+}
 pub fn parse(s: &str) -> Result<Node, &'static str> {
     if s.len() > MAX_INPUT {
         return Err("html_too_large");
     }
     let mut stack = vec![Node::root()];
     let mut at = 0;
-    let mut count = 0;
+    let mut count = 1;
     while at < s.len() {
-        count += 1;
-        if count > MAX_NODES {
-            return Err("html_too_complex");
-        }
         let Some(offset) = s[at..].find('<') else {
+            emitted(&mut count, 1)?;
             stack
                 .last_mut()
                 .unwrap()
@@ -233,6 +237,7 @@ pub fn parse(s: &str) -> Result<Node, &'static str> {
         };
         let open = at + offset;
         if open > at {
+            emitted(&mut count, 1)?;
             stack
                 .last_mut()
                 .unwrap()
@@ -250,6 +255,7 @@ pub fn parse(s: &str) -> Result<Node, &'static str> {
             continue;
         }
         let Some((mut n, closing, end, terminated)) = tag(s, open) else {
+            emitted(&mut count, 1)?;
             stack.last_mut().unwrap().children.push(Node::text("<"));
             at = open + 1;
             continue;
@@ -292,6 +298,7 @@ pub fn parse(s: &str) -> Result<Node, &'static str> {
                 search = pos + 1
             }
             let stop = found.unwrap_or(s.len());
+            emitted(&mut count, 2)?;
             let mut raw = Node::text(&s[at..stop]);
             raw.raw = true;
             n.children.push(raw);
@@ -301,6 +308,7 @@ pub fn parse(s: &str) -> Result<Node, &'static str> {
             stack.last_mut().unwrap().children.push(n);
             continue;
         }
+        emitted(&mut count, 1)?;
         if void(&n.name) || n.self_closing || stack.len() >= MAX_DEPTH {
             stack.last_mut().unwrap().children.push(n)
         } else {
