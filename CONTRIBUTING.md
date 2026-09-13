@@ -181,3 +181,38 @@ force-push are not.
 
 If an agent wrote the patch, you are still its author: read the diff before you
 send it, and be able to explain any line in it.
+
+## Releasing
+
+A release is one command, run on a clean `main` that matches `origin/main`:
+
+```bash
+make publish VERSION=0.11.0
+```
+
+It bumps the version in `Cargo.toml`, `Cargo.lock` and `manifest.json`, commits
+`Version 0.11.0`, tags that commit `v0.11.0`, pushes `main` and the tag
+together, and then follows the Release run until it ends. Without `VERSION` it
+tags the version the checkout already carries. It needs `gh` logged in.
+
+The tag push is what triggers **Release**. That workflow tests and builds the
+static backend for x86_64 and aarch64, checks the API contract against the
+last release, publishes the GitHub release, verifies the published assets by
+downloading them again, and finally pushes one more commit to `main` that
+advances `backend-version` — the pin every installed plugin reads to know which
+backend to download. Fetch that commit with `git pull` when the run is green.
+
+Three things to know:
+
+- **Do not tag by hand.** The tag has to be `main`'s head and name the Cargo
+  version, and Release refuses anything else before it builds. If a stray tag
+  exists, remove it with `git push origin :refs/tags/v0.11.0` and let
+  `make publish` make it again.
+- **Cut a release when a change needs the backend.** `main` may run one API
+  step ahead of the pinned backend, and the plugin refuses that step until the
+  binary has it, so merging is always safe — but the feature does not reach
+  users until this command runs.
+- **A failed run is not half a release.** Existing tags and releases are never
+  overwritten; read the failed step, fix it on `main`, and publish the next
+  patch version. [docs/BACKEND-RUNTIME.md](docs/BACKEND-RUNTIME.md) has the
+  full account of what each step checks and why.
