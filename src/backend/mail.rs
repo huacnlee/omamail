@@ -1,5 +1,5 @@
 use super::Session;
-use crate::mail::{ListRequest, Provider, ReadRequest};
+use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -9,6 +9,25 @@ struct ProviderList<'a> {
 
 struct ProviderRead<'a> {
     session: &'a Session,
+}
+
+/// Action planning has no provider call of its own. The caller's opaque IDs
+/// remain individual rows unless a read-only lookup supplies a collapsed
+/// conversation row to the shared planner.
+struct AccountActionLookup;
+
+impl crate::mail::action::ActionLookup for AccountActionLookup {
+    fn refusals(&self, account: &crate::mail::Account) -> Result<Value, &'static str> {
+        crate::account::refusals_readonly(&account.id)
+    }
+
+    fn rows<'a>(
+        &'a self,
+        _account: &'a crate::mail::Account,
+        ids: &'a [String],
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
+        Box::pin(async move { Ok(ids.iter().map(|id| json!({"id":id})).collect()) })
+    }
 }
 
 fn summaries(messages: &[Value]) -> Result<Vec<Value>, &'static str> {
@@ -41,6 +60,10 @@ impl Session {
             "mail.read" => {
                 let request = ReadRequest::try_from(params)?;
                 crate::mail::read::read_with(request, &ProviderRead { session: self }).await
+            }
+            "mail.act" => {
+                let request = ActRequest::try_from(params)?;
+                crate::mail::action::dry_run(&request, &AccountActionLookup).await
             }
             _ => Err("unknown_method"),
         }

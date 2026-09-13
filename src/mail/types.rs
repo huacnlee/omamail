@@ -167,8 +167,21 @@ fn account(object: &Map<String, Value>) -> Result<Account, &'static str> {
     resolve_account(&wanted)
 }
 
-fn opaque_id(value: &str) -> Result<String, &'static str> {
-    if value.is_empty() || value.len() > MAX_ID || value.chars().any(char::is_control) {
+pub(crate) fn opaque_id(value: &str) -> Result<String, &'static str> {
+    if value.is_empty()
+        || value.len() > MAX_ID
+        || value.chars().any(|character| {
+            character.is_control()
+                || matches!(
+                    character,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        })
+    {
         return Err("invalid_params");
     }
     Ok(value.to_owned())

@@ -33,6 +33,32 @@ pub fn action_scope(action: &str) -> &'static str {
         "message"
     }
 }
+
+/// Maps the closed public action vocabulary onto the desktop model vocabulary.
+/// Keeping this next to the model rules prevents the CLI/API boundary from
+/// growing a second action table.
+pub(crate) fn domain_action(operation: &str) -> Result<&'static str, &'static str> {
+    match operation {
+        "read" => Ok("markRead"),
+        "unread" => Ok("markUnread"),
+        "star" => Ok("star"),
+        "unstar" => Ok("unstar"),
+        "archive" => Ok("archive"),
+        "trash" => Ok("trash"),
+        "spam" => Ok("spam"),
+        _ => Err("invalid_params"),
+    }
+}
+
+/// The canonical mailbox whose absence prevents an honest action preview.
+pub(crate) fn action_mailbox(action: &str) -> Option<&'static str> {
+    match action {
+        "archive" => Some("archive"),
+        "trash" => Some("trash"),
+        "spam" => Some("spam"),
+        _ => None,
+    }
+}
 pub fn action_targets(row: &Value, action: &str) -> Value {
     let b = block(row);
     if action_scope(action) == "conversation" && !rows(&b["memberIds"]).is_empty() {
@@ -98,6 +124,16 @@ pub fn changes(action: &str, source: &str) -> Value {
         _ => return Value::Null,
     };
     json!({"add":add,"remove":remove})
+}
+
+/// Every mail action's label projection. Trash has a dedicated transport verb
+/// on several providers, but its preview still states the mailbox label it
+/// would add.
+pub(crate) fn action_changes(action: &str) -> Value {
+    if action == "trash" {
+        return json!({"add":["TRASH"],"remove":[]});
+    }
+    changes(action, "")
 }
 fn with_thread(summary: &Value, thread: &Value) -> Value {
     if !summary.is_object() {

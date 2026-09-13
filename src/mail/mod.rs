@@ -1,4 +1,5 @@
 mod account;
+pub(crate) mod action;
 pub(crate) mod list;
 pub(crate) mod read;
 mod types;
@@ -17,3 +18,6 @@ mod list_tests;
 
 #[cfg(test)]
 mod read_tests;
+
+#[cfg(test)]
+mod action_tests;

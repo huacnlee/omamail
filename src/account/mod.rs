@@ -4,14 +4,14 @@ use std::{env, io::Read, path::PathBuf};
 
 const MAX_CONFIG: u64 = 1024 * 1024;
 
-mod storage;
-pub mod senders;
 pub mod conversation;
-pub mod unified;
-pub mod model;
 pub mod intents;
+pub mod model;
+pub mod senders;
+mod storage;
 #[cfg(test)]
 mod tests;
+pub mod unified;
 pub use storage::call;
 pub(crate) use storage::{raw_registry, raw_registry_readonly};
 
@@ -23,6 +23,27 @@ pub fn list() -> Result<Value, &'static str> {
 pub(crate) fn list_readonly() -> Result<Value, &'static str> {
     let raw = raw_registry_readonly()?;
     summarize(&serde_json::to_vec(&raw).map_err(|_| "accounts_invalid")?)
+}
+
+/// Account-specific provider withdrawals are stored in the private registry,
+/// rather than the public credential-free account summary. This read-only
+/// projection is deliberately narrow: callers can learn only the capability
+/// keys that the account has withdrawn.
+pub(crate) fn refusals_readonly(account_id: &str) -> Result<Value, &'static str> {
+    let raw = raw_registry_readonly()?;
+    let entries = raw["accounts"].as_array().ok_or("accounts_invalid")?;
+    for entry in entries {
+        let one = json!({"version":1,"activeId":"","accounts":[entry]});
+        let summary = summarize(&serde_json::to_vec(&one).map_err(|_| "accounts_invalid")?)?;
+        if summary["accounts"][0]["id"] == account_id {
+            return Ok(if entry["refusals"].is_object() {
+                entry["refusals"].clone()
+            } else {
+                Value::Null
+            });
+        }
+    }
+    Err("mail_account_unknown")
 }
 
 fn text(value: &Value) -> &str {
