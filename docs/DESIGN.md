@@ -273,6 +273,16 @@ Follow [Interface language](http://longbridge.github.io/gpui-component/docs/desi
 
 Project-specific rules take precedence: use three periods in `Settings...`, `Edit...`, and other commands that open another surface or require more input; an immediate command has no ellipsis. Labels must describe their real scope—`Mark these read` does not claim to affect unloaded mail—and provider capabilities that do not exist are omitted rather than explained by a failing command.
 
+## The bar: a dot, not a count
+
+The bar widget answers one question — is there mail waiting? — and it answers with a dot on the envelope, never with a number. This is a product decision, not a gap to be filled.
+
+A count on a mail icon is a demand. On a busy mailbox it is never zero, it climbs while you are doing something else, and it asks to be cleared. A dot says something is there and leaves when to look to you, which is what lets Omamail sit in the bar all day without turning the mailbox into a queue to be worked down. The client is meant to be worked asynchronously: mail waits, and the person decides when.
+
+A count is also rarely true. Gmail's list endpoint returns an estimate rather than a total, and that estimate is a placeholder on a short page whether four messages match or four thousand; Gmail counts conversations where this client lists messages; and a decade of phone mail apps has taught people that the number on the icon is wrong more often than it is right. A number that is usually wrong teaches people to stop reading it, and from then on it is only noise.
+
+So the bar says whether, the tooltip says roughly how many, and the window says what. The dot follows the Primary-scoped unread count so that it reaches zero and can go out. Do not put digits on the envelope, a pill beside it, or a `99+`: a change that does so is answering a question the product chose not to ask, and making the number exact does not change that.
+
 ## Status and feedback
 
 The status bar answers three questions without opening another surface:

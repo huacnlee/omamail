@@ -12,7 +12,7 @@ Three plugin entry points (`manifest.kinds`):
 | Kind | File | Responsibility |
 |---|---|---|
 | `service` | `ui/Service.qml` | Shared singleton: auth, API, mailbox state, unread polling, new-mail notifications. Lives whether or not the window is open. |
-| `bar-widget` | `ui/BarWidget.qml` | Envelope icon + unread badge in the bar. Left click opens the app window. |
+| `bar-widget` | `ui/BarWidget.qml` | Envelope icon + unread dot in the bar — a dot, never a count (see `DESIGN.md`). Left click opens the app window. |
 | `panel` | `ui/App.qml` | The application window — a single `FloatingWindow`, 980×720 default, 760×520 minimum. Hyprland treats it as an ordinary window. |
 
 ## Confirmed decisions
@@ -70,7 +70,7 @@ Outlook.com and Hotmail use Microsoft's OAuth device-code flow for delegated IMA
 - Calendar: month and week views over Google Calendar, Microsoft calendars (Outlook.com and Microsoft 365, through Graph with the mailbox's sign-in) and CalDAV, with event create, edit and delete. Google calendars follow the current mailbox by default. A setting can combine every connected account in one view.
 - One-click unsubscribe from mailing lists that support it
 - Search using Gmail's own operator syntax
-- Unread badge in the bar; merged desktop notification for new mail
+- Unread dot in the bar, deliberately without a count; merged desktop notification for new mail
 - CJK correctness: RFC 2047 encoded-word headers, hand-rolled base64 + UTF-8
 - Full keyboard operation with Gmail's key bindings
 - Several accounts at once, each with its own cache and unread count, switched
