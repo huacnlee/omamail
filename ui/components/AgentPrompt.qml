@@ -199,10 +199,11 @@ FocusScope {
     if (selected < 0 || selected >= commandMatches.items.length) return false
     var choice = commandMatches.items[selected]
     var start = commandMatches.start
-    var label = "/" + choice.command
+    // The separator belongs to the token so an immediate Backspace stays atomic.
+    var label = "/" + choice.command + " "
     updatingCommands = true
     field.text = field.text.slice(0, start) + label
-    commandTokens = commandTokens.concat([{start: start, end: start + label.length, prompt: choice.prompt}])
+    commandTokens = commandTokens.concat([{start: start, end: start + label.length, prompt: choice.prompt + " "}])
     commandText = field.text
     updatingCommands = false
     dismissedCommandText = field.text

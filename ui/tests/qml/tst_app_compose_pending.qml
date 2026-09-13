@@ -492,7 +492,7 @@ Item {
       keyClick(Qt.Key_Return)
       tryCompare(dock, "commandsOpen", false)
       verify(field.text.length > 1)
-      compare(field.text, "/review")
+      compare(field.text, "/review ")
       compare(mailService.agentRequests, 0)
       compare(field.activeFocus, true)
       keyClick(Qt.Key_Backspace)
@@ -508,7 +508,7 @@ Item {
       tryCompare(dock, "commandsOpen", true)
       keyClick(Qt.Key_Enter)
       tryCompare(dock, "commandsOpen", false)
-      compare(field.text, "/review")
+      compare(field.text, "/review ")
       compare(mailService.agentRequests, 0)
       field.clear()
       field.text = "/"

@@ -120,7 +120,8 @@ Item {
       tryCompare(popup, "commandsOpen", true)
       var prompt = popup.commandMatches.items[0].prompt
       verify(popup.chooseCommand(0))
-      compare(field.text, "/summarize")
+      compare(field.text, "/summarize ")
+      compare(field.cursorPosition, field.length)
       compare(popup.commandTokens.length, 1)
       compare(service.calls, 0)
       compare(popup.commandsOpen, false)
@@ -139,7 +140,7 @@ Item {
       var field = findChild(popup, "agent-prompt-field")
       field.text = "Please\n/sum"
       verify(popup.chooseCommand(0))
-      compare(field.text, "Please\n/summarize")
+      compare(field.text, "Please\n/summarize ")
       field.forceActiveFocus()
       keyClick(Qt.Key_Backspace)
       compare(field.text, "Please\n")
@@ -151,7 +152,7 @@ Item {
       field.text = "/sum"
       var prompt = popup.commandMatches.items[0].prompt
       verify(popup.chooseCommand(0))
-      field.insert(field.length, " 用中文")
+      field.insert(field.length, "用中文")
       field.cursorPosition = field.length
       keyClick(Qt.Key_Backspace)
       compare(field.text, "/summarize 用中")
@@ -163,7 +164,7 @@ Item {
       compare(popup.commandTokens.length, 1)
       field.select(2, 5)
       keyClick(Qt.Key_Backspace)
-      compare(field.text, " 用中")
+      compare(field.text, "用中")
       compare(popup.commandTokens.length, 0)
     }
     function test_command_highlight_and_async_restore() {
@@ -187,7 +188,7 @@ Item {
       verify(popup.submitCurrent())
       service.agentStarting = false
       service.agentError = "Synthetic launch failure"
-      compare(field.text, "/summarize")
+      compare(field.text, "/summarize ")
       compare(popup.commandTokens.length, 1)
       field.cursorPosition = field.length
       field.forceActiveFocus()
