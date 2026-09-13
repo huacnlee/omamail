@@ -212,3 +212,34 @@ required for the release gate.
 Documentation updates include CLI help examples and `docs/BACKEND.md`. The
 existing source, Rust, backend-contract, and published-backend gates continue to
 run, with fixtures updated for the new API revision rather than bypassed.
+
+## Companion compose-exit correction
+
+The same delivery includes a keyboard correction for the existing composer.
+`Escape` already routes through the single `back` action correctly; the current
+exit decision is wrong because it treats any nonempty prefilled reply as a
+draft. A reply opened with `r` has recipients, subject, quote, and possibly a
+signature before the writer changes anything, so content presence cannot answer
+whether the user edited it.
+
+`ComposeView` records a separate `userModified` state. Only user text edits,
+sender/contact choices, Cc/Bcc/Reply-To visibility choices, and user attachment
+addition/removal set it. Programmatic reply/forward fields, quotes, signatures,
+opening a provider-saved draft, and asynchronous attachment hydration do not.
+Beginning a new/reply/forward composition or opening an existing provider draft
+resets the state after synchronous setup. Restoring unsaved recovery data or a
+failed save preserves its prior modified state.
+
+Back or `Escape` immediately closes an unmodified composition without saving,
+including an untouched prefilled reply and an untouched existing draft. A
+modified composition opens a modal choice with `Save draft`, `Discard`, and
+`Cancel`. Saving uses the existing durable draft/recovery path, Discard leaves
+without saving the changes, and Cancel keeps the composer open. `Escape` inside
+the modal means Cancel; Tab/Shift+Tab and Enter make every choice reachable from
+the keyboard. The composer's existing explicit Discard button remains an
+immediate destructive action.
+
+No key binding is added: `ui/keys/Keymap.js` remains the sole owner of the
+existing `back` binding, and `App.goBack()` remains its router. Tests must prove
+the distinction between programmatic defaults and user edits, all three dialog
+outcomes, save-failure recovery, and keyboard focus after dismissing the modal.
