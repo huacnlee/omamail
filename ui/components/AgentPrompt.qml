@@ -716,7 +716,8 @@ FocusScope {
                 required property var modelData
                 anchors.fill: parent
                 Repeater {
-                  model: parent.modelData.end - parent.modelData.start
+                  // The separator is part of atomic deletion, not the highlight.
+                  model: field.getText(parent.modelData.start, parent.modelData.end).trim().length
                   delegate: Rectangle {
                     required property int index
                     readonly property int position: parent.modelData.start + index
