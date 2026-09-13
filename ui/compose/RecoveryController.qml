@@ -17,8 +17,13 @@ QtObject {
   // This requirement survives releases and later, unrelated API revisions.
   readonly property bool recoverySupported: !!service && !!service.backend
     && service.backend.ready && service.backend.apiVersion >= 3
+  readonly property bool recoveryNeedsUpdate: !!service && !!service.backend
+    && service.backend.ready && !recoverySupported
   readonly property string recoveryUpdateNotice: "Draft recovery needs an updated backend. Keep this window open."
   onRecoverySupportedChanged: { if (recoverySupported) root.readComposeRecovery() }
+  onRecoveryNeedsUpdateChanged: {
+    if (recoveryNeedsUpdate && root.composeWriteQueued) root.draftSavedNotice = recoveryUpdateNotice
+  }
   function reconcileComposeReceipts() {
     if (root.composeReceiptChecking) return
     var record = root.composeRecovery
@@ -206,7 +211,7 @@ QtObject {
   function writeComposeRecovery(raw) {
     root.composeWritePayload = String(raw || "")
     root.composeWriteQueued = true
-    if (!recoverySupported && service && service.backend && service.backend.ready)
+    if (recoveryNeedsUpdate)
       root.draftSavedNotice = recoveryUpdateNotice
     if (!root.composeRecoveryLoaded || root.composeStorageRevision === "") root.readComposeRecovery()
     else root.drainComposeRecovery()

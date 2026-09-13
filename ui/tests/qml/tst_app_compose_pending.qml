@@ -324,6 +324,44 @@ Item {
       for (var i = recoveryBackend.requests.length - 1; i >= 0; i--) if (recoveryBackend.requests[i].method === method) return recoveryBackend.requests[i]
       return null
     }
+    function test_offline_recovery_warns_on_old_backend_connection_data() {
+      return [{tag:"api-three",api:3},{tag:"later-api",api:4}]
+    }
+    function test_offline_recovery_warns_on_old_backend_connection(data) {
+      recoveryBackend.apiVersion = 0
+      app.draftSavedNotice = ""
+      var record = {version:1,active:true,draft:{userModified:true,body:"Offline edit"}}
+      var raw = JSON.stringify(record)
+      app.writeComposeRecovery(raw)
+      verify(app.composeWriteQueued)
+      compare(recoveryBackend.requests.length, 0)
+      compare(app.draftSavedNotice, "")
+
+      recoveryBackend.apiVersion = 2
+      compare(app.draftSavedNotice, "", "disconnected version metadata alone cannot report a connection")
+      recoveryBackend.ready = true
+      verify(app.draftSavedNotice.indexOf("Keep this window open") >= 0,
+        "connecting an old backend must warn about the pending recovery")
+      compare(recoveryBackend.requests.length, 0)
+      verify(app.composeWriteQueued)
+      compare(app.composeWritePayload, raw)
+
+      recoveryBackend.ready = false
+      recoveryBackend.apiVersion = data.api
+      recoveryBackend.ready = true
+      tryCompare(recoveryBackend.requests, "length", 1)
+      lastNativeRequest("compose.recoveryRead").done({record:{active:false},revision:"initial"}, null)
+      var saved = lastNativeRequest("compose.recoverySave")
+      verify(saved !== null)
+      compare(saved.params.record, record)
+      verify(app.draftSavedNotice.indexOf("Keep this window open") >= 0,
+        "connecting a capable backend does not itself persist the draft")
+      saved.done({record:saved.params.record,revision:"durable"}, null)
+      compare(app.composeWriteQueued, false)
+      compare(app.composeWritePayload, "")
+      compare(app.composeRecovery, record)
+      compare(app.draftSavedNotice, "")
+    }
     function recoveredPending() {
       return {version:1,active:true,returnView:"list",draft:{body:"Recovered queued message",accountId:"me@example.com",pendingSendId:"receipt-one"},parked:[]}
     }
