@@ -177,8 +177,8 @@ assert.strictEqual(keymap.readableSequence("g,i"), "g then i",
   "a chord reads as a chord, not as Qt's comma")
 assert.strictEqual(keymap.readableSequence("Escape"), "Esc")
 assert.strictEqual(keymap.readableSequence("Ctrl+Return"), "Ctrl+Enter")
-assert.strictEqual(keymap.displayFor(byId("goMailbox")), "Ctrl+1…0",
-  "ten mailbox keys are one row on the sheet, not ten")
+assert.strictEqual(keymap.displayFor(byId("goMailbox")), "Ctrl+1…9",
+  "nine mailbox keys are one row on the sheet, not nine")
 
 const goAccount = byId("goAccount")
 assert.ok(goAccount, "number keys switch directly to email accounts")
@@ -191,7 +191,8 @@ assert.strictEqual(keymap.slotFor("goAccount", "Alt+0"), 9)
 // Which key of the row fired, read off the row's own list rather than parsed.
 assert.strictEqual(keymap.slotFor("goMailbox", "Ctrl+1"), 0)
 assert.strictEqual(keymap.slotFor("goMailbox", "Ctrl+9"), 8)
-assert.strictEqual(keymap.slotFor("goMailbox", "Ctrl+0"), 9, "the tenth row, not the zeroth")
+assert.strictEqual(keymap.slotFor("goMailbox", "Ctrl+0"), -1,
+  "Ctrl+0 is reset zoom, as in every browser, not a tenth row")
 assert.strictEqual(keymap.slotFor("goMailbox", "Alt+1"), -1)
 assert.strictEqual(keymap.slotFor("goMailbox", ""), -1)
 assert.strictEqual(keymap.slotFor("nothing", "Alt+1"), -1)
@@ -253,7 +254,7 @@ assert.strictEqual(keymap.isEnabled(mailView, "calendar", false), true)
 assert.strictEqual(keymap.isEnabled(calendarView, "list", false), true)
 assert.strictEqual(keymap.isEnabled(calendarView, "reader", false), true)
 assert.strictEqual(keymap.isEnabled(calendarView, "compose", false), false)
-assert.strictEqual(keymap.displayFor(byId("zoomReset")), "Ctrl+Shift+0")
+assert.strictEqual(keymap.displayFor(byId("zoomReset")), "Ctrl+0")
 const sidebar = byId("toggleSidebar")
 assert.strictEqual(keymap.displayFor(sidebar), "[")
 assert.strictEqual(keymap.isEnabled(sidebar, "list", false), true)

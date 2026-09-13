@@ -27,7 +27,7 @@ Works with **Gmail**, **HEY**, **Fastmail**, **iCloud Mail**, **Outlook**, **Yah
   inside Omarchy rather than to look like a web app in a window. Three columns
   when there is room, one when there is not, and nothing on screen that is not
   your mail.
-- **Gmail, Outlook, HEY, JMAP and IMAP.** Sign in to Gmail with Google, to Outlook with Microsoft, to HEY through the HEY CLI that 37signals publish, or add a mailbox on any JMAP or IMAP server with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
+- **Gmail, HEY, Outlook, IMAP and JMAP.** Sign in to Gmail with Google, to HEY through the HEY CLI that 37signals publish, to Outlook with Microsoft, or add a mailbox on any IMAP or JMAP server with an address and an app password. Several accounts at once, each with its own inbox, cache and unread count.
 - **Keyboard-first.** `j`/`k` to move, `Shift+J`/`Shift+K` to scroll the reader,
   `e` to archive, `v` to file, `s` to star, `r` to
   reply, `c` to compose, `Alt+1`…`0` for the mailboxes — hold Alt and the rail says
@@ -258,7 +258,7 @@ Right-click does the rest. On a label in the rail: rename it, make a label besid
 | `c` | Compose |
 | `Ctrl+Enter` | Send |
 | `/` | Search |
-| `Alt+1` … `Alt+0` | The mailbox with that number on the rail |
+| `Ctrl+1` … `Ctrl+9` | The mailbox with that number on the rail |
 | `Alt+A` | Switch account |
 | `Space` / `x` | Select the message; `e`, `d`, `s`, `v`, `Shift+I`, `Shift+U` then act on every selected one |
 | `Ctrl+A` | Select every message loaded, or none |

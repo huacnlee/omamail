@@ -203,7 +203,7 @@ Item {
     }
 
     // Zoom is not: there is no message body to size until one is open.
-    // A row of ten keys, told apart by which one fired. No chord: Qt puts a
+    // A row of nine keys, told apart by which one fired. No chord: Qt puts a
     // 400ms deadline on an unfinished sequence, which is what the mailboxes
     // used to be reached through and why half the presses did nothing.
     function test_a_digit_names_the_mailbox_it_opens() {
@@ -212,10 +212,9 @@ Item {
       compare(host.lastSequence, "Ctrl+3")
     }
 
-    function test_the_tenth_mailbox_is_the_zero_key() {
+    function test_ctrl_zero_is_not_a_mailbox() {
       keyClick(Qt.Key_0, Qt.ControlModifier)
-      compare(host.lastId, "goMailbox")
-      compare(host.lastSequence, "Ctrl+0")
+      compare(host.lastId, "", "Ctrl+0 resets the zoom, so the rail stops at nine")
     }
 
     function test_a_digit_is_dead_in_a_draft() {
@@ -268,12 +267,12 @@ Item {
     }
 
     function test_a_reader_only_key_is_dead_in_the_list() {
-      keyClick(Qt.Key_0, Qt.ControlModifier | Qt.ShiftModifier)
+      keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "", "nothing to zoom from the list")
       host.context = "reader"
       host.lastId = ""
       wait(20)
-      keyClick(Qt.Key_0, Qt.ControlModifier | Qt.ShiftModifier)
+      keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "zoomReset")
     }
 

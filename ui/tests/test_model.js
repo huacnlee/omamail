@@ -731,7 +731,7 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
 }
 
 // One numbered list over the rail: mailboxes first, then the labels A to Z,
-// and no number at all past the tenth row.
+// and no number at all past the ninth row.
 {
   const boxes = [
     { key: "inbox", label: "Inbox" },
@@ -776,9 +776,9 @@ assert.strictEqual(model.pluralize(0, "message"), "0 messages")
   // The ceiling is where a row stops having a key, not where the rail stops.
   const many = []
   for (let i = 0; i < 14; i++) many.push({ id: "L" + i, name: "n" + i, rawName: "n" + i })
-  assert.strictEqual(model.sidebarSlots(boxes, many, 10).length, 10)
-  assert.strictEqual(model.slotNumberOf(model.sidebarSlots(boxes, many, 10), "label", "L7"), 0,
-    "past the tenth row there is no digit left to offer")
+  assert.strictEqual(model.sidebarSlots(boxes, many, 9).length, 9)
+  assert.strictEqual(model.slotNumberOf(model.sidebarSlots(boxes, many, 9), "label", "L6"), 0,
+    "past the ninth row there is no digit left to offer: Ctrl+0 belongs to the zoom")
   assert.strictEqual(model.sidebarSlots(null, null, 10).length, 0)
 }
 

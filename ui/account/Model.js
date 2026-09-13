@@ -1083,9 +1083,9 @@ function messageById(primary, fallback, id) {
 // keys that jump read this, so the number beside a row and the row a number
 // opens cannot disagree — describing the order twice is how they would.
 //
-// Ten because the keys are digits. Past that a row simply has no number: a
-// mailbox nobody can reach by keyboard is honest, and renumbering the rail
-// every time the server reports a label would not be.
+// Nine because the keys are digits and `Ctrl+0` is reset zoom. Past that a
+// row simply has no number: a mailbox nobody can reach by keyboard is honest,
+// and renumbering the rail every time the server reports a label would not be.
 function sidebarSlots(mailboxes, labels, limit) {
   var max = Math.max(0, Math.floor(Number(limit) || 0))
   var out = []
@@ -1110,7 +1110,7 @@ function sidebarSlots(mailboxes, labels, limit) {
   return out
 }
 
-// What a row's badge says, and 0 for a row past the tenth. One-based, because
+// What a row's badge says, and 0 for a row past the last. One-based, because
 // the badge is read by a person rather than indexed by anything.
 function slotNumberOf(slots, kind, handle) {
   var list = Array.isArray(slots) ? slots : []

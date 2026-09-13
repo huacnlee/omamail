@@ -201,10 +201,10 @@ Item {
     // it is not the one open, and the glyph says so.
     property bool monitored: false
 
-    // The badge names the key, not the position: the tenth row is opened by
-    // Alt+0, so it says 0. A row past the tenth has no key and no badge.
+    // The badge names the key: Ctrl and the digit. A row past the ninth has
+    // no key and no badge — `Ctrl+0` is reset zoom, not a tenth row.
     readonly property bool showsNumber: root.numbersVisible && slotNumber > 0
-    readonly property string numberText: slotNumber === 10 ? "0" : String(slotNumber)
+    readonly property string numberText: String(slotNumber)
 
     width: column.width
     implicitHeight: Style.space(28)

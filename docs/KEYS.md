@@ -147,7 +147,7 @@ used to exist, and they had.
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
-| `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9`, `Ctrl+0` | mail | Go to that mailbox |
+| `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9` | mail | Go to that mailbox |
 | `goAccount` | `Alt+1`, `Alt+2`, `Alt+3`, `Alt+4`, `Alt+5`, `Alt+6`, `Alt+7`, `Alt+8`, `Alt+9`, `Alt+0` | mail+calendar | Go to that email account |
 | `switchAccount` | `Alt+A` | mail | Switch account |
 | `askAgent` | `Alt+G` | mail+compose | Ask AI about the message or draft |
@@ -161,7 +161,7 @@ used to exist, and they had.
 | `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
-| `zoomReset` | `Ctrl+Shift+0` | reader | Reset the zoom |
+| `zoomReset` | `Ctrl+0` | reader | Reset the zoom |
 | `refresh` | `F5`, `Ctrl+R` | all | Check for mail |
 | `settings` | `Ctrl+,` | all | Open settings |
 | `help` | `?` | mail | Toggle all keybindings |
@@ -193,13 +193,14 @@ clock had been running. Measured, not guessed:
 And they had to be memorised. Four bindings that look like nothing on screen,
 for the four places you actually go.
 
-`Ctrl+1`…`Ctrl+0` replaces both. A modifier has no deadline, and **holding Ctrl
+`Ctrl+1`…`Ctrl+9` replaces both. A modifier has no deadline, and **holding Ctrl
 puts the digit on every row of the rail**, so there is nothing to remember —
 the rail says which key opens it. The numbers run down the rail as it is drawn,
 mailboxes first and then the server's labels, from `Model.sidebarSlots`, which
 is the same list the badges are drawn from: the number beside a row and the row
-a number opens are one fact rather than two. Past the tenth row there is simply
-no number, because there is no digit left to offer.
+a number opens are one fact rather than two. Past the ninth row there is simply
+no number: `Ctrl+0` is reset zoom, the way it is in every browser, and the
+rail does not take it.
 
 Held Ctrl is the one `Keys` handler in `App.qml`, and it is not a binding — a
 modifier alone cannot be a `Shortcut`, so there is nothing to route. It accepts

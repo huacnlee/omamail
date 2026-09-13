@@ -30,7 +30,7 @@ Item {
   property bool overlay: false
 
   // The sequence travels with the id, because one row can bind several keys
-  // that differ in what they mean: `Ctrl+1`…`Ctrl+0` are one binding and ten
+  // that differ in what they mean: `Ctrl+1`…`Ctrl+9` are one binding and nine
   // mailboxes.
   signal triggered(string id, string sequence)
 

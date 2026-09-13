@@ -89,7 +89,7 @@ Item {
       var account = installAccount("gmail", "me@example.com", "me@example.com")
       account.mailboxKey = "starred"
       account.labels = [
-        { id: "Label_3", name: "Work", rawName: "Work", system: false, unread: 0 },
+        { id: "Label_3", name: "Bills", rawName: "Bills", system: false, unread: 0 },
         { id: "Label_7", name: "Receipts", rawName: "Receipts", system: false, unread: 0 }
       ]
 
@@ -99,7 +99,7 @@ Item {
 
       tryCompare(account, "rawLabelId", "Label_3")
       compare(mailService.rawLabelId, "Label_3")
-      compare(mailService.rawQuery, "label:Work")
+      compare(mailService.rawQuery, "label:Bills")
       compare(ids(named(app, "label-picker").matchingLabels), "Label_7",
         "the current label cannot trigger an optimistic removal that leaves it attached")
 
@@ -152,16 +152,18 @@ Item {
     function test_imap_current_folder_is_not_a_uid_move_destination() {
       var account = installAccount("imap", "imap:me@example.com", "me@example.com")
       account.labels = [
-        { id: "Receipts", name: "Receipts", rawName: "Receipts", system: false, unread: 0 },
-        { id: "Archive", name: "Archive", rawName: "Archive", system: false, unread: 0 }
+        { id: "Archive", name: "Archive", rawName: "Archive", system: false, unread: 0 },
+        { id: "Receipts", name: "Receipts", rawName: "Receipts", system: false, unread: 0 }
       ]
 
-      var slot = labelSlot("Receipts")
+      // The ninth row on the rail: eight mailboxes come first, and the rail
+      // stops at nine because `Ctrl+0` is reset zoom.
+      var slot = labelSlot("Archive")
       verify(slot >= 0)
       app.goSlot(slot)
 
-      tryCompare(account, "rawLabelId", "Receipts")
-      compare(ids(named(app, "label-picker").matchingLabels), "Archive",
+      tryCompare(account, "rawLabelId", "Archive")
+      compare(ids(named(app, "label-picker").matchingLabels), "Receipts",
         "the current folder cannot become a same-folder UID MOVE")
     }
   }

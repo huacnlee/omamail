@@ -151,13 +151,15 @@ var BINDINGS = [
   // Qt's own 400ms deadline on an unfinished sequence, so half of them did
   // nothing and said nothing about why. A modifier has no deadline.
   //
-  // One row, ten sequences: `slotFor` reads which one fired off this row's own
-  // key list, so the `Ctrl+` prefix is not written down a second time.
+  // One row, nine sequences: `slotFor` reads which one fired off this row's
+  // own key list, so the `Ctrl+` prefix is not written down a second time.
+  // Nine and not ten, because `Ctrl+0` is reset zoom in every browser and
+  // stays that here; a tenth row on the rail would have taken it.
   { id: "goMailbox",
     keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
-      "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9", "Ctrl+0"],
+      "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"],
     contexts: MAIL, group: "Going", label: "Go to that mailbox",
-    display: "Ctrl+1…0" },
+    display: "Ctrl+1…9" },
 
   // Accounts are surfaces rather than destinations inside the current one, so
   // they use Alt and the same visible order as the account switcher.
@@ -203,7 +205,7 @@ var BINDINGS = [
     group: "Reading", label: "Zoom the message body in" },
   { id: "zoomOut", keys: ["Ctrl+-"], contexts: ["reader"],
     group: "Reading", label: "Zoom the message body out" },
-  { id: "zoomReset", keys: ["Ctrl+Shift+0"], contexts: ["reader"],
+  { id: "zoomReset", keys: ["Ctrl+0"], contexts: ["reader"],
     group: "Reading", label: "Reset the zoom" },
 
   { id: "refresh", keys: ["F5", "Ctrl+R"], contexts: ANY,

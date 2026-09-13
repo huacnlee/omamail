@@ -320,6 +320,13 @@ Item {
     nav = Nav.push(nav, Nav.entry(kind, fields))
   }
 
+  // Going somewhere takes the keyboard back from the search field. A click on
+  // a row or on the rail moves no focus — a MouseArea never does — so after
+  // one click in the field the context stayed "search" with a message open,
+  // and `e` typed itself into the query instead of archiving. The field is
+  // left the way it is submitted: by a navigation, not only by Escape.
+  onNavChanged: if (searchBar.fieldFocused) focusScope.parkKeyboard()
+
   // An overlay whose view has closed, wherever it sits. Usually the top; a
   // draft can also finish under the shortcut sheet, and then the sheet goes
   // with it — it was drawn over a place that no longer exists.
@@ -931,7 +938,7 @@ Item {
   // are drawn from, so the number beside a row and the row a number opens are
   // the same fact rather than two.
   readonly property var sidebarSlots: service
-    ? Model.sidebarSlots(service.mailboxes, service.visibleLabels, 10) : []
+    ? Model.sidebarSlots(service.mailboxes, service.visibleLabels, 9) : []
 
   function goSlot(index) {
     if (!service || index < 0 || index >= sidebarSlots.length) return
