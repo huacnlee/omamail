@@ -239,6 +239,7 @@ async fn actual_tls_rejects_untrusted_issuer_and_wrong_hostname() {
             env!("CARGO_MANIFEST_DIR"),
             "/src/providers/gmail_http_tls_test.py"
         ))
+        .arg("3")
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
@@ -260,7 +261,7 @@ async fn actual_tls_rejects_untrusted_issuer_and_wrong_hostname() {
             "localhost",
             RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()),
         ),
-        ("127.0.0.1", trusted),
+        ("127.0.0.1", trusted.clone()),
     ] {
         let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         let w: Wire = BufReader::new(Box::new(socket));
@@ -272,6 +273,16 @@ async fn actual_tls_rejects_untrusted_issuer_and_wrong_hostname() {
         output.read_line(&mut report).unwrap();
         assert_eq!(report.trim(), "tls-refused-no-http");
     }
+    // A private authority the store was built from — the system's, in
+    // production — is honoured for the host it issued for (#185).
+    let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let w: Wire = BufReader::new(Box::new(socket));
+    let mut secure = tls_with_roots(w, "localhost", trusted).await.unwrap();
+    // close_notify, so the peer reads a clean end rather than a reset.
+    secure.shutdown().await.unwrap();
+    let mut report = String::new();
+    output.read_line(&mut report).unwrap();
+    assert_eq!(report.trim(), "empty");
     assert!(peer.wait().unwrap().success());
 }
 #[test]

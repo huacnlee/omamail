@@ -166,10 +166,13 @@ async fn tls(w: Wire, host: &str) -> Result<Wire> {
     if !w.buffer().is_empty() {
         return Err("mail_tls_failed");
     }
-    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    tls_with_roots(w, host, roots).await
+    tls_with_roots(w, host, crate::tls::roots()).await
 }
-async fn tls_with_roots(w: Wire, host: &str, roots: RootCertStore) -> Result<Wire> {
+async fn tls_with_roots(
+    w: Wire,
+    host: &str,
+    roots: impl Into<Arc<RootCertStore>>,
+) -> Result<Wire> {
     let config = ClientConfig::builder_with_provider(Arc::new(
         tokio_rustls::rustls::crypto::ring::default_provider(),
     ))

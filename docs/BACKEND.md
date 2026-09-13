@@ -72,6 +72,8 @@ Replies contain `jsonrpc: "2.0"`, the original `id`, and either `result` or an `
 
 A Tokio runtime runs up to 32 concurrent frame futures behind a bounded 16-frame queue. Gmail uses a shared native reqwest/rustls connection pool, with asynchronous HTTP and Hickory DNS resolution, verified TLS, fixed Google HTTPS origins, no redirects or environment proxies, and a streamed 16 MiB response ceiling. OAuth refresh is coalesced per account; one account's refresh does not block another account. HTTP has a 10-second connection timeout and a 20-second whole-request timeout. Gmail IPC requests have a 25-second deadline including queue time. Expired queued frames never start domain operations.
 
+Every TLS connection the backend opens — Gmail, JMAP, Microsoft, calendars, public HTTP and IMAP/SMTP — verifies the peer against the bundled Mozilla list plus the operating system's certificate store (`/etc/ssl/certs`, or `SSL_CERT_FILE` and `SSL_CERT_DIR` when set), so a mail server behind a private authority the system trusts is reachable, as it was under curl before the backend existed. reqwest's `rustls-tls-native-roots` feature does this for HTTPS; `src/tls/` builds the same union once for the tokio-rustls connections IMAP and SMTP make. An entry in the system store that rustls cannot parse is skipped, not fatal.
+
 Blocking keyring and file operations run on a separate bounded thread pool;
 the runtime has two async workers and at most eight blocking workers. The
 official HEY child processes use asynchronous pipes, output limits, deadlines
