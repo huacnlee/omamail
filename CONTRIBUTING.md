@@ -136,6 +136,8 @@ Keep an attachment, not only open it once
 
 Not `fix imap bug`, not `Update ImapClient.qml`.
 
+Choose a scope prefix from the final change: `ai: ` for AI features, `docs: ` for documentation only, `website: ` for the website, and `chore: ` for repository maintenance such as release workflows, CI, builds, dependency upkeep and developer tooling. Other changes have no scope prefix. For mixed changes, use the primary outcome: a release-flow PR with README cleanup uses `chore: `, for example `chore: Fix backend release ordering with a single release PR`. These rules also apply to individual commit subjects. See [the naming rules](AGENTS.md#commits-and-pull-requests).
+
 **The body is prose, with two headings that are read by a machine.** Say what
 was wrong and why this is the fix; a paragraph of reasoning is worth more than
 a bulleted diff summary, and the surprising part is the part to spend words on.
