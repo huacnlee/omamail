@@ -1,6 +1,167 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[tokio::test]
+async fn mail_send_preview_is_write_free_and_execute_keeps_one_durable_job() {
+    use crate::mail::{Account, Provider, SendRequest};
+    struct Identities;
+    impl crate::mail::send::IdentityLookup for Identities {
+        fn identities<'a>(
+            &'a self,
+            _: &'a Account,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Value, &'static str>> + Send + 'a>,
+        > {
+            Box::pin(async {
+                Ok(json!([{"email":"a@example.org","displayName":"Alias","isDefault":true}]))
+            })
+        }
+    }
+    fn request(execute: bool) -> SendRequest {
+        SendRequest {
+            account: Account {
+                id: "a@example.org".into(),
+                provider: Provider::Gmail,
+            },
+            from: String::new(),
+            to: vec!["one@example.org".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Plan".into(),
+            body: "private body\n".into(),
+            attachments: vec![],
+            execute,
+            send_id: Some("explicit-send-1".into()),
+        }
+    }
+    let dir = Temp::new();
+    let jobs = Arc::new(Mutex::new(Vec::new()));
+    let recorded = jobs.clone();
+    let outbox = Outbox::with_root(
+        Arc::new(move |job| {
+            recorded.lock().unwrap().push(job);
+            Box::pin(async { Err("outbox_delivery_unknown") })
+        }),
+        Some(dir.0.clone()),
+    );
+    let before = crate::mail::tests::fixture_tree(&dir.0);
+    let preview = crate::mail::send::send_with(request(false), &Identities, &outbox)
+        .await
+        .unwrap();
+    assert_eq!(preview["dryRun"], true);
+    assert_eq!(crate::mail::tests::fixture_tree(&dir.0), before);
+    assert!(jobs.lock().unwrap().is_empty());
+    let result = crate::mail::send::send_with(request(true), &Identities, &outbox)
+        .await
+        .unwrap();
+    assert_eq!(result["sendId"], "explicit-send-1");
+    assert_eq!(result["outbox"]["entries"][0]["state"], "queued");
+    let entry = &result["outbox"]["entries"][0];
+    assert_eq!(
+        entry["dueAt"].as_u64().unwrap() - entry["queuedAt"].as_u64().unwrap(),
+        10_000
+    );
+    let duplicate = crate::mail::send::send_with(request(true), &Identities, &outbox)
+        .await
+        .unwrap();
+    assert_eq!(duplicate["outbox"]["entries"].as_array().unwrap().len(), 1);
+    let mut changed = request(true);
+    changed.body = "different".into();
+    assert_eq!(
+        crate::mail::send::send_with(changed, &Identities, &outbox).await,
+        Err("outbox_send_id_conflict")
+    );
+    outbox
+        .call("outbox.flush", &json!({"accountId":"a@example.org"}))
+        .await
+        .unwrap();
+    wait_state(&outbox, "explicit-send-1", "a@example.org", "unknown").await;
+    let again = crate::mail::send::send_with(request(true), &Identities, &outbox)
+        .await
+        .unwrap();
+    assert_eq!(again["outbox"]["entries"][0]["state"], "unknown");
+    let jobs = jobs.lock().unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0]["accountId"], "a@example.org");
+    assert_eq!(jobs[0]["provider"], "gmail");
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(jobs[0]["payload"]["raw"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        mailparse::parse_mail(&bytes).unwrap().get_body().unwrap(),
+        "private body\n"
+    );
+}
 struct Temp(PathBuf);
+
+#[tokio::test]
+async fn mail_send_idempotency_survives_sent_payload_removal_and_restart() {
+    use crate::mail::{Account, Provider, SendRequest};
+    fn prepared() -> crate::mail::send::Prepared {
+        crate::mail::send::prepare(
+            &SendRequest {
+                account: Account {
+                    id: "a@example.org".into(),
+                    provider: Provider::Gmail,
+                },
+                from: String::new(),
+                to: vec!["one@example.org".into()],
+                cc: vec![],
+                bcc: vec![],
+                subject: "Plan".into(),
+                body: "body".into(),
+                attachments: vec![],
+                execute: true,
+                send_id: Some("replay".into()),
+            },
+            &json!([{"email":"a@example.org"}]),
+        )
+        .unwrap()
+    }
+    let dir = Temp::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let executor: Executor = Arc::new(move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(json!({"id":"delivered"})) })
+    });
+    let outbox = Outbox::with_root(executor.clone(), Some(dir.0.clone()));
+    let (first, concurrent) = tokio::join!(
+        outbox.enqueue_mail(prepared(), Some("replay")),
+        outbox.enqueue_mail(prepared(), Some("replay"))
+    );
+    assert_eq!(first.unwrap()["sendId"], "replay");
+    assert_eq!(
+        concurrent.unwrap()["outbox"]["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    outbox
+        .call("outbox.flush", &json!({"accountId":"a@example.org"}))
+        .await
+        .unwrap();
+    wait_state(&outbox, "replay", "a@example.org", "sent").await;
+    let stored = outbox
+        .call(
+            "outbox.snapshot",
+            &json!({"accountId":"a@example.org","sendId":"replay","includePayloads":true}),
+        )
+        .await
+        .unwrap();
+    assert!(stored["entries"][0].get("payload").is_none());
+    outbox.shutdown().await.unwrap();
+    drop(outbox);
+    let reopened = Outbox::with_root(executor, Some(dir.0.clone()));
+    let duplicate = reopened
+        .enqueue_mail(prepared(), Some("replay"))
+        .await
+        .unwrap();
+    assert_eq!(duplicate["outbox"]["entries"][0]["state"], "sent");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
 impl Temp {
     fn new() -> Self {
         let stamp = SystemTime::now()

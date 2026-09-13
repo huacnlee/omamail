@@ -2,6 +2,7 @@ mod account;
 pub(crate) mod action;
 pub(crate) mod list;
 pub(crate) mod read;
+pub(crate) mod send;
 mod types;
 
 pub use account::resolve_account;
@@ -21,3 +22,6 @@ mod read_tests;
 
 #[cfg(test)]
 mod action_tests;
+
+#[cfg(test)]
+mod send_tests;

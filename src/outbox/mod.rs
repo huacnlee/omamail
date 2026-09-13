@@ -41,6 +41,7 @@ struct Inner {
 pub struct Outbox {
     inner: Arc<Inner>,
     jobs: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    compose_gate: tokio::sync::Mutex<()>,
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -178,10 +179,52 @@ impl Outbox {
                 writer: Arc::new(storage::Writer::default()),
             }),
             jobs: Mutex::new(vec![]),
+            compose_gate: tokio::sync::Mutex::new(()),
         }
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.inner.events.subscribe()
+    }
+    /// Serialize explicit-ID composition with its enqueue. Replays retain the
+    /// original timestamp, MIME boundary and message ID; `call` remains the sole
+    /// owner of digest conflict checks and exactly-once queue insertion.
+    pub(crate) async fn enqueue_mail(
+        &self,
+        prepared: crate::mail::send::Prepared,
+        send_id: Option<&str>,
+    ) -> Result<Value, &'static str> {
+        let _gate = self.compose_gate.lock().await;
+        let account = prepared.account.id.clone();
+        let provider = prepared.account.provider.id();
+        let mut stamp = now();
+        let id = match send_id {
+            Some(id) => {
+                text(&json!({"sendId":id}), "sendId")?;
+                let snapshot = self
+                    .call("outbox.snapshot", &json!({"accountId":account,"sendId":id}))
+                    .await?;
+                if let Some(entry) = snapshot["entries"]
+                    .as_array()
+                    .and_then(|entries| entries.first())
+                {
+                    stamp = entry["order"].as_u64().ok_or("outbox_storage_invalid")?;
+                }
+                id.to_owned()
+            }
+            None => format!(
+                "send-{stamp}-{}-{}",
+                std::process::id(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            ),
+        };
+        let seed = id.clone();
+        let payload = tokio::task::spawn_blocking(move || prepared.payload(stamp, &seed))
+            .await
+            .map_err(|_| "worker_failed")??;
+        let answer = self.call("outbox.enqueue", &json!({"accountId":account,"provider":provider,"sendId":id,"order":stamp,"payload":payload})).await?;
+        Ok(
+            json!({"dryRun":false,"executed":true,"accountId":account,"sendId":answer["id"],"outbox":answer["snapshot"]}),
+        )
     }
     pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
         let account = text(params, "accountId")?.to_owned();

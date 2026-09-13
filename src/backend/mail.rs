@@ -1,5 +1,5 @@
 use super::Session;
-use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest};
+use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest, SendRequest};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -13,6 +13,49 @@ struct ProviderList<'a> {
 
 struct ProviderRead<'a> {
     session: &'a Session,
+}
+
+struct ProviderIdentities<'a> {
+    session: &'a Session,
+}
+
+impl crate::mail::send::IdentityLookup for ProviderIdentities<'_> {
+    fn identities<'a>(
+        &'a self,
+        account: &'a crate::mail::Account,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            let refusals = crate::account::refusals_readonly(&account.id)?;
+            if !crate::providers::can(account.provider.id(), "send", &refusals) {
+                return Err("mail_send_unavailable");
+            }
+            let params = json!({"accountId":account.id});
+            match account.provider {
+                Provider::Gmail => self.session.gmail.call("gmail.sendAs", &params).await,
+                Provider::Jmap => {
+                    let value = self.session.jmap.call("jmap.sendAs", &params).await?;
+                    Ok(value["data"].clone())
+                }
+                Provider::Hey => {
+                    let checked = crate::providers::hey_access::checked_params(&json!({"accountId":account.id,"program":crate::providers::hey_access::program()?})).await?;
+                    crate::providers::hey::call("hey.sendAs", &checked).await
+                }
+                Provider::Imap | Provider::Outlook => {
+                    let account = account.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let settings = crate::auth::settings_readonly(account.provider.id(), &account.id)?;
+                        let email = settings["email"].as_str().filter(|value| !value.is_empty()).or_else(|| settings["imap"]["username"].as_str()).ok_or("mail_send_sender_unavailable")?;
+                        let aliases = settings["imap"]["aliases"].as_array().cloned().unwrap_or_default();
+                        if aliases.len() > 1024 { return Err("mail_send_identities_invalid"); }
+                        let default = aliases.iter().any(|alias| alias["isDefault"] == true);
+                        let mut rows = vec![json!({"email":email,"displayName":"","isPrimary":true,"isDefault":!default})];
+                        rows.extend(aliases);
+                        Ok(json!(rows))
+                    }).await.map_err(|_| "worker_failed")?
+                }
+            }
+        })
+    }
 }
 
 pub(crate) trait MutationAdapter: Send + Sync {
@@ -266,6 +309,15 @@ impl Session {
         params: &Value,
     ) -> Result<Value, &'static str> {
         match method {
+            "mail.send" => {
+                let request = SendRequest::try_from(params)?;
+                crate::mail::send::send_with(
+                    request,
+                    &ProviderIdentities { session: self },
+                    &self.outbox,
+                )
+                .await
+            }
             "mail.list" => {
                 let request = ListRequest::try_from(params)?;
                 crate::mail::list::list_with(request, &ProviderList { session: self }).await

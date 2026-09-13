@@ -80,7 +80,7 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
         let subject = field(params, "subject")?;
         let reply = field(params, "replyTo")?;
         let body = params["body"].as_str().ok_or("Invalid HEY body")?;
-        if (body.is_empty() && method == "hey.send") || body.len() > LIMIT || body.contains('\0') {
+        if body.len() > LIMIT || body.contains('\0') {
             return Err("Invalid HEY body");
         }
         let draft = field(params, "draftId")?;
@@ -111,7 +111,11 @@ fn prepare(method: &str, params: &Value) -> Result<(Vec<String>, Vec<u8>), &'sta
             }
             args.extend(["reply".into(), reply.into()]);
         } else {
-            if to.trim().is_empty() && method == "hey.send" {
+            if to.trim().is_empty()
+                && cc.trim().is_empty()
+                && bcc.trim().is_empty()
+                && method == "hey.send"
+            {
                 return Err("HEY requires a recipient");
             }
             args.extend([
@@ -288,6 +292,26 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_body_and_cc_only_send_reach_the_official_cli() {
+        let (args, input) =
+            prepare("hey.send", &json!({"body":"","cc":"one@example.org"})).unwrap();
+        assert!(input.is_empty());
+        assert_eq!(
+            args,
+            vec![
+                "compose",
+                "--to",
+                "",
+                "--subject",
+                "",
+                "--cc",
+                "one@example.org",
+                "--json"
+            ]
+        );
+    }
 
     #[test]
     fn raw_message_decoding_retains_bcc_and_private_body() {

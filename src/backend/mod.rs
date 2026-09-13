@@ -57,7 +57,7 @@ impl Session {
     // re-enter this dispatcher; embedding every provider future here overflowed
     // the worker stack in the real Quickshell large-request integration test.
     pub async fn dispatch(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
-        if matches!(method, "mail.list" | "mail.read" | "mail.act") {
+        if matches!(method, "mail.list" | "mail.read" | "mail.act" | "mail.send") {
             return Box::pin(self.mail_call(method, params)).await;
         }
         if matches!(method, "system.info" | "system.quit" | "providers.list") {

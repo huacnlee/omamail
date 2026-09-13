@@ -135,6 +135,7 @@ pub struct SendRequest {
     pub body: String,
     pub attachments: Vec<AttachmentInput>,
     pub execute: bool,
+    pub send_id: Option<String>,
 }
 
 fn params_object<'a>(
@@ -316,6 +317,7 @@ impl TryFrom<&Value> for SendRequest {
                 "body",
                 "attachments",
                 "execute",
+                "sendId",
             ],
         )?;
         let from = optional_string(object, "from", "")?;
@@ -361,6 +363,16 @@ impl TryFrom<&Value> for SendRequest {
             body: optional_string(object, "body", "")?,
             attachments,
             execute: execute(object)?,
+            send_id: object
+                .get("sendId")
+                .map(|value| {
+                    let value = value.as_str().ok_or("invalid_params")?;
+                    if value.len() > 1024 {
+                        return Err("invalid_params");
+                    }
+                    opaque_id(value)
+                })
+                .transpose()?,
         })
     }
 }
