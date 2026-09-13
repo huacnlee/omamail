@@ -120,47 +120,6 @@ impl Drop for HeyAttachments {
     }
 }
 
-#[cfg(test)]
-mod attachment_tests {
-    use super::*;
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    use std::os::unix::fs::PermissionsExt;
-
-    #[test]
-    fn hey_materializes_the_durable_mime_bytes_and_cleans_private_files() {
-        let payload = crate::message::compose::build(&json!({"to":"one@example.org","body":"private body","attachments":[{"filename":"quote\\工\".txt","data":STANDARD.encode(b"validated bytes")},{"filename":"quote\\工\".txt","data":STANDARD.encode(b"second") }]})).unwrap();
-        let staged = HeyAttachments::from_raw(payload["raw"].as_str().unwrap()).unwrap();
-        let paths = staged.paths();
-        assert_eq!(paths.as_array().unwrap().len(), 2);
-        let first = std::path::PathBuf::from(paths[0]["path"].as_str().unwrap());
-        assert_eq!(first.file_name().unwrap(), "quote\\工\".txt");
-        assert_eq!(std::fs::read(&first).unwrap(), b"validated bytes");
-        assert_eq!(
-            std::fs::metadata(&first).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            std::fs::metadata(first.parent().unwrap())
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        assert_eq!(
-            std::fs::read(paths[1]["path"].as_str().unwrap()).unwrap(),
-            b"second"
-        );
-        drop(staged);
-        assert!(!first.exists());
-    }
-
-    #[test]
-    fn hey_rejects_mime_filename_traversal_before_writing() {
-        let payload = crate::message::compose::build(&json!({"body":"body","attachments":[{"filename":"../escape","data":STANDARD.encode(b"bad") }]})).unwrap();
-        assert!(HeyAttachments::from_raw(payload["raw"].as_str().unwrap()).is_err());
-    }
-}
 pub async fn send(
     job: &Value,
     gmail: &crate::providers::gmail::Session,
@@ -250,4 +209,46 @@ pub async fn send(
         }
     }
     Ok(answer)
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn hey_materializes_the_durable_mime_bytes_and_cleans_private_files() {
+        let payload = crate::message::compose::build(&json!({"to":"one@example.org","body":"private body","attachments":[{"filename":"quote\\工\".txt","data":STANDARD.encode(b"validated bytes")},{"filename":"quote\\工\".txt","data":STANDARD.encode(b"second") }]})).unwrap();
+        let staged = HeyAttachments::from_raw(payload["raw"].as_str().unwrap()).unwrap();
+        let paths = staged.paths();
+        assert_eq!(paths.as_array().unwrap().len(), 2);
+        let first = std::path::PathBuf::from(paths[0]["path"].as_str().unwrap());
+        assert_eq!(first.file_name().unwrap(), "quote\\工\".txt");
+        assert_eq!(std::fs::read(&first).unwrap(), b"validated bytes");
+        assert_eq!(
+            std::fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(first.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::read(paths[1]["path"].as_str().unwrap()).unwrap(),
+            b"second"
+        );
+        drop(staged);
+        assert!(!first.exists());
+    }
+
+    #[test]
+    fn hey_rejects_mime_filename_traversal_before_writing() {
+        let payload = crate::message::compose::build(&json!({"body":"body","attachments":[{"filename":"../escape","data":STANDARD.encode(b"bad") }]})).unwrap();
+        assert!(HeyAttachments::from_raw(payload["raw"].as_str().unwrap()).is_err());
+    }
 }

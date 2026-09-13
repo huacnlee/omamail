@@ -240,6 +240,32 @@ async fn conversation(
     Ok(members.clone())
 }
 
+pub(crate) async fn read_with(
+    request: ReadRequest,
+    adapter: &impl ReadAdapter,
+) -> Result<Value, &'static str> {
+    let opened = adapter
+        .call(
+            "reader.open",
+            json!({
+                "accountId":request.account.id,
+                "id":request.id,
+                "requestId":request_id(),
+                "cacheOnly":false,
+                "now":now(),
+                "options":{"allowRemoteImages":false,"withReader":true},
+            }),
+        )
+        .await?;
+    let (message, members) = safe_message(&request, opened)?;
+    let conversation = conversation(&request, &message, members, adapter).await?;
+    Ok(json!({
+        "accountId":request.account.id,
+        "message":message,
+        "conversation":conversation,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,30 +309,4 @@ mod tests {
             "mail_read_invalid_reader"
         );
     }
-}
-
-pub(crate) async fn read_with(
-    request: ReadRequest,
-    adapter: &impl ReadAdapter,
-) -> Result<Value, &'static str> {
-    let opened = adapter
-        .call(
-            "reader.open",
-            json!({
-                "accountId":request.account.id,
-                "id":request.id,
-                "requestId":request_id(),
-                "cacheOnly":false,
-                "now":now(),
-                "options":{"allowRemoteImages":false,"withReader":true},
-            }),
-        )
-        .await?;
-    let (message, members) = safe_message(&request, opened)?;
-    let conversation = conversation(&request, &message, members, adapter).await?;
-    Ok(json!({
-        "accountId":request.account.id,
-        "message":message,
-        "conversation":conversation,
-    }))
 }

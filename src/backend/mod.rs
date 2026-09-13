@@ -1,8 +1,8 @@
 mod content;
 pub(crate) mod mail;
-mod reader;
 mod methods;
 pub mod protocol;
+mod reader;
 mod rpc;
 pub mod stdio;
 pub mod upload;
@@ -78,16 +78,28 @@ impl Session {
                 } else {
                     crate::account::conversation::request(&params)
                 }
-            }).await.map_err(|_| "worker_failed")?;
+            })
+            .await
+            .map_err(|_| "worker_failed")?;
         }
         if matches!(method, "providers.resolve" | "providers.snapshot") {
             if method == "providers.resolve" {
                 return crate::providers::domain::resolve(params);
             }
-            if params != &json!({}) { return Err("invalid_params"); }
+            if params != &json!({}) {
+                return Err("invalid_params");
+            }
             return Ok(crate::providers::domain::snapshot());
         }
-        if matches!(method, "agent.jobsList" | "agent.jobsProjection" | "agent.jobStart" | "agent.jobShow" | "agent.jobCancel" | "agent.jobForget") {
+        if matches!(
+            method,
+            "agent.jobsList"
+                | "agent.jobsProjection"
+                | "agent.jobStart"
+                | "agent.jobShow"
+                | "agent.jobCancel"
+                | "agent.jobForget"
+        ) {
             return Box::pin(crate::agent::jobs::call(method, params)).await;
         }
         if method.starts_with("outbox.") {

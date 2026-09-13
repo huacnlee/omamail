@@ -91,6 +91,110 @@ fn get_request() -> Request {
 }
 
 #[tokio::test]
+async fn mail_send_preview_reads_google_identity_without_mutation_or_local_writes() {
+    use crate::mail::tests::{account_fixture, fixture_tree, isolated};
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    if isolated() {
+        return;
+    }
+    let fixture = account_fixture(json!({"version":1,"activeId":"audit@example.org",
+        "accounts":[{"provider":"gmail","email":"audit@example.org"}]}));
+    let credentials = fixture.root.join("home/.config/omamail");
+    std::fs::create_dir_all(&credentials).unwrap();
+    let client_file = credentials.join("credentials.json");
+    std::fs::write(
+        &client_file,
+        json!({"installed":{
+        "client_id":"123-audit.apps.googleusercontent.com",
+        "client_secret":"synthetic-client-secret"}})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&client_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let helper = fixture.root.join("secret-tool");
+    std::fs::write(&helper, r#"#!/usr/bin/python3
+import os, sys
+expected = ['lookup','service','omamail','kind','refresh-token','client-id','123-audit.apps.googleusercontent.com','account','audit@example.org','grant','calendar-events-v1']
+if sys.argv[1:] != expected or sys.stdin.read() != '':
+    open(os.path.join(os.environ['HOME'], 'forbidden-process'), 'w').write('unexpected invocation')
+    sys.exit(99)
+print('synthetic-refresh-token')
+"#).unwrap();
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+    unsafe { std::env::set_var("PATH", &fixture.root) };
+    for directory in ["cache", "state"] {
+        let directory = fixture.root.join(directory).join("omamail");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("sentinel"), b"unchanged existing state").unwrap();
+    }
+    std::fs::write(fixture.root.join("state/omamail/outbox.json"), b"[]\n").unwrap();
+    let attachment = fixture.root.join("quote\\工\".txt");
+    std::fs::write(&attachment, b"private attachment bytes").unwrap();
+    let before = fixture_tree(&fixture.root);
+    let body = json!({"access_token":"synthetic-access-token","expires_in":3600,
+        "sendAs":[{"sendAsEmail":"audit@example.org","displayName":"Audit 工",
+        "isPrimary":true,"isDefault":true}]})
+    .to_string();
+    let peer = server(
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes(),
+        Duration::ZERO,
+    )
+    .await;
+    let transport = client_builder().https_only(false).build().unwrap();
+    let origin = peer.url.strip_suffix("/messages/abc").unwrap().to_owned();
+    let session = crate::backend::Session::default();
+    let params = json!({"to":["工 <one@example.org>"],"subject":"Private preview subject",
+        "body":"private multiline body\nsecond\r\nمتن\tend",
+        "attachments":[{"path":attachment,"name":"quote\\工\".txt","size":24}]});
+    with_test_transport(transport, origin, async {
+        for _ in 0..2 {
+            let result = session.dispatch("mail.send", &params).await.unwrap();
+            assert_eq!(result["dryRun"], true);
+            assert_eq!(result["executed"], false);
+            assert_eq!(result["body"], params["body"]);
+            assert_eq!(result["from"], "Audit 工 <audit@example.org>");
+            assert!(!result.to_string().contains("synthetic-"));
+            assert_eq!(fixture_tree(&fixture.root), before);
+        }
+        for bad in ["bad\r", "bad\n", "bad\r\n", "bad\0", "=?utf-8?b?YQ==?="] {
+            let mut invalid = params.clone();
+            invalid["subject"] = json!(bad);
+            assert!(session.dispatch("mail.send", &invalid).await.is_err());
+            assert_eq!(fixture_tree(&fixture.root), before);
+        }
+    })
+    .await;
+    let requests = peer.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        4,
+        "one refresh, two valid identity reads and one rejected encoded-header identity read"
+    );
+    assert!(requests[0].starts_with("POST /token HTTP/1.1\r\n"));
+    assert!(!requests[0].contains("authorization:"));
+    assert!(requests[0].ends_with("grant_type=refresh_token&client_id=123-audit.apps.googleusercontent.com&client_secret=synthetic-client-secret&refresh_token=synthetic-refresh-token"));
+    for request in &requests[1..] {
+        assert!(request.starts_with("GET /gmail/v1/users/me/settings/sendAs HTTP/1.1\r\n"));
+        assert!(request.contains("\r\nauthorization: Bearer synthetic-access-token\r\n"));
+        assert!(request.ends_with("\r\n\r\n"));
+        assert!(!request.contains("synthetic-refresh-token"));
+        assert!(!request.contains("synthetic-client-secret"));
+    }
+    for request in requests.iter() {
+        assert!(!request.contains("private multiline body"));
+        assert!(!request.contains("Private preview subject"));
+        assert!(!request.contains("private attachment bytes"));
+        assert!(!request.contains("/messages/send") && !request.contains("/upload"));
+    }
+    assert_eq!(fixture_tree(&fixture.root), before);
+}
+
+#[tokio::test]
 async fn native_headers_form_and_keepalive() {
     let server = server(ok(), Duration::ZERO).await;
     let client = client_builder().https_only(false).build().unwrap();

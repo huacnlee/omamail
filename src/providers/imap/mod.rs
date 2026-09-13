@@ -168,11 +168,7 @@ async fn tls(w: Wire, host: &str) -> Result<Wire> {
     }
     tls_with_roots(w, host, crate::tls::roots()).await
 }
-async fn tls_with_roots(
-    w: Wire,
-    host: &str,
-    roots: impl Into<Arc<RootCertStore>>,
-) -> Result<Wire> {
+async fn tls_with_roots(w: Wire, host: &str, roots: impl Into<Arc<RootCertStore>>) -> Result<Wire> {
     let config = ClientConfig::builder_with_provider(Arc::new(
         tokio_rustls::rustls::crypto::ring::default_provider(),
     ))

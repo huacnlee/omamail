@@ -68,6 +68,11 @@ impl Peer {
         if scenario == "action-unknown" {
             document["capabilities"]["urn:ietf:params:jmap:core"]["maxObjectsInSet"] = json!(1);
         }
+        if scenario == "send-preview" {
+            document["capabilities"]["urn:ietf:params:jmap:submission"] = json!({});
+            document["accounts"]["account"]["accountCapabilities"]["urn:ietf:params:jmap:submission"] =
+                json!({});
+        }
         // Deliberately stale: production availability must read the live peer.
         let boxes = vec![
             json!({"id":"I","role":"inbox"}),
@@ -470,6 +475,51 @@ async fn production_jmap_dispatch_previews_all_actions_without_local_writes() {
     // actions also read threads and members.
     // Invalid batches must cause no extra provider request.
     assert_eq!(calls.len(), 6 * 2 * 4 + 2 * 2, "{report}");
+    assert_eq!(fixture_tree(&fixture.root), before);
+}
+
+#[tokio::test]
+async fn production_jmap_send_preview_only_reads_identity_and_preserves_storage() {
+    if isolated() {
+        return;
+    }
+    let fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
+        "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
+    let attachment = fixture.root.join("quote\\工\".txt");
+    fs::write(&attachment, b"synthetic attachment").unwrap();
+    fs::create_dir_all(fixture.root.join("state/omamail")).unwrap();
+    fs::write(fixture.root.join("state/omamail/outbox.json"), b"[]\n").unwrap();
+    let before = fixture_tree(&fixture.root);
+    let (peer, session) = Peer::start("send-preview", true).await;
+    let params = json!({"to":["工 <one@example.org>"],"subject":"Preview 工",
+        "body":"line one\nline two\r\nمتن\tend",
+        "attachments":[{"path":attachment,"name":"quote\\工\".txt","size":20}]});
+    let result = session.dispatch("mail.send", &params).await.unwrap();
+    assert_eq!(result["dryRun"], true);
+    assert_eq!(result["executed"], false);
+    assert_eq!(result["body"], params["body"]);
+    assert_eq!(result["from"], "User <user@example.test>");
+    assert_eq!(fixture_tree(&fixture.root), before);
+    for bad in ["bad\r", "bad\n", "bad\r\n", "bad\0", "=?utf-8?b?YQ==?="] {
+        let mut invalid = params.clone();
+        invalid["subject"] = json!(bad);
+        assert!(session.dispatch("mail.send", &invalid).await.is_err());
+        assert_eq!(fixture_tree(&fixture.root), before);
+    }
+    let report = peer.report().await;
+    assert!(
+        report
+            .as_array()
+            .is_some_and(|requests| !requests.is_empty()
+                && requests.iter().all(|request| request["method"] == "POST"
+                    && request["path"] == "/api"
+                    && request["authorization"] == true
+                    && request["calls"]
+                        .as_array()
+                        .is_some_and(|calls| !calls.is_empty()
+                            && calls.iter().all(|call| call[0] == "Identity/get")))),
+        "{report}"
+    );
     assert_eq!(fixture_tree(&fixture.root), before);
 }
 

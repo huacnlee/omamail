@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, future::Future, pin::Pin};
 
 const MAX_TARGETS: usize = 2_000;
+type LookupFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, &'static str>> + Send + 'a>>;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ActionPlan {
@@ -33,10 +34,7 @@ pub(crate) struct ActionAvailability {
 /// Supplies only bounded, read-only action context. Implementations must not
 /// call provider mutation adapters or change cache/account/outbox state.
 pub(crate) trait ActionLookup: Send + Sync {
-    fn availability<'a>(
-        &'a self,
-        account: &'a Account,
-    ) -> Pin<Box<dyn Future<Output = Result<ActionAvailability, &'static str>> + Send + 'a>>;
+    fn availability<'a>(&'a self, account: &'a Account) -> LookupFuture<'a, ActionAvailability>;
 
     fn rows<'a>(
         &'a self,
@@ -44,7 +42,7 @@ pub(crate) trait ActionLookup: Send + Sync {
         ids: &'a [String],
         availability: &'a ActionAvailability,
         operation: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>>;
+    ) -> LookupFuture<'a, Vec<Value>>;
 }
 
 /// Returns only confirmed successful IDs. Unknown outcomes are failures for
@@ -136,10 +134,9 @@ pub(crate) async fn plan_action(
     }
     if let Some(mailbox) = crate::account::model::action_mailbox(action)
         && availability.mailbox_required[&request.operation] != false
+        && !availability.mailboxes[mailbox].as_bool().unwrap_or(false)
     {
-        if !availability.mailboxes[mailbox].as_bool().unwrap_or(false) {
-            return Err("mail_action_destination_unavailable");
-        }
+        return Err("mail_action_destination_unavailable");
     }
     let change = crate::account::model::action_changes(action);
     let add_label_ids = label_ids(&change, "add")?;

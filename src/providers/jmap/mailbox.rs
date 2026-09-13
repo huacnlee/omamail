@@ -287,9 +287,9 @@ impl Session {
             let email = by_id.get(id).ok_or("mail_action_target_unknown")?;
             let thread = action_id(&email["threadId"])?;
             let raw_member_ids = members.get(&thread).ok_or("mail_action_target_unknown")?;
-            let viewed = if super::resource::in_mailbox(&email, string(&roles["junk"])) {
+            let viewed = if super::resource::in_mailbox(email, string(&roles["junk"])) {
                 string(&roles["junk"])
-            } else if super::resource::in_mailbox(&email, string(&roles["trash"])) {
+            } else if super::resource::in_mailbox(email, string(&roles["trash"])) {
                 string(&roles["trash"])
             } else {
                 ""
