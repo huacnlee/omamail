@@ -9,13 +9,23 @@ Item {
   QtObject {
     id: recoveryBackend
     property bool ready: false
+    property int apiVersion: 3
     property var requests: []
     function call(method, params, callback) { requests = requests.concat([{method:method,params:params,done:callback}]) }
   }
 
   QtObject {
+    id: recoveryRuntime
+    property string state: "ready"
+    property bool canInstall: false
+    property int requiredApiVersion: 2
+    property int latestApiVersion: 3
+  }
+
+  QtObject {
     id: mailService
     property var backend: recoveryBackend
+    property var backendRuntime: null
 
     property bool hasAgent: true
     property bool agentStarting: false
@@ -202,9 +212,13 @@ Item {
     }
 
     function init() {
+      mailService.backendRuntime = null
       var exitDialog = named(app, "compose-exit-dialog")
       if (exitDialog) exitDialog.close()
       recoveryBackend.ready = false
+      recoveryBackend.apiVersion = 3
+      recoveryRuntime.requiredApiVersion = 2
+      recoveryRuntime.latestApiVersion = 3
       recoveryBackend.requests = []
       app.composeWriting = false
       app.composeReading = false
@@ -279,6 +293,32 @@ Item {
       compare(recoveryBackend.requests.length, 1)
       compare(recoveryBackend.requests[0].method, "compose.recoveryRead")
       recoveryBackend.requests[0].done({record:{active:false,returnView:"",draft:null,parked:[]},revision:"initial"}, null)
+    }
+    function test_edit_history_recovery_waits_for_fixed_api_three() {
+      recoveryBackend.apiVersion = 2
+      recoveryBackend.ready = true
+      mailService.backendRuntime = recoveryRuntime
+      compare(recoveryBackend.requests.length, 0)
+      var record = {version:1,active:true,draft:{userModified:true,body:""}}
+      app.writeComposeRecovery(JSON.stringify(record))
+      compare(recoveryBackend.requests.length, 0, "old backend must not erase an emptied draft")
+      verify(app.composeWriteQueued)
+      verify(app.draftSavedNotice.indexOf("Keep this window open") >= 0)
+      recoveryRuntime.requiredApiVersion = 3
+      app.readComposeRecovery()
+      compare(recoveryBackend.requests.length, 0, "release metadata cannot enable API 3 behavior")
+      recoveryBackend.apiVersion = 3
+      tryCompare(recoveryBackend.requests, "length", 1)
+      lastNativeRequest("compose.recoveryRead").done({record:{active:false},revision:"initial"}, null)
+      var saved = lastNativeRequest("compose.recoverySave")
+      verify(saved !== null)
+      compare(saved.params.record.draft.userModified, true)
+      compare(saved.params.record.draft.body, "")
+      saved.done({record:saved.params.record,revision:"next"}, null)
+      compare(app.draftSavedNotice, "", "the update notice clears only after recovery is durable")
+      recoveryRuntime.latestApiVersion = 4
+      app.writeComposeRecovery(JSON.stringify(record))
+      verify(lastNativeRequest("compose.recoverySave") !== saved, "later APIs must not disable API 3 recovery")
     }
     function lastNativeRequest(method) {
       for (var i = recoveryBackend.requests.length - 1; i >= 0; i--) if (recoveryBackend.requests[i].method === method) return recoveryBackend.requests[i]

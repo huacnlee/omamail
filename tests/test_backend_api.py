@@ -2,7 +2,7 @@
 """Exercise the plugin's API contract against an explicitly selected binary.
 
 Uses the production QML JavaScript request, frame and response codecs in Node.
-Only synthetic data and cache-only operations are used; no real account, credential,
+Only synthetic data, dry runs and local storage operations are used; no real account, credential,
 mail server, or external agent is configured. This is a compatibility gate, not
 an exhaustive provider/network integration suite.
 """
@@ -78,6 +78,17 @@ function safeDocument(value) {
   assert.ok(value && typeof value === 'object');
   assert.ok(!JSON.stringify(value).includes('forbiddenScript'));
 }
+function storageSnapshot(directory = process.env.HOME) {
+  const snapshot = {};
+  function visit(path) {
+    const stat = fs.lstatSync(path, {bigint:true});
+    snapshot[path] = [String(stat.mode), String(stat.ino), String(stat.mtimeNs),
+      stat.isFile() ? fs.readFileSync(path).toString('base64') : null];
+    if (stat.isDirectory()) for (const name of fs.readdirSync(path).sort()) visit(path + '/' + name);
+  }
+  visit(directory);
+  return snapshot;
+}
 (async () => {
   const info = await call('system.info');
   assert.equal(info.name, 'omamail');
@@ -91,14 +102,30 @@ function safeDocument(value) {
   function at(value, path) { return path ? path.split('.').reduce((v, key) => v === undefined || v === null ? undefined : v[key], value) : value; }
   assert.ok(Array.isArray(contract.contractCases) && contract.contractCases.length);
   for (const fixture of contract.contractCases) {
+    const registryPath = process.env.XDG_CONFIG_HOME + '/omamail/accounts.json';
+    const emptyRegistry = fixture.name === 'mail list requires an account';
+    const registryBefore = emptyRegistry ? fs.readFileSync(registryPath) : null;
+    if (emptyRegistry) fs.writeFileSync(registryPath, JSON.stringify({version:1,accounts:[]}));
+    // The full isolated HOME includes seeded cache/config/state sentinels,
+    // credential helper effects and any newly created outbox/draft files.
+    const noWrites = fixture.method.startsWith('mail.') || fixture.name === 'recovery rejects invalid edit history';
+    const before = noWrites ? storageSnapshot() : null;
     const value = await call(fixture.method, fixture.params, fixture.errorCode === undefined ? null : fixture.errorCode);
-    for (const [path, expected] of Object.entries(fixture.equals || {}))
-      assert.deepEqual(at(value, path), expected, fixture.name + ': ' + path);
+    if (noWrites) assert.deepEqual(storageSnapshot(), before, fixture.name + ': no storage or credential effects');
+    if (emptyRegistry) fs.writeFileSync(registryPath, registryBefore);
+    for (const [path, expected] of Object.entries(fixture.equals || {})) {
+      const actual = at(value, path);
+      // Production codecs run in a VM; compare JSON values across its realm,
+      // not the Array/Object prototypes of the Node fixture loader.
+      assert.deepEqual(actual === undefined ? undefined : JSON.parse(JSON.stringify(actual)), expected, fixture.name + ': ' + path);
+    }
     for (const [path, expected] of Object.entries(fixture.types || {})) {
       const actual = at(value, path);
       const type = Array.isArray(actual) ? 'array' : actual === null ? 'null' : typeof actual;
       assert.equal(type, expected, fixture.name + ': ' + path);
     }
+    if (fixture.name === 'recovery reads edit history')
+      assert.equal(value.record.parked[1].userModified, undefined, 'legacy edit history remains absent');
   }
 
   await call('message.parse', {raw:17}, -32602);
@@ -184,8 +211,21 @@ def main():
         (home / 'run').mkdir(mode=0o700)
         registry = home / 'config/omamail/accounts.json'
         registry.parent.mkdir(parents=True)
-        registry.write_text(json.dumps({'version': 1, 'accounts': [{'email': 'contract@example.org'}]}))
+        registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org', 'accounts': [
+            {'email': 'contract@example.org'},
+            {'provider': 'imap', 'email': 'sender@example.org',
+             'imap': {'username': 'sender@example.org'}}]}))
         registry.chmod(0o600)
+        for name in ('cache', 'state', 'data'):
+            sentinel = home / name / 'omamail/sentinel'
+            sentinel.parent.mkdir(parents=True)
+            sentinel.write_bytes(b'preserve existing user state\n')
+        helpers = home / 'bin'
+        helpers.mkdir()
+        credential_helper = helpers / 'secret-tool'
+        credential_helper.write_text('#!/bin/sh\nprintf touched >> "$HOME/credential-touched"\nexit 1\n')
+        credential_helper.chmod(0o700)
+        env['PATH'] = str(helpers) + os.pathsep + env.get('PATH', '')
         process = subprocess.Popen(['node', '-e', HARNESS], env=env, cwd=home,
                                    start_new_session=True)
         try:

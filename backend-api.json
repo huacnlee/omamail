@@ -1,5 +1,5 @@
 {
-  "apiVersion": 2,
+  "apiVersion": 3,
   "releasedApiVersion": 2,
   "protocolVersion": 1,
   "methods": [
@@ -64,6 +64,10 @@
     "upload.append",
     "upload.discard",
     "request.upload",
+    "mail.list",
+    "mail.read",
+    "mail.act",
+    "mail.send",
     "mail.watch",
     "mail.unwatch",
     "mail.check",
@@ -174,6 +178,230 @@
     "jmap.stream.close"
   ],
   "contractCases": [
+    {
+      "name": "mail list requires an account",
+      "method": "mail.list",
+      "params": {},
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
+      }
+    },
+    {
+      "name": "mail read requires an account",
+      "method": "mail.read",
+      "params": {
+        "account": "absent@example.org",
+        "id": "opaque:id"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
+      }
+    },
+    {
+      "name": "mail action dry run",
+      "method": "mail.act",
+      "params": {
+        "account": "contract@example.org",
+        "operation": "star",
+        "ids": [
+          "opaque:id",
+          "other",
+          "opaque:id"
+        ]
+      },
+      "equals": {
+        "dryRun": true,
+        "executed": false,
+        "accountId": "contract@example.org",
+        "operation": "star",
+        "requestedIds": [
+          "opaque:id",
+          "other",
+          "opaque:id"
+        ],
+        "targetIds": [
+          "opaque:id",
+          "other"
+        ]
+      }
+    },
+    {
+      "name": "mail send dry run",
+      "method": "mail.send",
+      "params": {
+        "account": "imap:sender@example.org",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello 合成\nSecond line"
+      },
+      "equals": {
+        "dryRun": true,
+        "executed": false,
+        "accountId": "imap:sender@example.org",
+        "from": "sender@example.org",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello 合成\nSecond line",
+        "attachments": []
+      }
+    },
+    {
+      "name": "mail list rejects unknown fields",
+      "method": "mail.list",
+      "params": {
+        "account": "contract@example.org",
+        "unexpected": true,
+        "execute": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail read rejects unknown fields",
+      "method": "mail.read",
+      "params": {
+        "account": "contract@example.org",
+        "id": "opaque:id",
+        "unexpected": true,
+        "execute": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail act rejects unknown fields",
+      "method": "mail.act",
+      "params": {
+        "account": "contract@example.org",
+        "operation": "star",
+        "ids": ["opaque:id"],
+        "unexpected": true,
+        "execute": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail send rejects unknown fields",
+      "method": "mail.send",
+      "params": {
+        "account": "imap:sender@example.org",
+        "to": ["recipient@example.org"],
+        "body": "Preview",
+        "unexpected": true,
+        "execute": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail act rejects nonboolean execution",
+      "method": "mail.act",
+      "params": {
+        "account": "contract@example.org",
+        "operation": "star",
+        "ids": [
+          "opaque:id"
+        ],
+        "execute": "true"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail send rejects nonboolean execution",
+      "method": "mail.send",
+      "params": {
+        "account": "imap:sender@example.org",
+        "to": [
+          "recipient@example.org"
+        ],
+        "body": "Preview",
+        "execute": "true"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "recovery preserves empty edited draft",
+      "method": "compose.recoverySave",
+      "params": {
+        "expectedRevision": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "record": {
+          "version": 1,
+          "active": true,
+          "draft": {
+            "userModified": true
+          },
+          "parked": [
+            {
+              "subject": "Untouched prefill",
+              "userModified": false
+            },
+            {
+              "subject": "Legacy snapshot"
+            }
+          ]
+        }
+      },
+      "equals": {
+        "record.active": true,
+        "record.draft.userModified": true,
+        "record.draft.body": "",
+        "record.parked.0.userModified": false
+      },
+      "types": {
+        "revision": "string"
+      }
+    },
+    {
+      "name": "recovery reads edit history",
+      "method": "compose.recoveryRead",
+      "params": {},
+      "equals": {
+        "record.active": true,
+        "record.draft.userModified": true,
+        "record.draft.body": "",
+        "record.parked.0.userModified": false,
+        "record.parked.1.subject": "Legacy snapshot"
+      }
+    },
+    {
+      "name": "recovery rejects invalid edit history",
+      "method": "compose.recoverySave",
+      "params": {
+        "expectedRevision": "unused",
+        "record": {
+          "version": 1,
+          "active": true,
+          "draft": {
+            "userModified": "true"
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "recovery_invalid_user_modified"
+      }
+    },
     {
       "name": "strict handshake parameters",
       "method": "system.info",
@@ -368,7 +596,26 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "mail.list",
+      "mail.read",
+      "mail.act",
+      "mail.send"
+    ],
+    "cases": [
+      "mail list requires an account",
+      "mail read requires an account",
+      "mail action dry run",
+      "mail send dry run",
+      "mail list rejects unknown fields",
+      "mail read rejects unknown fields",
+      "mail act rejects unknown fields",
+      "mail send rejects unknown fields",
+      "mail act rejects nonboolean execution",
+      "mail send rejects nonboolean execution",
+      "recovery preserves empty edited draft",
+      "recovery reads edit history",
+      "recovery rejects invalid edit history"
+    ]
   }
 }

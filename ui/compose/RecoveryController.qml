@@ -13,6 +13,12 @@ QtObject {
   readonly property var root: app
   readonly property var compose: composer
   readonly property var service: app ? app.service : null
+  // API 3 preserves explicit edit history, including a draft edited to empty.
+  // This requirement survives releases and later, unrelated API revisions.
+  readonly property bool recoverySupported: !!service && !!service.backend
+    && service.backend.ready && service.backend.apiVersion >= 3
+  readonly property string recoveryUpdateNotice: "Draft recovery needs an updated backend. Keep this window open."
+  onRecoverySupportedChanged: { if (recoverySupported) root.readComposeRecovery() }
   function reconcileComposeReceipts() {
     if (root.composeReceiptChecking) return
     var record = root.composeRecovery
@@ -107,7 +113,7 @@ QtObject {
   }
 
   function readComposeRecovery() {
-    if (!root.service || !root.service.backend || !root.service.backend.ready || root.composeReading) return
+    if (!recoverySupported || root.composeReading) return
     root.composeReading = true
     var mine = root.composeRecoveryRevision
     root.service.backend.call("compose.recoveryRead", {}, function(result, error) {
@@ -200,13 +206,15 @@ QtObject {
   function writeComposeRecovery(raw) {
     root.composeWritePayload = String(raw || "")
     root.composeWriteQueued = true
+    if (!recoverySupported && service && service.backend && service.backend.ready)
+      root.draftSavedNotice = recoveryUpdateNotice
     if (!root.composeRecoveryLoaded || root.composeStorageRevision === "") root.readComposeRecovery()
     else root.drainComposeRecovery()
   }
 
   function drainComposeRecovery() {
     if (root.composeRecoveryConflict || root.composeWriting || !root.composeWriteQueued || !root.composeRecoveryLoaded
-        || !root.service || !root.service.backend || !root.service.backend.ready || root.composeStorageRevision === "") return
+        || !recoverySupported || root.composeStorageRevision === "") return
     var raw = root.composeWritePayload
     var mine = root.composeRecoveryRevision
     root.composeWriteQueued = false
@@ -224,6 +232,7 @@ QtObject {
       }
       root.composeStorageRevision = String(result.revision || "")
       root.composeCommittedRevision = Math.max(root.composeCommittedRevision, mine)
+      if (root.draftSavedNotice === controller.recoveryUpdateNotice) root.draftSavedNotice = ""
       root.acknowledgeComposeReceipts()
       if (mine === root.composeRecoveryRevision && !root.composeWriteQueued) {
         root.composeRecovery = result.record

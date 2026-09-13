@@ -128,6 +128,79 @@ server settings are never returned. The reader refuses nonregular files, final
 symlinks, files above 1 MiB and malformed or unsupported registries. Missing
 files produce an empty list. Listing does not write or migrate the source file.
 
+## Mail commands
+
+The root commands are `list`, `read`, `mark`, `archive`, `trash`, `spam`, and
+`send`. There is no `mail` command prefix. They use the same provider-neutral
+operations as the API 3 methods `mail.list`, `mail.read`, `mail.act`, and
+`mail.send`. The checkout implements API 3; the pinned release still provides
+API 2. These commands require a build containing API 3 until a backend release
+ships them; see [backend versioning](BACKEND-RUNTIME.md).
+
+Use `omamail accounts list --json` to find an account ID. Omitting `--account`
+uses the active account. An explicit unknown account fails with
+`mail_account_unknown`, without falling back to another account. IDs and page
+tokens are opaque: copy them exactly from returned results, including punctuation.
+
+```sh
+omamail list --account me@example.org --json
+omamail list --mailbox unread --limit 10 --json
+omamail list --mailbox inbox --query 'meeting' --page-token 'RETURNED_TOKEN' --json
+omamail read 'MESSAGE_ID' --account me@example.org --json
+omamail mark star 'MESSAGE_ID' --json
+omamail mark star 'MESSAGE_ID' --execute --json
+omamail archive 'MESSAGE_ID' --json
+omamail archive 'MESSAGE_ID' --execute --json
+```
+
+`list` defaults to Inbox and 25 rows; `--limit` accepts 1–100. Mailboxes are
+`inbox`, `unread`, `starred`, `sent`, `drafts`, `archive`, `spam`, and `trash`,
+subject to account capabilities. Search syntax follows the account's provider.
+List results include `accountId`, `messages`, `nextPageToken`, and `estimate`;
+an empty next-page token ends pagination. `read` returns safe text and attachment
+metadata without marking the message read or exporting attachment files.
+`mark` accepts exactly `read`, `unread`, `star`, and `unstar`. Actions accept
+multiple message IDs. Their previews retain `requestedIds` and show the resolved
+`targetIds`, including expanded conversation members where applicable.
+
+Every state-changing command is a dry run unless `--execute` is present.
+JSON previews return `{"ok":true,"result":{"dryRun":true,"executed":false,...}}`
+and exit 0. A dry run may make bounded read-only queries to resolve identities,
+capabilities or conversation members; it does not mutate the mailbox, accounts
+or caches, write files, create drafts, submit messages or enqueue outbox entries.
+Provider capabilities can refuse an operation. `--execute` is an execution
+switch, not proof of human approval; there is no confirmation code. Automation
+must obtain any approval its own workflow requires before setting it.
+
+`send` reads a UTF-8 body from stdin, up to 16 MiB. There is no body argument.
+Repeat `--to`, `--cc`, `--bcc`, or `--attach` as needed. Attachments require
+absolute regular-file paths. `--from` must identify a sender belonging to the
+selected account; otherwise its default identity is used.
+
+```sh
+printf 'Hello,\nThe report is ready.\n' | omamail send --account me@example.org --to you@example.org --subject 'Report ready' --json
+printf 'Hello,\nThe report is ready.\n' | omamail send --account me@example.org --to you@example.org --subject 'Report ready' --execute --json
+```
+
+Executed actions report confirmed `succeededIds` and `failedIds`; partial
+failure exits 1 and retains the result beside the JSON error. Executed sends
+use the durable outbox. `executed: true` means execution was requested;
+delivery is authoritative only through the returned `outbox` entry matching
+`sendId`. The CLI waits for that entry: `sent` exits 0, while failure,
+cancellation or uncertain delivery exits 1. Check Sent before retrying an
+uncertain delivery. Direct RPC callers must inspect the returned outbox state
+and use `outbox.snapshot` to follow entries still queued or sending.
+
+`--json` works before or after the command. Operation errors exit 1 with
+`{"ok":false,"error":{"code":"..."}}` on stdout; human-readable errors use
+stderr. Invalid command syntax exits 2. JSON-RPC uses numeric error codes:
+unknown fields and nonboolean `execute` are rejected with `-32602` before any
+operation starts; a domain failure uses `-32000` and its static error name as
+`message`. RPC `execute` defaults to false and accepts only a JSON boolean.
+The low-level `call` command also exposes older provider-specific mutation
+methods; the dry-run guarantee belongs to these four `mail.*` operations and
+the seven root commands.
+
 ## Domain ownership
 
 | Area | Rust backend responsibility | UI or external boundary |
@@ -174,6 +247,13 @@ The principal shared-domain RPC families are:
 | `model.apply`, `model.unified`, `model.intent` | Pure model transformations, cross-account snapshots and stateful action-intent reconciliation. |
 | `outbox.enqueue`, `outbox.snapshot`, `outbox.undo`, `outbox.flush`, `outbox.abandon`, `outbox.forget` | Backend-owned delivery lifecycle. `outbox.changed` publishes revisions; terminal or stale snapshots cannot authorize a resend. |
 | `compose.recoveryRead`, `compose.recoverySave` | Normalized private recovery records with expected-revision checks. An editor conflict keeps the live draft rather than silently overwriting another instance. |
+
+API 3 recovery preserves the optional boolean `userModified`, including an
+edited draft whose contents are now empty. Absence retains the legacy behavior;
+nonboolean values fail with `recovery_invalid_user_modified` before a write.
+Desktop recovery waits for a connected backend with API 3 or newer, independently
+of release metadata. With an older backend the editor keeps its queued recovery
+in memory and tells the user to keep the window open.
 
 `outbox.snapshot` omits payloads by default. Recovering a particular payload
 requires an explicit send ID. A send whose result is unknown remains unknown;

@@ -404,7 +404,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 2, "methods": methods::ALL
+            "protocol": 1, "apiVersion": 3, "methods": methods::ALL
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),

@@ -8,7 +8,8 @@ mod output;
 #[command(
     name = "omamail",
     version,
-    about = "Mail backend and command-line client"
+    about = "Mail backend and command-line client",
+    after_help = "Examples:\n  omamail list --account me@example.org --json\n  omamail read MESSAGE_ID --json\n  omamail mark star MESSAGE_ID\n  omamail archive MESSAGE_ID\n  omamail archive MESSAGE_ID --execute\n  printf 'Hello\\n' | omamail send --to you@example.org --subject Hello --json\n\nMutations preview by default. Add --execute to apply them.\nOmitted --account uses the active account; message IDs and page tokens are opaque."
 )]
 struct Cli {
     /// Print machine-readable JSON instead of human-readable tables

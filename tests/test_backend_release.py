@@ -166,6 +166,18 @@ class ReleaseTests(unittest.TestCase):
         self.api.write_text(json.dumps(contract))
         self.assertEqual(self.check_api('--baseline', self.published).returncode, 0)
 
+    def test_unreleased_error_message_expectations_preserve_published_contract(self):
+        contract = self.api_fixture()
+        contract['apiVersion'] = 2
+        contract['contractCases'].append({
+            'name': 'strict parameters', 'method': 'system.info',
+            'params': {'unexpected': True}, 'errorCode': -32602,
+            'equals': {'message': 'Invalid params'}})
+        contract['unreleased']['cases'] = ['strict parameters']
+        self.api.write_text(json.dumps(contract))
+        result = self.check_api('--published', self.published)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_api_revisions_and_pin_require_canonical_values(self):
         contract = self.api_fixture()
         for value in (True, 0, -1, '1', 1.5, 2147483648):

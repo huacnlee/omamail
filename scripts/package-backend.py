@@ -93,7 +93,7 @@ def read_api(path):
             raise ValueError('invalid API contract case')
         names.add(case['name'])
         if 'errorCode' in case:
-            if type(case['errorCode']) is not int or set(case) & {'equals', 'types'}:
+            if type(case['errorCode']) is not int:
                 raise ValueError('invalid API error expectation')
         elif not case.get('equals') and not case.get('types'):
             raise ValueError('API contract case requires an expectation')
