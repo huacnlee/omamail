@@ -37,6 +37,8 @@ function snapshot(value) {
     mail.push({
       id: identifier(message.id), accountId: identifier(message.accountId),
       subject: text(message.subject), unread: message.unread === true,
+      subjectDirection: message.subjectDirection === "rtl" || message.subjectDirection === "ltr"
+        ? message.subjectDirection : "",
       from: { display: text(message.from && message.from.display) },
       sourceLabel: text(message.sourceLabel), receivedLabel: text(message.receivedLabel)
     })
