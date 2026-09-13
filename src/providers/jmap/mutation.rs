@@ -2,6 +2,23 @@ use super::mailbox::{Context, SUBMISSION, Snapshot, argument, fill, ids};
 use super::query::string;
 use super::*;
 use serde_json::Map;
+fn sender_identity(bytes: &[u8], identities: &Value) -> Result<String, &'static str> {
+    let (headers, _) = mailparse::parse_headers(bytes).map_err(|_| "jmap_invalid_message")?;
+    let wanted = crate::message::envelope::sender(&headers).map_err(|_| "jmap_invalid_message")?;
+    let rows = identities.as_array().ok_or("jmap_invalid_response")?;
+    let chosen = if let Some(wanted) = wanted {
+        rows.iter()
+            .find(|value| string(&value["email"]).eq_ignore_ascii_case(&wanted))
+    } else {
+        rows.iter()
+            .find(|value| value["isDefault"] == true)
+            .or_else(|| rows.first())
+    };
+    chosen
+        .map(|value| string(&value["id"]).to_owned())
+        .filter(|id| !id.is_empty())
+        .ok_or("jmap_sender_unavailable")
+}
 fn has(values: &Value, wanted: &str) -> bool {
     values
         .as_array()
@@ -323,22 +340,7 @@ impl Session {
         }
         let identity = if send {
             let identities = self.identities(context, snapshot).await?;
-            let (headers, _) =
-                mailparse::parse_headers(&bytes).map_err(|_| "jmap_invalid_message")?;
-            use mailparse::MailHeaderMap;
-            let from = headers.get_first_value("From").unwrap_or_default();
-            let wanted = mailparse::addrparse(&from)
-                .ok()
-                .and_then(|addresses| addresses.extract_single_info())
-                .map(|a| a.addr)
-                .unwrap_or_default();
-            let rows = identities.as_array().ok_or("jmap_invalid_response")?;
-            let chosen = rows
-                .iter()
-                .find(|v| string(&v["email"]).eq_ignore_ascii_case(&wanted))
-                .or_else(|| rows.iter().find(|v| v["isDefault"] == true))
-                .or_else(|| rows.first());
-            chosen.map(|v| string(&v["id"])).unwrap_or("").to_owned()
+            sender_identity(&bytes, &identities)?
         } else {
             String::new()
         };
@@ -467,6 +469,18 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn encoded_from_names_select_only_the_actual_jmap_identity() {
+        let identities = json!([{"id":"victim","email":"victim@example.org","isDefault":true},{"id":"alias","email":"alias@example.org"}]);
+        for name in ["工 <victim@example.org>, Alias", "工, Lee"] {
+            let payload = crate::message::compose::build(&json!({"from":"alias@example.org","fromName":name,"to":"to@example.org","body":"body"})).unwrap();
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload["raw"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(sender_identity(&bytes, &identities).unwrap(), "alias");
+        }
+        assert!(sender_identity(b"From: unapproved@example.org\r\n\r\nbody", &identities).is_err());
+    }
     #[test]
     fn preview_applicability_and_patch_agree_for_missing_roles_and_membership() {
         for roles in [

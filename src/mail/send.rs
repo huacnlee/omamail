@@ -1,6 +1,9 @@
 //! Validate a semantic message once; previews own no mutable service or storage.
 use super::{Account, Provider, SendRequest};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -318,14 +321,51 @@ impl Prepared {
             .to_string()
         );
         let payload = crate::message::compose::build(&fields)?;
-        let encoded_len = payload["raw"].as_str().ok_or("invalid_params")?.len();
-        if (self.account.provider == Provider::Hey && encoded_len > 16 * 1024 * 1024 * 4 / 3)
-            || (self.account.provider == Provider::Jmap && encoded_len > 24 * 1024 * 1024)
-        {
-            return Err("message_too_large");
-        }
+        let encoded = payload["raw"].as_str().ok_or("invalid_params")?;
+        let bytes = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| "invalid_message")?;
+        validate_size(self.account.provider, bytes.len(), encoded.len())?;
+        verify_envelope(&bytes, &self.fields)?;
         Ok(payload)
     }
+}
+
+pub(super) fn verify_envelope(bytes: &[u8], fields: &Value) -> Result<()> {
+    let (headers, _) = mailparse::parse_headers(bytes).map_err(|_| "invalid_message")?;
+    if crate::message::envelope::sender(&headers)?.as_deref() != fields["from"].as_str() {
+        return Err("mail_send_envelope_mismatch");
+    }
+    for (field, name) in [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")] {
+        let text = fields[field].as_str().unwrap_or("");
+        let expected: Vec<_> = if text.is_empty() {
+            vec![]
+        } else {
+            parsed(text)?
+                .into_iter()
+                .map(|(address, _)| address)
+                .collect()
+        };
+        if crate::message::envelope::addresses(&headers, name)? != expected {
+            return Err("mail_send_envelope_mismatch");
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_size(
+    provider: Provider,
+    decoded_len: usize,
+    encoded_len: usize,
+) -> Result<()> {
+    if (provider == Provider::Hey && encoded_len > 16 * 1024 * 1024 * 4 / 3)
+        || (provider == Provider::Jmap && encoded_len > 24 * 1024 * 1024)
+        || (matches!(provider, Provider::Imap | Provider::Outlook)
+            && decoded_len > crate::message::MAX_MESSAGE)
+    {
+        return Err("message_too_large");
+    }
+    Ok(())
 }
 
 pub(crate) async fn send_with(

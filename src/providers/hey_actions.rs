@@ -224,14 +224,13 @@ fn decode_message(params: &Value) -> Result<Value, &'static str> {
         "attachments":params.get("attachments").cloned().unwrap_or(json!([])),
         "draftId":params.get("draftId").cloned().unwrap_or(json!(""))});
     if thread.is_empty() {
-        for (key, header) in [
-            ("to", "To"),
-            ("cc", "Cc"),
-            ("bcc", "Bcc"),
-            ("subject", "Subject"),
-        ] {
-            out[key] = json!(mail.headers.get_first_value(header).unwrap_or_default());
+        for (key, header) in [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")] {
+            // The official CLI accepts address lists. Pass the structural
+            // addresses, not decoded names for another parser to reinterpret.
+            out[key] =
+                json!(crate::message::envelope::addresses(&mail.headers, header)?.join(", "));
         }
+        out["subject"] = json!(mail.headers.get_first_value("Subject").unwrap_or_default());
     } else {
         out["replyTo"] = json!(thread);
     }
@@ -292,6 +291,23 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mime_display_names_cannot_add_hey_recipients() {
+        use base64::Engine;
+        let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"To: =?UTF-8?B?5belIDx2aWN0aW1AZXhhbXBsZS5vcmc+LCBBbGlhcw==?= <to@example.org>\r\nCc: =?UTF-8?B?5belLCBMZWU=?= <cc@example.org>\r\nBcc: =?UTF-8?B?5belIDx2aWN0aW1AZXhhbXBsZS5vcmc+LCBBbGlhcw==?= <bcc@example.org>\r\n\r\nbody");
+        let fields = decode_message(&json!({"raw":raw})).unwrap();
+        let (args, _) = prepare("hey.send", &fields).unwrap();
+        for (flag, expected) in [
+            ("--to", "to@example.org"),
+            ("--cc", "cc@example.org"),
+            ("--bcc", "bcc@example.org"),
+        ] {
+            let at = args.iter().position(|arg| arg == flag).unwrap();
+            assert_eq!(args[at + 1], expected);
+        }
+        assert!(!args.iter().any(|arg| arg.contains("victim@example.org")));
+    }
 
     #[test]
     fn empty_body_and_cc_only_send_reach_the_official_cli() {

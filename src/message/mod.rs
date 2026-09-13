@@ -7,6 +7,7 @@ pub mod compose;
 pub mod content;
 pub mod html;
 pub mod signature;
+pub(crate) mod envelope;
 
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 

@@ -1,5 +1,36 @@
 use super::*;
 #[test]
+fn encoded_from_name_never_becomes_the_smtp_sender() {
+    for name in ["工 <victim@example.org>, Alias", "工, Lee"] {
+        let payload = crate::message::compose::build(&json!({"from":"alias@example.org","fromName":name,"to":"to@example.org","cc":"cc@example.org","bcc":"bcc@example.org","body":"body"})).unwrap();
+        let bytes = URL_SAFE_NO_PAD
+            .decode(payload["raw"].as_str().unwrap())
+            .unwrap();
+        let (sender, recipients) = envelope(&bytes, "fallback@example.org").unwrap();
+        assert_eq!(sender, "alias@example.org");
+        assert_eq!(
+            recipients,
+            ["to@example.org", "cc@example.org", "bcc@example.org"]
+        );
+    }
+}
+
+#[test]
+fn encoded_recipient_names_never_expand_smtp_recipients() {
+    let raw = b"From: alias@example.org\r\nTo: =?UTF-8?B?5belIDx2aWN0aW1AZXhhbXBsZS5vcmc+LCBBbGlhcw==?= <to@example.org>\r\nCc: =?UTF-8?B?5belLCBMZWU=?= <cc@example.org>\r\nBcc: =?UTF-8?B?5belIDx2aWN0aW1AZXhhbXBsZS5vcmc+LCBBbGlhcw==?= <bcc@example.org>\r\n\r\nbody";
+    assert_eq!(
+        envelope(raw, "fallback@example.org").unwrap(),
+        (
+            "alias@example.org".into(),
+            vec![
+                "to@example.org".into(),
+                "cc@example.org".into(),
+                "bcc@example.org".into()
+            ]
+        )
+    );
+}
+#[test]
 fn native_envelope_preserves_groups_cc_and_bcc_recipients() {
     let (from,to)=envelope(b"From: Writer <from@example.org>\r\nTo: Group: a@example.org,b@example.org;\r\nCc: a@example.org\r\nBcc: secret@example.org\r\n\r\nHello","fallback@example.org").unwrap();
     assert_eq!(from, "from@example.org");

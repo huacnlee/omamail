@@ -144,3 +144,33 @@ fn outgoing_preserves_twenty_mebibyte_attachment_support() {
     let output=compose::build(&json!({"to":"test@example.org","body":"hello","attachments":[{"filename":"large.bin","data":data}]})).unwrap();
     assert!(output["raw"].as_str().unwrap().len() < 48 * 1024 * 1024);
 }
+#[test]
+fn outgoing_address_words_never_hide_address_structure() {
+    use mailparse::MailHeaderMap;
+    for name in ["工 <victim@example.org>, Alias", "工, Lee"] {
+        let quoted = format!("\"{name}\"");
+        let fields = json!({"from":"alias@example.org","fromName":name,
+            "to":format!("{quoted} <to@example.org>"),
+            "cc":format!("{quoted} <cc@example.org>"),
+            "bcc":format!("{quoted} <bcc@example.org>"),"body":"body"});
+        let payload = crate::message::compose::build(&fields).unwrap();
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload["raw"].as_str().unwrap())
+            .unwrap();
+        let (headers, _) = mailparse::parse_headers(&bytes).unwrap();
+        for (key, expected) in [
+            ("From", "alias@example.org"),
+            ("To", "to@example.org"),
+            ("Cc", "cc@example.org"),
+            ("Bcc", "bcc@example.org"),
+        ] {
+            let addresses =
+                mailparse::addrparse_header(headers.get_first_header(key).unwrap()).unwrap();
+            let one = addresses
+                .extract_single_info()
+                .expect("one structural address");
+            assert_eq!(one.addr, expected);
+            assert_eq!(one.display_name.as_deref(), Some(name));
+        }
+    }
+}

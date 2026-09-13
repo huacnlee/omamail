@@ -92,6 +92,117 @@ fn encoded_header_words_cannot_change_the_previewed_envelope() {
 }
 
 #[test]
+fn actual_composed_sender_and_recipients_must_match_the_authorized_plan() {
+    let fields = json!({"from":"alias@example.org","to":"to@example.org","cc":"cc@example.org","bcc":"bcc@example.org"});
+    let good = b"From: alias@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org\r\n\r\nbody";
+    assert!(send::verify_envelope(good, &fields).is_ok());
+    for bad in [
+        "From: victim@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org\r\n\r\nbody",
+        "From: alias@example.org\r\nFrom: victim@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org\r\n\r\nbody",
+        "From: alias@example.org\r\nTo: to@example.org, victim@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org\r\n\r\nbody",
+        "From: alias@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org, victim@example.org\r\n\r\nbody",
+    ] {
+        assert!(send::verify_envelope(bad.as_bytes(), &fields).is_err());
+    }
+}
+
+#[test]
+fn every_provider_keeps_unicode_display_text_out_of_the_planned_envelope() {
+    for provider in [
+        Provider::Gmail,
+        Provider::Imap,
+        Provider::Outlook,
+        Provider::Jmap,
+        Provider::Hey,
+    ] {
+        for name in ["工 <victim@example.org>, Alias", "工, Lee"] {
+            let mut request = request();
+            request.account.provider = provider;
+            request.to = vec![format!("\"{name}\" <to@example.org>")];
+            request.cc = vec![format!("\"{name}\" <cc@example.org>")];
+            request.bcc = vec![format!("\"{name}\" <bcc@example.org>")];
+            let prepared = send::prepare(
+                &request,
+                &json!([{"email":"alias@example.org","displayName":name,"isDefault":true}]),
+            )
+            .unwrap();
+            let payload = prepared.payload(0, "unicode").unwrap();
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload["raw"].as_str().unwrap())
+                .unwrap();
+            let (headers, _) = mailparse::parse_headers(&bytes).unwrap();
+            assert_eq!(
+                crate::message::envelope::sender(&headers)
+                    .unwrap()
+                    .as_deref(),
+                Some("alias@example.org")
+            );
+            for (header, expected) in [
+                ("To", "to@example.org"),
+                ("Cc", "cc@example.org"),
+                ("Bcc", "bcc@example.org"),
+            ] {
+                assert_eq!(
+                    crate::message::envelope::addresses(&headers, header).unwrap(),
+                    vec![expected]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn provider_decoded_mime_limits_accept_the_boundary_and_refuse_the_next_byte() {
+    for provider in [Provider::Imap, Provider::Outlook] {
+        assert!(send::validate_size(provider, 16 * 1024 * 1024, 22_369_622).is_ok());
+        assert_eq!(
+            send::validate_size(provider, 16 * 1024 * 1024 + 1, 22_369_623),
+            Err("message_too_large")
+        );
+    }
+    assert!(send::validate_size(Provider::Gmail, 17 * 1024 * 1024, 23 * 1024 * 1024).is_ok());
+    assert!(send::validate_size(Provider::Jmap, 18 * 1024 * 1024, 24 * 1024 * 1024).is_ok());
+    assert!(send::validate_size(Provider::Jmap, 18 * 1024 * 1024, 24 * 1024 * 1024 + 1).is_err());
+    assert!(send::validate_size(Provider::Hey, 16 * 1024 * 1024, 16 * 1024 * 1024 * 4 / 3).is_ok());
+    assert!(
+        send::validate_size(
+            Provider::Hey,
+            16 * 1024 * 1024,
+            16 * 1024 * 1024 * 4 / 3 + 1
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn thirteen_mib_body_fails_imap_and_outlook_preview_before_enqueue() {
+    if tests::isolated() {
+        return;
+    }
+    let fixture = tests::account_fixture(
+        json!({"version":1,"activeId":"imap:a@example.org","accounts":[{"provider":"imap","email":"a@example.org"},{"provider":"outlook","email":"a@example.org"}]}),
+    );
+    let before = tests::fixture_tree(&fixture.root);
+    let session = crate::backend::Session::default();
+    let mut params = json!({"body":"x".repeat(13*1024*1024),"to":["to@example.org"]});
+    for provider in ["imap", "outlook"] {
+        params["account"] = json!(format!("{provider}:a@example.org"));
+        for execute in [false, true] {
+            params["execute"] = json!(execute);
+            assert!(
+                matches!(
+                    session.dispatch("mail.send", &params).await,
+                    Err("message_too_large")
+                ),
+                "oversized {provider} MIME was accepted (execute={execute})"
+            );
+            assert_eq!(tests::fixture_tree(&fixture.root), before);
+        }
+    }
+}
+
+#[test]
 fn attachment_bytes_are_pinned_and_preview_never_changes_the_fixture() {
     if tests::isolated() {
         return;

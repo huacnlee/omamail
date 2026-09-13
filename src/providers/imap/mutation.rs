@@ -147,37 +147,13 @@ fn raw(p: &Value) -> Result<Vec<u8>> {
     Ok(body)
 }
 fn envelope(body: &[u8], fallback: &str) -> Result<(String, Vec<String>)> {
-    use mailparse::MailHeaderMap;
-    let parsed = mailparse::parse_mail(body).map_err(|_| "invalid_message")?;
-    fn addresses(value: &str) -> Result<Vec<String>> {
-        let mut out = Vec::new();
-        for address in mailparse::addrparse(value)
-            .map_err(|_| "invalid_message")?
-            .iter()
-        {
-            match address {
-                mailparse::MailAddr::Single(addr) => out.push(addr.addr.clone()),
-                mailparse::MailAddr::Group(group) => {
-                    out.extend(group.addrs.iter().map(|a| a.addr.clone()))
-                }
-            }
-        }
-        Ok(out)
-    }
-    let from = parsed
-        .headers
-        .get_first_value("From")
-        .map(|v| addresses(&v))
-        .transpose()?
-        .and_then(|v| v.into_iter().next())
-        .unwrap_or_else(|| fallback.into());
+    let (headers, _) = mailparse::parse_headers(body).map_err(|_| "invalid_message")?;
+    let from = crate::message::envelope::sender(&headers)?.unwrap_or_else(|| fallback.into());
     let mut recipients = Vec::new();
     for key in ["To", "Cc", "Bcc"] {
-        for header in parsed.headers.get_all_values(key) {
-            for address in addresses(&header)? {
-                if !recipients.contains(&address) {
-                    recipients.push(address);
-                }
+        for address in crate::message::envelope::addresses(&headers, key)? {
+            if !recipients.contains(&address) {
+                recipients.push(address);
             }
         }
     }

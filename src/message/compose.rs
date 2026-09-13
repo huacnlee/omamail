@@ -58,6 +58,39 @@ fn fold(name: &str, value: &str) -> Result<String> {
         format!("{name}: =?UTF-8?B?{}?=", STANDARD.encode(value))
     })
 }
+fn address_line(name: &str, value: &str) -> Result<String> {
+    let value = header(value)?;
+    if value.is_ascii() {
+        return Ok(format!("{name}: {value}"));
+    }
+    fn single(value: &mailparse::SingleInfo) -> Result<String> {
+        let address = header(&value.addr)?;
+        let name = phrase(value.display_name.as_deref().unwrap_or(""))?;
+        Ok(if name.is_empty() {
+            address
+        } else {
+            format!("{name} <{address}>")
+        })
+    }
+    let parsed = mailparse::addrparse(&value).map_err(|_| "invalid_message_header")?;
+    let mut addresses = Vec::new();
+    for address in parsed.iter() {
+        addresses.push(match address {
+            mailparse::MailAddr::Single(value) => single(value)?,
+            mailparse::MailAddr::Group(group) => format!(
+                "{}: {};",
+                phrase(&group.group_name)?,
+                group
+                    .addrs
+                    .iter()
+                    .map(single)
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ),
+        });
+    }
+    Ok(format!("{name}: {}", addresses.join(", ")))
+}
 fn reference(value: &str) -> Result<String> {
     Ok(header(value)?
         .chars()
@@ -317,10 +350,10 @@ pub fn build(fields: &Value) -> Result<Value> {
             }
         ));
     }
-    lines.push(fold("To", field(fields, "to"))?);
+    lines.push(address_line("To", field(fields, "to"))?);
     for (key, name) in [("cc", "Cc"), ("bcc", "Bcc"), ("replyTo", "Reply-To")] {
         if !field(fields, key).is_empty() {
-            lines.push(fold(name, field(fields, key))?);
+            lines.push(address_line(name, field(fields, key))?);
         }
     }
     lines.push(fold("Subject", field(fields, "subject"))?);
