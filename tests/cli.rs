@@ -199,6 +199,31 @@ fn call_mail_list(root: &Path, account: &str) -> Output {
     child.wait_with_output().unwrap()
 }
 
+fn call_mail_read(root: &Path, account: &str, id: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["call", "mail.read", "--json"])
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("HOME", root.join("home"))
+        .env("PATH", root.join("bin"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({"account":account, "id":id})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    drop(child.stdin.take());
+    child.wait_with_output().unwrap()
+}
+
 fn metadata(path: &Path) -> (u32, (i64, i64), (i64, i64)) {
     let metadata = fs::metadata(path).unwrap();
     (
@@ -225,6 +250,51 @@ fn configured_list_failures_do_not_repair_registry_metadata() {
         ("outlook:outlook@example.org", Some("auth_signed_out")),
     ] {
         let output = call_mail_list(&fixture.0, account);
+        assert!(!output.status.success(), "{account}: {output:?}");
+        if let Some(expected_error) = expected_error {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+                expected_error,
+                "{account} must stop at the synthetic keyring failure before a network request"
+            );
+        }
+        assert_eq!(
+            (
+                metadata(&directory),
+                metadata(&registry),
+                fs::read(&registry).unwrap()
+            ),
+            before,
+            "{account} changed the configured account registry"
+        );
+    }
+}
+
+#[test]
+fn configured_read_failures_do_not_repair_registry_metadata() {
+    let fixture = mail_list_fixture(9, false);
+    let directory = fixture.0.join("config/omamail");
+    let registry = directory.join("accounts.json");
+    let before = (
+        metadata(&directory),
+        metadata(&registry),
+        fs::read(&registry).unwrap(),
+    );
+    for (account, id, expected_error) in [
+        ("gmail@example.org", "safe-message", None),
+        ("imap:imap@example.org", "7:INBOX", Some("auth_signed_out")),
+        (
+            "jmap:jmap@example.org",
+            "safe-message",
+            Some("auth_signed_out"),
+        ),
+        (
+            "outlook:outlook@example.org",
+            "7:INBOX",
+            Some("auth_signed_out"),
+        ),
+    ] {
+        let output = call_mail_read(&fixture.0, account, id);
         assert!(!output.status.success(), "{account}: {output:?}");
         if let Some(expected_error) = expected_error {
             assert_eq!(
@@ -360,6 +430,27 @@ fn list_without_a_configured_account_is_a_stable_json_error() {
         serde_json::json!({"ok":false,"error":{"code":"mail_account_unknown"}})
     );
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn read_rejects_unknown_accounts_and_unsafe_message_ids_without_writing_config() {
+    let unknown = call_in_empty_home(
+        "mail.read",
+        b"{\"account\":\"missing@example.org\",\"id\":\"one\"}",
+    );
+    assert_eq!(unknown.status.code(), Some(1));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&unknown.stdout).unwrap(),
+        serde_json::json!({"ok":false,"error":{"code":"mail_account_unknown"}})
+    );
+
+    let fixture = mail_list_fixture(9, false);
+    let unsafe_id = call_mail_read(&fixture.0, "gmail@example.org", "one\ntwo");
+    assert_eq!(unsafe_id.status.code(), Some(1));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&unsafe_id.stdout).unwrap(),
+        serde_json::json!({"ok":false,"error":{"code":"invalid_params"}})
+    );
 }
 
 #[test]

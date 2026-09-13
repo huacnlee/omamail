@@ -1,9 +1,13 @@
 use super::Session;
-use crate::mail::{ListRequest, Provider};
+use crate::mail::{ListRequest, Provider, ReadRequest};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
 struct ProviderList<'a> {
+    session: &'a Session,
+}
+
+struct ProviderRead<'a> {
     session: &'a Session,
 }
 
@@ -29,11 +33,17 @@ impl Session {
         method: &str,
         params: &Value,
     ) -> Result<Value, &'static str> {
-        if method != "mail.list" {
-            return Err("unknown_method");
+        match method {
+            "mail.list" => {
+                let request = ListRequest::try_from(params)?;
+                crate::mail::list::list_with(request, &ProviderList { session: self }).await
+            }
+            "mail.read" => {
+                let request = ReadRequest::try_from(params)?;
+                crate::mail::read::read_with(request, &ProviderRead { session: self }).await
+            }
+            _ => Err("unknown_method"),
         }
-        let request = ListRequest::try_from(params)?;
-        crate::mail::list::list_with(request, &ProviderList { session: self }).await
     }
 
     async fn provider_list(
@@ -202,6 +212,28 @@ impl crate::mail::list::ListAdapter for ProviderList<'_> {
         provider_query: String,
     ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
         Box::pin(self.session.provider_list(request, provider_query))
+    }
+}
+
+impl crate::mail::read::ReadAdapter for ProviderRead<'_> {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            if method == "reader.open" {
+                return self.session.reader_call(method, &params).await;
+            }
+            if method == "account.conversation" {
+                return tokio::task::spawn_blocking(move || {
+                    crate::account::conversation::request(&params)
+                })
+                .await
+                .map_err(|_| "worker_failed")?;
+            }
+            Err("unknown_method")
+        })
     }
 }
 
