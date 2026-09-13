@@ -34,7 +34,7 @@ dispatch, pipes and uploads. Shared account and MIME logic live in
 tests stay with their modules; `tests/` holds integration tests.
 
 Run `make install` to compile the release binary, atomically install it into
-`runtime/bin/omamail`, and install/link the plugin locally. `make install-backend-local`
+`${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`, and install/link the plugin locally. `make install-backend-local`
 updates just the private binary. `make test-local` runs the local suite and the
 real offscreen backend process harness. For development, use `./dev backend` and
 `make test-rust`; `./dev run` builds and prints instructions

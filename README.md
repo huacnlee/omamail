@@ -91,8 +91,9 @@ omarchy plugin add https://github.com/huacnlee/omamail.git --enable
 
 Open Omamail and explicitly install its backend when prompted. Loading the
 plugin never downloads a binary. The installer uses the exact `backend-version`
-release for Linux x86_64 or aarch64 and keeps it at `runtime/bin/omamail` inside
-the plugin. No system package or second Quickshell process is installed.
+release for Linux x86_64 or aarch64 and keeps it at
+`${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`, outside the watched plugin
+tree. No system package or second Quickshell process is installed.
 See [backend installation and releases](docs/BACKEND-RUNTIME.md) for updates,
 optional CLI access and recovery. Each plugin revision keeps its own exact backend
 pin; an old plugin never automatically switches to the backend used by main.
@@ -361,8 +362,9 @@ make install          # build/install the local backend, link the plugin, restar
 make validate         # tests, source regressions, qmllint, manifest check
 ```
 
-`make install` installs the compiled release binary at `runtime/bin/omamail`
-inside this checkout, then links the checkout into the Omarchy plugins directory.
+`make install` installs the compiled release binary at
+`${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`, then links the checkout
+into the Omarchy plugins directory.
 Use `make install-backend-local` to build and replace only that binary without
 restarting the shell. Unset `OMAMAIL_BIN` when using the installed runtime.
 

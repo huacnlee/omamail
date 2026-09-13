@@ -22,7 +22,11 @@ import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
-BINARY = ROOT / "runtime/bin/omamail"
+DATA_ROOT = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "omamail"
+BINARY = DATA_ROOT / "bin/omamail"
+LEGACY_BINARY = ROOT / "runtime/bin/omamail"
+LOCAL_BUILD = DATA_ROOT / "local-build.json"
+LOCK = DATA_ROOT / "runtime.lock"
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
 ARCHIVE_LIMIT = 128 * 1024 * 1024
 BINARY_LIMIT = 256 * 1024 * 1024
@@ -132,7 +136,7 @@ def checkout_version():
 
 def local_required(required):
     """Only an explicit installation of these exact bytes overrides the release pin."""
-    local_build = ROOT / "runtime/local-build.json"
+    local_build = LOCAL_BUILD
     safe_path(local_build)
     if not local_build.exists():
         return required
@@ -165,7 +169,7 @@ def local_required(required):
 
 def replace_runtime(candidate, marker=None):
     """Keep the old override if the atomic executable replacement fails."""
-    local_build = ROOT / "runtime/local-build.json"
+    local_build = LOCAL_BUILD
     safe_path(BINARY)
     safe_path(local_build)
     backup = candidate.parent / "previous-local-build.json"
@@ -226,9 +230,8 @@ def deadline():
 
 @contextlib.contextmanager
 def locked():
-    runtime = ROOT / "runtime"
-    safe_path(runtime, directory=True, create=True)
-    descriptor = os.open(runtime / ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    safe_path(DATA_ROOT, directory=True, create=True)
+    descriptor = os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         require(stat.S_ISREG(os.fstat(descriptor).st_mode), "Invalid runtime lock.")
         try:
@@ -242,7 +245,7 @@ def locked():
 
 def install(required, architecture):
     safe_path(BINARY)
-    safe_path(ROOT / "runtime/local-build.json")
+    safe_path(LOCAL_BUILD)
     asset = "omamail-linux-" + architecture + ".tar.gz"
     base = "https://github.com/huacnlee/omamail/releases/download/v" + required + "/"
     with deadline():
@@ -320,9 +323,15 @@ def cli_link(enable):
     link = Path.home() / ".local/bin/omamail"
     safe_path(link.parent, directory=True, create=enable)
     if link.is_symlink():
-        require(os.readlink(link) == str(BINARY), "CLI path belongs to another installation.")
+        target = os.readlink(link)
+        require(target in (str(BINARY), str(LEGACY_BINARY)), "CLI path belongs to another installation.")
         if not enable:
             link.unlink()
+        elif target == str(LEGACY_BINARY):
+            with tempfile.TemporaryDirectory(prefix=".omamail-cli-", dir=link.parent) as staging:
+                candidate = Path(staging) / "omamail"
+                os.symlink(str(BINARY), candidate)
+                os.replace(candidate, link)
     elif link.exists():
         raise Refused("CLI path belongs to another installation.")
     elif enable:
@@ -372,7 +381,7 @@ def run(command):
                     result["requiredVersion"] = required
                 elif command == "uninstall":
                     safe_path(BINARY)
-                    local_build = ROOT / "runtime/local-build.json"
+                    local_build = LOCAL_BUILD
                     safe_path(local_build)
                     local_build.unlink(missing_ok=True)
                     BINARY.unlink(missing_ok=True)

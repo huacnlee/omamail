@@ -1,7 +1,9 @@
 # Plugin-owned backend
 
 Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
-one executable at `<plugin root>/runtime/bin/omamail`. The root `backend-version`
+one executable at `${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`. Keeping
+the mutable runtime outside the recursively watched plugin tree prevents an
+installation or CLI operation from reloading the interface. The root `backend-version`
 file requires an exact version, independent of PATH and system packages. Service
 starts one persistent `omamail serve` process over stdin/stdout and checks its
 exact binary version, protocol and API revision before dispatching migrated calls.
@@ -20,7 +22,8 @@ protect integrity, not against a compromised publisher.
 
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses
-an unrelated file or link. Nothing edits PATH. Run `disable-cli` before removing
+an unrelated file or link. An owned link to the former plugin-local runtime is
+repointed without modifying that watched directory. Nothing edits PATH. Run `disable-cli` before removing
 the plugin, since Omarchy has no verified uninstall hook for that external link.
 `scripts/uninstall-backend.sh` removes the runtime only. Neither operation deletes
 accounts, drafts, caches or keyring entries. Marketplace checkouts contain no
@@ -208,9 +211,10 @@ binary instead of testing the missing-runtime screen.
 To try the latest checkout in the desktop, run `make install`. It first builds
 with `cargo build --locked --release` into this checkout's `target/` directory,
 regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary before
-atomically replacing `runtime/bin/omamail`. When its version is ahead of the
+atomically replacing `${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`. When its version is ahead of the
 release pin, it must match the Git checkout's Cargo package version. The explicit
-local installation records a private `runtime/local-build.json` marker binding
+local installation records a private
+`${XDG_DATA_HOME:-~/.local/share}/omamail/local-build.json` marker binding
 that version, the current release pin and the installed binary's SHA-256.
 Status and CLI activation accept this local version only while the checkout,
 Cargo version, pin and binary bytes still match. No tracked pin is changed.
