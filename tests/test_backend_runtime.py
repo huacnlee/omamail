@@ -32,19 +32,56 @@ class RuntimeTests(unittest.TestCase):
         spec.loader.exec_module(self.manager)
         (self.root / "backend-version").write_text("0.8.2\n")
         (self.root / "backend-api.json").write_text('{"apiVersion": 1, "releasedApiVersion": 1, "unreleased": {"methods": [], "cases": []}}')
-        self.binary = self.root / "runtime/bin/omamail"
+        self.data = Path(self.tmp.name).resolve() / "data/omamail"
+        self.home = Path(self.tmp.name).resolve() / "home"
+        self.binary = self.data / "bin/omamail"
+        patch.object(self.manager, "DATA_ROOT", self.data).start()
+        patch.object(self.manager, "BINARY", self.binary).start()
+        patch.object(self.manager, "LOCAL_BUILD", self.data / "local-build.json").start()
+        patch.object(self.manager, "LOCK", self.data / "runtime.lock").start()
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {}, clear=True).start()
-        patch.object(self.manager.Path, "home", return_value=self.root / "home").start()
+        patch.object(self.manager.Path, "home", return_value=self.home).start()
         patch.object(self.manager.platform, "system", return_value="Linux").start()
         patch.object(self.manager.platform, "machine", return_value="x86_64").start()
         patch.object(self.manager, "download", side_effect=AssertionError("unexpected network")).start()
+
+    def test_runtime_lives_in_xdg_data_outside_plugin_tree(self):
+        data = Path(self.tmp.name).resolve() / "data"
+        home = Path(self.tmp.name).resolve() / "home"
+        target = self.root / "scripts/xdg-backend-runtime.py"
+        shutil.copyfile(SOURCE, target)
+        spec = importlib.util.spec_from_file_location("xdg_runtime_manager", target)
+        manager = importlib.util.module_from_spec(spec)
+        with patch.dict(os.environ, {"XDG_DATA_HOME": str(data)}, clear=True):
+            spec.loader.exec_module(manager)
+        self.assertEqual(manager.BINARY, data / "omamail/bin/omamail")
+        self.assertFalse(manager.BINARY.is_relative_to(manager.ROOT))
+        spec = importlib.util.spec_from_file_location("home_runtime_manager", target)
+        manager = importlib.util.module_from_spec(spec)
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=home):
+            spec.loader.exec_module(manager)
+        self.assertEqual(manager.BINARY, home / ".local/share/omamail/bin/omamail")
 
     def old(self):
         self.binary.parent.mkdir(parents=True, exist_ok=True)
         self.binary.write_bytes(b"#!/bin/sh\nprintf 'omamail 0.8.1\\n'\n")
         self.binary.chmod(0o700)
         return self.binary.read_bytes()
+
+    def plugin_tree(self):
+        return [(str(path.relative_to(self.root)), path.is_dir(),
+                 b"" if path.is_dir() else path.read_bytes())
+                for path in sorted(self.root.rglob("*"))]
+
+    def test_install_and_cli_enable_do_not_write_the_watched_plugin_tree(self):
+        self.release(self.archive())
+        before = self.plugin_tree()
+        self.assertEqual(self.manager.run("install")["state"], "ready")
+        self.assertEqual(self.manager.run("enable-cli")["state"], "ready")
+        self.assertEqual(self.plugin_tree(), before)
+        self.assertTrue(self.binary.is_file())
+        self.assertEqual(os.readlink(self.home / ".local/bin/omamail"), str(self.binary))
 
     def test_install_local_checks_version_and_preserves_old_runtime_on_failure(self):
         source = self.root / "target/release/omamail"
@@ -53,7 +90,7 @@ class RuntimeTests(unittest.TestCase):
         source.chmod(0o700)
         result = self.manager.run("install-local")
         self.assertEqual(result["state"], "ready", result)
-        installed = self.root / "runtime/bin/omamail"
+        installed = self.binary
         self.assertEqual(installed.read_bytes(), source.read_bytes())
         self.assertEqual(installed.stat().st_mode & 0o777, 0o700)
         previous = installed.read_bytes()
@@ -83,14 +120,15 @@ binary.chmod(0o700)
 ''')
         cargo.chmod(0o700)
         link = self.root / "scripts/link-plugin.sh"
-        link.write_text('''#!/bin/sh
+        link.write_text(f'''#!/bin/sh
 set -eu
-test "$(runtime/bin/omamail --version)" = 'omamail 0.8.2'
-cmp target/release/omamail runtime/bin/omamail
+test "$({self.binary} --version)" = 'omamail 0.8.2'
+cmp target/release/omamail {self.binary}
 touch linked
 ''')
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.defpath,
-                   CARGO_TARGET_DIR=str(self.root / "other-target"))
+                   CARGO_TARGET_DIR=str(self.root / "other-target"),
+                   XDG_DATA_HOME=str(self.data.parent))
         result = subprocess.run(["make", "install"], cwd=self.root, env=env, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         marker = self.root / "linked"
@@ -120,10 +158,9 @@ touch linked
             self.assertEqual(result["requiredVersion"], "0.9.0")
             self.assertEqual(result["installedVersion"], "0.9.0")
         self.assertEqual((self.root / "backend-version").read_text(), "0.8.2\n")
-        marker = self.root / "runtime/local-build.json"
+        marker = self.data / "local-build.json"
         self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
-        home = self.root / "home"
-        with patch.object(self.manager.Path, "home", return_value=home):
+        with patch.object(self.manager.Path, "home", return_value=self.home):
             self.assertEqual(self.manager.run("enable-cli")["state"], "ready")
 
     def test_local_marker_never_authorizes_changed_bytes_checkout_or_pin(self):
@@ -152,13 +189,13 @@ touch linked
         result = self.manager.run("install")
         self.assertEqual(result["state"], "ready", result)
         self.assertEqual(result["requiredVersion"], "0.8.2")
-        self.assertFalse((self.root / "runtime/local-build.json").exists())
+        self.assertFalse((self.data / "local-build.json").exists())
         self.assertEqual(self.manager.run("status")["requiredVersion"], "0.8.2")
 
     def test_unsafe_local_marker_refused_without_touching_target(self):
         self.local_checkout()
         self.assertEqual(self.manager.run("install-local")["state"], "ready")
-        marker = self.root / "runtime/local-build.json"
+        marker = self.data / "local-build.json"
         marker.chmod(0o644)
         self.assertEqual(self.manager.run("status")["state"], "error")
         outside = self.root / "outside"
@@ -173,13 +210,13 @@ touch linked
         self.local_checkout()
         self.assertEqual(self.manager.run("install-local")["state"], "ready")
         self.assertEqual(self.manager.run("uninstall")["state"], "missing")
-        self.assertFalse((self.root / "runtime/local-build.json").exists())
+        self.assertFalse((self.data / "local-build.json").exists())
 
     def test_failed_atomic_replacement_preserves_local_runtime_and_marker(self):
         source = self.local_checkout()
         self.assertEqual(self.manager.run("install-local")["state"], "ready")
         previous = self.binary.read_bytes()
-        marker = self.root / "runtime/local-build.json"
+        marker = self.data / "local-build.json"
         previous_marker = marker.read_bytes()
         source.write_bytes(previous + b"# new build\n")
         replace = os.replace
@@ -418,7 +455,8 @@ touch linked
 
     def test_lock_refusal_preserves_old_binary(self):
         old = self.old()
-        with (self.root / "runtime/.lock").open("w") as lock:
+        self.data.mkdir(parents=True, exist_ok=True)
+        with (self.data / "runtime.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.assertEqual(self.manager.run("install")["state"], "error")
         self.assertEqual(self.binary.read_bytes(), old)
@@ -426,7 +464,8 @@ touch linked
     def test_symlink_runtime_refused_without_touching_target(self):
         outside = self.root / "outside"
         outside.mkdir()
-        (self.root / "runtime").symlink_to(outside, target_is_directory=True)
+        self.data.parent.mkdir(parents=True)
+        self.data.symlink_to(outside, target_is_directory=True)
         self.assertEqual(self.manager.run("install")["state"], "error")
         self.assertEqual(list(outside.iterdir()), [])
 
@@ -440,10 +479,9 @@ touch linked
     def test_cli_link_never_replaces_unrelated_file(self):
         self.release(self.archive())
         self.assertEqual(self.manager.run("install")["state"], "ready")
-        home = self.root / "home"
-        link = home / ".local/bin/omamail"
+        link = self.home / ".local/bin/omamail"
         link.parent.mkdir(parents=True)
-        with patch.object(self.manager.Path, "home", return_value=home):
+        with patch.object(self.manager.Path, "home", return_value=self.home):
             link.write_text("unrelated")
             self.assertEqual(self.manager.run("enable-cli")["state"], "error")
             self.assertEqual(self.manager.run("disable-cli")["state"], "error")
@@ -457,10 +495,36 @@ touch linked
             self.assertFalse(self.manager.run("status")["cliInstalled"])
             self.assertFalse(link.is_symlink())
 
+    def test_cli_install_replaces_the_owned_legacy_runtime_link(self):
+        self.release(self.archive())
+        self.assertEqual(self.manager.run("install")["state"], "ready")
+        legacy = self.root / "runtime/bin/omamail"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("old plugin-owned runtime")
+        link = self.home / ".local/bin/omamail"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(legacy)
+        with patch.object(self.manager.Path, "home", return_value=self.home):
+            result = self.manager.run("enable-cli")
+        self.assertEqual(result["state"], "ready", result)
+        self.assertEqual(os.readlink(link), str(self.binary))
+        self.assertEqual(legacy.read_text(), "old plugin-owned runtime")
+
+    def test_failed_legacy_cli_migration_preserves_the_owned_link(self):
+        self.release(self.archive())
+        self.assertEqual(self.manager.run("install")["state"], "ready")
+        legacy = self.root / "runtime/bin/omamail"
+        link = self.home / ".local/bin/omamail"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(legacy)
+        with patch.object(self.manager.os, "replace", side_effect=OSError("synthetic failure")):
+            self.assertEqual(self.manager.run("enable-cli")["state"], "error")
+        self.assertEqual(os.readlink(link), str(legacy))
+
     def test_cli_status_requires_exact_owned_link_and_valid_private_runtime(self):
         self.release(self.archive())
         self.assertFalse(self.manager.run("install")["cliInstalled"])
-        link = self.root / "home/.local/bin/omamail"
+        link = self.home / ".local/bin/omamail"
         link.parent.mkdir(parents=True)
         foreign = self.root / "foreign"
         foreign.write_text("#!/bin/sh\ntouch " + str(self.root / "executed") + "\n")
