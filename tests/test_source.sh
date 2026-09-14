@@ -1072,6 +1072,7 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf) ceiling=2573248 ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
+        (app/resources/macos/omamail.icns) ceiling=350889 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
@@ -1098,6 +1099,24 @@ done <<'FONT_CHECKSUMS'
 f2a5ea6cfab397445ffab00c0370927b66d61e560a05db5db271b42006381c1a app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf
 fe471e538392f51910faab985fa8e192a39dd3426125edd15b71b3680df0e749 app/assets/fonts/SymbolsNerdFontMono-Regular.ttf
 FONT_CHECKSUMS
+
+# The macOS bundle icon is generated from the small reviewed SVG beside it.
+# Keep the binary exception pinned to its exact bytes and documented recipe;
+# changing the artwork or encoder must be an explicit review rather than an
+# accidental expansion of the repository-wide asset ceiling.
+icon_provenance=app/resources/macos/ICON-PROVENANCE.md
+[ -f "../$icon_provenance" ] || fail "the macOS icon must record its provenance"
+mac_icon=app/resources/macos/omamail.icns
+[ "$(cd .. && wc -c < "$mac_icon")" -eq 350889 ] \
+  || fail "$mac_icon does not match its reviewed byte size"
+mac_icon_checksum=b876fc5bdd346ee6cafff7c3163a2fa7e79fb1346dd410538d31f21698d84afc
+actual_mac_icon_checksum=$(cd .. && shasum -a 256 "$mac_icon" | awk '{print $1}')
+[ "$actual_mac_icon_checksum" = "$mac_icon_checksum" ] \
+  || fail "$mac_icon does not match its reviewed checksum"
+grep -q "$mac_icon_checksum" "../$icon_provenance" \
+  || fail "$mac_icon checksum is missing from its shipped provenance"
+grep -q 'acd7580c6c73145d21911af77ea28711a289a37a42fb625f41c240842fc3e500' "../$icon_provenance" \
+  || fail "the macOS icon source checksum is missing from its shipped provenance"
 
 # The compose form, account boundary and raw-message builder must keep the
 # selected send-as address all the way to the provider. A missing link silently
