@@ -116,6 +116,12 @@ TestCase {
     Color.reload()
   }
 
+  function test_panel_tooltip_uses_shared_hover_delay() {
+    compare(toolTip.delay, Style.tooltipDelay)
+    compare(String(toolTip.palette.window), String(Color.popups.background))
+    compare(String(toolTip.palette.windowText), String(Color.popups.text))
+  }
+
   function test_environment_and_detached_operations_use_native_host() {
     compare(Quickshell.env("HOME"), "/fixture/home")
     Quickshell.execDetached(["xdg-open", "https://example.test/path"])

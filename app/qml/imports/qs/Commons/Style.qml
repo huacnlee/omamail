@@ -31,6 +31,10 @@ QtObject {
   readonly property real hoverBorderWidth: controlNumber("hover-cursor-border-width", normalBorderWidth)
   readonly property real selectedBorderWidth: controlNumber("selected-border-width", 0)
   readonly property real focusBorderWidth: controlNumber("focus-border-width", hoverBorderWidth)
+  // Match the shell's hover intent threshold. Keeping this here gives every
+  // standalone tooltip the same pause, including controls that use the
+  // platform style directly.
+  readonly property int tooltipDelay: 400
   readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
   readonly property var font: ({

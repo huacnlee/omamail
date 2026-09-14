@@ -34,5 +34,6 @@ Item {
   QQC.ToolTip {
     visible: parent.children[1].containsMouse && root.tooltipText !== ""
     text: root.tooltipText
+    delay: Style.tooltipDelay
   }
 }

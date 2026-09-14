@@ -5,3 +5,5 @@ SpinBox 2.0 SpinBox.qml
 SpinBox 6.0 SpinBox.qml
 Switch 2.0 Switch.qml
 Switch 6.0 Switch.qml
+ToolTip 2.0 ToolTip.qml
+ToolTip 6.0 ToolTip.qml

@@ -60,6 +60,6 @@ Rectangle {
   QQC.ToolTip {
     visible: control.hovered && root.tooltipText !== ""
     text: root.tooltipText
-    delay: 450
+    delay: Style.tooltipDelay
   }
 }

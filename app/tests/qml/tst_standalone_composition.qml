@@ -33,6 +33,12 @@ TestCase {
     palette.highlight: Color.accent
   }
 
+  ToolTip {
+    id: styledToolTip
+    visible: false
+    text: "Delayed help"
+  }
+
   Component {
     id: compositionComponent
     Standalone.Main { nativeHost: host; nativeFileStore: host }
@@ -65,6 +71,15 @@ TestCase {
     verify(findChild(styledSpinBox, "omamail-spinbox-increment"))
     compare(background.radius, Style.cornerRadius)
     compare(String(styledSpinBox.palette.windowText), String(Color.foreground))
+    compare(styledToolTip.delay, Style.tooltipDelay)
+    var tooltipLabel = findChild(styledToolTip, "omamail-tooltip-label")
+    var tooltipBackground = findChild(styledToolTip, "omamail-tooltip-background")
+    verify(tooltipLabel)
+    verify(tooltipBackground)
+    compare(String(tooltipLabel.color), String(Color.popups.text))
+    compare(String(tooltipBackground.color), String(Color.popups.background))
+    compare(String(tooltipBackground.border.color), String(Color.popups.border))
+    compare(tooltipBackground.radius, Style.cornerRadius)
   }
 
   function test_one_shared_service_and_app_with_standalone_capabilities() {
