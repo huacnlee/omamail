@@ -20,6 +20,9 @@ class ApplicationHost final : public QObject {
     Q_PROPERTY(QString backendPath READ backendPath CONSTANT)
     Q_PROPERTY(QString notificationError READ notificationError
                NOTIFY notificationErrorChanged)
+    Q_PROPERTY(QVariantMap pendingNotificationActivation
+               READ pendingNotificationActivation
+               NOTIFY pendingNotificationActivationChanged)
 
 public:
     explicit ApplicationHost(QObject *parent = nullptr);
@@ -35,12 +38,17 @@ public:
     QVariantMap settings() const { return m_settings; }
     QString backendPath() const { return m_backendPath; }
     QString notificationError() const;
+    QVariantMap pendingNotificationActivation() const
+    {
+        return m_pendingNotificationActivation;
+    }
 
     Q_INVOKABLE bool openExternal(const QString &urlOrPath);
     Q_INVOKABLE bool setClipboard(const QString &text);
     Q_INVOKABLE bool showNotification(const QString &id, const QString &title,
                                       const QString &body, const QString &accountId,
                                       const QString &messageId);
+    Q_INVOKABLE QVariantMap takePendingNotificationActivation();
     Q_INVOKABLE void hide();
     Q_INVOKABLE void quit();
     Q_INVOKABLE bool updateSettings(const QVariantMap &settings);
@@ -50,6 +58,7 @@ signals:
     void settingsChanged();
     void hideRequested();
     void notificationErrorChanged();
+    void pendingNotificationActivationChanged();
     void notificationActivated(const QString &accountId, const QString &messageId);
 
 private:
@@ -62,4 +71,5 @@ private:
     QString m_backendPath;
     SettingsStore m_store;
     std::unique_ptr<NotificationService> m_notifications;
+    QVariantMap m_pendingNotificationActivation;
 };

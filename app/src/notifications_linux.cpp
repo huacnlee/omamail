@@ -87,6 +87,10 @@ private slots:
         if (previous && previous != nativeId) m_nativeToToken.remove(previous);
         m_tokenToNative.insert(token, nativeId);
         m_nativeToToken.insert(nativeId, token);
+        emit delivered(token);
+        emit activationAliasAssigned(token,
+            notificationToken(QStringLiteral("linux-notification:")
+                              + QString::number(nativeId)));
     }
 
     void actionInvoked(uint nativeId, const QString &action)
@@ -94,7 +98,10 @@ private slots:
         if (action != QStringLiteral("default") && action != QStringLiteral("open"))
             return;
         const auto token = m_nativeToToken.constFind(nativeId);
-        if (token != m_nativeToToken.cend()) emit activated(*token);
+        if (token != m_nativeToToken.cend()) deliverActivation(*token);
+        else
+            deliverActivation(notificationToken(QStringLiteral("linux-notification:")
+                                                + QString::number(nativeId)));
     }
 
     void notificationClosed(uint nativeId, uint)
@@ -117,5 +124,7 @@ std::unique_ptr<NotificationPlatform> createNotificationPlatform()
 {
     return std::make_unique<LinuxNotificationPlatform>();
 }
+
+void initializeNotificationActivation() {}
 
 #include "notifications_linux.moc"

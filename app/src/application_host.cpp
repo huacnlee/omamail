@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -32,7 +33,9 @@ ApplicationHost::ApplicationHost(
     : QObject(parent), m_backendPath(std::move(backendPath)),
       m_store(std::move(settingsPath)),
       m_notifications(std::make_unique<NotificationService>(
-          std::move(notificationPlatform)))
+          std::move(notificationPlatform),
+          QFileInfo(m_store.path()).dir().filePath(
+              QStringLiteral("notification-routes.json"))))
 {
     m_capabilities = {
         {QStringLiteral("agent"), false},
@@ -97,12 +100,26 @@ bool ApplicationHost::showNotification(const QString &id, const QString &title,
 void ApplicationHost::activateFromNotification(const QString &accountId,
                                                const QString &messageId)
 {
+    m_pendingNotificationActivation = {
+        {QStringLiteral("accountId"), accountId},
+        {QStringLiteral("messageId"), messageId}};
+    emit pendingNotificationActivationChanged();
     for (QWindow *window : QGuiApplication::topLevelWindows()) {
         window->show();
         window->raise();
         window->requestActivate();
     }
     emit notificationActivated(accountId, messageId);
+}
+
+QVariantMap ApplicationHost::takePendingNotificationActivation()
+{
+    const QVariantMap pending = m_pendingNotificationActivation;
+    if (!pending.isEmpty()) {
+        m_pendingNotificationActivation.clear();
+        emit pendingNotificationActivationChanged();
+    }
+    return pending;
 }
 
 void ApplicationHost::hide()

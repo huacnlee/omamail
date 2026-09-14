@@ -4,6 +4,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 
@@ -22,13 +23,23 @@ public:
 
     virtual bool available() const = 0;
     virtual bool show(const NativeNotification &notification, QString *error) = 0;
+    virtual QStringList takePendingActivations();
 
 signals:
     void activated(const QString &token);
+    void activationAliasAssigned(const QString &token, const QString &alias);
+    void delivered(const QString &token);
     void failed(const QString &error);
+
+protected:
+    void deliverActivation(const QString &token);
+
+private:
+    QStringList m_pendingActivations;
 };
 
 std::unique_ptr<NotificationPlatform> createNotificationPlatform();
+void initializeNotificationActivation();
 
 QString notificationToken(const QString &id);
 QString normalizeNotificationText(QString text);
@@ -41,7 +52,8 @@ class NotificationService final : public QObject {
 
 public:
     explicit NotificationService(
-        std::unique_ptr<NotificationPlatform> platform = {}, QObject *parent = nullptr);
+        std::unique_ptr<NotificationPlatform> platform = {},
+        QString routingPath = {}, QObject *parent = nullptr);
     ~NotificationService() override;
 
     bool available() const;
@@ -60,9 +72,15 @@ private:
     };
 
     void setError(const QString &error);
+    void routeActivation(const QString &token);
+    bool loadRoutes(QString *error);
+    bool saveRoutes(QString *error) const;
 
     std::unique_ptr<NotificationPlatform> m_platform;
     QHash<QString, Target> m_targets;
     QList<QString> m_targetOrder;
+    QString m_routingPath;
     QString m_error;
+    QString m_lastActivatedToken;
+    qint64 m_lastActivationTime = 0;
 };

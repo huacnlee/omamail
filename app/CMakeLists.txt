@@ -49,7 +49,8 @@ if(APPLE)
   target_link_libraries(omamail_native PUBLIC
     "-framework Foundation" "-framework UserNotifications")
 elseif(WIN32)
-  target_link_libraries(omamail_native PUBLIC windowsapp runtimeobject)
+  target_link_libraries(omamail_native PUBLIC
+    crypt32 ole32 runtimeobject windowsapp)
 elseif(UNIX)
   target_link_libraries(omamail_native PUBLIC Qt6::DBus)
 endif()

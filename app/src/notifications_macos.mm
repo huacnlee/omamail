@@ -10,9 +10,15 @@
 #include <memory>
 
 class MacNotificationPlatform;
+@class OmamailNotificationDelegate;
 
 struct MacNotificationState {
     MacNotificationPlatform *owner = nullptr;
+    QStringList pendingActivations;
+    UNUserNotificationCenter *center = nil;
+    OmamailNotificationDelegate *delegate = nil;
+    bool initializationAttempted = false;
+    bool bundleReady = false;
 };
 
 @interface OmamailNotificationDelegate : NSObject<UNUserNotificationCenterDelegate> {
@@ -47,26 +53,68 @@ static void onQtThread(const std::shared_ptr<MacNotificationState> &state,
         }, Qt::QueuedConnection);
 }
 
+static std::shared_ptr<MacNotificationState> macNotificationState()
+{
+    static const auto state = std::make_shared<MacNotificationState>();
+    return state;
+}
+
+static bool installNotificationDelegate(
+    const std::shared_ptr<MacNotificationState> &state, QString *error = nullptr)
+{
+    if (state->center) return true;
+    if (state->initializationAttempted) {
+        if (error && !state->bundleReady)
+            *error = QStringLiteral(
+                "macOS notifications require an application bundle identifier");
+        return false;
+    }
+    state->initializationAttempted = true;
+    state->bundleReady = NSBundle.mainBundle.bundleIdentifier.length > 0;
+    if (!state->bundleReady) {
+        if (error)
+            *error = QStringLiteral(
+                "macOS notifications require an application bundle identifier");
+        return false;
+    }
+    @try {
+        state->center = [UNUserNotificationCenter currentNotificationCenter];
+        state->delegate = [[OmamailNotificationDelegate alloc] init];
+        state->delegate->state = state;
+        state->center.delegate = state->delegate;
+        return true;
+    } @catch (NSException *exception) {
+        if (error) {
+            *error = QStringLiteral("macOS notification center failed: %1")
+                .arg(fromNSString(exception.reason));
+        }
+        return false;
+    }
+}
+
 class MacNotificationPlatform final : public NotificationPlatform {
 public:
     MacNotificationPlatform()
-        : m_state(std::make_shared<MacNotificationState>())
+        : m_state(macNotificationState())
     {
+        installNotificationDelegate(m_state);
         m_state->owner = this;
-        m_bundleReady = NSBundle.mainBundle.bundleIdentifier.length > 0;
     }
 
     ~MacNotificationPlatform() override
     {
         m_state->owner = nullptr;
-        if (m_delegate) {
-            if (m_center.delegate == m_delegate) m_center.delegate = nil;
-            m_delegate->state.reset();
-            [m_delegate release];
-        }
     }
 
-    bool available() const override { return m_bundleReady; }
+    bool available() const override { return m_state->center != nil; }
+
+    QStringList takePendingActivations() override
+    {
+        QStringList pending = NotificationPlatform::takePendingActivations();
+        pending.append(m_state->pendingActivations);
+        m_state->pendingActivations.clear();
+        return pending;
+    }
 
     bool show(const NativeNotification &notification, QString *error) override
     {
@@ -76,7 +124,7 @@ public:
 
         const auto state = m_state;
         const NativeNotification copy = notification;
-        UNUserNotificationCenter *center = m_center;
+        UNUserNotificationCenter *center = m_state->center;
         [center getNotificationSettingsWithCompletionHandler:
             ^(UNNotificationSettings *settings) {
                 const UNAuthorizationStatus status = settings.authorizationStatus;
@@ -126,9 +174,16 @@ public:
                 requestWithIdentifier:toNSString(notification.token)
                 content:content trigger:nil];
             const auto state = m_state;
-            [m_center addNotificationRequest:request
+            const QString token = notification.token;
+            [m_state->center addNotificationRequest:request
                 withCompletionHandler:^(NSError *deliveryError) {
-                    if (!deliveryError) return;
+                    if (!deliveryError) {
+                        onQtThread(state, [token](
+                            MacNotificationPlatform *owner) {
+                                emit owner->delivered(token);
+                            });
+                        return;
+                    }
                     const QString detail = fromNSString(deliveryError.localizedDescription);
                     onQtThread(state, [detail](MacNotificationPlatform *owner) {
                         owner->reportFailure(QStringLiteral(
@@ -139,38 +194,16 @@ public:
         }
     }
 
-    void activateToken(const QString &token) { emit activated(token); }
+    void activateToken(const QString &token) { deliverActivation(token); }
     void reportFailure(const QString &error) { emit failed(error); }
 
 private:
     bool ensureCenter(QString *error)
     {
-        if (m_center) return true;
-        if (!m_bundleReady) {
-            if (error)
-                *error = QStringLiteral(
-                    "macOS notifications require an application bundle identifier");
-            return false;
-        }
-        @try {
-            m_center = [UNUserNotificationCenter currentNotificationCenter];
-            m_delegate = [[OmamailNotificationDelegate alloc] init];
-            m_delegate->state = m_state;
-            m_center.delegate = m_delegate;
-            return true;
-        } @catch (NSException *exception) {
-            if (error) {
-                *error = QStringLiteral("macOS notification center failed: %1")
-                    .arg(fromNSString(exception.reason));
-            }
-            return false;
-        }
+        return installNotificationDelegate(m_state, error);
     }
 
-    UNUserNotificationCenter *m_center = nil;
-    OmamailNotificationDelegate *m_delegate = nil;
     std::shared_ptr<MacNotificationState> m_state;
-    bool m_bundleReady = false;
 };
 
 @implementation OmamailNotificationDelegate
@@ -192,8 +225,10 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
     if (![response.actionIdentifier isEqualToString:UNNotificationDismissActionIdentifier]) {
         const QString token = fromNSString(response.notification.request.identifier);
         const auto callbackState = state;
-        onQtThread(callbackState, [token](MacNotificationPlatform *owner) {
-            owner->activateToken(token);
+        QCoreApplication *application = QCoreApplication::instance();
+        if (application) QMetaObject::invokeMethod(application, [callbackState, token] {
+            if (callbackState->owner) callbackState->owner->activateToken(token);
+            else callbackState->pendingActivations.append(token);
         });
     }
     completionHandler();
@@ -203,4 +238,9 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
 std::unique_ptr<NotificationPlatform> createNotificationPlatform()
 {
     return std::make_unique<MacNotificationPlatform>();
+}
+
+void initializeNotificationActivation()
+{
+    installNotificationDelegate(macNotificationState());
 }

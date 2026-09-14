@@ -16,3 +16,5 @@ std::unique_ptr<NotificationPlatform> createNotificationPlatform()
 {
     return std::make_unique<UnavailableNotificationPlatform>();
 }
+
+void initializeNotificationActivation() {}

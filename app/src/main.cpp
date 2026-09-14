@@ -1,4 +1,5 @@
 #include "resource_check.h"
+#include "notifications.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -49,6 +50,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (const int status = reportResourceCheck(paths); status != 0) return status;
+    initializeNotificationActivation();
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QFileInfo(paths.sharedUi).absolutePath());
