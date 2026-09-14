@@ -21,9 +21,27 @@ ApplicationHost::ApplicationHost(QObject *parent)
 }
 ApplicationHost::ApplicationHost(QString manifestPath, QString backendPath,
                                  QString settingsPath, QObject *parent)
-    : QObject(parent), m_backendPath(std::move(backendPath)),
-      m_store(std::move(settingsPath))
+    : ApplicationHost(std::move(manifestPath), std::move(backendPath),
+                      std::move(settingsPath), {}, parent)
 {
+}
+
+ApplicationHost::ApplicationHost(
+    QString manifestPath, QString backendPath, QString settingsPath,
+    std::unique_ptr<NotificationPlatform> notificationPlatform, QObject *parent)
+    : QObject(parent), m_backendPath(std::move(backendPath)),
+      m_store(std::move(settingsPath)),
+      m_notifications(std::make_unique<NotificationService>(
+          std::move(notificationPlatform)))
+{
+    m_capabilities = {
+        {QStringLiteral("agent"), false},
+        {QStringLiteral("systemTray"), false},
+        {QStringLiteral("notifications"), m_notifications->available()}};
+    connect(m_notifications.get(), &NotificationService::errorChanged, this,
+            &ApplicationHost::notificationErrorChanged);
+    connect(m_notifications.get(), &NotificationService::activated, this,
+            &ApplicationHost::activateFromNotification);
     loadManifest(manifestPath);
     QVariantMap defaults = m_manifest.value(QStringLiteral("barWidget")).toMap()
                                .value(QStringLiteral("defaults")).toMap();
@@ -63,11 +81,28 @@ bool ApplicationHost::setClipboard(const QString &text)
     return true;
 }
 
-bool ApplicationHost::showNotification(const QString &, const QString &,
-                                       const QString &, const QString &,
-                                       const QString &)
+QString ApplicationHost::notificationError() const
 {
-    return false;
+    return m_notifications ? m_notifications->error() : QString{};
+}
+
+bool ApplicationHost::showNotification(const QString &id, const QString &title,
+                                       const QString &body, const QString &accountId,
+                                       const QString &messageId)
+{
+    return m_notifications
+        && m_notifications->show(id, title, body, accountId, messageId);
+}
+
+void ApplicationHost::activateFromNotification(const QString &accountId,
+                                               const QString &messageId)
+{
+    for (QWindow *window : QGuiApplication::topLevelWindows()) {
+        window->show();
+        window->raise();
+        window->requestActivate();
+    }
+    emit notificationActivated(accountId, messageId);
 }
 
 void ApplicationHost::hide()

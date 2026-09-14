@@ -16,11 +16,25 @@ set(OMAMAIL_NATIVE_SOURCES
   src/application_host.h
   src/file_store.cpp
   src/file_store.h
+  src/notifications.cpp
+  src/notifications.h
   src/process.cpp
   src/process.h
   src/resource_check.cpp
   src/resource_check.h
 )
+
+if(APPLE)
+  enable_language(OBJCXX)
+  list(APPEND OMAMAIL_NATIVE_SOURCES src/notifications_macos.mm)
+elseif(WIN32)
+  list(APPEND OMAMAIL_NATIVE_SOURCES src/notifications_windows.cpp)
+elseif(UNIX)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS DBus)
+  list(APPEND OMAMAIL_NATIVE_SOURCES src/notifications_linux.cpp)
+else()
+  list(APPEND OMAMAIL_NATIVE_SOURCES src/notifications_stub.cpp)
+endif()
 
 qt_add_library(omamail_native STATIC)
 qt_add_qml_module(omamail_native
@@ -31,6 +45,14 @@ qt_add_qml_module(omamail_native
 )
 target_link_libraries(omamail_native PUBLIC
   Qt6::Core Qt6::Gui Qt6::Qml Qt6::Network)
+if(APPLE)
+  target_link_libraries(omamail_native PUBLIC
+    "-framework Foundation" "-framework UserNotifications")
+elseif(WIN32)
+  target_link_libraries(omamail_native PUBLIC windowsapp runtimeobject)
+elseif(UNIX)
+  target_link_libraries(omamail_native PUBLIC Qt6::DBus)
+endif()
 if(WIN32)
   target_compile_definitions(omamail_native PRIVATE
     _WIN32_WINNT=0x0A00 WINVER=0x0A00)
@@ -77,9 +99,13 @@ if(BUILD_TESTING)
   omamail_native_test(tst_process tst_process.cpp)
   omamail_native_test(tst_settings tst_settings.cpp)
   omamail_native_test(tst_resources tst_resources.cpp)
+  omamail_native_test(tst_notifications tst_notifications.cpp)
 
   target_compile_definitions(tst_process PRIVATE
     PYTHON_EXECUTABLE="${Python3_EXECUTABLE}"
     RPC_BACKEND_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/rpc_backend.py")
-  set_tests_properties(tst_resources PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set_tests_properties(tst_resources tst_notifications PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME notification_source_boundary
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_notification_sources.py")
 endif()
