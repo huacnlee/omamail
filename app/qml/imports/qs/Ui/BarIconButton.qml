@@ -31,9 +31,8 @@ Item {
     onPressed: function(event) { root.pressed(event.button) }
     onWheel: function(event) { root.wheelMoved(event.angleDelta.y) }
   }
-  QQC.ToolTip {
+  PanelToolTip {
     visible: parent.children[1].containsMouse && root.tooltipText !== ""
     text: root.tooltipText
-    delay: Style.tooltipDelay
   }
 }

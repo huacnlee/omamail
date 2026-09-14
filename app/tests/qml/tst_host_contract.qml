@@ -97,7 +97,7 @@ TestCase {
   Item {
     id: controls
     visible: false
-    Button { id: button; text: "Save" }
+    Button { id: button; text: "Save"; tooltipText: "Save help" }
     TextField { id: textField; password: true }
     BorderSurface { id: surface; borderSpec: Border.controlSpec("normal", Color.foreground, Color.accent) }
     NumberField { id: numberField; label: "Count"; from: 1; to: 10; value: 4 }
@@ -120,6 +120,11 @@ TestCase {
     compare(toolTip.delay, Style.tooltipDelay)
     compare(String(toolTip.palette.window), String(Color.popups.background))
     compare(String(toolTip.palette.windowText), String(Color.popups.text))
+  }
+
+  function test_button_tooltip_uses_the_shared_styled_surface() {
+    verify(findChild(button, "omamail-tooltip-background"))
+    verify(findChild(button, "omamail-tooltip-label"))
   }
 
   function test_environment_and_detached_operations_use_native_host() {

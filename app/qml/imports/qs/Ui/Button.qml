@@ -57,9 +57,9 @@ Rectangle {
     onHoveredChanged: root.hovered(hovered)
   }
 
-  QQC.ToolTip {
+  PanelToolTip {
     visible: control.hovered && root.tooltipText !== ""
     text: root.tooltipText
-    delay: Style.tooltipDelay
+    fontFamily: root.fontFamily
   }
 }
