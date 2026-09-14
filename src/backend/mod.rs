@@ -462,7 +462,7 @@ mod cache_lifecycle_tests {
     use super::*;
     #[tokio::test]
     async fn successful_clear_invalidates_only_its_account_and_refused_clear_preserves_cache() {
-        let root = std::env::temp_dir().join(format!(
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-backend-cache-clear-{}",
             std::process::id()
         ));

@@ -27,6 +27,7 @@ pub(crate) fn isolated() -> bool {
     let output = std::process::Command::new(env::current_exe().unwrap())
         .args(["--exact", &name, "--test-threads=1", "--nocapture"])
         .env("OMAMAIL_ACTION_TEST_CHILD", name)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -45,6 +46,10 @@ pub(crate) struct AccountFixture {
     previous_state: Option<OsString>,
     previous_home: Option<OsString>,
     pub(crate) root: PathBuf,
+    pub(crate) config: PathBuf,
+    pub(crate) cache: PathBuf,
+    pub(crate) state: PathBuf,
+    pub(crate) home: PathBuf,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -71,7 +76,7 @@ fn metadata_state(path: &std::path::Path) -> MetadataState {
 }
 
 fn registry_state(fixture: &AccountFixture) -> RegistryState {
-    let directory = fixture.root.join("omamail");
+    let directory = fixture.config.join("omamail");
     let registry = directory.join("accounts.json");
     RegistryState {
         directory: metadata_state(&directory),
@@ -149,27 +154,37 @@ pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
     let environment = ENVIRONMENT
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let root = env::temp_dir().join(format!(
+    let root = env::temp_dir().canonicalize().unwrap().join(format!(
         "omamail-mail-tests-{}-{}",
         std::process::id(),
         FIXTURE_SERIAL.fetch_add(1, Ordering::Relaxed)
     ));
-    fs::create_dir_all(root.join("omamail")).unwrap();
-    fs::write(root.join("omamail/accounts.json"), registry.to_string()).unwrap();
-    fs::set_permissions(root.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
-    fs::set_permissions(
-        root.join("omamail/accounts.json"),
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
     let previous = env::var_os("XDG_CONFIG_HOME");
     let previous_cache = env::var_os("XDG_CACHE_HOME");
     let previous_state = env::var_os("XDG_STATE_HOME");
     let previous_home = env::var_os("HOME");
-    unsafe { env::set_var("XDG_CONFIG_HOME", &root) };
+    let home = root.join("home");
+    unsafe { env::set_var("XDG_CONFIG_HOME", root.join("config")) };
     unsafe { env::set_var("XDG_CACHE_HOME", root.join("cache")) };
     unsafe { env::set_var("XDG_STATE_HOME", root.join("state")) };
-    unsafe { env::set_var("HOME", root.join("home")) };
+    unsafe { env::set_var("HOME", &home) };
+    let dirs = crate::platform::dirs::AppDirs::discover().unwrap();
+    fs::create_dir_all(dirs.config.join("omamail")).unwrap();
+    fs::write(
+        dirs.config.join("omamail/accounts.json"),
+        registry.to_string(),
+    )
+    .unwrap();
+    fs::set_permissions(
+        dirs.config.join("omamail"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
+    fs::set_permissions(
+        dirs.config.join("omamail/accounts.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
     AccountFixture {
         _environment: environment,
         previous,
@@ -177,6 +192,10 @@ pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
         previous_state,
         previous_home,
         root,
+        config: dirs.config,
+        cache: dirs.cache,
+        state: dirs.state,
+        home,
     }
 }
 
