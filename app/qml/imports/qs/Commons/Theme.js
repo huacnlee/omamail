@@ -3,12 +3,23 @@
 // Standalone application roles derived from Omarchy's colors.toml. Parsing is
 // deliberately all-or-nothing: mixing one broken user role with fallback
 // colours produces a palette that belongs to neither theme.
-var FALLBACK = {
+var DARK_FALLBACK = {
   background: "#1a1b26", foreground: "#a9b1d6", accent: "#7aa2f7",
   red: "#f7768e", yellow: "#e0af68", green: "#9ece6a",
   lighter_background: "#24283b", dark_background: "#13141c",
   bright_foreground: "#c0caf5", selection: "#292e42", muted: "#414868",
   mode: "dark"
+}
+
+// Lupine is Omarchy's built-in light theme. Keep this fallback pinned to the
+// source palette rather than approximating a light version of Tokyo Night:
+// https://github.com/bjarneo/omarchy-lupine-theme/blob/3c225d2129e6f8649e6a9ebba18ea5db4e37f7a3/colors.toml
+var LIGHT_FALLBACK = {
+  background: "#fafafa", foreground: "#212121", accent: "#3264eb",
+  red: "#c900c4", yellow: "#026fde", green: "#4a2fd0",
+  lighter_background: "#f5f5f5", dark_background: "#ececec",
+  bright_foreground: "#000000", selection: "#d0d0d0", muted: "#9e9e9e",
+  mode: "light"
 }
 
 function copy(source) {
@@ -133,5 +144,10 @@ function roles(values) {
   }
 }
 
-function fallback() { return roles(copy(FALLBACK)) }
-function resolve(raw) { var parsed = parse(raw); return parsed ? roles(parsed) : fallback() }
+function fallback(appearance) {
+  return roles(copy(appearance === "light" ? LIGHT_FALLBACK : DARK_FALLBACK))
+}
+function resolve(raw, fallbackAppearance) {
+  var parsed = parse(raw)
+  return parsed ? roles(parsed) : fallback(fallbackAppearance)
+}

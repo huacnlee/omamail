@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import "Theme.js" as Theme
 import "ShellTheme.js" as ShellTheme
@@ -9,6 +10,7 @@ QtObject {
 
   property var theme: Theme.fallback()
   property var shellTheme: ShellTheme.resolve("", "")
+  property bool hasOmarchyTheme: false
   property var watchedStore: null
   property var watchedPaths: []
   readonly property bool dark: theme.appearance === "dark"
@@ -25,6 +27,16 @@ QtObject {
   readonly property color selection: theme.selection
   readonly property color border: theme.border
   readonly property color onAccent: theme.onAccent
+
+  function systemAppearance() {
+    return Application.styleHints.colorScheme === Qt.Light ? "light" : "dark"
+  }
+
+  function applySystemAppearance(appearance) {
+    if (hasOmarchyTheme) return false
+    theme = Theme.fallback(appearance === "light" ? "light" : "dark")
+    return true
+  }
   function shellColor(value, fallback) {
     var token = String(value || "").replace(/^\s+|\s+$/g, "")
     var role = token.toLowerCase()
@@ -69,7 +81,8 @@ QtObject {
     var store = Quickshell.fileStore
     if (home === "" || !store || typeof store.read !== "function") {
       updateWatches(null, [])
-      theme = Theme.fallback()
+      hasOmarchyTheme = false
+      theme = Theme.fallback(systemAppearance())
       return false
     }
     var stateCurrent = home + "/.local/state/omarchy/current"
@@ -88,16 +101,18 @@ QtObject {
     var result = store.read(colorsPath) || ({})
     var shellResult = store.read(shellPath) || ({})
     var userShellResult = store.read(userShellPath) || ({})
-    var nextTheme = result.ok === true ? Theme.resolve(String(result.text || "")) : Theme.fallback()
+    var parsedTheme = result.ok === true ? Theme.parse(String(result.text || "")) : null
+    var nextTheme = parsedTheme ? Theme.roles(parsedTheme) : Theme.fallback(systemAppearance())
     var nextShellTheme = ShellTheme.resolve(
       shellResult.ok === true ? String(shellResult.text || "") : "",
       userShellResult.ok === true ? String(userShellResult.text || "") : "")
     // Both complete values are prepared before either singleton observes the
     // reload, so no partially parsed shell configuration can leak into UI.
+    hasOmarchyTheme = parsedTheme !== null
     theme = nextTheme
     shellTheme = nextShellTheme
     Style.applyShellTheme(nextShellTheme)
-    return result.ok === true && Theme.parse(String(result.text || "")) !== null
+    return hasOmarchyTheme
   }
 
   property Connections storeConnections: Connections {
@@ -112,6 +127,11 @@ QtObject {
     target: Quickshell
     function onFileStoreChanged() { root.reload() }
     function onNativeHostChanged() { root.reload() }
+  }
+
+  property Connections styleHintsConnections: Connections {
+    target: Application.styleHints
+    function onColorSchemeChanged() { root.applySystemAppearance(root.systemAppearance()) }
   }
 
   Component.onCompleted: reload()

@@ -214,11 +214,41 @@ TestCase {
       "/fixture/home/.config/omarchy/current/theme/colors.toml":
         "background='#ffffff'\nforeground='#000000'\naccent='#abcdef'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
     })
+    Color.applySystemAppearance("dark")
     verify(!Color.reload())
     compare(String(Color.background), "#1a1b26")
     compare(String(Color.foreground), "#a9b1d6")
     compare(String(Color.accent), "#7aa2f7")
     compare(String(Color.urgent), "#f7768e")
+  }
+
+
+  function test_system_scheme_switches_complete_fallback_but_not_omarchy_theme() {
+    host.files = ({})
+    Color.reload()
+    verify(!Color.hasOmarchyTheme)
+    verify(Color.applySystemAppearance("light"))
+    compare(Color.dark, false)
+    compare(String(Color.background), "#fafafa")
+    compare(String(Color.foreground), "#212121")
+    compare(String(Color.accent), "#3264eb")
+    compare(String(Color.surface), "#f5f5f5")
+    compare(String(Color.inset), "#ececec")
+    compare(String(Color.border), "#9e9e9e")
+
+    verify(Color.applySystemAppearance("dark"))
+    compare(Color.dark, true)
+    compare(String(Color.background), "#1a1b26")
+
+    var path = "/fixture/home/.local/state/omarchy/current/theme/colors.toml"
+    host.files[path] =
+      "mode='light'\nbackground='#ffffff'\nforeground='#111111'\naccent='#123456'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
+    verify(Color.reload())
+    verify(Color.hasOmarchyTheme)
+    compare(String(Color.accent), "#123456")
+    verify(!Color.applySystemAppearance("dark"))
+    compare(String(Color.accent), "#123456")
+    compare(Color.dark, false)
   }
 
   function test_theme_change_reloads_the_active_palette() {

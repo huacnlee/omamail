@@ -42,6 +42,17 @@ assert.strictEqual(ansi.border, "#555555")
 assert.strictEqual(ansi.bright, "#eeeeee")
 
 const fallback = context.fallback()
+const lightFallback = context.fallback("light")
+assert.strictEqual(lightFallback.appearance, "light")
+assert.strictEqual(lightFallback.background, "#fafafa")
+assert.strictEqual(lightFallback.foreground, "#212121")
+assert.strictEqual(lightFallback.accent, "#3264eb")
+assert.strictEqual(lightFallback.surface, "#f5f5f5")
+assert.strictEqual(lightFallback.inset, "#ececec")
+assert.strictEqual(lightFallback.selection, "#d0d0d0")
+assert.strictEqual(lightFallback.border, "#9e9e9e")
+assert.ok(context.contrast(lightFallback.foreground, lightFallback.background) >= 4.5)
+assert.ok(context.contrast(lightFallback.urgent, lightFallback.background) >= 4.5)
 for (const broken of [
   "background = '#000000'\nforeground = '#ffffff'\naccent = 'blue'",
   "background = '#000000'\nforeground = '#ffffff'\naccent = '#123456'",
@@ -51,6 +62,9 @@ for (const broken of [
   assert.strictEqual(JSON.stringify(context.resolve(broken)), JSON.stringify(fallback),
     "an invalid theme falls back as one complete palette")
 }
+
+assert.strictEqual(JSON.stringify(context.resolve("broken", "light")),
+  JSON.stringify(lightFallback), "invalid input uses the requested complete fallback")
 
 assert.strictEqual(context.onAccent("#eeeeee"), "#000000")
 assert.strictEqual(context.onAccent("#111111"), "#ffffff")
