@@ -85,12 +85,12 @@ fn own_acl(extra: &str) -> String {
 // unlike symlinks. Exercise the real filesystem without a privileged shell.
 fn junction(path: &Path, target: &Path) {
     fs::create_dir(path).unwrap();
-    let substitute = target
-        .canonicalize()
-        .unwrap()
-        .as_os_str()
-        .to_string_lossy()
-        .replacen(r"\\?\", r"\??\", 1);
+    let canonical = target.canonicalize().unwrap();
+    let path_text = canonical.as_os_str().to_string_lossy();
+    let substitute = path_text
+        .strip_prefix(r"\\?\")
+        .map(|path| format!(r"\??\{path}"))
+        .unwrap_or_else(|| format!(r"\??\{path_text}"));
     let name: Vec<u16> = substitute.encode_utf16().collect();
     let mut data = Vec::new();
     data.extend(0xa0000003u32.to_le_bytes()); // IO_REPARSE_TAG_MOUNT_POINT

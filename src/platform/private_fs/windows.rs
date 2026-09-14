@@ -21,6 +21,7 @@ use windows_sys::{
 };
 type Result<T> = std::result::Result<T, &'static str>;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
+static REPLACEMENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const READ: u32 = FILE_GENERIC_READ;
 
@@ -230,7 +231,7 @@ fn open_at(
     };
     if result < 0 {
         return match result as u32 {
-            0xc0000034 | 0xc000003a => Ok(None), // OBJECT_NAME/PATH_NOT_FOUND.
+            0xc0000034 | 0xc000003a | 0xc0000056 => Ok(None), // NAME/PATH_NOT_FOUND or DELETE_PENDING.
             0xc0000035 => Err("private_fs_exists"),
             0xc0000043 => Err("private_fs_busy"),
             _ => Err("cache_unsafe_path"),
@@ -384,6 +385,10 @@ pub(crate) fn create_private(dir: &File, name: &str) -> Result<File> {
     Ok(file)
 }
 pub(crate) fn atomic_replace(dir: &File, name: &str, bytes: &[u8]) -> Result<()> {
+    // Windows replacement briefly transitions the destination through a
+    // delete-pending name. Serialize our writers so one validated replacement
+    // cannot observe another operation's transient namespace state.
+    let _replacement = REPLACEMENTS.lock().map_err(|_| "cache_unavailable")?;
     validate_owned_root(dir)?;
     regular_readonly(dir, name)?;
     let name = name_units(name.as_ref())?;
@@ -438,6 +443,12 @@ pub(crate) fn atomic_replace(dir: &File, name: &str, bytes: &[u8]) -> Result<()>
         let _ = delete_handle(&file);
     }
     result
+}
+
+/// Windows has no supported equivalent of fsync(2) for a directory handle.
+/// Each file replacement is flushed before and after its rename above.
+pub(crate) fn sync_dir(_: &File) -> Result<()> {
+    Ok(())
 }
 
 pub(crate) struct ExclusiveLock {

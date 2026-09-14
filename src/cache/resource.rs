@@ -126,7 +126,7 @@ fn put_at(root: &Path, params: &Value, live: &Mutex<bool>) -> Result<Value> {
     for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
         unlink(&dir, &old)?;
     }
-    dir.sync_all().map_err(|_| "cache_unavailable")?;
+    crate::platform::private_fs::sync_dir(&dir)?;
     Ok(json!({"stored":true}))
 }
 

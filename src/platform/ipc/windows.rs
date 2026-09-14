@@ -41,14 +41,27 @@ impl LocalEndpoint {
     }
     pub(crate) fn listen(&self) -> Result<LocalListener> {
         private_fs::validate_owned_root(&self.dir)?;
-        let pending = create_server(&self.name, true)?;
+        let mut pending = None;
+        for attempt in 0..10 {
+            match create_server(&self.name, true) {
+                Ok(server) => {
+                    pending = Some(server);
+                    break;
+                }
+                Err(error) if attempt < 9 => {
+                    let _ = error;
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error),
+            }
+        }
         Ok(LocalListener {
             _dir: self
                 .dir
                 .try_clone()
                 .map_err(|_| "outbox_owner_unavailable")?,
             name: self.name.clone(),
-            pending: Mutex::new(pending),
+            pending: Mutex::new(pending.ok_or("outbox_owner_unavailable")?),
         })
     }
     pub(crate) async fn connect(&self) -> Result<NamedPipeClient> {

@@ -106,7 +106,9 @@ fn body_name(id: &str) -> Result<String> {
     Ok(name)
 }
 
-use crate::platform::private_fs::{atomic_replace, names, open_dir, remove_owned as unlink};
+use crate::platform::private_fs::{
+    atomic_replace, names, open_dir, remove_owned as unlink, sync_dir,
+};
 pub(crate) use crate::platform::private_fs::{
     directories, directories_readonly, regular, regular_readonly,
 };
@@ -192,7 +194,7 @@ fn call_at(root: &Path, method: &str, params: &Value) -> Result<Value> {
             for (_, name) in files {
                 unlink(&dir, &name)?;
             }
-            dir.sync_all().map_err(|_| "cache_unavailable")?;
+            sync_dir(&dir)?;
         }
         return Ok(json!({"cleared":true}));
     }
@@ -259,7 +261,7 @@ fn put_at(root: &Path, params: &Value, body: &Value) -> Result<Value> {
     for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
         unlink(&dir, &old)?;
     }
-    dir.sync_all().map_err(|_| "cache_unavailable")?;
+    sync_dir(&dir)?;
     Ok(json!({"stored":true}))
 }
 

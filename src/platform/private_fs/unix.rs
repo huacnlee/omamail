@@ -365,6 +365,10 @@ pub(crate) fn atomic_replace(dir: &File, name: &str, bytes: &[u8]) -> Result<()>
     result
 }
 
+pub(crate) fn sync_dir(dir: &File) -> Result<()> {
+    dir.sync_all().map_err(|_| "cache_unavailable")
+}
+
 pub(crate) struct ExclusiveLock {
     file: File,
     owner: u32,
