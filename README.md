@@ -26,22 +26,10 @@ Click the envelope in the bar, install the pinned backend when prompted, and add
 
 The standalone app includes mail, calendar, and native desktop notifications. It has no system tray, AI assistance, or operating-system `mailto:` registration in this release.
 
-macOS (Apple silicon):
+macOS & Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh
-```
-
-Linux (x86_64, glibc 2.35 or newer; tar.gz only):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh
-```
-
-Windows (x64 PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/huacnlee/omamail/main/install.ps1 | iex
 ```
 
 The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
