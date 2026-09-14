@@ -11,7 +11,8 @@ cp artifacts/backend-x86_64/omamail-linux-x86_64.tar.gz release-assets/
 cp artifacts/backend-aarch64/omamail-linux-aarch64.tar.gz release-assets/
 cp artifacts/app-macos-aarch64/omamail-app-macos-aarch64.tar.gz release-assets/
 cp artifacts/app-linux-x86_64/omamail-app-linux-x86_64.tar.gz release-assets/
-cp artifacts/app-windows-x86_64/omamail-app-windows-x86_64.zip release-assets/
+# Windows is temporarily not released:
+# cp artifacts/app-windows-x86_64/omamail-app-windows-x86_64.zip release-assets/
 cp install.sh install.ps1 release-assets/
 cmp artifacts/backend-x86_64/backend-api.json artifacts/backend-aarch64/backend-api.json
 cp artifacts/backend-x86_64/backend-api.json release-assets/
@@ -40,7 +41,7 @@ python3 scripts/package-backend.py check-provenance draft-download/backend-build
 for asset in \
   omamail-linux-x86_64.tar.gz omamail-linux-aarch64.tar.gz \
   omamail-app-macos-aarch64.tar.gz omamail-app-linux-x86_64.tar.gz \
-  omamail-app-windows-x86_64.zip install.sh install.ps1 SHA256SUMS \
+  install.sh install.ps1 SHA256SUMS \
   backend-api.json backend-build.json; do
   cmp "release-assets/$asset" "draft-download/$asset"
 done
@@ -58,7 +59,7 @@ python3 scripts/package-backend.py check-provenance public-download/backend-buil
 for asset in \
   omamail-linux-x86_64.tar.gz omamail-linux-aarch64.tar.gz \
   omamail-app-macos-aarch64.tar.gz omamail-app-linux-x86_64.tar.gz \
-  omamail-app-windows-x86_64.zip install.sh install.ps1 SHA256SUMS \
+  install.sh install.ps1 SHA256SUMS \
   backend-api.json backend-build.json; do
   cmp "release-assets/$asset" "public-download/$asset"
 done

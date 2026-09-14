@@ -14,13 +14,13 @@ PUBLISH = ROOT / "scripts/publish-backend.sh"
 APP_JOBS = {
     "app-macos-aarch64": ("macos-15", "omamail-app-macos-aarch64.tar.gz"),
     "app-linux-x86_64": ("ubuntu-22.04", "omamail-app-linux-x86_64.tar.gz"),
-    "app-windows-x86_64": ("windows-2022", "omamail-app-windows-x86_64.zip"),
+    # "app-windows-x86_64": ("windows-2022", "omamail-app-windows-x86_64.zip"),  # temporarily disabled
 }
 
 CI_APP_JOBS = {
     "standalone-app-macos": ("macos-15", "macos-aarch64", "omamail-app-macos-aarch64.tar.gz"),
     "standalone-app-linux": ("ubuntu-22.04", "linux-x86_64", "omamail-app-linux-x86_64.tar.gz"),
-    "standalone-app-windows": ("windows-2022", "windows-x86_64", "omamail-app-windows-x86_64.zip"),
+    # "standalone-app-windows": ("windows-2022", "windows-x86_64", "omamail-app-windows-x86_64.zip"),  # temporarily disabled
 }
 
 
@@ -156,7 +156,7 @@ class ReleaseWorkflowContract(unittest.TestCase):
             "omamail-linux-aarch64.tar.gz",
             "omamail-app-macos-aarch64.tar.gz",
             "omamail-app-linux-x86_64.tar.gz",
-            "omamail-app-windows-x86_64.zip",
+            # "omamail-app-windows-x86_64.zip",  # temporarily not released
             "install.sh",
             "install.ps1",
             "SHA256SUMS",

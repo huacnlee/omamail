@@ -69,7 +69,7 @@ class PublicationTests(unittest.TestCase):
         app_assets = {
             'app-macos-aarch64': 'omamail-app-macos-aarch64.tar.gz',
             'app-linux-x86_64': 'omamail-app-linux-x86_64.tar.gz',
-            'app-windows-x86_64': 'omamail-app-windows-x86_64.zip',
+            # 'app-windows-x86_64': 'omamail-app-windows-x86_64.zip',  # temporarily not released
         }
         for artifact_name, asset_name in app_assets.items():
             artifact = self.repo / 'artifacts' / artifact_name
@@ -101,7 +101,7 @@ elif args[:2] == ['release', 'create']:
     assert uploaded == {
         'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
         'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
-        'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1',
+        'install.sh', 'install.ps1',
         'SHA256SUMS', 'backend-api.json', 'backend-build.json'}
     tag = subprocess.check_output(['git', 'ls-remote', 'origin', 'refs/tags/v0.2.0'], text=True).split()[0]
     assert tag == os.environ['GITHUB_SHA']
@@ -124,7 +124,7 @@ elif args[:2] == ['release', 'download']:
     if mode == 'corrupt' and not is_public:
         (destination / 'omamail-linux-aarch64.tar.gz').write_bytes(b'corrupt')
     if mode in ('corrupt-app', 'public-corrupt') and is_public == (mode == 'public-corrupt'):
-        (destination / 'omamail-app-windows-x86_64.zip').write_bytes(b'corrupt')
+        (destination / 'omamail-app-linux-x86_64.tar.gz').write_bytes(b'corrupt')
     if mode == 'wrong-contract' and not is_public:
         (destination / 'backend-api.json').write_text('{}')
     if mode == 'wrong-provenance' and not is_public:
