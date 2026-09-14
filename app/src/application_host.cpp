@@ -15,8 +15,8 @@
 #include <QWindow>
 
 ApplicationHost::ApplicationHost(QObject *parent)
-    : ApplicationHost(defaultResourcePaths().manifest,
-                      defaultResourcePaths().backend, {}, parent)
+    : ApplicationHost(defaultResourcePaths({}, developmentResourcesEnabled()).manifest,
+                      defaultResourcePaths({}, developmentResourcesEnabled()).backend, {}, parent)
 {
 }
 ApplicationHost::ApplicationHost(QString manifestPath, QString backendPath,

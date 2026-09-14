@@ -16,7 +16,9 @@ struct ResourceCheck {
     QStringList errors;
 };
 
-ResourcePaths defaultResourcePaths(const QString &executablePath = {});
+bool developmentResourcesEnabled();
+ResourcePaths defaultResourcePaths(const QString &executablePath = {},
+                                   bool developmentMode = false);
 ResourceCheck checkResources(const ResourcePaths &paths);
 bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile,
                   QString *error = nullptr);

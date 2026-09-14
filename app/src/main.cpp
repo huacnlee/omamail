@@ -35,13 +35,13 @@ int main(int argc, char *argv[])
 
     if (checkOnly && readyFile.isEmpty()) {
         QCoreApplication application(argc, argv);
-        return reportResourceCheck(defaultResourcePaths());
+        return reportResourceCheck(defaultResourcePaths({}, developmentResourcesEnabled()));
     }
 
     if (!readyFile.isEmpty() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication application(argc, argv);
-    const ResourcePaths paths = defaultResourcePaths();
+    const ResourcePaths paths = defaultResourcePaths({}, developmentResourcesEnabled());
     if (!readyFile.isEmpty()) {
         QString error;
         if (runSmokeTest(paths, readyFile, &error)) return 0;

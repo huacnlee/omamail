@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFileSystemWatcher>
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QVariantMap>
@@ -28,6 +29,7 @@ private:
 
     QFileSystemWatcher m_watcher;
     QSet<QString> m_watchedFiles;
+    QHash<QString, bool> m_lastExists;
 };
 class SettingsStore final {
 public:

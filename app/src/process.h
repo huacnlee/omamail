@@ -45,6 +45,7 @@ signals:
     void exited(int exitCode);
     void stdoutLine(const QString &line);
     void stderrLine(const QString &line);
+    void failed(const QString &error);
 
 private:
     static constexpr qsizetype maximumLineBytes() { return 1024 * 1024; }
@@ -55,11 +56,17 @@ private:
     void emitLine(QByteArray line, bool standardError);
     void finishPendingLines();
     void setRunningValue(bool running);
+    void failStream(const QString &error);
+#ifdef Q_OS_WIN
+    bool prepareWindowsContainment();
+    void clearWindowsStartup();
+#endif
 
     QVariantList m_command;
     bool m_running = false;
     bool m_stdinEnabled = false;
     bool m_exitReported = false;
+    bool m_streamFailed = false;
     QProcess m_process;
     QTimer m_forceKill;
     QByteArray m_stdoutPending;
@@ -68,5 +75,7 @@ private:
     qint64 m_processGroupId = 0;
 #ifdef Q_OS_WIN
     void *m_job = nullptr;
+    void *m_attributeList = nullptr;
+    void *m_extendedStartupInfo = nullptr;
 #endif
 };

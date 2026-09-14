@@ -2,6 +2,7 @@
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -23,14 +24,22 @@ def main():
     elif mode == "crash":
         os.abort()
     elif mode == "tree":
-        child = os.fork()
-        if child == 0:
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            while True:
-                time.sleep(1)
-        print(child, flush=True)
+        child = subprocess.Popen([sys.executable, __file__, "linger"])
+        print(child.pid, flush=True)
         while True:
             time.sleep(1)
+    elif mode == "linger":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        while True:
+            time.sleep(1)
+    elif mode == "ready":
+        print("ready", flush=True)
+        while True:
+            time.sleep(1)
+    elif mode == "wait":
+        time.sleep(1.2)
+    elif mode == "oversize":
+        os.write(sys.stdout.fileno(), b"x" * (1024 * 1024 + 1) + b"\nvalid\n")
     elif mode == "serve":
         for raw in sys.stdin.buffer:
             request = json.loads(raw)

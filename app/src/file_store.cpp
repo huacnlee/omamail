@@ -66,7 +66,15 @@ FileStore::FileStore(QObject *parent)
         restoreWatches();
     });
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
-            [this](const QString &) { restoreWatches(); });
+            [this](const QString &directory) {
+        for (const QString &path : std::as_const(m_watchedFiles)) {
+            if (QFileInfo(path).absolutePath() != directory) continue;
+            const bool exists = QFileInfo::exists(path);
+            if (m_lastExists.value(path, false) != exists) emit changed(path);
+            m_lastExists.insert(path, exists);
+        }
+        restoreWatches();
+    });
 }
 
 QVariantMap FileStore::read(const QString &path)
@@ -126,8 +134,13 @@ QVariantMap FileStore::write(const QString &path, const QString &text, bool atom
 void FileStore::watch(const QString &path, bool enabled)
 {
     const QString absolute = QFileInfo(path).absoluteFilePath();
-    if (enabled) m_watchedFiles.insert(absolute);
-    else m_watchedFiles.remove(absolute);
+    if (enabled) {
+        m_watchedFiles.insert(absolute);
+        m_lastExists.insert(absolute, QFileInfo::exists(absolute));
+    } else {
+        m_watchedFiles.remove(absolute);
+        m_lastExists.remove(absolute);
+    }
     restoreWatches();
 }
 
@@ -137,7 +150,9 @@ void FileStore::restoreWatches()
     if (!old.isEmpty()) m_watcher.removePaths(old);
     QSet<QString> paths;
     for (const QString &file : std::as_const(m_watchedFiles)) {
-        if (QFileInfo::exists(file)) paths.insert(file);
+        const bool exists = QFileInfo::exists(file);
+        m_lastExists.insert(file, exists);
+        if (exists) paths.insert(file);
         paths.insert(QFileInfo(file).absolutePath());
     }
     if (!paths.isEmpty()) m_watcher.addPaths(paths.values());

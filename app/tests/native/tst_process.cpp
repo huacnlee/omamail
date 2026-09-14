@@ -6,9 +6,11 @@
 #include <QSignalSpy>
 #include <QTest>
 
-#ifndef Q_OS_WIN
 #include <cerrno>
 #include <csignal>
+#ifdef Q_OS_WIN
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 class ProcessTest : public QObject {
@@ -29,9 +31,9 @@ private slots:
     void incrementalUtf8Lines();
     void stderrIsBounded();
     void reportsGracefulAndCrashExits();
-#ifndef Q_OS_WIN
     void stoppingKillsTheProcessTree();
-#endif
+    void stoppedProcessTimerCannotKillRapidRestart();
+    void oversizedRecordFailsWithoutEmittingTruncatedFrames();
 };
 
 void ProcessTest::exactArgumentsAndStdin()
@@ -105,7 +107,6 @@ void ProcessTest::reportsGracefulAndCrashExits()
     QVERIFY(!crash.running());
 }
 
-#ifndef Q_OS_WIN
 void ProcessTest::stoppingKillsTheProcessTree()
 {
     NativeProcess process;
@@ -119,10 +120,47 @@ void ProcessTest::stoppingKillsTheProcessTree()
 
     process.setRunning(false);
     QVERIFY(exited.wait(5000));
+#ifdef Q_OS_WIN
+    HANDLE child = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(descendant));
+    QVERIFY(child != nullptr);
+    QCOMPARE(WaitForSingleObject(child, 5000), DWORD(WAIT_OBJECT_0));
+    CloseHandle(child);
+#else
     QTRY_VERIFY_WITH_TIMEOUT(::kill(static_cast<pid_t>(descendant), 0) == -1
                              && errno == ESRCH, 5000);
-}
 #endif
+}
+
+void ProcessTest::stoppedProcessTimerCannotKillRapidRestart()
+{
+    NativeProcess process;
+    process.setCommand(command(QStringLiteral("ready")));
+    QSignalSpy lines(&process, &NativeProcess::stdoutLine);
+    QSignalSpy exited(&process, &NativeProcess::exited);
+    process.setRunning(true);
+    QTRY_COMPARE_WITH_TIMEOUT(lines.size(), 1, 5000);
+    process.setRunning(false);
+    QVERIFY(exited.wait(5000));
+
+    process.setCommand(command(QStringLiteral("wait")));
+    process.setRunning(true);
+    QVERIFY(exited.wait(5000));
+    QCOMPARE(exited.last().at(0).toInt(), 0);
+}
+
+void ProcessTest::oversizedRecordFailsWithoutEmittingTruncatedFrames()
+{
+    NativeProcess process;
+    process.setCommand(command(QStringLiteral("oversize")));
+    QSignalSpy lines(&process, &NativeProcess::stdoutLine);
+    QSignalSpy failures(&process, &NativeProcess::failed);
+    QSignalSpy exited(&process, &NativeProcess::exited);
+    process.setRunning(true);
+    QVERIFY(exited.wait(5000));
+    QCOMPARE(lines.size(), 0);
+    QCOMPARE(failures.size(), 1);
+    QVERIFY(failures.first().at(0).toString().contains(QStringLiteral("too large")));
+}
 
 QTEST_MAIN(ProcessTest)
 #include "tst_process.moc"

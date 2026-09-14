@@ -15,6 +15,9 @@
 #include <memory>
 
 namespace {
+constexpr qsizetype maximumBackendFrameBytes = 1024 * 1024;
+constexpr qsizetype maximumStderrBytes = 64 * 1024;
+
 QString firstExisting(const QStringList &candidates)
 {
     for (const QString &candidate : candidates) {
@@ -40,31 +43,57 @@ bool readable(const QString &path)
     return file.open(QIODevice::ReadOnly);
 }
 
-bool waitForLine(QProcess &process, QByteArray &buffer, QByteArray *line,
-                 int timeoutMilliseconds)
+void drainStderr(QProcess &process, QByteArray &stderrTail)
+{
+    stderrTail.append(process.readAllStandardError());
+    if (stderrTail.size() > maximumStderrBytes)
+        stderrTail.remove(0, stderrTail.size() - maximumStderrBytes);
+}
+
+bool takeLine(QByteArray &buffer, const QByteArray &bytes, QByteArray *line,
+              bool *complete, QString *error)
+{
+    *complete = false;
+    const qsizetype newline = bytes.indexOf('\n');
+    const qsizetype prefix = newline < 0 ? bytes.size() : newline;
+    if (buffer.size() + prefix >= maximumBackendFrameBytes) {
+        if (error) *error = QStringLiteral("Backend response frame is too large");
+        return false;
+    }
+    buffer.append(bytes.constData(), prefix);
+    if (newline < 0) return true;
+    *line = buffer;
+    buffer.clear();
+    *complete = true;
+    return true;
+}
+
+bool waitForLine(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
+                 QByteArray *line, int timeoutMilliseconds, QString *error)
 {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMilliseconds) {
-        const qsizetype newline = buffer.indexOf('\n');
-        if (newline >= 0) {
-            *line = buffer.left(newline);
-            buffer.remove(0, newline + 1);
-            return true;
+        drainStderr(process, stderrTail);
+        while (process.bytesAvailable() > 0) {
+            const QByteArray bytes = process.read(qMin<qint64>(process.bytesAvailable(), 64 * 1024));
+            bool complete = false;
+            if (!takeLine(buffer, bytes, line, &complete, error)) return false;
+            if (complete) return true;
         }
-        if (buffer.size() >= 1024 * 1024) return false;
         const int remaining = timeoutMilliseconds - static_cast<int>(timer.elapsed());
         if (!process.waitForReadyRead(qMin(remaining, 100))) {
-            if (process.state() == QProcess::NotRunning) break;
+            drainStderr(process, stderrTail);
+            if (process.state() == QProcess::NotRunning
+                && process.bytesAvailable() == 0) break;
             QCoreApplication::processEvents();
-            continue;
         }
-        buffer.append(process.readAllStandardOutput());
     }
+    if (error && error->isEmpty()) *error = QStringLiteral("Backend response timed out");
     return false;
 }
 
-bool request(QProcess &process, QByteArray &buffer, const QByteArray &id,
+bool request(QProcess &process, QByteArray &buffer, QByteArray &stderrTail, const QByteArray &id,
              const QByteArray &method, QJsonObject *result, QString *error)
 {
     const QByteArray frame = QByteArrayLiteral("{\"jsonrpc\":\"2.0\",\"id\":\"")
@@ -75,10 +104,7 @@ bool request(QProcess &process, QByteArray &buffer, const QByteArray &id,
         return false;
     }
     QByteArray line;
-    if (!waitForLine(process, buffer, &line, 5000)) {
-        if (error) *error = QStringLiteral("Backend response timed out");
-        return false;
-    }
+    if (!waitForLine(process, buffer, stderrTail, &line, 5000, error)) return false;
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
     const QJsonObject reply = document.object();
@@ -101,7 +127,12 @@ void stopProcess(QProcess &process)
 }
 }
 
-ResourcePaths defaultResourcePaths(const QString &executablePath)
+bool developmentResourcesEnabled()
+{
+    return qgetenv("OMAMAIL_DEVELOPMENT_RESOURCES") == QByteArrayLiteral("1");
+}
+
+ResourcePaths defaultResourcePaths(const QString &executablePath, bool developmentMode)
 {
     const QString executable = executablePath.isEmpty()
         ? QCoreApplication::applicationFilePath() : executablePath;
@@ -109,21 +140,23 @@ ResourcePaths defaultResourcePaths(const QString &executablePath)
     const QDir sourceRoot(QStringLiteral(OMAMAIL_SOURCE_ROOT));
     const QString pluginName = platformPluginName();
     ResourcePaths paths;
-    paths.standaloneQml = firstExisting({
+    QStringList standaloneCandidates{
         QStringLiteral(":/omamail/app/Main.qml"),
         executableDir.filePath(QStringLiteral("qml/Main.qml")),
-        executableDir.filePath(QStringLiteral("../Resources/qml/Main.qml")),
-        sourceRoot.filePath(QStringLiteral("app/qml/Main.qml"))});
-    paths.sharedUi = firstExisting({
+        executableDir.filePath(QStringLiteral("../Resources/qml/Main.qml"))};
+    QStringList sharedCandidates{
         executableDir.filePath(QStringLiteral("ui/Service.qml")),
-        executableDir.filePath(QStringLiteral("../Resources/ui/Service.qml")),
-        sourceRoot.filePath(QStringLiteral("ui/Service.qml"))});
+        executableDir.filePath(QStringLiteral("../Resources/ui/Service.qml"))};
+    if (developmentMode) {
+        standaloneCandidates.append(sourceRoot.filePath(QStringLiteral("app/qml/Main.qml")));
+        sharedCandidates.append(sourceRoot.filePath(QStringLiteral("ui/Service.qml")));
+    }
+    paths.standaloneQml = firstExisting(standaloneCandidates);
+    paths.sharedUi = firstExisting(sharedCandidates);
     QStringList platformCandidates{
         executableDir.filePath(QStringLiteral("plugins/platforms/%1").arg(pluginName)),
         executableDir.filePath(QStringLiteral("../PlugIns/platforms/%1").arg(pluginName))};
-    const bool developmentLayout = QFileInfo(paths.sharedUi).absoluteFilePath()
-        == QFileInfo(sourceRoot.filePath(QStringLiteral("ui/Service.qml"))).absoluteFilePath();
-    if (developmentLayout)
+    if (developmentMode)
         platformCandidates.append(QDir(QLibraryInfo::path(QLibraryInfo::PluginsPath))
             .filePath(QStringLiteral("platforms/%1").arg(pluginName)));
     paths.platformPlugin = firstExisting(platformCandidates);
@@ -135,15 +168,17 @@ ResourcePaths defaultResourcePaths(const QString &executablePath)
         executableDir.filePath(QStringLiteral("omamail")),
 #endif
     };
-    if (developmentLayout) {
+    if (developmentMode) {
         backendCandidates.prepend(configuredBackend);
         backendCandidates.prepend(QString::fromLocal8Bit(qgetenv("OMAMAIL_BIN")));
     }
     paths.backend = firstExisting(backendCandidates);
-    paths.manifest = firstExisting({
+    QStringList manifestCandidates{
         executableDir.filePath(QStringLiteral("manifest.json")),
-        executableDir.filePath(QStringLiteral("../Resources/manifest.json")),
-        sourceRoot.filePath(QStringLiteral("manifest.json"))});
+        executableDir.filePath(QStringLiteral("../Resources/manifest.json"))};
+    if (developmentMode)
+        manifestCandidates.append(sourceRoot.filePath(QStringLiteral("manifest.json")));
+    paths.manifest = firstExisting(manifestCandidates);
     return paths;
 }
 
@@ -201,14 +236,16 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
     backend.setProgram(paths.backend);
     backend.setArguments({QStringLiteral("serve")});
     backend.setProcessChannelMode(QProcess::SeparateChannels);
+    backend.setReadChannel(QProcess::StandardOutput);
     backend.start();
     if (!backend.waitForStarted(5000)) {
         if (error) *error = QStringLiteral("Could not start backend: %1").arg(backend.errorString());
         return false;
     }
     QByteArray responseBuffer;
+    QByteArray stderrTail;
     QJsonObject info;
-    if (!request(backend, responseBuffer, "smoke-info", "system.info", &info, error)) {
+    if (!request(backend, responseBuffer, stderrTail, "smoke-info", "system.info", &info, error)) {
         stopProcess(backend);
         return false;
     }
@@ -222,7 +259,7 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
         return false;
     }
     QJsonObject quitResult;
-    if (!request(backend, responseBuffer, "smoke-quit", "system.quit", &quitResult, error)
+    if (!request(backend, responseBuffer, stderrTail, "smoke-quit", "system.quit", &quitResult, error)
         || quitResult.value(QStringLiteral("quitReady")).toBool() != true
         || !backend.waitForFinished(5000) || backend.exitStatus() != QProcess::NormalExit
         || backend.exitCode() != 0) {

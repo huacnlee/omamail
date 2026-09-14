@@ -5,6 +5,7 @@
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLibraryInfo>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextStream>
@@ -44,6 +45,9 @@ private slots:
     void reportsEachMissingComponent();
     void rejectsBackendWithoutExecutePermission();
     void smokeTestLoadsQmlHandshakesAndWritesReadyFile();
+    void smokeRejectsOversizedStdoutFrame();
+    void smokeDrainsLargeStderr();
+    void bundleDiscoveryDoesNotUseDevelopmentFallbacks();
 };
 
 void ResourcesTest::acceptsCompleteReadableLayout()
@@ -107,9 +111,64 @@ void ResourcesTest::smokeTestLoadsQmlHandshakesAndWritesReadyFile()
     QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 9);
 }
 
+void ResourcesTest::smokeRejectsOversizedStdoutFrame()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    paths.backend = QCoreApplication::applicationFilePath();
+    qputenv("OMAMAIL_SMOKE_FIXTURE", "oversize-stdout");
+    QString error;
+    QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error));
+    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+    QVERIFY(error.contains(QStringLiteral("too large")));
+    QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
+}
+
+void ResourcesTest::smokeDrainsLargeStderr()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    paths.backend = QCoreApplication::applicationFilePath();
+    qputenv("OMAMAIL_SMOKE_FIXTURE", "large-stderr");
+    QString error;
+    QVERIFY2(runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error),
+             qPrintable(error));
+    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+}
+
+void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()
+{
+    QTemporaryDir staged;
+    const QString executable = staged.filePath(QStringLiteral("Omamail.app/Contents/MacOS/omamail-app"));
+    QVERIFY(writeFile(executable));
+    const ResourcePaths paths = defaultResourcePaths(executable, false);
+    QVERIFY(!paths.sharedUi.startsWith(QStringLiteral(OMAMAIL_SOURCE_ROOT)));
+    QVERIFY(paths.backend != QStringLiteral(OMAMAIL_BACKEND_PATH));
+    QVERIFY(!paths.platformPlugin.startsWith(QLibraryInfo::path(QLibraryInfo::PluginsPath)));
+    const ResourceCheck result = checkResources(paths);
+    QVERIFY(!result.ok);
+    QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("shared UI")));
+    QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("platform plugin")));
+    QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("backend")));
+}
+
 int main(int argc, char *argv[])
 {
     if (argc > 1 && QByteArray(argv[1]) == QByteArrayLiteral("serve")) {
+        const QByteArray fixture = qgetenv("OMAMAIL_SMOKE_FIXTURE");
+        if (fixture == QByteArrayLiteral("oversize-stdout")) {
+            QFile output;
+            if (!output.open(stdout, QIODevice::WriteOnly)) return 2;
+            output.write(QByteArray(1024 * 1024 + 1, 'x') + '\n');
+            output.flush();
+            return 0;
+        }
+        if (fixture == QByteArrayLiteral("large-stderr")) {
+            QFile errors;
+            if (!errors.open(stderr, QIODevice::WriteOnly)) return 2;
+            errors.write(QByteArray(4 * 1024 * 1024, 'e'));
+            errors.flush();
+        }
         QTextStream input(stdin, QIODevice::ReadOnly);
         QTextStream output(stdout, QIODevice::WriteOnly);
         while (!input.atEnd()) {

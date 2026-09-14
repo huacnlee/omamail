@@ -1,7 +1,5 @@
 #include "process.h"
 
-#include <QMetaType>
-
 #ifdef Q_OS_UNIX
 #include <csignal>
 #include <unistd.h>
@@ -27,21 +25,7 @@ NativeProcess::NativeProcess(QObject *parent)
     connect(&m_process, &QProcess::started, this, [this] {
         m_processGroupId = m_process.processId();
 #ifdef Q_OS_WIN
-        HANDLE job = CreateJobObjectW(nullptr, nullptr);
-        if (job) {
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE,
-                                       static_cast<DWORD>(m_process.processId()));
-            if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                                         &limits, sizeof(limits))
-                || !child || !AssignProcessToJobObject(job, child)) {
-                CloseHandle(job);
-            } else {
-                m_job = job;
-            }
-            if (child) CloseHandle(child);
-        }
+        clearWindowsStartup();
 #endif
         if (!m_stdinEnabled) m_process.closeWriteChannel();
         emit started();
@@ -59,13 +43,19 @@ NativeProcess::NativeProcess(QObject *parent)
     });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart || m_exitReported) return;
+#ifdef Q_OS_WIN
+        clearWindowsStartup();
+        killTree();
+#endif
+        m_forceKill.stop();
         m_exitReported = true;
         setRunningValue(false);
         emit exited(-1);
     });
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status) {
-        finishPendingLines();
+        m_forceKill.stop();
+        if (!m_streamFailed) finishPendingLines();
         killTree();
         setRunningValue(false);
         if (m_exitReported) return;
@@ -82,6 +72,7 @@ NativeProcess::~NativeProcess()
         if (m_process.state() != QProcess::NotRunning) m_process.waitForFinished(1000);
     }
 #ifdef Q_OS_WIN
+    clearWindowsStartup();
     if (m_job) CloseHandle(static_cast<HANDLE>(m_job));
 #endif
 }
@@ -121,7 +112,9 @@ void NativeProcess::setRunning(bool running)
 
 void NativeProcess::start()
 {
+    m_forceKill.stop();
     m_exitReported = false;
+    m_streamFailed = false;
     if (m_process.state() != QProcess::NotRunning || m_command.isEmpty()) {
         setRunningValue(false);
         if (!m_exitReported) {
@@ -152,6 +145,15 @@ void NativeProcess::start()
     m_process.setProgram(program);
     m_process.setArguments(arguments);
     m_process.setInputChannelMode(QProcess::ManagedInputChannel);
+#ifdef Q_OS_WIN
+    if (!prepareWindowsContainment()) {
+        setRunningValue(false);
+        m_exitReported = true;
+        emit failed(QStringLiteral("Could not establish process-tree containment"));
+        emit exited(-1);
+        return;
+    }
+#endif
     m_process.start();
 }
 
@@ -208,24 +210,28 @@ void NativeProcess::killTree()
 void NativeProcess::consume(QByteArray &pending, const QByteArray &data,
                             bool standardError)
 {
-    pending.append(data);
-    qsizetype newline = -1;
-    while ((newline = pending.indexOf('\n')) >= 0) {
-        QByteArray line = pending.left(newline);
-        pending.remove(0, newline + 1);
-        emitLine(line, standardError);
-    }
-    if (pending.size() > maximumLineBytes()) {
-        QByteArray line = pending.left(maximumLineBytes());
+    if (m_streamFailed) return;
+    qsizetype offset = 0;
+    while (offset < data.size()) {
+        const qsizetype newline = data.indexOf('\n', offset);
+        const qsizetype end = newline < 0 ? data.size() : newline;
+        const qsizetype length = end - offset;
+        if (pending.size() + length >= maximumLineBytes()) {
+            failStream(standardError ? QStringLiteral("stderr record is too large")
+                                     : QStringLiteral("stdout record is too large"));
+            return;
+        }
+        pending.append(data.constData() + offset, length);
+        if (newline < 0) return;
+        emitLine(pending, standardError);
         pending.clear();
-        emitLine(line, standardError);
+        offset = newline + 1;
     }
 }
 
 void NativeProcess::emitLine(QByteArray line, bool standardError)
 {
     if (line.endsWith('\r')) line.chop(1);
-    if (line.size() > maximumLineBytes()) line.truncate(maximumLineBytes());
     const QString decoded = QString::fromUtf8(line);
     if (standardError) emit stderrLine(decoded);
     else emit stdoutLine(decoded);
@@ -242,3 +248,72 @@ void NativeProcess::finishPendingLines()
         m_stderrPending.clear();
     }
 }
+
+void NativeProcess::failStream(const QString &error)
+{
+    if (m_streamFailed) return;
+    m_streamFailed = true;
+    m_stdoutPending.clear();
+    m_stderrPending.clear();
+    emit failed(error);
+    setRunning(false);
+}
+
+#ifdef Q_OS_WIN
+bool NativeProcess::prepareWindowsContainment()
+{
+    clearWindowsStartup();
+    if (m_job) {
+        CloseHandle(static_cast<HANDLE>(m_job));
+        m_job = nullptr;
+    }
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) return false;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &limits, sizeof(limits))) {
+        CloseHandle(job);
+        return false;
+    }
+    SIZE_T bytes = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+    auto *attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
+        HeapAlloc(GetProcessHeap(), 0, bytes));
+    auto *startup = new STARTUPINFOEXW{};
+    if (!attributes || !startup
+        || !InitializeProcThreadAttributeList(attributes, 1, 0, &bytes)
+        || !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                                      &job, sizeof(job), nullptr, nullptr)) {
+        if (attributes) HeapFree(GetProcessHeap(), 0, attributes);
+        delete startup;
+        CloseHandle(job);
+        return false;
+    }
+    startup->lpAttributeList = attributes;
+    m_job = job;
+    m_attributeList = attributes;
+    m_extendedStartupInfo = startup;
+    m_process.setCreateProcessArgumentsModifier([this](QProcess::CreateProcessArguments *args) {
+        auto *extended = static_cast<STARTUPINFOEXW *>(m_extendedStartupInfo);
+        extended->StartupInfo = *reinterpret_cast<STARTUPINFOW *>(args->startupInfo);
+        extended->StartupInfo.cb = sizeof(STARTUPINFOEXW);
+        args->startupInfo = reinterpret_cast<Q_STARTUPINFO *>(&extended->StartupInfo);
+        args->flags |= EXTENDED_STARTUPINFO_PRESENT;
+    });
+    return true;
+}
+
+void NativeProcess::clearWindowsStartup()
+{
+    if (m_attributeList) {
+        DeleteProcThreadAttributeList(
+            static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(m_attributeList));
+        HeapFree(GetProcessHeap(), 0, m_attributeList);
+        m_attributeList = nullptr;
+    }
+    delete static_cast<STARTUPINFOEXW *>(m_extendedStartupInfo);
+    m_extendedStartupInfo = nullptr;
+    m_process.setCreateProcessArgumentsModifier({});
+}
+#endif

@@ -18,6 +18,7 @@ private slots:
     void invalidJsonIsPreserved();
     void rejectsCredentialAndUnknownFields();
     void fileStoreReadsWritesAndWatches();
+    void watchReportsExternalCreation();
     void environmentUsesFixedAllowlist();
 };
 
@@ -104,6 +105,21 @@ void SettingsTest::environmentUsesFixedAllowlist()
     ApplicationHost host;
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_BIN")), QStringLiteral("/synthetic/backend"));
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_TEST_SECRET")), QString());
+}
+
+void SettingsTest::watchReportsExternalCreation()
+{
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("created-later.txt"));
+    FileStore store;
+    QSignalSpy changed(&store, &FileStore::changed);
+    store.watch(path, true);
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("outside"), qint64(7));
+    file.close();
+    QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
+    QCOMPARE(changed.last().at(0).toString(), path);
 }
 
 QTEST_MAIN(SettingsTest)
