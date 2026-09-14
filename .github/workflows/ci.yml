@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py check)"
-          cargo test --locked --no-default-features --features standalone
+          cargo test --locked --no-default-features --features standalone,integration-test-credentials
           cargo build --release --locked --no-default-features --features standalone
           cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
           cmake --build build/app
