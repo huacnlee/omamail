@@ -39,16 +39,20 @@ Column {
   // off the headings themselves, so a section that grows moves the ones
   // below it in the rail's map as well as on screen. The calendars section
   // is a component with its own heading, so its top stands in.
-  readonly property var sections: [
-    { key: "backend", title: "Mail backend", y: backendSetup.y },
-    { key: "bar", title: "Bar", y: barHeading.y },
-    { key: "reading", title: "Reading", y: readingHeading.y },
-    { key: "notifications", title: "Notifications", y: notificationsHeading.y },
-    { key: "writing", title: "Writing", y: writingHeading.y },
-    { key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y },
-    { key: "calendars", title: "Calendars", y: calendarsSection.y },
-    { key: "oauth", title: "Google OAuth client", y: oauthHeading.y }
-  ]
+  readonly property var sections: {
+    var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
+    if (!root.service || root.service.hasTray !== false)
+      values.push({ key: "bar", title: "Bar", y: barHeading.y })
+    values.push({ key: "reading", title: "Reading", y: readingHeading.y })
+    if (!root.service || root.service.hasNotifications !== false
+        || String(root.service.notificationError || "") !== "")
+      values.push({ key: "notifications", title: "Notifications", y: notificationsHeading.y })
+    values.push({ key: "writing", title: "Writing", y: writingHeading.y })
+    values.push({ key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y })
+    values.push({ key: "calendars", title: "Calendars", y: calendarsSection.y })
+    values.push({ key: "oauth", title: "Google OAuth client", y: oauthHeading.y })
+    return values
+  }
   readonly property var auth: service ? service.auth : null
 
   function signatureAccount(id) {
@@ -248,7 +252,8 @@ Column {
     width: parent.width
     runtime: root.service ? root.service.backendRuntime || null : null
     backendError: root.service && root.service.backend ? root.service.backend.failure : ""
-    diagnosisAvailable: !!root.service && typeof root.service.diagnoseError === "function"
+    diagnosisAvailable: !!root.service && root.service.hasAgent === true
+      && typeof root.service.diagnoseError === "function"
     diagnosing: !!root.service && !!root.service.diagnosing
     onDiagnosisRequested: root.service.diagnoseError()
     textColor: root.textColor
@@ -269,6 +274,7 @@ Column {
 
   Text {
     id: barHeading
+    visible: !root.service || root.service.hasTray !== false
     text: "BAR"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -277,6 +283,8 @@ Column {
   }
 
   Rectangle {
+    objectName: "bar-settings"
+    visible: !root.service || root.service.hasTray !== false
     width: parent.width
     implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
       + Style.space(16)
@@ -606,6 +614,8 @@ Column {
 
   Text {
     id: notificationsHeading
+    visible: !root.service || root.service.hasNotifications !== false
+      || String(root.service.notificationError || "") !== ""
     text: "NOTIFICATIONS"
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -614,6 +624,8 @@ Column {
   }
 
   Rectangle {
+    objectName: "notification-settings"
+    visible: !root.service || root.service.hasNotifications !== false
     width: parent.width
     implicitHeight: Math.max(notifyText.implicitHeight, notifySwitch.implicitHeight)
       + Style.space(16)
@@ -665,7 +677,7 @@ Column {
     width: parent.width
     visible: text !== ""
     text: root.service ? String(root.service.notificationError || "") : ""
-    color: root.dangerColor
+    color: root.urgentColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     wrapMode: Text.WordWrap

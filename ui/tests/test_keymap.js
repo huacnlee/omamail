@@ -362,6 +362,12 @@ deepEqual(keymap.hintsFor("list", null), offered)
 const all = keymap.helpGroups().map(g => g.name)
 const weight = g => g.rows.length + 1
 const totalWeight = keymap.helpGroups().reduce((sum, g) => sum + weight(g), 0)
+const withoutAgent = keymap.helpGroups(["askAgent", "assistantSend",
+  "assistantCommandUp", "assistantCommandDown", "assistantChooseCommand"])
+assert.ok(!withoutAgent.some(g => g.name === "AI"),
+  "a host without the agent does not advertise AI shortcuts")
+assert.ok(!withoutAgent.some(g => g.rows.some(r => r.action.indexOf("Ask AI") >= 0)),
+  "the Ask AI shortcut leaves the host-specific reference sheet")
 
 for (const count of [1, 2, 3, 4]) {
   const columns = keymap.helpColumns(count)

@@ -124,16 +124,8 @@ Item {
   readonly property string fontFamily: Style.font.family
 
   function copyText(text) {
-    clipboardProxy.text = String(text || "")
-    clipboardProxy.selectAll()
-    clipboardProxy.copy()
-    clipboardProxy.deselect()
-  }
-
-  TextEdit {
-    id: clipboardProxy
-    visible: false
-    readOnly: true
+    return service && typeof service.copyText === "function"
+      ? service.copyText(String(text || "")) : false
   }
 
   readonly property var agentPrompt: agentPromptLoader.item || inactiveAgentPrompt
@@ -1480,7 +1472,8 @@ Item {
         width: Math.min(parent.width - Style.space(48), Style.space(480))
         runtime: root.service ? root.service.backendRuntime || null : null
         backendError: root.service && root.service.backend ? root.service.backend.failure : ""
-        diagnosisAvailable: !!root.service && typeof root.service.diagnoseError === "function"
+        diagnosisAvailable: !!root.service && root.service.hasAgent === true
+          && typeof root.service.diagnoseError === "function"
         diagnosing: !!root.service && !!root.service.diagnosing
         onDiagnosisRequested: root.service.diagnoseError()
         textColor: root.foreground
@@ -2985,6 +2978,10 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
+        hiddenBindings: root.service && root.service.hasAgent === false
+          ? ["askAgent", "assistantSend", "assistantCommandUp",
+             "assistantCommandDown", "assistantChooseCommand"]
+          : []
         onDismissed: root.dismissHelp()
       }
 

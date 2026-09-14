@@ -35,4 +35,8 @@ assert "PATH=" not in launch
 cmake = (ROOT / "app/CMakeLists.txt").read_text()
 assert 'ui/assets/*' in cmake
 
+makefile = (ROOT / "Makefile").read_text()
+assert "validate: test test-app-qml qml-check" in makefile
+assert 'test-app-qml:\n\t@test -n "$(QMLTESTRUNNER)"' in makefile
+
 print("test_app_make.py ok")

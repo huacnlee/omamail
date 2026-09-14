@@ -64,8 +64,12 @@ Item {
   // The three names `MailAccount` reads without knowing which provider it has.
   readonly property bool credentialsPresent: configured
   property bool loginBusy: false
-  property bool credentialBusy: false
-  readonly property bool sessionBusy: credentialBusy
+  property bool credentialLookupBusy: false
+  property bool credentialWriteBusy: false
+  property int credentialLookupSerial: 0
+  property string credentialWriteAccount: ""
+  property string pendingCredentialDelete: ""
+  readonly property bool sessionBusy: credentialLookupBusy || credentialWriteBusy
   property string lastError: ""
 
   // Which of the check's three waits is happening, 1 to 3, or 0 when nothing
@@ -160,7 +164,7 @@ Item {
     var next = credentialWaiters.slice()
     next.push(callback)
     credentialWaiters = next
-    if (credentialBusy) return
+    if (credentialLookupBusy) return
     startSecretLookup()
   }
 
@@ -169,29 +173,37 @@ Item {
       secretChecked = true
       return
     }
-    if (credentialBusy) return
+    if (credentialLookupBusy) return
     startSecretLookup()
   }
 
   function startSecretLookup() {
     var boundAccount = accountId
     if (!platform || typeof platform.credentialGet !== "function" || boundAccount === "") {
-      handleSecretLookup("")
+      handleSecretLookup("", "credential_store_unavailable")
       return
     }
     lookupHandled = false
-    credentialBusy = true
+    var serial = ++credentialLookupSerial
+    credentialLookupBusy = true
     platform.credentialGet("jmap-secret", boundAccount, "", function(value, error) {
-      root.credentialBusy = false
+      if (serial !== root.credentialLookupSerial) return
+      root.credentialLookupBusy = false
       if (boundAccount !== root.accountId) return
-      if (error && error !== "credential_missing") root.lastError = "The credential store is unavailable"
-      root.handleSecretLookup(error ? "" : value)
+      root.handleSecretLookup(error ? "" : value, error)
     })
   }
 
-  function handleSecretLookup(line) {
+  function handleSecretLookup(line, error) {
     if (lookupHandled) return
     lookupHandled = true
+    if (error && error !== "credential_missing") {
+      secretChecked = false
+      lastError = "The credential store is unavailable"
+      finishWaiters(null, lastError)
+      if (configured) sessionUnavailable(lastError)
+      return
+    }
     secretChecked = true
     var value = String(line || "")
     if (value === "") {
@@ -211,7 +223,7 @@ Item {
   // turn, and one `Mailbox/get` — rather than being written down first and
   // failing later on a page with no field to correct.
   function signIn(value) {
-    if (platform && platform.backendCanStoreCredentials === false) {
+    if (platform && platform.canAccessCredentials === false) {
       lastError = "Install or update the mail backend before signing in"
       return false
     }
@@ -273,13 +285,22 @@ Item {
   }
 
   function storeSecret() {
-    if (!platform || typeof platform.credentialPut !== "function" || accountId === "" || secret === "") return
+    if (!platform || typeof platform.credentialPut !== "function" || accountId === ""
+        || secret === "" || credentialWriteBusy) return
     var boundAccount = accountId
     var value = secret
-    credentialBusy = true
+    credentialWriteBusy = true
+    credentialWriteAccount = boundAccount
     platform.credentialPut("jmap-secret", boundAccount, "", value, function(ok, error) {
       value = ""
-      root.credentialBusy = false
+      root.credentialWriteBusy = false
+      root.credentialWriteAccount = ""
+      var deleteAccount = root.pendingCredentialDelete
+      root.pendingCredentialDelete = ""
+      if (deleteAccount !== "") {
+        root.deleteCredential(deleteAccount)
+        return
+      }
       if (boundAccount !== root.accountId) return
       if (!ok) root.lastError = "Signed in, but the app password could not be saved. "
         + "You may need to enter it again after a restart"
@@ -287,12 +308,19 @@ Item {
     })
   }
 
+  function deleteCredential(boundAccount) {
+    if (platform && typeof platform.credentialDelete === "function" && boundAccount !== "")
+      platform.credentialDelete("jmap-secret", boundAccount, "", function() {})
+  }
+
   function logout() {
+    var boundAccount = accountId
     secret = ""
     pendingSecret = ""
     secretChecked = true
-    if (platform && typeof platform.credentialDelete === "function" && accountId !== "")
-      platform.credentialDelete("jmap-secret", accountId, "", function() {})
+    if (credentialWriteBusy && credentialWriteAccount === boundAccount)
+      pendingCredentialDelete = boundAccount
+    else deleteCredential(boundAccount)
     loggedOut()
   }
 
@@ -321,6 +349,11 @@ Item {
     secret = ""
     secretChecked = false
     lookupHandled = false
+    credentialLookupSerial++
+    credentialLookupBusy = false
+    finishWaiters(null, "The mailbox changed before its credential was loaded")
+    if (credentialWriteBusy && credentialWriteAccount !== "")
+      pendingCredentialDelete = credentialWriteAccount
   }
 
 }

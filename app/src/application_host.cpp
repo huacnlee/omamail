@@ -148,7 +148,8 @@ QString ApplicationHost::environment(const QString &name) const
 {
     static const QSet<QString> allowed{
         QStringLiteral("HOME"), QStringLiteral("XDG_CONFIG_HOME"),
-        QStringLiteral("XDG_CACHE_HOME"), QStringLiteral("OMAMAIL_BIN")};
+        QStringLiteral("XDG_CACHE_HOME"), QStringLiteral("OMAMAIL_BIN"),
+        QStringLiteral("OMAMAIL_SMOKE_TEST")};
     if (!allowed.contains(name)) return {};
     return QString::fromLocal8Bit(qgetenv(name.toLocal8Bit().constData()));
 }
@@ -169,22 +170,44 @@ bool safeRelativePath(const QString &name)
     return true;
 }
 
-QString applicationPath(QStandardPaths::StandardLocation location, const QString &name)
+QString backendStorageRoot(bool cache)
+{
+#ifdef Q_OS_WIN
+    QString root = QString::fromLocal8Bit(qgetenv(cache ? "LOCALAPPDATA" : "APPDATA"));
+    if (root.isEmpty()) root = QStandardPaths::writableLocation(
+        cache ? QStandardPaths::CacheLocation : QStandardPaths::AppConfigLocation);
+    if (cache) root = QDir(root).filePath(QStringLiteral("OmamailData/Cache"));
+#elif defined(Q_OS_MACOS)
+    const QString home = QDir::homePath();
+    QString root = QDir(home).filePath(cache ? QStringLiteral("Library/Caches")
+                                             : QStringLiteral("Library/Application Support"));
+#else
+    QString root = QString::fromLocal8Bit(qgetenv(
+        cache ? "XDG_CACHE_HOME" : "XDG_CONFIG_HOME"));
+    if (root.isEmpty()) root = QDir::home().filePath(
+        cache ? QStringLiteral(".cache") : QStringLiteral(".config"));
+#endif
+    if (!QDir::isAbsolutePath(root)
+        || QDir::fromNativeSeparators(root).split('/').contains(QStringLiteral(".."))) return {};
+    return QDir(QDir::cleanPath(root)).filePath(QStringLiteral("omamail"));
+}
+
+QString applicationPath(bool cache, const QString &name)
 {
     if (!safeRelativePath(name)) return {};
-    const QString root = QStandardPaths::writableLocation(location);
+    const QString root = backendStorageRoot(cache);
     return root.isEmpty() ? QString() : QDir(root).filePath(name);
 }
 }
 
 QString ApplicationHost::configPath(const QString &name) const
 {
-    return applicationPath(QStandardPaths::AppConfigLocation, name);
+    return applicationPath(false, name);
 }
 
 QString ApplicationHost::cachePath(const QString &name) const
 {
-    return applicationPath(QStandardPaths::CacheLocation, name);
+    return applicationPath(true, name);
 }
 
 QString ApplicationHost::localFilePath(const QUrl &url) const

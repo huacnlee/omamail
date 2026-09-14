@@ -235,6 +235,10 @@ test-qml:
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
 test-app-qml:
+	@test -n "$(QMLTESTRUNNER)" || { \
+		echo "qmltestrunner not found: install Qt 6 QML test tooling" >&2; \
+		exit 1; \
+	}
 	cmake -S app -B "$(APP_BUILD_DIR)" -DOMAMAIL_BACKEND="$(APP_BACKEND)"
 	cmake --build "$(APP_BUILD_DIR)" --parallel
 	python3 app/tests/test_qml_inventory.py
@@ -260,7 +264,7 @@ qml-check:
 	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES)
 	$(QMLLINT) -I app/qml/imports -I app/build/qml $(APP_QML_FILES)
 
-validate: test qml-check
+validate: test test-app-qml qml-check
 	omarchy plugin validate .
 	git diff --check
 

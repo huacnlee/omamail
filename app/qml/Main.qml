@@ -28,10 +28,12 @@ Item {
     if (account === "" || message === "") return
     pendingActivation = ({ accountId: account, messageId: message })
     routePendingActivation()
+    if (pendingActivation && !mailService.accountsLoaded) activationFallback.restart()
   }
 
   function routePendingActivation() {
     if (!pendingActivation || !mailService.accountsLoaded) return
+    activationFallback.stop()
     var target = pendingActivation
     pendingActivation = null
     // Use the account registry's validation path before acknowledging the
@@ -42,6 +44,17 @@ Item {
     if (root.nativeHost && typeof root.nativeHost.takePendingNotificationActivation === "function")
       root.nativeHost.takePendingNotificationActivation()
     if (!accepted) openInitialWindow()
+  }
+
+  Timer {
+    id: activationFallback
+    objectName: "activation-fallback"
+    interval: 5000
+    repeat: false
+    // Account storage may be temporarily unavailable. Never leave a cold
+    // notification launch windowless; retain the durable route so a later
+    // successful registry read can still validate and navigate it.
+    onTriggered: root.openInitialWindow()
   }
 
   Binding { target: Quickshell; property: "nativeHost"; value: root.nativeHost }
@@ -104,7 +117,10 @@ Item {
     if (String(pending.accountId || "") !== "" && String(pending.messageId || "") !== "")
       root.pendingActivation = ({ accountId: String(pending.accountId),
         messageId: String(pending.messageId) })
-    if (root.pendingActivation) root.routePendingActivation()
+    if (root.pendingActivation) {
+      root.routePendingActivation()
+      if (root.pendingActivation) activationFallback.start()
+    }
     else openInitialWindow()
   }
 }

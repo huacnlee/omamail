@@ -24,6 +24,7 @@ Rectangle {
   required property color backgroundColor
   required property color dimColor
   required property string panelFontFamily
+  property var hiddenBindings: []
 
   signal dismissed()
 
@@ -56,7 +57,7 @@ Rectangle {
   // The split into columns is the table's too: balancing it here would put a
   // layout decision in a view, and the rule — in order, a heading counts as a
   // line — is worth a test.
-  readonly property var columns: Keymap.helpColumns(columnCount)
+  readonly property var columns: Keymap.helpColumns(columnCount, hiddenBindings)
 
   color: Qt.rgba(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.96)
 

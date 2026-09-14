@@ -45,6 +45,8 @@ Item {
 
   CalendarPalette {
     id: calendarPalette
+    palettePath: root.controller && root.controller.service
+      ? String(root.controller.service.calendarPalettePath || "") : ""
     textColor: root.textColor
     accentColor: root.accentColor
     urgentColor: root.urgentColor

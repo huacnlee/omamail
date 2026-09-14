@@ -598,7 +598,7 @@ Item {
       lastError = "Add the mailbox address and Microsoft OAuth client ID first"
       return
     }
-    if (platform && platform.backendCanStoreCredentials === false) {
+    if (platform && platform.canAccessCredentials === false) {
       lastError = "Install or update the mail backend before signing in"
       return
     }

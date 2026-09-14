@@ -377,7 +377,7 @@ Item {
       lastError = "Connect a Google Cloud OAuth client first"
       return
     }
-    if (platform && platform.backendCanStoreCredentials === false) {
+    if (platform && platform.canAccessCredentials === false) {
       lastError = "Install or update the mail backend before signing in"
       return
     }

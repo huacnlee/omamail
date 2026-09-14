@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QLibraryInfo>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -243,10 +244,11 @@ ResourcePaths defaultResourcePaths(const QString &executablePath, bool developme
     }
     paths.backend = firstExisting(backendCandidates);
     QStringList manifestCandidates{
+        QStringLiteral(":/omamail/manifest.json"),
         executableDir.filePath(QStringLiteral("manifest.json")),
         executableDir.filePath(QStringLiteral("../Resources/manifest.json"))};
     if (developmentMode)
-        manifestCandidates.append(sourceRoot.filePath(QStringLiteral("manifest.json")));
+        manifestCandidates.prepend(sourceRoot.filePath(QStringLiteral("manifest.json")));
     paths.manifest = firstExisting(manifestCandidates);
     return paths;
 }
@@ -260,6 +262,24 @@ ResourceCheck checkResources(const ResourcePaths &paths)
     if (!readable(paths.sharedUi))
         result.errors.append(QStringLiteral("Missing or unreadable shared UI: %1")
                                  .arg(paths.sharedUi));
+    QFile manifest(paths.manifest);
+    if (!manifest.open(QIODevice::ReadOnly)) {
+        result.errors.append(QStringLiteral("Missing or unreadable manifest: %1")
+                                 .arg(paths.manifest));
+    } else {
+        const QByteArray bytes = manifest.read(1024 * 1024 + 1);
+        QJsonParseError parseError;
+        const QJsonDocument document = bytes.size() > 1024 * 1024
+            ? QJsonDocument() : QJsonDocument::fromJson(bytes, &parseError);
+        const QJsonObject value = document.object();
+        if (bytes.size() > 1024 * 1024 || parseError.error != QJsonParseError::NoError
+            || !document.isObject() || value.value(QStringLiteral("id")).toString() != QStringLiteral("omamail")
+            || value.value(QStringLiteral("name")).toString() != QStringLiteral("Omamail")
+            || value.value(QStringLiteral("version")).toString() != QStringLiteral(OMAMAIL_APP_VERSION)) {
+            result.errors.append(QStringLiteral("Invalid standalone manifest: %1")
+                                     .arg(paths.manifest));
+        }
+    }
     if (!readable(paths.platformPlugin))
         result.errors.append(QStringLiteral("Missing or unreadable Qt platform plugin: %1")
                                  .arg(paths.platformPlugin));
@@ -281,6 +301,8 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
         return false;
     }
 
+    const QByteArray previousSmokeMode = qgetenv("OMAMAIL_SMOKE_TEST");
+    qputenv("OMAMAIL_SMOKE_TEST", QByteArrayLiteral("1"));
     QQmlEngine engine;
     const QFileInfo sharedEntry(paths.sharedUi);
     engine.addImportPath(sharedEntry.absolutePath());
@@ -293,10 +315,14 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
         : QUrl::fromLocalFile(paths.standaloneQml);
     QQmlComponent component(&engine, componentUrl);
     if (component.status() != QQmlComponent::Ready) {
+        if (previousSmokeMode.isNull()) qunsetenv("OMAMAIL_SMOKE_TEST");
+        else qputenv("OMAMAIL_SMOKE_TEST", previousSmokeMode);
         if (error) *error = component.errorString();
         return false;
     }
     std::unique_ptr<QObject> root(component.create());
+    if (previousSmokeMode.isNull()) qunsetenv("OMAMAIL_SMOKE_TEST");
+    else qputenv("OMAMAIL_SMOKE_TEST", previousSmokeMode);
     if (!root) {
         if (error) *error = component.errorString();
         return false;
@@ -322,10 +348,14 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
     }
     const QString version = info.value(QStringLiteral("version")).toString();
     const QJsonValue apiVersion = info.value(QStringLiteral("apiVersion"));
-    if (version.isEmpty() || !apiVersion.isDouble()
+    const QJsonValue protocol = info.value(QStringLiteral("protocol"));
+    if (info.value(QStringLiteral("name")).toString() != QStringLiteral("omamail")
+        || version != QStringLiteral(OMAMAIL_APP_VERSION)
+        || !protocol.isDouble() || protocol.toInt() != 1
+        || !apiVersion.isDouble()
         || apiVersion.toDouble() != static_cast<double>(apiVersion.toInt())
-        || apiVersion.toInt() < 1) {
-        if (error) *error = QStringLiteral("Backend system.info is incomplete");
+        || apiVersion.toInt() != 4) {
+        if (error) *error = QStringLiteral("Bundled backend system.info does not match this app");
         stopProcess(backend);
         return false;
     }

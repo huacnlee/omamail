@@ -10,6 +10,7 @@ QtObject {
   property string backendPath: "/fixture/bin/omamail"
   property string notificationError: ""
   property bool hidden: false
+  property bool quitCalled: false
   property var pendingNotificationActivation: ({})
   property var environmentValues: ({
     HOME: "/fixture/home",
@@ -37,6 +38,7 @@ QtObject {
     files = ({ "/fixture/existing": "saved" })
     watched = ({})
     hidden = false
+    quitCalled = false
   }
 
   function environment(name) { return String(environmentValues[name] || "") }
@@ -49,11 +51,12 @@ QtObject {
     }])
     return true
   }
-  function configPath(name) { return "/fixture/config/Omamail/" + String(name) }
-  function cachePath(name) { return "/fixture/cache/Omamail/" + String(name) }
+  function configPath(name) { return "/fixture/config/omamail/" + String(name) }
+  function cachePath(name) { return "/fixture/cache/omamail/" + String(name) }
   function localFilePath(url) { return String(url).replace(/^file:\/\//, "") }
   function updateSettings(value) { settings = value; return true }
   function hide() { hidden = true }
+  function quit() { quitCalled = true }
   function takePendingNotificationActivation() {
     var pending = pendingNotificationActivation
     pendingNotificationActivation = ({})

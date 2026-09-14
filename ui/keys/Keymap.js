@@ -367,11 +367,13 @@ function hintTextFor(binding, context) {
 
 // Grouped in the order the groups first appear in the table, so the sheet's
 // shape is a property of the table rather than a second list to maintain.
-function helpGroups() {
+function helpGroups(hidden) {
   var groups = []
   var byName = ({})
+  var omitted = Array.isArray(hidden) ? hidden : []
   for (var i = 0; i < BINDINGS.length; i++) {
     var binding = BINDINGS[i]
+    if (omitted.indexOf(binding.id) >= 0) continue
     if (!byName[binding.group]) {
       byName[binding.group] = ({ name: binding.group, rows: [] })
       groups.push(byName[binding.group])
@@ -424,8 +426,8 @@ function helpWeight(group) {
 // Split in order rather than packed by size: a reader who knows the sheet finds
 // a group where it has always been, and "smallest column so far" moves them
 // about every time a binding is added.
-function helpColumns(count) {
-  var groups = helpGroups()
+function helpColumns(count, hidden) {
+  var groups = helpGroups(hidden)
   var columns = Math.max(1, Math.min(groups.length, Math.floor(Number(count)) || 1))
   var out = []
   for (var c = 0; c < columns; c++) out.push([])

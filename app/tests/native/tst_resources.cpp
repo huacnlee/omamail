@@ -30,9 +30,12 @@ private:
         paths.sharedUi = directory.filePath(QStringLiteral("ui/Service.qml"));
         paths.platformPlugin = directory.filePath(QStringLiteral("plugins/platforms/platform.fixture"));
         paths.backend = directory.filePath(QStringLiteral("bin/omamail"));
+        paths.manifest = directory.filePath(QStringLiteral("manifest.json"));
         writeFile(paths.standaloneQml, "import QtQuick\nItem {}\n");
         writeFile(paths.sharedUi, "import QtQuick\nItem {}\n");
         writeFile(paths.platformPlugin);
+        writeFile(paths.manifest, QByteArrayLiteral("{\"id\":\"omamail\",\"name\":\"Omamail\",\"version\":\"")
+            + QByteArrayLiteral(OMAMAIL_APP_VERSION) + QByteArrayLiteral("\"}"));
         writeFile(paths.backend, "#!/bin/sh\nexit 0\n");
         QFile backend(paths.backend);
         backend.setPermissions(backend.permissions() | QFileDevice::ExeOwner
@@ -45,7 +48,9 @@ private slots:
     void reportsEachMissingComponent_data();
     void reportsEachMissingComponent();
     void rejectsBackendWithoutExecutePermission();
+    void rejectsInvalidManifest();
     void smokeTestLoadsQmlHandshakesAndWritesReadyFile();
+    void smokeRejectsMismatchedBackendApi();
     void smokeRejectsOversizedStdoutFrame();
     void smokeDrainsLargeStderr();
     void smokeBoundsBothChannelsAfterQuitReply();
@@ -69,6 +74,7 @@ void ResourcesTest::reportsEachMissingComponent_data()
     QTest::newRow("shared ui") << QStringLiteral("sharedUi") << QStringLiteral("shared UI");
     QTest::newRow("platform plugin") << QStringLiteral("platformPlugin") << QStringLiteral("Qt platform plugin");
     QTest::newRow("backend") << QStringLiteral("backend") << QStringLiteral("backend");
+    QTest::newRow("manifest") << QStringLiteral("manifest") << QStringLiteral("manifest");
 }
 
 void ResourcesTest::reportsEachMissingComponent()
@@ -81,12 +87,23 @@ void ResourcesTest::reportsEachMissingComponent()
     if (member == QStringLiteral("standaloneQml")) path = paths.standaloneQml;
     else if (member == QStringLiteral("sharedUi")) path = paths.sharedUi;
     else if (member == QStringLiteral("platformPlugin")) path = paths.platformPlugin;
-    else path = paths.backend;
+    else if (member == QStringLiteral("backend")) path = paths.backend;
+    else path = paths.manifest;
     QVERIFY(QFile::remove(path));
 
     const ResourceCheck result = checkResources(paths);
     QVERIFY(!result.ok);
     QVERIFY(result.errors.join(QStringLiteral("\n")).contains(description));
+}
+
+void ResourcesTest::rejectsInvalidManifest()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    QVERIFY(writeFile(paths.manifest, "{\"id\":\"other\",\"name\":\"Omamail\",\"version\":\"0.10.1\"}"));
+    const ResourceCheck result = checkResources(paths);
+    QVERIFY(!result.ok);
+    QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("Invalid standalone manifest")));
 }
 
 void ResourcesTest::rejectsBackendWithoutExecutePermission()
@@ -111,8 +128,21 @@ void ResourcesTest::smokeTestLoadsQmlHandshakesAndWritesReadyFile()
     QFile ready(readyPath);
     QVERIFY(ready.open(QIODevice::ReadOnly));
     const QJsonObject value = QJsonDocument::fromJson(ready.readAll()).object();
-    QCOMPARE(value.value(QStringLiteral("version")).toString(), QStringLiteral("fixture-1"));
-    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 9);
+    QCOMPARE(value.value(QStringLiteral("version")).toString(), QStringLiteral(OMAMAIL_APP_VERSION));
+    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 4);
+}
+
+void ResourcesTest::smokeRejectsMismatchedBackendApi()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    paths.backend = QCoreApplication::applicationFilePath();
+    qputenv("OMAMAIL_SMOKE_FIXTURE", "stale-api");
+    QString error;
+    QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error));
+    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+    QVERIFY(error.contains(QStringLiteral("does not match")));
+    QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
 }
 
 void ResourcesTest::smokeRejectsOversizedStdoutFrame()
@@ -235,9 +265,9 @@ int main(int argc, char *argv[])
             QJsonObject result;
             if (request.value(QStringLiteral("method")).toString() == QStringLiteral("system.info")) {
                 result = {{QStringLiteral("name"), QStringLiteral("omamail")},
-                          {QStringLiteral("version"), QStringLiteral("fixture-1")},
+                          {QStringLiteral("version"), QStringLiteral(OMAMAIL_APP_VERSION)},
                           {QStringLiteral("protocol"), 1},
-                          {QStringLiteral("apiVersion"), 9}};
+                          {QStringLiteral("apiVersion"), fixture == QByteArrayLiteral("stale-api") ? 3 : 4}};
             } else {
                 result = {{QStringLiteral("quitReady"), true}};
             }

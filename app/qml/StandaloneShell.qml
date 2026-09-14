@@ -12,6 +12,7 @@ QtObject {
 
   readonly property bool standalone: true
   readonly property string backendPath: String(host && host.backendPath || "")
+  readonly property string calendarPalettePath: ""
   readonly property string notificationError: String(host && host.notificationError || "")
   readonly property var capabilities: ({
     agent: false,
@@ -40,7 +41,12 @@ QtObject {
   function hide(pluginId) {
     if (String(pluginId || "") !== String(manifest.id || "omamail")) return false
     if (app && typeof app.close === "function") app.close()
-    if (host && typeof host.hide === "function") host.hide()
+    // With no tray and no actionable notification there is no background
+    // route back to a hidden window. End the process so a launcher invocation
+    // starts a reachable application again.
+    if (!capabilities.tray && !capabilities.notifications
+        && host && typeof host.quit === "function") host.quit()
+    else if (host && typeof host.hide === "function") host.hide()
     return true
   }
 

@@ -13,6 +13,8 @@ import "account/Accounts.js" as Accounts
 import "account/Model.js" as Model
 import "account/Unified.js" as Unified
 import "providers/Registry.js" as Provider
+import "providers/Credentials.js" as CredentialKeys
+import "providers/Secrets.js" as SecretText
 import "bar/Preview.js" as Preview
 import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
@@ -52,6 +54,8 @@ Item {
   readonly property var capabilities: platform && platform.capabilities
     ? platform.capabilities : ({ agent: true, tray: true, mailto: true, notifications: true })
   readonly property bool standalone: !!platform && platform.standalone === true
+  readonly property bool smokeTest: standalone
+    && Quickshell.env("OMAMAIL_SMOKE_TEST") === "1"
 
   // One plugin-owned runtime and persistent process survive window openings.
   readonly property var backendRuntime: privateRuntime
@@ -66,25 +70,35 @@ Item {
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
   }
   readonly property var backend: rustBackend
-  readonly property bool diagnosing: diagnostics.busy
-  function diagnoseError() { diagnostics.open() }
-  Diagnostics {
-    id: diagnostics
-    pluginDir: root.pluginDir
-    onFailed: function(message) { if (root.current) root.current.fail(message) }
+  readonly property bool diagnosing: !!diagnosticsLoader.item && diagnosticsLoader.item.busy
+  function diagnoseError() {
+    if (hasAgent && diagnosticsLoader.item) diagnosticsLoader.item.open()
+  }
+  Loader {
+    id: diagnosticsLoader
+    active: root.hasAgent
+    sourceComponent: Component {
+      Diagnostics {
+        objectName: "diagnostics"
+        pluginDir: root.pluginDir
+        onFailed: function(message) { if (root.current) root.current.fail(message) }
+      }
+    }
   }
   Backend {
     id: rustBackend
     // The runtime manager resolves symlinks. Launch its validated path rather
     // than comparing it with the spelling used to load this plugin.
     executable: privateRuntime.executable
-    launchEnabled: privateRuntime.state === "ready" && executable !== ""
+    launchEnabled: !root.smokeTest && privateRuntime.state === "ready" && executable !== ""
     expectedVersion: privateRuntime.requiredVersion
     expectedApiVersion: privateRuntime.requiredApiVersion
     latestApiVersion: privateRuntime.latestApiVersion
     unreleasedMethods: privateRuntime.unreleasedMethods
     onReadyChanged: root.scheduleUnifiedSnapshot()
-    onRequestFailed: function(method, error) { diagnostics.record(method, error) }
+    onRequestFailed: function(method, error) {
+      if (diagnosticsLoader.item) diagnosticsLoader.item.record(method, error)
+    }
   }
 
   // Overall update status is diagnostic, not a feature requirement: its
@@ -142,13 +156,25 @@ Item {
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
   // System AI is always reachable. The launcher explains missing setup.
   readonly property bool hasAgent: capabilities.agent === true
+  readonly property bool hasTray: capabilities.tray === true
   readonly property bool hasMailto: capabilities.mailto === true
   readonly property bool hasNotifications: capabilities.notifications === true
   readonly property string notificationError: platform && platform.notificationError
     ? String(platform.notificationError) : ""
+  readonly property string calendarPalettePath: platform
+    && platform.calendarPalettePath !== undefined
+      ? String(platform.calendarPalettePath || "")
+      : Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
   // Credential RPC was introduced in API 4. This minimum stays fixed after
   // release; it is a capability of the connected backend, not release state.
   readonly property bool backendCanStoreCredentials: backend.ready && backend.apiVersion >= 4
+  // API 4 is the permanent typed-RPC capability. Until the pinned plugin
+  // backend itself advances, the Linux plugin keeps its reviewed keyring
+  // adapter; standalone hosts never enter this compatibility path.
+  readonly property bool legacyCredentialCompatibility: !standalone
+    && backend.ready && backend.apiVersion < 4
+  readonly property bool canAccessCredentials: backendCanStoreCredentials
+    || legacyCredentialCompatibility
   readonly property var agentRunner: agentRunnerLoader.item || inactiveAgentRunner
   readonly property var agentContext: agentContextLoader.item || inactiveAgentContext
   readonly property var eventSuggester: eventSuggesterLoader.item || inactiveEventSuggester
@@ -443,8 +469,63 @@ Item {
     return fields
   }
 
+  function legacyCredentialAttributes(kind, accountId, clientId) {
+    var account = String(accountId || "")
+    var client = String(clientId || "")
+    var controlled = /[\u0000-\u001f\u007f]/
+    if (account === "" || account.length > 1024 || account.trim() !== account
+        || controlled.test(account) || client.length > 1024 || controlled.test(client)) return []
+    if (kind === "google-refresh-token")
+      return client === "" || (account !== "default"
+        && (account.indexOf("@") < 0 || account.indexOf(":") >= 0))
+          ? [] : CredentialKeys.keyringAttributes(client, account)
+    if (kind === "outlook-refresh-token")
+      return client === "" || account.indexOf("outlook:") !== 0
+        || account.indexOf("@") < 0 ? []
+          : CredentialKeys.outlookKeyringAttributes(client, account)
+    if (kind === "imap-password")
+      return account.indexOf("imap:") === 0 && account.indexOf("@") >= 0
+        ? CredentialKeys.imapKeyringAttributes(account) : []
+    if (kind === "jmap-secret")
+      return account.indexOf("jmap:") === 0 && account.indexOf("@") >= 0
+        ? CredentialKeys.jmapKeyringAttributes(account) : []
+    if (kind === "calendar-password") return CalendarSources.keyringAttributes(account)
+    return []
+  }
+
+  function legacyCredentialOperation(operation, kind, accountId, clientId, secret, callback) {
+    var attributes = legacyCredentialAttributes(kind, accountId, clientId)
+    var value = String(secret || "")
+    if (attributes.length === 0 || (operation === "put"
+        && (value === "" || /[\u0000\r\n]/.test(value)))) {
+      if (typeof callback === "function") {
+        if (operation === "get") callback("", "invalid_params")
+        else callback(false, "invalid_params")
+      }
+      return false
+    }
+    var request = legacyCredentialProcessComponent.createObject(root, {
+      operation: operation, done: callback, payload: value,
+      command: operation === "get" ? ["secret-tool", "lookup"].concat(attributes)
+        : operation === "delete" ? ["secret-tool", "clear"].concat(attributes)
+        : [root.pluginDir + "/scripts/keyring-store.sh"].concat(attributes)
+    })
+    value = ""
+    if (!request) {
+      if (typeof callback === "function") {
+        if (operation === "get") callback("", "credential_store_unavailable")
+        else callback(false, "credential_store_unavailable")
+      }
+      return false
+    }
+    request.running = true
+    return true
+  }
+
   function credentialGet(kind, accountId, clientId, callback) {
     if (!backendCanStoreCredentials) {
+      if (legacyCredentialCompatibility)
+        return legacyCredentialOperation("get", kind, accountId, clientId, "", callback)
       if (typeof callback === "function") callback("", "backend_needs_update")
       return false
     }
@@ -457,6 +538,8 @@ Item {
 
   function credentialPut(kind, accountId, clientId, secret, callback) {
     if (!backendCanStoreCredentials) {
+      if (legacyCredentialCompatibility)
+        return legacyCredentialOperation("put", kind, accountId, clientId, secret, callback)
       if (typeof callback === "function") callback(false, "backend_needs_update")
       return false
     }
@@ -471,6 +554,8 @@ Item {
 
   function credentialDelete(kind, accountId, clientId, callback) {
     if (!backendCanStoreCredentials) {
+      if (legacyCredentialCompatibility)
+        return legacyCredentialOperation("delete", kind, accountId, clientId, "", callback)
       if (typeof callback === "function") callback(false, "backend_needs_update")
       return false
     }
@@ -991,6 +1076,11 @@ Item {
           && (!root.accountsLoaded || root.accountsRevision !== result.revision)) {
         root.accountsRevision = String(result.revision || "")
         root.applyAccounts(JSON.stringify(result.registry))
+      } else if (error && !root.accountsLoaded) {
+        // First-run storage failure still settles the registry with a local
+        // placeholder. Cold-start notification routing can then fall back to
+        // the ordinary window instead of waiting forever for a missing read.
+        root.applyAccounts("")
       }
       if (reload) root.restoreAccountRegistry()
     })
@@ -2585,6 +2675,37 @@ Item {
             try { value = JSON.parse(String(stdout.text || "")) } catch (e) {}
             done(value || ({ok:false,error:String(stderr.text || "Host operation failed")}))
           }
+        }
+        destroy()
+      }
+    }
+  }
+
+  Component {
+    id: legacyCredentialProcessComponent
+    Process {
+      id: legacyCredentialProcess
+      required property string operation
+      property var done: null
+      property string payload: ""
+      objectName: "legacy-credential-" + operation
+      stdinEnabled: operation === "put"
+      stdout: StdioCollector { id: legacyCredentialOutput; waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+      onStarted: if (operation === "put") {
+        write(payload + "\n")
+        payload = ""
+      }
+      onExited: function(exitCode) {
+        payload = ""
+        var callback = done
+        done = null
+        if (typeof callback === "function") {
+          if (operation === "get") callback(exitCode === 0
+            ? SecretText.fromKeyring(legacyCredentialOutput.text) : "",
+            exitCode === 0 ? "" : (exitCode === 1
+              ? "credential_missing" : "credential_store_unavailable"))
+          else callback(exitCode === 0, exitCode === 0 ? "" : "credential_store_unavailable")
         }
         destroy()
       }

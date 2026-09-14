@@ -5,6 +5,7 @@
 //! before the native store is touched.
 use super::{CredentialKey, CredentialKind, Error, Secret};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 enum Request {
     Get(CredentialKey),
@@ -118,12 +119,19 @@ fn map_store_error(error: Error) -> &'static str {
     }
 }
 
-pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
+async fn call_with_store(
+    store: Arc<dyn super::CredentialStore>,
+    method: &str,
+    params: &Value,
+) -> Result<Value, &'static str> {
     // Parsing before the first await is deliberate: malformed metadata or a
     // secret containing NUL cannot prompt, read, write, or delete in a native
     // credential store.
     match parse(method, params)? {
-        Request::Get(key) => match super::get(key).await {
+        Request::Get(key) => match tokio::task::spawn_blocking(move || store.get(&key))
+            .await
+            .map_err(|_| "credential_store_unavailable")?
+        {
             Ok(secret) => {
                 Ok(json!({"found":true,"secret":secret.text().map_err(map_store_error)?}))
             }
@@ -131,10 +139,16 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
             Err(error) => Err(map_store_error(error)),
         },
         Request::Put(key, secret) => {
-            super::put(key, secret).await.map_err(map_store_error)?;
+            tokio::task::spawn_blocking(move || store.put(&key, secret.as_slice()))
+                .await
+                .map_err(|_| "credential_store_unavailable")?
+                .map_err(map_store_error)?;
             Ok(json!({"stored":true}))
         }
-        Request::Delete(key) => match super::delete(key).await {
+        Request::Delete(key) => match tokio::task::spawn_blocking(move || store.delete(&key))
+            .await
+            .map_err(|_| "credential_store_unavailable")?
+        {
             Ok(()) => Ok(json!({"deleted":true})),
             Err(Error::Missing) => Ok(json!({"deleted":false})),
             Err(error) => Err(map_store_error(error)),
@@ -142,9 +156,51 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
     }
 }
 
+pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
+    call_with_store(Arc::new(super::NativeStore), method, params).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingStore {
+        calls: Mutex<Vec<&'static str>>,
+        value: Mutex<Option<(CredentialKey, Vec<u8>)>>,
+    }
+    impl super::super::CredentialStore for RecordingStore {
+        fn get(&self, key: &CredentialKey) -> Result<Secret, Error> {
+            self.calls.lock().unwrap().push("get");
+            let value = self.value.lock().unwrap();
+            let Some((stored_key, secret)) = value.as_ref() else {
+                return Err(Error::Missing);
+            };
+            if stored_key != key {
+                return Err(Error::Missing);
+            }
+            Secret::new(secret.clone())
+        }
+        fn put(&self, key: &CredentialKey, secret: &[u8]) -> Result<(), Error> {
+            self.calls.lock().unwrap().push("put");
+            *self.value.lock().unwrap() = Some((key.clone(), secret.to_vec()));
+            Ok(())
+        }
+        fn delete(&self, key: &CredentialKey) -> Result<(), Error> {
+            self.calls.lock().unwrap().push("delete");
+            let mut value = self.value.lock().unwrap();
+            if value
+                .as_ref()
+                .is_some_and(|(stored_key, _)| stored_key == key)
+            {
+                *value = None;
+                Ok(())
+            } else {
+                Err(Error::Missing)
+            }
+        }
+    }
 
     #[test]
     fn typed_requests_reject_unknown_fields_kinds_and_control_characters() {
@@ -211,5 +267,72 @@ mod tests {
             assert_eq!(key.provider, provider);
             assert!(key.attributes().is_ok());
         }
+    }
+
+    #[tokio::test]
+    async fn public_responses_round_trip_opaque_text_through_a_controlled_store() {
+        let store = Arc::new(RecordingStore::default());
+        let key = json!({"kind":"imap-password","accountId":"imap:a@example.org"});
+        let secret = "quotes '\" backslash \\ Unicode 你好\r\nline";
+        assert_eq!(
+            call_with_store(
+                store.clone(),
+                "credentials.put",
+                &json!({
+                    "kind":"imap-password","accountId":"imap:a@example.org","secret":secret
+                })
+            )
+            .await
+            .unwrap(),
+            json!({"stored":true})
+        );
+        assert_eq!(
+            call_with_store(store.clone(), "credentials.get", &key)
+                .await
+                .unwrap(),
+            json!({"found":true,"secret":secret})
+        );
+        assert_eq!(
+            call_with_store(store.clone(), "credentials.delete", &key)
+                .await
+                .unwrap(),
+            json!({"deleted":true})
+        );
+        assert_eq!(
+            call_with_store(store.clone(), "credentials.get", &key)
+                .await
+                .unwrap(),
+            json!({"found":false})
+        );
+        assert_eq!(
+            *store.calls.lock().unwrap(),
+            ["put", "get", "delete", "get"]
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_public_requests_have_no_store_side_effect() {
+        let store = Arc::new(RecordingStore::default());
+        for (method, params) in [
+            (
+                "credentials.get",
+                json!({"kind":"native-command","accountId":"imap:a@example.org"}),
+            ),
+            (
+                "credentials.put",
+                json!({"kind":"imap-password","accountId":"imap:a@example.org\n","secret":"x"}),
+            ),
+            (
+                "credentials.delete",
+                json!({"kind":"calendar-password","accountId":"source","nativeAttributes":[]}),
+            ),
+        ] {
+            assert_eq!(
+                call_with_store(store.clone(), method, &params).await,
+                Err("invalid_params")
+            );
+        }
+        assert!(store.calls.lock().unwrap().is_empty());
+        assert!(store.value.lock().unwrap().is_none());
     }
 }

@@ -10,6 +10,7 @@ Item {
     id: mailService
 
     property var requests: []
+    property var credentialWrites: []
     property var backend: ({ call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
       callback({ body: "{}", status: 200 }, null)
@@ -26,6 +27,11 @@ Item {
 
     function withGoogleAccessToken(_accountId, callback) {
       callback("", "not used by this test")
+    }
+    function credentialPut(kind, accountId, clientId, secret, callback) {
+      credentialWrites.push({kind:kind,accountId:accountId,clientId:clientId,secret:secret})
+      callback(true, "")
+      return true
     }
   }
 
@@ -52,6 +58,7 @@ Item {
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
       mailService.requests = []
+      mailService.credentialWrites = []
       mailService.unifiedCalendarView = false
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
@@ -61,6 +68,9 @@ Item {
       controller.rangeEnd = 0
       controller.pendingRangeStart = 0
       controller.pendingRangeEnd = 0
+      controller.savingSource = false
+      controller.sourceBeingSaved = null
+      controller.sourceSecret = ""
     }
 
     function test_network_requests_are_owned_by_backend() {
@@ -152,6 +162,17 @@ Item {
 
       mailService.unifiedCalendarView = true
 
+      compare(controller.pendingRangeStart, 1000)
+      compare(controller.pendingRangeEnd, 2000)
+    }
+
+    function test_updating_a_caldav_password_refreshes_the_visible_range() {
+      controller.rangeStart = 1000
+      controller.rangeEnd = 2000
+      controller.loading = true
+      controller.updateCalendarPassword(controller.sourceList.sources[0], "new-secret")
+      compare(mailService.credentialWrites, [{kind:"calendar-password",
+        accountId:"caldav:team",clientId:"",secret:"new-secret"}])
       compare(controller.pendingRangeStart, 1000)
       compare(controller.pendingRangeEnd, 2000)
     }

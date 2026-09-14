@@ -437,7 +437,7 @@ Item {
     sourceBeingSaved = source
     sourceSecret = String(secret)
     savingSource = true
-    storeSourcePassword(false)
+    storeSourcePassword(true)
   }
 
   function storeNextPassword() {

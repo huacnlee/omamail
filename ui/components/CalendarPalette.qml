@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import "../calendar/Palette.js" as Palette
 
@@ -13,8 +12,9 @@ QtObject {
 
   property var values: ({})
   readonly property var slots: Palette.keys()
-  readonly property string palettePath: Quickshell.env("HOME")
-    + "/.local/state/omarchy/current/theme/colors.toml"
+  // The shell decides whether an Omarchy palette exists. Standalone hosts
+  // leave this empty and use the semantic colours supplied by App.qml.
+  property string palettePath: ""
 
   function colorFor(key) {
     var normalized = Palette.normalizeKey(key)

@@ -37,8 +37,11 @@ TestCase {
     compare(composition.service.backendRuntime.executable, host.backendPath)
     tryCompare(composition.app, "backendUnavailable", true)
     compare(findChild(composition, "agent-runner"), null)
+    compare(findChild(composition, "diagnostics-helper"), null)
     compare(findChild(composition, "agent-prompt"), null)
     compare(findChild(composition, "compose-agent"), null)
+    compare(findChild(composition, "backend-diagnose").visible, false)
+    compare(findChild(composition, "bar-settings").visible, false)
   }
 
   function test_shell_persists_settings_and_routes_activation_payload() {
@@ -76,6 +79,21 @@ TestCase {
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
     compare(composition.service.hasNotifications, false)
+    compare(findChild(composition, "notification-settings").visible, false)
+    compare(findChild(composition, "bar-settings").visible, false)
+    verify(composition.shell.hide("omamail"))
+    compare(host.quitCalled, true)
+    compare(host.hidden, false)
+  }
+
+  function test_notification_error_uses_a_valid_semantic_colour() {
+    host.notificationError = "Notification permission was denied"
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    var label = findChild(composition, "notificationIntegrationError")
+    verify(label)
+    verify(label.color !== undefined)
+    compare(String(label.color), String(composition.app.urgent))
   }
 
   function test_cold_start_activation_is_consumed_once() {
@@ -95,6 +113,20 @@ TestCase {
     composition.service.accountsLoaded = true
     tryCompare(composition.app, "cursorId", "7:INBOX")
     compare(host.pendingNotificationActivation, {})
+  }
+
+  function test_cold_start_activation_opens_an_ordinary_window_if_registry_stalls() {
+    host.pendingNotificationActivation = ({accountId:"imap:a@example.org",messageId:"7:INBOX"})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    composition.service.accountsLoaded = false
+    var fallback = findChild(composition, "activation-fallback")
+    verify(fallback)
+    fallback.interval = 1
+    fallback.restart()
+    tryCompare(composition.app, "opened", true)
+    compare(host.pendingNotificationActivation,
+      {accountId:"imap:a@example.org",messageId:"7:INBOX"})
   }
 
   function test_live_activation_waits_for_registry_and_acknowledges_after_routing() {
@@ -135,8 +167,17 @@ TestCase {
     var called = false
     verify(composition.shell.writeConfig("calendars.json", "{}", function(ok) { called = ok }))
     verify(called)
-    compare(host.files["/fixture/config/Omamail/calendars.json"], "{}")
+    compare(host.files["/fixture/config/omamail/calendars.json"], "{}")
     verify(!composition.shell.writeConfig("../outside", "secret", function() {}))
-    verify(!Object.prototype.hasOwnProperty.call(host.files, "/fixture/config/Omamail/../outside"))
+    verify(!Object.prototype.hasOwnProperty.call(host.files, "/fixture/config/omamail/../outside"))
+  }
+
+
+  function test_all_shared_clipboard_writes_cross_the_host_seam() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.copyText("meeting room <A> & notes"))
+    compare(host.copied, ["meeting room <A> & notes"])
+    compare(findChild(composition, "clipboardProxy"), null)
   }
 }

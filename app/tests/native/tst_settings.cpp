@@ -20,6 +20,7 @@ private slots:
     void fileStoreReadsWritesAndWatches();
     void watchReportsExternalCreation();
     void environmentUsesFixedAllowlist();
+    void applicationPathsMatchBackendRoots();
     void applicationPathsRejectTraversalAndRemoteUrls();
 };
 
@@ -106,6 +107,28 @@ void SettingsTest::environmentUsesFixedAllowlist()
     ApplicationHost host;
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_BIN")), QStringLiteral("/synthetic/backend"));
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_TEST_SECRET")), QString());
+}
+
+void SettingsTest::applicationPathsMatchBackendRoots()
+{
+    ApplicationHost host;
+#ifdef Q_OS_WIN
+    const QByteArray oldAppData = qgetenv("APPDATA");
+    qputenv("APPDATA", "C:/Users/fixture/AppData/Roaming");
+    QCOMPARE(QDir::fromNativeSeparators(host.configPath(QStringLiteral("settings.json"))),
+             QStringLiteral("C:/Users/fixture/AppData/Roaming/omamail/settings.json"));
+    qputenv("APPDATA", oldAppData);
+#elif defined(Q_OS_MACOS)
+    QCOMPARE(host.configPath(QStringLiteral("settings.json")),
+             QDir(QDir::homePath()).filePath(
+                 QStringLiteral("Library/Application Support/omamail/settings.json")));
+#else
+    const QByteArray oldConfigHome = qgetenv("XDG_CONFIG_HOME");
+    qputenv("XDG_CONFIG_HOME", "/tmp/omamail-xdg-config");
+    QCOMPARE(host.configPath(QStringLiteral("settings.json")),
+             QStringLiteral("/tmp/omamail-xdg-config/omamail/settings.json"));
+    qputenv("XDG_CONFIG_HOME", oldConfigHome);
+#endif
 }
 
 void SettingsTest::applicationPathsRejectTraversalAndRemoteUrls()
