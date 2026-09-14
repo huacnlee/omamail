@@ -29,7 +29,7 @@ The standalone app includes mail, calendar, and native desktop notifications. It
 macOS & Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh
+curl -fsSL https://github.com/huacnlee/omamail/raw/refs/heads/main/install.sh | sh
 ```
 
 The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
