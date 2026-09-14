@@ -1,4 +1,6 @@
-# Plugin-owned backend
+# Backend runtimes and releases
+
+## Omarchy plugin-owned backend
 
 Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
 one executable at `${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`. Keeping
@@ -37,6 +39,16 @@ terminal do not change an already running shell: follow the printed instructions
 to make the override available when the shell constructs the plugin, restarting
 the shell with that environment when needed. This is not a second Quickshell
 application. Rust mail migration remains incomplete; see [BACKEND.md](BACKEND.md).
+
+## Standalone bundled backend
+
+The standalone Qt host under `app/` uses the same `ui/` composition and Rust business modules through small Quickshell compatibility adapters. A production archive places one exact-version `omamail` backend beside `omamail-app`, together with the QML, manifest, Qt libraries, and platform plugin. Production resource lookup accepts that bundled backend only; it does not search PATH, resolve `latest`, or use `OMAMAIL_BIN`. The environment override and source-resource lookup are enabled only when `OMAMAIL_DEVELOPMENT_RESOURCES=1`, which is what `make app-run` sets for a checkout build.
+
+The host starts one persistent bundled `omamail serve` process and performs the protocol, version, and API handshake before mail or calendar calls. Normal shutdown asks the service to quit, drains bounded output, and then terminates the process tree on deadline. `omamail-app --check-resources` verifies the packaged entry points, platform plugin, manifest version, backend architecture, and backend version without opening the UI. `omamail-app --smoke-test READY_FILE` additionally starts the bundled backend, completes the handshake, requests shutdown, and writes readiness metadata only after a clean exit.
+
+Standalone credentials use the native store through typed backend RPC: Keychain on macOS, Secret Service on Linux, and Credential Manager on Windows. Account metadata, cache, state, runtime endpoints, and downloads use the platform directories selected by `src/platform/dirs.rs`; private files and outbox IPC are protected by the platform implementations under `src/platform/`. The host never places a secret in its process arguments. The standalone capability object disables AI, the tray, and operating-system `mailto:` registration while retaining native notifications.
+
+For source development, `make app-build` builds the backend with `--no-default-features --features standalone` and then builds the Qt host. `make app-run` performs that build and launches the host from source resources. These targets require Rust, CMake 3.21 or newer, and Qt 6.5 or newer; the Linux host also needs Qt DBus.
 
 ## Stable API and old plugins
 
@@ -102,7 +114,7 @@ binary does not have yet. The contract names that difference and nothing more:
 
 Run `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with origin. Without `VERSION`, it prepares the next patch version. The command creates `release/X.Y.Z`, prepares Cargo.toml, the omamail Cargo.lock record and manifest.json, and opens one PR targeting main. It pushes only that release branch, then follows its exact Release run. It never pushes main or a tag. `backend-version` and the released API contract stay unchanged during preparation.
 
-A push to `release/**` starts Release. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. CI builds both backends, creates `vX.Y.Z` and publishes the assets, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
+A push to `release/**` starts the authoritative Release workflow. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. The workflow builds both plugin backends and all three standalone archives, creates `vX.Y.Z`, publishes the complete asset set and installers, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
 
 The required **Published backend merge gate** refuses a release PR until its pin equals the prepared version, then verifies the actual released binaries and contract as usual. Once the pin commit and required checks pass, review and merge that PR once: main receives the version metadata and working backend dependency together. The command does not merge automatically. Features wait until the connected backend meets their fixed minimum API revision, independently of whether that revision is currently labelled released or unreleased.
 
@@ -119,6 +131,10 @@ must also pass the contract runner before packaging.
 Both native build jobs produce identical source fingerprints before publication. The new draft
 release is completed, made public, downloaded again and verified before a
 follow-up commit updates backend-version and folds backend-api.json on the release branch.
+
+The same workflow builds `omamail-app-macos-aarch64.tar.gz` on macOS 15, `omamail-app-linux-x86_64.tar.gz` on Ubuntu 22.04 (the glibc 2.35 floor), and `omamail-app-windows-x86_64.zip` on Windows Server 2022. Each native job runs the standalone Rust suite, its platform credential contract, the Qt C++ tests, the standalone QML suite, the backend API contract, package validation, installer rollback tests, resource checks, and a live bundled-backend smoke test before uploading its archive. `publish-and-pin` depends on all five build jobs, creates one combined `SHA256SUMS`, publishes `install.sh` and `install.ps1` with the archives, downloads every public asset again, and only then advances the plugin backend pin.
+
+The Linux standalone release is tar.gz only; no AppImage is built or published. Standalone archives are currently unsigned. The macOS app is not notarized and the Windows binaries are not code signed, so platform publisher warnings remain a release limitation rather than a property the validation jobs can clear.
 
 Publication is serialized. Existing releases and tags are never overwritten;
 remote lookup errors fail closed. The branch must still equal the dispatch
@@ -170,7 +186,37 @@ attempt failed because RELEASE_TOKEN lacked permission to create a release;
 the release was completed separately. Future automated publication still requires
 a contents-write token as described above.
 
+## Standalone security gates
+
+A standalone release needs a separate security verdict for macOS arm64, Linux x86_64, and Windows x64. The verdict is **PASS** only when the release commit has completed its native job and every boundary below was exercised on that runtime. A shared test on another operating system, successful compilation, or source inspection alone leaves that platform **NOT VERIFIED**. A failing boundary is **BLOCK** and prevents publication.
+
+| Boundary | Evidence required on each native runtime |
+| --- | --- |
+| Credentials | Native Keychain, Secret Service, or Credential Manager success, missing-item, denial, validation, and bounded-prompt cases; secrets absent from argv, settings, and diagnostics. |
+| Untrusted mail and URLs | Plain-text metadata, HTML/resource sanitization, public-address DNS pinning, HTTPS/TLS, redirect, proxy, deadline, and response-size cases using controlled targets. |
+| Process argv and stdin | Hostile arguments preserved as one argument, exact stdin bytes including NUL, bounded stdout/stderr, timeout, cancellation, and descendant termination. |
+| Private files and outbox IPC | Platform directory resolution, unsafe ancestor/link/reparse refusal, ownership and ACL checks, atomic replacement/rollback, locks, peer identity, and oversized IPC frames. |
+| Archive installation | SHA-256 verification before extraction, strict single-root layout and architecture/version checks, traversal/link/special-file and size refusal, transactional upgrade rollback, and uninstall preserving user data. |
+| Notifications | Plain-text or escaped markup handling, NUL refusal, bounded private activation routes, stale/forged route refusal, cold and warm activation, and no secret or route token in process arguments. |
+| Network requests | Every mail/calendar request keeps credentials on the configured origin or validated public target, validates bytes before process start, applies TLS/protocol/redirect/proxy policy, and has a deadline and response bound. |
+
+The native standalone job runs this platform gate before its archive can become an artifact. It must run `cargo test --locked --no-default-features --features standalone`, the ignored native credential contract, CTest, the standalone QML tests, package and installer tests, `--check-resources`, `--smoke-test`, and the packaged backend API contract. The release's `publish-and-pin` job depends on all three platform jobs; missing or failed native evidence cannot be replaced by manually uploading an archive.
+
+Current integrated-checkout audit on 2026-09-14: macOS arm64, Linux x86_64, and Windows x64 are **NOT VERIFIED** until the corresponding `release/**` native jobs complete for this exact commit. Local macOS results may establish part of the boundary evidence, but they do not exercise Linux Secret Service/DBus, Windows Credential Manager/named pipes/ACLs, or clean hosted-runner install and notification activation on those systems. Do not treat this documentation commit or the presence of workflow definitions as a hosted-runner result.
+
 ## Local verification
+
+For the standalone host, run `make app-build` to build without the AI feature and `make app-run` to launch from source resources. `make test-app-qml` builds the host and runs its composition test. A fuller local native check is:
+
+```sh
+cargo test --locked --no-default-features --features standalone
+cmake -S app -B build/app -DOMAMAIL_BACKEND="$PWD/target/debug/omamail"
+cmake --build build/app --parallel
+ctest --test-dir build/app --output-on-failure
+QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml -import app/qml/imports -import ui
+```
+
+These commands establish evidence only for the operating system that ran them. Package and installer acceptance must use the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
 
 `make install-plugin` removes the old private backend and its local-build marker,
 then links and reloads only the plugin. It does not compile or download a backend.

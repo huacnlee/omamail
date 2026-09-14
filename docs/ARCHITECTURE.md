@@ -8,9 +8,9 @@ Use the [GPUI Component Coding Guides](http://longbridge.github.io/gpui-componen
 
 ## Architectural position
 
-Omamail is a stateful desktop application hosted as an Omarchy shell plugin. Its architecture has five layers:
+Omamail is one stateful mail and calendar application with two desktop hosts: an Omarchy shell plugin and a standalone Qt executable. Its architecture has five layers:
 
-1. The shell entry points connect Omarchy to the application.
+1. Host entry points connect Omarchy or the native Qt process to the application.
 2. The window composition owns window state, navigation, action dispatch, and top-level layout.
 3. Domain modules own mail, provider, cache, message, and account decisions.
 4. Interaction and layout primitives implement reusable UI behavior.
@@ -18,15 +18,24 @@ Omamail is a stateful desktop application hosted as an Omarchy shell plugin. Its
 
 Dependencies point down this list. A view may ask the application to perform an action, but it does not acquire provider knowledge or mutate storage on its own. A provider may normalize mail into the shared message resource, but it does not know which row, popup, or page is visible.
 
-The visual system is separate from all five layers. Colors, typography, spacing, fills, radii, icons, density, and surface treatment come from the active Omarchy theme through `App.qml` and semantic component properties. GPUI Component supplies the architectural and interaction baseline, not the visual language.
+The visual system is separate from all five layers. In the plugin, colors come from the active Omarchy theme; in the standalone app, the compatibility imports derive the same semantic roles from Qt's active system palette. `App.qml` passes those semantic values to components in either host. GPUI Component supplies the architectural and interaction baseline, not the visual language.
 
 ## Entry points and window composition
 
-The shell loads the QML entry points under `ui/`, as named by the root manifest:
+The Omarchy shell loads the QML entry points under `ui/`, as named by the root manifest:
 
 - `Service.qml` is the long-lived application and account host. The shell constructs it, so it declares no required properties beyond what the shell supplies. It owns state that must survive the window.
 - `BarWidget.qml` is the shell-facing trigger and settings bridge.
 - `App.qml` composes the application window. It owns visible navigation, action dispatch, focus context, non-popup surfaces, and the arrangement of the major panes.
+
+The standalone executable under `app/` is a host rather than a second implementation:
+
+- `app/src/main.cpp` resolves packaged resources, validates them, and loads `app/qml/Main.qml`.
+- `app/qml/Main.qml` constructs the same `Service.qml` and `App.qml`, then supplies `StandaloneShell` and `StandaloneManifest` in place of the Omarchy objects.
+- `app/qml/imports/` implements only the Quickshell and `qs.*` contracts used by the shared UI. It does not copy mail, calendar, provider, or navigation behavior.
+- `app/src/` owns native process containment, bounded line transport, private settings writes, file watching, external URL dispatch, clipboard access, and notifications. These capabilities are exposed through `Omamail.Native`; QML does not branch by operating system.
+
+The standalone capability object is the product boundary for this release: mail, calendar, and native notifications are enabled; AI, the system tray, and operating-system `mailto:` registration are disabled. Shared views hide or avoid unsupported operations by capability rather than by host identity.
 
 This composition boundary is shaped by the shell entry-point contract and Qt's focus and popup behavior. `App.qml` coordinates:
 
@@ -38,6 +47,18 @@ This composition boundary is shaped by the shell entry-point contract and Qt's f
 - responsive composition of sidebar, list, reader, and pages.
 
 `App.qml` must not become the implementation of every one of those behaviors. It owns their state and policy; reusable mechanics belong in components or testable JavaScript modules. Composition ownership and implementation are not the same thing.
+
+## Native and backend boundaries
+
+Both hosts keep one persistent `omamail serve` process and communicate with newline-delimited JSON-RPC over stdin/stdout. `ui/backend/Backend.qml` owns correlation, protocol/API compatibility, cancellation, and frame assembly. The plugin resolves its exact private backend pin; a packaged standalone host resolves the exact backend beside its own executable. Only the explicit development mode used by `make app-run` accepts a source build through `OMAMAIL_BIN`.
+
+The Cargo `agent` feature is on by default for the Omarchy build. The standalone Make and release builds use `--no-default-features --features standalone`; agent worker commands and RPC methods are absent rather than hidden only in QML.
+
+Credentials cross the UI/backend boundary through typed `credential.get`, `credential.put`, and `credential.delete` RPC methods. Rust validates the provider-specific key and secret bytes before calling Keychain, Secret Service, or Credential Manager. Secrets travel in the RPC body or subprocess stdin and must never be placed in argv, logs, settings, or notification routes.
+
+Cross-platform storage is owned by `src/platform/`: `dirs` selects platform application directories, `private_fs` supplies handle-anchored private files, and `ipc` supplies Unix sockets or Windows named pipes for the outbox. Platform implementations must preserve the same refusal and deadline semantics even though their operating-system primitives differ.
+
+Standalone notifications flow from the shared new-mail decision into `NativeHost.showNotification`. `app/src/notifications*` treats title and body as untrusted plain text, keeps activation routing in a private bounded store, and validates the account/message route again in the loaded account registry before navigating. Notification adapters do not invoke a shell or put activation data in process arguments.
 
 ## State ownership
 
@@ -78,12 +99,7 @@ Qt Quick Controls popups intercept keys before window shortcuts. That is a platf
 
 ## Domain modules
 
-Rust lives under `src/`, Qt/QML and its JavaScript under `ui/`. Within each
-layer, modules are grouped by responsibility. `src/cli/` handles headless
-commands, `src/backend/` handles persistent stdio JSON-RPC communication, and
-shared business modules such as `src/account/` and `src/message/` serve both.
-The migration is incomplete; `BACKEND.md` records the current boundary. The
-existing UI modules are:
+Rust lives under `src/`, shared Qt/QML and its JavaScript under `ui/`, and the standalone host under `app/`. Within each layer, modules are grouped by responsibility. `src/cli/` handles headless commands, `src/backend/` handles persistent stdio JSON-RPC communication, and shared business modules such as `src/account/` and `src/message/` serve both hosts. The migration is incomplete; `BACKEND.md` records the current boundary. The existing UI modules are:
 
 - `ui/providers/` owns service descriptions, authentication, protocol behavior, capabilities, and normalization into the shared Gmail-shaped resource.
 - `ui/account/` owns accounts, a mailbox, and list behavior after actions.

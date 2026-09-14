@@ -41,9 +41,11 @@ it, described in terms of what it protects rather than what it opens.
 
 ## Project boundary
 
-Omamail is a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell]. Changes should extend that plugin's service or interface, not turn this repository into a second application.
+Omamail has two hosts over one shared mail and calendar implementation: a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell], and the Qt host under `app/`. A shared behavior belongs under `ui/` or in the Rust backend; `ui/Service.qml`, `ui/BarWidget.qml`, and `ui/App.qml` remain the Omarchy entry points, while `app/qml/Main.qml` supplies the standalone composition and adapters.
 
-Helper scripts and the plugin's private Rust backend belong here. The same executable may expose CLI commands over its shared business modules; an optional user command is an explicitly requested symlink to that executable. Separate applications, daemons, SDKs and automatic global integrations remain outside this boundary. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
+Helper scripts and the plugin's private Rust backend belong here. The same executable exposes CLI commands over its shared business modules, and both hosts use its persistent stdio RPC service. The standalone release bundles the exact backend beside its host. Separate daemons, SDKs, and automatic system-wide integrations remain outside this boundary. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
+
+The first standalone scope includes mail, calendar, and native notifications. It deliberately exposes no tray, AI, or operating-system `mailto:` registration. Keep platform integration behind the native interfaces in `app/src/`; do not branch the shared UI by operating system.
 
 Programmatic access to mail may be useful, but it needs an integration boundary designed independently from the Quickshell plugin. Omarchy defines [IPC as the standard boundary for commands that communicate with the running shell][shell-ipc]; proposals that need a different lifecycle or ownership model should begin with a design discussion.
 
@@ -54,14 +56,14 @@ Programmatic access to mail may be useful, but it needs an integration boundary 
 ```bash
 ./dev backend    # build the private backend for development
 ./dev run        # build and print shell environment/start instructions
+make app-build   # build the standalone backend and Qt host
+make app-run     # build and launch the standalone app from source resources
 make validate    # node tests, source regressions, QML tests, qmllint, manifest
 ```
 
-`make validate` needs `node`, `python3`, Qt 6 QML test tooling
-(`qt6-declarative` on Arch, `qt6-declarative-dev-tools` and
-`qml6-module-qttest` on Debian and Ubuntu) and the `omarchy` CLI. It has to be
-green before you open the pull request, and green on your machine — nothing in
-CI runs it for you.
+`make app-build` needs Rust, CMake 3.21 or newer, and Qt 6.5 or newer. On Linux, the Qt DBus development component is also required. It builds the backend with `--no-default-features --features standalone`, so the resulting process has no AI worker surface. `make app-run` sets only the development resource and bundled-backend overrides needed to run that build.
+
+`make validate` needs `node`, `python3`, Qt 6 QML test tooling (`qt6-declarative` on Arch, `qt6-declarative-dev-tools` and `qml6-module-qttest` on Debian and Ubuntu) and the `omarchy` CLI. It has to be green before you open the pull request, and green on your machine — nothing in CI runs it for you. Standalone changes must also pass `make test-app-qml` and the native platform gates described in [Backend runtime](docs/BACKEND-RUNTIME.md).
 
 ## How the change gets made
 
@@ -91,6 +93,7 @@ A change without a test that fails without it is not finished. Where one goes:
 | Parsing, formatting, or a decision rule in `.js` | `tests/test_*.js`, run by `node` — no compositor needed |
 | A script in `scripts/` | `tests/test_*.sh` or `tests/test_*.py` |
 | Focus, key routing, layout, or anything needing the QML engine | `tests/qml/tst_*.qml`, run offscreen |
+| Standalone host, adapter, packaging, or installer behavior | `app/tests/`, run on every affected native platform |
 | A rule that grep can enforce — no literal colours, no `LayoutMirroring` | `tests/test_source.sh` |
 
 Add the new file to the `Makefile` in the same commit; a test nothing runs is
@@ -106,14 +109,7 @@ code once and watch it fail, and say so in the pull request.
   that the change did not require. `AGENTS.md`'s *Colors*, *UI labels* and
   *Popups* sections are the same rules where they are specific to this
   codebase, and `tests/test_source.sh` enforces the part of them that grep can.
-- **Test it on a screen, by hand. This is required and nothing substitutes for
-  it.** Register your development checkout with the Omarchy shell and follow
-  [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope
-  in the bar and drive the change with the mouse and with the keyboard, in a
-  light theme and in a dark one, and at both window sizes — three columns and
-  mini. The offscreen QML tests prove focus and routing; they cannot see that a
-  control hangs four pixels out of its row, and that is the class of bug that
-  reaches users.
+- **Test it on a screen, by hand. This is required and nothing substitutes for it.** For the plugin, register your development checkout with the Omarchy shell and follow [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope in the bar and drive the change with the mouse and keyboard in a light theme and a dark one, at both window sizes. For the standalone host, run `make app-run` on each affected platform and repeat the applicable mail, calendar, notification, and window checks. The offscreen QML tests prove focus and routing; they cannot see that a control hangs four pixels out of its row.
 - Put a screenshot in the pull request, and say which themes and sizes you
   drove it in.
 
