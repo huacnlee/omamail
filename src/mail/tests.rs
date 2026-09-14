@@ -2,11 +2,14 @@ use super::{
     ActRequest, ListRequest, Mailbox, Mark, Provider, ReadRequest, SendRequest, resolve_account,
 };
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::{
     env,
     ffi::OsString,
     fs,
-    os::unix::fs::{MetadataExt, PermissionsExt},
     path::PathBuf,
     sync::{
         Mutex, MutexGuard,
@@ -55,9 +58,20 @@ pub(crate) struct AccountFixture {
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct MetadataState {
+    #[cfg(unix)]
     mode: u32,
+    #[cfg(unix)]
     modified: (i64, i64),
+    #[cfg(unix)]
     changed: (i64, i64),
+    #[cfg(windows)]
+    attributes: u32,
+    #[cfg(windows)]
+    modified: u64,
+    #[cfg(windows)]
+    created: u64,
+    #[cfg(windows)]
+    size: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -69,10 +83,22 @@ struct RegistryState {
 
 fn metadata_state(path: &std::path::Path) -> MetadataState {
     let metadata = fs::metadata(path).unwrap();
-    MetadataState {
-        mode: metadata.mode(),
-        modified: (metadata.mtime(), metadata.mtime_nsec()),
-        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    #[cfg(unix)]
+    {
+        return MetadataState {
+            mode: metadata.mode(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        };
+    }
+    #[cfg(windows)]
+    {
+        MetadataState {
+            attributes: metadata.file_attributes(),
+            modified: metadata.last_write_time(),
+            created: metadata.creation_time(),
+            size: metadata.file_size(),
+        }
     }
 }
 
@@ -180,20 +206,17 @@ pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
     unsafe { env::set_var("XDG_CACHE_HOME", root.join("cache")) };
     unsafe { env::set_var("XDG_STATE_HOME", root.join("state")) };
     unsafe { env::set_var("HOME", &home) };
-    fs::create_dir_all(dirs.config.join("omamail")).unwrap();
-    fs::write(
-        dirs.config.join("omamail/accounts.json"),
-        registry.to_string(),
+    let config = crate::platform::private_fs::directories(
+        &dirs.config,
+        &[crate::platform::dirs::APP_DIRECTORY],
+        true,
     )
+    .unwrap()
     .unwrap();
-    fs::set_permissions(
-        dirs.config.join("omamail"),
-        fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
-    fs::set_permissions(
-        dirs.config.join("omamail/accounts.json"),
-        fs::Permissions::from_mode(0o600),
+    crate::platform::private_fs::atomic_replace(
+        &config,
+        "accounts.json",
+        registry.to_string().as_bytes(),
     )
     .unwrap();
     AccountFixture {
