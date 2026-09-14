@@ -21,7 +21,7 @@ use windows_sys::{
 };
 type Result<T> = std::result::Result<T, &'static str>;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
-static REPLACEMENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REPLACEMENTS: std::sync::RwLock<()> = std::sync::RwLock::new(());
 static ENUMERATIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const READ: u32 = FILE_GENERIC_READ;
@@ -327,6 +327,13 @@ pub(crate) fn open_private(dir: &File, name: &str, writable: bool) -> Result<Opt
     )
 }
 fn regular_with_access(dir: &File, name: &str, access: u32) -> Result<Option<File>> {
+    // Keep validation of an opened name outside our own replacement's brief
+    // rename/delete transition. The returned handle remains authoritative and
+    // usable after the guard is released, including when its name is replaced.
+    let _replacement = REPLACEMENTS.read().map_err(|_| "cache_unavailable")?;
+    regular_with_access_unlocked(dir, name, access)
+}
+fn regular_with_access_unlocked(dir: &File, name: &str, access: u32) -> Result<Option<File>> {
     validate_owned_root(dir)?;
     let Some(file) = open_at(dir, name.as_ref(), false, nt::FILE_OPEN, access, SHARE)? else {
         return Ok(None);
@@ -389,9 +396,9 @@ pub(crate) fn atomic_replace(dir: &File, name: &str, bytes: &[u8]) -> Result<()>
     // Windows replacement briefly transitions the destination through a
     // delete-pending name. Serialize our writers so one validated replacement
     // cannot observe another operation's transient namespace state.
-    let _replacement = REPLACEMENTS.lock().map_err(|_| "cache_unavailable")?;
+    let _replacement = REPLACEMENTS.write().map_err(|_| "cache_unavailable")?;
     validate_owned_root(dir)?;
-    regular_readonly(dir, name)?;
+    regular_with_access_unlocked(dir, name, READ)?;
     let name = name_units(name.as_ref())?;
     let temporary = format!(
         ".tmp.{}.{}",
@@ -405,7 +412,7 @@ pub(crate) fn atomic_replace(dir: &File, name: &str, bytes: &[u8]) -> Result<()>
             .and_then(|_| file.sync_all())
             .map_err(|_| "cache_unavailable")?;
         let target = String::from_utf16(&name).map_err(|_| "cache_invalid_input")?;
-        regular_readonly(dir, &target)?;
+        regular_with_access_unlocked(dir, &target, READ)?;
         let offset = offset_of!(nt::FILE_RENAME_INFORMATION, FileName);
         let length = (offset + name.len() * 2).max(size_of::<nt::FILE_RENAME_INFORMATION>());
         let mut buffer = vec![0usize; length.div_ceil(size_of::<usize>())];
