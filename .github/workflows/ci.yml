@@ -186,7 +186,7 @@ jobs:
       - name: Build and exercise the production archive
         shell: pwsh
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
         run: |
           $ErrorActionPreference = "Stop"
           $version = python scripts/package-backend.py check

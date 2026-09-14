@@ -82,6 +82,8 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 self.assertIn("QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic", block)
                 self.assertIn("-import app/qml/styles", block)
                 if "windows" in job:
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: windows"), 1)
                     self.assertNotRegex(block, r"(?i)\$host\s*=")
                     self.assertIn("& $appExecutable --smoke-test", block)
                     self.assertIn("Test-Package.ps1", block)
@@ -116,6 +118,8 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 self.assertIn("--smoke-test", block)
                 self.assertIn(archive, block)
                 if target == "windows-x86_64":
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: windows"), 1)
                     self.assertIn("package-release.ps1", block)
                     self.assertNotRegex(block, r"(?i)\$host\s*=")
                     self.assertIn("& $appExecutable --smoke-test", block)

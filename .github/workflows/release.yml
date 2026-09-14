@@ -312,7 +312,7 @@ jobs:
       - name: Package, unpack, and test the Windows archive and installer
         shell: pwsh
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
         run: |
           $ErrorActionPreference = "Stop"
           & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe `
