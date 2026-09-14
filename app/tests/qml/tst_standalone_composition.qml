@@ -320,6 +320,17 @@ TestCase {
     compare(host.hidden, false)
   }
 
+  function test_close_hides_rather_than_quits_where_the_dock_can_reopen() {
+    host.capabilities = ({agent:false,tray:false,mailto:false,notifications:false,reopen:true})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.shell.hide("omamail"))
+    compare(host.hidden, true)
+    compare(host.quitCalled, false)
+    host.reopenRequested()
+    compare(composition.app.opened, true)
+  }
+
   function test_notification_error_uses_a_valid_semantic_colour() {
     host.notificationError = "Notification permission was denied"
     var composition = createTemporaryObject(compositionComponent, testCase)

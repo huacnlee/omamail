@@ -29,6 +29,10 @@ require(main, 'iconFromIcnsFile(QStringLiteral(\n            ":/omamail/app/reso
 cmake = (APP / "CMakeLists.txt").read_text(encoding="utf-8")
 require(cmake, 'resources/macos/omamail.icns"', "macOS icon resource")
 
+# Closing the window is not quitting: Qt must not end the process on its own
+# when the last window is hidden, or Cmd+W behaves as Cmd+Q.
+require(main, 'application.setQuitOnLastWindowClosed(false);', "host-owned process lifetime")
+
 qml = (APP / "qml/Main.qml").read_text(encoding="utf-8")
 require(qml, 'title: "Omamail"', "window title")
 

@@ -41,7 +41,14 @@ ApplicationHost::ApplicationHost(
     m_capabilities = {
         {QStringLiteral("agent"), false},
         {QStringLiteral("systemTray"), false},
-        {QStringLiteral("notifications"), m_notifications->available()}};
+        {QStringLiteral("notifications"), m_notifications->available()},
+        // The Dock keeps a running application reachable after its window is
+        // shut; elsewhere a windowless process has no such door.
+#ifdef Q_OS_MACOS
+        {QStringLiteral("reopen"), true}};
+#else
+        {QStringLiteral("reopen"), false}};
+#endif
     connect(m_notifications.get(), &NotificationService::errorChanged, this,
             &ApplicationHost::notificationErrorChanged);
     connect(m_notifications.get(), &NotificationService::activated, this,

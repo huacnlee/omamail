@@ -45,6 +45,10 @@ int main(int argc, char *argv[])
     if (!readyFile.isEmpty() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication application(argc, argv);
+    // The host decides when the process ends: the app menu's Quit, or the
+    // shell hiding a window it has no way to bring back. Qt's own reflex of
+    // quitting once the last window is hidden would turn Cmd+W into Cmd+Q.
+    application.setQuitOnLastWindowClosed(false);
     // macOS shows the bundle's CFBundleIconFile — the plated omamail.icns —
     // in Finder, and a window icon set here replaces that Dock image with the
     // bare logo. Leave the bundle icon alone there. A development run has no
