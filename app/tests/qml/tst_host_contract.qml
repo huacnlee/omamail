@@ -65,11 +65,16 @@ TestCase {
     id: controlledDropdownComponent
     Item {
       property string modelValue: "one"
+      property var modelOptions: [
+        { label: "One", value: "one" },
+        { label: "Two", value: "two" },
+        { label: "Three", value: "three" }
+      ]
       property string proposedValue: ""
       property alias control: controlledDropdown
       Dropdown {
         id: controlledDropdown
-        options: [{ label: "One", value: "one" }, { label: "Two", value: "two" }]
+        options: parent.modelOptions
         value: parent.modelValue
         onChanged: function(value) { parent.proposedValue = value }
       }
@@ -264,6 +269,7 @@ TestCase {
     verify(wrapper)
     var input = findChild(wrapper.control, "dropdown-input")
     verify(input)
+    input.currentIndex = 1
     input.activated(1)
     compare(wrapper.proposedValue, "two")
     compare(wrapper.control.value, "one")
@@ -271,6 +277,14 @@ TestCase {
     wrapper.modelValue = "two"
     compare(wrapper.control.value, "two")
     compare(input.currentIndex, 1)
+    wrapper.modelOptions = [
+      { label: "Three renamed", value: "three" },
+      { label: "One renamed", value: "one" },
+      { label: "Two renamed", value: "two" }
+    ]
+    tryCompare(input, "currentIndex", 2)
+    compare(wrapper.control.value, "two")
+    compare(input.currentValue, "two")
   }
 
   function test_shared_non_bar_controls_construct_with_the_contract() {

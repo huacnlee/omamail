@@ -75,8 +75,13 @@ EXPECTED_MEMBERS = {
         "selected", "hasCursor", "leftAlign", "focusable", "fontFamily",
         "fontSize", "horizontalPadding", "verticalPadding", "clicked", "hovered",
     },
-    "qs/Ui/NumberField.qml": {"label", "value", "from", "to", "stepSize", "modified"},
-    "qs/Ui/ToggleSwitch.qml": {"checked", "busy", "toggled"},
+    "qs/Ui/NumberField.qml": {
+        "label", "value", "from", "to", "stepSize", "foreground", "accent",
+        "fontFamily", "fontSize", "fieldWidth", "modified",
+    },
+    "qs/Ui/ToggleSwitch.qml": {
+        "checked", "busy", "foreground", "accent", "toggled",
+    },
     "qs/Ui/Dropdown.qml": {
         "label", "value", "options", "foreground", "background", "popupBorder",
         "accent", "fontFamily", "rowHeight", "popupRowHeight", "showLabel",

@@ -21,9 +21,14 @@ Item {
   signal changed(string value)
   signal hovered(bool isHovered)
 
-  onValueChanged: {
+  function syncIndex() {
     var next = indexForValue(value)
     if (combo.currentIndex !== next) combo.currentIndex = next
+  }
+  onValueChanged: syncIndex()
+  onOptionsChanged: {
+    syncIndex()
+    Qt.callLater(syncIndex)
   }
 
   implicitWidth: Style.space(240)
@@ -57,7 +62,7 @@ Item {
     model: root.options
     textRole: "label"
     valueRole: "value"
-    currentIndex: root.indexForValue(root.value)
+    currentIndex: -1
     palette.buttonText: root.foreground
     palette.button: root.background
     palette.highlight: root.accent
@@ -74,8 +79,10 @@ Item {
     onActivated: function(index) {
       if (index < 0 || index >= root.options.length) return
       root.changed(String(root.options[index].value))
-      currentIndex = root.indexForValue(root.value)
+      root.syncIndex()
     }
     onHoveredChanged: root.hovered(hovered)
   }
+
+  Component.onCompleted: syncIndex()
 }
