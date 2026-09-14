@@ -24,72 +24,33 @@ Click the envelope in the bar, install the pinned backend when prompted, and add
 
 ### Standalone desktop app
 
-The standalone app includes mail, calendar, and native desktop notifications. This first release has no system tray, AI assistance, or operating-system `mailto:` registration.
+The standalone app includes mail, calendar, and native desktop notifications. It has no system tray, AI assistance, or operating-system `mailto:` registration in this release.
 
-| Platform | Published package | Requirement | Installed location |
-| --- | --- | --- | --- |
-| macOS | `omamail-app-macos-aarch64.tar.gz` | Apple silicon (arm64) | `~/Applications/Omamail.app` |
-| Linux | `omamail-app-linux-x86_64.tar.gz` | x86_64, glibc 2.35 or newer | `~/.local/omamail.app` |
-| Windows | `omamail-app-windows-x86_64.zip` | x64 Windows | `%LOCALAPPDATA%\omamail` |
-
-Linux uses the tar.gz package; there is no AppImage. The Linux installer also creates `~/.local/bin/omamail` and `~/.local/share/applications/omamail.desktop`. The Windows installer adds the app's `bin` directory to the user PATH and creates a Start Menu shortcut.
-
-On macOS or Linux, install the latest release with curl:
+macOS (Apple silicon):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh
 ```
 
-On Windows PowerShell, download and run the installer:
-
-```powershell
-$installer = Join-Path $env:TEMP 'omamail-install.ps1'
-Invoke-WebRequest https://raw.githubusercontent.com/huacnlee/omamail/main/install.ps1 -OutFile $installer
-& $installer
-```
-
-Both installers download the platform archive and `SHA256SUMS` from the GitHub release, verify the checksum and package layout, and replace an existing installation transactionally. They do not launch the app during installation.
-
-To install a specific version, pass the version without or with the leading `v`:
+Linux (x86_64, glibc 2.35 or newer; tar.gz only):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh -s -- --version 0.10.1
+curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh
 ```
+
+Windows (x64 PowerShell):
 
 ```powershell
-& $installer -Version 0.10.1
+irm https://raw.githubusercontent.com/huacnlee/omamail/main/install.ps1 | iex
 ```
 
-To install a downloaded archive, keep the release's `SHA256SUMS` beside it and run:
-
-```bash
-sh ./install.sh --version 0.10.1 --archive ./omamail-app-linux-x86_64.tar.gz --checksums ./SHA256SUMS
-```
-
-```powershell
-& .\install.ps1 -Version 0.10.1 -ArchivePath .\omamail-app-windows-x86_64.zip -ChecksumPath .\SHA256SUMS
-```
-
-Use the matching macOS archive in the shell command when installing locally on macOS.
-
-Uninstalling removes the application and its launcher integration while preserving accounts, drafts, caches, and keyring entries:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh -s -- --uninstall
-```
-
-```powershell
-& $installer -Uninstall
-```
-
-Standalone release archives are currently unsigned. The macOS app is not notarized and the Windows executable is not code signed, so the operating system may show a publisher or first-launch warning. Build from source if you do not want to approve an unsigned download.
+The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
 
 ## Run from source
 
 Install Rust, CMake 3.21 or newer, and Qt 6.5 or newer, then use the repository Make targets:
 
 ```bash
-make app-build
 make app-run
 ```
 
