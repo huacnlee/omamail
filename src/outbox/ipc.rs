@@ -1,28 +1,16 @@
 //! Private, bounded submission to the process holding the outbox lease.
 //! This listener has no independent lifecycle: dropping/stopping the owning
 //! outbox aborts it. Only ID-bound enqueue and payload-free snapshots cross it.
-#[cfg(unix)]
 use super::{Inner, storage, text};
-#[cfg(unix)]
-use crate::platform::ipc::{LocalEndpoint, check_peer};
-#[cfg(unix)]
+use crate::platform::ipc::{LocalEndpoint, authenticate};
 use serde_json::{Value, json};
-#[cfg(unix)]
 use std::{path::Path, sync::Arc, time::Duration};
-#[cfg(unix)]
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
-};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[cfg(unix)]
 const MAX_REQUEST: usize = 49 * 1024 * 1024;
-#[cfg(unix)]
 const MAX_REPLY: usize = 128 * 1024;
-#[cfg(unix)]
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-#[cfg(unix)]
 pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
     // The caller holds the exclusive lease and the state mutex. No successor
     // can replace this socket until every in-flight durable write releases it.
@@ -36,10 +24,10 @@ pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
             tokio::select! {
                 connection = listener.accept(), if requests.len() < 2 => {
                     let Ok((mut stream, _)) = connection else { break; };
-                    if check_peer(&stream).is_err() { continue; }
                     let Some(inner) = owner.upgrade() else { break; };
                     requests.spawn(async move {
                         let _ = tokio::time::timeout(TIMEOUT, async {
+                            authenticate(&mut stream).await?;
                             let request = read_frame(&mut stream, MAX_REQUEST).await?;
                             let result = serve_request(&inner, &request).await;
                             let reply = match result {
@@ -62,7 +50,6 @@ pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
     Ok(())
 }
 
-#[cfg(unix)]
 async fn serve_request(inner: &Arc<Inner>, request: &Value) -> Result<Value, &'static str> {
     let method = request["method"].as_str().ok_or("outbox_invalid_params")?;
     let params = &request["params"];
@@ -82,7 +69,6 @@ async fn serve_request(inner: &Arc<Inner>, request: &Value) -> Result<Value, &'s
     Ok(result)
 }
 
-#[cfg(unix)]
 pub(super) async fn request(
     root: &Path,
     method: &str,
@@ -129,8 +115,10 @@ pub(super) async fn request(
     .unwrap_or(Err("outbox_owner_unavailable"))
 }
 
-#[cfg(unix)]
-async fn read_frame(stream: &mut UnixStream, limit: usize) -> Result<Value, &'static str> {
+async fn read_frame<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    limit: usize,
+) -> Result<Value, &'static str> {
     let length = stream
         .read_u32()
         .await
@@ -146,9 +134,8 @@ async fn read_frame(stream: &mut UnixStream, limit: usize) -> Result<Value, &'st
     serde_json::from_slice(&bytes).map_err(|_| "outbox_invalid_params")
 }
 
-#[cfg(unix)]
-async fn write_frame(
-    stream: &mut UnixStream,
+async fn write_frame<S: AsyncWrite + Unpin>(
+    stream: &mut S,
     value: &Value,
     limit: usize,
 ) -> Result<(), &'static str> {
@@ -164,17 +151,4 @@ async fn write_frame(
         .write_all(&bytes)
         .await
         .map_err(|_| "outbox_owner_unavailable")
-}
-
-#[cfg(windows)]
-pub(super) fn listen(_: &std::sync::Arc<super::Inner>) -> Result<(), &'static str> {
-    Err("platform_ipc_unsupported")
-}
-#[cfg(windows)]
-pub(super) async fn request(
-    _: &std::path::Path,
-    _: &str,
-    _: &serde_json::Value,
-) -> Result<serde_json::Value, &'static str> {
-    Err("platform_ipc_unsupported")
 }

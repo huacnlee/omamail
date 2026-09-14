@@ -33,6 +33,7 @@ pub(crate) fn open_dir(
     create: bool,
     private: bool,
 ) -> Result<Option<File>> {
+    validate_acl(parent, false)?;
     let name = cstr(name)?;
     if create {
         // SAFETY: valid directory fd and NUL-terminated single component.
@@ -57,6 +58,7 @@ pub(crate) fn open_dir(
         return Err("cache_unsafe_path");
     }
     let file = unsafe { File::from_raw_fd(fd) };
+    validate_acl(&file, private)?;
     if private {
         if file.metadata().map_err(|_| "cache_unavailable")?.uid() != unsafe { libc::geteuid() } {
             return Err("cache_unsafe_path");
@@ -82,6 +84,7 @@ fn open_dir_readonly(parent: &File, name: &std::ffi::OsStr, private: bool) -> Re
         return Err("cache_unsafe_path");
     }
     let file = unsafe { File::from_raw_fd(fd) };
+    validate_acl(&file, private)?;
     if private {
         let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
         if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
@@ -188,6 +191,7 @@ fn regular_impl(dir: &File, name: &str, writable: bool) -> Result<Option<File>> 
     {
         return Err("cache_unsafe_path");
     }
+    validate_acl(&file, true)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .map_err(|_| "cache_unavailable")?;
     Ok(Some(file))
@@ -217,6 +221,7 @@ pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
     {
         return Err("cache_unsafe_path");
     }
+    validate_acl(&file, true)?;
     Ok(Some(file))
 }
 
@@ -280,6 +285,7 @@ fn errno_location() -> *mut libc::c_int {
 }
 
 pub(crate) fn validate_owned_root(dir: &File) -> Result<()> {
+    validate_acl(dir, true)?;
     let metadata = dir.metadata().map_err(|_| "cache_unavailable")?;
     if !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
@@ -467,4 +473,85 @@ pub(crate) fn same_file_version(before: &std::fs::Metadata, after: &std::fs::Met
         after.ctime(),
         after.ctime_nsec(),
     )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn validate_acl(_: &File, _: bool) -> Result<()> {
+    Ok(())
+}
+
+/// Darwin's mode bits do not constrain extended allow ACEs. Deny-only ACLs
+/// (including the standard home-directory delete denial) are safe. Private
+/// objects refuse all allow ACEs; ancestors refuse any ACL mutation grant.
+#[cfg(target_os = "macos")]
+fn validate_acl(file: &File, private: bool) -> Result<()> {
+    use std::ffi::c_void;
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_int) -> *mut c_void;
+        fn acl_get_entry(
+            acl: *mut c_void,
+            entry_id: libc::c_int,
+            entry: *mut *mut c_void,
+        ) -> libc::c_int;
+        fn acl_get_tag_type(entry: *mut c_void, tag: *mut libc::c_int) -> libc::c_int;
+        fn acl_get_permset(entry: *mut c_void, permissions: *mut *mut c_void) -> libc::c_int;
+        fn acl_get_perm_np(permissions: *mut c_void, permission: libc::c_uint) -> libc::c_int;
+        fn acl_free(value: *mut c_void) -> libc::c_int;
+    }
+    struct Acl(*mut c_void);
+    impl Drop for Acl {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    acl_free(self.0);
+                }
+            }
+        }
+    }
+    let acl = Acl(unsafe {
+        acl_get_fd_np(file.as_raw_fd(), 0x100 /* ACL_TYPE_EXTENDED */)
+    });
+    if acl.0.is_null() {
+        // Darwin reports ENOENT for a file that has no extended ACL at all.
+        return if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+            Ok(())
+        } else {
+            Err("cache_unsafe_path")
+        };
+    }
+    let mut index = 0; // ACL_FIRST_ENTRY; subsequent reads use ACL_NEXT_ENTRY=-1.
+    loop {
+        let mut entry = std::ptr::null_mut();
+        let result = unsafe { acl_get_entry(acl.0, index, &mut entry) };
+        if result != 0 {
+            // Darwin returns -1/EINVAL when the ACL has no further entries.
+            return if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
+                Ok(())
+            } else {
+                Err("cache_unsafe_path")
+            };
+        }
+        index = -1;
+        let mut tag = 0;
+        if unsafe { acl_get_tag_type(entry, &mut tag) } != 0 {
+            return Err("cache_unsafe_path");
+        }
+        if tag == 2
+        /* ACL_EXTENDED_DENY */
+        {
+            continue;
+        }
+        if tag != 1 /* ACL_EXTENDED_ALLOW */ || private {
+            return Err("cache_unsafe_path");
+        }
+        let mut permissions = std::ptr::null_mut();
+        if unsafe { acl_get_permset(entry, &mut permissions) } != 0 {
+            return Err("cache_unsafe_path");
+        }
+        for bit in [2, 4, 5, 6, 8, 10, 12, 13] {
+            if unsafe { acl_get_perm_np(permissions, 1 << bit) } != 0 {
+                return Err("cache_unsafe_path");
+            }
+        }
+    }
 }

@@ -211,4 +211,70 @@ mod unix {
         assert!(endpoint.connect().await.is_err());
         drop(listener);
     }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_inherited_acl_cannot_expose_private_data_or_authorize_mutation() {
+        use std::process::Command;
+        let temp = Temp::new();
+        let dir = directories(&temp.0, &["omamail"], true).unwrap().unwrap();
+        atomic_replace(&dir, "record", b"private").unwrap();
+        let path = temp.0.join("omamail/record");
+        assert!(
+            Command::new("/bin/chmod")
+                .args(["+a", "everyone allow read"])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(regular_readonly(&dir, "record").is_err());
+        assert!(atomic_replace(&dir, "record", b"bad").is_err());
+        assert!(remove_owned(&dir, "record").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"private");
+        assert!(
+            Command::new("/bin/chmod")
+                .arg("-N")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("/bin/chmod")
+                .args(["+a", "everyone allow read,file_inherit,directory_inherit"])
+                .arg(&temp.0)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let inherited = temp.0.join("inherited");
+        fs::create_dir(&inherited).unwrap();
+        fs::set_permissions(&inherited, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(directories_readonly(&temp.0, &["inherited"]).is_err());
+        assert!(directories(&temp.0, &["inherited"], true).is_err());
+        assert!(!inherited.join("record").exists());
+        assert!(
+            Command::new("/bin/chmod")
+                .arg("-N")
+                .arg(&temp.0)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(Command::new("/bin/chmod").args(["+a", "everyone allow read,write,delete,add_file,add_subdirectory,delete_child,file_inherit,directory_inherit"]).arg(&temp.0).status().unwrap().success());
+        assert!(directories(&temp.0, &["outside"], true).is_err());
+        assert!(!temp.0.join("outside").exists());
+        assert!(
+            Command::new("/bin/chmod")
+                .arg("-N")
+                .arg(&temp.0)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
 }

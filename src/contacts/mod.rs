@@ -312,6 +312,12 @@ mod tests {
 }
 
 #[cfg(windows)]
-fn read(_: &Path) -> Option<String> {
-    None
+fn read(path: &Path) -> Option<String> {
+    let file = crate::platform::private_fs::open_external(path).ok()?;
+    if file.metadata().ok()?.len() > MAX_FILE {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= MAX_FILE).then(|| String::from_utf8_lossy(&bytes).into_owned())
 }

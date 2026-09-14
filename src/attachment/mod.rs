@@ -57,18 +57,21 @@ fn mime(bytes: &[u8], path: &Path) -> &'static str {
         "application/octet-stream"
     }
 }
-#[cfg(unix)]
 pub fn read(params: &Value) -> Result<Value, &'static str> {
     let raw = params["path"].as_str().ok_or("invalid_params")?;
     if raw.chars().any(char::is_control) || !Path::new(raw).is_absolute() {
         return Err("attachment_path_invalid");
     }
     let path = Path::new(raw);
+    #[cfg(unix)]
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
         .map_err(|_| "attachment_unreadable")?;
+    #[cfg(windows)]
+    let file =
+        crate::platform::private_fs::open_external(path).map_err(|_| "attachment_unreadable")?;
     let metadata = file.metadata().map_err(|_| "attachment_unreadable")?;
     if !metadata.is_file() {
         return Err("attachment_not_regular");
@@ -409,10 +412,24 @@ mod forget_tests {
 }
 
 #[cfg(windows)]
-pub fn read(_: &Value) -> Result<Value, &'static str> {
-    Err("platform_private_storage_unsupported")
-}
-#[cfg(windows)]
-pub fn store(_: &Value, _: &[u8]) -> Result<Value, &'static str> {
-    Err("platform_private_storage_unsupported")
+pub fn store(params: &Value, bytes: &[u8]) -> Result<Value, &'static str> {
+    if bytes.len() > MAX_BYTES {
+        return Err("attachment_too_large");
+    }
+    let filename = safe_filename(params["filename"].as_str().ok_or("invalid_params")?);
+    let opening = params["open"].as_bool().unwrap_or(false);
+    if opening && !openable(&filename, bytes) {
+        return Err("attachment_open_refused");
+    }
+    let dirs = crate::platform::dirs::AppDirs::discover()?;
+    let directory = if opening {
+        crate::platform::private_fs::directories(&dirs.runtime, &["omamail", "attachments"], true)
+    } else {
+        crate::platform::private_fs::directories(&dirs.downloads, &[], true)
+    }
+    .map_err(|_| "attachment_write_failed")?
+    .ok_or("attachment_write_failed")?;
+    let path = crate::platform::private_fs::write_unique(&directory, &filename, bytes)
+        .map_err(|_| "attachment_write_failed")?;
+    Ok(json!({"ok":true,"path":path,"open":opening}))
 }

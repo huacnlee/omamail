@@ -170,3 +170,7 @@ pub(crate) fn check_peer(stream: &UnixStream) -> Result<()> {
     }
     Ok(())
 }
+
+pub(crate) async fn authenticate(stream: &mut UnixStream) -> Result<()> {
+    check_peer(stream)
+}
