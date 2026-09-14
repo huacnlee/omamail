@@ -1,6 +1,6 @@
 {
   "apiVersion": 4,
-  "releasedApiVersion": 3,
+  "releasedApiVersion": 4,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -691,15 +691,7 @@
     }
   ],
   "unreleased": {
-    "methods": [
-      "credentials.get",
-      "credentials.put",
-      "credentials.delete"
-    ],
-    "cases": [
-      "credential get rejects an unknown product kind before native access",
-      "credential put rejects controlled metadata before native access",
-      "credential delete rejects native attributes before native access"
-    ]
+    "methods": [],
+    "cases": []
   }
 }
