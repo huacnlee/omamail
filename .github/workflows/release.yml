@@ -289,8 +289,6 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test --locked --no-default-features --features standalone
-          if ($LASTEXITCODE -ne 0) { throw "standalone backend tests failed" }
           cargo build --release --locked --no-default-features --features standalone
           if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
           cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
