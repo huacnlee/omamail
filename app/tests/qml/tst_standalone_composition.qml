@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import Quickshell
 import "../../qml" as Standalone
+import "../../../ui/providers" as Providers
 
 TestCase {
   id: testCase
@@ -15,6 +16,23 @@ TestCase {
   Component {
     id: compositionComponent
     Standalone.Main { nativeHost: host; nativeFileStore: host }
+  }
+
+  Component {
+    id: gmailAuthComponent
+    Providers.AuthManager {
+      pluginDir: "/fixture/plugin"
+      platform: credentialShell
+      backend: null
+      accountId: ""
+    }
+  }
+
+  Standalone.StandaloneShell {
+    id: credentialShell
+    host: host
+    fileStore: host
+    manifest: ({id:"omamail"})
   }
 
   function init() { host.reset() }
@@ -171,6 +189,21 @@ TestCase {
     compare(host.files["/fixture/config/omamail/calendars.json"], "{}")
     verify(!composition.shell.writeConfig("../outside", "secret", function() {}))
     verify(!Object.prototype.hasOwnProperty.call(host.files, "/fixture/config/omamail/../outside"))
+  }
+
+  function test_google_client_is_saved_and_reloaded_through_standalone_store() {
+    Quickshell.nativeHost = host
+    Quickshell.fileStore = host
+    var auth = createTemporaryObject(gmailAuthComponent, testCase)
+    verify(auth)
+    verify(auth.saveCredentials(
+      "123-standalone.apps.googleusercontent.com\nGOCSPX-synthetic-secret"))
+    tryCompare(auth, "credentialsWriteBusy", false)
+    compare(auth.clientId, "123-standalone.apps.googleusercontent.com")
+    compare(auth.credentials.clientSecret, "GOCSPX-synthetic-secret")
+    var saved = JSON.parse(host.files["/fixture/config/omamail/credentials.json"])
+    compare(saved.installed.client_id, "123-standalone.apps.googleusercontent.com")
+    compare(saved.installed.client_secret, "GOCSPX-synthetic-secret")
   }
 
 

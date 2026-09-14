@@ -72,6 +72,10 @@ Item {
   property bool lookupHandled: false
   // One lookup at a time, whichever of the two processes is carrying it.
   property bool credentialLookupBusy: false
+  // The OAuth client file and the refresh-token keyring are two independent
+  // stores. Keep their writes separate: saving credentials.json must not use
+  // the token write's busy state (and the setup page observes this one).
+  property bool credentialsWriteBusy: false
   property bool credentialWriteBusy: false
   readonly property bool lookupRunning: credentialLookupBusy
   property string credentialsWritePayload: ""
