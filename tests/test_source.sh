@@ -1071,7 +1071,7 @@ oversized=$(cd ..
       case "$file" in
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
-        (app/resources/macos/omamail.icns) ceiling=246889 ;;
+        (app/resources/macos/omamail.icns) ceiling=125257 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
@@ -1105,16 +1105,25 @@ FONT_CHECKSUMS
 icon_provenance=app/resources/macos/ICON-PROVENANCE.md
 [ -f "../$icon_provenance" ] || fail "the macOS icon must record its provenance"
 mac_icon=app/resources/macos/omamail.icns
-[ "$(cd .. && wc -c < "$mac_icon")" -eq 246889 ] \
+[ "$(cd .. && wc -c < "$mac_icon")" -eq 125257 ] \
   || fail "$mac_icon does not match its reviewed byte size"
-mac_icon_checksum=e8df633e8ac64aef6306663ef0ad782c9f8633e8c73c094bb83a7ca6b4a76e1c
+mac_icon_checksum=9d5df5d8d3fd0d6db8cbbb8f31bb38a44b185d37329de4d6b6f58c404980e22d
 actual_mac_icon_checksum=$(cd .. && shasum -a 256 "$mac_icon" | awk '{print $1}')
 [ "$actual_mac_icon_checksum" = "$mac_icon_checksum" ] \
   || fail "$mac_icon does not match its reviewed checksum"
 grep -q "$mac_icon_checksum" "../$icon_provenance" \
   || fail "$mac_icon checksum is missing from its shipped provenance"
-grep -q '4e9cc52b3c3e8590f43805c155dd87ac38fbe14194f6f47f9b42e75d49b1295b' "../$icon_provenance" \
+grep -q 'b900f47d96947727d17c150f0963f63ff09d476135e2fac440ca5fb5ead8f7fc' "../$icon_provenance" \
   || fail "the macOS icon source checksum is missing from its shipped provenance"
+windows_icon=app/resources/windows/omamail.ico
+windows_icon_checksum=4762a6d6ab3b4d4136b3efccdff7ea0bc5157165605c1dda9fe19cca8bb2aaa7
+actual_windows_icon_checksum=$(cd .. && shasum -a 256 "$windows_icon" | awk '{print $1}')
+[ "$actual_windows_icon_checksum" = "$windows_icon_checksum" ] \
+  || fail "$windows_icon does not match its reviewed checksum"
+grep -q "$windows_icon_checksum" "../$icon_provenance" \
+  || fail "$windows_icon checksum is missing from its shipped provenance"
+grep -q '3c780a0881ca98ffb717eb2877bf2e8a877deb9ddc3593a2bcca1d19139616e4' "../$icon_provenance" \
+  || fail "the canonical Omamail logo checksum is missing from icon provenance"
 
 # The compose form, account boundary and raw-message builder must keep the
 # selected send-as address all the way to the provider. A missing link silently

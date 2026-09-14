@@ -9,9 +9,5 @@
   </defs>
   <g filter="url(#shadow)">
     <rect x="28" y="28" width="968" height="968" rx="220" fill="#1a1b26"/>
-    <g transform="translate(-288 -326) scale(25)">
-      <path d="M20 43V24l12 13 12-13v19" fill="none" stroke="#ea4335"
-            stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    </g>
   </g>
 </svg>

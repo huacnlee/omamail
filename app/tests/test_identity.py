@@ -35,12 +35,15 @@ require(mac_svg, 'viewBox="0 0 1024 1024"', "macOS 1024px icon canvas")
 require(mac_svg, 'x="28" y="28" width="968" height="968" rx="220"',
         "macOS rounded icon plate")
 require(mac_svg, 'fill="#1a1b26"', "Omarchy background on the macOS icon")
-require(mac_svg, 'transform="translate(-288 -326) scale(25)"',
-        "Dock-scale Omamail mark")
-require(mac_svg, 'd="M20 43V24l12 13 12-13v19"',
-        "unaltered Omamail mark geometry")
-if '#9aa0a6' in mac_svg:
-    raise SystemExit("macOS icon retained the light envelope frame")
+if '<path' in mac_svg:
+    raise SystemExit("macOS icon redraws part of the Omamail logo")
+generator = (APP / "resources/icons/generate-native-icons.sh").read_text(encoding="utf-8")
+require(generator, 'source_logo="$root/resources/icons/omamail.svg"',
+        "canonical native icon logo source")
+require(generator, '-density 768 "$source_logo" -resize 700x700 "$work/logo.png"',
+        "native icon logo scale")
+require(generator, '"$work/plate.png" "$work/logo.png" -gravity center -composite',
+        "complete native icon composition")
 
 icns = (APP / "resources/macos/omamail.icns").read_bytes()
 if icns[:4] != b"icns" or int.from_bytes(icns[4:8], "big") != len(icns):

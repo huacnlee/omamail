@@ -5,11 +5,10 @@ param(
     [string]$Qml = "app\qml",
     [string]$Ui = "ui",
     [string]$Manifest = "manifest.json",
-    [string]$Icon = "app\resources\icons\omamail.svg",
+    [string]$Icon = "app\resources\windows\omamail.ico",
     [string]$Dist = "dist",
     [string]$Version = "",
     [string]$WindeployQt = "windeployqt.exe",
-    [string]$Magick = "magick.exe",
     [string]$Python = "python.exe",
     [string]$BackendApiTest = "tests\test_backend_api.py",
     [switch]$SyntheticTestMode
@@ -112,9 +111,6 @@ if (-not $SyntheticTestMode -and -not (Get-Command $WindeployQt -ErrorAction Sil
 if (-not $SyntheticTestMode -and -not (Get-Command $Python -ErrorAction SilentlyContinue)) {
     throw "Python is required for the packaged backend API test"
 }
-if (-not $SyntheticTestMode -and -not (Get-Command $Magick -ErrorAction SilentlyContinue)) {
-    throw "ImageMagick (magick) is required for a production Windows package"
-}
 $BackendApiTestPath = Resolve-InputPath $BackendApiTest
 if (-not $SyntheticTestMode) {
     Assert-File $BackendApiTestPath "backend API test"
@@ -149,11 +145,9 @@ try {
         $Platforms = Join-Path $Bin "platforms"
         New-Item -ItemType Directory -Force $Platforms | Out-Null
         Copy-Item -LiteralPath $HostPath -Destination (Join-Path $Platforms "qwindows.dll")
-        [IO.File]::WriteAllBytes((Join-Path $Package "app-icon.ico"), [byte[]](0, 0, 1, 0))
+        Copy-Item -LiteralPath $IconPath -Destination (Join-Path $Package "app-icon.ico")
     } else {
-        & $Magick -background none $IconPath -define "icon:auto-resize=256,128,64,48,32,16" `
-            (Join-Path $Package "app-icon.ico")
-        if ($LASTEXITCODE -ne 0) { throw "failed to generate app-icon.ico" }
+        Copy-Item -LiteralPath $IconPath -Destination (Join-Path $Package "app-icon.ico")
         & $WindeployQt --release --no-translations --qmldir $Package --dir $Bin `
             (Join-Path $Bin "omamail-app.exe")
         if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }

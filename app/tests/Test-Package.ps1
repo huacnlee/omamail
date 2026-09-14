@@ -88,6 +88,19 @@ try {
         )) {
             Assert-True ($Names -ccontains $Required) "archive is missing $Required"
         }
+        $IconEntry = $Zip.GetEntry("omamail/app-icon.ico")
+        $IconMemory = New-Object IO.MemoryStream
+        try {
+            $IconStream = $IconEntry.Open()
+            try { $IconStream.CopyTo($IconMemory) } finally { $IconStream.Dispose() }
+            $ExpectedIcon = [IO.File]::ReadAllBytes(
+                (Join-Path $RepoRoot "app\resources\windows\omamail.ico"))
+            Assert-True ([Convert]::ToBase64String($IconMemory.ToArray()) -ceq
+                [Convert]::ToBase64String($ExpectedIcon)) `
+                "package does not contain the reviewed Windows Omamail icon"
+        } finally {
+            $IconMemory.Dispose()
+        }
         $ReleaseEntry = $Zip.GetEntry("omamail/release.json")
         $Reader = New-Object IO.StreamReader($ReleaseEntry.Open())
         try { $Release = $Reader.ReadToEnd() | ConvertFrom-Json } finally { $Reader.Dispose() }
