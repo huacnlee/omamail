@@ -22,6 +22,7 @@ TestCase {
   function test_one_shared_service_and_app_with_standalone_capabilities() {
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
+    verify(composition.visible, "standalone composition must expose a native window")
     compare(composition.service.objectName, "standalone-service")
     compare(composition.app.objectName, "standalone-app")
     verify(composition.app.opened)

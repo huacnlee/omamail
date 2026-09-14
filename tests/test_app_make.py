@@ -20,13 +20,13 @@ assert "make app-run" in help_text
 build = make("-n", "app-build")
 assert "cargo build --locked --no-default-features --features standalone" in build
 assert '-DOMAMAIL_BACKEND="' in build
-assert "/target/debug/omamail" in build
+assert "/target/standalone/debug/omamail" in build
 assert "cmake --build" in build
 
 run = make("-n", "app-run")
 launch = run.splitlines()[-1]
 assert "OMAMAIL_DEVELOPMENT_RESOURCES=1" in launch
-assert 'OMAMAIL_BIN="' in launch and "/target/debug/omamail" in launch
+assert 'OMAMAIL_BIN="' in launch and "/target/standalone/debug/omamail" in launch
 assert "/app/build/omamail-app" in launch
 assert "backend-runtime.py" not in run
 assert "install" not in run

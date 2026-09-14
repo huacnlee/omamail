@@ -27,6 +27,10 @@ Item {
   property var service: null
   property bool opened: false
   property bool closingFromHost: false
+  function syncWindowVisibility() {
+    window.visible = root.opened
+  }
+  onOpenedChanged: Qt.callLater(syncWindowVisibility)
   property string draftSavedToast: ""
   property string composeRecoveryNotice: ""
   property bool composeRecoveryUpdateNoticePending: false
@@ -1451,12 +1455,13 @@ Item {
 
   FloatingWindow {
     id: window
-    visible: root.opened
     title: "Omamail"
     color: root.background
     implicitWidth: Style.space(980)
     implicitHeight: Style.space(720)
     minimumSize: Qt.size(Style.space(760), Style.space(520))
+
+    Component.onCompleted: root.syncWindowVisibility()
 
     onVisibleChanged: {
       if (!visible && root.opened && !root.closingFromHost) root.requestClose()

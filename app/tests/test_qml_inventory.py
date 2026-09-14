@@ -47,9 +47,7 @@ EXPECTED_MEMBERS = {
         "nativeHost", "fileStore", "notificationActivated", "env",
         "execDetached", "showNotification",
     },
-    "Quickshell/FloatingWindow.qml": {
-        "implicitWidth", "implicitHeight", "minimumSize",
-    },
+    "Quickshell/FloatingWindow.qml": {"minimumSize"},
     "Quickshell/Io/Process.qml": {
         "command", "running", "stdinEnabled", "jobMode", "stdout", "stderr",
         "written", "started", "exited", "write", "terminate",

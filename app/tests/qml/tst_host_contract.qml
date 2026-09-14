@@ -304,11 +304,10 @@ TestCase {
     compare(sharedAppComponent.status, Component.Ready)
   }
 
-  function test_floating_window_is_a_real_window() {
+  function test_floating_window_hosts_shared_content() {
     var floating = createTemporaryObject(windowComponent, testCase)
     verify(floating)
-    compare(floating.minimumWidth, 320)
-    compare(floating.minimumHeight, 240)
-    floating.close()
+    compare(floating.minimumSize.width, 320)
+    compare(floating.minimumSize.height, 240)
   }
 }

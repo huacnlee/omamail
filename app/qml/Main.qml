@@ -1,11 +1,26 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Omamail.Native
 import "../../ui" as Omamail
 
-Item {
+ApplicationWindow {
   id: root
   objectName: "standalone-composition"
+  visible: mailApp.opened
+  title: "Omamail"
+  color: mailApp.background
+  width: 980
+  height: 720
+  minimumWidth: 760
+  minimumHeight: 520
+
+  onVisibleChanged: {
+    if (visible) {
+      raise()
+      requestActivate()
+    }
+  }
 
   property var nativeHost: NativeHost
   property var nativeFileStore: NativeFileStore
@@ -86,6 +101,8 @@ Item {
   Omamail.App {
     id: mailApp
     objectName: "standalone-app"
+    width: root.width
+    height: root.height
     shell: shellAdapter
     manifest: manifestAdapter.value
     service: mailService

@@ -78,7 +78,8 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 APP_QML_FILES := app/qml/Main.qml app/qml/StandaloneShell.qml app/qml/StandaloneManifest.qml
 APP_BUILD_DIR ?= app/build
 APP_EXEEXT := $(if $(filter Windows_NT,$(OS)),.exe,)
-APP_BACKEND := $(CURDIR)/target/debug/omamail$(APP_EXEEXT)
+APP_TARGET_DIR ?= $(CURDIR)/target/standalone
+APP_BACKEND := $(APP_TARGET_DIR)/debug/omamail$(APP_EXEEXT)
 APP_EXECUTABLE := $(CURDIR)/$(APP_BUILD_DIR)/omamail-app$(APP_EXEEXT)
 
 .PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
@@ -245,7 +246,7 @@ test-app-qml:
 	QT_QPA_PLATFORM=offscreen ctest --test-dir "$(APP_BUILD_DIR)" --output-on-failure -R 'tst_standalone_composition'
 
 app-build:
-	cargo build --locked --no-default-features --features standalone --target-dir "$(CURDIR)/target" --bin omamail
+	cargo build --locked --no-default-features --features standalone --target-dir "$(APP_TARGET_DIR)" --bin omamail
 	cmake -S app -B "$(APP_BUILD_DIR)" -DOMAMAIL_BACKEND="$(APP_BACKEND)"
 	cmake --build "$(APP_BUILD_DIR)" --parallel
 
