@@ -1070,9 +1070,8 @@ oversized=$(cd ..
       [ -f "$file" ] || continue
       case "$file" in
         (preview.png) ceiling=$preview_limit ;;
-        (app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf) ceiling=2573248 ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
-        (app/resources/macos/omamail.icns) ceiling=350889 ;;
+        (app/resources/macos/omamail.icns) ceiling=246889 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
@@ -1085,9 +1084,9 @@ if [ -n "$oversized" ]; then
   fail "the files above are over their size ceiling; keep large assets out of the clone"
 fi
 
-# The standalone host embeds two exact upstream Nerd Fonts assets. Keep their
-# exceptions tied to reviewed bytes and to the provenance shipped beside them;
-# a different font must update all three deliberately.
+# The standalone host embeds one exact upstream Nerd Fonts icon asset. Keep its
+# exception tied to reviewed bytes and to the provenance shipped beside it; a
+# different font must update all three deliberately.
 font_provenance=app/assets/fonts/NerdFonts-PROVENANCE.md
 [ -f "../$font_provenance" ] || fail "bundled fonts must record their provenance"
 while read -r expected file; do
@@ -1096,7 +1095,6 @@ while read -r expected file; do
   grep -q "$expected" "../$font_provenance" \
     || fail "$file checksum is missing from its shipped provenance"
 done <<'FONT_CHECKSUMS'
-f2a5ea6cfab397445ffab00c0370927b66d61e560a05db5db271b42006381c1a app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf
 fe471e538392f51910faab985fa8e192a39dd3426125edd15b71b3680df0e749 app/assets/fonts/SymbolsNerdFontMono-Regular.ttf
 FONT_CHECKSUMS
 
@@ -1107,15 +1105,15 @@ FONT_CHECKSUMS
 icon_provenance=app/resources/macos/ICON-PROVENANCE.md
 [ -f "../$icon_provenance" ] || fail "the macOS icon must record its provenance"
 mac_icon=app/resources/macos/omamail.icns
-[ "$(cd .. && wc -c < "$mac_icon")" -eq 350889 ] \
+[ "$(cd .. && wc -c < "$mac_icon")" -eq 246889 ] \
   || fail "$mac_icon does not match its reviewed byte size"
-mac_icon_checksum=b876fc5bdd346ee6cafff7c3163a2fa7e79fb1346dd410538d31f21698d84afc
+mac_icon_checksum=e8df633e8ac64aef6306663ef0ad782c9f8633e8c73c094bb83a7ca6b4a76e1c
 actual_mac_icon_checksum=$(cd .. && shasum -a 256 "$mac_icon" | awk '{print $1}')
 [ "$actual_mac_icon_checksum" = "$mac_icon_checksum" ] \
   || fail "$mac_icon does not match its reviewed checksum"
 grep -q "$mac_icon_checksum" "../$icon_provenance" \
   || fail "$mac_icon checksum is missing from its shipped provenance"
-grep -q 'acd7580c6c73145d21911af77ea28711a289a37a42fb625f41c240842fc3e500' "../$icon_provenance" \
+grep -q '4e9cc52b3c3e8590f43805c155dd87ac38fbe14194f6f47f9b42e75d49b1295b' "../$icon_provenance" \
   || fail "the macOS icon source checksum is missing from its shipped provenance"
 
 # The compose form, account boundary and raw-message builder must keep the

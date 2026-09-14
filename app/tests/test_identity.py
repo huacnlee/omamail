@@ -32,15 +32,15 @@ if plist.get("CFBundleIconFile") != "omamail.icns":
 
 mac_svg = (APP / "resources/macos/omamail-macos.svg").read_text(encoding="utf-8")
 require(mac_svg, 'viewBox="0 0 1024 1024"', "macOS 1024px icon canvas")
-require(mac_svg, 'x="64" y="48" width="896" height="896" rx="202"',
+require(mac_svg, 'x="28" y="28" width="968" height="968" rx="220"',
         "macOS rounded icon plate")
 require(mac_svg, 'fill="#1a1b26"', "Omarchy background on the macOS icon")
-require(mac_svg, 'stroke="#7aa2f7"', "Omarchy accent on the macOS icon")
-for logo_geometry in (
-    '<rect x="5" y="13" width="54" height="38" rx="5"',
-    'd="M20 43V24l12 13 12-13v19"',
-):
-    require(mac_svg, logo_geometry, "unaltered Omamail logo geometry")
+require(mac_svg, 'transform="translate(-288 -326) scale(25)"',
+        "Dock-scale Omamail mark")
+require(mac_svg, 'd="M20 43V24l12 13 12-13v19"',
+        "unaltered Omamail mark geometry")
+if '#9aa0a6' in mac_svg:
+    raise SystemExit("macOS icon retained the light envelope frame")
 
 icns = (APP / "resources/macos/omamail.icns").read_bytes()
 if icns[:4] != b"icns" or int.from_bytes(icns[4:8], "big") != len(icns):

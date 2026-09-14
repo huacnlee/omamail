@@ -2,12 +2,14 @@
 
 `omamail.icns` is a generated application resource for the standalone macOS
 bundle. Its editable source is `omamail-macos.svg` in this directory. That SVG
-places the existing Omamail mark on the documented Omarchy background and
-accent colors with a macOS rounded-rectangle mask and safe area.
+places the red Omamail M on the documented Omarchy background color with a
+full-size macOS rounded-rectangle container and transparent outer corners. The
+mail-envelope outline used inside the application is intentionally omitted at
+Dock size, where it read as an unrelated light frame.
 
-- Source SVG SHA-256: `acd7580c6c73145d21911af77ea28711a289a37a42fb625f41c240842fc3e500`
-- Generated ICNS size: `350889` bytes
-- Generated ICNS SHA-256: `b876fc5bdd346ee6cafff7c3163a2fa7e79fb1346dd410538d31f21698d84afc`
+- Source SVG SHA-256: `4e9cc52b3c3e8590f43805c155dd87ac38fbe14194f6f47f9b42e75d49b1295b`
+- Generated ICNS size: `246889` bytes
+- Generated ICNS SHA-256: `e8df633e8ac64aef6306663ef0ad782c9f8633e8c73c094bb83a7ca6b4a76e1c`
 - ImageMagick: `7.1.0-10 Q16-HDRI arm`
 - Apple `iconutil`: macOS 27.0
 
