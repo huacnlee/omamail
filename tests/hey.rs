@@ -7,15 +7,31 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[cfg(target_os = "macos")]
+fn config_root(home: &std::path::Path, xdg: &std::path::Path) -> std::path::PathBuf {
+    let _ = xdg;
+    home.join("Library/Application Support")
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn config_root(home: &std::path::Path, xdg: &std::path::Path) -> std::path::PathBuf {
+    let _ = home;
+    xdg.to_owned()
+}
+
 #[test]
 fn mail_actions_use_bound_official_cli_batches_and_never_retry_refusals() {
     let temp = Command::new("mktemp").arg("-d").output().unwrap();
-    let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
-    fs::create_dir_all(dir.join("omamail")).unwrap();
-    fs::write(dir.join("omamail/accounts.json"),br#"{"version":1,"activeId":"hey:a@example.org","accounts":[{"provider":"hey","email":"a@example.org"}]}"#).unwrap();
-    fs::set_permissions(dir.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
+    // The private storage boundary refuses symlinked components, and Darwin's
+    // temporary root is an alias of /private; resolve it first.
+    let dir = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim())
+        .canonicalize()
+        .unwrap();
+    let config = config_root(&dir, &dir).join("omamail");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(config.join("accounts.json"),br#"{"version":1,"activeId":"hey:a@example.org","accounts":[{"provider":"hey","email":"a@example.org"}]}"#).unwrap();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
     fs::set_permissions(
-        dir.join("omamail/accounts.json"),
+        config.join("accounts.json"),
         fs::Permissions::from_mode(0o600),
     )
     .unwrap();
