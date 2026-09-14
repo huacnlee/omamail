@@ -25,6 +25,9 @@ Item {
   property var shell: null
   property var manifest: null
   property var service: null
+  // The standalone host supplies its own client-side title bar. The Omarchy
+  // shell keeps ownership of plugin window chrome and leaves this disabled.
+  property bool standaloneWindowChrome: false
   property bool opened: false
   property bool closingFromHost: false
   function syncWindowVisibility() {
@@ -1576,11 +1579,27 @@ Item {
 
       Item {
         id: header
+        objectName: "app-title-bar"
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         height: Style.space(48)
         visible: !root.composing
+
+        // Kept below the header controls so their own pointer handlers win.
+        // Empty title-bar space starts the platform's native move operation,
+        // preserving compositor snapping instead of updating x/y ourselves.
+        MouseArea {
+          id: windowMoveArea
+          objectName: "app-title-bar-drag-area"
+          anchors.fill: parent
+          enabled: root.standaloneWindowChrome
+          acceptedButtons: Qt.LeftButton
+          onPressed: function(mouse) {
+            var nativeWindow = header.Window.window
+            if (!nativeWindow || !nativeWindow.startSystemMove()) mouse.accepted = false
+          }
+        }
 
         // Identity first, controls after, with a rule between them: the mark
         // and the name say what this window is, and everything to their right

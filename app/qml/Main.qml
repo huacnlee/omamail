@@ -8,6 +8,7 @@ ApplicationWindow {
   id: root
   objectName: "standalone-composition"
   visible: mailApp.opened
+  flags: Qt.Window | Qt.FramelessWindowHint
   title: "Omamail"
   color: mailApp.background
   width: 980
@@ -106,6 +107,7 @@ ApplicationWindow {
     shell: shellAdapter
     manifest: manifestAdapter.value
     service: mailService
+    standaloneWindowChrome: true
   }
 
   Connections {
