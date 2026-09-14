@@ -33,6 +33,7 @@ private slots:
     void reportsGracefulAndCrashExits();
     void stoppingKillsTheProcessTree();
     void stoppedProcessTimerCannotKillRapidRestart();
+    void restartRequestDuringShutdownKeepsForceKillDeadline();
     void oversizedRecordFailsWithoutEmittingTruncatedFrames();
 };
 
@@ -118,17 +119,42 @@ void ProcessTest::stoppingKillsTheProcessTree()
     const qint64 descendant = lines.at(0).at(0).toString().toLongLong();
     QVERIFY(descendant > 1);
 
-    process.setRunning(false);
-    QVERIFY(exited.wait(5000));
 #ifdef Q_OS_WIN
     HANDLE child = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(descendant));
     QVERIFY(child != nullptr);
+#endif
+    process.setRunning(false);
+    QVERIFY(exited.wait(5000));
+#ifdef Q_OS_WIN
     QCOMPARE(WaitForSingleObject(child, 5000), DWORD(WAIT_OBJECT_0));
     CloseHandle(child);
 #else
     QTRY_VERIFY_WITH_TIMEOUT(::kill(static_cast<pid_t>(descendant), 0) == -1
                              && errno == ESRCH, 5000);
 #endif
+}
+
+void ProcessTest::restartRequestDuringShutdownKeepsForceKillDeadline()
+{
+    NativeProcess process;
+    process.setCommand(command(QStringLiteral("resistant")));
+    QSignalSpy lines(&process, &NativeProcess::stdoutLine);
+    QSignalSpy exited(&process, &NativeProcess::exited);
+    QSignalSpy failures(&process, &NativeProcess::failed);
+    process.setRunning(true);
+    QTRY_COMPARE_WITH_TIMEOUT(lines.size(), 1, 5000);
+
+    process.setRunning(false);
+    process.setRunning(true);
+    QVERIFY(exited.wait(3000));
+    QVERIFY(exited.last().at(0).toInt() != 0);
+    QCOMPARE(failures.size(), 1);
+    QVERIFY(failures.first().at(0).toString().contains(QStringLiteral("stopping")));
+
+    process.setCommand(command(QStringLiteral("wait")));
+    process.setRunning(true);
+    QVERIFY(exited.wait(5000));
+    QCOMPARE(exited.last().at(0).toInt(), 0);
 }
 
 void ProcessTest::stoppedProcessTimerCannotKillRapidRestart()

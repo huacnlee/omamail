@@ -47,6 +47,7 @@ private slots:
     void smokeTestLoadsQmlHandshakesAndWritesReadyFile();
     void smokeRejectsOversizedStdoutFrame();
     void smokeDrainsLargeStderr();
+    void smokeDrainsBothChannelsAfterQuitReply();
     void bundleDiscoveryDoesNotUseDevelopmentFallbacks();
 };
 
@@ -136,6 +137,18 @@ void ResourcesTest::smokeDrainsLargeStderr()
     qunsetenv("OMAMAIL_SMOKE_FIXTURE");
 }
 
+void ResourcesTest::smokeDrainsBothChannelsAfterQuitReply()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    paths.backend = QCoreApplication::applicationFilePath();
+    qputenv("OMAMAIL_SMOKE_FIXTURE", "flood-after-quit");
+    QString error;
+    QVERIFY2(runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error),
+             qPrintable(error));
+    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+}
+
 void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()
 {
     QTemporaryDir staged;
@@ -186,8 +199,25 @@ int main(int argc, char *argv[])
                                     {QStringLiteral("id"), request.value(QStringLiteral("id"))},
                                     {QStringLiteral("result"), result}};
             output << QJsonDocument(reply).toJson(QJsonDocument::Compact) << Qt::endl;
-            if (request.value(QStringLiteral("method")).toString() == QStringLiteral("system.quit"))
+            if (request.value(QStringLiteral("method")).toString() == QStringLiteral("system.quit")) {
+                if (fixture == QByteArrayLiteral("flood-after-quit")) {
+                    QFile standardOutput;
+                    QFile standardError;
+                    if (!standardOutput.open(stdout, QIODevice::WriteOnly)
+                        || !standardError.open(stderr, QIODevice::WriteOnly)) return 2;
+                    const QByteArray stdoutRecord(8 * 1024, 'o');
+                    const QByteArray stderrRecord(8 * 1024, 'e');
+                    for (int i = 0; i < 256; ++i) {
+                        standardOutput.write(stdoutRecord);
+                        standardOutput.write("\n");
+                        standardOutput.flush();
+                        standardError.write(stderrRecord);
+                        standardError.write("\n");
+                        standardError.flush();
+                    }
+                }
                 return 0;
+            }
         }
         return 1;
     }

@@ -36,6 +36,11 @@ def main():
         print("ready", flush=True)
         while True:
             time.sleep(1)
+    elif mode == "resistant":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        print("ready", flush=True)
+        while True:
+            time.sleep(1)
     elif mode == "wait":
         time.sleep(1.2)
     elif mode == "oversize":

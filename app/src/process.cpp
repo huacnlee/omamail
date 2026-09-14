@@ -112,15 +112,18 @@ void NativeProcess::setRunning(bool running)
 
 void NativeProcess::start()
 {
+    if (m_process.state() != QProcess::NotRunning) {
+        setRunningValue(false);
+        emit failed(QStringLiteral("Process is still stopping"));
+        return;
+    }
     m_forceKill.stop();
     m_exitReported = false;
     m_streamFailed = false;
-    if (m_process.state() != QProcess::NotRunning || m_command.isEmpty()) {
+    if (m_command.isEmpty()) {
         setRunningValue(false);
-        if (!m_exitReported) {
-            m_exitReported = true;
-            emit exited(-1);
-        }
+        m_exitReported = true;
+        emit exited(-1);
         return;
     }
     QString program = m_command.first().toString();
@@ -281,17 +284,18 @@ bool NativeProcess::prepareWindowsContainment()
     auto *attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
         HeapAlloc(GetProcessHeap(), 0, bytes));
     auto *startup = new STARTUPINFOEXW{};
+    m_job = job;
     if (!attributes || !startup
         || !InitializeProcThreadAttributeList(attributes, 1, 0, &bytes)
         || !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-                                      &job, sizeof(job), nullptr, nullptr)) {
+                                      &m_job, sizeof(HANDLE), nullptr, nullptr)) {
         if (attributes) HeapFree(GetProcessHeap(), 0, attributes);
         delete startup;
         CloseHandle(job);
+        m_job = nullptr;
         return false;
     }
     startup->lpAttributeList = attributes;
-    m_job = job;
     m_attributeList = attributes;
     m_extendedStartupInfo = startup;
     m_process.setCreateProcessArgumentsModifier([this](QProcess::CreateProcessArguments *args) {
