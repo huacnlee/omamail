@@ -31,9 +31,17 @@ public:
 };
 
 namespace {
-using namespace winrt;
-using namespace Windows::Data::Xml::Dom;
-using namespace Windows::UI::Notifications;
+using winrt::event_token;
+using winrt::hresult_error;
+using winrt::hstring;
+using winrt::IInspectable;
+using winrt::Windows::Data::Xml::Dom::XmlDocument;
+using winrt::Windows::Data::Xml::Dom::XmlElement;
+using winrt::Windows::UI::Notifications::NotificationSetting;
+using winrt::Windows::UI::Notifications::ToastFailedEventArgs;
+using winrt::Windows::UI::Notifications::ToastNotification;
+using winrt::Windows::UI::Notifications::ToastNotificationManager;
+using winrt::Windows::UI::Notifications::ToastNotifier;
 
 class WindowsNotificationPlatform;
 

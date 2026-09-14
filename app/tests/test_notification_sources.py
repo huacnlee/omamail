@@ -32,6 +32,9 @@ for required in (
 ):
     assert required in windows, f"Windows cold-start activation contract missing: {required}"
 assert windows.index("m_notifier.Show(toast);") < windows.index("removeEntry(key);")
+assert "using namespace winrt;" not in windows
+assert "using namespace Windows::" not in windows
+assert "using winrt::Windows::UI::Notifications::ToastNotification;" in windows
 
 linux = (ROOT / "src" / "notifications_linux.cpp").read_text(encoding="utf-8")
 for required in (
