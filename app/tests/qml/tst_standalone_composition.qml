@@ -102,7 +102,7 @@ TestCase {
 
   function test_tooltip_is_anchored_below_the_trigger_not_the_pointer() {
     positionedToolTip.visible = true
-    wait(Style.tooltipDelay + 20)
+    tryCompare(positionedToolTip, "opened", true, Style.tooltipDelay + 1000)
     verify(positionedToolTip.y >= tooltipTrigger.height)
     var anchoredX = positionedToolTip.x
     var anchoredY = positionedToolTip.y
@@ -115,16 +115,18 @@ TestCase {
     compare(positionedToolTip.x, anchoredX)
     compare(positionedToolTip.y, anchoredY)
     positionedToolTip.visible = false
+    tryCompare(positionedToolTip, "opened", false)
   }
 
   function test_tooltip_flips_above_and_clamps_to_window_edges() {
     edgeToolTip.visible = true
-    wait(Style.tooltipDelay + 20)
+    tryCompare(edgeToolTip, "opened", true, Style.tooltipDelay + 1000)
     var anchor = edgeTooltipTrigger.mapToItem(null, 0, 0)
     verify(anchor.x + edgeToolTip.x >= 0)
     verify(anchor.x + edgeToolTip.x + edgeToolTip.width <= testCase.width)
     verify(anchor.y + edgeToolTip.y + edgeToolTip.height < anchor.y)
     edgeToolTip.visible = false
+    tryCompare(edgeToolTip, "opened", false)
   }
 
   function test_one_shared_service_and_app_with_standalone_capabilities() {
