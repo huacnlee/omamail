@@ -4,6 +4,7 @@ node_modules/
 /runtime/
 .DS_Store
 .claude/worktrees/
+app/build/
 
 # Design canvases and planning notes are working material, not something a
 # user installing the plugin should have to download. They live outside the
