@@ -121,18 +121,33 @@ mod tests {
     }
     #[tokio::test]
     async fn requests_overlap_and_cancellation_kills_the_process_group() {
-        let started = std::time::Instant::now();
-        let args = vec!["-c".into(), "sleep 0.1; printf ok".into()];
+        let root = std::env::temp_dir().join(format!(
+            "omamail-async-overlap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let root_arg = root.to_str().unwrap().to_owned();
+        // Each child announces that it started, then refuses to finish until
+        // all three announcements exist. A serialized runner would deadlock
+        // and time out; successful output therefore proves actual overlap
+        // without relying on scheduler-sensitive elapsed time.
+        let script = "import os,sys,time\nroot,name=sys.argv[1:3]\nopen(os.path.join(root,name),'x').close()\nwhile len(os.listdir(root)) < 3: time.sleep(0.01)\nsys.stdout.write('ok')";
+        let a_args = vec!["-c".into(), script.into(), root_arg.clone(), "a".into()];
+        let b_args = vec!["-c".into(), script.into(), root_arg.clone(), "b".into()];
+        let c_args = vec!["-c".into(), script.into(), root_arg, "c".into()];
         let (a, b, c) = tokio::join!(
-            run("/bin/sh", &args, b"", Duration::from_secs(2), 1024),
-            run("/bin/sh", &args, b"", Duration::from_secs(2), 1024),
-            run("/bin/sh", &args, b"", Duration::from_secs(2), 1024)
+            run("python3", &a_args, b"", Duration::from_secs(2), 1024),
+            run("python3", &b_args, b"", Duration::from_secs(2), 1024),
+            run("python3", &c_args, b"", Duration::from_secs(2), 1024)
         );
         for result in [a, b, c] {
             assert_eq!(result.unwrap().stdout, b"ok");
         }
-        assert!(started.elapsed() < Duration::from_millis(280));
-        let marker = std::env::temp_dir().join(format!("omamail-cancel-{}", std::process::id()));
+        let marker = root.join("cancel");
         let path = marker.to_str().unwrap().to_owned();
         let task = tokio::spawn(async move {
             run("python3", &["-c".into(), "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(30)".into(), path], b"", Duration::from_secs(30), 1024).await
@@ -163,7 +178,7 @@ mod tests {
             0,
             "cancelled child must be gone"
         );
-        std::fs::remove_file(marker).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
