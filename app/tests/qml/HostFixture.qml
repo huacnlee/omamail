@@ -24,6 +24,7 @@ QtObject {
   property var files: ({})
   property var watched: ({})
   signal notificationActivated(string accountId, string messageId)
+  signal reopenRequested()
   signal changed(string path)
   signal failed(string path, string error)
 

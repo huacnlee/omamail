@@ -8,6 +8,6 @@
     </filter>
   </defs>
   <g filter="url(#shadow)">
-    <rect x="28" y="28" width="968" height="968" rx="220" fill="#1a1b26"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="#1a1b26"/>
   </g>
 </svg>

@@ -134,7 +134,8 @@ TestCase {
     compare(toolTip.background.opacity, 1)
     compare(toolTip.background.color.a, 1)
     verify(toolTip.background.z < toolTip.contentItem.z)
-    compare(String(toolTip.background.color), String(Color.surface))
+    compare(String(toolTip.background.color), String(Color.popups.background))
+    compare(String(toolTip.background.color), String(Color.background))
     toolTip.visible = false
     tryCompare(toolTip, "opened", false)
   }
@@ -173,6 +174,7 @@ TestCase {
     verify(Color.accent.valid)
     verify(Color.urgent.valid)
     verify(Color.popups.background.valid)
+    compare(String(Color.popups.background), String(Color.background))
     verify(Color.popups.border.valid)
     verify(Style.normalBorderColor.valid)
     verify(Style.selectedAccentFill.valid)
@@ -246,12 +248,12 @@ TestCase {
     verify(!Color.hasOmarchyTheme)
     verify(Color.applySystemAppearance("light"))
     compare(Color.dark, false)
-    compare(String(Color.background), "#ffffff")
-    compare(String(Color.foreground), "#212121")
-    compare(String(Color.accent), "#3264eb")
-    compare(String(Color.surface), "#f5f5f5")
-    compare(String(Color.inset), "#ececec")
-    compare(String(Color.border), "#9e9e9e")
+    compare(String(Color.background), "#fffcf0")
+    compare(String(Color.foreground), "#100f0f")
+    compare(String(Color.accent), "#205ea6")
+    compare(String(Color.surface), "#f2f0e5")
+    compare(String(Color.inset), "#e6e4d9")
+    compare(String(Color.border), "#b7b5ac")
 
     verify(Color.applySystemAppearance("dark"))
     compare(Color.dark, true)
@@ -266,6 +268,35 @@ TestCase {
     verify(!Color.applySystemAppearance("dark"))
     compare(String(Color.accent), "#123456")
     compare(Color.dark, false)
+  }
+
+  function test_preferred_appearance_overrides_the_desktop_but_not_omarchy() {
+    host.files = ({})
+    Color.preferredAppearance = ""
+    Color.reload()
+    verify(!Color.hasOmarchyTheme)
+    Color.preferredAppearance = "dark"
+    compare(Color.dark, true)
+    compare(String(Color.background), "#1a1b26")
+    Color.preferredAppearance = "light"
+    compare(Color.dark, false)
+    compare(String(Color.background), "#fffcf0")
+    // The desktop's scheme only decides when nothing is preferred.
+    verify(Color.applySystemAppearance("dark"))
+    compare(Color.dark, true)
+    compare(Color.fallbackAppearance(), "light")
+    Color.reload()
+    compare(Color.dark, false)
+
+    var path = "/fixture/home/.local/state/omarchy/current/theme/colors.toml"
+    host.files[path] =
+      "mode='dark'\nbackground='#010203'\nforeground='#fefefe'\naccent='#123456'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
+    verify(Color.reload())
+    verify(Color.hasOmarchyTheme)
+    Color.preferredAppearance = "light"
+    compare(Color.dark, true)
+    compare(String(Color.background), "#010203")
+    Color.preferredAppearance = ""
   }
 
   function test_theme_change_reloads_the_active_palette() {

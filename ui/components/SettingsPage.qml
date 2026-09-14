@@ -3,6 +3,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
+import "../settings/Appearance.js" as Appearance
 import "../message/Html.js" as Html
 
 // Where mailboxes are managed.
@@ -268,6 +269,81 @@ Column {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.heading
     font.bold: true
+  }
+
+  // ------------------------------------------------------------ appearance
+  //
+  // Standalone only. The plugin's palette is the shell's, and the row would
+  // have nothing to change.
+
+  Text {
+    id: appearanceHeading
+    visible: !!root.service && root.service.hasAppearance === true
+    text: "APPEARANCE"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    objectName: "appearance-settings"
+    visible: !!root.service && root.service.hasAppearance === true
+    width: parent.width
+    implicitHeight: Math.max(appearanceText.implicitHeight, appearanceTrack.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: appearanceText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: appearanceTrack.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Theme"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "System follows the desktop's light or dark setting."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Rectangle {
+      id: appearanceTrack
+      objectName: "appearanceTrack"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      width: appearanceSegments.implicitWidth
+      height: appearanceSegments.implicitHeight
+      radius: Style.cornerRadius
+      color: "transparent"
+      border.width: 1
+      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+
+      Row {
+        id: appearanceSegments
+        spacing: 0
+
+        AppearanceButton { text: Appearance.SYSTEM; mode: Appearance.SYSTEM; firstSegment: true }
+        AppearanceButton { text: Appearance.LIGHT; mode: Appearance.LIGHT }
+        AppearanceButton { text: Appearance.DARK; mode: Appearance.DARK }
+      }
+    }
   }
 
   // ------------------------------------------------------------------- bar
@@ -1211,6 +1287,29 @@ Column {
       foreground: root.dimColor
       fontFamily: root.panelFontFamily
       onClicked: root.clientSetupRequested()
+    }
+  }
+
+  // One of the three palettes the standalone window can draw with.
+  component AppearanceButton: Button {
+    required property string mode
+    property bool firstSegment: false
+    objectName: "appearance-" + mode.toLowerCase()
+    selected: !!root.service && root.service.appearance === mode
+    bordered: false
+    foreground: selected ? root.textColor : root.dimColor
+    accent: root.accentColor
+    fontFamily: root.panelFontFamily
+    fontSize: Style.font.caption
+    horizontalPadding: Style.space(7)
+    verticalPadding: Style.space(3)
+    onClicked: if (root.service) root.service.setAppearance(mode)
+
+    Rectangle {
+      visible: !parent.firstSegment
+      width: 1
+      height: parent.height
+      color: appearanceTrack.border.color
     }
   }
 

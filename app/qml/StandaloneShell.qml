@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Dialogs
+import qs.Commons
 
 QtObject {
   id: root
@@ -19,7 +20,10 @@ QtObject {
     tray: false,
     mailto: false,
     notifications: !!host && !!host.capabilities
-      && host.capabilities.notifications === true
+      && host.capabilities.notifications === true,
+    // An installed Omarchy theme is the palette; the appearance setting only
+    // has something to decide where the fallback palettes are in use.
+    appearance: !Color.hasOmarchyTheme
   })
 
   property var fileCallback: null

@@ -1,3 +1,4 @@
+#include "app_icon.h"
 #include "resource_check.h"
 
 #include <QDir>
@@ -44,6 +45,7 @@ private:
     }
 
 private slots:
+    void platedIconReadsEveryPngInTheIcns();
     void acceptsCompleteReadableLayout();
     void reportsEachMissingComponent_data();
     void reportsEachMissingComponent();
@@ -59,6 +61,24 @@ private slots:
     void developmentDiscoveryUsesExplicitSourceAndBackend();
     void bundleDiscoveryAcceptsPortableRootLayout();
 };
+
+void ResourcesTest::platedIconReadsEveryPngInTheIcns()
+{
+    const QIcon icon = iconFromIcnsFile(QDir(QStringLiteral(OMAMAIL_SOURCE_ROOT))
+        .filePath(QStringLiteral("app/resources/macos/omamail.icns")));
+    QVERIFY(!icon.isNull());
+    const QList<QSize> sizes = icon.availableSizes();
+    for (int dimension : {32, 64, 128, 256, 512, 1024})
+        QVERIFY2(sizes.contains(QSize(dimension, dimension)), qPrintable(QString::number(dimension)));
+    // The plate is the Omarchy background, not the bare logo's transparency.
+    const QImage image = icon.pixmap(QSize(64, 64)).toImage();
+    QCOMPARE(image.pixelColor(32, 16).name(), QStringLiteral("#1a1b26"));
+    QCOMPARE(image.pixelColor(2, 2).alpha(), 0);
+
+    QVERIFY(iconFromIcns(QByteArray()).isNull());
+    QVERIFY(iconFromIcns(QByteArrayLiteral("icns\0\0\0\x08")).isNull());
+    QVERIFY(iconFromIcnsFile(QStringLiteral("/nonexistent/omamail.icns")).isNull());
+}
 
 void ResourcesTest::acceptsCompleteReadableLayout()
 {

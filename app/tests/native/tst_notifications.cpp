@@ -76,6 +76,7 @@ private slots:
     void duplicateRefreshesTheDurableRouteLru();
     void nulTextIsRejectedBeforeThePlatformBoundary();
     void activationRaisesExistingWindow();
+    void activatingWithoutWindowsAsksToReopen();
     void routesSurviveRestartAndEarlyActivation();
     void platformActivationAliasSurvivesRestart();
     void platformActivationAliasIsQualifiedByBusAndServiceOwner();
@@ -319,6 +320,26 @@ void NotificationTest::activationRaisesExistingWindow()
     QCOMPARE(host.takePendingNotificationActivation().value(
                  QStringLiteral("accountId")), QStringLiteral("account"));
     QVERIFY(host.pendingNotificationActivation().isEmpty());
+}
+
+void NotificationTest::activatingWithoutWindowsAsksToReopen()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    ApplicationHost host({}, {}, directory.filePath(QStringLiteral("settings.json")),
+                         std::make_unique<FakeNotificationPlatform>());
+    QSignalSpy reopen(&host, &ApplicationHost::reopenRequested);
+    QWindow window;
+    window.hide();
+
+    host.handleApplicationStateChanged(Qt::ApplicationInactive);
+    QCOMPARE(reopen.size(), 0);
+    host.handleApplicationStateChanged(Qt::ApplicationActive);
+    QCOMPARE(reopen.size(), 1);
+
+    window.show();
+    host.handleApplicationStateChanged(Qt::ApplicationActive);
+    QCOMPARE(reopen.size(), 1);
 }
 
 void NotificationTest::routesSurviveRestartAndEarlyActivation()

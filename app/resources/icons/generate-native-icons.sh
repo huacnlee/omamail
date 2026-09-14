@@ -13,7 +13,7 @@ command -v magick >/dev/null 2>&1 || { printf 'ImageMagick is required\n' >&2; e
 command -v iconutil >/dev/null 2>&1 || { printf 'Apple iconutil is required\n' >&2; exit 1; }
 
 magick -background none "$plate" -resize 1024x1024 "$work/plate.png"
-magick -background none -density 768 "$source_logo" -resize 700x700 "$work/logo.png"
+magick -background none -density 768 "$source_logo" -resize 596x596 "$work/logo.png"
 magick "$work/plate.png" "$work/logo.png" -gravity center -composite "$work/master.png"
 
 iconset="$work/omamail.iconset"

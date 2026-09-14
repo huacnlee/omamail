@@ -139,9 +139,34 @@ TestCase {
     verify(composition.app.standaloneWindowChrome)
     var windowBorder = findChild(composition, "standalone-window-border")
     verify(windowBorder)
-    compare(String(windowBorder.border.color), String(composition.app.borderColor))
-    compare(windowBorder.border.width, composition.app.borderWidth)
+    compare(String(windowBorder.border.color), String(Color.border))
+    verify(String(Color.border) !== String(composition.app.borderColor))
+    compare(windowBorder.border.width,
+      composition.app.borderWidth / Math.max(1, Screen.devicePixelRatio))
     verify(windowBorder.visible)
+    var corners = {
+      "top-left": Qt.SizeFDiagCursor, "top-right": Qt.SizeBDiagCursor,
+      "bottom-left": Qt.SizeBDiagCursor, "bottom-right": Qt.SizeFDiagCursor
+    }
+    // Repeater delegates have a visual parent but no object parent, so
+    // findChild cannot see them; the window's content lists them directly.
+    function resizeCorner(name) {
+      var items = composition.contentItem.children
+      for (var i = 0; i < items.length; i++)
+        if (items[i].objectName === "standalone-resize-corner-" + name) return items[i]
+      return null
+    }
+    for (var name in corners) {
+      var corner = resizeCorner(name)
+      verify(corner, name)
+      compare(corner.cursorShape, corners[name])
+      verify(corner.visible)
+      compare(corner.x, name.indexOf("right") >= 0 ? composition.width - corner.width : 0)
+      compare(corner.y, name.indexOf("bottom") >= 0 ? composition.height - corner.height : 0)
+    }
+    composition.visibility = Window.Maximized
+    compare(resizeCorner("top-left").visible, false)
+    composition.visibility = Window.Windowed
     verify(findChild(composition, "app-title-bar-drag-area").enabled)
     verify(composition.app.opened)
     compare(composition.service.capabilities.agent, false)
@@ -161,6 +186,20 @@ TestCase {
     compare(findChild(composition, "compose-agent"), null)
     compare(findChild(composition, "backend-diagnose").visible, false)
     compare(findChild(composition, "bar-settings").visible, false)
+    compare(composition.service.capabilities.appearance, true)
+    composition.app.openSettings()
+    verify(findChild(composition, "appearance-settings").visible)
+    compare(composition.service.appearance, "System")
+    findChild(composition, "appearance-dark").clicked()
+    compare(host.settings.appearance, "Dark")
+    compare(composition.service.appearance, "Dark")
+    compare(Color.dark, true)
+    compare(String(Color.preferredAppearance), "dark")
+    findChild(composition, "appearance-light").clicked()
+    compare(Color.dark, false)
+    compare(String(Color.background), "#fffcf0")
+    findChild(composition, "appearance-system").clicked()
+    compare(String(Color.preferredAppearance), "")
     var appMenu = findChild(composition, "app-menu")
     verify(appMenu)
     compare(appMenu.canQuit, true)
@@ -176,23 +215,23 @@ TestCase {
   function test_window_size_restores_and_is_saved_after_resize() {
     var path = "/fixture/config/omamail/window-size.json"
     host.files = ({})
-    host.files[path] = JSON.stringify({width: 1040, height: 680})
+    host.files[path] = JSON.stringify({width: 1000, height: 680})
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
-    compare(composition.width, 1040)
+    compare(composition.width, 1000)
     compare(composition.height, 680)
-    composition.width = 1110
+    composition.width = 980
     composition.height = 710
     composition.scheduleWindowSizeSave()
     composition.saveWindowSize()
     var saved = JSON.parse(host.files[path])
-    compare(saved.width, 1110)
+    compare(saved.width, 980)
     compare(saved.height, 710)
     composition.destroy()
     wait(0)
     var restarted = createTemporaryObject(compositionComponent, testCase)
     verify(restarted)
-    compare(restarted.width, 1110)
+    compare(restarted.width, 980)
     compare(restarted.height, 710)
   }
 
@@ -202,25 +241,41 @@ TestCase {
     host.files[path] = "{broken JSON"
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
-    compare(composition.width, Math.min(1280, Math.max(760, composition.availableWindowWidth)))
-    compare(composition.height, Math.min(900, Math.max(520, composition.availableWindowHeight)))
-    compare(composition.boundedWindowDimension(759, 1280, 760, 1920), 1280)
-    compare(composition.boundedWindowDimension("900", 900, 520, 1080), 900)
-    compare(composition.boundedWindowDimension(20000, 1280, 760, 1920), 1280)
-    compare(composition.boundedWindowDimension(1600, 1280, 760, 1200), 1200)
+    compare(composition.width, Math.min(1024, Math.max(760, composition.availableWindowWidth)))
+    compare(composition.height, Math.min(768, Math.max(520, composition.availableWindowHeight)))
+    compare(composition.boundedWindowDimension(759, 1024, 760, 1920), 1024)
+    compare(composition.boundedWindowDimension("768", 768, 520, 1080), 768)
+    compare(composition.boundedWindowDimension(20000, 1024, 760, 1920), 1024)
+    compare(composition.boundedWindowDimension(1600, 1024, 760, 1200), 1200)
+  }
+
+  function test_close_chord_shuts_the_window_through_the_host() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    composition.requestActivate()
+    tryVerify(function() { return composition.active })
+    keySequence(StandardKey.Close)
+    compare(composition.app.opened, false)
+    compare(host.hidden, true)
+    compare(host.quitCalled, false)
+    // The Dock brings it back through the same door the launcher uses.
+    host.reopenRequested()
+    compare(composition.app.opened, true)
+    verify(composition.visible)
   }
 
   function test_non_windowed_size_does_not_replace_saved_normal_size() {
     var path = "/fixture/config/omamail/window-size.json"
     host.files = ({})
-    host.files[path] = JSON.stringify({width: 1040, height: 680})
+    host.files[path] = JSON.stringify({width: 1000, height: 680})
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
     composition.visibility = Window.Maximized
     composition.width = 1400
     composition.height = 850
     composition.saveWindowSize()
-    compare(JSON.parse(host.files[path]), {width:1040, height:680})
+    compare(JSON.parse(host.files[path]), {width:1000, height:680})
   }
 
   function test_shell_persists_settings_and_routes_activation_payload() {

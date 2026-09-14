@@ -28,8 +28,18 @@ QtObject {
   readonly property color border: theme.border
   readonly property color onAccent: theme.onAccent
 
+  // "light", "dark", or "" to follow the desktop. Set by the standalone
+  // window from its appearance setting; an Omarchy theme overrides both.
+  property string preferredAppearance: ""
+  onPreferredAppearanceChanged: applySystemAppearance(fallbackAppearance())
+
   function systemAppearance() {
     return Application.styleHints.colorScheme === Qt.Light ? "light" : "dark"
+  }
+
+  function fallbackAppearance() {
+    return preferredAppearance === "light" || preferredAppearance === "dark"
+      ? preferredAppearance : systemAppearance()
   }
 
   function applySystemAppearance(appearance) {
@@ -52,9 +62,12 @@ QtObject {
     if (!isFinite(amount)) amount = 1
     return Qt.rgba(value.r, value.g, value.b, Math.max(0, Math.min(1, amount)))
   }
+  // A menu is a piece of the window, not a raised card: without a shell.toml
+  // saying otherwise it sits on the window's own background, and only its
+  // border separates it from what is behind.
   readonly property QtObject popups: QtObject {
     readonly property color background: root.withAlpha(
-      root.shellColor(root.shellTheme.popups.background, root.surface),
+      root.shellColor(root.shellTheme.popups.background, root.background),
       root.shellTheme.popups["background-alpha"] === undefined
         ? 1 : root.shellTheme.popups["background-alpha"])
     readonly property color text: root.shellColor(root.shellTheme.popups.text, root.foreground)
@@ -82,7 +95,7 @@ QtObject {
     if (home === "" || !store || typeof store.read !== "function") {
       updateWatches(null, [])
       hasOmarchyTheme = false
-      theme = Theme.fallback(systemAppearance())
+      theme = Theme.fallback(fallbackAppearance())
       return false
     }
     var stateCurrent = home + "/.local/state/omarchy/current"
@@ -102,7 +115,7 @@ QtObject {
     var shellResult = store.read(shellPath) || ({})
     var userShellResult = store.read(userShellPath) || ({})
     var parsedTheme = result.ok === true ? Theme.parse(String(result.text || "")) : null
-    var nextTheme = parsedTheme ? Theme.roles(parsedTheme) : Theme.fallback(systemAppearance())
+    var nextTheme = parsedTheme ? Theme.roles(parsedTheme) : Theme.fallback(fallbackAppearance())
     var nextShellTheme = ShellTheme.resolve(
       shellResult.ok === true ? String(shellResult.text || "") : "",
       userShellResult.ok === true ? String(userShellResult.text || "") : "")
@@ -131,7 +144,7 @@ QtObject {
 
   property Connections styleHintsConnections: Connections {
     target: Application.styleHints
-    function onColorSchemeChanged() { root.applySystemAppearance(root.systemAppearance()) }
+    function onColorSchemeChanged() { root.applySystemAppearance(root.fallbackAppearance()) }
   }
 
   Component.onCompleted: reload()

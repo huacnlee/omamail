@@ -18,6 +18,16 @@ main = (APP / "src/main.cpp").read_text(encoding="utf-8")
 require(main, 'setApplicationName(QStringLiteral("Omamail"))', "Qt application name")
 require(main, 'setWindowIcon(QIcon(QStringLiteral(', "Qt window icon")
 require(main, ':/omamail/app/resources/icons/omamail.svg', "Qt Omamail icon resource")
+# The bare logo is the Linux and Windows window icon. On macOS the plated
+# bundle icon is the application icon, and setting a window icon there would
+# swap the Dock image for the bare logo while Finder keeps the plate. A run
+# outside a bundle takes the same plated icon from the resource.
+require(main, '#ifdef Q_OS_MACOS\n    if (!QCoreApplication::applicationDirPath().endsWith(',
+        "macOS bundle icon guard")
+require(main, 'iconFromIcnsFile(QStringLiteral(\n            ":/omamail/app/resources/macos/omamail.icns"',
+        "macOS development icon")
+cmake = (APP / "CMakeLists.txt").read_text(encoding="utf-8")
+require(cmake, 'resources/macos/omamail.icns"', "macOS icon resource")
 
 qml = (APP / "qml/Main.qml").read_text(encoding="utf-8")
 require(qml, 'title: "Omamail"', "window title")
@@ -32,7 +42,9 @@ if plist.get("CFBundleIconFile") != "omamail.icns":
 
 mac_svg = (APP / "resources/macos/omamail-macos.svg").read_text(encoding="utf-8")
 require(mac_svg, 'viewBox="0 0 1024 1024"', "macOS 1024px icon canvas")
-require(mac_svg, 'x="28" y="28" width="968" height="968" rx="220"',
+# Apple's app-icon grid: an 824pt plate on the 1024pt canvas. A plate that
+# fills the canvas sits in the Dock visibly larger than every neighbour.
+require(mac_svg, 'x="100" y="100" width="824" height="824" rx="185"',
         "macOS rounded icon plate")
 require(mac_svg, 'fill="#1a1b26"', "Omarchy background on the macOS icon")
 if '<path' in mac_svg:
@@ -40,7 +52,7 @@ if '<path' in mac_svg:
 generator = (APP / "resources/icons/generate-native-icons.sh").read_text(encoding="utf-8")
 require(generator, 'source_logo="$root/resources/icons/omamail.svg"',
         "canonical native icon logo source")
-require(generator, '-density 768 "$source_logo" -resize 700x700 "$work/logo.png"',
+require(generator, '-density 768 "$source_logo" -resize 596x596 "$work/logo.png"',
         "native icon logo scale")
 require(generator, '"$work/plate.png" "$work/logo.png" -gravity center -composite',
         "complete native icon composition")

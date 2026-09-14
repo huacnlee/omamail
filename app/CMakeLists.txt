@@ -16,6 +16,8 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 qt_standard_project_setup(REQUIRES 6.5)
 
 set(OMAMAIL_NATIVE_SOURCES
+  src/app_icon.cpp
+  src/app_icon.h
   src/application_host.cpp
   src/application_host.h
   src/file_store.cpp
@@ -105,6 +107,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
     PREFIX "/omamail/app"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}"
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/omamail.svg"
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources/macos/omamail.icns"
   )
 endif()
 

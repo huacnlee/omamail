@@ -1071,7 +1071,7 @@ oversized=$(cd ..
       case "$file" in
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
-        (app/resources/macos/omamail.icns) ceiling=125257 ;;
+        (app/resources/macos/omamail.icns) ceiling=111809 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
@@ -1105,18 +1105,18 @@ FONT_CHECKSUMS
 icon_provenance=app/resources/macos/ICON-PROVENANCE.md
 [ -f "../$icon_provenance" ] || fail "the macOS icon must record its provenance"
 mac_icon=app/resources/macos/omamail.icns
-[ "$(cd .. && wc -c < "$mac_icon")" -eq 125257 ] \
+[ "$(cd .. && wc -c < "$mac_icon")" -eq 111809 ] \
   || fail "$mac_icon does not match its reviewed byte size"
-mac_icon_checksum=9d5df5d8d3fd0d6db8cbbb8f31bb38a44b185d37329de4d6b6f58c404980e22d
+mac_icon_checksum=bd29ce1e72aa9db37ed5b1cb930956d2d933dc4426e7cea7f1b8baf2edb9262d
 actual_mac_icon_checksum=$(cd .. && shasum -a 256 "$mac_icon" | awk '{print $1}')
 [ "$actual_mac_icon_checksum" = "$mac_icon_checksum" ] \
   || fail "$mac_icon does not match its reviewed checksum"
 grep -q "$mac_icon_checksum" "../$icon_provenance" \
   || fail "$mac_icon checksum is missing from its shipped provenance"
-grep -q 'b900f47d96947727d17c150f0963f63ff09d476135e2fac440ca5fb5ead8f7fc' "../$icon_provenance" \
+grep -q '1277a2cf247b275a15961fb20175420abb5dfc5489acb95313f4f604c09b6e78' "../$icon_provenance" \
   || fail "the macOS icon source checksum is missing from its shipped provenance"
 windows_icon=app/resources/windows/omamail.ico
-windows_icon_checksum=4762a6d6ab3b4d4136b3efccdff7ea0bc5157165605c1dda9fe19cca8bb2aaa7
+windows_icon_checksum=2562966adb272711ae0274f7eade7ef2680781bb4405182280a310658752131d
 actual_windows_icon_checksum=$(cd .. && shasum -a 256 "$windows_icon" | awk '{print $1}')
 [ "$actual_windows_icon_checksum" = "$windows_icon_checksum" ] \
   || fail "$windows_icon does not match its reviewed checksum"

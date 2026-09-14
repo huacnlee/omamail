@@ -143,6 +143,7 @@ test-js:
 	node ui/tests/test_mailto.js
 	node ui/tests/test_html.js
 	node ui/tests/test_direction.js
+	node ui/tests/test_appearance.js
 	node ui/tests/test_cache.js
 	node ui/tests/test_render_cache.js
 	node ui/tests/test_model.js

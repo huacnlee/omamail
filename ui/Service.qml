@@ -20,6 +20,7 @@ import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
 import "message/Direction.js" as Direction
+import "settings/Appearance.js" as Appearance
 
 // Every mailbox on this machine, and whichever one is on screen.
 //
@@ -128,6 +129,7 @@ Item {
     maxMessages: 50,
     heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
     contentDirection: Direction.MODE_DEFAULT,
+    appearance: Appearance.MODE_DEFAULT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
@@ -159,6 +161,11 @@ Item {
   readonly property bool hasTray: capabilities.tray === true
   readonly property bool hasMailto: capabilities.mailto === true
   readonly property bool hasNotifications: capabilities.notifications === true
+  // Only a host that paints its own window has a palette to choose. The
+  // Omarchy plugin's colours are the shell's, decided in colors.toml.
+  readonly property bool hasAppearance: capabilities.appearance === true
+  readonly property string appearance: Appearance.normalizeMode(
+    settings ? settings.appearance : null)
   readonly property string notificationError: platform && platform.notificationError
     ? String(platform.notificationError) : ""
   readonly property string calendarPalettePath: platform
@@ -591,6 +598,10 @@ Item {
 
   function setContentDirection(value) {
     persistSetting("contentDirection", Direction.normalizeMode(value))
+  }
+
+  function setAppearance(value) {
+    persistSetting("appearance", Appearance.normalizeMode(value))
   }
 
   function setUnifiedCalendarView(value) {

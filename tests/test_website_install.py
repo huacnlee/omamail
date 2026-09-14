@@ -10,17 +10,24 @@ PAGE = (ROOT / "docs/index.html").read_text(encoding="utf-8")
 UNIX_INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh"
 )
-WINDOWS_LINES = (
-    "$installer = Join-Path $env:TEMP 'omamail-install.ps1'",
-    "Invoke-WebRequest https://raw.githubusercontent.com/huacnlee/omamail/main/install.ps1 -OutFile $installer",
-    "&amp; $installer",
+TABS = (
+    'role="tab" id="install-tab-macos" aria-controls="install-macos" aria-selected="true"',
+    'role="tab" id="install-tab-linux" aria-controls="install-linux" aria-selected="false"',
+)
+PANELS = (
+    'role="tabpanel" id="install-macos" aria-labelledby="install-tab-macos"',
+    'role="tabpanel" id="install-linux" aria-labelledby="install-tab-linux" hidden',
 )
 
 assert (ROOT / "install.sh").is_file(), "website links to a missing Unix installer"
-assert (ROOT / "install.ps1").is_file(), "website links to a missing Windows installer"
 assert PAGE.count(UNIX_INSTALL) == 2, "macOS and Linux must each show the canonical curl command"
-for line in WINDOWS_LINES:
-    assert line in PAGE, f"website is missing the Windows installer line: {line}"
+# The site shows macOS and Linux, one at a time behind tabs. Windows has an
+# installer in the repository but no published instructions yet.
+for tab in TABS:
+    assert tab in PAGE, f"website is missing the install tab: {tab}"
+for panel in PANELS:
+    assert panel in PAGE, f"website is missing the install panel: {panel}"
+assert "install.ps1" not in PAGE, "website still shows the Windows installer"
 assert "TAR.GZ ONLY" in PAGE, "Linux package format is not explicit"
 assert "make app-run" in PAGE, "standalone development entry point is missing"
 assert "mailto:</code> registration" in PAGE, "standalone capability boundary is missing"

@@ -1,5 +1,6 @@
-#include "resource_check.h"
+#include "app_icon.h"
 #include "notifications.h"
+#include "resource_check.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -44,8 +45,20 @@ int main(int argc, char *argv[])
     if (!readyFile.isEmpty() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication application(argc, argv);
+    // macOS shows the bundle's CFBundleIconFile — the plated omamail.icns —
+    // in Finder, and a window icon set here replaces that Dock image with the
+    // bare logo. Leave the bundle icon alone there. A development run has no
+    // bundle and would sit in the Dock as a generic executable, so it takes
+    // the same plated icon from the resource instead. The other platforms
+    // take their window icon from the SVG.
+#ifdef Q_OS_MACOS
+    if (!QCoreApplication::applicationDirPath().endsWith(QStringLiteral(".app/Contents/MacOS")))
+        application.setWindowIcon(iconFromIcnsFile(QStringLiteral(
+            ":/omamail/app/resources/macos/omamail.icns")));
+#else
     application.setWindowIcon(QIcon(QStringLiteral(
         ":/omamail/app/resources/icons/omamail.svg")));
+#endif
     const ResourcePaths paths = defaultResourcePaths({}, developmentResourcesEnabled());
     if (!readyFile.isEmpty()) {
         QString error;

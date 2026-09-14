@@ -11,15 +11,14 @@ var DARK_FALLBACK = {
   mode: "dark"
 }
 
-// Lupine is Omarchy's built-in light theme. This standalone adaptation keeps
-// its palette pinned to the source, with the user-selected pure-white window
-// background replacing Lupine's near-white background:
-// https://github.com/bjarneo/omarchy-lupine-theme/blob/3c225d2129e6f8649e6a9ebba18ea5db4e37f7a3/colors.toml
+// Flexoki Light, the warm light palette gpui-omarchy and the Omamail website
+// use outside Omarchy. Status colours are already dark enough to read as text
+// on the paper background.
 var LIGHT_FALLBACK = {
-  background: "#ffffff", foreground: "#212121", accent: "#3264eb",
-  red: "#c900c4", yellow: "#026fde", green: "#4a2fd0",
-  lighter_background: "#f5f5f5", dark_background: "#ececec",
-  bright_foreground: "#000000", selection: "#d0d0d0", muted: "#9e9e9e",
+  background: "#fffcf0", foreground: "#100f0f", accent: "#205ea6",
+  red: "#af3029", yellow: "#855b00", green: "#526600",
+  lighter_background: "#f2f0e5", dark_background: "#e6e4d9",
+  bright_foreground: "#100f0f", selection: "#dad8ce", muted: "#b7b5ac",
   mode: "light"
 }
 
