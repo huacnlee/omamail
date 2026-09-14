@@ -82,7 +82,10 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("Test-Package.ps1", block)
                     self.assertIn("Test-Install.ps1", block)
                     self.assertIn("package-release.ps1", block)
-                    self.assertIn("-HostBinary build/app/omamail-app.exe", block)
+                    self.assertIn('-G "Visual Studio 17 2022" -A x64', block)
+                    self.assertIn("cmake --build build/app --config Release", block)
+                    self.assertIn("ctest --test-dir build/app -C Release", block)
+                    self.assertIn("-HostBinary build/app/Release/omamail-app.exe", block)
                 else:
                     self.assertIn("test_package.py", block)
                     self.assertIn("test_install.sh", block)
@@ -108,6 +111,10 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("package-release.ps1", block)
                     self.assertIn("Test-Package.ps1", block)
                     self.assertIn("Test-Install.ps1", block)
+                    self.assertIn('-G "Visual Studio 17 2022" -A x64', block)
+                    self.assertIn("cmake --build build/app --config Release", block)
+                    self.assertIn("ctest --test-dir build/app -C Release", block)
+                    self.assertIn("-HostBinary build/app/Release/omamail-app.exe", block)
                 else:
                     self.assertIn(f"package-release.sh {target}", block)
                     self.assertIn("test_package.py", block)

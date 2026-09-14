@@ -166,11 +166,11 @@ jobs:
           $version = python scripts/package-backend.py check
           cargo build --release --locked --no-default-features --features standalone
           if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
+          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
           if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
-          cmake --build build/app
+          cmake --build build/app --config Release
           if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
-          ctest --test-dir build/app --output-on-failure
+          ctest --test-dir build/app -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
           python app/tests/test_qml_inventory.py
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
@@ -184,7 +184,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $version = python scripts/package-backend.py check
-          & app/scripts/package-release.ps1 -HostBinary build/app/omamail-app.exe -Backend target/release/omamail.exe
+          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe -Backend target/release/omamail.exe
           if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
           & app/tests/Test-Package.ps1
           & app/tests/Test-Install.ps1
