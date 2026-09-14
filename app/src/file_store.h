@@ -16,6 +16,7 @@ public:
     explicit FileStore(QObject *parent = nullptr);
 
     Q_INVOKABLE QVariantMap read(const QString &path);
+    Q_INVOKABLE bool exists(const QString &path) const;
     Q_INVOKABLE QVariantMap write(const QString &path, const QString &text,
                                   bool atomic = true);
     Q_INVOKABLE void watch(const QString &path, bool enabled);

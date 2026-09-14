@@ -93,6 +93,11 @@ QVariantMap FileStore::read(const QString &path)
     return result(true, QString::fromUtf8(file.readAll()));
 }
 
+bool FileStore::exists(const QString &path) const
+{
+    return QFileInfo::exists(path);
+}
+
 QVariantMap FileStore::write(const QString &path, const QString &text, bool atomic)
 {
     if (path.isEmpty()) {

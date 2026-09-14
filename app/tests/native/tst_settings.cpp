@@ -86,9 +86,12 @@ void SettingsTest::fileStoreReadsWritesAndWatches()
     QTemporaryDir directory;
     const QString path = directory.filePath(QStringLiteral("payload.txt"));
     FileStore store;
+    QVERIFY(!store.exists(path));
     QSignalSpy changed(&store, &FileStore::changed);
     auto written = store.write(path, QString::fromUtf8("one €"), true);
     QVERIFY(written.value(QStringLiteral("ok")).toBool());
+    QVERIFY(store.exists(path));
+    QVERIFY(store.exists(directory.path()));
     const auto read = store.read(path);
     QVERIFY(read.value(QStringLiteral("ok")).toBool());
     QCOMPARE(read.value(QStringLiteral("text")).toString(), QString::fromUtf8("one €"));

@@ -4,29 +4,36 @@ import QtQuick
 QtObject {
   id: root
 
+  readonly property FontLoader iconFont: FontLoader {
+    source: "../../../../assets/fonts/SymbolsNerdFontMono-Regular.ttf"
+  }
+
   readonly property FontMetrics metrics: FontMetrics { font: Qt.application.font }
-  readonly property real baseFontSize: Math.max(10,
-    metrics.font.pixelSize > 0 ? metrics.font.pixelSize : metrics.height * 0.8)
-  property real spacingScale: Math.max(0.75, baseFontSize / 14)
-  readonly property real cornerRadius: space(4)
+  // Omarchy shell baseline at the inspected revision. The standalone port
+  // keeps the platform's text family, while retaining the shell's logical
+  // type and spacing scale and its square fallback geometry.
+  readonly property real baseFontSize: 12
+  property real spacingScale: 1
+  readonly property real cornerRadius: 0
   readonly property real normalBorderWidth: 1
   readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
   readonly property var font: ({
     family: metrics.font.family,
-    title: Math.round(baseFontSize * 1.55),
-    heading: Math.round(baseFontSize * 1.28),
-    subtitle: Math.round(baseFontSize * 1.1),
+    iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
+    title: Math.round(baseFontSize * 1.167),
+    heading: Math.round(baseFontSize * 1.333),
+    subtitle: Math.round(baseFontSize * 1.083),
     body: Math.round(baseFontSize),
-    bodySmall: Math.round(baseFontSize * 0.93),
-    caption: Math.round(baseFontSize * 0.79),
-    iconLarge: Math.round(baseFontSize * 1.55),
-    icon: Math.round(baseFontSize * 1.14),
-    iconSmall: Math.round(baseFontSize)
+    bodySmall: Math.round(baseFontSize * 0.917),
+    caption: Math.round(baseFontSize * 0.833),
+    iconLarge: Math.round(baseFontSize * 1.5),
+    icon: Math.round(baseFontSize * 1.167),
+    iconSmall: Math.round(baseFontSize * 0.917)
   })
   readonly property var spacing: ({
-    controlPaddingX: space(8), controlPaddingY: space(5), inputPaddingY: space(5),
-    controlHeight: space(30), controlGap: space(6), sm: space(3), md: space(6),
+    controlPaddingX: space(10), controlPaddingY: space(6), inputPaddingY: space(7),
+    controlHeight: space(28), controlGap: space(8), sm: space(4), md: space(6),
     popupRowHeight: space(28)
   })
 
@@ -43,12 +50,12 @@ QtObject {
       first.a * (1 - n) + second.a * n)
   }
   function mutedColorFor(foreground, background) { return mix(foreground, background, 0.46) }
-  function hoverFillFor(foreground, _accent) { return withAlpha(foreground, 0.09) }
-  function selectedFillFor(_foreground, accent) { return withAlpha(accent, 0.24) }
-  function selectedStateColor(foreground, accent) { return mix(foreground, accent, 0.42) }
-  function selectionFillFor(_foreground, accent) { return withAlpha(accent, 0.32) }
-  function pressedFillFor(foreground, accent) { return withAlpha(mix(foreground, accent, 0.55), 0.3) }
-  function normalFillFor(foreground, _accent) { return withAlpha(foreground, 0.045) }
-  function normalBorderFor(foreground, _accent) { return withAlpha(foreground, 0.2) }
-  function hoverBorderFor(_foreground, accent) { return withAlpha(accent, 0.72) }
+  function hoverFillFor(foreground, _accent) { return withAlpha(foreground, 0.08) }
+  function selectedFillFor(foreground, _accent) { return withAlpha(foreground, 0.18) }
+  function selectedStateColor(foreground, _accent) { return foreground }
+  function selectionFillFor(foreground, _accent) { return withAlpha(foreground, 0.35) }
+  function pressedFillFor(foreground, _accent) { return withAlpha(foreground, 0.22) }
+  function normalFillFor(foreground, _accent) { return withAlpha(foreground, 0.04) }
+  function normalBorderFor(foreground, _accent) { return withAlpha(foreground, 0.4) }
+  function hoverBorderFor(foreground, _accent) { return withAlpha(foreground, 0.25) }
 }

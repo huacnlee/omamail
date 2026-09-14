@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../../../ui" as Omamail
+import "../../../ui/components" as Components
 
 TestCase {
   id: testCase
@@ -91,6 +92,7 @@ TestCase {
   }
   Component { id: windowComponent; FloatingWindow { visible: false; minimumSize: Qt.size(320, 240) } }
   Component { id: sharedAppComponent; Omamail.App { opened: false } }
+  Component { id: actionIconComponent; Components.ActionIcon { name: "archive" } }
 
   Item {
     id: controls
@@ -111,6 +113,7 @@ TestCase {
     host.reset()
     Quickshell.nativeHost = host
     Quickshell.fileStore = host
+    Color.reload()
   }
 
   function test_environment_and_detached_operations_use_native_host() {
@@ -147,6 +150,62 @@ TestCase {
     verify(Style.selectedAccentFill.valid)
     verify(Style.space(8) > 0)
     verify(Style.mutedColorFor(Color.foreground, Color.background).valid)
+    compare(Style.cornerRadius, 0)
+    compare(Style.font.body, 12)
+    compare(Style.font.caption, 10)
+    compare(Style.font.iconSmall, 11)
+    compare(Style.font.icon, 14)
+    compare(Style.font.iconLarge, 18)
+    compare(Style.spacing.controlHeight, 28)
+    compare(Style.spacing.controlPaddingX, 10)
+    compare(Style.spacing.controlPaddingY, 6)
+    compare(Style.spacing.inputPaddingY, 7)
+    compare(Style.spacing.controlGap, 8)
+  }
+
+  function test_standalone_bundles_the_omarchy_nerd_icon_range() {
+    tryCompare(Style.iconFont, "status", FontLoader.Ready)
+    compare(Style.font.iconFamily, "Symbols Nerd Font Mono")
+    var icon = createTemporaryObject(actionIconComponent, testCase)
+    verify(icon)
+    compare(icon.fontFamily, Style.font.iconFamily)
+    compare(icon.glyphText.codePointAt(0), 0xF120E)
+  }
+
+  function test_current_omarchy_theme_wins_over_stale_legacy_theme() {
+    host.files = ({
+      "/fixture/home/.local/state/omarchy/current/theme/colors.toml":
+        "background='#111111'\nforeground='#eeeeee'\naccent='#123456'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'",
+      "/fixture/home/.config/omarchy/current/theme/colors.toml":
+        "background='#ffffff'\nforeground='#000000'\naccent='#abcdef'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
+    })
+    verify(Color.reload())
+    compare(String(Color.background), "#111111")
+    compare(String(Color.accent), "#123456")
+  }
+
+  function test_legacy_theme_is_used_only_without_state_current() {
+    host.files = ({
+      "/fixture/home/.config/omarchy/current/theme/colors.toml":
+        "background='#ffffff'\nforeground='#000000'\naccent='#205ea6'\nred='#af3029'\nyellow='#855b00'\ngreen='#526600'"
+    })
+    verify(Color.reload())
+    compare(String(Color.background), "#ffffff")
+    compare(String(Color.accent), "#205ea6")
+  }
+
+  function test_invalid_current_theme_falls_back_atomically() {
+    host.files = ({
+      "/fixture/home/.local/state/omarchy/current/theme/colors.toml":
+        "background='#010203'\nforeground='#ffffff'\naccent='bad'",
+      "/fixture/home/.config/omarchy/current/theme/colors.toml":
+        "background='#ffffff'\nforeground='#000000'\naccent='#abcdef'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
+    })
+    verify(!Color.reload())
+    compare(String(Color.background), "#1a1b26")
+    compare(String(Color.foreground), "#a9b1d6")
+    compare(String(Color.accent), "#7aa2f7")
+    compare(String(Color.urgent), "#f7768e")
   }
 
   function test_split_parser_buffers_incomplete_frames() {

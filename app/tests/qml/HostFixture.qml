@@ -72,6 +72,11 @@ QtObject {
       return ({ ok: false, text: "", error: "missing" })
     return ({ ok: true, text: String(files[key]), error: "" })
   }
+  function exists(path) {
+    var prefix = String(path || "") + "/"
+    for (var key in files) if (key === path || key.indexOf(prefix) === 0) return true
+    return false
+  }
   function write(path, text, atomic) {
     var next = ({})
     var keys = Object.keys(files)

@@ -25,7 +25,11 @@ Item {
   property real iconSize: Style.font.icon
   // Bound to the shell's family rather than fixed, so the icons follow
   // `omarchy font set` with everything else; the tests pass a Nerd Font in.
-  property string fontFamily: Style.font.family
+  // The shell uses one configured Nerd Font for text and icons. Standalone
+  // keeps native text metrics, but supplies the same Nerd Font symbol range
+  // through Style.font.iconFamily so these private-use codepoints never fall
+  // through to a platform-dependent fallback face.
+  property string fontFamily: Style.font["iconFamily"] || Style.font.family
   // Stroke weight of the drawn mark only, relative to its 16-unit grid.
   property real strokeScale: 1.4
 

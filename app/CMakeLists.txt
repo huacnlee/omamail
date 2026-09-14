@@ -81,6 +81,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml"
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/qmldir"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/*"
     "${CMAKE_CURRENT_SOURCE_DIR}/../ui/*.qml"
     "${CMAKE_CURRENT_SOURCE_DIR}/../ui/*.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/../ui/assets/*")
