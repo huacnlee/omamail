@@ -3,11 +3,9 @@ use crate::credentials::{
     CredentialKey, CredentialKind, CredentialStore, Error as StoreError, NativeStore, Secret,
 };
 use serde_json::Value;
-use std::{
-    io::Read,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::{Path, PathBuf},
-};
+use std::{fs::File, io::Read, path::Path};
+
+const MAX_CLIENT_BYTES: u64 = 1024 * 1024;
 
 pub struct Client {
     pub(crate) client_id: String,
@@ -85,34 +83,41 @@ fn parse_client(bytes: &[u8], account: &str) -> Result<Client, &'static str> {
         client(&raw).ok_or("gmail_client_missing")
     }
 }
-fn read_path(path: &Path, account: &str) -> Result<Client, &'static str> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|_| "gmail_client_unreadable")?;
+fn storage_error(error: &'static str) -> &'static str {
+    match error {
+        "cache_unsafe_path" => "gmail_client_permissions",
+        "cache_home_invalid" => "config_home_invalid",
+        _ => "gmail_client_unreadable",
+    }
+}
+fn read_file(file: File, account: &str) -> Result<Client, &'static str> {
     let metadata = file.metadata().map_err(|_| "gmail_client_unreadable")?;
-    if !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err("gmail_client_permissions");
+    if metadata.len() > MAX_CLIENT_BYTES {
+        return Err("gmail_client_too_large");
     }
     let mut bytes = vec![];
-    file.take(1024 * 1024 + 1)
+    file.take(MAX_CLIENT_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "gmail_client_unreadable")?;
-    if bytes.len() > 1024 * 1024 {
+    if bytes.len() as u64 > MAX_CLIENT_BYTES {
         return Err("gmail_client_too_large");
     }
     parse_client(&bytes, account)
 }
+fn read_at(config: &Path, account: &str) -> Result<Client, &'static str> {
+    let dir = crate::platform::private_fs::directories_readonly(config, &["omamail"])
+        .map_err(storage_error)?
+        .ok_or("gmail_client_unreadable")?;
+    let file = crate::platform::private_fs::regular_readonly(&dir, "credentials.json")
+        .map_err(storage_error)?
+        .ok_or("gmail_client_unreadable")?;
+    read_file(file, account)
+}
 pub fn read_for_account(account: &str) -> Result<Client, &'static str> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .ok_or("config_home_invalid")?;
-    read_path(&home.join(".config/omamail/credentials.json"), account)
+    let config = crate::platform::dirs::AppDirs::discover()
+        .map_err(|_| "config_home_invalid")?
+        .config;
+    read_at(&config, account)
 }
 pub(super) fn lookup_with(
     client: &Client,
@@ -163,8 +168,12 @@ pub fn lookup_refresh_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
 
     const SINGLE: &[u8] = br#"{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"synthetic"}}"#;
     #[test]
@@ -205,38 +214,112 @@ mod tests {
             .is_err()
         );
     }
-    #[test]
-    fn private_regular_file_only() {
-        let dir = std::env::temp_dir().join(format!(
-            "omamail-client-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+    struct Fixture {
+        root: PathBuf,
+        config: PathBuf,
+        directory: File,
+    }
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "omamail-client-test-{}-{}",
+                std::process::id(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            ));
+            let config = root.join("config");
+            let directory = crate::platform::private_fs::directories(&config, &["omamail"], true)
                 .unwrap()
-                .as_nanos()
+                .unwrap();
+            Self {
+                root,
+                config,
+                directory,
+            }
+        }
+        fn write(&self, bytes: &[u8]) {
+            crate::platform::private_fs::atomic_replace(&self.directory, "credentials.json", bytes)
+                .unwrap();
+        }
+        fn path(&self) -> PathBuf {
+            self.config.join("omamail/credentials.json")
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+    #[test]
+    fn reads_only_the_platform_config_root() {
+        let name = std::thread::current().name().unwrap().to_owned();
+        if std::env::var("OMAMAIL_GMAIL_DIR_TEST_CHILD").as_deref() != Ok(name.as_str()) {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &name, "--test-threads=1", "--nocapture"])
+                .env("OMAMAIL_GMAIL_DIR_TEST_CHILD", &name)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let fixture = Fixture::new();
+        fixture.write(SINGLE);
+        let dirs = crate::platform::dirs::AppDirs::from_roots(
+            fixture.config.clone(),
+            fixture.root.join("cache"),
+            fixture.root.join("state"),
+            fixture.root.join("runtime"),
+            fixture.root.join("downloads"),
+        )
+        .unwrap();
+        let _override =
+            crate::platform::dirs::install_test_override(dirs, fixture.root.join("different-home"))
+                .unwrap();
+        assert_eq!(
+            read_for_account("one@example.org").unwrap().client_secret,
+            "synthetic"
+        );
+    }
+    #[test]
+    fn hardlinks_and_oversized_files_are_rejected_before_parsing() {
+        let fixture = Fixture::new();
+        fixture.write(b"not json");
+        let alias = fixture.root.join("second-name");
+        std::fs::hard_link(fixture.path(), &alias).unwrap();
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org"),
+            Err("gmail_client_permissions")
         ));
-        std::fs::create_dir(&dir).unwrap();
-        let file = dir.join("client");
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&file)
-            .unwrap();
-        out.write_all(SINGLE).unwrap();
-        assert!(read_path(&file, "one@example.org").is_ok());
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(read_path(&file, "one@example.org").is_err());
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let link = dir.join("link");
-        symlink(&file, &link).unwrap();
-        assert!(read_path(&link, "one@example.org").is_err());
-        assert!(read_path(&dir, "one@example.org").is_err());
-        out.set_len(1024 * 1024 + 1).unwrap();
-        assert!(read_path(&file, "one@example.org").is_err());
-        std::fs::remove_file(link).unwrap();
-        std::fs::remove_file(file).unwrap();
-        std::fs::remove_dir(dir).unwrap();
+        std::fs::remove_file(alias).unwrap();
+        fixture.write(&vec![b'x'; MAX_CLIENT_BYTES as usize + 1]);
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org"),
+            Err("gmail_client_too_large")
+        ));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unix_permissions_and_symlinks_are_rejected_before_parsing() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let fixture = Fixture::new();
+        fixture.write(b"not json");
+        std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org"),
+            Err("gmail_client_permissions")
+        ));
+        std::fs::remove_file(fixture.path()).unwrap();
+        let target = fixture.root.join("outside");
+        std::fs::write(&target, b"not json").unwrap();
+        symlink(&target, fixture.path()).unwrap();
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org"),
+            Err("gmail_client_permissions")
+        ));
     }
     #[test]
     fn lookup_is_account_and_current_grant_bound() {

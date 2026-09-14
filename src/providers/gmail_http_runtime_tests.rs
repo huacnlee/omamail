@@ -100,7 +100,7 @@ async fn mail_send_preview_reads_google_identity_without_mutation_or_local_write
     }
     let fixture = account_fixture(json!({"version":1,"activeId":"audit@example.org",
         "accounts":[{"provider":"gmail","email":"audit@example.org"}]}));
-    let credentials = fixture.home.join(".config/omamail");
+    let credentials = fixture.config.join("omamail");
     std::fs::create_dir_all(&credentials).unwrap();
     let client_file = credentials.join("credentials.json");
     std::fs::write(
