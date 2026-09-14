@@ -18,7 +18,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Security::*,
     Storage::FileSystem::SECURITY_IDENTIFICATION,
-    System::{IO::CancelIoEx, Pipes::*, Threading::*},
+    System::{Pipes::*, Threading::*},
 };
 type Result<T> = std::result::Result<T, &'static str>;
 const HANDSHAKE: u8 = 1;
@@ -41,27 +41,14 @@ impl LocalEndpoint {
     }
     pub(crate) fn listen(&self) -> Result<LocalListener> {
         private_fs::validate_owned_root(&self.dir)?;
-        let mut pending = None;
-        for attempt in 0..100 {
-            match create_server(&self.name, true) {
-                Ok(server) => {
-                    pending = Some(server);
-                    break;
-                }
-                Err(error) if attempt < 99 => {
-                    let _ = error;
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        let pending = create_server(&self.name, true)?;
         Ok(LocalListener {
             _dir: self
                 .dir
                 .try_clone()
                 .map_err(|_| "outbox_owner_unavailable")?,
             name: self.name.clone(),
-            pending: Mutex::new(pending.ok_or("outbox_owner_unavailable")?),
+            pending: Mutex::new(pending),
         })
     }
     pub(crate) async fn connect(&self) -> Result<NamedPipeClient> {
@@ -130,17 +117,6 @@ pub(crate) struct LocalListener {
     _dir: File,
     name: String,
     pending: Mutex<NamedPipeServer>,
-}
-impl Drop for LocalListener {
-    fn drop(&mut self) {
-        let pending = self.pending.get_mut();
-        unsafe {
-            // Cancel any IOCP registration and disconnect before closing the
-            // last instance, so FIRST_PIPE_INSTANCE can reclaim the namespace.
-            CancelIoEx(pending.as_raw_handle(), ptr::null());
-            DisconnectNamedPipe(pending.as_raw_handle());
-        }
-    }
 }
 impl LocalListener {
     pub(crate) async fn accept(&self) -> std::io::Result<(NamedPipeServer, ())> {
