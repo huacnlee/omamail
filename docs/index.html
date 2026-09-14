@@ -585,6 +585,49 @@ pre.block .c { color: var(--dim); }
   color: var(--dim);
 }
 
+.install-heading {
+  margin: 0 0 12px;
+  color: var(--bright);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+.install-note {
+  margin: 0 0 20px;
+  max-width: 74ch;
+  color: var(--dim);
+}
+.install-platforms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--muted);
+  margin-bottom: 32px;
+}
+.install-platform {
+  min-width: 0;
+  padding: 18px;
+  border-right: 1px solid var(--hairline);
+}
+.install-platform:last-child { border-right: 0; }
+.install-platform h3 {
+  margin: 0 0 4px;
+  color: var(--bright);
+  font-size: 0.875rem;
+}
+.install-platform .kind {
+  display: block;
+  min-height: 2.8em;
+  margin-bottom: 12px;
+  color: var(--dim);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+.install-platform pre.block { margin: 0; }
+.install-source {
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+  margin-bottom: 32px;
+}
+
 /* ---------- footer ---------- */
 
 footer {
@@ -673,6 +716,10 @@ footer p:last-child { margin-bottom: 0; }
   .box:last-child { border-bottom: 0; }
   .features { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
+  .install-platforms { grid-template-columns: 1fr; }
+  .install-platform { border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .install-platform:last-child { border-bottom: 0; }
+  .install-platform .kind { min-height: 0; }
 }
 
 /* Narrow enough that the bar would wrap: the name alone carries it. */
@@ -912,7 +959,34 @@ footer p:last-child { margin-bottom: 0; }
 
 <section>
   <div class="wrap">
-    <h2><span class="idx">06</span> <span data-zh="装上和卸掉">Install and remove</span></h2>
+    <h2><span class="idx">06</span> <span data-zh="安装">Install</span></h2>
+    <h3 class="install-heading" data-zh="独立桌面应用">Standalone desktop app</h3>
+    <p class="install-note" data-zh="独立版包含邮件、日历和原生桌面通知，暂不包含系统托盘、AI 辅助和 <code>mailto:</code> 注册。安装程序会先校验发布包，再替换已有版本。">The standalone app includes mail, calendar and native desktop notifications. This release does not include the system tray, AI assistance or <code>mailto:</code> registration. Each installer verifies the release package before replacing an existing version.</p>
+    <div class="install-platforms">
+      <div class="install-platform">
+        <h3>macOS</h3>
+        <span class="kind" data-zh="APPLE SILICON · TAR.GZ · 未签名">APPLE SILICON · TAR.GZ · UNSIGNED</span>
+        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh</pre>
+      </div>
+      <div class="install-platform">
+        <h3>Linux</h3>
+        <span class="kind" data-zh="X86_64 · GLIBC 2.35+ · 仅 TAR.GZ">X86_64 · GLIBC 2.35+ · TAR.GZ ONLY</span>
+        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh</pre>
+      </div>
+      <div class="install-platform">
+        <h3>Windows</h3>
+        <span class="kind" data-zh="X64 · ZIP · POWERSHELL">X64 · ZIP · POWERSHELL</span>
+        <pre class="block">$installer = Join-Path $env:TEMP 'omamail-install.ps1'
+Invoke-WebRequest https://raw.githubusercontent.com/huacnlee/omamail/main/install.ps1 -OutFile $installer
+&amp; $installer</pre>
+      </div>
+    </div>
+    <div class="install-source">
+      <h3 class="install-heading" data-zh="从源码运行">Run from source</h3>
+      <p class="install-note" data-zh="开发者安装 Rust、CMake 3.21+ 和 Qt 6.5+ 后，可以在仓库根目录启动独立版。">Developers with Rust, CMake 3.21+ and Qt 6.5+ can launch the standalone app from the repository root.</p>
+      <pre class="block"><span class="prompt">$ </span>make app-run</pre>
+    </div>
+    <h3 class="install-heading" data-zh="Omarchy 插件">Omarchy plugin</h3>
     <div class="grid-2">
       <div>
         <h3 data-zh="装上">INSTALL</h3>

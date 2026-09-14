@@ -27,6 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Check installation instructions
+        run: python3 tests/test_website_install.py
       # The page is one file, but every screenshot, icon and the og:image it
       # points at lives in docs/images. Staging only the HTML published a site
       # whose images all 404, so the whole image directory ships with it.
