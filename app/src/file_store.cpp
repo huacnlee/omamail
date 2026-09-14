@@ -1,0 +1,197 @@
+#include "file_store.h"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <QStandardPaths>
+
+namespace {
+constexpr qint64 maximumTextFileBytes = 16 * 1024 * 1024;
+
+QVariantMap result(bool ok, const QString &text = {}, const QString &error = {})
+{
+    return {{QStringLiteral("ok"), ok}, {QStringLiteral("text"), text},
+            {QStringLiteral("error"), error}};
+}
+
+const QSet<QString> &allowedSettings()
+{
+    static const QSet<QString> keys{
+        QStringLiteral("refreshIntervalSec"), QStringLiteral("maxMessages"),
+        QStringLiteral("heavyMessageRendering"), QStringLiteral("contentDirection"),
+        QStringLiteral("defaultQuery"), QStringLiteral("notifyNewMail"),
+        QStringLiteral("oauthPort"), QStringLiteral("undoSendSeconds"),
+        QStringLiteral("unifiedCalendarView"), QStringLiteral("openOnClick"),
+        QStringLiteral("showBarIcon"), QStringLiteral("suggestEvents"),
+        QStringLiteral("unifiedMailboxes")};
+    return keys;
+}
+
+bool parseSettingsFile(const QString &path, QVariantMap *settings, QString *error)
+{
+    QFile file(path);
+    if (!file.exists()) {
+        settings->clear();
+        if (error) error->clear();
+        return true;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    if (file.size() > maximumTextFileBytes) {
+        if (error) *error = QStringLiteral("Settings file is too large");
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (error) *error = QStringLiteral("Invalid settings JSON: %1").arg(parseError.errorString());
+        return false;
+    }
+    *settings = document.object().toVariantMap();
+    return SettingsStore::accepts(*settings, error);
+}
+}
+
+FileStore::FileStore(QObject *parent)
+    : QObject(parent)
+{
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this,
+            [this](const QString &path) {
+        emit changed(path);
+        restoreWatches();
+    });
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
+            [this](const QString &) { restoreWatches(); });
+}
+
+QVariantMap FileStore::read(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        const QString error = file.errorString();
+        emit failed(path, error);
+        return result(false, {}, error);
+    }
+    if (file.size() > maximumTextFileBytes) {
+        const QString error = QStringLiteral("File is too large");
+        emit failed(path, error);
+        return result(false, {}, error);
+    }
+    return result(true, QString::fromUtf8(file.readAll()));
+}
+
+QVariantMap FileStore::write(const QString &path, const QString &text, bool atomic)
+{
+    if (path.isEmpty()) {
+        const QString error = QStringLiteral("Path is empty");
+        emit failed(path, error);
+        return result(false, {}, error);
+    }
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        const QString error = QStringLiteral("Could not create the parent directory");
+        emit failed(path, error);
+        return result(false, {}, error);
+    }
+    const QByteArray bytes = text.toUtf8();
+    QString error;
+    bool ok = false;
+    if (atomic) {
+        QSaveFile file(path);
+        ok = file.open(QIODevice::WriteOnly);
+        if (ok) file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        ok = ok && file.write(bytes) == bytes.size() && file.commit();
+        if (!ok) error = file.errorString();
+    } else {
+        QFile file(path);
+        ok = file.open(QIODevice::WriteOnly | QIODevice::Truncate);
+        if (ok) file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        ok = ok && file.write(bytes) == bytes.size() && file.flush();
+        if (!ok) error = file.errorString();
+    }
+    if (!ok) {
+        emit failed(path, error);
+        return result(false, {}, error);
+    }
+    if (m_watchedFiles.contains(QFileInfo(path).absoluteFilePath()))
+        emit changed(QFileInfo(path).absoluteFilePath());
+    restoreWatches();
+    return result(true);
+}
+
+void FileStore::watch(const QString &path, bool enabled)
+{
+    const QString absolute = QFileInfo(path).absoluteFilePath();
+    if (enabled) m_watchedFiles.insert(absolute);
+    else m_watchedFiles.remove(absolute);
+    restoreWatches();
+}
+
+void FileStore::restoreWatches()
+{
+    const QStringList old = m_watcher.files() + m_watcher.directories();
+    if (!old.isEmpty()) m_watcher.removePaths(old);
+    QSet<QString> paths;
+    for (const QString &file : std::as_const(m_watchedFiles)) {
+        if (QFileInfo::exists(file)) paths.insert(file);
+        paths.insert(QFileInfo(file).absolutePath());
+    }
+    if (!paths.isEmpty()) m_watcher.addPaths(paths.values());
+}
+
+SettingsStore::SettingsStore(QString path)
+    : m_path(std::move(path))
+{
+    if (m_path.isEmpty()) {
+        m_path = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+            .filePath(QStringLiteral("settings.json"));
+    }
+}
+
+QVariantMap SettingsStore::load(QString *error) const
+{
+    QVariantMap settings;
+    if (!parseSettingsFile(m_path, &settings, error)) return {};
+    return settings;
+}
+
+bool SettingsStore::accepts(const QVariantMap &settings, QString *error)
+{
+    for (auto it = settings.cbegin(); it != settings.cend(); ++it) {
+        if (!allowedSettings().contains(it.key())) {
+            if (error) *error = QStringLiteral("Setting is not allowed: %1").arg(it.key());
+            return false;
+        }
+    }
+    if (error) error->clear();
+    return true;
+}
+
+bool SettingsStore::replace(const QVariantMap &settings, QString *error) const
+{
+    if (!accepts(settings, error)) return false;
+    QVariantMap existing;
+    if (!parseSettingsFile(m_path, &existing, error)) return false;
+    if (!QDir().mkpath(QFileInfo(m_path).absolutePath())) {
+        if (error) *error = QStringLiteral("Could not create settings directory");
+        return false;
+    }
+    QSaveFile file(m_path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    const QByteArray bytes = QJsonDocument(QJsonObject::fromVariantMap(settings))
+        .toJson(QJsonDocument::Indented);
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    if (error) error->clear();
+    return true;
+}
