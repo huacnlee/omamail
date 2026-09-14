@@ -9,11 +9,27 @@ import threading
 
 with tempfile.TemporaryDirectory(prefix="omamail-jmap-tls-") as directory:
     root = pathlib.Path(directory)
+    (root / "server.ext").write_text(
+        "subjectAltName=DNS:localhost\n"
+        "basicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature,keyEncipherment\n"
+        "extendedKeyUsage=serverAuth\n",
+        encoding="ascii",
+    )
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                    "-keyout", str(root / "key.pem"), "-out", str(root / "cert.pem"),
-                    "-days", "1", "-subj", "/CN=localhost",
-                    "-addext", "subjectAltName=DNS:localhost",
-                    "-addext", "basicConstraints=critical,CA:FALSE"], check=True,
+                    "-keyout", str(root / "ca-key.pem"), "-out", str(root / "ca.pem"),
+                    "-days", "1", "-subj", "/CN=Omamail test CA",
+                    "-addext", "basicConstraints=critical,CA:TRUE,pathlen:0",
+                    "-addext", "keyUsage=critical,keyCertSign,cRLSign"], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    subprocess.run(["openssl", "req", "-newkey", "rsa:2048", "-nodes",
+                    "-keyout", str(root / "key.pem"), "-out", str(root / "server.csr"),
+                    "-subj", "/CN=localhost"], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    subprocess.run(["openssl", "x509", "-req", "-in", str(root / "server.csr"),
+                    "-CA", str(root / "ca.pem"), "-CAkey", str(root / "ca-key.pem"),
+                    "-CAcreateserial", "-out", str(root / "cert.pem"), "-days", "1",
+                    "-sha256", "-extfile", str(root / "server.ext")], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     requests = []
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -38,6 +54,6 @@ with tempfile.TemporaryDirectory(prefix="omamail-jmap-tls-") as directory:
     context.load_cert_chain(root / "cert.pem", root / "key.pem")
     server.socket = context.wrap_socket(server.socket, server_side=True)
     print(server.server_port, flush=True)
-    print(root / "cert.pem", flush=True)
+    print(root / "ca.pem", flush=True)
     server.serve_forever(poll_interval=0.05)
     server.server_close()
