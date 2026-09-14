@@ -119,10 +119,11 @@ if(BUILD_TESTING)
   if(QMLTESTRUNNER_EXECUTABLE)
     add_test(NAME tst_standalone_composition COMMAND ${QMLTESTRUNNER_EXECUTABLE}
       -import "${CMAKE_CURRENT_SOURCE_DIR}/qml/imports"
+      -import "${CMAKE_CURRENT_SOURCE_DIR}/qml/styles"
       -import "${CMAKE_BINARY_DIR}/qml"
       -import "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml/imports"
       -input "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml/tst_standalone_composition.qml")
     set_tests_properties(tst_standalone_composition PROPERTIES
-      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;OMAMAIL_DEVELOPMENT_RESOURCES=1")
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;OMAMAIL_DEVELOPMENT_RESOURCES=1;QT_QUICK_CONTROLS_STYLE=Omamail;QT_QUICK_CONTROLS_FALLBACK_STYLE=Basic")
   endif()
 endif()

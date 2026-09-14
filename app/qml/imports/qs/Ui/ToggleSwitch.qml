@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic as QQC
+import QtQuick.Controls as QQC
 import qs.Commons
 
 Item {
@@ -24,6 +24,7 @@ Item {
     anchors.centerIn: parent
     checked: root.checked
     enabled: !root.busy
+    palette.window: Color.background
     palette.windowText: root.foreground
     palette.highlight: root.accent
     onToggled: {
@@ -38,5 +39,8 @@ Item {
     height: parent.height
     running: root.busy
     visible: running
+    palette.window: Color.background
+    palette.windowText: root.foreground
+    palette.highlight: root.accent
   }
 }

@@ -1,3 +1,7 @@
 module Omamail
 ScrollBar 2.0 ScrollBar.qml
 ScrollBar 6.0 ScrollBar.qml
+SpinBox 2.0 SpinBox.qml
+SpinBox 6.0 SpinBox.qml
+Switch 2.0 Switch.qml
+Switch 6.0 Switch.qml

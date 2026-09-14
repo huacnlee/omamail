@@ -1,6 +1,8 @@
 import QtQuick
+import QtQuick.Controls
 import QtTest
 import Quickshell
+import qs.Commons
 import "../../qml" as Standalone
 import "../../../ui/providers" as Providers
 
@@ -12,6 +14,24 @@ TestCase {
   height: 480
 
   HostFixture { id: host }
+
+  Switch {
+    id: styledSwitch
+    visible: false
+    checked: true
+    palette.window: Color.background
+    palette.windowText: Color.foreground
+    palette.highlight: Color.accent
+  }
+
+  SpinBox {
+    id: styledSpinBox
+    visible: false
+    editable: true
+    palette.window: Color.background
+    palette.windowText: Color.foreground
+    palette.highlight: Color.accent
+  }
 
   Component {
     id: compositionComponent
@@ -36,6 +56,16 @@ TestCase {
   }
 
   function init() { host.reset() }
+
+  function test_standalone_controls_use_semantic_omamail_style() {
+    verify(findChild(styledSwitch, "omamail-switch-knob"))
+    var background = findChild(styledSpinBox, "omamail-spinbox-background")
+    verify(background)
+    verify(findChild(styledSpinBox, "omamail-spinbox-decrement"))
+    verify(findChild(styledSpinBox, "omamail-spinbox-increment"))
+    compare(background.radius, Style.cornerRadius)
+    compare(String(styledSpinBox.palette.windowText), String(Color.foreground))
+  }
 
   function test_one_shared_service_and_app_with_standalone_capabilities() {
     var composition = createTemporaryObject(compositionComponent, testCase)

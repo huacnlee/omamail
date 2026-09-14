@@ -46,6 +46,11 @@ Item {
     stepSize: root.stepSize
     value: root.value
     editable: true
+    font.family: root.fontFamily
+    font.pixelSize: root.fontSize
+    palette.window: Color.background
+    palette.windowText: root.foreground
+    palette.highlight: root.accent
     onValueModified: {
       root.modified(value)
       value = root.value
