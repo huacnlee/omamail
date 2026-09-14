@@ -86,8 +86,8 @@ function parse(raw) {
   }
 
   var mapped = {
-    background: values.background || values.bg,
-    foreground: values.foreground || values.fg,
+    background: values.background || values.bg || values.color0,
+    foreground: values.foreground || values.fg || values.color7,
     accent: values.accent || values.color4,
     red: values.red || values.color1,
     yellow: values.yellow || values.color3,

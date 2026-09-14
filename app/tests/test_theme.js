@@ -27,8 +27,8 @@ assert.strictEqual(semantic.border, "#b7b5ac")
 assert.ok(context.contrast(semantic.urgent, semantic.background) >= 4.5)
 
 const ansi = context.resolve(`
-background = "#101010"
-foreground = "#eeeeee"
+color0 = "#101010"
+color7 = "#eeeeee"
 color1 = "#ff5555"
 color2 = "#55ff55"
 color3 = "#ffff55"
@@ -36,6 +36,8 @@ color4 = "#5599ff"
 color8 = "#555555"
 `)
 assert.strictEqual(ansi.accent, "#5599ff")
+assert.strictEqual(ansi.background, "#101010")
+assert.strictEqual(ansi.foreground, "#eeeeee")
 assert.strictEqual(ansi.border, "#555555")
 assert.strictEqual(ansi.bright, "#eeeeee")
 

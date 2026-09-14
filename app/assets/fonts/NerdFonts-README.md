@@ -2,6 +2,8 @@
 
 This is an archived font from the Nerd Fonts release v3.5.1.
 
+The standalone app bundles `JetBrainsMonoNerdFontMono-Regular.ttf` for UI text and `SymbolsNerdFontMono-Regular.ttf` for functional icons. JetBrains Mono is licensed under the SIL Open Font License 1.1 included in `NerdFonts-LICENSE`.
+
 For more information see:
 * https://github.com/ryanoasis/nerd-fonts/
 * https://github.com/ryanoasis/nerd-fonts/releases/latest/

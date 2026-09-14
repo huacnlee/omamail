@@ -68,9 +68,15 @@ FileStore::FileStore(QObject *parent)
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
             [this](const QString &directory) {
         for (const QString &path : std::as_const(m_watchedFiles)) {
-            if (QFileInfo(path).absolutePath() != directory) continue;
+            const QFileInfo info(path);
+            if (info.absolutePath() != directory && info.absoluteFilePath() != directory)
+                continue;
             const bool exists = QFileInfo::exists(path);
-            if (m_lastExists.value(path, false) != exists) emit changed(path);
+            // A watched directory may be a symlink such as Omarchy's
+            // `current` theme entry. Its existence can stay true while its
+            // target is atomically replaced, so any relevant directory event
+            // invalidates the watched path.
+            emit changed(path);
             m_lastExists.insert(path, exists);
         }
         restoreWatches();

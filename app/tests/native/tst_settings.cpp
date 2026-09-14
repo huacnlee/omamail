@@ -19,6 +19,7 @@ private slots:
     void rejectsCredentialAndUnknownFields();
     void fileStoreReadsWritesAndWatches();
     void watchReportsExternalCreation();
+    void watchReportsDirectoryMutation();
     void environmentUsesFixedAllowlist();
     void applicationPathsMatchBackendRoots();
     void applicationPathsRejectTraversalAndRemoteUrls();
@@ -164,6 +165,23 @@ void SettingsTest::watchReportsExternalCreation()
     file.close();
     QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
     QCOMPARE(changed.last().at(0).toString(), path);
+}
+
+void SettingsTest::watchReportsDirectoryMutation()
+{
+    QTemporaryDir directory;
+    const QString watchedDirectory = directory.filePath(QStringLiteral("current"));
+    QVERIFY(QDir().mkpath(watchedDirectory));
+    FileStore store;
+    QSignalSpy changed(&store, &FileStore::changed);
+    store.watch(watchedDirectory, true);
+
+    QFile file(QDir(watchedDirectory).filePath(QStringLiteral("replacement")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("outside"), qint64(7));
+    file.close();
+    QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
+    QCOMPARE(changed.last().at(0).toString(), watchedDirectory);
 }
 
 QTEST_MAIN(SettingsTest)

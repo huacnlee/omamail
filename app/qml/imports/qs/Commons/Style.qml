@@ -8,10 +8,14 @@ QtObject {
     source: "../../../../assets/fonts/SymbolsNerdFontMono-Regular.ttf"
   }
 
+  readonly property FontLoader textFont: FontLoader {
+    source: "../../../../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
+  }
+
   readonly property FontMetrics metrics: FontMetrics { font: Qt.application.font }
-  // Omarchy shell baseline at the inspected revision. The standalone port
-  // keeps the platform's text family, while retaining the shell's logical
-  // type and spacing scale and its square fallback geometry.
+  // Omarchy shell baseline at the inspected revision. Bundle its default
+  // Nerd Font so every standalone platform gets the same text metrics and
+  // glyph coverage without depending on the host's font configuration.
   readonly property real baseFontSize: 12
   property real spacingScale: 1
   readonly property real cornerRadius: 0
@@ -19,7 +23,7 @@ QtObject {
   readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
   readonly property var font: ({
-    family: metrics.font.family,
+    family: textFont.status === FontLoader.Ready ? textFont.name : "monospace",
     iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
     title: Math.round(baseFontSize * 1.167),
     heading: Math.round(baseFontSize * 1.333),
