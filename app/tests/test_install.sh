@@ -285,13 +285,43 @@ printf 'preserve me\n' > "$user_data"
 export OMAMAIL_TEST_OS=Darwin
 export OMAMAIL_TEST_ARCH=arm64
 export OMAMAIL_INSTALL_ROOT="$temp/install/Omamail.app"
+xattr_stub="$temp/xattr"
+xattr_log="$temp/xattr.log"
+cat > "$xattr_stub" <<'SH'
+#!/bin/sh
+set -eu
+[ "$#" -eq 3 ]
+[ "$1" = -dr ]
+[ "$2" = com.apple.quarantine ]
+expected_parent=$(CDPATH= cd -- "$(dirname -- "$OMAMAIL_INSTALL_ROOT")" && pwd)
+expected_prefix="$expected_parent/$(basename -- "$OMAMAIL_INSTALL_ROOT").new."
+case "$3" in "$expected_prefix"[0-9]*) ;; *) exit 2 ;; esac
+printf '%s\n' "$1" "$2" "$3" >> "$OMAMAIL_TEST_XATTR_LOG"
+[ "${OMAMAIL_TEST_XATTR_FAIL:-0}" != 1 ]
+SH
+chmod 700 "$xattr_stub"
+export OMAMAIL_TEST_XATTR_COMMAND="$xattr_stub"
+export OMAMAIL_TEST_XATTR_LOG="$xattr_log"
 mac_archive="$temp/fixtures/mac-valid.tar.gz"
 make_archive "$mac_archive" mac-valid 0.10.1
 mac_sums=$(write_sums "$mac_archive")
 install_archive "$mac_archive" "$mac_sums" 0.10.1
 [ "$(cat "$OMAMAIL_INSTALL_ROOT/marker")" = mac-valid ]
 [ "$(readlink "$OMAMAIL_INSTALL_ROOT/Contents/Frameworks/Fixture.framework/Versions/Current")" = A ]
+[ "$(sed -n '1p' "$xattr_log")" = -dr ]
+[ "$(sed -n '2p' "$xattr_log")" = com.apple.quarantine ]
+logged_xattr_target=$(sed -n '3p' "$xattr_log")
+case "$logged_xattr_target" in "$(CDPATH= cd -- "$(dirname -- "$OMAMAIL_INSTALL_ROOT")" && pwd)/$(basename -- "$OMAMAIL_INSTALL_ROOT").new."[0-9]*) ;; *) exit 1 ;; esac
 [ ! -e "$OMAMAIL_LAUNCH_LOG" ]
+export OMAMAIL_TEST_XATTR_FAIL=1
+if install_archive "$mac_archive" "$mac_sums" 0.10.1 >"$temp/xattr-failure.out" 2>"$temp/xattr-failure.err"; then
+  printf 'macOS install succeeded after xattr failed\n' >&2
+  exit 1
+fi
+unset OMAMAIL_TEST_XATTR_FAIL
+grep -Fq 'could not clear macOS quarantine' "$temp/xattr-failure.err"
+[ "$(cat "$OMAMAIL_INSTALL_ROOT/marker")" = mac-valid ]
+[ ! -e "$OMAMAIL_INSTALL_ROOT.previous" ]
 for kind in mac-mailto mac-missing-info mac-wrong-arch; do
   archive="$temp/fixtures/$kind.tar.gz"
   make_archive "$archive" "$kind" 0.10.1

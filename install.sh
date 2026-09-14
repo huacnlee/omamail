@@ -425,6 +425,18 @@ if [ ! -d "$(dirname -- "$install_dir")" ]; then install_parent_created=1; fi
 mkdir -p "$(dirname -- "$install_dir")"
 rm -rf "$candidate"
 cp -R "$source_dir" "$candidate" || { printf 'could not stage the new installation.\n' >&2; exit 1; }
+if [ "$os" = Darwin ]; then
+  xattr_command=/usr/bin/xattr
+  if [ "$test_mode" = 1 ] && [ -n "${OMAMAIL_TEST_XATTR_COMMAND:-}" ]; then
+    xattr_command=$OMAMAIL_TEST_XATTR_COMMAND
+  fi
+  [ -x "$xattr_command" ] || { printf 'xattr is required to prepare the unsigned macOS app.\n' >&2; exit 1; }
+  candidate_absolute=$(CDPATH= cd -- "$(dirname -- "$candidate")" && pwd)/$(basename -- "$candidate")
+  "$xattr_command" -dr com.apple.quarantine "$candidate_absolute" || {
+    printf 'could not clear macOS quarantine from the unsigned app.\n' >&2
+    exit 1
+  }
+fi
 
 backup="$install_dir.previous"
 had_install=0
