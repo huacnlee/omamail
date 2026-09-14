@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QTextStream>
@@ -43,6 +44,8 @@ int main(int argc, char *argv[])
     if (!readyFile.isEmpty() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication application(argc, argv);
+    application.setWindowIcon(QIcon(QStringLiteral(
+        ":/omamail/app/resources/icons/omamail.svg")));
     const ResourcePaths paths = defaultResourcePaths({}, developmentResourcesEnabled());
     if (!readyFile.isEmpty()) {
         QString error;

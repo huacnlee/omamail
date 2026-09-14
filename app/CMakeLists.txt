@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.21)
 
 project(omamail-app VERSION 0.10.1 LANGUAGES CXX)
 
+if(WIN32)
+  enable_language(RC)
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,7 +75,13 @@ else()
   target_compile_definitions(omamail_native PUBLIC OMAMAIL_BACKEND_PATH="")
 endif()
 
-qt_add_executable(omamail-app src/main.cpp)
+set(OMAMAIL_APP_SOURCES src/main.cpp)
+if(WIN32)
+  configure_file(resources/windows/omamail.rc.in
+    "${CMAKE_CURRENT_BINARY_DIR}/omamail.rc" @ONLY)
+  list(APPEND OMAMAIL_APP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/omamail.rc")
+endif()
+qt_add_executable(omamail-app ${OMAMAIL_APP_SOURCES})
 target_compile_definitions(omamail-app PRIVATE OMAMAIL_APP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(omamail-app PRIVATE
   omamail_nativeplugin Qt6::Quick Qt6::QuickControls2)
@@ -90,6 +100,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
     PREFIX "/omamail"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/.."
     FILES ${OMAMAIL_STANDALONE_QML} "${CMAKE_CURRENT_SOURCE_DIR}/../manifest.json"
+  )
+  qt_add_resources(omamail-app standalone_brand
+    PREFIX "/omamail/app"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/omamail.svg"
   )
 endif()
 
@@ -114,6 +129,8 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME notification_source_boundary
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_notification_sources.py")
+  add_test(NAME application_identity
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_identity.py")
 
   find_program(QMLTESTRUNNER_EXECUTABLE qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/bin")
   if(QMLTESTRUNNER_EXECUTABLE)

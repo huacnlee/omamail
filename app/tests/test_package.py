@@ -89,7 +89,10 @@ class PackageTest(unittest.TestCase):
             })
             if target == "macos-aarch64":
                 info = plistlib.load(package.extractfile(f"{top}/Contents/Info.plist"))
+                self.assertEqual(info["CFBundleDisplayName"], "Omamail")
+                self.assertEqual(info["CFBundleName"], "Omamail")
                 self.assertEqual(info["CFBundleIdentifier"], "com.omamail.app")
+                self.assertEqual(info["CFBundleIconFile"], "omamail.icns")
                 self.assertEqual(info["CFBundleExecutable"], "omamail-app")
                 self.assertEqual(info["CFBundleShortVersionString"], VERSION)
                 self.assertEqual(info["CFBundleVersion"], VERSION)
@@ -129,6 +132,14 @@ class PackageTest(unittest.TestCase):
                 "share/icons/hicolor/scalable/apps/omamail.svg",
             ],
         )
+
+        archive = self.dist / "omamail-app-linux-x86_64.tar.gz"
+        with tarfile.open(archive, "r:gz") as package:
+            desktop = package.extractfile(
+                "omamail.app/share/applications/omamail.desktop"
+            ).read().decode("utf-8")
+            self.assertIn("\nName=Omamail\n", "\n" + desktop)
+            self.assertIn("\nIcon=omamail\n", "\n" + desktop)
 
     def test_missing_payload_fails_without_archive(self):
         self.backend.unlink()
