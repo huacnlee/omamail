@@ -87,3 +87,40 @@ pub(super) fn delete(key: &CredentialKey) -> Result<(), Error> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires native Windows Credential Manager; mandatory in the native credential gate"]
+    fn credentials_native_windows_anonymous_logon_is_not_missing() {
+        use windows_sys::Win32::{
+            Security::{ImpersonateAnonymousToken, RevertToSelf},
+            System::Threading::GetCurrentThread,
+        };
+        // Thread-scoped impersonation needs no test user's password and never
+        // modifies the runner's actual credential set.
+        assert_ne!(unsafe { ImpersonateAnonymousToken(GetCurrentThread()) }, 0);
+        struct Revert;
+        impl Drop for Revert {
+            fn drop(&mut self) {
+                if unsafe { RevertToSelf() } == 0 {
+                    std::process::abort();
+                }
+            }
+        }
+        let revert = Revert;
+        let key = CredentialKey {
+            provider: "imap".into(),
+            account_id: "imap:denied-fixture@example.invalid".into(),
+            kind: CredentialKind::ImapPassword,
+        };
+        let read = get(&key).map(|_| ());
+        let write = put(&key, b"synthetic-denied-write");
+        let clear = delete(&key);
+        drop(revert);
+        assert_eq!(read, Err(Error::Unavailable));
+        assert_eq!(write, Err(Error::Unavailable));
+        assert_eq!(clear, Err(Error::Unavailable));
+    }
+}
