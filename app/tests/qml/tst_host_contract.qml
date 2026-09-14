@@ -210,6 +210,21 @@ TestCase {
     compare(String(Color.urgent), "#f7768e")
   }
 
+  function test_theme_change_reloads_the_active_palette() {
+    var path = "/fixture/home/.local/state/omarchy/current/theme/colors.toml"
+    host.files = ({})
+    host.files[path] =
+      "background='#111111'\nforeground='#eeeeee'\naccent='#123456'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'"
+    verify(Color.reload())
+    verify(host.watched[path])
+
+    host.files[path] =
+      "background='#222222'\nforeground='#ffffff'\naccent='#654321'\nred='#dd4444'\nyellow='#dddd44'\ngreen='#44dd44'"
+    host.changed(path)
+    compare(String(Color.background), "#222222")
+    compare(String(Color.accent), "#654321")
+  }
+
   function test_split_parser_buffers_incomplete_frames() {
     var parser = createTemporaryObject(parserComponent, testCase)
     verify(parser)
