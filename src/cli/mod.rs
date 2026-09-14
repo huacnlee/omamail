@@ -37,6 +37,7 @@ enum Command {
     Send(mail::Send),
     /// Serve JSON-RPC 2.0 on persistent stdin/stdout pipes
     Serve,
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     #[command(hide = true)]
     AgentWorker { id: String },
     /// Report backend version and implemented methods
@@ -108,6 +109,7 @@ pub fn run() {
         }
         return;
     }
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     if let Command::AgentWorker { ref id } = command {
         let result = crate::backend::runtime()
             .map_err(|_| "agent_runtime_failed")
@@ -161,7 +163,9 @@ pub fn run() {
         }
         Command::Call { method } => call::read_params(io::stdin())
             .and_then(|params| runtime.block_on(call::dispatch(&session, &method, &params))),
-        Command::Serve | Command::AgentWorker { .. } => unreachable!(),
+        Command::Serve => unreachable!(),
+        #[cfg(all(feature = "agent", target_os = "linux"))]
+        Command::AgentWorker { .. } => unreachable!(),
     };
     output::print_result(result, cli.json, envelope);
 }

@@ -4,6 +4,11 @@ version = "0.10.1"
 edition = "2024"
 publish = false
 
+[features]
+default = ["agent"]
+agent = []
+standalone = []
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 tabled = { version = "0.20", default-features = false, features = ["std"] }
@@ -25,6 +30,9 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 rustls-native-certs = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Security"] }
 
 [profile.release]
 opt-level = "s"

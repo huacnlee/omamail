@@ -1605,3 +1605,39 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
         peer.await.unwrap();
     }
 }
+
+#[cfg(not(all(feature = "agent", target_os = "linux")))]
+#[test]
+fn agent_disabled_build_has_no_worker_or_agent_rpc() {
+    let worker = omamail(&["agent-worker", "synthetic-job"]);
+    assert!(!worker.status.success());
+    assert!(String::from_utf8_lossy(&worker.stderr).contains("unrecognized subcommand"));
+    let info = omamail(&["info", "--json"]);
+    assert!(info.status.success());
+    let info: Value = serde_json::from_slice(&info.stdout).unwrap();
+    assert_eq!(info["capabilities"]["agent"], false);
+    assert!(
+        info["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|method| !method.as_str().unwrap().starts_with("agent."))
+    );
+    for method in [
+        "agent.context",
+        "agent.contextCancel",
+        "agent.jobsList",
+        "agent.jobsProjection",
+        "agent.jobStart",
+        "agent.jobShow",
+        "agent.jobCancel",
+        "agent.jobForget",
+    ] {
+        let output = omamail(&["call", method, "--json"]);
+        assert!(!output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            "unknown_method"
+        );
+    }
+}

@@ -11,6 +11,7 @@ use crate::{account, message};
 pub struct Session {
     uploads: std::sync::Mutex<upload::Uploads>,
     reader: std::sync::Arc<std::sync::Mutex<reader::ReaderStore>>,
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     agent_context: crate::agent::context::Contexts,
     upload_jobs: tokio::sync::Semaphore,
     gmail: std::sync::Arc<crate::providers::gmail::Session>,
@@ -38,6 +39,7 @@ impl Default for Session {
         Self {
             uploads: Default::default(),
             reader: Default::default(),
+            #[cfg(all(feature = "agent", target_os = "linux"))]
             agent_context: Default::default(),
             upload_jobs: tokio::sync::Semaphore::new(2),
             mail: crate::sync::Sync::new(gmail.clone(), jmap.clone(), queries.clone()),
@@ -57,6 +59,10 @@ impl Session {
     // re-enter this dispatcher; embedding every provider future here overflowed
     // the worker stack in the real Quickshell large-request integration test.
     pub async fn dispatch(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        #[cfg(not(all(feature = "agent", target_os = "linux")))]
+        if method.starts_with("agent.") {
+            return Err("unknown_method");
+        }
         if matches!(method, "mail.list" | "mail.read" | "mail.act" | "mail.send") {
             return Box::pin(self.mail_call(method, params)).await;
         }
@@ -66,6 +72,7 @@ impl Session {
         if matches!(method, "reader.open" | "reader.render" | "reader.cancel") {
             return Box::pin(self.reader_call(method, params)).await;
         }
+        #[cfg(all(feature = "agent", target_os = "linux"))]
         if matches!(method, "agent.context" | "agent.contextCancel") {
             return Box::pin(self.agent_context.call(method, params, self)).await;
         }
@@ -91,6 +98,7 @@ impl Session {
             }
             return Ok(crate::providers::domain::snapshot());
         }
+        #[cfg(all(feature = "agent", target_os = "linux"))]
         if matches!(
             method,
             "agent.jobsList"
@@ -416,7 +424,8 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 3, "methods": methods::ALL
+            "protocol": 1, "apiVersion": 3, "methods": methods::ALL,
+            "capabilities": {"agent": cfg!(all(feature = "agent", target_os = "linux"))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),
@@ -435,7 +444,16 @@ mod api_contract_tests {
         let info = dispatch("system.info", &json!({})).unwrap();
         assert_eq!(info["apiVersion"], contract["apiVersion"]);
         assert_eq!(info["protocol"], contract["protocolVersion"]);
-        assert_eq!(info["methods"], contract["methods"]);
+        let expected: Vec<_> = contract["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|method| {
+                cfg!(all(feature = "agent", target_os = "linux"))
+                    || !method.as_str().unwrap().starts_with("agent.")
+            })
+            .collect();
+        assert_eq!(info["methods"], json!(expected));
     }
 }
 

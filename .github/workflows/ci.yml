@@ -13,6 +13,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  standalone-backend:
+    name: Standalone backend (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: cargo check --locked --all-targets --no-default-features --features standalone
+      - run: cargo test --locked --no-default-features --features standalone process
+      - run: cargo test --locked --no-default-features --features standalone --test cli agent_disabled_build_has_no_worker_or_agent_rpc
+
   portable-tests:
     name: Portable tests
     runs-on: ubuntu-latest

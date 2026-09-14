@@ -5,18 +5,11 @@ use tokio::{
     process::Command,
 };
 
+#[derive(Debug)]
 pub struct Output {
     pub success: bool,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
-}
-struct Group(u32);
-impl Drop for Group {
-    fn drop(&mut self) {
-        unsafe {
-            libc::kill(-(self.0 as i32), libc::SIGKILL);
-        }
-    }
 }
 async fn read(mut pipe: impl AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::new();
@@ -42,6 +35,16 @@ pub async fn run(
     timeout: Duration,
     limit: usize,
 ) -> Result<Output, &'static str> {
+    run_with_stderr_limit(program, args, input, timeout, limit, limit.min(65536)).await
+}
+pub(super) async fn run_with_stderr_limit(
+    program: &str,
+    args: &[String],
+    input: &[u8],
+    timeout: Duration,
+    limit: usize,
+    stderr_limit: usize,
+) -> Result<Output, &'static str> {
     if input.len() > limit {
         return Err("process_input_too_large");
     }
@@ -52,9 +55,11 @@ pub async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    command.as_std_mut().process_group(0);
+    super::platform::configure(command.as_std_mut());
     let mut child = command.spawn().map_err(|_| "process_unavailable")?;
-    let group = Group(child.id().ok_or("process_unavailable")?);
+    // Windows assigns the still-suspended process to its job before resuming it.
+    // A failed attach cannot execute any child code.
+    let group = super::platform::Tree::for_async_child(&child)?;
     let mut stdin = child.stdin.take().ok_or("process_pipe_failed")?;
     let stdout = child.stdout.take().ok_or("process_pipe_failed")?;
     let stderr = child.stderr.take().ok_or("process_pipe_failed")?;
@@ -68,12 +73,8 @@ pub async fn run(
             Ok(())
         };
         let wait = async { child.wait().await.map_err(|_| "process_wait_failed") };
-        let (_, stdout, stderr, status) = tokio::try_join!(
-            write,
-            read(stdout, limit),
-            read(stderr, limit.min(65536)),
-            wait
-        )?;
+        let (_, stdout, stderr, status) =
+            tokio::try_join!(write, read(stdout, limit), read(stderr, stderr_limit), wait)?;
         Ok(Output {
             success: status.success(),
             stdout,
@@ -90,9 +91,8 @@ pub async fn run(
     }
     result
 }
-use std::os::unix::process::CommandExt;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[tokio::test]

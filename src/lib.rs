@@ -1,4 +1,6 @@
 pub mod account;
+// Detached assistant workers currently rely on Linux pidfds and private storage.
+#[cfg(all(feature = "agent", target_os = "linux"))]
 pub mod agent;
 pub mod attachment;
 pub mod auth;

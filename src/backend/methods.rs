@@ -5,13 +5,21 @@ pub const ALL: &[&str] = &[
     "accounts.list",
     "account.identities",
     "account.conversation",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.context",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobsList",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobsProjection",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobStart",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobShow",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobCancel",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.jobForget",
+    #[cfg(all(feature = "agent", target_os = "linux"))]
     "agent.contextCancel",
     "reader.open",
     "reader.render",
