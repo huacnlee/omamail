@@ -50,6 +50,12 @@ QtObject {
     return true
   }
 
+  function quit() {
+    if (!host || typeof host.quit !== "function") return false
+    host.quit()
+    return true
+  }
+
   function openExternal(target) {
     return !!host && typeof host.openExternal === "function" && host.openExternal(String(target || ""))
   }

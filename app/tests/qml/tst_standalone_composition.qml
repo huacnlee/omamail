@@ -64,6 +64,16 @@ TestCase {
     compare(findChild(composition, "compose-agent"), null)
     compare(findChild(composition, "backend-diagnose").visible, false)
     compare(findChild(composition, "bar-settings").visible, false)
+    var appMenu = findChild(composition, "app-menu")
+    verify(appMenu)
+    compare(appMenu.canQuit, true)
+    appMenu.openAt(40, 40)
+    wait(20)
+    var quitRow = findChild(composition, "app-menu-quit")
+    verify(quitRow)
+    verify(quitRow.visible)
+    quitRow.activated()
+    compare(host.quitCalled, true)
   }
 
   function test_shell_persists_settings_and_routes_activation_payload() {

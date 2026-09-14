@@ -2686,6 +2686,7 @@ Item {
         signedIn: root.ready
         canOpenWebInbox: !!root.service && root.service.canOpenWebInbox
         accountCount: root.service ? root.service.accountCount : 1
+        canQuit: root.standaloneWindowChrome
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.openHelp()
@@ -2701,6 +2702,10 @@ Item {
         onSwitchAccountRequested: accountSwitcher.openCentered()
         onProjectRequested: if (root.service) root.service.openProjectPage()
         onAuthorRequested: if (root.service) root.service.openAuthorPage()
+        onQuitRequested: {
+          if (root.standaloneWindowChrome && root.shell
+              && typeof root.shell.quit === "function") root.shell.quit()
+        }
       }
 
       // Every mailbox, opened from the address in the status bar.

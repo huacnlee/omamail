@@ -403,6 +403,21 @@ Item {
       mailService.mailboxKey = "inbox"
     }
 
+    function test_plugin_menu_does_not_offer_quit() {
+      var menu = named(app, "app-menu")
+      verify(menu)
+      menu.openAt(40, 40)
+      wait(20)
+      var row = null
+      for (var i = 0; i < menu.menuRows.length; i++)
+        if (menu.menuRows[i].objectName === "app-menu-quit") row = menu.menuRows[i]
+      verify(row, "the shared menu keeps one tested row")
+      compare(app.standaloneWindowChrome, false)
+      compare(menu.canQuit, false)
+      compare(row.visible, false, "a plugin cannot terminate its shell")
+      menu.close()
+    }
+
     function test_a_draft_over_the_reader_returns_to_the_reader() {
       app.openMessage("message-1")
       compare(kinds(), "list,reader")

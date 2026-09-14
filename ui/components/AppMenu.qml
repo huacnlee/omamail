@@ -23,6 +23,9 @@ Item {
   // bar, or the status bar when the sidebar is hidden — so it carries no
   // trigger of its own by default.
   property bool showTrigger: false
+  // Only the standalone host owns the application process. A plugin menu
+  // must never offer to terminate the shell that loaded it.
+  property bool canQuit: false
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -32,7 +35,7 @@ Item {
   property real anchorY: 0
   property int cursorIndex: -1
   readonly property var menuRows: [inboxRow, calendarRow, markRow, webRow,
-    switchRow, settingsRow, shortcutsRow, projectRow, authorRow]
+    switchRow, settingsRow, shortcutsRow, projectRow, authorRow, quitRow]
 
   function openAt(sceneX, sceneY) {
     var local = root.mapFromGlobal(sceneX, sceneY)
@@ -79,6 +82,7 @@ Item {
   signal switchAccountRequested()
   signal projectRequested()
   signal authorRequested()
+  signal quitRequested()
 
   anchors.fill: root.showTrigger ? undefined : parent
   implicitWidth: root.showTrigger ? Style.space(24) : 0
@@ -197,6 +201,18 @@ Item {
         id: authorRow
         text: "Twitter..."
         onActivated: { menu.close(); root.authorRequested() }
+      }
+      MenuSeparatorLine {
+        visible: root.canQuit
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+      MenuRow {
+        id: quitRow
+        objectName: "app-menu-quit"
+        text: "Quit"
+        visible: root.canQuit
+        onActivated: { menu.close(); root.quitRequested() }
       }
     }
   }
