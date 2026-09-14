@@ -238,6 +238,7 @@ fn attachment_bytes_are_pinned_and_preview_never_changes_the_fixture() {
     assert!(payload.get("attachments").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn attachment_paths_types_metadata_counts_and_sizes_are_validated_before_read() {
     if tests::isolated() {
@@ -399,6 +400,7 @@ async fn public_rpc_preview_uses_configured_imap_identity_without_writes() {
     assert_eq!(tests::fixture_tree(&fixture.root), before);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn hey_delivery_uses_the_validated_bytes_and_keeps_the_body_off_argv() {
     if tests::isolated() {

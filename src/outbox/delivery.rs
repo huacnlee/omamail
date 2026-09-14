@@ -13,6 +13,7 @@ struct HeyAttachments {
 impl HeyAttachments {
     fn from_raw(raw: &str) -> Result<Self, &'static str> {
         use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        #[cfg(unix)]
         use std::{
             io::{Read, Write},
             os::unix::fs::{DirBuilderExt, OpenOptionsExt},
@@ -72,39 +73,44 @@ impl HeyAttachments {
         if files.is_empty() {
             return Ok(staged);
         }
-        let mut random = [0; 16];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut file| file.read_exact(&mut random))
-            .map_err(|_| "outbox_attachment_unavailable")?;
-        let directory =
-            std::env::temp_dir().join(format!("omamail-send-{}", URL_SAFE_NO_PAD.encode(random)));
-        if !directory.is_absolute() {
-            return Err("outbox_attachment_unavailable");
-        }
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&directory)
-            .map_err(|_| "outbox_attachment_unavailable")?;
-        staged.directory = Some(directory.clone());
-        for (index, (name, bytes)) in files.into_iter().enumerate() {
-            let folder = directory.join(index.to_string());
+        #[cfg(windows)]
+        return Err("outbox_attachment_unavailable");
+        #[cfg(unix)]
+        {
+            let mut random = [0; 16];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut file| file.read_exact(&mut random))
+                .map_err(|_| "outbox_attachment_unavailable")?;
+            let directory = std::env::temp_dir()
+                .join(format!("omamail-send-{}", URL_SAFE_NO_PAD.encode(random)));
+            if !directory.is_absolute() {
+                return Err("outbox_attachment_unavailable");
+            }
             std::fs::DirBuilder::new()
                 .mode(0o700)
-                .create(&folder)
+                .create(&directory)
                 .map_err(|_| "outbox_attachment_unavailable")?;
-            let path = folder.join(&name);
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-                .open(&path)
-                .map_err(|_| "outbox_attachment_unavailable")?;
-            file.write_all(&bytes)
-                .map_err(|_| "outbox_attachment_unavailable")?;
-            staged.paths.push(json!({"path":path,"filename":name}));
+            staged.directory = Some(directory.clone());
+            for (index, (name, bytes)) in files.into_iter().enumerate() {
+                let folder = directory.join(index.to_string());
+                std::fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(&folder)
+                    .map_err(|_| "outbox_attachment_unavailable")?;
+                let path = folder.join(&name);
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                    .open(&path)
+                    .map_err(|_| "outbox_attachment_unavailable")?;
+                file.write_all(&bytes)
+                    .map_err(|_| "outbox_attachment_unavailable")?;
+                staged.paths.push(json!({"path":path,"filename":name}));
+            }
+            Ok(staged)
         }
-        Ok(staged)
     }
 
     fn paths(&self) -> Value {
@@ -211,7 +217,7 @@ pub async fn send(
     Ok(answer)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod attachment_tests {
     use super::*;
     use base64::{Engine, engine::general_purpose::STANDARD};

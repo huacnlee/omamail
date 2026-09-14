@@ -27,6 +27,14 @@ impl Read for Input {
         if bytes.is_empty() {
             return Ok(0);
         }
+        #[cfg(windows)]
+        {
+            // Windows anonymous pipes do not support poll(2). A failed stdout
+            // will be observed before the next request; otherwise the blocking
+            // stdin read is exactly the backend protocol's required wait.
+            return io::stdin().read(bytes);
+        }
+        #[cfg(unix)]
         loop {
             if self.failed.load(Ordering::Acquire) {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "output closed"));

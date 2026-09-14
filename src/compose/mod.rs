@@ -7,11 +7,9 @@ use std::{
 };
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(test)]
-use std::{
-    fs::File,
-    os::fd::AsRawFd,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(all(test, unix))]
+use std::{fs::File, os::fd::AsRawFd};
 #[cfg(test)]
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 type Result<T> = std::result::Result<T, &'static str>;

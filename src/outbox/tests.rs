@@ -117,6 +117,7 @@ async fn owner_bridge_rejects_unbounded_frames_unkeyed_mutations_and_payload_rea
     assert_eq!(storage::read(&dir.0).unwrap(), before);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn owner_socket_refuses_symlinks_and_non_socket_entries_without_removing_them() {
     use std::os::unix::fs::symlink;
@@ -276,7 +277,9 @@ async fn mail_send_preview_is_write_free_and_execute_keeps_one_durable_job() {
 }
 struct Temp(PathBuf);
 
+#[cfg(unix)]
 struct ForkedDescriptors(i32, std::os::unix::net::UnixStream);
+#[cfg(unix)]
 impl ForkedDescriptors {
     fn new() -> Self {
         use std::io::Read;
@@ -300,6 +303,7 @@ impl ForkedDescriptors {
         Self(pid, parent)
     }
 }
+#[cfg(unix)]
 impl Drop for ForkedDescriptors {
     fn drop(&mut self) {
         use std::io::Write;
@@ -310,6 +314,7 @@ impl Drop for ForkedDescriptors {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn forked_child_drop_cannot_unlock_its_parent_lease() {
     use std::io::Read;
@@ -346,6 +351,7 @@ fn forked_child_drop_cannot_unlock_its_parent_lease() {
     assert!(storage::lease(&dir.0).is_ok());
 }
 
+#[cfg(unix)]
 #[test]
 fn forked_child_descriptor_cannot_extend_the_last_owner_lease() {
     use std::os::fd::AsRawFd;
@@ -472,6 +478,7 @@ impl Temp {
         )))
     }
     fn create(base: PathBuf) -> Self {
+        #[cfg(unix)]
         use std::os::unix::fs::DirBuilderExt;
         for attempt in 0..1024 {
             let path = if attempt == 0 {
@@ -479,7 +486,10 @@ impl Temp {
             } else {
                 base.with_extension(attempt.to_string())
             };
-            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            builder.mode(0o700);
+            match builder.create(&path) {
                 Ok(()) => return Self(path),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => panic!("could not create private test directory: {error}"),
@@ -686,6 +696,7 @@ async fn uncertain_delivery_is_not_retried_and_restart_recovers_unsent() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
+#[cfg(unix)]
 #[tokio::test]
 async fn unsafe_storage_and_invalid_requests_cannot_send() {
     use std::os::unix::fs::symlink;
@@ -739,6 +750,7 @@ async fn rust_timer_delivers_without_any_ui_flush_or_poll_command() {
     assert!(start.elapsed() >= Duration::from_millis(900));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
     #[cfg(target_os = "linux")]
@@ -942,6 +954,7 @@ async fn queue_preserves_large_composed_payload_without_the_old_sixteen_megabyte
     outbox.shutdown().await.unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn test_directories_retry_collisions_without_reusing_or_removing_existing_data() {
     use std::os::unix::fs::PermissionsExt;

@@ -87,6 +87,7 @@ fn meaningful_body_history_and_parked_identity_survive() {
     assert_eq!(record["parked"].as_array().unwrap().len(), 1);
     assert_eq!(record["parked"][0]["accountId"], "imap:two@example.org");
 }
+#[cfg(unix)]
 #[test]
 fn snapshots_are_private_atomic_and_stale_clear_cannot_erase_newer_draft() {
     use std::os::unix::fs::PermissionsExt;
@@ -132,6 +133,7 @@ fn snapshots_are_private_atomic_and_stale_clear_cannot_erase_newer_draft() {
     .unwrap();
     assert_eq!(cleared["record"], empty());
 }
+#[cfg(unix)]
 #[test]
 fn links_never_read_write_or_modify_outside_target() {
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -272,6 +274,7 @@ fn delivery_receipts_survive_recovery_without_changing_legacy_empty_fields() {
     assert!(normalize(&value).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn recovery_lock_releases_even_with_an_inherited_file_description() {
     let temp = Temp::new();

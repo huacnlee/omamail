@@ -2,11 +2,10 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use std::fs::File;
+#[cfg(all(test, unix))]
+use std::os::fd::AsRawFd;
 #[cfg(test)]
-use std::{
-    os::fd::AsRawFd,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 type Result<T> = std::result::Result<T, &'static str>;
@@ -191,6 +190,7 @@ mod tests {
         call_at(&root,"accounts.save",&json!({"registry":saved("b@example.org"),"revision":first["revision"],"allowDrop":true})).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[cfg(unix)]
     #[test]
     fn links_at_registry_lock_and_config_directory_never_change_targets() {
         use std::os::unix::fs::{PermissionsExt, symlink};
@@ -296,7 +296,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod lock_tests {
     use super::*;
     #[test]
