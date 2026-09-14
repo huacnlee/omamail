@@ -175,6 +175,7 @@ Item {
     }
 
     function init() {
+      if (Qt.platform.os !== "linux") { skip("The plugin agent backend is Linux-only"); return }
       added.clear(); dismissed.clear(); card.suggestions = []
       mailService.backend.protocolInfo = { apiVersion: 2, protocol: 1, version: "0.0.0" }
       mailService.backendRuntime.latestApiVersion = 2

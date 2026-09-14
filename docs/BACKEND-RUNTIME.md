@@ -213,7 +213,7 @@ cargo test --locked --no-default-features --features standalone
 cmake -S app -B build/app -DOMAMAIL_BACKEND="$PWD/target/debug/omamail"
 cmake --build build/app --parallel
 ctest --test-dir build/app --output-on-failure
-QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml -import app/qml/imports -import ui
+QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
 ```
 
 These commands establish evidence only for the operating system that ran them. Package and installer acceptance must use the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.

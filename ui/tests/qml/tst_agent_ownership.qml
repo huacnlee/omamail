@@ -73,6 +73,7 @@ Item {
       bridge.modelBridge=NativeIntentFixture.backend(mailService)
     }
     function init() {
+      if (Qt.platform.os !== "linux") { skip("The plugin agent backend is Linux-only"); return }
       var agent=runner()
       agent.backend=null
       bridge.requests=[]

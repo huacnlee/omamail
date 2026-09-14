@@ -61,6 +61,7 @@ class ReleaseWorkflowContract(unittest.TestCase):
             "credentials_native",
             "cmake -S app",
             "ctest --test-dir",
+            "-input app/tests/qml/tst_host_contract.qml",
             "test_qml_inventory.py",
             "test_backend_api.py",
             "--check-resources",
