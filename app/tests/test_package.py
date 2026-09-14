@@ -97,6 +97,13 @@ class PackageTest(unittest.TestCase):
                 self.assertEqual(info["CFBundleShortVersionString"], VERSION)
                 self.assertEqual(info["CFBundleVersion"], VERSION)
                 self.assertNotIn("CFBundleURLTypes", info)
+                packaged_icon = package.extractfile(
+                    f"{top}/Contents/Resources/omamail.icns"
+                ).read()
+                self.assertEqual(
+                    packaged_icon,
+                    (ROOT / "app/resources/macos/omamail.icns").read_bytes(),
+                )
 
     def test_macos_archive_layout(self):
         self.assert_archive(

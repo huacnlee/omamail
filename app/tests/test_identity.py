@@ -30,6 +30,43 @@ for key in ("CFBundleDisplayName", "CFBundleName"):
 if plist.get("CFBundleIconFile") != "omamail.icns":
     raise SystemExit("macOS bundle icon is not omamail.icns")
 
+mac_svg = (APP / "resources/macos/omamail-macos.svg").read_text(encoding="utf-8")
+require(mac_svg, 'viewBox="0 0 1024 1024"', "macOS 1024px icon canvas")
+require(mac_svg, 'x="64" y="48" width="896" height="896" rx="202"',
+        "macOS rounded icon plate")
+require(mac_svg, 'fill="#1a1b26"', "Omarchy background on the macOS icon")
+require(mac_svg, 'stroke="#7aa2f7"', "Omarchy accent on the macOS icon")
+for logo_geometry in (
+    '<rect x="5" y="13" width="54" height="38" rx="5"',
+    'd="M20 43V24l12 13 12-13v19"',
+):
+    require(mac_svg, logo_geometry, "unaltered Omamail logo geometry")
+
+icns = (APP / "resources/macos/omamail.icns").read_bytes()
+if icns[:4] != b"icns" or int.from_bytes(icns[4:8], "big") != len(icns):
+    raise SystemExit("macOS Omamail icon is not a complete ICNS file")
+chunks = set()
+png_dimensions = set()
+offset = 8
+while offset < len(icns):
+    size = int.from_bytes(icns[offset + 4:offset + 8], "big")
+    if size < 8 or offset + size > len(icns):
+        raise SystemExit("macOS Omamail ICNS has a malformed image chunk")
+    chunks.add(icns[offset:offset + 4])
+    payload = icns[offset + 8:offset + size]
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        png_dimensions.add((
+            int.from_bytes(payload[16:20], "big"),
+            int.from_bytes(payload[20:24], "big"),
+            payload[25],
+        ))
+    offset += size
+if offset != len(icns) or not {b"ic04", b"ic05", b"ic07", b"ic08", b"ic09", b"ic10"}.issubset(chunks):
+    raise SystemExit("macOS Omamail ICNS does not cover 16px through 1024px")
+for dimension in (32, 64, 128, 256, 512, 1024):
+    if (dimension, dimension, 6) not in png_dimensions:
+        raise SystemExit(f"macOS Omamail ICNS lacks a {dimension}px RGBA image")
+
 desktop = (APP / "resources/linux/omamail.desktop").read_text(encoding="utf-8")
 require("\n" + desktop, "\nName=Omamail\n", "Linux application name")
 require("\n" + desktop, "\nIcon=omamail\n", "Linux application icon")

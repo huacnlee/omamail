@@ -109,28 +109,7 @@ if [ "$target" = macos-aarch64 ]; then
   if [ "$test_layout" -eq 1 ]; then
     [ -f "$platform_plugin" ] || { printf 'test platform plugin is missing\n' >&2; exit 1; }
     cp "$platform_plugin" "$app/Contents/PlugIns/platforms/libqcocoa.dylib"
-    cp "$repo_root/app/resources/icons/omamail.svg" "$app/Contents/Resources/omamail.icns"
   else
-    icon_svg="$repo_root/app/resources/icons/omamail.svg"
-    if command -v rsvg-convert >/dev/null 2>&1; then
-      render_icon() { rsvg-convert -w "$1" -h "$1" "$icon_svg" -o "$2"; }
-    elif command -v magick >/dev/null 2>&1; then
-      render_icon() { magick -background none -density 512 "$icon_svg" -resize "$1"x"$1" "$2"; }
-    elif command -v sips >/dev/null 2>&1; then
-      render_icon() { sips -s format png -z "$1" "$1" "$icon_svg" --out "$2" >/dev/null; }
-    else
-      printf 'rsvg-convert, ImageMagick, or sips is required to build the macOS icon\n' >&2
-      exit 1
-    fi
-    command -v iconutil >/dev/null 2>&1 || { printf 'iconutil is required\n' >&2; exit 1; }
-    iconset="$stage/omamail.iconset"
-    mkdir -p "$iconset"
-    for size in 16 32 128 256 512; do
-      render_icon "$size" "$iconset/icon_${size}x${size}.png"
-      render_icon "$((size * 2))" "$iconset/icon_${size}x${size}@2x.png"
-    done
-    for png in "$iconset"/*.png; do [ -s "$png" ] || { printf 'failed to render %s\n' "$png" >&2; exit 1; }; done
-    iconutil -c icns "$iconset" -o "$app/Contents/Resources/omamail.icns"
     if [ -n "$qt_bin" ] && [ -x "$qt_bin/macdeployqt" ]; then deploy="$qt_bin/macdeployqt"
     else deploy=$(command -v macdeployqt || true)
     fi
@@ -138,6 +117,7 @@ if [ "$target" = macos-aarch64 ]; then
     "$deploy" "$app" -qmldir="$app/Contents/Resources" -always-overwrite
     [ -f "$app/Contents/PlugIns/platforms/libqcocoa.dylib" ] || { printf 'macdeployqt omitted the Cocoa platform plugin\n' >&2; exit 1; }
   fi
+  cp "$repo_root/app/resources/macos/omamail.icns" "$app/Contents/Resources/omamail.icns"
   archive="$dist/omamail-app-macos-aarch64.tar.gz"
 else
   top_level=omamail.app
