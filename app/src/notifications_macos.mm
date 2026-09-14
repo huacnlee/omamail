@@ -121,6 +121,7 @@ public:
         if (!ensureCenter(error)) {
             return false;
         }
+        track(notification);
 
         const auto state = m_state;
         const NativeNotification copy = notification;
@@ -136,9 +137,10 @@ public:
                     return;
                 }
                 if (status != UNAuthorizationStatusNotDetermined) {
-                    onQtThread(state, [](MacNotificationPlatform *owner) {
-                        owner->reportFailure(QStringLiteral(
-                            "Notifications are disabled in macOS System Settings"));
+                    onQtThread(state, [copy](MacNotificationPlatform *owner) {
+                        owner->reportFailure(copy.token, copy.revision,
+                            QStringLiteral(
+                                "Notifications are disabled in macOS System Settings"));
                     });
                     return;
                 }
@@ -154,9 +156,11 @@ public:
                         const QString detail = authorizationError
                             ? fromNSString(authorizationError.localizedDescription)
                             : QStringLiteral("permission denied");
-                        onQtThread(state, [detail](MacNotificationPlatform *owner) {
-                            owner->reportFailure(QStringLiteral(
-                                "macOS notification authorization failed: %1").arg(detail));
+                        onQtThread(state, [copy, detail](MacNotificationPlatform *owner) {
+                            owner->reportFailure(copy.token, copy.revision,
+                                QStringLiteral(
+                                    "macOS notification authorization failed: %1")
+                                    .arg(detail));
                         });
                     }];
             }];
@@ -165,6 +169,7 @@ public:
 
     void submit(const NativeNotification &notification)
     {
+        if (!isCurrent(notification.token, notification.revision)) return;
         @autoreleasepool {
             UNMutableNotificationContent *content =
                 [[UNMutableNotificationContent alloc] init];
@@ -175,19 +180,22 @@ public:
                 content:content trigger:nil];
             const auto state = m_state;
             const QString token = notification.token;
+            const quint64 revision = notification.revision;
             [m_state->center addNotificationRequest:request
                 withCompletionHandler:^(NSError *deliveryError) {
                     if (!deliveryError) {
-                        onQtThread(state, [token](
+                        onQtThread(state, [token, revision](
                             MacNotificationPlatform *owner) {
-                                emit owner->delivered(token);
+                                owner->reportDelivered(token, revision);
                             });
                         return;
                     }
                     const QString detail = fromNSString(deliveryError.localizedDescription);
-                    onQtThread(state, [detail](MacNotificationPlatform *owner) {
-                        owner->reportFailure(QStringLiteral(
-                            "macOS notification delivery failed: %1").arg(detail));
+                    onQtThread(state, [token, revision, detail](
+                        MacNotificationPlatform *owner) {
+                        owner->reportFailure(token, revision,
+                            QStringLiteral("macOS notification delivery failed: %1")
+                                .arg(detail));
                     });
                 }];
             [content release];
@@ -195,15 +203,49 @@ public:
     }
 
     void activateToken(const QString &token) { deliverActivation(token); }
-    void reportFailure(const QString &error) { emit failed(error); }
+    void reportDelivered(const QString &token, quint64 revision)
+    {
+        if (!takeCurrent(token, revision)) return;
+        emit delivered(token, revision);
+    }
+    void reportFailure(const QString &token, quint64 revision,
+                       const QString &error)
+    {
+        if (!takeCurrent(token, revision)) return;
+        emit failed(token, revision, error);
+    }
 
 private:
+    void track(const NativeNotification &notification)
+    {
+        m_revisionOrder.removeAll(notification.token);
+        m_revisionOrder.append(notification.token);
+        m_revisions.insert(notification.token, notification.revision);
+        while (m_revisionOrder.size() > maximumNativeNotificationEntries)
+            m_revisions.remove(m_revisionOrder.takeFirst());
+    }
+
+    bool isCurrent(const QString &token, quint64 revision) const
+    {
+        return m_revisions.value(token) == revision;
+    }
+
+    bool takeCurrent(const QString &token, quint64 revision)
+    {
+        if (!isCurrent(token, revision)) return false;
+        m_revisions.remove(token);
+        m_revisionOrder.removeAll(token);
+        return true;
+    }
+
     bool ensureCenter(QString *error)
     {
         return installNotificationDelegate(m_state, error);
     }
 
     std::shared_ptr<MacNotificationState> m_state;
+    QHash<QString, quint64> m_revisions;
+    QList<QString> m_revisionOrder;
 };
 
 @implementation OmamailNotificationDelegate
@@ -228,7 +270,12 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
         QCoreApplication *application = QCoreApplication::instance();
         if (application) QMetaObject::invokeMethod(application, [callbackState, token] {
             if (callbackState->owner) callbackState->owner->activateToken(token);
-            else callbackState->pendingActivations.append(token);
+            else {
+                callbackState->pendingActivations.append(token);
+                while (callbackState->pendingActivations.size()
+                       > maximumNativeNotificationEntries)
+                    callbackState->pendingActivations.removeFirst();
+            }
         });
     }
     completionHandler();

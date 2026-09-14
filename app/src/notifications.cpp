@@ -43,6 +43,14 @@ bool validToken(const QString &token)
     return expression.match(token).hasMatch();
 }
 
+bool validActivationNamespace(const QString &activationNamespace)
+{
+    static const QRegularExpression expression(
+        QStringLiteral("^:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$"));
+    return activationNamespace.size() <= 255
+        && expression.match(activationNamespace).hasMatch();
+}
+
 bool ensurePrivateDirectory(const QString &path, QString *error)
 {
     const QFileInfo before(path);
@@ -151,12 +159,22 @@ void NotificationPlatform::deliverActivation(const QString &token)
         emit activated(token);
     else
         m_pendingActivations.append(token);
+    while (m_pendingActivations.size() > maximumNativeNotificationEntries)
+        m_pendingActivations.removeFirst();
 }
 
 QString notificationToken(const QString &id)
 {
     return QString::fromLatin1(
         QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+
+QString notificationPlatformAlias(const QString &activationNamespace,
+                                  quint64 nativeId)
+{
+    return notificationToken(QStringLiteral("notification-platform:")
+                             + activationNamespace + QLatin1Char(':')
+                             + QString::number(nativeId));
 }
 
 QString normalizeNotificationText(QString text)
@@ -194,22 +212,35 @@ NotificationService::NotificationService(
     connect(m_platform.get(), &NotificationPlatform::activated, this,
             &NotificationService::routeActivation);
     connect(m_platform.get(), &NotificationPlatform::activationAliasAssigned, this,
-            [this](const QString &token, const QString &alias) {
+            [this](const QString &token, quint64 revision, const QString &alias,
+                   const QString &activationNamespace) {
                 if (!validToken(token) || !validToken(alias)) return;
+                if (m_revisions.value(token) != revision
+                    || !validActivationNamespace(activationNamespace)
+                    || activationNamespace != m_platform->activationNamespace()) return;
                 const auto target = m_targets.constFind(token);
                 if (target == m_targets.cend()) return;
                 const Target targetValue = *target;
-                if (!m_targets.contains(alias)) m_targetOrder.append(alias);
-                m_targets.insert(alias, targetValue);
-                while (m_targetOrder.size() > maximumRetainedTargets)
-                    m_targets.remove(m_targetOrder.takeFirst());
+                const auto oldTargets = m_targets;
+                const auto oldOrder = m_targetOrder;
+                m_targets.insert(alias, Target{targetValue.accountId,
+                    targetValue.messageId, targetValue.rootToken,
+                    activationNamespace});
+                touchTarget(alias);
                 QString error;
-                if (!saveRoutes(&error)) setError(error);
+                if (!saveRoutes(&error)) {
+                    m_targets = oldTargets;
+                    m_targetOrder = oldOrder;
+                    setDeliveryError(token, revision, error);
+                }
             });
+    connect(m_platform.get(), &NotificationPlatform::activationNamespaceChanged,
+            this, &NotificationService::invalidateActivationNamespace);
     connect(m_platform.get(), &NotificationPlatform::delivered, this,
-            [this](const QString &) { setError({}); });
+            &NotificationService::deliverySucceeded);
     connect(m_platform.get(), &NotificationPlatform::failed, this,
-            [this](const QString &error) { setError(error); });
+            &NotificationService::deliveryFailed);
+    invalidateActivationNamespace(m_platform->activationNamespace());
     const QStringList pending = m_platform->takePendingActivations();
     if (!pending.isEmpty()) {
         QTimer::singleShot(0, this, [this, pending] {
@@ -219,6 +250,89 @@ NotificationService::NotificationService(
 }
 
 NotificationService::~NotificationService() = default;
+
+void NotificationService::touchTarget(const QString &token)
+{
+    m_targetOrder.removeAll(token);
+    m_targetOrder.append(token);
+    while (m_targetOrder.size() > maximumRetainedTargets)
+        m_targets.remove(m_targetOrder.takeFirst());
+}
+
+void NotificationService::touchRevision(const QString &token, quint64 revision)
+{
+    m_revisionOrder.removeAll(token);
+    m_revisionOrder.append(token);
+    m_revisions.insert(token, revision);
+    while (m_revisionOrder.size() > maximumRetainedTargets)
+        m_revisions.remove(m_revisionOrder.takeFirst());
+}
+
+void NotificationService::removeRouteFamily(const QString &rootToken)
+{
+    for (auto iterator = m_targets.begin(); iterator != m_targets.end();) {
+        if (iterator->rootToken == rootToken) {
+            m_targetOrder.removeAll(iterator.key());
+            iterator = m_targets.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
+}
+
+void NotificationService::setDeliveryError(const QString &token, quint64 revision,
+                                           const QString &error)
+{
+    if (revision < m_errorRevision) return;
+    m_errorToken = token;
+    m_errorRevision = revision;
+    setError(error);
+}
+
+void NotificationService::deliverySucceeded(const QString &token, quint64 revision)
+{
+    if (m_revisions.value(token) != revision || revision < m_errorRevision) return;
+    m_errorToken.clear();
+    m_errorRevision = revision;
+    setError({});
+}
+
+void NotificationService::deliveryFailed(const QString &token, quint64 revision,
+                                         const QString &error)
+{
+    if (m_revisions.value(token) != revision) return;
+    removeRouteFamily(token);
+    m_revisions.remove(token);
+    m_revisionOrder.removeAll(token);
+    QString persistenceError;
+    if (!persistRouteRemoval(&persistenceError)) {
+        setDeliveryError(token, revision,
+            QStringLiteral("%1; notification route cleanup failed: %2")
+                .arg(error, persistenceError));
+        return;
+    }
+    setDeliveryError(token, revision,
+        error.isEmpty() ? QStringLiteral("Desktop notification failed") : error);
+}
+
+void NotificationService::invalidateActivationNamespace(
+    const QString &activationNamespace)
+{
+    bool changed = false;
+    for (auto iterator = m_targets.begin(); iterator != m_targets.end();) {
+        if (!iterator->activationNamespace.isEmpty()
+            && iterator->activationNamespace != activationNamespace) {
+            m_targetOrder.removeAll(iterator.key());
+            iterator = m_targets.erase(iterator);
+            changed = true;
+        } else {
+            ++iterator;
+        }
+    }
+    if (!changed) return;
+    QString error;
+    if (!persistRouteRemoval(&error)) setError(error);
+}
 
 void NotificationService::routeActivation(const QString &token)
 {
@@ -240,45 +354,55 @@ bool NotificationService::show(const QString &id, const QString &title,
                                const QString &body, const QString &accountId,
                                const QString &messageId)
 {
+    const quint64 revision = ++m_nextRevision;
+    const QString token = notificationToken(id);
     if (!available()) {
-        setError(QStringLiteral("Desktop notifications are unavailable"));
+        setDeliveryError(token, revision,
+                         QStringLiteral("Desktop notifications are unavailable"));
         return false;
     }
     if (title.contains(QChar::Null) || body.contains(QChar::Null)) {
-        setError(QStringLiteral("Desktop notification text contains NUL"));
+        setDeliveryError(token, revision,
+                         QStringLiteral("Desktop notification text contains NUL"));
         return false;
     }
     if (!validRouteValue(id) || !validRouteValue(accountId)
         || !validRouteValue(messageId)) {
-        setError(QStringLiteral("Desktop notification route is invalid"));
+        setDeliveryError(token, revision,
+                         QStringLiteral("Desktop notification route is invalid"));
         return false;
     }
 
     const NativeNotification notification{
-        notificationToken(id), normalizeNotificationText(title),
+        token, revision, normalizeNotificationText(title),
         normalizeNotificationText(body)};
     const auto oldTargets = m_targets;
     const auto oldOrder = m_targetOrder;
-    if (!m_targets.contains(notification.token)) {
-        m_targetOrder.append(notification.token);
-        while (m_targetOrder.size() > maximumRetainedTargets)
-            m_targets.remove(m_targetOrder.takeFirst());
-    }
-    m_targets.insert(notification.token, Target{accountId, messageId});
+    const auto oldRevisions = m_revisions;
+    const auto oldRevisionOrder = m_revisionOrder;
+    m_targets.insert(notification.token,
+                     Target{accountId, messageId, notification.token, {}});
+    touchTarget(notification.token);
+    touchRevision(notification.token, revision);
 
     QString error;
     if (!saveRoutes(&error)) {
         m_targets = oldTargets;
         m_targetOrder = oldOrder;
-        setError(error);
+        m_revisions = oldRevisions;
+        m_revisionOrder = oldRevisionOrder;
+        setDeliveryError(token, revision, error);
         return false;
     }
     if (!m_platform->show(notification, &error)) {
         m_targets = oldTargets;
         m_targetOrder = oldOrder;
+        m_revisions = oldRevisions;
+        m_revisionOrder = oldRevisionOrder;
         QString rollbackError;
         if (!saveRoutes(&rollbackError) && error.isEmpty()) error = rollbackError;
-        setError(error.isEmpty() ? QStringLiteral("Desktop notification failed") : error);
+        setDeliveryError(token, revision,
+            error.isEmpty() ? QStringLiteral("Desktop notification failed") : error);
         return false;
     }
     return true;
@@ -305,7 +429,7 @@ bool NotificationService::loadRoutes(QString *error)
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(plain, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()
-        || document.object().value(QStringLiteral("version")).toInt() != 1
+        || document.object().value(QStringLiteral("version")).toInt() != 2
         || !document.object().value(QStringLiteral("routes")).isArray()) {
         if (error) *error = QStringLiteral("Notification routes are invalid");
         return false;
@@ -323,10 +447,20 @@ bool NotificationService::loadRoutes(QString *error)
             m_targetOrder.clear();
             return false;
         }
-        if (!m_targets.contains(token)) m_targetOrder.append(token);
-        m_targets.insert(token, Target{accountId, messageId});
-        while (m_targetOrder.size() > maximumRetainedTargets)
-            m_targets.remove(m_targetOrder.takeFirst());
+        const QString rootToken = route.value(QStringLiteral("rootToken")).toString();
+        const QString activationNamespace =
+            route.value(QStringLiteral("activationNamespace")).toString();
+        if (!validToken(rootToken)
+            || (!activationNamespace.isEmpty()
+                && !validActivationNamespace(activationNamespace))) {
+            if (error) *error = QStringLiteral("Notification route entry is invalid");
+            m_targets.clear();
+            m_targetOrder.clear();
+            return false;
+        }
+        m_targets.insert(token, Target{accountId, messageId, rootToken,
+                                      activationNamespace});
+        touchTarget(token);
     }
     if (error) error->clear();
     return true;
@@ -343,10 +477,13 @@ bool NotificationService::saveRoutes(QString *error) const
         if (target == m_targets.cend()) continue;
         routes.append(QJsonObject{{QStringLiteral("token"), token},
                                   {QStringLiteral("accountId"), target->accountId},
-                                  {QStringLiteral("messageId"), target->messageId}});
+                                  {QStringLiteral("messageId"), target->messageId},
+                                  {QStringLiteral("rootToken"), target->rootToken},
+                                  {QStringLiteral("activationNamespace"),
+                                   target->activationNamespace}});
     }
     const QByteArray plain = QJsonDocument(QJsonObject{
-        {QStringLiteral("version"), 1}, {QStringLiteral("routes"), routes}})
+        {QStringLiteral("version"), 2}, {QStringLiteral("routes"), routes}})
         .toJson(QJsonDocument::Compact);
     if (plain.size() > maximumRoutePlaintextBytes) {
         if (error) *error = QStringLiteral("Notification routes are too large");
@@ -367,6 +504,26 @@ bool NotificationService::saveRoutes(QString *error) const
     }
     if (error) error->clear();
     return true;
+}
+
+bool NotificationService::persistRouteRemoval(QString *error) const
+{
+    QString saveError;
+    if (saveRoutes(&saveError)) {
+        if (error) error->clear();
+        return true;
+    }
+    const QFileInfo routeInfo(m_routingPath);
+    if ((!routeInfo.exists() && !routeInfo.isSymLink())
+        || QFile::remove(m_routingPath)) {
+        if (error) error->clear();
+        return true;
+    }
+    if (error) {
+        *error = QStringLiteral("%1; could not remove notification route file")
+                     .arg(saveError);
+    }
+    return false;
 }
 
 void NotificationService::setError(const QString &error)

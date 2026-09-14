@@ -27,7 +27,19 @@ for required in (
     "INotificationActivationCallback",
     "validActivationToken(invokedArgs)",
     "std::wcscmp(appUserModelId, applicationId)",
+    "trimEntries();",
+    "maximumNativeNotificationEntries",
 ):
     assert required in windows, f"Windows cold-start activation contract missing: {required}"
+assert windows.index("m_notifier.Show(toast);") < windows.index("removeEntry(key);")
+
+linux = (ROOT / "src" / "notifications_linux.cpp").read_text(encoding="utf-8")
+for required in (
+    "serviceOwner(notificationService)",
+    "activationNamespaceChanged(owner)",
+    "notificationPlatformAlias(serviceOwner, nativeId)",
+    "maximumNativeNotificationEntries",
+):
+    assert required in linux, f"Linux durable activation boundary missing: {required}"
 
 print("notification adapters contain no shell/process invocation")

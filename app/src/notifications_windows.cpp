@@ -282,31 +282,39 @@ public:
             toast.Group(L"omamail");
             const auto state = m_state;
             const QString token = notification.token;
+            const quint64 revision = notification.revision;
             const event_token activated = toast.Activated(
                 [state, token](const ToastNotification &, const IInspectable &) {
                     dispatchActivation(state, token);
                 });
             const event_token failed = toast.Failed(
-                [state](const ToastNotification &, const ToastFailedEventArgs &args) {
+                [state, token, revision](const ToastNotification &,
+                                          const ToastFailedEventArgs &args) {
                     const QString detail = QStringLiteral("0x%1").arg(
                         static_cast<quint32>(args.ErrorCode().value), 8, 16,
                         QLatin1Char('0'));
-                    onQtThread(state, [detail](WindowsNotificationPlatform *owner) {
-                        owner->reportFailure(QStringLiteral(
-                            "Windows notification delivery failed: %1").arg(detail));
+                    onQtThread(state, [token, revision, detail](
+                        WindowsNotificationPlatform *owner) {
+                        owner->reportFailure(token, revision,
+                            QStringLiteral("Windows notification delivery failed: %1")
+                                .arg(detail));
                     });
                 });
 
             const std::wstring key = toHString(notification.token).c_str();
-            const auto existing = m_entries.find(key);
-            if (existing != m_entries.end()) {
-                existing->second.toast.Activated(existing->second.activated);
-                existing->second.toast.Failed(existing->second.failed);
-                m_entries.erase(existing);
+            try {
+                m_notifier.Show(toast);
+            } catch (...) {
+                toast.Activated(activated);
+                toast.Failed(failed);
+                throw;
             }
-            m_notifier.Show(toast);
-            m_entries.emplace(key, Entry{toast, activated, failed});
-            emit delivered(notification.token);
+            removeEntry(key);
+            m_entries.emplace(key, Entry{toast, activated, failed, revision});
+            m_entryOrder.removeAll(notification.token);
+            m_entryOrder.append(notification.token);
+            trimEntries();
+            emit delivered(notification.token, revision);
             return true;
         } catch (const hresult_error &failure) {
             if (error) {
@@ -318,14 +326,47 @@ public:
     }
 
     void activateToken(const QString &token) { deliverActivation(token); }
-    void reportFailure(const QString &error) { emit failed(error); }
+    void reportFailure(const QString &token, quint64 revision,
+                       const QString &error)
+    {
+        const std::wstring key = toHString(token).c_str();
+        const auto entry = m_entries.find(key);
+        if (entry != m_entries.end() && entry->second.revision == revision)
+            removeEntry(entry);
+        emit failed(token, revision, error);
+    }
 
 private:
     struct Entry {
         ToastNotification toast{nullptr};
         event_token activated{};
         event_token failed{};
+        quint64 revision = 0;
     };
+
+    using EntryIterator = std::map<std::wstring, Entry>::iterator;
+
+    void removeEntry(EntryIterator entry)
+    {
+        if (entry == m_entries.end()) return;
+        entry->second.toast.Activated(entry->second.activated);
+        entry->second.toast.Failed(entry->second.failed);
+        m_entryOrder.removeAll(QString::fromStdWString(entry->first));
+        m_entries.erase(entry);
+    }
+
+    void removeEntry(const std::wstring &key)
+    {
+        removeEntry(m_entries.find(key));
+    }
+
+    void trimEntries()
+    {
+        while (m_entryOrder.size() > maximumNativeNotificationEntries) {
+            const QString expired = m_entryOrder.constFirst();
+            removeEntry(toHString(expired).c_str());
+        }
+    }
 
     static void appendText(const XmlDocument &document, const XmlElement &binding,
                            const QString &text)
@@ -338,6 +379,7 @@ private:
     ToastNotifier m_notifier{nullptr};
     std::shared_ptr<WindowsNotificationState> m_state;
     std::map<std::wstring, Entry> m_entries;
+    QList<QString> m_entryOrder;
     bool m_ready = false;
 };
 
@@ -348,7 +390,12 @@ void dispatchActivation(const std::shared_ptr<WindowsNotificationState> &state,
     if (!application) return;
     QMetaObject::invokeMethod(application, [state, token] {
         if (state->owner) state->owner->activateToken(token);
-        else state->pendingActivations.append(token);
+        else {
+            state->pendingActivations.append(token);
+            while (state->pendingActivations.size()
+                   > maximumNativeNotificationEntries)
+                state->pendingActivations.removeFirst();
+        }
     }, Qt::QueuedConnection);
 }
 }
