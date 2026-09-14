@@ -11,19 +11,24 @@ Item {
   property color accent: Color.accent
   signal toggled()
 
+  onCheckedChanged: {
+    if (toggle.checked !== checked) toggle.checked = checked
+  }
+
   implicitWidth: toggle.implicitWidth
   implicitHeight: toggle.implicitHeight
 
   QQC.Switch {
     id: toggle
+    objectName: "toggle-switch-input"
     anchors.centerIn: parent
     checked: root.checked
     enabled: !root.busy
     palette.windowText: root.foreground
     palette.highlight: root.accent
     onToggled: {
-      root.checked = checked
       root.toggled()
+      checked = root.checked
     }
   }
 

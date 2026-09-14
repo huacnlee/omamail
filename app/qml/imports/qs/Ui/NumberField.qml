@@ -17,6 +17,10 @@ Item {
   property real fieldWidth: Style.space(80)
   signal modified(int value)
 
+  onValueChanged: {
+    if (spinBox.value !== value) spinBox.value = value
+  }
+
   implicitWidth: labelText.implicitWidth + (label === "" ? 0 : Style.spacing.controlGap)
     + fieldWidth
   implicitHeight: Math.max(labelText.implicitHeight, spinBox.implicitHeight)
@@ -33,6 +37,7 @@ Item {
 
   QQC.SpinBox {
     id: spinBox
+    objectName: "number-field-input"
     anchors.right: parent.right
     anchors.verticalCenter: parent.verticalCenter
     width: root.fieldWidth
@@ -42,8 +47,8 @@ Item {
     value: root.value
     editable: true
     onValueModified: {
-      root.value = value
       root.modified(value)
+      value = root.value
     }
   }
 }

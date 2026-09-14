@@ -42,6 +42,66 @@ EXPECTED_MODULES = {
     },
 }
 
+EXPECTED_MEMBERS = {
+    "Quickshell/Quickshell.qml": {
+        "nativeHost", "fileStore", "notificationActivated", "env",
+        "execDetached", "showNotification",
+    },
+    "Quickshell/FloatingWindow.qml": {
+        "implicitWidth", "implicitHeight", "minimumSize",
+    },
+    "Quickshell/Io/Process.qml": {
+        "command", "running", "stdinEnabled", "jobMode", "stdout", "stderr",
+        "written", "started", "exited", "write", "terminate",
+    },
+    "Quickshell/Io/FileView.qml": {
+        "path", "watchChanges", "printErrors", "atomicWrites", "loaded",
+        "fileChanged", "loadFailed", "reload", "text", "setText",
+    },
+    "Quickshell/Io/SplitParser.qml": {"splitMarker", "read"},
+    "Quickshell/Io/StdioCollector.qml": {"waitForEnd", "text", "streamFinished"},
+    "qs/Commons/Color.qml": {"foreground", "background", "accent", "urgent", "popups"},
+    "qs/Commons/Style.qml": {
+        "cornerRadius", "normalBorderWidth", "normalBorderColor",
+        "selectedAccentFill", "font", "spacing", "spacingScale", "space",
+        "hoverFillFor", "selectedFillFor", "selectedStateColor",
+        "selectionFillFor", "pressedFillFor", "normalFillFor",
+        "normalBorderFor", "hoverBorderFor", "mutedColorFor",
+    },
+    "qs/Commons/Border.qml": {"controlSpec", "flat"},
+    "qs/Ui/TextField.qml": {"password", "foreground", "accent", "verticalPadding", "horizontalPadding"},
+    "qs/Ui/Button.qml": {
+        "text", "tooltipText", "foreground", "accent", "background", "bordered",
+        "selected", "hasCursor", "leftAlign", "focusable", "fontFamily",
+        "fontSize", "horizontalPadding", "verticalPadding", "clicked", "hovered",
+    },
+    "qs/Ui/NumberField.qml": {"label", "value", "from", "to", "stepSize", "modified"},
+    "qs/Ui/ToggleSwitch.qml": {"checked", "busy", "toggled"},
+    "qs/Ui/Dropdown.qml": {
+        "label", "value", "options", "foreground", "background", "popupBorder",
+        "accent", "fontFamily", "rowHeight", "popupRowHeight", "showLabel",
+        "hasCursor", "popupOpen", "changed", "hovered",
+    },
+    "qs/Ui/BorderSurface.qml": {"borderSpec"},
+    "qs/Ui/PanelActionButton.qml": {
+        "iconText", "tooltipText", "foreground", "hoverColor", "fontFamily",
+        "fontSize", "focusable", "hasCursor", "bordered", "clicked", "hovered",
+    },
+    "qs/Ui/PanelSeparator.qml": {"foreground"},
+    "qs/Ui/PanelSectionHeader.qml": {"foreground", "fontFamily"},
+    "qs/Ui/PanelToolTip.qml": {"fontFamily"},
+    "qs/Ui/BarWidget.qml": {"bar", "moduleName", "settings", "vertical", "barSize"},
+    "qs/Ui/BarIconButton.qml": {
+        "bar", "iconComponent", "tooltipText", "slotSize", "opticalSize", "active",
+        "foreground", "pressed", "wheelMoved",
+    },
+    "qs/Ui/KeyboardPanel.qml": {
+        "anchorItem", "owner", "bar", "open", "contentWidth", "contentHeight",
+        "margin", "padding", "centerOnBar", "gap", "popoutSwitching",
+        "popoutSwitchClosing", "focusPrimed", "focusTarget",
+    },
+}
+
 
 class QmlInventoryTest(unittest.TestCase):
     def test_production_modules_export_the_shared_host_surface(self):
@@ -63,6 +123,13 @@ class QmlInventoryTest(unittest.TestCase):
         forbidden = re.compile(r"/usr/share/omarchy/shell|ui/tests/qml/imports")
         for path in IMPORTS.rglob("*.qml"):
             self.assertIsNone(forbidden.search(path.read_text()), str(path.relative_to(ROOT)))
+
+    def test_production_types_keep_every_consumed_custom_member(self):
+        declaration = re.compile(r"\b(?:property(?:\s+\w+)*|signal|function)\s+(\w+)")
+        for relative, expected in EXPECTED_MEMBERS.items():
+            source = (IMPORTS / relative).read_text()
+            actual = set(declaration.findall(source))
+            self.assertFalse(expected - actual, f"{relative}: missing {sorted(expected - actual)}")
 
     def test_standalone_palette_has_no_literal_ui_colors(self):
         literal = re.compile(r"#[0-9a-fA-F]{3,8}|\b(?:white|black|gray|grey|red|orange)\b")

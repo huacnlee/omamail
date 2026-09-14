@@ -54,6 +54,8 @@ Item {
 
   function syncNative() {
     if (!running || _syncingRunning) return
+    resetSink(stdout)
+    resetSink(stderr)
     if (isNotificationCommand()) {
       startNotification()
       return
@@ -90,6 +92,10 @@ Item {
 
   function finish(sink) {
     if (sink && typeof sink.finish === "function") sink.finish()
+  }
+
+  function resetSink(sink) {
+    if (sink && typeof sink.reset === "function") sink.reset()
   }
 
   onRunningChanged: {

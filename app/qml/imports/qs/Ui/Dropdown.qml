@@ -21,6 +21,11 @@ Item {
   signal changed(string value)
   signal hovered(bool isHovered)
 
+  onValueChanged: {
+    var next = indexForValue(value)
+    if (combo.currentIndex !== next) combo.currentIndex = next
+  }
+
   implicitWidth: Style.space(240)
   implicitHeight: Math.max(rowHeight, labelText.visible ? labelText.implicitHeight : 0)
 
@@ -43,6 +48,7 @@ Item {
 
   QQC.ComboBox {
     id: combo
+    objectName: "dropdown-input"
     anchors.left: labelText.visible ? labelText.right : parent.left
     anchors.leftMargin: labelText.visible ? Style.spacing.controlGap : 0
     anchors.right: parent.right
@@ -67,8 +73,8 @@ Item {
     }
     onActivated: function(index) {
       if (index < 0 || index >= root.options.length) return
-      root.value = String(root.options[index].value)
-      root.changed(root.value)
+      root.changed(String(root.options[index].value))
+      currentIndex = root.indexForValue(root.value)
     }
     onHoveredChanged: root.hovered(hovered)
   }

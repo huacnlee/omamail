@@ -36,6 +36,46 @@ TestCase {
   Component { id: fileComponent; FileView { path: "/fixture/existing"; watchChanges: true } }
   Component { id: processComponent; Process {} }
   Component {
+    id: controlledNumberComponent
+    Item {
+      property int modelValue: 2
+      property int proposedValue: -1
+      property alias control: controlledNumber
+      NumberField {
+        id: controlledNumber
+        value: parent.modelValue
+        onModified: function(value) { parent.proposedValue = value }
+      }
+    }
+  }
+  Component {
+    id: controlledToggleComponent
+    Item {
+      property bool modelValue: false
+      property var proposedValue: null
+      property alias control: controlledToggle
+      ToggleSwitch {
+        id: controlledToggle
+        checked: parent.modelValue
+        onToggled: parent.proposedValue = !parent.modelValue
+      }
+    }
+  }
+  Component {
+    id: controlledDropdownComponent
+    Item {
+      property string modelValue: "one"
+      property string proposedValue: ""
+      property alias control: controlledDropdown
+      Dropdown {
+        id: controlledDropdown
+        options: [{ label: "One", value: "one" }, { label: "Two", value: "two" }]
+        value: parent.modelValue
+        onChanged: function(value) { parent.proposedValue = value }
+      }
+    }
+  }
+  Component {
     id: notificationProcessComponent
     Process {
       property string targetAccountId: "account-1"
@@ -152,6 +192,85 @@ TestCase {
     compare(lines, ["ready"])
     process.write("request\n")
     compare(nativeProcess.written, "request\n")
+  }
+
+  function test_process_clears_collected_output_before_each_run() {
+    var nativeProcess = nativeProcessComponent.createObject(testCase)
+    var process = createTemporaryObject(processComponent, testCase, {
+      nativeProcess: nativeProcess,
+      command: ["credential-helper"]
+    })
+    verify(process)
+    process.running = true
+    nativeProcess.stdoutLine("old-credential")
+    nativeProcess.running = false
+    nativeProcess.exited(0)
+    compare(process.stdout.text, "old-credential\n")
+
+    process.running = true
+    compare(process.stdout.text, "")
+    nativeProcess.running = false
+    nativeProcess.exited(0)
+    compare(process.stdout.text, "")
+  }
+
+  function test_process_clears_partial_parser_state_before_each_run() {
+    var nativeProcess = nativeProcessComponent.createObject(testCase)
+    var parser = parserComponent.createObject(testCase)
+    var process = createTemporaryObject(processComponent, testCase, {
+      nativeProcess: nativeProcess,
+      stdout: parser,
+      command: ["line-helper"]
+    })
+    verify(process)
+    parser.accept("partial")
+    compare(parser.pending, "partial")
+    process.running = true
+    compare(parser.pending, "")
+  }
+
+  function test_number_field_emits_without_replacing_external_value() {
+    var wrapper = createTemporaryObject(controlledNumberComponent, testCase)
+    verify(wrapper)
+    var input = findChild(wrapper.control, "number-field-input")
+    verify(input)
+    input.value = 6
+    input.valueModified()
+    compare(wrapper.proposedValue, 6)
+    compare(wrapper.control.value, 2)
+    compare(input.value, 2)
+    wrapper.modelValue = 8
+    compare(wrapper.control.value, 8)
+    compare(input.value, 8)
+  }
+
+  function test_toggle_emits_without_replacing_external_value() {
+    var wrapper = createTemporaryObject(controlledToggleComponent, testCase)
+    verify(wrapper)
+    var input = findChild(wrapper.control, "toggle-switch-input")
+    verify(input)
+    input.checked = true
+    input.toggled()
+    compare(wrapper.proposedValue, true)
+    compare(wrapper.control.checked, false)
+    compare(input.checked, false)
+    wrapper.modelValue = true
+    compare(wrapper.control.checked, true)
+    compare(input.checked, true)
+  }
+
+  function test_dropdown_emits_without_replacing_external_value() {
+    var wrapper = createTemporaryObject(controlledDropdownComponent, testCase)
+    verify(wrapper)
+    var input = findChild(wrapper.control, "dropdown-input")
+    verify(input)
+    input.activated(1)
+    compare(wrapper.proposedValue, "two")
+    compare(wrapper.control.value, "one")
+    compare(input.currentIndex, 0)
+    wrapper.modelValue = "two"
+    compare(wrapper.control.value, "two")
+    compare(input.currentIndex, 1)
   }
 
   function test_shared_non_bar_controls_construct_with_the_contract() {

@@ -40,4 +40,6 @@ QtObject {
     pending = ""
     read(frame)
   }
+
+  function reset() { pending = "" }
 }
