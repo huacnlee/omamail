@@ -18,6 +18,11 @@ impl AppDirs {
         Self::discover_with(|name| std::env::var_os(name), &std::env::temp_dir())
     }
     pub fn home() -> Result<PathBuf, &'static str> {
+        #[cfg(windows)]
+        {
+            return known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Profile);
+        }
+        #[cfg(unix)]
         absolute(
             std::env::var_os("HOME")
                 .map(PathBuf::from)
@@ -31,7 +36,19 @@ impl AppDirs {
         #[cfg(windows)]
         {
             let _ = (env, temporary);
-            Err("platform_directories_unsupported")
+            use windows_sys::Win32::UI::Shell::{
+                FOLDERID_Downloads, FOLDERID_LocalAppData, FOLDERID_RoamingAppData,
+            };
+            let local = known_folder(&FOLDERID_LocalAppData)?;
+            // Program files install into LocalAppData/omamail. Keep all data
+            // outside that replaceable installation directory.
+            Self::from_roots(
+                known_folder(&FOLDERID_RoamingAppData)?,
+                local.join("OmamailData/Cache"),
+                local.join("OmamailData/State"),
+                local.join("OmamailData/Runtime"),
+                known_folder(&FOLDERID_Downloads)?,
+            )
         }
         #[cfg(unix)]
         {
@@ -64,8 +81,8 @@ impl AppDirs {
                         .map(PathBuf::from)
                         .unwrap_or(fallback)
                 };
-                let config = root("XDG_CONFIG_HOME", home.join(".config"));
-                let downloads = root("XDG_DOWNLOAD_DIR", linux_downloads(&home, &config));
+                let config = absolute(root("XDG_CONFIG_HOME", home.join(".config")))?;
+                let downloads = download_root(&env, &home, &config);
                 (
                     config,
                     root("XDG_CACHE_HOME", home.join(".cache")),
@@ -105,9 +122,30 @@ fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
     }
     Ok(path)
 }
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
-    if let Ok(text) = std::fs::read_to_string(config.join("user-dirs.dirs")) {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    const LIMIT: u64 = 64 * 1024;
+    let read = || -> Option<String> {
+        // NONBLOCK avoids opening a FIFO/device before metadata can reject it.
+        // Both the metadata and the actual read are bounded against file growth.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(config.join("user-dirs.dirs"))
+            .ok()?;
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || metadata.len() > LIMIT {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        file.take(LIMIT + 1).read_to_end(&mut bytes).ok()?;
+        if bytes.len() as u64 > LIMIT {
+            return None;
+        }
+        String::from_utf8(bytes).ok()
+    };
+    if let Some(text) = read() {
         for line in text.lines() {
             if let Some(value) = line
                 .trim()
@@ -123,4 +161,112 @@ fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
         }
     }
     home.join("Downloads")
+}
+
+#[cfg(any(target_os = "linux", all(test, unix)))]
+fn download_root(env: &impl Fn(&str) -> Option<OsString>, home: &Path, config: &Path) -> PathBuf {
+    env("XDG_DOWNLOAD_DIR")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| linux_downloads(home, config))
+}
+#[cfg(all(test, unix))]
+mod download_tests {
+    use super::*;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    #[test]
+    fn fifo_and_oversized_user_dirs_never_block_or_allocate_their_contents() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("omamail-user-dirs-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("user-dirs.dirs");
+        let raw = CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0);
+        let start = std::time::Instant::now();
+        assert_eq!(linux_downloads(&root, &root), root.join("Downloads"));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(
+            download_root(
+                &|_| Some(OsString::from("/explicit/downloads")),
+                &root,
+                &root
+            ),
+            PathBuf::from("/explicit/downloads")
+        );
+        std::fs::remove_file(&path).unwrap();
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(1024 * 1024 * 1024).unwrap();
+        assert_eq!(linux_downloads(&root, &root), root.join("Downloads"));
+        std::fs::write(&path, b"XDG_DOWNLOAD_DIR=\"$HOME/Custom\"\n").unwrap();
+        assert_eq!(linux_downloads(&root, &root), root.join("Custom"));
+        let file = std::fs::File::open(&path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_accessed(std::time::UNIX_EPOCH))
+            .unwrap();
+        let before = file.metadata().unwrap().accessed().unwrap();
+        assert_eq!(
+            download_root(
+                &|_| Some(OsString::from("/explicit/downloads")),
+                &root,
+                &root
+            ),
+            PathBuf::from("/explicit/downloads")
+        );
+        assert_eq!(
+            file.metadata().unwrap().accessed().unwrap(),
+            before,
+            "an explicit override must not read user-dirs.dirs"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(windows)]
+fn known_folder(id: &windows_sys::core::GUID) -> Result<PathBuf, &'static str> {
+    use std::{os::windows::ffi::OsStringExt, ptr};
+    use windows_sys::Win32::{System::Com::CoTaskMemFree, UI::Shell::SHGetKnownFolderPath};
+    let mut raw = ptr::null_mut();
+    if unsafe { SHGetKnownFolderPath(id, 0, ptr::null_mut(), &mut raw) } < 0 {
+        return Err("home_missing");
+    }
+    let mut length = 0;
+    while length < 32768 && unsafe { *raw.add(length) } != 0 {
+        length += 1;
+    }
+    let result = if length < 32768 {
+        absolute(PathBuf::from(OsString::from_wide(unsafe {
+            std::slice::from_raw_parts(raw, length)
+        })))
+    } else {
+        Err("home_invalid")
+    };
+    unsafe {
+        CoTaskMemFree(raw.cast());
+    }
+    result
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_Downloads, FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_RoamingAppData,
+    };
+    #[test]
+    fn native_known_folders_keep_data_outside_the_program_installation() {
+        let dirs = AppDirs::discover().unwrap();
+        assert_eq!(dirs.config, known_folder(&FOLDERID_RoamingAppData).unwrap());
+        assert_eq!(dirs.downloads, known_folder(&FOLDERID_Downloads).unwrap());
+        assert_eq!(
+            AppDirs::home().unwrap(),
+            known_folder(&FOLDERID_Profile).unwrap()
+        );
+        let local = known_folder(&FOLDERID_LocalAppData).unwrap();
+        for root in [&dirs.cache, &dirs.state, &dirs.runtime] {
+            assert!(root.is_absolute());
+            assert!(root.starts_with(local.join("OmamailData")));
+            assert!(!root.starts_with(local.join("omamail")));
+        }
+    }
 }
