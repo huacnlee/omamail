@@ -37,6 +37,7 @@ DropArea {
 
   property bool opened: false
   property bool userModified: false
+  property bool settingBodyText: false
   // Drafts parked for their send's undo window, oldest first, each beside
   // the name of the send it belongs to. The timer owns them while the
   // visible composer stays free for the next message.
@@ -145,6 +146,12 @@ DropArea {
     draftChanged()
   }
 
+  function setBodyText(value) {
+    settingBodyText = true
+    bodyEdit.text = value
+    settingBodyText = false
+  }
+
   function hasUserChanges() { return userModified }
 
   onAccountIdChanged: noteDraftChanged()
@@ -214,7 +221,7 @@ DropArea {
     bccField.text = ""
     replyToField.text = ""
     subjectField.text = ""
-    bodyEdit.text = ""
+    setBodyText("")
     placedBody = ""
     bodyWasEdited = false
     bodyPrefix = ""
@@ -276,7 +283,7 @@ DropArea {
       root.pendingQuoteSummary = null
       root.pendingQuoteText = ""
       root.placedBody = root.bodyPrefix + String(result.body || "")
-      bodyEdit.text = root.placedBody
+      root.setBodyText(root.placedBody)
       if (params.summary && (root.mode === "reply" || root.mode === "replyAll") && subjectField.text === previousSubject)
         subjectField.text = String(result.replySubject || previousSubject)
     })
@@ -346,7 +353,7 @@ DropArea {
     bccField.text = String(saved.bcc || "")
     replyToField.text = String(saved.replyTo || "")
     subjectField.text = String(saved.subject || "")
-    bodyEdit.text = String(saved.body || "")
+    setBodyText(String(saved.body || ""))
     placedBody = String(saved.placedBody || "")
     bodyWasEdited = saved.bodyWasEdited === true
     userModified = typeof saved.userModified === "boolean"
@@ -608,7 +615,7 @@ DropArea {
     if (mode === "draft") {
       // Somebody wrote this and it was saved. None of it was placed, so all of
       // it is theirs — including the sign-off it already carries.
-      bodyEdit.text = String(values.body || "")
+      root.setBodyText(String(values.body || ""))
       placedBody = ""
       bodyWasEdited = true
       bodyPrefix = ""
@@ -1823,8 +1830,13 @@ DropArea {
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
-      onTextChanged: root.noteDraftChanged()
-      onTextEdited: { root.bodyWasEdited = true; root.noteUserModified() }
+      onTextChanged: {
+        root.noteDraftChanged()
+        if (!root.settingBodyText && activeFocus) {
+          root.bodyWasEdited = true
+          root.noteUserModified()
+        }
+      }
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: root.pasteKey(event)
     }
