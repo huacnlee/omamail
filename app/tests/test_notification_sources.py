@@ -36,8 +36,10 @@ assert windows.index("m_notifier.Show(toast);") < windows.index("removeEntry(key
 linux = (ROOT / "src" / "notifications_linux.cpp").read_text(encoding="utf-8")
 for required in (
     "serviceOwner(notificationService)",
-    "activationNamespaceChanged(owner)",
-    "notificationPlatformAlias(serviceOwner, nativeId)",
+    'QStringLiteral("GetId")',
+    "m_busId + QLatin1Char('/') + owner",
+    "activationNamespaceChanged(activationNamespace())",
+    "notificationPlatformAlias(activationNamespace, nativeId)",
     "maximumNativeNotificationEntries",
 ):
     assert required in linux, f"Linux durable activation boundary missing: {required}"

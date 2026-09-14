@@ -78,7 +78,7 @@ private slots:
     void activationRaisesExistingWindow();
     void routesSurviveRestartAndEarlyActivation();
     void platformActivationAliasSurvivesRestart();
-    void platformActivationAliasIsQualifiedByServiceOwner();
+    void platformActivationAliasIsQualifiedByBusAndServiceOwner();
     void stalePlatformActivationNamespaceIsInvalidated();
     void invalidRoutesNeverReachThePlatform();
     void failedReplacementKeepsThePreviousDurableRoute();
@@ -172,22 +172,24 @@ void NotificationTest::asynchronousFailureRemovesTheDurableRoute()
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("routes.json"));
     const QString token = notificationToken(QStringLiteral("failed-id"));
-    const QString alias = notificationPlatformAlias(QStringLiteral(":1.42"), 42);
+    const QString activationNamespace =
+        QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:1.42");
+    const QString alias = notificationPlatformAlias(activationNamespace, 42);
     {
         auto platform = std::make_unique<FakeNotificationPlatform>();
         auto *fake = platform.get();
-        fake->currentActivationNamespace = QStringLiteral(":1.42");
+        fake->currentActivationNamespace = activationNamespace;
         NotificationService service(std::move(platform), path);
         QVERIFY(service.show(QStringLiteral("failed-id"), QStringLiteral("title"), {},
                              QStringLiteral("account"), QStringLiteral("message")));
         fake->assignAlias(fake->shown.constLast(), alias,
-                          QStringLiteral(":1.42"));
+                          activationNamespace);
         fake->failLatest(QStringLiteral("native delivery failed"));
         QCOMPARE(service.error(), QStringLiteral("native delivery failed"));
     }
 
     auto restartedPlatform = std::make_unique<FakeNotificationPlatform>();
-    restartedPlatform->currentActivationNamespace = QStringLiteral(":1.42");
+    restartedPlatform->currentActivationNamespace = activationNamespace;
     restartedPlatform->pending = {token, alias};
     NotificationService restarted(std::move(restartedPlatform), path);
     QSignalSpy activated(&restarted, &NotificationService::activated);
@@ -354,21 +356,23 @@ void NotificationTest::platformActivationAliasSurvivesRestart()
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("routes.json"));
     const QString token = notificationToken(QStringLiteral("persistent-id"));
-    const QString alias = notificationPlatformAlias(QStringLiteral(":1.42"), 42);
+    const QString activationNamespace =
+        QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:1.42");
+    const QString alias = notificationPlatformAlias(activationNamespace, 42);
     {
         auto platform = std::make_unique<FakeNotificationPlatform>();
         auto *fake = platform.get();
-        fake->currentActivationNamespace = QStringLiteral(":1.42");
+        fake->currentActivationNamespace = activationNamespace;
         NotificationService service(std::move(platform), path);
         QVERIFY(service.show(QStringLiteral("persistent-id"), QStringLiteral("title"),
                              {}, QStringLiteral("account"),
                              QStringLiteral("message")));
         fake->assignAlias(fake->shown.constLast(), alias,
-                          QStringLiteral(":1.42"));
+                          activationNamespace);
     }
 
     auto restartedPlatform = std::make_unique<FakeNotificationPlatform>();
-    restartedPlatform->currentActivationNamespace = QStringLiteral(":1.42");
+    restartedPlatform->currentActivationNamespace = activationNamespace;
     restartedPlatform->pending = {alias};
     NotificationService restarted(std::move(restartedPlatform), path);
     QSignalSpy activated(&restarted, &NotificationService::activated);
@@ -377,11 +381,16 @@ void NotificationTest::platformActivationAliasSurvivesRestart()
     QCOMPARE(activated[0][1].toString(), QStringLiteral("message"));
 }
 
-void NotificationTest::platformActivationAliasIsQualifiedByServiceOwner()
+void NotificationTest::platformActivationAliasIsQualifiedByBusAndServiceOwner()
 {
-    const QString first = notificationPlatformAlias(QStringLiteral(":1.42"), 42);
-    const QString second = notificationPlatformAlias(QStringLiteral(":1.43"), 42);
+    const QString first = notificationPlatformAlias(
+        QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:1.42"), 42);
+    const QString second = notificationPlatformAlias(
+        QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:1.43"), 42);
+    const QString restartedBus = notificationPlatformAlias(
+        QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/:1.42"), 42);
     QVERIFY(first != second);
+    QVERIFY(first != restartedBus);
     QCOMPARE(first.size(), 64);
     QCOMPARE(second.size(), 64);
 }
@@ -391,24 +400,28 @@ void NotificationTest::stalePlatformActivationNamespaceIsInvalidated()
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("routes.json"));
-    const QString oldAlias = notificationPlatformAlias(QStringLiteral(":1.42"), 42);
+    const QString oldNamespace =
+        QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:1.42");
+    const QString newNamespace =
+        QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/:1.42");
+    const QString oldAlias = notificationPlatformAlias(oldNamespace, 42);
     {
         auto platform = std::make_unique<FakeNotificationPlatform>();
         auto *fake = platform.get();
-        fake->currentActivationNamespace = QStringLiteral(":1.42");
+        fake->currentActivationNamespace = oldNamespace;
         NotificationService service(std::move(platform), path);
         QSignalSpy activated(&service, &NotificationService::activated);
         QVERIFY(service.show(QStringLiteral("id"), {}, {},
                              QStringLiteral("account"), QStringLiteral("message")));
         fake->assignAlias(fake->shown.constLast(), oldAlias,
-                          QStringLiteral(":1.42"));
-        fake->changeActivationNamespace(QStringLiteral(":1.43"));
+                          oldNamespace);
+        fake->changeActivationNamespace(newNamespace);
         fake->activate(oldAlias);
         QCOMPARE(activated.size(), 0);
     }
 
     auto restartedPlatform = std::make_unique<FakeNotificationPlatform>();
-    restartedPlatform->currentActivationNamespace = QStringLiteral(":1.43");
+    restartedPlatform->currentActivationNamespace = newNamespace;
     restartedPlatform->pending = {oldAlias};
     NotificationService restarted(std::move(restartedPlatform), path);
     QSignalSpy activated(&restarted, &NotificationService::activated);

@@ -3,10 +3,12 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusInterface>
+#include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusReply>
 #include <QDBusServiceWatcher>
+#include <QRegularExpression>
 #include <QVariantMap>
 
 namespace {
@@ -22,13 +24,13 @@ public:
                           QStringLiteral("/org/freedesktop/Notifications"),
                           QStringLiteral("org.freedesktop.Notifications"), m_bus),
           m_serviceWatcher(notificationService, m_bus,
-                QDBusServiceWatcher::WatchForOwnerChange, this)
+                           QDBusServiceWatcher::WatchForOwnerChange, this)
     {
         if (!m_bus.isConnected()) return;
-        updateServiceOwner(currentServiceOwner());
+        refreshServiceIdentity();
         connect(&m_serviceWatcher, &QDBusServiceWatcher::serviceOwnerChanged,
-                this, [this](const QString &, const QString &, const QString &owner) {
-                    updateServiceOwner(owner);
+                this, [this](const QString &, const QString &, const QString &) {
+                    refreshServiceIdentity();
                 });
         m_bus.connect(notificationService,
                       QStringLiteral("/org/freedesktop/Notifications"),
@@ -43,7 +45,10 @@ public:
     }
 
     bool available() const override { return m_bus.isConnected(); }
-    QString activationNamespace() const override { return m_serviceOwner; }
+    QString activationNamespace() const override
+    {
+        return namespaceFor(m_serviceOwner);
+    }
 
     bool show(const NativeNotification &notification, QString *error) override
     {
@@ -57,8 +62,7 @@ public:
             return false;
         }
 
-        const QString owner = currentServiceOwner();
-        if (owner != m_serviceOwner) updateServiceOwner(owner);
+        refreshServiceIdentity();
         trackRevision(notification.token, notification.revision);
         const uint replacesId = m_tokenToNative.value(notification.token, 0);
         const QStringList actions{QStringLiteral("default"), QStringLiteral("Open")};
@@ -98,8 +102,8 @@ private slots:
         }
 
         const uint nativeId = reply.value();
-        const QString currentOwner = currentServiceOwner();
-        if (currentOwner != m_serviceOwner) updateServiceOwner(currentOwner);
+        refreshServiceIdentity();
+        const QString currentOwner = m_serviceOwner;
         if (m_revisions.value(token) != revision) {
             if (!serviceOwner.isEmpty() && serviceOwner == m_serviceOwner)
                 m_notifications.asyncCall(QStringLiteral("CloseNotification"), nativeId);
@@ -110,8 +114,11 @@ private slots:
         takeCurrentRevision(token, revision);
         rememberNativeId(token, nativeId);
         emit delivered(token, revision);
+        const QString activationNamespace = namespaceFor(serviceOwner);
+        if (activationNamespace.isEmpty()) return;
         emit activationAliasAssigned(token, revision,
-            notificationPlatformAlias(serviceOwner, nativeId), serviceOwner);
+            notificationPlatformAlias(activationNamespace, nativeId),
+            activationNamespace);
     }
 
     void actionInvoked(uint nativeId, const QString &action)
@@ -120,8 +127,8 @@ private slots:
             return;
         const auto token = m_nativeToToken.constFind(nativeId);
         if (token != m_nativeToToken.cend()) deliverActivation(*token);
-        else if (!m_serviceOwner.isEmpty())
-            deliverActivation(notificationPlatformAlias(m_serviceOwner, nativeId));
+        else if (!activationNamespace().isEmpty())
+            deliverActivation(notificationPlatformAlias(activationNamespace(), nativeId));
     }
 
     void notificationClosed(uint nativeId, uint)
@@ -134,6 +141,20 @@ private slots:
     }
 
 private:
+    QString currentBusId() const
+    {
+        const QDBusMessage request = QDBusMessage::createMethodCall(
+            QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("/org/freedesktop/DBus"),
+            QStringLiteral("org.freedesktop.DBus"), QStringLiteral("GetId"));
+        const QDBusMessage response = m_bus.call(request, QDBus::Block, 1000);
+        if (response.type() != QDBusMessage::ReplyMessage
+            || response.arguments().size() != 1) return {};
+        const QString busId = response.arguments().constFirst().toString().toLower();
+        static const QRegularExpression valid(QStringLiteral("^[0-9a-f]{32}$"));
+        return valid.match(busId).hasMatch() ? busId : QString{};
+    }
+
     QString currentServiceOwner() const
     {
         if (!m_bus.interface()) return {};
@@ -154,7 +175,36 @@ private:
         m_tokenToNative.clear();
         m_nativeToToken.clear();
         m_nativeOrder.clear();
-        emit activationNamespaceChanged(owner);
+        emit activationNamespaceChanged(activationNamespace());
+    }
+
+    QString namespaceFor(const QString &owner) const
+    {
+        if (m_busId.isEmpty() || owner.isEmpty()) return {};
+        return m_busId + QLatin1Char('/') + owner;
+    }
+
+    void clearNativeIdentity()
+    {
+        m_revisions.clear();
+        m_revisionOrder.clear();
+        m_tokenToNative.clear();
+        m_nativeToToken.clear();
+        m_nativeOrder.clear();
+    }
+
+    void refreshServiceIdentity()
+    {
+        const QString busId = currentBusId();
+        const QString owner = currentServiceOwner();
+        if (busId != m_busId) {
+            m_busId = busId;
+            m_serviceOwner = owner;
+            clearNativeIdentity();
+            emit activationNamespaceChanged(activationNamespace());
+            return;
+        }
+        updateServiceOwner(owner);
     }
 
     void trackRevision(const QString &token, quint64 revision)
@@ -200,6 +250,7 @@ private:
     QDBusConnection m_bus;
     QDBusInterface m_notifications;
     QDBusServiceWatcher m_serviceWatcher;
+    QString m_busId;
     QString m_serviceOwner;
     QHash<QString, quint64> m_revisions;
     QList<QString> m_revisionOrder;

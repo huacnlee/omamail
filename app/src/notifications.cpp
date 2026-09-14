@@ -46,8 +46,8 @@ bool validToken(const QString &token)
 bool validActivationNamespace(const QString &activationNamespace)
 {
     static const QRegularExpression expression(
-        QStringLiteral("^:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$"));
-    return activationNamespace.size() <= 255
+        QStringLiteral("^[0-9a-f]{32}/:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$"));
+    return activationNamespace.size() <= 288
         && expression.match(activationNamespace).hasMatch();
 }
 
