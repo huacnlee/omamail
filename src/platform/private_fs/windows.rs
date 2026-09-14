@@ -22,6 +22,7 @@ use windows_sys::{
 type Result<T> = std::result::Result<T, &'static str>;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 static REPLACEMENTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENUMERATIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const READ: u32 = FILE_GENERIC_READ;
 
@@ -473,20 +474,10 @@ pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
 
 pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
     validate_owned_root(dir)?;
-    // Reopen the pinned handle, not its current pathname, for an independent
-    // enumeration cursor. A duplicate handle would share enumeration state.
-    let handle = unsafe {
-        ReOpenFile(
-            dir.as_raw_handle(),
-            READ,
-            SHARE,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err("cache_unavailable");
-    }
-    let stream = unsafe { File::from_raw_handle(handle) };
+    // Restart the cursor on the already pinned and validated handle. ReOpenFile
+    // does not reliably accept directory handles on all supported Windows
+    // filesystems; serializing prevents two restarts from sharing a cursor.
+    let _enumeration = ENUMERATIONS.lock().map_err(|_| "cache_unavailable")?;
     let mut buffer = vec![0u64; 8192];
     let capacity = buffer.len() * size_of::<u64>();
     let mut out = Vec::new();
@@ -495,7 +486,7 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
         let mut status = IO_STATUS_BLOCK::default();
         let result = unsafe {
             nt::NtQueryDirectoryFile(
-                stream.as_raw_handle(),
+                dir.as_raw_handle(),
                 ptr::null_mut(),
                 None,
                 ptr::null(),

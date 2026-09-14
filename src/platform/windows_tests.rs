@@ -291,7 +291,6 @@ async fn windows_pipe_authenticates_rejects_squatting_and_reclaims_dropped_insta
     drop(server);
     drop(client);
     drop(listener);
-    drop(endpoint.listen().unwrap());
     fs::rename(temp.0.join("omamail"), temp.0.join("moved")).unwrap();
     let listener = endpoint.listen().unwrap();
     let mut client = endpoint.connect().await.unwrap();
