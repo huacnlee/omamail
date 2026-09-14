@@ -14,6 +14,7 @@ import "account/Model.js" as Model
 import "account/Unified.js" as Unified
 import "providers/Registry.js" as Provider
 import "bar/Preview.js" as Preview
+import "bar/Bridge.js" as BarBridge
 import "calendar/Sources.js" as CalendarSources
 import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
@@ -2395,8 +2396,21 @@ Item {
   }
 
   Component.onCompleted: {
+    barBridge = BarBridge.publish(function() {
+      return {
+        ready: root.ready, windowOpen: root.windowOpen,
+        showBarIcon: root.showBarIcon, unreadTotal: root.unreadTotal,
+        barTooltip: root.barTooltip, contentDirection: root.contentDirection,
+        barMessages: root.barMessages, barEvents: root.barEvents
+      }
+    }, function(values) { root.applySettings(BarBridge.settings(values, root.defaultSettingValues)) },
+      function() { root.refresh() },
+      function() { root.refreshCalendarPreview() })
     Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
   }
+
+  property var barBridge: null
+  Component.onDestruction: BarBridge.clear(barBridge)
 }
