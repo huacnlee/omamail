@@ -277,7 +277,7 @@ async fn windows_pipe_authenticates_rejects_squatting_and_reclaims_dropped_insta
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let temp = Temp::new();
     let dir = temp.private();
-    let _lease = lock_exclusive(&dir, "lease").unwrap();
+    let lease = lock_exclusive(&dir, "lease").unwrap();
     let endpoint = LocalEndpoint::outbox(&temp.0).unwrap();
     let listener = endpoint.listen().unwrap();
     assert!(endpoint.listen().is_err());
@@ -291,6 +291,10 @@ async fn windows_pipe_authenticates_rejects_squatting_and_reclaims_dropped_insta
     drop(server);
     drop(client);
     drop(listener);
+    // A lease intentionally denies delete sharing, so release it before the
+    // directory rename used to prove that the endpoint follows its pinned
+    // directory handle rather than reopening the old path.
+    drop(lease);
     fs::rename(temp.0.join("omamail"), temp.0.join("moved")).unwrap();
     let listener = endpoint.listen().unwrap();
     let mut client = endpoint.connect().await.unwrap();
