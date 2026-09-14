@@ -14,6 +14,7 @@ pub mod credentials;
 pub mod mail;
 pub mod message;
 pub mod outbox;
+pub mod platform;
 pub mod process;
 pub mod providers;
 pub mod public_http;

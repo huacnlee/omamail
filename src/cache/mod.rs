@@ -2,21 +2,10 @@
 //! Directory descriptors pin every path component; sender values never form paths.
 use serde_json::{Value, json};
 use std::{
-    ffi::{CStr, CString, OsString},
     fs::File,
-    io::{Read, Write},
-    os::{
-        fd::{AsRawFd, FromRawFd},
-        unix::{
-            ffi::OsStringExt,
-            fs::{MetadataExt, PermissionsExt},
-        },
-    },
-    path::{Component, Path, PathBuf},
-    sync::{
-        Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    io::Read,
+    path::{Path, PathBuf},
+    sync::Mutex,
     time::SystemTime,
 };
 
@@ -30,8 +19,9 @@ mod tests;
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_BODIES: usize = 1000;
+#[cfg(test)]
+static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static OPERATIONS: Mutex<()> = Mutex::new(());
-static SERIAL: AtomicU64 = AtomicU64::new(0);
 type Result<T> = std::result::Result<T, &'static str>;
 
 pub fn validate_params(params: &Value, needs_id: bool) -> Result<()> {
@@ -59,19 +49,7 @@ pub fn put_upload(params: &Value, bytes: &[u8]) -> Result<Value> {
 }
 
 fn cache_home() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".cache"))
-        })
-        .ok_or("cache_home_missing")?;
-    if !base.is_absolute() {
-        return Err("cache_home_invalid");
-    }
-    Ok(base)
+    Ok(crate::platform::dirs::AppDirs::discover()?.cache)
 }
 
 fn field<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
@@ -128,191 +106,13 @@ fn body_name(id: &str) -> Result<String> {
     Ok(name)
 }
 
-fn cstr(name: &std::ffi::OsStr) -> Result<CString> {
-    use std::os::unix::ffi::OsStrExt;
-    CString::new(name.as_bytes()).map_err(|_| "cache_invalid_input")
-}
-
-fn open_dir(
-    parent: &File,
-    name: &std::ffi::OsStr,
-    create: bool,
-    private: bool,
-) -> Result<Option<File>> {
-    let name = cstr(name)?;
-    if create {
-        // SAFETY: valid directory fd and NUL-terminated single component.
-        let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
-        if result != 0
-            && std::io::Error::last_os_error().kind() != std::io::ErrorKind::AlreadyExists
-        {
-            return Err("cache_unavailable");
-        }
-    }
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-            return Ok(None);
-        }
-        return Err("cache_unsafe_path");
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    if private {
-        if file.metadata().map_err(|_| "cache_unavailable")?.uid() != unsafe { libc::geteuid() } {
-            return Err("cache_unsafe_path");
-        }
-        file.set_permissions(std::fs::Permissions::from_mode(0o700))
-            .map_err(|_| "cache_unavailable")?;
-    }
-    Ok(Some(file))
-}
-
-fn open_dir_readonly(parent: &File, name: &std::ffi::OsStr, private: bool) -> Result<Option<File>> {
-    let name = cstr(name)?;
-    let access = libc::O_RDONLY
-        | libc::O_DIRECTORY
-        | libc::O_NOFOLLOW
-        | libc::O_CLOEXEC
-        | if private { libc::O_NOATIME } else { 0 };
-    let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), access) };
-    if fd < 0 {
-        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-            return Ok(None);
-        }
-        return Err("cache_unsafe_path");
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    if private {
-        let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
-        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
-            return Err("cache_unsafe_path");
-        }
-    }
-    Ok(Some(file))
-}
+use crate::platform::private_fs::{atomic_replace, names, open_dir, remove_owned as unlink};
+pub(crate) use crate::platform::private_fs::{
+    directories, directories_readonly, regular, regular_readonly,
+};
 
 fn directory(root: &Path, account: &str, create: bool) -> Result<Option<File>> {
     directories(root, &["omamail", "bodies", account], create)
-}
-
-pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<Option<File>> {
-    if !root.is_absolute() {
-        return Err("cache_home_invalid");
-    }
-    let mut dir = File::open("/").map_err(|_| "cache_unavailable")?;
-    for component in root.components() {
-        match component {
-            Component::RootDir => (),
-            Component::Normal(name) => {
-                let Some(next) = open_dir(&dir, name, create, false)? else {
-                    return Ok(None);
-                };
-                dir = next;
-            }
-            _ => return Err("cache_home_invalid"),
-        }
-    }
-    for name in suffix {
-        let Some(next) = open_dir(&dir, name.as_ref(), create, true)? else {
-            return Ok(None);
-        };
-        dir = next;
-    }
-    Ok(Some(dir))
-}
-
-pub(crate) fn directories_readonly(root: &Path, suffix: &[&str]) -> Result<Option<File>> {
-    if !root.is_absolute() {
-        return Err("cache_home_invalid");
-    }
-    let mut dir = File::open("/").map_err(|_| "cache_unavailable")?;
-    for component in root.components() {
-        match component {
-            Component::RootDir => (),
-            Component::Normal(name) => {
-                let Some(next) = open_dir_readonly(&dir, name, false)? else {
-                    return Ok(None);
-                };
-                dir = next;
-            }
-            _ => return Err("cache_home_invalid"),
-        }
-    }
-    for name in suffix {
-        let Some(next) = open_dir_readonly(&dir, name.as_ref(), true)? else {
-            return Ok(None);
-        };
-        dir = next;
-    }
-    Ok(Some(dir))
-}
-
-pub(crate) fn regular(dir: &File, name: &str, writable: bool) -> Result<Option<File>> {
-    let name = CString::new(name).map_err(|_| "cache_invalid_input")?;
-    let access = if writable {
-        libc::O_RDWR
-    } else {
-        libc::O_RDONLY
-    };
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            name.as_ptr(),
-            access | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-            return Ok(None);
-        }
-        return Err("cache_unsafe_path");
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
-    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != unsafe { libc::geteuid() }
-    {
-        return Err("cache_unsafe_path");
-    }
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .map_err(|_| "cache_unavailable")?;
-    Ok(Some(file))
-}
-
-pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
-    let name = CString::new(name).map_err(|_| "cache_invalid_input")?;
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY
-                | libc::O_NOFOLLOW
-                | libc::O_NONBLOCK
-                | libc::O_CLOEXEC
-                | libc::O_NOATIME,
-        )
-    };
-    if fd < 0 {
-        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-            return Ok(None);
-        }
-        return Err("cache_unsafe_path");
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err("cache_unsafe_path");
-    }
-    Ok(Some(file))
 }
 
 fn js_string(value: &Value) -> String {
@@ -453,123 +253,30 @@ fn put_at(root: &Path, params: &Value, body: &Value) -> Result<Value> {
     regular(&dir, &name, false)?;
     let mut files = entries(&dir)?;
     disk::reserve(root, bytes.len() as u64, Some(("bodies", &account, &name)))?;
-    let temporary = format!(
-        ".tmp.{}.{}",
-        std::process::id(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    );
-    let temporary_c = CString::new(temporary.clone()).unwrap();
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            temporary_c.as_ptr(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if fd < 0 {
-        return Err("cache_unavailable");
+    atomic_replace(&dir, &name, &bytes)?;
+    files.retain(|(_, existing)| existing != &name);
+    files.sort_by(|a, b| b.cmp(a));
+    for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
+        unlink(&dir, &old)?;
     }
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    let result = (|| {
-        file.write_all(&bytes).map_err(|_| "cache_unavailable")?;
-        file.sync_all().map_err(|_| "cache_unavailable")?;
-        let target = CString::new(name.clone()).unwrap();
-        if unsafe {
-            libc::renameat(
-                dir.as_raw_fd(),
-                temporary_c.as_ptr(),
-                dir.as_raw_fd(),
-                target.as_ptr(),
-            )
-        } != 0
-        {
-            return Err("cache_unavailable");
-        }
-        files.retain(|(_, existing)| existing != &name);
-        files.sort_by(|a, b| b.cmp(a));
-        for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
-            unlink(&dir, &old)?;
-        }
-        dir.sync_all().map_err(|_| "cache_unavailable")?;
-        Ok(json!({"stored":true}))
-    })();
-    if result.is_err() {
-        let _ = unlink(&dir, &temporary);
-    }
-    result
-}
-
-fn unlink(dir: &File, name: &str) -> Result<()> {
-    // Recheck the final component and unlink relative to the pinned directory.
-    if regular(dir, name, false)?.is_none() {
-        return Ok(());
-    }
-    let name = CString::new(name).map_err(|_| "cache_invalid_input")?;
-    if unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-        return Err("cache_unavailable");
-    }
-    Ok(())
+    dir.sync_all().map_err(|_| "cache_unavailable")?;
+    Ok(json!({"stored":true}))
 }
 
 fn entries(dir: &File) -> Result<Vec<(SystemTime, String)>> {
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            c".".as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return Err("cache_unavailable");
-    }
-    let stream = unsafe { libc::fdopendir(fd) };
-    if stream.is_null() {
-        unsafe {
-            libc::close(fd);
-        }
-        return Err("cache_unavailable");
-    }
-    struct Stream(*mut libc::DIR);
-    impl Drop for Stream {
-        fn drop(&mut self) {
-            unsafe {
-                libc::closedir(self.0);
-            }
-        }
-    }
-    let stream = Stream(stream);
     let mut found = Vec::new();
-    let mut inspected = 0;
-    loop {
-        // readdir uses a null result for both EOF and failure.
-        unsafe {
-            *libc::__errno_location() = 0;
-        }
-        let entry = unsafe { libc::readdir(stream.0) };
-        if entry.is_null() {
-            if unsafe { *libc::__errno_location() } != 0 {
-                return Err("cache_unavailable");
-            }
-            break;
-        }
-        inspected += 1;
-        if inspected > 10_002 {
-            return Err("cache_too_many_files");
-        }
-        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
-        let name = OsString::from_vec(name.to_vec());
-        let Some(name) = name.to_str().filter(|name| name.ends_with(".json")) else {
-            continue;
-        };
-        let Some(file) = regular(dir, name, false)? else {
+    for name in names(dir)?
+        .into_iter()
+        .filter(|name| name.ends_with(".json"))
+    {
+        let Some(file) = regular(dir, &name, false)? else {
             continue;
         };
         found.push((
             file.metadata()
                 .and_then(|meta| meta.modified())
                 .map_err(|_| "cache_unavailable")?,
-            name.to_owned(),
+            name,
         ));
     }
     Ok(found)

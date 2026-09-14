@@ -93,46 +93,8 @@ pub(super) fn call_at(root: &Path, method: &str, params: &Value) -> Result<Value
             .map(|v| normalize(&v))
             .unwrap_or_else(|_| empty()));
     }
-    let temporary = format!(
-        ".tmp.{}.{}",
-        std::process::id(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    );
-    let temporary_c = CString::new(temporary.clone()).unwrap();
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            temporary_c.as_ptr(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if fd < 0 {
-        return Err("cache_unavailable");
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    let result = (|| {
-        file.write_all(&bytes).map_err(|_| "cache_unavailable")?;
-        file.sync_all().map_err(|_| "cache_unavailable")?;
-        let target = CString::new(name).unwrap();
-        if unsafe {
-            libc::renameat(
-                dir.as_raw_fd(),
-                temporary_c.as_ptr(),
-                dir.as_raw_fd(),
-                target.as_ptr(),
-            )
-        } != 0
-        {
-            return Err("cache_unavailable");
-        }
-        dir.sync_all().map_err(|_| "cache_unavailable")?;
-        Ok(json!({"stored":true}))
-    })();
-    if result.is_err() {
-        let _ = unlink(&dir, &temporary);
-    }
-    result
+    atomic_replace(&dir, &name, &bytes)?;
+    Ok(json!({"stored":true}))
 }
 
 fn normalize_calendar(value: &Value) -> Value {

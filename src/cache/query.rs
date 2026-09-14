@@ -1,5 +1,6 @@
 //! Session-owned query cache. Only presentation snapshots cross to the UI.
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,

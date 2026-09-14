@@ -1,10 +1,11 @@
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
+use std::sync::atomic::Ordering;
 
 pub(super) struct Temp(pub(super) PathBuf);
 impl Temp {
     pub(super) fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-native-cache-{}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)

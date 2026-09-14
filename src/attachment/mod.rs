@@ -2,6 +2,7 @@
 //! sender-selected filenames are reduced to basenames and created exclusively.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::{
     fs::{self, OpenOptions},
@@ -56,6 +57,7 @@ fn mime(bytes: &[u8], path: &Path) -> &'static str {
         "application/octet-stream"
     }
 }
+#[cfg(unix)]
 pub fn read(params: &Value) -> Result<Value, &'static str> {
     let raw = params["path"].as_str().ok_or("invalid_params")?;
     if raw.chars().any(char::is_control) || !Path::new(raw).is_absolute() {
@@ -181,38 +183,9 @@ pub fn openable(name: &str, data: &[u8]) -> bool {
         .any(|s| text.contains(s))
 }
 fn downloads() -> Result<PathBuf, &'static str> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .ok_or("home_missing")?;
-    if let Some(value) = std::env::var_os("XDG_DOWNLOAD_DIR").filter(|s| !s.is_empty()) {
-        let p = PathBuf::from(value);
-        return p
-            .is_absolute()
-            .then_some(p)
-            .ok_or("attachment_path_invalid");
-    }
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    if let Ok(text) = fs::read_to_string(config.join("user-dirs.dirs")) {
-        for line in text.lines() {
-            if let Some(value) = line
-                .trim()
-                .strip_prefix("XDG_DOWNLOAD_DIR=")
-                .and_then(|s| s.trim().strip_prefix('"'))
-                .and_then(|s| s.strip_suffix('"'))
-            {
-                let path = PathBuf::from(value.replace("$HOME", &home.to_string_lossy()));
-                if path.is_absolute() {
-                    return Ok(path);
-                }
-            }
-        }
-    }
-    Ok(home.join("Downloads"))
+    Ok(crate::platform::dirs::AppDirs::discover()?.downloads)
 }
+#[cfg(unix)]
 pub fn store(params: &Value, bytes: &[u8]) -> Result<Value, &'static str> {
     if bytes.len() > MAX_BYTES {
         return Err("attachment_too_large");
@@ -223,10 +196,7 @@ pub fn store(params: &Value, bytes: &[u8]) -> Result<Value, &'static str> {
         return Err("attachment_open_refused");
     }
     let directory = if opening {
-        let base = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .unwrap_or_else(std::env::temp_dir);
+        let base = crate::platform::dirs::AppDirs::discover()?.runtime;
         let mut found = None;
         for n in 0..1000 {
             let path = base.join(format!("omamail-attachment-{}-{n}", std::process::id()));
@@ -248,6 +218,7 @@ pub fn store(params: &Value, bytes: &[u8]) -> Result<Value, &'static str> {
     let path = write_unique(&directory, &filename, bytes)?;
     Ok(json!({"ok":true,"path":path,"open":opening}))
 }
+#[cfg(unix)]
 fn write_unique(directory: &Path, filename: &str, bytes: &[u8]) -> Result<PathBuf, &'static str> {
     let path = Path::new(filename);
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -281,13 +252,15 @@ fn write_unique(directory: &Path, filename: &str, bytes: &[u8]) -> Result<PathBu
     }
     Err("attachment_write_failed")
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[test]
     fn refuses_special_files_and_never_overwrites_symlinks() {
-        let root =
-            std::env::temp_dir().join(format!("omamail-attachment-test-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("omamail-attachment-test-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let victim = root.join("victim");
         fs::write(&victim, b"keep").unwrap();
@@ -342,23 +315,13 @@ mod tests {
 /// Forget only files created by the application's clipboard staging helper.
 /// A recovered draft's `owned` boolean is never authority for a filesystem path.
 pub fn forget(params: &Value) -> Result<Value, &'static str> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("home_missing")?;
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".cache"));
-    if !base.is_absolute() {
-        return Err("attachment_path_invalid");
-    }
+    let base = crate::platform::dirs::AppDirs::discover()?.cache;
     forget_in(
         &base.join("omamail/compose"),
         params["path"].as_str().ok_or("invalid_params")?,
     )
 }
 fn forget_in(directory: &Path, raw: &str) -> Result<Value, &'static str> {
-    use std::os::fd::AsRawFd;
     let path = Path::new(raw);
     if raw.chars().any(char::is_control)
         || path.components().any(|c| {
@@ -384,48 +347,29 @@ fn forget_in(directory: &Path, raw: &str) -> Result<Value, &'static str> {
     if !STAGED.is_match(name) {
         return Err("attachment_not_owned");
     }
-    let folder = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(directory)
-        .map_err(|_| "attachment_not_owned")?;
-    let name = std::ffi::CString::new(name).map_err(|_| "attachment_not_owned")?;
-    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // The checked directory descriptor pins the parent through rename races.
-    if unsafe {
-        libc::fstatat(
-            folder.as_raw_fd(),
-            name.as_ptr(),
-            metadata.as_mut_ptr(),
-            libc::AT_SYMLINK_NOFOLLOW,
-        )
-    } != 0
-    {
-        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-            return Ok(json!({"ok":true}));
-        }
-        return Err("attachment_not_owned");
-    }
-    let metadata = unsafe { metadata.assume_init() };
-    if metadata.st_mode & libc::S_IFMT != libc::S_IFREG
-        || metadata.st_uid != unsafe { libc::geteuid() }
-        || metadata.st_mode & 0o077 != 0
-    {
-        return Err("attachment_not_owned");
-    }
-    if unsafe { libc::unlinkat(folder.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-        return Err("attachment_forget_failed");
-    }
+    let Some(folder) = crate::platform::private_fs::directories_readonly(directory, &[])
+        .map_err(|_| "attachment_not_owned")?
+    else {
+        return Ok(json!({"ok":true}));
+    };
+    crate::platform::private_fs::remove_owned(&folder, name).map_err(|_| "attachment_not_owned")?;
     Ok(json!({"ok":true}))
 }
-#[cfg(test)]
+
+#[cfg(all(test, unix))]
 mod forget_tests {
     use super::*;
     #[test]
     fn recovered_owned_flag_cannot_delete_outside_staging() {
-        let root = std::env::temp_dir().join(format!("omamail-forget-test-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("omamail-forget-test-{}", std::process::id()));
         let staging = root.join("compose");
         fs::create_dir_all(&staging).unwrap();
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
         let victim = root.join("victim");
         fs::write(&victim, b"keep").unwrap();
         for path in [
@@ -462,4 +406,13 @@ mod forget_tests {
         assert_eq!(fs::read(&victim).unwrap(), b"keep");
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[cfg(windows)]
+pub fn read(_: &Value) -> Result<Value, &'static str> {
+    Err("platform_private_storage_unsupported")
+}
+#[cfg(windows)]
+pub fn store(_: &Value, _: &[u8]) -> Result<Value, &'static str> {
+    Err("platform_private_storage_unsupported")
 }

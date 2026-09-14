@@ -1,5 +1,6 @@
 //! Bounded, read-only contact discovery. No subprocesses or network access.
 use serde_json::{Value, json};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::{
     collections::BTreeMap,
@@ -40,6 +41,7 @@ fn collect(book: &mut Book, name: &str, email: &str) {
         book.insert(key, json!({"name":name,"email":email}));
     }
 }
+#[cfg(unix)]
 fn read(path: &Path) -> Option<String> {
     let file = fs::OpenOptions::new()
         .read(true)
@@ -221,23 +223,14 @@ fn thunderbird(book: &mut Book, root: &Path) {
     }
 }
 pub fn suggest() -> Result<Value, &'static str> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .ok_or("home_missing")?;
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    let cached = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".cache"));
-    if !config.is_absolute() || !cached.is_absolute() {
-        return Err("home_invalid");
-    }
-    Ok(discover(&home, &config, &cached))
+    let dirs = crate::platform::dirs::AppDirs::discover()?;
+    Ok(discover(
+        &crate::platform::dirs::AppDirs::home()?,
+        &dirs.config,
+        &dirs.cache,
+    ))
 }
+
 fn discover(home: &Path, config: &Path, cached: &Path) -> Value {
     let mut book = Book::new();
     for name in [".thunderbird", ".betterbird"] {
@@ -316,4 +309,9 @@ mod tests {
         assert_eq!(b.len(), 1);
         assert_eq!(b["a@example.com"]["name"], "Alice");
     }
+}
+
+#[cfg(windows)]
+fn read(_: &Path) -> Option<String> {
+    None
 }

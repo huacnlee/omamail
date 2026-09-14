@@ -1,8 +1,9 @@
 use super::*;
+use std::io::Write;
 struct Temp(PathBuf);
 impl Temp {
     fn new() -> Self {
-        let p = std::env::temp_dir().join(format!(
+        let p = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-compose-test-{}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -287,7 +288,9 @@ fn recovery_lock_releases_even_with_an_inherited_file_description() {
         0
     );
     let inherited = file.try_clone().unwrap();
-    drop(RecoveryLock(file));
+    drop(crate::platform::private_fs::ExclusiveLock::from_locked(
+        file,
+    ));
     let contender = File::open(&path).unwrap();
     assert_eq!(
         unsafe { libc::flock(contender.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },

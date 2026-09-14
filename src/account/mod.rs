@@ -1,6 +1,6 @@
 //! Read the desktop's account registry without exposing authentication fields.
 use serde_json::{Value, json};
-use std::{env, io::Read, path::PathBuf};
+use std::{io::Read, path::PathBuf};
 
 const MAX_CONFIG: u64 = 1024 * 1024;
 

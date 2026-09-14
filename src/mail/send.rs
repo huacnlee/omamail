@@ -6,18 +6,7 @@ use base64::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::HashSet,
-    fs::File,
-    future::Future,
-    io::Read,
-    os::{
-        fd::{AsRawFd, FromRawFd},
-        unix::fs::MetadataExt,
-    },
-    path::Path,
-    pin::Pin,
-};
+use std::{collections::HashSet, fs::File, future::Future, io::Read, path::Path, pin::Pin};
 
 pub(crate) const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_HEADER: usize = 8192;
@@ -131,37 +120,7 @@ fn recipients(values: &[String], seen: &mut HashSet<String>) -> Result<Vec<Strin
 /// Walk descriptors so neither the last component nor an ancestor can be a
 /// symlink. NONBLOCK prevents a named pipe from hanging before fstat rejects it.
 fn open_file(path: &Path) -> Result<File> {
-    let raw = path.to_str().ok_or("mail_send_attachment_path")?;
-    if !path.is_absolute()
-        || raw.len() > 8192
-        || raw.chars().any(char::is_control)
-        || raw.split('/').any(|part| matches!(part, "." | ".."))
-    {
-        return Err("mail_send_attachment_path");
-    }
-    let mut parent = File::open("/").map_err(|_| "mail_send_attachment_unreadable")?;
-    let parts: Vec<_> = raw.split('/').filter(|part| !part.is_empty()).collect();
-    if parts.is_empty() {
-        return Err("mail_send_attachment_path");
-    }
-    for (index, part) in parts.iter().enumerate() {
-        let name = std::ffi::CString::new(*part).map_err(|_| "mail_send_attachment_path")?;
-        let flags = libc::O_RDONLY
-            | libc::O_NOFOLLOW
-            | libc::O_CLOEXEC
-            | libc::O_NONBLOCK
-            | if index + 1 < parts.len() {
-                libc::O_DIRECTORY
-            } else {
-                0
-            };
-        let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags) };
-        if fd < 0 {
-            return Err("mail_send_attachment_unreadable");
-        }
-        parent = unsafe { File::from_raw_fd(fd) };
-    }
-    Ok(parent)
+    crate::platform::private_fs::open_external(path)
 }
 
 fn attachment(input: &super::AttachmentInput, total: &mut usize) -> Result<Value> {
@@ -199,17 +158,7 @@ fn attachment(input: &super::AttachmentInput, total: &mut usize) -> Result<Value
     }
     if bytes.len() as u64 != before.len()
         || before.len() != after.len()
-        || (
-            before.mtime(),
-            before.mtime_nsec(),
-            before.ctime(),
-            before.ctime_nsec(),
-        ) != (
-            after.mtime(),
-            after.mtime_nsec(),
-            after.ctime(),
-            after.ctime_nsec(),
-        )
+        || !crate::platform::private_fs::same_file_version(&before, &after)
     {
         return Err("mail_send_attachment_changed");
     }

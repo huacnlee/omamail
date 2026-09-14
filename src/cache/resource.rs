@@ -116,56 +116,20 @@ fn put_at(root: &Path, params: &Value, live: &Mutex<bool>) -> Result<Value> {
         bytes.len() as u64,
         Some(("resources", &account, &name)),
     )?;
-    let temporary = format!(
-        ".tmp.{}.{}",
-        std::process::id(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    );
-    let temporary_c = CString::new(temporary.clone()).unwrap();
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            temporary_c.as_ptr(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if fd < 0 {
-        return Err("cache_unavailable");
+    let commit_guard = live.lock().map_err(|_| "cache_unavailable")?;
+    if !*commit_guard {
+        return Err("cache_cancelled");
     }
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    let result = (|| {
-        file.write_all(&bytes).map_err(|_| "cache_unavailable")?;
-        file.sync_all().map_err(|_| "cache_unavailable")?;
-        let commit_guard = live.lock().map_err(|_| "cache_unavailable")?;
-        if !*commit_guard {
-            return Err("cache_cancelled");
-        }
-        let target = CString::new(name.clone()).unwrap();
-        if unsafe {
-            libc::renameat(
-                dir.as_raw_fd(),
-                temporary_c.as_ptr(),
-                dir.as_raw_fd(),
-                target.as_ptr(),
-            )
-        } != 0
-        {
-            return Err("cache_unavailable");
-        }
-        files.retain(|(_, existing)| existing != &name);
-        files.sort_by(|a, b| b.cmp(a));
-        for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
-            unlink(&dir, &old)?;
-        }
-        dir.sync_all().map_err(|_| "cache_unavailable")?;
-        Ok(json!({"stored":true}))
-    })();
-    if result.is_err() {
-        let _ = unlink(&dir, &temporary);
+    atomic_replace(&dir, &name, &bytes)?;
+    files.retain(|(_, existing)| existing != &name);
+    files.sort_by(|a, b| b.cmp(a));
+    for (_, old) in files.into_iter().skip(MAX_BODIES - 1) {
+        unlink(&dir, &old)?;
     }
-    result
+    dir.sync_all().map_err(|_| "cache_unavailable")?;
+    Ok(json!({"stored":true}))
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,75 +1,34 @@
 //! Private, bounded submission to the process holding the outbox lease.
 //! This listener has no independent lifecycle: dropping/stopping the owning
 //! outbox aborts it. Only ID-bound enqueue and payload-free snapshots cross it.
+#[cfg(unix)]
 use super::{Inner, storage, text};
+#[cfg(unix)]
+use crate::platform::ipc::{LocalEndpoint, check_peer};
+#[cfg(unix)]
 use serde_json::{Value, json};
-use std::{
-    fs::File,
-    os::{
-        fd::AsRawFd,
-        unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
-    },
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+#[cfg(unix)]
+use std::{path::Path, sync::Arc, time::Duration};
+#[cfg(unix)]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    net::UnixStream,
 };
 
+#[cfg(unix)]
 const MAX_REQUEST: usize = 49 * 1024 * 1024;
+#[cfg(unix)]
 const MAX_REPLY: usize = 128 * 1024;
+#[cfg(unix)]
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-fn location(root: &Path) -> Result<(File, String), &'static str> {
-    let dir = crate::cache::directories_readonly(root, &["omamail"])?
-        .ok_or("outbox_owner_unavailable")?;
-    // Anchor both operations to the checked descriptor; long XDG paths must
-    // not exceed sockaddr_un's 108-byte pathname limit or re-resolve ancestors.
-    let path = format!("/proc/self/fd/{}/outbox.sock", dir.as_raw_fd());
-    Ok((dir, path))
-}
-
-fn check_socket(path: &str) -> Result<(), &'static str> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| "outbox_owner_unavailable")?;
-    if !metadata.file_type().is_socket()
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.nlink() != 1
-    {
-        return Err("outbox_storage_unsafe");
-    }
-    Ok(())
-}
-
-fn check_peer(stream: &UnixStream) -> Result<(), &'static str> {
-    if stream
-        .peer_cred()
-        .map_err(|_| "outbox_owner_unavailable")?
-        .uid()
-        != unsafe { libc::geteuid() }
-    {
-        return Err("outbox_storage_unsafe");
-    }
-    Ok(())
-}
-
+#[cfg(unix)]
 pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
     // The caller holds the exclusive lease and the state mutex. No successor
     // can replace this socket until every in-flight durable write releases it.
     let root = inner.root.clone().map(Ok).unwrap_or_else(storage::home)?;
-    let (_dir, path) = location(&root)?;
-    match std::fs::symlink_metadata(&path) {
-        Ok(_) => {
-            check_socket(&path)?;
-            std::fs::remove_file(&path).map_err(|_| "outbox_storage_unavailable")?;
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-        Err(_) => return Err("outbox_storage_unavailable"),
-    }
-    let listener = UnixListener::bind(&path).map_err(|_| "outbox_storage_unavailable")?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|_| "outbox_storage_unavailable")?;
+    let endpoint = LocalEndpoint::outbox(&root)?;
+    let listener = endpoint.listen()?;
     let owner = Arc::downgrade(inner);
     let task = tokio::spawn(async move {
         let mut requests = tokio::task::JoinSet::new();
@@ -103,6 +62,7 @@ pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn serve_request(inner: &Arc<Inner>, request: &Value) -> Result<Value, &'static str> {
     let method = request["method"].as_str().ok_or("outbox_invalid_params")?;
     let params = &request["params"];
@@ -122,18 +82,15 @@ async fn serve_request(inner: &Arc<Inner>, request: &Value) -> Result<Value, &'s
     Ok(result)
 }
 
+#[cfg(unix)]
 pub(super) async fn request(
     root: &Path,
     method: &str,
     params: &Value,
 ) -> Result<Value, &'static str> {
     tokio::time::timeout(TIMEOUT, async {
-        let (_dir, path) = location(root)?;
-        check_socket(&path)?;
-        let mut stream = UnixStream::connect(&path)
-            .await
-            .map_err(|_| "outbox_owner_unavailable")?;
-        check_peer(&stream)?;
+        let endpoint = LocalEndpoint::outbox(root)?;
+        let mut stream = endpoint.connect().await?;
         write_frame(
             &mut stream,
             &json!({"method":method,"params":params}),
@@ -172,6 +129,7 @@ pub(super) async fn request(
     .unwrap_or(Err("outbox_owner_unavailable"))
 }
 
+#[cfg(unix)]
 async fn read_frame(stream: &mut UnixStream, limit: usize) -> Result<Value, &'static str> {
     let length = stream
         .read_u32()
@@ -188,6 +146,7 @@ async fn read_frame(stream: &mut UnixStream, limit: usize) -> Result<Value, &'st
     serde_json::from_slice(&bytes).map_err(|_| "outbox_invalid_params")
 }
 
+#[cfg(unix)]
 async fn write_frame(
     stream: &mut UnixStream,
     value: &Value,
@@ -205,4 +164,17 @@ async fn write_frame(
         .write_all(&bytes)
         .await
         .map_err(|_| "outbox_owner_unavailable")
+}
+
+#[cfg(windows)]
+pub(super) fn listen(_: &std::sync::Arc<super::Inner>) -> Result<(), &'static str> {
+    Err("platform_ipc_unsupported")
+}
+#[cfg(windows)]
+pub(super) async fn request(
+    _: &std::path::Path,
+    _: &str,
+    _: &serde_json::Value,
+) -> Result<serde_json::Value, &'static str> {
+    Err("platform_ipc_unsupported")
 }

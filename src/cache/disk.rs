@@ -2,55 +2,6 @@
 use super::*;
 pub(super) const MAX_DISK_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_DISK_ENTRIES: usize = 4096;
-fn names(dir: &File) -> Result<Vec<String>> {
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            c".".as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return Err("cache_unavailable");
-    }
-    let stream = unsafe { libc::fdopendir(fd) };
-    if stream.is_null() {
-        unsafe {
-            libc::close(fd);
-        }
-        return Err("cache_unavailable");
-    }
-    let result = (|| {
-        let mut out = Vec::new();
-        loop {
-            unsafe {
-                *libc::__errno_location() = 0;
-            }
-            let entry = unsafe { libc::readdir(stream) };
-            if entry.is_null() {
-                if unsafe { *libc::__errno_location() } != 0 {
-                    return Err("cache_unavailable");
-                }
-                break;
-            }
-            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }
-                .to_str()
-                .map_err(|_| "cache_unsafe_path")?;
-            if name == "." || name == ".." {
-                continue;
-            }
-            out.push(name.to_owned());
-            if out.len() > 10_000 {
-                return Err("cache_too_many_files");
-            }
-        }
-        Ok(out)
-    })();
-    unsafe {
-        libc::closedir(stream);
-    }
-    result
-}
 /// Caller holds OPERATIONS. Reserve temporary-file bytes before writing, so a
 /// successful operation never temporarily doubles the configured disk ceiling.
 pub(super) fn reserve(

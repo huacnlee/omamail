@@ -1,32 +1,18 @@
 //! Private account registry storage with optimistic revisions and a cross-process lock.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::fs::File;
+#[cfg(test)]
 use std::{
-    ffi::CString,
-    fs::File,
-    io::Write,
-    os::fd::{AsRawFd, FromRawFd},
+    os::fd::AsRawFd,
+    sync::atomic::{AtomicU64, Ordering},
 };
+#[cfg(test)]
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 type Result<T> = std::result::Result<T, &'static str>;
-struct RegistryLock(File);
-impl Drop for RegistryLock {
-    fn drop(&mut self) {
-        // A concurrently forked process can inherit the open file description.
-        // Unlock explicitly rather than waiting for its final inherited fd to close.
-        unsafe {
-            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
-        }
-    }
-}
+
 fn home() -> Result<PathBuf> {
-    env::var_os("XDG_CONFIG_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
-        .filter(|p| p.is_absolute())
-        .ok_or("config_home_invalid")
+    Ok(crate::platform::dirs::AppDirs::discover()?.config)
 }
 pub fn call(method: &str, params: &Value) -> Result<Value> {
     call_at(&home()?, method, params)
@@ -104,32 +90,18 @@ fn call_at(root: &std::path::Path, method: &str, params: &Value) -> Result<Value
         return Ok(json!({"registry":registry(&[])?,"revision":revision(&[])}));
     };
     // The lock inode remains stable while accounts.json is atomically replaced.
-    let lock = if writing {
-        let fd = unsafe {
-            libc::openat(
-                dir.as_raw_fd(),
-                c".accounts.lock".as_ptr(),
-                libc::O_RDWR
-                    | libc::O_CREAT
-                    | libc::O_NOFOLLOW
-                    | libc::O_NONBLOCK
-                    | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        if fd < 0 {
-            return Err("accounts_unsafe_path");
-        }
-        let file = unsafe { File::from_raw_fd(fd) };
-        use std::os::unix::fs::MetadataExt;
-        let m = file.metadata().map_err(|_| "accounts_unreadable")?;
-        if !m.is_file() || m.nlink() != 1 || m.uid() != unsafe { libc::geteuid() } {
-            return Err("accounts_unsafe_path");
-        }
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err("accounts_busy");
-        }
-        Some(RegistryLock(file))
+    let _lock = if writing {
+        Some(
+            crate::platform::private_fs::lock_exclusive(&dir, ".accounts.lock").map_err(
+                |error| {
+                    if error == "private_fs_busy" {
+                        "accounts_busy"
+                    } else {
+                        error
+                    }
+                },
+            )?,
+        )
     } else {
         None
     };
@@ -158,47 +130,16 @@ fn call_at(root: &std::path::Path, method: &str, params: &Value) -> Result<Value
             }
         }
     }
-    let name = format!(
-        ".accounts.{}.{}",
-        std::process::id(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    );
-    let temp = CString::new(name).unwrap();
-    let fd = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            temp.as_ptr(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if fd < 0 {
-        return Err("accounts_write_failed");
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    let result = (|| {
-        file.write_all(&bytes)
-            .map_err(|_| "accounts_write_failed")?;
-        file.sync_all().map_err(|_| "accounts_write_failed")?;
-        if unsafe {
-            libc::renameat(
-                dir.as_raw_fd(),
-                temp.as_ptr(),
-                dir.as_raw_fd(),
-                c"accounts.json".as_ptr(),
-            )
-        } != 0
-        {
-            return Err("accounts_write_failed");
-        }
-        dir.sync_all().map_err(|_| "accounts_write_failed")?;
-        Ok(json!({"revision":revision(&bytes)}))
-    })();
-    if result.is_err() {
-        unsafe { libc::unlinkat(dir.as_raw_fd(), temp.as_ptr(), 0) };
-    }
-    drop(lock);
-    result
+    crate::platform::private_fs::atomic_replace(&dir, "accounts.json", &bytes).map_err(
+        |error| {
+            if error == "cache_unavailable" {
+                "accounts_write_failed"
+            } else {
+                error
+            }
+        },
+    )?;
+    Ok(json!({"revision":revision(&bytes)}))
 }
 
 #[cfg(test)]
@@ -209,7 +150,7 @@ mod tests {
     }
     #[test]
     fn revisions_prevent_stale_overwrites_and_missing_accounts() {
-        let root = std::env::temp_dir().join(format!(
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-registry-{}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -254,7 +195,7 @@ mod tests {
     fn links_at_registry_lock_and_config_directory_never_change_targets() {
         use std::os::unix::fs::{PermissionsExt, symlink};
         for link_name in ["accounts.json", ".accounts.lock", "omamail"] {
-            let root = std::env::temp_dir().join(format!(
+            let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
                 "omamail-registry-security-{}-{}",
                 std::process::id(),
                 SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -291,7 +232,7 @@ mod tests {
     }
     #[test]
     fn released_identity_never_authorizes_an_unrelated_removal_or_stale_write() {
-        let root = std::env::temp_dir().join(format!(
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-registry-release-{}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -360,7 +301,7 @@ mod lock_tests {
     use super::*;
     #[test]
     fn guard_unlocks_even_while_duplicate_description_is_alive() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-lock-{}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -373,7 +314,7 @@ mod lock_tests {
             0
         );
         let inherited = first.try_clone().unwrap();
-        let guard = RegistryLock(first);
+        let guard = crate::platform::private_fs::ExclusiveLock::from_locked(first);
         let contender = File::open(&path).unwrap();
         assert_ne!(
             unsafe { libc::flock(contender.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },

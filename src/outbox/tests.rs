@@ -19,7 +19,9 @@ async fn owner_submission_ack_loss_replays_one_durable_id_without_another_delive
         .await
         .unwrap();
     let params = enqueue("lost-reply", "a@example.org", 0);
-    let mut socket = tokio::net::UnixStream::connect(dir.0.join("omamail/outbox.sock"))
+    let mut socket = crate::platform::ipc::LocalEndpoint::outbox(&dir.0)
+        .unwrap()
+        .connect()
         .await
         .unwrap();
     let bytes = json!({"method":"outbox.enqueue","params":params})
@@ -27,9 +29,12 @@ async fn owner_submission_ack_loss_replays_one_durable_id_without_another_delive
         .into_bytes();
     socket.write_u32(bytes.len() as u32).await.unwrap();
     socket.write_all(&bytes).await.unwrap();
-    // Deliberately abandon the IPC acknowledgement after writing the request.
-    drop(socket);
+    // Never consume the acknowledgement. Keep the peer alive until accept has
+    // authenticated it: Darwin cannot recover peer credentials after both ends
+    // have been closed. Shutting the write side still sends the complete frame.
+    socket.shutdown().await.unwrap();
     wait_state(&owner, "lost-reply", "a@example.org", "unknown").await;
+    drop(socket);
     let submitter = Outbox::with_root(
         Arc::new(|_| Box::pin(async { panic!("submitter must never deliver") })),
         Some(dir.0.clone()),
@@ -93,7 +98,9 @@ async fn owner_bridge_rejects_unbounded_frames_unkeyed_mutations_and_payload_rea
         );
     }
     for (length, bytes) in [(u32::MAX, b"".as_slice()), (1, b"{".as_slice())] {
-        let mut socket = tokio::net::UnixStream::connect(dir.0.join("omamail/outbox.sock"))
+        let mut socket = crate::platform::ipc::LocalEndpoint::outbox(&dir.0)
+            .unwrap()
+            .connect()
             .await
             .unwrap();
         socket.write_u32(length).await.unwrap();
@@ -353,9 +360,12 @@ fn forked_child_descriptor_cannot_extend_the_last_owner_lease() {
         unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC,
         0
     );
-    let child = ForkedDescriptors::new();
-    let inherited = format!("/proc/{}/fd/{fd}", child.0);
+    let _child = ForkedDescriptors::new();
+    #[cfg(target_os = "linux")]
+    let inherited = format!("/proc/{}/fd/{fd}", _child.0);
+    #[cfg(target_os = "linux")]
     let lock_path = dir.0.join("omamail/outbox.lock");
+    #[cfg(target_os = "linux")]
     assert_eq!(std::fs::read_link(&inherited).unwrap(), lock_path);
     drop(lease);
     assert!(
@@ -363,10 +373,12 @@ fn forked_child_descriptor_cannot_extend_the_last_owner_lease() {
         "an active writer must retain exclusivity"
     );
     drop(writer);
-    assert!(
-        std::fs::read_link(format!("/proc/self/fd/{fd}")).is_err(),
-        "the parent closed its final descriptor"
+    assert_eq!(
+        unsafe { libc::fcntl(fd, libc::F_GETFD) },
+        -1,
+        "parent closed its final descriptor"
     );
+    #[cfg(target_os = "linux")]
     assert_eq!(
         std::fs::read_link(&inherited).unwrap(),
         lock_path,
@@ -453,7 +465,7 @@ impl Temp {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        Self::create(std::env::temp_dir().join(format!(
+        Self::create(std::env::temp_dir().canonicalize().unwrap().join(format!(
             "omamail-outbox-{}-{stamp}-{}",
             std::process::id(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
@@ -729,6 +741,7 @@ async fn rust_timer_delivers_without_any_ui_flush_or_poll_command() {
 
 #[tokio::test]
 async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
+    #[cfg(target_os = "linux")]
     use std::os::fd::AsRawFd;
     if crate::mail::tests::isolated() {
         return;
@@ -748,6 +761,7 @@ async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
         .await
         .unwrap();
     wait_state(&outbox, "inflight", "a@example.org", "sending").await;
+    #[cfg(target_os = "linux")]
     let lease_fd = outbox
         .inner
         .lease
@@ -756,9 +770,12 @@ async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
         .as_ref()
         .unwrap()
         .as_raw_fd();
-    let child = ForkedDescriptors::new();
-    let inherited = format!("/proc/{}/fd/{lease_fd}", child.0);
+    let _child = ForkedDescriptors::new();
+    #[cfg(target_os = "linux")]
+    let inherited = format!("/proc/{}/fd/{lease_fd}", _child.0);
+    #[cfg(target_os = "linux")]
     let lock_path = dir.0.join("omamail/outbox.lock");
+    #[cfg(target_os = "linux")]
     assert_eq!(std::fs::read_link(&inherited).unwrap(), lock_path);
     outbox.shutdown().await.unwrap();
     assert_eq!(state(&outbox, "inflight", "a@example.org").await, "unknown");
@@ -769,6 +786,7 @@ async fn shutdown_marks_wire_inflight_unknown_and_refuses_new_sends() {
         Err("outbox_stopping")
     );
     drop(outbox);
+    #[cfg(target_os = "linux")]
     assert_eq!(
         std::fs::read_link(&inherited).unwrap(),
         lock_path,
