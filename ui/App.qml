@@ -136,6 +136,31 @@ Item {
     readOnly: true
   }
 
+  readonly property var agentPrompt: agentPromptLoader.item || inactiveAgentPrompt
+  readonly property var composeAgent: composeAgentLoader.item || inactiveComposeAgent
+  QtObject {
+    id: inactiveAgentPrompt
+    property bool opened: false
+    property bool activeFocus: false
+    property string messageId: ""
+    function close() {}
+    function openCenteredFor() {}
+    function openFor() {}
+    function openForSelection() {}
+    function takeFocus() {}
+  }
+  QtObject {
+    id: inactiveComposeAgent
+    property bool opened: false
+    property bool activeFocus: false
+    property bool working: false
+    property var job: null
+    function close() {}
+    function open() {}
+    function openAt() {}
+    function takeFocus() {}
+  }
+
   readonly property bool assistantOpen: agentPrompt.opened || composeAgent.opened
   readonly property var activeAssistant: composeAgent.opened ? composeAgent : (agentPrompt.opened ? agentPrompt : null)
   property real preferredAssistantWidth: 0
@@ -1406,10 +1431,10 @@ Item {
 
   function copyAddress(address) {
     var text = String(address || "").trim()
-    // Straight to wl-copy as one argument: no shell, and an address that
-    // starts with a dash is not an address.
+    // The host owns the platform clipboard. An address that starts with a
+    // dash is still refused before it crosses that boundary.
     if (text === "" || text.charAt(0) === "-") return
-    Quickshell.execDetached(["wl-copy", text])
+    if (service && typeof service.copyText === "function") service.copyText(text)
     notice = "Copied " + text
     noticeTimer.restart()
   }
@@ -1726,7 +1751,8 @@ Item {
             anchors.right: root.composing ? parent.right : undefined
             objectName: "header-ai-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
+            visible: !!root.service && root.service.hasAgent !== false
+              && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
@@ -2164,7 +2190,9 @@ Item {
             }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
-            onOpenRequested: function(url) { Qt.openUrlExternally(url) }
+            onOpenRequested: function(url) {
+              if (root.service) root.service.openExternal(url)
+            }
             onEditRequested: function(sourceId, event) { eventComposer.beginEdit(sourceId, event) }
             onDeleteRequested: function(sourceId, event) { root.requestEventDelete(sourceId, event) }
           }
@@ -2565,7 +2593,7 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
-          visible: !!root.service && root.service.lastError !== ""
+          visible: !!root.service && root.service.hasAgent !== false && root.service.lastError !== ""
             && typeof root.service.diagnoseError === "function"
           enabled: visible && !root.service.diagnosing
           iconName: "agent"
@@ -2717,43 +2745,53 @@ Item {
           }
           onDoubleClicked: root.preferredAssistantWidth = 0
         }
-        AgentPrompt {
-          id: agentPrompt
-          onOpenedChanged: if (opened) composeAgent.close()
-          objectName: "agent-prompt"
-          service: root.service
+        Loader {
+          id: agentPromptLoader
+          active: !!root.service && root.service.hasAgent !== false
           anchors.fill: parent
-          textColor: root.foreground
-          accentColor: root.accent
-          urgentColor: root.urgent
-          dimColor: root.dim
-          popupBackgroundColor: root.popupBackground
-          popupBorderColor: root.popupBorder
-          panelFontFamily: root.fontFamily
-          onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
-          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
-          onEditingChanged: function(editing) { root.assistantEditing = editing }
-          onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+          sourceComponent: Component {
+            AgentPrompt {
+              onOpenedChanged: if (opened) root.composeAgent.close()
+              objectName: "agent-prompt"
+              service: root.service
+              textColor: root.foreground
+              accentColor: root.accent
+              urgentColor: root.urgent
+              dimColor: root.dim
+              popupBackgroundColor: root.popupBackground
+              popupBorderColor: root.popupBorder
+              panelFontFamily: root.fontFamily
+              onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
+              onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
+              onEditingChanged: function(editing) { root.assistantEditing = editing }
+              onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+            }
+          }
         }
 
-        ComposeAgent {
-          id: composeAgent
-          onOpenedChanged: if (opened) agentPrompt.close()
-          objectName: "compose-agent"
+        Loader {
+          id: composeAgentLoader
+          active: !!root.service && root.service.hasAgent !== false
           anchors.fill: parent
-          service: root.service
-          composer: compose
-          textColor: root.foreground
-          accentColor: root.accent
-          urgentColor: root.urgent
-          dimColor: root.dim
-          popupBackgroundColor: root.popupBackground
-          popupBorderColor: root.popupBorder
-          panelFontFamily: root.fontFamily
-          onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
-          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
-          onEditingChanged: function(editing) { root.assistantEditing = editing }
-          onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+          sourceComponent: Component {
+            ComposeAgent {
+              onOpenedChanged: if (opened) root.agentPrompt.close()
+              objectName: "compose-agent"
+              service: root.service
+              composer: compose
+              textColor: root.foreground
+              accentColor: root.accent
+              urgentColor: root.urgent
+              dimColor: root.dim
+              popupBackgroundColor: root.popupBackground
+              popupBorderColor: root.popupBorder
+              panelFontFamily: root.fontFamily
+              onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
+              onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
+              onEditingChanged: function(editing) { root.assistantEditing = editing }
+              onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
+            }
+          }
         }
       }
 

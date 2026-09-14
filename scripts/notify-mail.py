@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from html import escape
 
 
 def paint(element, color):
@@ -40,6 +41,10 @@ def main(args):
         if temporary and os.path.exists(temporary):
             os.unlink(temporary)
     # Preserve notify-send's stdout action and lifetime for the QML waiter.
+    # notify-send treats these arguments as markup. Escape sender-authored text
+    # at the last boundary so native notification APIs still receive plain text.
+    title = escape(title, quote=False)
+    body = escape(body, quote=False)
     os.execvp('notify-send', ['notify-send', '-a', 'Omamail', '-i', str(path),
                             '--action=default=Read...', '--', title, body])
 

@@ -280,7 +280,8 @@ Column {
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
           tooltipText: root.suggestion.guideUrl
-          onActivated: Qt.openUrlExternally(root.suggestion.guideUrl)
+          onActivated: if (root.service && typeof root.service.openExternal === "function")
+            root.service.openExternal(root.suggestion.guideUrl)
         }
       }
     }

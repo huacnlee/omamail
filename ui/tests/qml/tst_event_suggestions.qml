@@ -97,7 +97,10 @@ Item {
     }
     function runner() {
       var kids = mailService.children
-      for (var i = 0; i < kids.length; i++) if (kids[i].jobs !== undefined && kids[i].pluginDir !== undefined) return kids[i]
+      for (var i = 0; i < kids.length; i++) {
+        var candidate = kids[i].item || kids[i]
+        if (candidate.jobs !== undefined && candidate.pluginDir !== undefined) return candidate
+      }
       return null
     }
     function calendarFor(email) {

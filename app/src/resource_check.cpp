@@ -209,15 +209,16 @@ ResourcePaths defaultResourcePaths(const QString &executablePath, bool developme
     const QString pluginName = platformPluginName();
     ResourcePaths paths;
     QStringList standaloneCandidates{
-        QStringLiteral(":/omamail/app/Main.qml"),
+        QStringLiteral(":/omamail/app/qml/Main.qml"),
         executableDir.filePath(QStringLiteral("qml/Main.qml")),
         executableDir.filePath(QStringLiteral("../Resources/qml/Main.qml"))};
     QStringList sharedCandidates{
+        QStringLiteral(":/omamail/ui/Service.qml"),
         executableDir.filePath(QStringLiteral("ui/Service.qml")),
         executableDir.filePath(QStringLiteral("../Resources/ui/Service.qml"))};
     if (developmentMode) {
-        standaloneCandidates.append(sourceRoot.filePath(QStringLiteral("app/qml/Main.qml")));
-        sharedCandidates.append(sourceRoot.filePath(QStringLiteral("ui/Service.qml")));
+        standaloneCandidates.prepend(sourceRoot.filePath(QStringLiteral("app/qml/Main.qml")));
+        sharedCandidates.prepend(sourceRoot.filePath(QStringLiteral("ui/Service.qml")));
     }
     paths.standaloneQml = firstExisting(standaloneCandidates);
     paths.sharedUi = firstExisting(sharedCandidates);
@@ -284,7 +285,7 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
     const QFileInfo sharedEntry(paths.sharedUi);
     engine.addImportPath(sharedEntry.absolutePath());
     const QString standaloneImports = paths.standaloneQml.startsWith(QStringLiteral(":"))
-        ? QStringLiteral("qrc:/omamail/app/imports")
+        ? QStringLiteral("qrc:/omamail/app/qml/imports")
         : QFileInfo(paths.standaloneQml).dir().filePath(QStringLiteral("imports"));
     engine.addImportPath(standaloneImports);
     const QUrl componentUrl = paths.standaloneQml.startsWith(QStringLiteral(":"))

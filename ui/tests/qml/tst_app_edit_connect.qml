@@ -38,7 +38,14 @@ Item {
     name: "AppEditConnect"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() {
+      var fixture = BackendFixture.markReady(mailService, 4)
+      fixture.answers = {
+        "credentials.get": {found:true,secret:"hunter2"},
+        "credentials.put": {stored:true},
+        "credentials.delete": {deleted:true}
+      }
+    }
 
     readonly property string imapId: "imap:shawn@example.test"
     readonly property string jmapId: "jmap:admin@example.test"
@@ -51,18 +58,6 @@ Item {
       for (var i = 0; i < values.length; i++) {
         var found = named(values[i], objectName)
         if (found) return found
-      }
-      return null
-    }
-
-    // The stubbed `Process` an auth object started for a keyring read.
-    function keyringLookup(auth) {
-      var kids = auth ? auth.data : null
-      for (var i = 0; kids && i < kids.length; i++) {
-        var kid = kids[i]
-        var command = kid && kid.command ? kid.command : []
-        if (kid && kid.running && command.length > 1 && command[0] === "secret-tool"
-            && command[1] === "lookup") return kid
       }
       return null
     }
@@ -99,11 +94,8 @@ Item {
       tryVerify(function() { return !!imap.auth && !!imap.api && !!jmap.auth && !!jmap.api },
         1000, "and each host its provider pair")
 
-      // The IMAP mailbox is signed in: its password comes back from the keyring.
-      var lookup = keyringLookup(imap.auth)
-      verify(!!lookup, "a configured IMAP account reads its password on start")
-      lookup.stdout.text = "hunter2\n"
-      lookup.exited(0)
+      // The IMAP mailbox is signed in: its password comes back from the typed
+      // credential RPC installed above.
       tryVerify(function() { return imap.ready }, 1000, "the IMAP mailbox is ready")
       compare(jmap.ready, false, "the JMAP one is not: it has no account id yet")
       tryCompare(app, "anyReady", true)

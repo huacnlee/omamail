@@ -25,7 +25,8 @@ QtObject {
     account.clearNotice()
 
     if (how === "browser") {
-      Qt.openUrlExternally(info.url)
+      if (account.platform && typeof account.platform.openExternal === "function")
+        account.platform.openExternal(info.url)
       // What happened is that a page opened. Whether the list acted on it is
       // between the user and that page, and saying "unsubscribed" here would
       // be this panel taking credit for work it cannot see.

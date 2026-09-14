@@ -5,8 +5,6 @@ import Quickshell.Io
 import "ImapProtocol.js" as Imap
 import "Outlook.js" as Outlook
 import "MicrosoftOAuth.js" as Microsoft
-import "Credentials.js" as Credentials
-import "Secrets.js" as Secrets
 
 // Microsoft sign-in for the Outlook provider. The refresh token lives in
 // GNOME Keyring; native backend clients handle OAuth, IMAP and SMTP networking.
@@ -19,6 +17,7 @@ Item {
 
   required property string pluginDir
   property var backend: null
+  property var platform: null
   property string accountId: ""
   property string configuredClientId: ""
   readonly property string clientId: Microsoft.effectiveClientId(configuredClientId)
@@ -72,9 +71,9 @@ Item {
   readonly property bool sessionBusy: !!lookupProcess || refreshBusy || restoreQueued
   property string lastError: ""
 
-  readonly property var requiredTools: ["secret-tool", "xdg-open"]
+  readonly property var requiredTools: []
   property var missingTools: []
-  property bool toolsChecked: false
+  property bool toolsChecked: true
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
 
   property var tokenWaiters: []
@@ -203,22 +202,17 @@ Item {
       return
     }
     var context = sessionContext()
-    var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
-    if (attributes.length === 0) {
+    if (!platform || typeof platform.credentialGet !== "function" || !clientId || !accountId) {
       handleGraphLookup("", context)
       return
     }
-    var process = lookupComponent.createObject(root, {
-      context: context,
-      purpose: "graph",
-      command: ["secret-tool", "lookup"].concat(attributes)
+    var operation = { context: context }
+    graphLookupProcess = operation
+    platform.credentialGet("outlook-refresh-token", accountId, clientId, function(value, error) {
+      if (root.graphLookupProcess !== operation) return
+      root.graphLookupProcess = null
+      root.handleGraphLookup(error ? "" : value, context)
     })
-    if (!process) {
-      handleGraphLookup("", context)
-      return
-    }
-    graphLookupProcess = process
-    process.running = true
   }
 
   function handleGraphLookup(raw, context) {
@@ -425,21 +419,17 @@ Item {
       return
     }
     var context = sessionContext()
-    var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
-    if (attributes.length === 0) {
+    if (!platform || typeof platform.credentialGet !== "function" || !clientId || !accountId) {
       handleSecretLookup("", context)
       return
     }
-    var process = lookupComponent.createObject(root, {
-      context: context,
-      command: ["secret-tool", "lookup"].concat(attributes)
+    var operation = { context: context }
+    lookupProcess = operation
+    platform.credentialGet("outlook-refresh-token", accountId, clientId, function(value, error) {
+      if (root.lookupProcess !== operation) return
+      root.lookupProcess = null
+      root.handleSecretLookup(error ? "" : value, context)
     })
-    if (!process) {
-      handleSecretLookup("", context)
-      return
-    }
-    lookupProcess = process
-    process.running = true
   }
 
   function handleSecretLookup(raw, context) {
@@ -457,15 +447,13 @@ Item {
   }
 
   function storeRefreshToken(token) {
-    var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
-    if (!token || attributes.length === 0) return
-    enqueueKeyringJob("store", attributes, String(token))
+    if (!token || !clientId || !accountId) return
+    enqueueKeyringJob("store", [], String(token))
   }
 
   function clearStoredToken() {
-    var attributes = Credentials.outlookKeyringAttributes(clientId, accountId)
-    if (attributes.length === 0) return
-    enqueueKeyringJob("clear", attributes, "")
+    if (!clientId || !accountId) return
+    enqueueKeyringJob("clear", [], "")
   }
 
   // Jobs own immutable destinations. Serialize them so logout's clear cannot
@@ -489,24 +477,28 @@ Item {
     var next = keyringJobs.slice()
     keyringJob = next.shift()
     keyringJobs = next
-    if (backend && keyringJob.context.accountId) {
-      var job = keyringJob
-      backend.call(job.kind === "store" ? "auth.store" : "auth.clear", {
-        accountId: job.context.accountId, clientId: job.context.clientId,
-        token: job.kind === "store" ? job.token : ""
-      }, function(result, error) {
-        if (root.keyringJob !== job) return
-        root.keyringJob = null
-        if (error && root.isCurrent(job.context)) root.lastError = "Could not update the saved Microsoft session"
-        root.runKeyringJob()
-      })
+    var job = keyringJob
+    if (!platform || (job.kind === "store" && typeof platform.credentialPut !== "function")
+        || (job.kind === "clear" && typeof platform.credentialDelete !== "function")) {
       job.token = ""
+      keyringJob = null
+      if (isCurrent(job.context)) lastError = "Could not update the saved Microsoft session"
+      runKeyringJob()
       return
     }
-    keyringProcess.command = keyringJob.kind === "store"
-      ? [pluginDir + "/scripts/keyring-store.sh"].concat(keyringJob.attributes)
-      : ["secret-tool", "clear"].concat(keyringJob.attributes)
-    keyringProcess.running = true
+    var done = function(ok, error) {
+      if (root.keyringJob !== job) return
+      root.keyringJob = null
+      if (!ok && root.isCurrent(job.context)) root.lastError = "Could not update the saved Microsoft session"
+      root.runKeyringJob()
+    }
+    if (job.kind === "store")
+      platform.credentialPut("outlook-refresh-token", job.context.accountId,
+        job.context.clientId, job.token, done)
+    else
+      platform.credentialDelete("outlook-refresh-token", job.context.accountId,
+        job.context.clientId, done)
+    job.token = ""
   }
 
   function postForm(url, body, callback) {
@@ -606,8 +598,13 @@ Item {
       lastError = "Add the mailbox address and Microsoft OAuth client ID first"
       return
     }
+    if (platform && platform.backendCanStoreCredentials === false) {
+      lastError = "Install or update the mail backend before signing in"
+      return
+    }
     if (!toolsPresent && toolsChecked) {
-      lastError = "Missing " + missingTools.join(", ")
+      lastError = missingTools.length > 0 ? "Missing " + missingTools.join(", ")
+        : "Install or update the mail backend before signing in"
       return
     }
     // Signed in for mail and refused Graph for want of consent: the code
@@ -651,7 +648,8 @@ Item {
         root.verificationUri = result.verificationUri
         root.deviceExpiresAt = Date.now() + result.expiresIn * 1000
         root.devicePollIntervalMs = result.interval * 1000
-        Quickshell.execDetached(["xdg-open", root.verificationUri])
+        if (root.platform && typeof root.platform.openExternal === "function")
+          root.platform.openExternal(root.verificationUri)
         devicePoll.interval = root.devicePollIntervalMs
         devicePoll.start()
       })
@@ -789,7 +787,8 @@ Item {
     sessionGeneration++
     var oldLookup = lookupProcess
     lookupProcess = null
-    if (oldLookup) oldLookup.running = false
+    // Async credential callbacks compare this sentinel and the generation;
+    // clearing it cancels their authority to update the session.
     restoreQueued = false
     graphProbeQueued = false
     refreshRetry.stop()
@@ -829,13 +828,6 @@ Item {
     loggedOut()
   }
 
-  function checkTools() {
-    toolProbe.command = ["sh", "-c",
-      "for tool in " + requiredTools.join(" ")
-        + "; do command -v \"$tool\" >/dev/null 2>&1 || printf '%s\\n' \"$tool\"; done"]
-    toolProbe.running = true
-  }
-
   function changeIdentity() {
     sessionEnabled = false
     resetMemorySession()
@@ -852,8 +844,6 @@ Item {
   onAccountIdChanged: changeIdentity()
   onClientIdChanged: changeIdentity()
 
-  Component.onCompleted: checkTools()
-
   Timer {
     id: devicePoll
     repeat: false
@@ -864,64 +854,6 @@ Item {
     id: refreshRetry
     repeat: false
     onTriggered: root.restoreSession()
-  }
-
-  Process {
-    id: toolProbe
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var missing = String(text || "").split("\n")
-        var found = []
-        for (var i = 0; i < missing.length; i++) {
-          var name = missing[i].trim()
-          if (name) found.push(name)
-        }
-        root.missingTools = found
-        root.toolsChecked = true
-      }
-    }
-  }
-
-  Component {
-    id: lookupComponent
-    Process {
-      id: lookup
-      required property var context
-      // "session" restores the mail token; "graph" asks for Graph's.
-      property string purpose: "session"
-      stdout: StdioCollector { waitForEnd: true }
-      stderr: StdioCollector { waitForEnd: true }
-      onExited: function(exitCode) {
-        if (root.lookupProcess === lookup) root.lookupProcess = null
-        if (root.graphLookupProcess === lookup) root.graphLookupProcess = null
-        var value = exitCode === 0 ? Secrets.fromKeyring(stdout.text) : ""
-        if (purpose === "graph") root.handleGraphLookup(value, context)
-        else root.handleSecretLookup(value, context)
-        destroy()
-      }
-    }
-  }
-
-  Process {
-    id: keyringProcess
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      if (root.keyringJob.kind === "store") write(root.keyringJob.token + "\n")
-      root.keyringJob.token = ""
-    }
-    onExited: function(exitCode) {
-      var job = root.keyringJob
-      root.keyringJob = null
-      if (exitCode !== 0 && root.isCurrent(job.context)) {
-        root.lastError = job.kind === "store"
-          ? "Signed in, but the Microsoft session could not be saved. You may need to sign in again after a restart"
-          : "The Microsoft session could not be removed from the keyring. Try signing out again"
-      }
-      root.runKeyringJob()
-    }
   }
 
 }

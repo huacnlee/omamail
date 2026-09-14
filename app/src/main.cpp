@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.addImportPath(QFileInfo(paths.sharedUi).absolutePath());
     engine.addImportPath(paths.standaloneQml.startsWith(QStringLiteral(":"))
-        ? QStringLiteral("qrc:/omamail/app/imports")
+        ? QStringLiteral("qrc:/omamail/app/qml/imports")
         : QFileInfo(paths.standaloneQml).dir().filePath(QStringLiteral("imports")));
     const QUrl mainUrl = paths.standaloneQml.startsWith(QStringLiteral(":"))
         ? QUrl(QStringLiteral("qrc") + paths.standaloneQml)

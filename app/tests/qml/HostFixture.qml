@@ -1,6 +1,16 @@
 import QtQuick
 
 QtObject {
+  property var manifest: ({
+    id: "omamail", name: "Omamail", version: "0.10.1",
+    barWidget: {defaults:{refreshIntervalSec:333,maxMessages:17,notifyNewMail:"On"}}
+  })
+  property var capabilities: ({agent:false,tray:false,mailto:false,notifications:true})
+  property var settings: ({refreshIntervalSec:333,maxMessages:17,notifyNewMail:"Off"})
+  property string backendPath: "/fixture/bin/omamail"
+  property string notificationError: ""
+  property bool hidden: false
+  property var pendingNotificationActivation: ({})
   property var environmentValues: ({
     HOME: "/fixture/home",
     XDG_CONFIG_HOME: "/fixture/config",
@@ -17,11 +27,16 @@ QtObject {
   signal failed(string path, string error)
 
   function reset() {
+    capabilities = ({agent:false,tray:false,mailto:false,notifications:true})
+    settings = ({refreshIntervalSec:333,maxMessages:17,notifyNewMail:"Off"})
     opened = []
     copied = []
     notifications = []
+    notificationError = ""
+    pendingNotificationActivation = ({})
     files = ({ "/fixture/existing": "saved" })
     watched = ({})
+    hidden = false
   }
 
   function environment(name) { return String(environmentValues[name] || "") }
@@ -33,6 +48,20 @@ QtObject {
       accountId: String(accountId), messageId: String(messageId)
     }])
     return true
+  }
+  function configPath(name) { return "/fixture/config/Omamail/" + String(name) }
+  function cachePath(name) { return "/fixture/cache/Omamail/" + String(name) }
+  function localFilePath(url) { return String(url).replace(/^file:\/\//, "") }
+  function updateSettings(value) { settings = value; return true }
+  function hide() { hidden = true }
+  function takePendingNotificationActivation() {
+    var pending = pendingNotificationActivation
+    pendingNotificationActivation = ({})
+    return pending
+  }
+  function activateNotification(accountId, messageId) {
+    pendingNotificationActivation = ({accountId:String(accountId),messageId:String(messageId)})
+    notificationActivated(String(accountId), String(messageId))
   }
   function read(path) {
     var key = String(path)

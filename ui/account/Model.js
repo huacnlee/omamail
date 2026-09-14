@@ -1290,21 +1290,12 @@ function newArrivals(summaries, seenIds, primed, floorMs) {
   return arrivals
 }
 
-// The desktop notification spec says a body may carry a small markup subset,
-// and the daemons that implement it read one out of whatever they are handed.
-// A subject is a stranger's sentence, so its angle brackets are its own — and
-// an <img> left in one is a fetch made by the notification rather than by the
-// reader, which is the same beacon by a different door.
-//
-// A leading "-" is stripped for a different reason: these values become
-// arguments to notify-send, and one that starts with a dash is read as an
-// option there.
+// This is the canonical plain text handed to every platform. A platform whose
+// notification API accepts markup escapes at that final boundary; doing it
+// here would make native notification centres show the entities themselves.
+// A leading dash remains harmless behind notify-send's `--` separator.
 function notificationText(value) {
   return String(value === undefined || value === null ? "" : value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/^[-\s]+/, "")
 }
 
 function notificationTitle(summary) {

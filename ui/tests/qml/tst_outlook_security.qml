@@ -3,6 +3,43 @@ import QtTest
 import "../../providers" as Providers
 
 Item {
+  QtObject {
+    id: credentialPlatform
+    property bool backendCanStoreCredentials: true
+    property var lookups: []
+    property var writes: []
+    function reset() { lookups = []; writes = [] }
+    function credentialGet(kind, accountId, clientId, callback) {
+      var job = {kind:kind,accountId:accountId,clientId:clientId,running:true,
+        stdout:{text:""}, callback:callback}
+      job.exited = function(exitCode) {
+        if (!job.running) return
+        job.running = false
+        job.callback(exitCode === 0 ? String(job.stdout.text || "").replace(/\n$/, "") : "",
+          exitCode === 0 ? "" : "credential_missing")
+      }
+      lookups = lookups.concat([job])
+      return true
+    }
+    function credentialPut(kind, accountId, clientId, secret, callback) {
+      return queue("store", kind, accountId, clientId, secret, callback)
+    }
+    function credentialDelete(kind, accountId, clientId, callback) {
+      return queue("clear", kind, accountId, clientId, "", callback)
+    }
+    function queue(action, kind, accountId, clientId, secret, callback) {
+      var job = {action:action,kind:kind,accountId:accountId,clientId:clientId,
+        secret:secret,running:true,command:["credentials." + action,kind,accountId],callback:callback}
+      job.started = function() {}
+      job.exited = function(exitCode) {
+        if (!job.running) return
+        job.running = false
+        job.callback(exitCode === 0, exitCode === 0 ? "" : "credential_store_unavailable")
+      }
+      writes = writes.concat([job])
+      return true
+    }
+  }
   Component {
     id: factory
     Providers.OutlookAuth {
@@ -10,6 +47,7 @@ Item {
       accountId: "outlook:alice@hotmail.com"
       configuredClientId: "12345678-1234-4abc-9def-1234567890ab"
       configuredEmail: "alice@hotmail.com"
+      platform: credentialPlatform
       property int reviewRefreshRequests: 0
       property int reviewResponseStatus: 200
       property bool deferResponse: false
@@ -34,6 +72,7 @@ Item {
   }
   TestCase {
     name: "OutlookSecurityReview"
+    function init() { credentialPlatform.reset() }
     function startLookup() {
       var auth = createTemporaryObject(factory, parent)
       verify(auth !== null)
@@ -43,27 +82,21 @@ Item {
       return auth
     }
     function lookupProcess(auth) {
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        if (child.command && child.command[0] === "secret-tool"
-            && child.command[1] === "lookup") return child
-      }
+      for (var i = credentialPlatform.lookups.length - 1; i >= 0; i--)
+        if (credentialPlatform.lookups[i].running) return credentialPlatform.lookups[i]
       fail("No pending keyring lookup")
     }
     function deliverLookup(auth) {
       var process = lookupProcess(auth)
       process.stdout.text = "synthetic-refresh-alice\n"
-      process.running = false
       process.exited(0)
     }
     function finishJob(auth) {
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        if (child.command && (child.command[0] === "/tmp/omamail-test/scripts/keyring-store.sh"
-            || child.command[1] === "clear")) {
+      for (var i = 0; i < credentialPlatform.writes.length; i++) {
+        var child = credentialPlatform.writes[i]
+        if (child.running) {
           var command = child.command.slice()
           child.started()
-          child.running = false
           child.exited(0)
           return command
         }
@@ -109,14 +142,13 @@ Item {
       // Finish the old lookup without a saved session, then reuse the host.
       var lookup = lookupProcess(auth)
       lookup.stdout.text = ""
-      lookup.running = false
       lookup.exited(1)
       auth.accountId = "outlook:bob@hotmail.com"
       auth.configuredEmail = "bob@hotmail.com"
       auth.logout()
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        if (child.command && child.command[1] === "clear") {
+      for (var i = 0; i < credentialPlatform.writes.length; i++) {
+        var child = credentialPlatform.writes[i]
+        if (child.running && child.action === "clear") {
           compare(child.command[child.command.length - 1], "outlook:bob@hotmail.com",
             "Sign-out must clear Bob's token, not Alice's previous lookup key")
           return
@@ -142,7 +174,6 @@ Item {
         calls++
       })
       var lookup = lookupProcess(auth)
-      lookup.running = false
       lookup.exited(1)
       compare(calls, 2)
       compare(auth.tokenWaiters.length, 0)
@@ -227,7 +258,6 @@ Item {
       var current = auth.lookupProcess
       verify(current !== null && current !== old)
       old.stdout.text = "synthetic-refresh-alice"
-      old.running = false
       old.exited(0)
       compare(auth.lookupProcess, current)
       compare(auth.reviewRefreshRequests, 0)

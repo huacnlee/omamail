@@ -4,7 +4,6 @@ import Quickshell.Io
 
 import "OAuth.js" as OAuth
 import "Credentials.js" as Credentials
-import "Secrets.js" as Secrets
 
 // Google sign-in and token storage. Nothing else in the plugin needs to know
 // what a refresh token looks like: callers ask for `withAccessToken` and get a
@@ -25,6 +24,7 @@ Item {
 
   required property string pluginDir
   property var backend: null
+  property var platform: null
   property int oauthPort: OAuth.DEFAULT_PORT
   property var scopes: OAuth.SCOPES
 
@@ -35,7 +35,8 @@ Item {
   property string accountId: ""
 
   readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string credentialsPath: Credentials.path(home)
+  readonly property string credentialsPath: platform && typeof platform.configPath === "function"
+    ? platform.configPath("credentials.json") : Credentials.path(home)
 
   property var credentials: Credentials.effective("")
   property bool credentialsChecked: false
@@ -57,24 +58,22 @@ Item {
   property int refreshRetryAttempt: 0
   property bool loginBusy: false
   property bool refreshBusy: false
-  property bool credentialsWriteBusy: false
   readonly property bool sessionBusy: refreshBusy || lookupRunning
   property string lastError: ""
 
   // Everything the sign-in needs that Omarchy does not guarantee is present.
-  readonly property var requiredTools: ["secret-tool", "xdg-open"]
+  readonly property var requiredTools: []
   property var missingTools: []
-  property bool toolsChecked: false
+  property bool toolsChecked: true
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
 
   property var tokenWaiters: []
   property string lookupPurpose: ""
   property bool lookupHandled: false
-  property var lookupAttributes: []
-  property var savedTokenAttributes: []
   // One lookup at a time, whichever of the two processes is carrying it.
-  readonly property bool lookupRunning: secretLookup.running || legacySearch.running
-  property string keyringWriteToken: ""
+  property bool credentialLookupBusy: false
+  property bool credentialWriteBusy: false
+  readonly property bool lookupRunning: credentialLookupBusy
   property string credentialsWritePayload: ""
 
   property var signedInProfile: null
@@ -168,8 +167,22 @@ Item {
     lastError = ""
     credentialsWriteBusy = true
     credentialsWritePayload = Credentials.serialize(result.credentials)
-    credentialsWriter.command = [pluginDir + "/scripts/config-store.sh", "credentials.json"]
-    credentialsWriter.running = true
+    if (!platform || typeof platform.writeConfig !== "function") {
+      credentialsWriteBusy = false
+      credentialsWritePayload = ""
+      lastError = "Could not save the OAuth client to " + credentialsPath
+      return false
+    }
+    platform.writeConfig("credentials.json", credentialsWritePayload, function(ok, error) {
+      root.credentialsWritePayload = ""
+      root.credentialsWriteBusy = false
+      if (!ok) {
+        root.lastError = "Could not save the OAuth client to " + root.credentialsPath
+        return
+      }
+      credentialsFile.reload()
+      root.credentialsSaved()
+    })
     return true
   }
 
@@ -195,116 +208,42 @@ Item {
     }
   }
 
-  // -------------------------------------------------------------- keyring
+  // -------------------------------------------------------- credential store
 
-  // Older grants are detected so the panel can ask for Calendar permission.
-  // Their tokens stay in the keyring and are never treated as current grants.
-  property bool triedLegacyLookup: false
-  property int secretLookupStage: 0
-  property var legacyAttributes: []
-
-  // Two keyring entries are not tied to an address: the pre-multi-account one
-  // keyed by client alone, and the one written for a mailbox that had not
-  // learned its address yet, which keys on a literal stand-in. Either can be
-  // found by *any* account sharing the client, and both belong to whichever
-  // mailbox was signed in before accounts were separated — the first one.
-  //
-  // Only that one may claim them. Without this a mailbox you have just added
-  // restores the token of the mailbox you already had, signs itself in, reports
-  // that same address, and collapses back into it — which is exactly what
-  // adding a second account did.
+  // Kept for account migration compatibility. Native credential APIs accept
+  // only fully typed current keys, so no wildcard legacy lookup is attempted.
   property bool mayAdoptLegacyToken: true
 
   function startSecretLookup() {
+    // Existing accounts are restored wholly inside the backend: the native
+    // store returns the refresh token directly to the OAuth client and QML
+    // receives only the resulting access token. The typed credential RPC is
+    // for provider paths that still need the secret as request input.
     if (accountId !== "" && backend) {
       savedSessionPresent = true
       refreshWithToken("", lookupPurpose)
       lookupPurpose = ""
       return
     }
-    if (!clientId) {
-      handleSecretLookup("")
-      return
-    }
-    // A mailbox with no address has never signed in under one, so there is
-    // nothing of its own to find — only somebody else's.
-    if (accountId === "" && !mayAdoptLegacyToken) {
+    if (!clientId || accountId === "" || !platform || typeof platform.credentialGet !== "function") {
       handleSecretLookup("")
       return
     }
     lookupHandled = false
-    triedLegacyLookup = false
-    secretLookupStage = 0
-    lookupAttributes = Credentials.refreshTokenAttributes(clientId, accountId, 0)
-    secretLookup.command = ["secret-tool", "lookup"].concat(lookupAttributes)
-    secretLookup.running = true
-  }
-
-  function startNextSecretLookup() {
-    lookupHandled = false
-    secretLookupStage++
-    var attributes = []
-    if (secretLookupStage === 1) {
-      triedLegacyLookup = false
-      attributes = Credentials.previousGrantKeyringAttributes(clientId, accountId)
-    } else if (secretLookupStage === 2 && mayAdoptLegacyToken) {
-      triedLegacyLookup = true
-      attributes = Credentials.legacyKeyringAttributes(clientId)
-    } else if (secretLookupStage <= 3) {
-      secretLookupStage = 3
-      triedLegacyLookup = false
-      attributes = Credentials.renamedKeyringAttributes(clientId, accountId)
-    } else if (secretLookupStage === 4 && mayAdoptLegacyToken) {
-      triedLegacyLookup = true
-      attributes = Credentials.renamedLegacyKeyringAttributes(clientId)
-    }
-    if (!attributes.length) {
-      handleSecretLookup("")
-      return
-    }
-    // A legacy read looks before it leaps. Its attributes are a wildcard over
-    // "account", so asking for the token outright can answer with a named
-    // mailbox's. See Credentials.hasLoneLegacyEntry.
-    if (triedLegacyLookup) {
-      legacySearch.reset()
-      legacyAttributes = attributes
-      legacySearch.command = ["secret-tool", "search", "--all"].concat(attributes)
-      legacySearch.running = true
-      return
-    }
-    lookupAttributes = attributes
-    secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
-    secretLookup.running = true
-  }
-
-  // The legacy entry's token, asked for only once the search has said that
-  // entry is the one a lookup would answer with. Refusing is not an error:
-  // what a mailbox with no token of its own gets is the next stage, and then
-  // the sign-in button.
-  //
-  // A search that did not exit cleanly is refused as well. Fail-closed covers
-  // the ordinary failures on its own, since a search that found nothing counts
-  // no matches, but a killed one can leave a whole record on stdout with its
-  // attributes cut short.
-  function readLegacyToken(exitCode, matches, attributed, named) {
-    if (exitCode !== 0 || !Credentials.hasLoneLegacyEntry(matches, attributed, named)) {
-      handleSecretLookup("")
-      return
-    }
-    lookupHandled = false
-    lookupAttributes = legacyAttributes
-    secretLookup.command = ["secret-tool", "lookup"].concat(legacyAttributes)
-    secretLookup.running = true
+    var boundAccount = accountId
+    var boundClient = clientId
+    credentialLookupBusy = true
+    platform.credentialGet("google-refresh-token", boundAccount, boundClient, function(value, error) {
+      root.credentialLookupBusy = false
+      if (boundAccount !== root.accountId || boundClient !== root.clientId) return
+      root.handleSecretLookup(error ? "" : value)
+    })
   }
 
   function handleSecretLookup(raw) {
     if (lookupHandled) return
     lookupHandled = true
     var token = String(raw || "").trim()
-    if (!token && secretLookupStage < 4 && clientId !== "") {
-      startNextSecretLookup()
-      return
-    }
     var purpose = lookupPurpose
     lookupPurpose = ""
     if (!token) {
@@ -314,24 +253,7 @@ Item {
       if (purpose === "request") finishWaiters("", "Sign in to Gmail first")
       return
     }
-    // Every fallback entry predates the Calendar grant marker. Refreshing it
-    // would report a live Gmail session while Calendar returns 403. Keep the
-    // saved token for Google's incremental consent flow, but require sign-in.
-    if (secretLookupStage > 0) {
-      token = ""
-      savedSessionPresent = false
-      savedTokenAttributes = []
-      refreshRetryAttempt = 0
-      refreshRetry.stop()
-      resetMemorySession()
-      sessionChecked = true
-      lastError = "Sign in again to add Google Calendar permission"
-      if (purpose === "request") finishWaiters("", lastError)
-      else sessionUnavailable(lastError)
-      return
-    }
     savedSessionPresent = true
-    savedTokenAttributes = lookupAttributes.slice()
     refreshWithToken(token, purpose)
   }
 
@@ -358,19 +280,26 @@ Item {
       unnamedRefreshToken = String(refreshToken)
       return
     }
-    if (keyringStore.running) return
-    keyringWriteToken = String(refreshToken)
-    keyringStore.command = [pluginDir + "/scripts/keyring-store.sh"].concat(
-      Credentials.keyringAttributes(clientId, accountId))
-    keyringStore.running = true
+    if (credentialWriteBusy || !platform || typeof platform.credentialPut !== "function") return
+    var boundAccount = accountId
+    var boundClient = clientId
+    var token = String(refreshToken)
+    credentialWriteBusy = true
+    platform.credentialPut("google-refresh-token", boundAccount, boundClient, token, function(ok, error) {
+      token = ""
+      root.credentialWriteBusy = false
+      if (!ok && boundAccount === root.accountId && boundClient === root.clientId)
+        root.lastError = "Signed in, but the session could not be saved. You may need to sign in again after a restart"
+      if (root.logoutPendingClear) {
+        root.logoutPendingClear = false
+        root.clearStoredToken()
+      }
+    })
   }
 
   function clearStoredToken(attributes) {
-    if (keyringClear.running || !clientId) return
-    var selected = attributes && attributes.length
-      ? attributes : Credentials.keyringAttributes(clientId, accountId)
-    keyringClear.command = ["secret-tool", "clear"].concat(selected)
-    keyringClear.running = true
+    if (!clientId || !accountId || !platform || typeof platform.credentialDelete !== "function") return
+    platform.credentialDelete("google-refresh-token", accountId, clientId, function() {})
   }
 
   // ---------------------------------------------------------------- tokens
@@ -413,7 +342,7 @@ Item {
           // means the panel offers "Sign in" instead of retrying forever.
           root.savedSessionPresent = false
           refreshRetry.stop()
-          root.clearStoredToken(root.savedTokenAttributes)
+          root.clearStoredToken()
         } else {
           // The keyring token is still valid evidence of a saved session. Keep
           // it and retry until the network can exchange it for an access token.
@@ -448,8 +377,13 @@ Item {
       lastError = "Connect a Google Cloud OAuth client first"
       return
     }
+    if (platform && platform.backendCanStoreCredentials === false) {
+      lastError = "Install or update the mail backend before signing in"
+      return
+    }
     if (!toolsPresent && toolsChecked) {
-      lastError = "Missing " + missingTools.join(", ")
+      lastError = missingTools.length > 0 ? "Missing " + missingTools.join(", ")
+        : "Install or update the mail backend before signing in"
       return
     }
     lastError = ""
@@ -471,7 +405,8 @@ Item {
         return
       }
       root.nativeFlow = result.id
-      Quickshell.execDetached(["xdg-open", result.url])
+      if (root.platform && typeof root.platform.openExternal === "function")
+        root.platform.openExternal(result.url)
       nativePoll.start()
       authTimeout.restart()
     })
@@ -564,19 +499,10 @@ Item {
     grantedScope = ""
     lastError = ""
     finishWaiters("", "Signed out")
-    if (keyringStore.running) logoutPendingClear = true
+    if (credentialWriteBusy) logoutPendingClear = true
     else clearStoredToken()
     loggedOut()
   }
-
-  function checkTools() {
-    toolProbe.command = ["sh", "-c",
-      "for tool in " + requiredTools.join(" ")
-        + "; do command -v \"$tool\" >/dev/null 2>&1 || printf '%s\\n' \"$tool\"; done"]
-    toolProbe.running = true
-  }
-
-  Component.onCompleted: checkTools()
 
   // ------------------------------------------------------------- processes
 
@@ -590,46 +516,6 @@ Item {
     // No file is the normal first-run state, not an error: fall through to
     // whatever client is built in.
     onLoadFailed: root.applyCredentials("")
-  }
-
-  Process {
-    id: toolProbe
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var missing = String(text || "").split("\n")
-        var found = []
-        for (var i = 0; i < missing.length; i++) {
-          var name = missing[i].trim()
-          if (name) found.push(name)
-        }
-        root.missingTools = found
-        root.toolsChecked = true
-      }
-    }
-  }
-
-  Process {
-    id: credentialsWriter
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.credentialsWritePayload + "\n")
-      root.credentialsWritePayload = ""
-    }
-    onExited: function(exitCode) {
-      root.credentialsWritePayload = ""
-      root.credentialsWriteBusy = false
-      if (exitCode !== 0) {
-        root.lastError = "Could not save the OAuth client to " + root.credentialsPath
-        return
-      }
-      // The FileView is watching the same path, but reload explicitly so the
-      // panel advances the moment the write lands rather than on a file event.
-      credentialsFile.reload()
-      root.credentialsSaved()
-    }
   }
 
   function stopNativeLogin() {
@@ -656,17 +542,6 @@ Item {
     onTriggered: root.restoreSession()
   }
 
-  Process {
-    id: secretLookup
-    stdout: StdioCollector { id: secretLookupOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      // One trailing newline is the pipe's; everything else is the secret.
-      var value = exitCode === 0 ? Secrets.fromKeyring(secretLookupOutput.text) : ""
-      root.handleSecretLookup(value)
-    }
-  }
-
   // Whether a legacy entry is there at all. The matches come back on stdout
   // and their attributes on stderr, so the two are counted apart and neither
   // is read as the other's.
@@ -675,60 +550,4 @@ Item {
   // alone loads every matching mailbox's token, and stdout carries all of
   // them. Nothing here needs a secret, only how many of each line there were,
   // so none is held.
-  Process {
-    id: legacySearch
-    property int matchCount: 0
-    property int attributedCount: 0
-    property int namedCount: 0
-
-    function reset() {
-      matchCount = 0
-      attributedCount = 0
-      namedCount = 0
-    }
-
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) {
-        if (Credentials.isKeyringMatchLine(line)) legacySearch.matchCount++
-      }
-    }
-    stderr: SplitParser {
-      splitMarker: "\n"
-      onRead: function(line) {
-        if (Credentials.isKeyringAttributedLine(line)) legacySearch.attributedCount++
-        if (Credentials.isKeyringNamedLine(line)) legacySearch.namedCount++
-      }
-    }
-    onExited: function(exitCode) {
-      root.readLegacyToken(exitCode, matchCount, attributedCount, namedCount)
-      reset()
-    }
-  }
-
-  Process {
-    id: keyringStore
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.keyringWriteToken + "\n")
-      root.keyringWriteToken = ""
-    }
-    onExited: function(exitCode) {
-      root.keyringWriteToken = ""
-      if (exitCode !== 0)
-        root.lastError = "Signed in, but the session could not be saved. You may need to sign in again after a restart"
-      if (root.logoutPendingClear) {
-        root.logoutPendingClear = false
-        root.clearStoredToken()
-      }
-    }
-  }
-
-  Process {
-    id: keyringClear
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-  }
 }

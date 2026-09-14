@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
@@ -11,6 +12,8 @@ Item {
   required property string notificationAccent
   required property string pluginDir
   required property string accountId
+  property bool nativeNotifications: false
+  property bool pluginNotifications: true
   signal activated(string targetAccountId, string messageId)
 
   // Each notification owns its waiter and target. A later poll must not replace
@@ -44,6 +47,12 @@ Item {
       title = Model.pluralize(list.length, "new message")
       body = names.join(", ")
     }
+    if (nativeNotifications && typeof Quickshell.showNotification === "function") {
+      Quickshell.showNotification(root.accountId + ":" + String(list[0].id || ""),
+        title, body, root.accountId, String(list[0].id || ""))
+      return
+    }
+    if (!pluginNotifications) return
     // Sender-authored text stays behind "--", never in options or shell code.
     var request = notificationProcessComponent.createObject(root, {
       targetAccountId: root.accountId,

@@ -51,6 +51,7 @@ private slots:
     void smokeBoundsBothChannelsAfterQuitReply();
     void smokeDeadlineCrossedDuringDrainDoesNotWaitForever();
     void bundleDiscoveryDoesNotUseDevelopmentFallbacks();
+    void developmentDiscoveryUsesExplicitSourceAndBackend();
 };
 
 void ResourcesTest::acceptsCompleteReadableLayout()
@@ -188,6 +189,26 @@ void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()
     QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("shared UI")));
     QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("platform plugin")));
     QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("backend")));
+}
+
+void ResourcesTest::developmentDiscoveryUsesExplicitSourceAndBackend()
+{
+    QTemporaryDir staged;
+    const QString executable = staged.filePath(QStringLiteral("build/omamail-app"));
+    QVERIFY(writeFile(executable));
+    const QString backendPath = staged.filePath(QStringLiteral("target/debug/omamail"));
+    QVERIFY(writeFile(backendPath, "#!/bin/sh\nexit 0\n"));
+    QFile backendFile(backendPath);
+    backendFile.setPermissions(backendFile.permissions() | QFileDevice::ExeOwner);
+    const QByteArray backend = backendPath.toUtf8();
+    qputenv("OMAMAIL_BIN", backend);
+    const ResourcePaths paths = defaultResourcePaths(executable, true);
+    qunsetenv("OMAMAIL_BIN");
+    QCOMPARE(paths.standaloneQml,
+             QDir(QStringLiteral(OMAMAIL_SOURCE_ROOT)).filePath(QStringLiteral("app/qml/Main.qml")));
+    QCOMPARE(paths.sharedUi,
+             QDir(QStringLiteral(OMAMAIL_SOURCE_ROOT)).filePath(QStringLiteral("ui/Service.qml")));
+    QCOMPARE(paths.backend, QString::fromUtf8(backend));
 }
 
 int main(int argc, char *argv[])

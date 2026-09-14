@@ -225,7 +225,7 @@ Rectangle {
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
-          onClicked: Qt.openUrlExternally(root.meetingLink)
+          onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
         }
 
         IconTextButton {
@@ -235,7 +235,7 @@ Rectangle {
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
-          onClicked: Qt.openUrlExternally(root.locationLink)
+          onClicked: if (root.controller) root.controller.openExternal(root.locationLink)
         }
 
         IconTextButton {
@@ -246,7 +246,7 @@ Rectangle {
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
-          onClicked: Qt.openUrlExternally(root.mapLink)
+          onClicked: if (root.controller) root.controller.openExternal(root.mapLink)
         }
 
         IconTextButton {
@@ -257,8 +257,7 @@ Rectangle {
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
-          // Straight to wl-copy as one argument: no shell in between.
-          onClicked: Quickshell.execDetached(["wl-copy", root.locationText])
+          onClicked: if (root.controller) root.controller.copyText(root.locationText)
         }
 
         IconTextButton {
@@ -269,7 +268,7 @@ Rectangle {
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
-          onClicked: Qt.openUrlExternally(root.providerLink)
+          onClicked: if (root.controller) root.controller.openExternal(root.providerLink)
         }
       }
 

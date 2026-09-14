@@ -1311,3 +1311,9 @@ if unknown:
                      + ", ".join(m + " (" + ", ".join(sorted(called[m])) + ")" for m in unknown))
 
 CONTRACTCALLS
+# Credential metadata and secret values cross one typed backend RPC. Provider
+# and calendar QML must never regain a platform command or keyring helper.
+if grep -E 'secret-tool|scripts/keyring-(lookup|store|clear)\.sh' \
+    providers/*.qml calendar/*.qml >/dev/null; then
+  fail "QML credential paths must use the typed backend credential RPC"
+fi

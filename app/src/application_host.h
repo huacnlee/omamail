@@ -4,6 +4,7 @@
 #include "notifications.h"
 
 #include <QObject>
+#include <QUrl>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
@@ -53,6 +54,9 @@ public:
     Q_INVOKABLE void quit();
     Q_INVOKABLE bool updateSettings(const QVariantMap &settings);
     Q_INVOKABLE QString environment(const QString &name) const;
+    Q_INVOKABLE QString configPath(const QString &name) const;
+    Q_INVOKABLE QString cachePath(const QString &name) const;
+    Q_INVOKABLE QString localFilePath(const QUrl &url) const;
 
 signals:
     void settingsChanged();

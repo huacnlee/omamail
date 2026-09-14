@@ -50,6 +50,21 @@ class NotificationTest(unittest.TestCase):
                 self.assertEqual(sorted((tmp / 'cache').rglob('*')), before)
             self.assertFalse((ROOT / 'forbidden').exists())
 
+    def test_sender_markup_is_escaped_only_at_notify_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            notify = tmp / 'notify-send'
+            notify.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                              'open(os.environ["CAPTURE"],"w").write(json.dumps(sys.argv[1:]))\n')
+            notify.chmod(0o700)
+            env = dict(os.environ, PATH=str(tmp) + ':' + os.environ['PATH'],
+                       XDG_CACHE_HOME=str(tmp / 'cache'), CAPTURE=str(tmp / 'argv'))
+            result = subprocess.run(['python3', str(ROOT / 'scripts/notify-mail.py'),
+                '#eeeeee', '#abcdef', '--', '<img> & sender', 'body <b>&'], env=env)
+            self.assertEqual(result.returncode, 0)
+            args = json.loads((tmp / 'argv').read_text())
+            self.assertEqual(args[-2:], ['&lt;img&gt; &amp; sender', 'body &lt;b&gt;&amp;'])
+
 
 if __name__ == '__main__':
     unittest.main()

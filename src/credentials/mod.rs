@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
+pub mod rpc;
+
 #[cfg(target_os = "macos")]
 mod keychain;
 #[cfg(target_os = "linux")]

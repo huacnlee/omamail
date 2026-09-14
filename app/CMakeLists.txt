@@ -80,10 +80,13 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
   file(GLOB_RECURSE OMAMAIL_STANDALONE_QML CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml"
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js"
-    "${CMAKE_CURRENT_SOURCE_DIR}/qml/qmldir")
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/qmldir"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ui/*.qml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ui/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ui/assets/*")
   qt_add_resources(omamail-app standalone_qml
-    PREFIX "/omamail/app"
-    BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+    PREFIX "/omamail"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/.."
     FILES ${OMAMAIL_STANDALONE_QML}
   )
 endif()
@@ -109,4 +112,15 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME notification_source_boundary
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_notification_sources.py")
+
+  find_program(QMLTESTRUNNER_EXECUTABLE qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/bin")
+  if(QMLTESTRUNNER_EXECUTABLE)
+    add_test(NAME tst_standalone_composition COMMAND ${QMLTESTRUNNER_EXECUTABLE}
+      -import "${CMAKE_CURRENT_SOURCE_DIR}/qml/imports"
+      -import "${CMAKE_BINARY_DIR}/qml"
+      -import "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml/imports"
+      -input "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml/tst_standalone_composition.qml")
+    set_tests_properties(tst_standalone_composition PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;OMAMAIL_DEVELOPMENT_RESOURCES=1")
+  endif()
 endif()

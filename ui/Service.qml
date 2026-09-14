@@ -44,13 +44,25 @@ Item {
   property var manifest: null
   property var pluginRegistry: null
   property var barWidgetRegistry: null
+  // Optional host seam. The Omarchy shell does not inject it and therefore
+  // keeps every existing plugin path; the standalone composition supplies a
+  // narrow adapter for native operations and its bundled backend.
+  property var platform: null
+  property var initialSettings: null
+  readonly property var capabilities: platform && platform.capabilities
+    ? platform.capabilities : ({ agent: true, tray: true, mailto: true, notifications: true })
+  readonly property bool standalone: !!platform && platform.standalone === true
 
   // One plugin-owned runtime and persistent process survive window openings.
   readonly property var backendRuntime: privateRuntime
   Runtime {
     id: privateRuntime
     pluginDir: root.pluginDir
-    developmentExecutable: Quickshell.env("OMAMAIL_BIN") || ""
+    bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
+    bundledVersion: root.standalone ? root.version : ""
+    bundledApiVersion: root.standalone ? 4 : 0
+    bundledMode: root.standalone
+    developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
   }
   readonly property var backend: rustBackend
@@ -111,14 +123,35 @@ Item {
     unifiedMailboxes: false,
     suggestEvents: false
   })
-  property var settings: defaultSettingValues
+  function normalizedSettings(values) {
+    var next = ({})
+    for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
+    var source = values || ({})
+    for (var name in source) {
+      if (source[name] !== undefined && source[name] !== null) next[name] = source[name]
+    }
+    return next
+  }
+  // An initial value is merged before any child account completes, so the
+  // standalone host never starts account activity under transient defaults.
+  property var settings: normalizedSettings(initialSettings)
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
   // System AI is always reachable. The launcher explains missing setup.
-  readonly property bool hasAgent: true
+  readonly property bool hasAgent: capabilities.agent === true
+  readonly property bool hasMailto: capabilities.mailto === true
+  readonly property bool hasNotifications: capabilities.notifications === true
+  readonly property string notificationError: platform && platform.notificationError
+    ? String(platform.notificationError) : ""
+  // Credential RPC was introduced in API 4. This minimum stays fixed after
+  // release; it is a capability of the connected backend, not release state.
+  readonly property bool backendCanStoreCredentials: backend.ready && backend.apiVersion >= 4
+  readonly property var agentRunner: agentRunnerLoader.item || inactiveAgentRunner
+  readonly property var agentContext: agentContextLoader.item || inactiveAgentContext
+  readonly property var eventSuggester: eventSuggesterLoader.item || inactiveEventSuggester
   readonly property string agentError: agentContext.error !== "" ? agentContext.error : agentRunner.lastError
   readonly property bool agentStarting: agentContext.busy || agentRunner.starting
   // The open account's jobs by message id — another account's job about
@@ -315,20 +348,136 @@ Item {
   }
 
   function registerMailtoHandler() {
-    if (pluginDir === "" || mailtoInstaller.running) return
+    if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
     mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
     mailtoInstaller.running = true
   }
 
   function applySettings(values) {
-    var next = ({})
-    for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
-    var source = values || ({})
-    for (var name in source) {
-      if (source[name] === undefined || source[name] === null) continue
-      next[name] = source[name]
-    }
+    var next = normalizedSettings(values)
     if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
+  }
+
+  function openExternal(value) {
+    var target = String(value || "")
+    if (target === "") return false
+    if (platform && typeof platform.openExternal === "function")
+      return platform.openExternal(target)
+    return Quickshell.execDetached(["xdg-open", target])
+  }
+
+  function copyText(value) {
+    var text = String(value === undefined || value === null ? "" : value)
+    if (platform && typeof platform.setClipboard === "function")
+      return platform.setClipboard(text)
+    return Quickshell.execDetached(["wl-copy", text])
+  }
+
+  function configPath(name) {
+    if (platform && typeof platform.configPath === "function")
+      return String(platform.configPath(String(name || "")) || "")
+    var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
+    return home + "/omamail/" + String(name || "")
+  }
+
+  function cachePath(name) {
+    if (platform && typeof platform.cachePath === "function")
+      return String(platform.cachePath(String(name || "")) || "")
+    var home = Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")
+    return home + "/omamail/" + String(name || "")
+  }
+
+  function writeConfig(name, text, callback) {
+    var allowed = ["credentials.json", "window.json", "calendars.json"]
+    if (allowed.indexOf(String(name || "")) < 0) {
+      if (typeof callback === "function") callback(false, "Invalid configuration file")
+      return false
+    }
+    if (platform && typeof platform.writeConfig === "function")
+      return platform.writeConfig(String(name), String(text), callback)
+    var request = hostProcessComponent.createObject(root, {
+      operation: "write", callback: callback, payload: String(text) + "\n",
+      command: [root.pluginDir + "/scripts/config-store.sh", String(name)]
+    })
+    if (!request) {
+      if (typeof callback === "function") callback(false, "Could not start configuration write")
+      return false
+    }
+    request.running = true
+    return true
+  }
+
+  function chooseFiles(callback) {
+    if (platform && typeof platform.chooseFiles === "function")
+      return platform.chooseFiles(callback)
+    var request = hostProcessComponent.createObject(root, {
+      operation: "result", callback: callback,
+      command: [root.pluginDir + "/scripts/attachment.sh", "pick"]
+    })
+    if (!request) {
+      if (typeof callback === "function") callback(({ok:false,error:"No file picker is available"}))
+      return false
+    }
+    request.running = true
+    return true
+  }
+
+  function clipboardAttachment(directory, callback) {
+    if (platform && typeof platform.clipboardAttachment === "function")
+      return platform.clipboardAttachment(String(directory || ""), callback)
+    var request = hostProcessComponent.createObject(root, {
+      operation: "result", callback: callback,
+      command: [root.pluginDir + "/scripts/attachment.sh", "clipboard", String(directory || "")]
+    })
+    if (!request) {
+      if (typeof callback === "function") callback(({ok:false,error:"no-image"}))
+      return false
+    }
+    request.running = true
+    return true
+  }
+
+  function credentialFields(kind, accountId, clientId) {
+    var fields = { kind: String(kind || ""), accountId: String(accountId || "") }
+    if (String(clientId || "") !== "") fields.clientId = String(clientId)
+    return fields
+  }
+
+  function credentialGet(kind, accountId, clientId, callback) {
+    if (!backendCanStoreCredentials) {
+      if (typeof callback === "function") callback("", "backend_needs_update")
+      return false
+    }
+    backend.call("credentials.get", credentialFields(kind, accountId, clientId), function(result, error) {
+      if (typeof callback === "function") callback(!error && result && result.found === true
+        ? String(result.secret || "") : "", error ? String(error.message || error) : "")
+    })
+    return true
+  }
+
+  function credentialPut(kind, accountId, clientId, secret, callback) {
+    if (!backendCanStoreCredentials) {
+      if (typeof callback === "function") callback(false, "backend_needs_update")
+      return false
+    }
+    var fields = credentialFields(kind, accountId, clientId)
+    fields.secret = String(secret || "")
+    backend.call("credentials.put", fields, function(result, error) {
+      if (typeof callback === "function") callback(!error && !!result && result.stored === true,
+        error ? String(error.message || error) : "")
+    })
+    return true
+  }
+
+  function credentialDelete(kind, accountId, clientId, callback) {
+    if (!backendCanStoreCredentials) {
+      if (typeof callback === "function") callback(false, "backend_needs_update")
+      return false
+    }
+    backend.call("credentials.delete", credentialFields(kind, accountId, clientId), function(result, error) {
+      if (typeof callback === "function") callback(!error, error ? String(error.message || error) : "")
+    })
+    return true
   }
 
   function persistSetting(name, value) {
@@ -510,9 +659,10 @@ Item {
   }
 
   function openNotification(accountId, messageId) {
-    if (!Accounts.find(accountList, accountId) || !messageId) return
+    if (!Accounts.find(accountList, accountId) || !messageId) return false
     if (shell && typeof shell.summon === "function")
-      shell.summon("omamail", JSON.stringify({ accountId: accountId, messageId: messageId }))
+      return shell.summon("omamail", JSON.stringify({ accountId: accountId, messageId: messageId }))
+    return false
   }
 
   // The switcher selects by position, because that is the only handle a mailbox
@@ -915,6 +1065,7 @@ Item {
   property bool alwaysShowImages: false
   property bool windowPrefsLoaded: false
   property string windowWritePayload: ""
+  property bool windowWriting: false
   property bool restoreWindow: false
   property int restoreAttempts: 0
 
@@ -953,7 +1104,7 @@ Item {
   // `running` guard does, loses the one value the user settled on.
   function saveWindowPrefs() {
     if (!windowPrefsLoaded) return
-    if (windowWriter.running) {
+    if (windowWriting) {
       windowPrefsSettling.restart()
       return
     }
@@ -968,8 +1119,12 @@ Item {
       alwaysShowImages: alwaysShowImages,
       windowOpen: windowOpen || restoreWindow
     })
-    windowWriter.command = [pluginDir + "/scripts/config-store.sh", "window.json"]
-    windowWriter.running = true
+    windowWriting = true
+    writeConfig("window.json", windowWritePayload, function(ok, error) {
+      root.windowWriting = false
+      root.windowWritePayload = ""
+      if (!ok && root.current) root.current.fail(error || "Could not save window settings")
+    })
   }
 
   // Written when a drag ends, not while it runs: a drag is a hundred values
@@ -1334,7 +1489,7 @@ Item {
 
   function openCalendarEditor() {
     var url = CalendarSources.calendarEditorUrl(sharedCalendar.sourceList)
-    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+    if (url !== "") openExternal(url)
   }
 
   // ------------------------------------------------------------- forwarding
@@ -2133,14 +2288,14 @@ Item {
   // address yet.
   function openProviderWebsite(id) {
     var url = Provider.webHomeUrl(id)
-    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+    if (url !== "") openExternal(url)
   }
 
   // The program a provider runs on, which is a different address from the
   // service — HEY is hey.com, and the client that reaches it is a repository.
   function openProviderClient(id) {
     var url = Provider.clientUrl(id)
-    if (url !== "") Quickshell.execDetached(["xdg-open", url])
+    if (url !== "") openExternal(url)
   }
   function openCloudConsole() { if (current) current.openCloudConsole() }
   function openGmailApiPage() { if (current) current.openGmailApiPage() }
@@ -2148,11 +2303,11 @@ Item {
   // Not forwarded to an account: the project exists whether or not anyone has
   // signed in, and the menu offers it on the setup page too.
   function openProjectPage() {
-    Quickshell.execDetached(["xdg-open", "https://github.com/huacnlee/omamail"])
+    openExternal("https://github.com/huacnlee/omamail")
   }
 
   function openAuthorPage() {
-    Quickshell.execDetached(["xdg-open", "https://x.com/huacnlee"])
+    openExternal("https://x.com/huacnlee")
   }
   function openConsentScreen() { if (current) current.openConsentScreen() }
 
@@ -2240,6 +2395,7 @@ Item {
     model: root.accountCount
 
     delegate: MailAccount {
+      platform: root
       required property int index
 
       readonly property var entry: {
@@ -2306,10 +2462,7 @@ Item {
 
   FileView {
     id: windowFile
-    path: {
-      var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
-      return home + "/omamail/window.json"
-    }
+    path: root.configPath("window.json")
     printErrors: false
     onLoaded: root.applyWindowPrefs(text())
     // No file yet is the ordinary first-run state, not an error.
@@ -2329,45 +2482,113 @@ Item {
     onTriggered: root.reopenWindow()
   }
 
-  AgentContext {
-    id: agentContext
-    service: root
-    runner: agentRunner
+  QtObject {
+    id: inactiveAgentContext
+    property string error: ""
+    property bool busy: false
+    function request() { return false }
   }
 
-  EventSuggester {
-    id: eventSuggester
-    service: root
-    runner: agentRunner
+  QtObject {
+    id: inactiveEventSuggester
+    property var suggestions: []
+    function compose() { return false }
+    function dismiss() { return false }
   }
 
-  AgentRunner {
-    id: agentRunner
-    backend: root.backend
-    pluginDir: root.pluginDir
-    // The open account owns what the rows show and cancel: an IMAP id is
-    // only unique inside one account, and two accounts can share an address.
-    accountId: root.current ? root.current.accountId : ""
-    onJobFinished: function(job) {
-      var text = Agent.finishedNote(job)
-      // On the account the job was about; the open one only for a job that
-      // named none.
-      var owner = findAccount(String(job && job.accountId || "")) || root.current
-      if (text !== "" && owner) owner.note(text)
+  QtObject {
+    id: inactiveAgentRunner
+    property string lastError: ""
+    property bool starting: false
+    property var byMessage: ({})
+    property bool attention: false
+    property var attentionByMessage: ({})
+    property bool anyActive: false
+    property var jobs: []
+    property string shownId: ""
+    property string shownOutput: ""
+    property var shownTranscript: []
+    property bool cancelling: false
+    function acknowledge() {}
+    function cancel() { return false }
+    function cancelById() { return false }
+    function draftJobs() { return [] }
+    function forget() {}
+    function forgetFinished() {}
+    function historyFor() { return [] }
+    function isActive() { return false }
+    function jobFor2() { return null }
+    function refresh() {}
+    function selectionJob() { return null }
+    function show() {}
+    function start() { return false }
+    function wantsAttention() { return false }
+  }
+
+  Loader {
+    id: agentContextLoader
+    active: root.hasAgent
+    sourceComponent: Component { AgentContext { service: root; runner: root.agentRunner } }
+  }
+
+  Loader {
+    id: eventSuggesterLoader
+    active: root.hasAgent
+    sourceComponent: Component { EventSuggester { service: root; runner: root.agentRunner } }
+  }
+
+  Loader {
+    id: agentRunnerLoader
+    active: root.hasAgent
+    // A stable facade keeps plugin test and shell integrations from depending
+    // on Loader ownership while the standalone build leaves `item` uncreated.
+    property string pluginDir: root.pluginDir
+    property var backend: root.backend
+    readonly property var jobs: item ? item.jobs : []
+    function applyListing(values) { if (item) item.applyListing(values) }
+    sourceComponent: Component {
+      AgentRunner {
+        objectName: "agent-runner"
+        backend: agentRunnerLoader.backend
+        pluginDir: root.pluginDir
+        // The open account owns what the rows show and cancel: an IMAP id is
+        // only unique inside one account, and two accounts can share an address.
+        accountId: root.current ? root.current.accountId : ""
+        onJobFinished: function(job) {
+          var text = Agent.finishedNote(job)
+          var owner = root.findAccount(String(job && job.accountId || "")) || root.current
+          if (text !== "" && owner) owner.note(text)
+        }
+        onFailed: function(text) { if (root.current) root.current.fail(text) }
+      }
     }
-    onFailed: function(text) { if (root.current) root.current.fail(text) }
   }
 
-  Process {
-    id: windowWriter
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.windowWritePayload + "\n")
-      root.windowWritePayload = ""
+  Component {
+    id: hostProcessComponent
+    Process {
+      required property string operation
+      property var callback: null
+      property string payload: ""
+      stdinEnabled: payload !== ""
+      stdout: StdioCollector { waitForEnd: true }
+      stderr: StdioCollector { waitForEnd: true }
+      onStarted: if (payload !== "") { write(payload); payload = "" }
+      onExited: function(exitCode) {
+        var done = callback
+        callback = null
+        if (typeof done === "function") {
+          if (operation === "write") done(exitCode === 0,
+            exitCode === 0 ? "" : String(stderr.text || "Could not write configuration"))
+          else {
+            var value = null
+            try { value = JSON.parse(String(stdout.text || "")) } catch (e) {}
+            done(value || ({ok:false,error:String(stderr.text || "Host operation failed")}))
+          }
+        }
+        destroy()
+      }
     }
-    onExited: root.windowWritePayload = ""
   }
 
   Connections {

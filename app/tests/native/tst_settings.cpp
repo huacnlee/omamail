@@ -20,6 +20,7 @@ private slots:
     void fileStoreReadsWritesAndWatches();
     void watchReportsExternalCreation();
     void environmentUsesFixedAllowlist();
+    void applicationPathsRejectTraversalAndRemoteUrls();
 };
 
 void SettingsTest::initTestCase()
@@ -105,6 +106,23 @@ void SettingsTest::environmentUsesFixedAllowlist()
     ApplicationHost host;
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_BIN")), QStringLiteral("/synthetic/backend"));
     QCOMPARE(host.environment(QStringLiteral("OMAMAIL_TEST_SECRET")), QString());
+}
+
+void SettingsTest::applicationPathsRejectTraversalAndRemoteUrls()
+{
+    ApplicationHost host;
+    QVERIFY(host.configPath(QStringLiteral("window.json")).endsWith(QStringLiteral("window.json")));
+    QVERIFY(host.cachePath(QStringLiteral("compose/draft-1")).endsWith(
+        QStringLiteral("compose/draft-1")));
+    for (const QString &value : {QStringLiteral("../outside"), QStringLiteral("a/../outside"),
+                                 QStringLiteral("a\\outside"), QStringLiteral("a\nname"),
+                                 QStringLiteral("/absolute")}) {
+        QVERIFY2(host.configPath(value).isEmpty(), qPrintable(value));
+        QVERIFY2(host.cachePath(value).isEmpty(), qPrintable(value));
+    }
+    QCOMPARE(host.localFilePath(QUrl::fromLocalFile(QStringLiteral("/tmp/a b"))),
+             QStringLiteral("/tmp/a b"));
+    QVERIFY(host.localFilePath(QUrl(QStringLiteral("https://example.test/file"))).isEmpty());
 }
 
 void SettingsTest::watchReportsExternalCreation()

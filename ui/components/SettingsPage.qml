@@ -138,8 +138,11 @@ Column {
     importNote = ""
     importFailed = false
     importStage = "pick"
-    signatureImporter.command = [root.attachScript, "pick"]
-    signatureImporter.running = true
+    if (typeof service.chooseFiles !== "function") {
+      finishImport(JSON.stringify({ok:false,error:"No file picker is available"}))
+      return
+    }
+    service.chooseFiles(function(result) { root.finishImport(JSON.stringify(result || {})) })
   }
 
   function finishImport(text) {
@@ -155,8 +158,13 @@ Column {
       var paths = Array.isArray(result.paths) ? result.paths : []
       if (paths.length === 0) { importing = false; return }
       importStage = "read"
-      signatureImporter.command = [root.attachScript, "read", String(paths[0])]
-      signatureImporter.running = true
+      if (!service.backend || !service.backend.ready) {
+        finishImport(JSON.stringify({ok:false,error:"Mail backend unavailable"}))
+        return
+      }
+      service.backend.call("attachment.read", {path:String(paths[0])}, function(read, error) {
+        root.finishImport(JSON.stringify(error ? {ok:false,error:"That file could not be read"} : read))
+      })
       return
     }
     var mime = String(result.mimeType || "").toLowerCase()
@@ -195,17 +203,6 @@ Column {
         root.saveSignature()
       }
     })
-  }
-
-  readonly property string attachScript: {
-    return service && service.pluginDir ? String(service.pluginDir) + "/scripts/attachment.sh" : ""
-  }
-
-  Process {
-    id: signatureImporter
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: root.finishImport(String(stdout.text || ""))
   }
 
   function saveSignature() {
@@ -527,6 +524,7 @@ Column {
   // AI; the switch says in a word which way it stands.
   Rectangle {
     objectName: "settings-suggest-events"
+    visible: !!root.service && root.service.hasAgent !== false
     width: parent.width
     implicitHeight: Math.max(suggestText.implicitHeight, suggestSwitch.implicitHeight)
       + Style.space(16)
@@ -660,6 +658,18 @@ Column {
       onToggled: if (root.service)
         root.service.setNotifyNewMail(!root.service.notifyNewMail)
     }
+  }
+
+  Text {
+    objectName: "notificationIntegrationError"
+    width: parent.width
+    visible: text !== ""
+    text: root.service ? String(root.service.notificationError || "") : ""
+    color: root.dangerColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+    textFormat: Text.PlainText
   }
 
   // --------------------------------------------------------------- writing

@@ -3,8 +3,6 @@ import Quickshell
 import Quickshell.Io
 
 import "JmapProtocol.js" as Jmap
-import "Credentials.js" as Credentials
-import "Secrets.js" as Secrets
 
 // A JMAP account's sign-in, which is an address and one secret.
 //
@@ -32,6 +30,7 @@ Item {
   height: 0
 
   property var backend: null
+  property var platform: null
   required property string pluginDir
 
   // Which mailbox this signs in. Known from the moment the address is typed,
@@ -65,7 +64,8 @@ Item {
   // The three names `MailAccount` reads without knowing which provider it has.
   readonly property bool credentialsPresent: configured
   property bool loginBusy: false
-  readonly property bool sessionBusy: secretLookup.running || keyringStore.running
+  property bool credentialBusy: false
+  readonly property bool sessionBusy: credentialBusy
   property string lastError: ""
 
   // Which of the check's three waits is happening, 1 to 3, or 0 when nothing
@@ -95,10 +95,10 @@ Item {
   // this is only what the last check found out, for the page's one sentence.
   property bool sendingOffered: true
 
-  // secret-tool holds the credential. Rust owns all network requests.
-  readonly property var requiredTools: ["secret-tool"]
+  // Native credential storage and network requests are backend capabilities.
+  readonly property var requiredTools: []
   property var missingTools: []
-  property bool toolsChecked: false
+  property bool toolsChecked: true
   readonly property bool toolsPresent: toolsChecked && missingTools.length === 0
 
   property var credentialWaiters: []
@@ -160,7 +160,7 @@ Item {
     var next = credentialWaiters.slice()
     next.push(callback)
     credentialWaiters = next
-    if (secretLookup.running) return
+    if (credentialBusy) return
     startSecretLookup()
   }
 
@@ -169,19 +169,24 @@ Item {
       secretChecked = true
       return
     }
-    if (secretLookup.running) return
+    if (credentialBusy) return
     startSecretLookup()
   }
 
   function startSecretLookup() {
-    var attributes = Credentials.jmapKeyringAttributes(accountId)
-    if (attributes.length === 0) {
+    var boundAccount = accountId
+    if (!platform || typeof platform.credentialGet !== "function" || boundAccount === "") {
       handleSecretLookup("")
       return
     }
     lookupHandled = false
-    secretLookup.command = ["secret-tool", "lookup"].concat(attributes)
-    secretLookup.running = true
+    credentialBusy = true
+    platform.credentialGet("jmap-secret", boundAccount, "", function(value, error) {
+      root.credentialBusy = false
+      if (boundAccount !== root.accountId) return
+      if (error && error !== "credential_missing") root.lastError = "The credential store is unavailable"
+      root.handleSecretLookup(error ? "" : value)
+    })
   }
 
   function handleSecretLookup(line) {
@@ -206,6 +211,14 @@ Item {
   // turn, and one `Mailbox/get` — rather than being written down first and
   // failing later on a page with no field to correct.
   function signIn(value) {
+    if (platform && platform.backendCanStoreCredentials === false) {
+      lastError = "Install or update the mail backend before signing in"
+      return false
+    }
+    if (!toolsPresent) {
+      lastError = "Missing " + missingTools.join(", ")
+      return false
+    }
     var typed = String(value || "")
     // "Save changes" re-verifies, and the field it would have come from is
     // empty on a signed-in page: nothing ever writes a saved secret back into
@@ -260,24 +273,26 @@ Item {
   }
 
   function storeSecret() {
-    var attributes = Credentials.jmapKeyringAttributes(accountId)
-    if (attributes.length === 0 || secret === "") return
-    keyringWriteSecret = secret
-    keyringStore.command = [pluginDir + "/scripts/keyring-store.sh"].concat(attributes)
-    keyringStore.running = true
+    if (!platform || typeof platform.credentialPut !== "function" || accountId === "" || secret === "") return
+    var boundAccount = accountId
+    var value = secret
+    credentialBusy = true
+    platform.credentialPut("jmap-secret", boundAccount, "", value, function(ok, error) {
+      value = ""
+      root.credentialBusy = false
+      if (boundAccount !== root.accountId) return
+      if (!ok) root.lastError = "Signed in, but the app password could not be saved. "
+        + "You may need to enter it again after a restart"
+      else root.credentialsSaved()
+    })
   }
-
-  property string keyringWriteSecret: ""
 
   function logout() {
     secret = ""
     pendingSecret = ""
     secretChecked = true
-    var attributes = Credentials.jmapKeyringAttributes(accountId)
-    if (attributes.length > 0) {
-      keyringClear.command = ["secret-tool", "clear"].concat(attributes)
-      keyringClear.running = true
-    }
+    if (platform && typeof platform.credentialDelete === "function" && accountId !== "")
+      platform.credentialDelete("jmap-secret", accountId, "", function() {})
     loggedOut()
   }
 
@@ -308,60 +323,4 @@ Item {
     lookupHandled = false
   }
 
-  Component.onCompleted: {
-    toolProbe.command = ["sh", "-c",
-      "for tool in secret-tool; do command -v \"$tool\" >/dev/null 2>&1 || echo \"$tool\"; done"]
-    toolProbe.running = true
-  }
-
-  Process {
-    id: toolProbe
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var missing = String(text || "").split("\n")
-        var found = []
-        for (var i = 0; i < missing.length; i++) {
-          var name = missing[i].trim()
-          if (name) found.push(name)
-        }
-        root.missingTools = found
-        root.toolsChecked = true
-      }
-    }
-  }
-
-  Process {
-    id: secretLookup
-    stdout: StdioCollector { id: secretOutput; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      // One trailing newline is the pipe's; everything else is the secret.
-      var value = exitCode === 0 ? Secrets.fromKeyring(secretOutput.text) : ""
-      root.handleSecretLookup(value)
-    }
-  }
-
-  Process {
-    id: keyringStore
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onStarted: {
-      write(root.keyringWriteSecret + "\n")
-      root.keyringWriteSecret = ""
-    }
-    onExited: function(exitCode) {
-      root.keyringWriteSecret = ""
-      if (exitCode !== 0)
-        root.lastError = "Signed in, but the app password could not be saved. "
-          + "You may need to enter it again after a restart"
-    }
-  }
-
-  Process {
-    id: keyringClear
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-  }
 }

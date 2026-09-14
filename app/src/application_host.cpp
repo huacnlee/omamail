@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QWindow>
 
@@ -150,4 +151,43 @@ QString ApplicationHost::environment(const QString &name) const
         QStringLiteral("XDG_CACHE_HOME"), QStringLiteral("OMAMAIL_BIN")};
     if (!allowed.contains(name)) return {};
     return QString::fromLocal8Bit(qgetenv(name.toLocal8Bit().constData()));
+}
+
+namespace {
+bool safeRelativePath(const QString &name)
+{
+    if (name.isEmpty() || name.contains(QChar::Null) || name.contains('\\')) return false;
+    const QStringList parts = name.split('/');
+    for (const QString &part : parts) {
+        if (part.isEmpty() || part == QStringLiteral(".") || part == QStringLiteral(".."))
+            return false;
+        for (const QChar character : part) {
+            if (!character.isLetterOrNumber() && character != '.' && character != '-'
+                && character != '_') return false;
+        }
+    }
+    return true;
+}
+
+QString applicationPath(QStandardPaths::StandardLocation location, const QString &name)
+{
+    if (!safeRelativePath(name)) return {};
+    const QString root = QStandardPaths::writableLocation(location);
+    return root.isEmpty() ? QString() : QDir(root).filePath(name);
+}
+}
+
+QString ApplicationHost::configPath(const QString &name) const
+{
+    return applicationPath(QStandardPaths::AppConfigLocation, name);
+}
+
+QString ApplicationHost::cachePath(const QString &name) const
+{
+    return applicationPath(QStandardPaths::CacheLocation, name);
+}
+
+QString ApplicationHost::localFilePath(const QUrl &url) const
+{
+    return url.isLocalFile() ? url.toLocalFile() : QString();
 }

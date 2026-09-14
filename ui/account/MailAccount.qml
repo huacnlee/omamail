@@ -35,6 +35,7 @@ Item {
 
   required property string pluginDir
   property var backend: null
+  property var platform: null
   property string syncFingerprint: ""
   property string configuredEmail: ""
   property string oauthClientId: ""
@@ -2012,7 +2013,8 @@ Item {
             ? "That attachment is not something this can open" : "That attachment could not be opened")
           return
         }
-        Quickshell.execDetached(["xdg-open", String(result.path)])
+        if (root.platform && typeof root.platform.openExternal === "function")
+          root.platform.openExternal(String(result.path))
         root.note("Opening " + String(file.filename || "attachment"))
       })
     })
@@ -2347,6 +2349,9 @@ Item {
     accountId: root.accountId
     notificationForeground: root.notificationForeground
     notificationAccent: root.notificationAccent
+    nativeNotifications: !!root.platform && root.platform.standalone === true
+      && root.platform.hasNotifications === true
+    pluginNotifications: !root.platform || root.platform.standalone !== true
     onActivated: function(accountId, messageId) {
       root.notificationActivated(accountId, messageId)
     }
@@ -2448,7 +2453,8 @@ Item {
     backend.call("providers.resolve", {provider: providerId, operation: operation, value: String(value || "")}, function(result, error) {
       if (error || boundAccount !== root.accountId || boundProvider !== root.providerId) return
       var url = String((result || {}).value || "")
-      if (url !== "") Quickshell.execDetached(["xdg-open", url])
+      if (url !== "" && root.platform && typeof root.platform.openExternal === "function")
+        root.platform.openExternal(url)
     })
   }
 
@@ -2456,16 +2462,18 @@ Item {
   function openWebInbox() { openProviderUrl("webBoxUrl", effectiveQuery) }
 
   function openCloudConsole() {
-    Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/clients/create"])
+    if (root.platform && typeof root.platform.openExternal === "function")
+      root.platform.openExternal("https://console.cloud.google.com/auth/clients/create")
   }
 
   function openConsentScreen() {
-    Quickshell.execDetached(["xdg-open", "https://console.cloud.google.com/auth/overview"])
+    if (root.platform && typeof root.platform.openExternal === "function")
+      root.platform.openExternal("https://console.cloud.google.com/auth/overview")
   }
 
   function openGmailApiPage() {
-    Quickshell.execDetached(["xdg-open",
-      "https://console.cloud.google.com/apis/library/gmail.googleapis.com"])
+    if (root.platform && typeof root.platform.openExternal === "function")
+      root.platform.openExternal("https://console.cloud.google.com/apis/library/gmail.googleapis.com")
   }
 
   // What every provider does once it is signed in. Named rather than repeated
@@ -2613,6 +2621,7 @@ Item {
 
     AuthManager {
       backend: root.backend
+      platform: root.platform
       pluginDir: root.pluginDir
       accountId: root.accountId
       mayAdoptLegacyToken: root.mayAdoptLegacyToken
@@ -2634,6 +2643,7 @@ Item {
 
     ImapAuth {
       backend: root.backend
+      platform: root.platform
       pluginDir: root.pluginDir
       accountId: root.accountId
       // Normalised here rather than trusted from the file: a host that arrived
@@ -2656,6 +2666,7 @@ Item {
 
     JmapAuth {
       backend: root.backend
+      platform: root.platform
       pluginDir: root.pluginDir
       accountId: root.accountId
       // Discovery runs from the address's domain when no server was typed, so
@@ -2703,6 +2714,7 @@ Item {
     id: outlookAuthComponent
 
     OutlookAuth {
+      platform: root.platform
       backend: root.backend
       pluginDir: root.pluginDir
       accountId: root.accountId

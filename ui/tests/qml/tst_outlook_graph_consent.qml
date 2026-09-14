@@ -5,6 +5,35 @@ import "../../providers" as Providers
 // The Microsoft sign-in against a Microsoft that is a script: one resource
 // per request, and consent for Graph as a second code.
 Item {
+  QtObject {
+    id: credentialPlatform
+    property bool backendCanStoreCredentials: true
+    property var lookups: []
+    property var writes: []
+    function reset() { lookups = []; writes = [] }
+    function credentialGet(kind, accountId, clientId, callback) {
+      var job = { kind: kind, accountId: accountId, clientId: clientId,
+        callback: callback, running: true, stdout: { text: "" } }
+      job.exited = function(exitCode) {
+        if (!job.running) return
+        job.running = false
+        job.callback(exitCode === 0 ? String(job.stdout.text || "").replace(/\n$/, "") : "",
+          exitCode === 0 ? "" : "credential_missing")
+      }
+      lookups = lookups.concat([job])
+      return true
+    }
+    function credentialPut(kind, accountId, clientId, secret, callback) {
+      writes = writes.concat([{ kind: kind, accountId: accountId, clientId: clientId,
+        secret: secret, callback: callback, running: true }])
+      return true
+    }
+    function credentialDelete(kind, accountId, clientId, callback) {
+      writes = writes.concat([{ kind: kind, accountId: accountId, clientId: clientId,
+        secret: "", callback: callback, running: true }])
+      return true
+    }
+  }
   Component {
     id: factory
     Providers.OutlookAuth {
@@ -13,6 +42,7 @@ Item {
       configuredClientId: "12345678-1234-4abc-9def-1234567890ab"
       configuredEmail: "alice@example.test"
       entrySettings: ({ tenant: "organizations", send: "graph" })
+      platform: credentialPlatform
       property var requests: []
       // Whether this client has been consented for Graph, which the Graph
       // sign-in grants; whether the person declines the code on screen.
@@ -123,6 +153,7 @@ Item {
   }
   TestCase {
     name: "OutlookGraphConsent"
+    function init() { credentialPlatform.reset() }
     function fresh(settings) {
       var auth = createTemporaryObject(factory, parent, settings || {})
       verify(auth !== null)
@@ -152,14 +183,20 @@ Item {
     }
     function mailScopesText() { return "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send" }
     function lookupProcess(auth) {
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        // The one Graph asked for, not the session restore a fresh object
-        // starts and `cancelLogin` let go of.
-        if (child.command && child.command[0] === "secret-tool" && child.command[1] === "lookup"
-            && child.purpose === "graph" && child.running) return child
-      }
-      fail("No pending keyring lookup for Graph")
+      // The newest live request is the one just made by this action; a fresh
+      // object's cancelled restore remains in the fake only to exercise stale
+      // callback handling.
+      for (var i = credentialPlatform.lookups.length - 1; i >= 0; i--)
+        if (credentialPlatform.lookups[i].running) return credentialPlatform.lookups[i]
+      fail("No pending credential lookup")
+    }
+    function storedSecrets(auth) {
+      var out = []
+      for (var i = 0; i < credentialPlatform.writes.length; i++)
+        if (credentialPlatform.writes[i].secret !== "") out.push(credentialPlatform.writes[i].secret)
+      for (var j = 0; j < auth.keyringJobs.length; j++)
+        if (auth.keyringJobs[j].token !== "") out.push(auth.keyringJobs[j].token)
+      return out
     }
 
     function test_a_mailbox_that_sends_by_smtp_signs_in_with_one_code() {
@@ -282,9 +319,7 @@ Item {
       var auth = fresh({ graphConsented: true, partialGrant: "https://graph.microsoft.com/User.Read" })
       signInForMail(auth)
       compare(auth.devicePurpose, "graph")
-      var stored = []
-      if (auth.keyringJob) stored.push(auth.keyringJob.token)
-      for (var i = 0; i < auth.keyringJobs.length; i++) stored.push(auth.keyringJobs[i].token)
+      var stored = storedSecrets(auth)
       compare(stored, ["refresh-mail", "refresh-rotated"], "the rotated token is not dropped for want of a scope")
     }
 
@@ -301,15 +336,8 @@ Item {
       auth.accessTokenExpiresAt = Date.now()
       var mailAnswer = ""
       auth.withCredentials(function(token, error) { mailAnswer = token + "|" + error })
-      var lookup = null
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        if (child.command && child.command[0] === "secret-tool" && child.command[1] === "lookup"
-            && child.purpose === "session" && child.running) lookup = child
-      }
-      verify(lookup !== null, "the mail session's own lookup")
+      var lookup = lookupProcess(auth)
       lookup.stdout.text = "refresh-mail\n"
-      lookup.running = false
       lookup.exited(0)
       compare(auth.refreshBusy, true)
       verify(auth.deferred !== null)
@@ -337,15 +365,9 @@ Item {
       compare(auth.graphRoundBusy, true)
       auth.accessTokenExpiresAt = Date.now()
       auth.withCredentials(function(token, error) {})
-      for (var i = 0; i < auth.children.length; i++) {
-        var child = auth.children[i]
-        if (child.command && child.command[0] === "secret-tool" && child.command[1] === "lookup"
-            && child.purpose === "session" && child.running) {
-          child.stdout.text = "refresh-mail\n"
-          child.running = false
-          child.exited(0)
-        }
-      }
+      var lookup = lookupProcess(auth)
+      lookup.stdout.text = "refresh-mail\n"
+      lookup.exited(0)
       compare(auth.refreshBusy, true, "a mail refresh is out under the code")
       auth.logout()
       compare(auth.graphRoundBusy, false)
@@ -365,9 +387,7 @@ Item {
       auth.pollDeviceCode()
       compare(auth.graphAccessToken, "")
       compare(auth.refusals.length, 1)
-      var stored = []
-      if (auth.keyringJob) stored.push(auth.keyringJob.token)
-      for (var i = 0; i < auth.keyringJobs.length; i++) stored.push(auth.keyringJobs[i].token)
+      var stored = storedSecrets(auth)
       verify(stored.indexOf("refresh-graph") >= 0, "the code's refresh token is the live one: " + JSON.stringify(stored))
       compare(auth.loggedIn, true)
     }
@@ -381,7 +401,6 @@ Item {
       auth.withGraphToken(function(token, error) { answer = token + "|" + error })
       var lookup = lookupProcess(auth)
       lookup.stdout.text = "refresh-mail\n"
-      lookup.running = false
       lookup.exited(0)
       verify(auth.deferred !== null, "the exchange is out")
       // Meanwhile the code is entered from the settings page.
@@ -430,7 +449,6 @@ Item {
       auth.withGraphToken(function(token, error) { answer = token + "|" + error })
       var lookup = lookupProcess(auth)
       lookup.stdout.text = "refresh-mail\n"
-      lookup.running = false
       lookup.exited(0)
       verify(answer.indexOf("|Microsoft Graph needs its own consent") === 0, answer)
       compare(auth.graphConsentNeeded, true)
@@ -466,7 +484,6 @@ Item {
       auth.withGraphToken(function(token, error) { answer = error })
       var lookup = lookupProcess(auth)
       lookup.stdout.text = "refresh-mail\n"
-      lookup.running = false
       lookup.exited(0)
       compare(auth.graphConsentNeeded, false)
       verify(answer !== "")

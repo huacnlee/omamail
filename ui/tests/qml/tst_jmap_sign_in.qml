@@ -47,7 +47,14 @@ Item {
     name: "JmapSignIn"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() {
+      var fixture = BackendFixture.markReady(mailService, 4)
+      fixture.answers = {
+        "credentials.get": {found:false},
+        "credentials.put": {stored:true},
+        "credentials.delete": {deleted:true}
+      }
+    }
 
     readonly property string accountId: "jmap:jane@example.test"
     readonly property string sessionUrl: "https://mail.example.test/jmap/session"

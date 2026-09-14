@@ -97,7 +97,8 @@ Item {
     }
     var opened = Html.externallyOpenableHttpUrl(url)
     if (opened === "") return
-    Qt.openUrlExternally(opened)
+    if (root.service && typeof root.service.openExternal === "function")
+      root.service.openExternal(opened)
   }
 
   function openImageMarker(source) {

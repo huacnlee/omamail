@@ -1,7 +1,9 @@
 import QtQuick
 import QtTest
+import Quickshell
 import qs.Commons
 import "../.." as Omamail
+import "../../account" as Account
 import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
 
@@ -29,6 +31,29 @@ Item {
   }
   Omamail.App { id: app; service: service }
 
+  Component {
+    id: nativeNotificationFactory
+    Account.NewMailNotification {
+      pluginDir: "/tmp/omamail-test"
+      accountId: "imap:plain@example.org"
+      notificationForeground: "#112233"
+      notificationAccent: "#445566"
+      nativeNotifications: true
+    }
+  }
+
+  Component {
+    id: unavailableNotificationFactory
+    Account.NewMailNotification {
+      pluginDir: "/tmp/omamail-test"
+      accountId: "imap:plain@example.org"
+      notificationForeground: "#112233"
+      notificationAccent: "#445566"
+      nativeNotifications: false
+      pluginNotifications: false
+    }
+  }
+
   TestCase {
     name: "NotificationOpen"
     when: windowShown
@@ -47,6 +72,7 @@ Item {
       service.activeIndex = -1
       service.refreshCurrent()
       host.opens = 0
+      Quickshell.notifications = []
     }
 
     function notification(account, arrivals) {
@@ -134,10 +160,36 @@ Item {
       var separator = process.command.indexOf("--")
       verify(separator > 0)
       compare(process.command.length, separator + 3)
-      verify(process.command[separator + 1].indexOf("--urgency") < 0)
-      verify(process.command[separator + 2].indexOf("<img") < 0)
+      compare(process.command[separator + 1], "--urgency=critical")
+      verify(process.command[separator + 2].indexOf("<img") >= 0)
       finish(process, "unknown\n")
       compare(host.opens, 0)
+    }
+
+    function test_native_boundary_gets_canonical_text_once() {
+      var notifier = createTemporaryObject(nativeNotificationFactory, parent)
+      verify(notifier)
+      notifier.notify([{
+        id: "opaque;$(touch /tmp/never-notification)",
+        from: { display: "<img> & sender" },
+        subject: "A < B & C", snippet: "line > next"
+      }])
+      compare(Quickshell.notifications.length, 1)
+      compare(Quickshell.notifications[0].title, "<img> & sender")
+      compare(Quickshell.notifications[0].body, "A < B & C\nline > next")
+      compare(Quickshell.notifications[0].accountId, "imap:plain@example.org")
+      compare(Quickshell.notifications[0].messageId,
+        "opaque;$(touch /tmp/never-notification)")
+      compare(latestNotification(notifier), null,
+        "native delivery does not launch the plugin notification helper")
+    }
+
+    function test_standalone_without_native_notifications_runs_no_plugin_helper() {
+      var notifier = createTemporaryObject(unavailableNotificationFactory, parent)
+      verify(notifier)
+      notifier.notify([{id:"7",from:{display:"Sender"},subject:"Subject",snippet:"Body"}])
+      compare(Quickshell.notifications.length, 0)
+      compare(latestNotification(notifier), null)
     }
   }
 }

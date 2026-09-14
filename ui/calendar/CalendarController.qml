@@ -121,8 +121,18 @@ Item {
   signal eventDeleted(bool ok, string error)
 
   readonly property string configPath: {
-    var home = Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
-    return home + "/omamail/calendars.json"
+    return service && typeof service.configPath === "function"
+      ? service.configPath("calendars.json") : ""
+  }
+
+  function openExternal(value) {
+    return service && typeof service.openExternal === "function"
+      ? service.openExternal(value) : false
+  }
+
+  function copyText(value) {
+    return service && typeof service.copyText === "function"
+      ? service.copyText(value) : false
   }
 
   function refresh(startMs, endMs) {
@@ -354,8 +364,7 @@ Item {
     sourceSecret = String(secret)
     sourceWritePayload = Sources.serialize(Sources.add(sourceList, checked.source))
     savingSource = true
-    sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
-    sourceWriter.running = true
+    writeSources()
   }
 
   function removeCalendar(sourceId) {
@@ -365,8 +374,7 @@ Item {
     sourceWritePayload = Sources.serialize(Sources.remove(sourceList, sourceId))
     refreshAfterSourceWrite = true
     savingSource = true
-    sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
-    sourceWriter.running = true
+    writeSources()
   }
 
   function setSourceEnabled(sourceId, enabled) {
@@ -385,8 +393,7 @@ Item {
     sourceWritePayload = Sources.serialize(next)
     refreshAfterSourceWrite = true
     savingSource = true
-    sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
-    sourceWriter.running = true
+    writeSources()
   }
 
   function colorKeyFor(sourceId) {
@@ -414,8 +421,7 @@ Item {
     sourceWritePayload = Sources.serialize(next)
     refreshAfterSourceWrite = false
     savingSource = true
-    sourceWriter.command = [pluginDir + "/scripts/config-store.sh", "calendars.json"]
-    sourceWriter.running = true
+    writeSources()
   }
 
   function updateCalendarPassword(source, secret) {
@@ -431,9 +437,7 @@ Item {
     sourceBeingSaved = source
     sourceSecret = String(secret)
     savingSource = true
-    sourcePasswordStore.command = [pluginDir + "/scripts/keyring-store.sh"]
-      .concat(Sources.keyringAttributes(source.id))
-    sourcePasswordStore.running = true
+    storeSourcePassword(false)
   }
 
   function storeNextPassword() {
@@ -447,9 +451,73 @@ Item {
     var pending = passwordSaveQueue.slice()
     var source = pending.shift()
     passwordSaveQueue = pending
-    var attributes = Sources.keyringAttributes(source.id)
-    passwordStore.command = [pluginDir + "/scripts/keyring-store.sh"].concat(attributes)
-    passwordStore.running = true
+    if (!service || typeof service.credentialPut !== "function") {
+      passwordToSave = ""
+      passwordSaveQueue = []
+      savingPassword = false
+      passwordSaved(false, "Credential storage is unavailable")
+      return
+    }
+    service.credentialPut("calendar-password", String(source.id || ""), "",
+      passwordToSave, function(ok, error) {
+        if (!ok) {
+          root.passwordToSave = ""
+          root.passwordSaveQueue = []
+          root.savingPassword = false
+          root.passwordSaved(false, String(error || "Could not save the password"))
+          return
+        }
+        root.storeNextPassword()
+      })
+  }
+
+  function sourceWriteFailed(error) {
+    savingSource = false
+    sourceSecret = ""
+    sourceBeingSaved = null
+    refreshAfterSourceWrite = false
+    calendarSaved(false, String(error || "Could not save the calendar"))
+  }
+
+  function writeSources() {
+    if (!service || typeof service.writeConfig !== "function") {
+      sourceWriteFailed("Settings storage is unavailable")
+      return
+    }
+    service.writeConfig("calendars.json", sourceWritePayload, function(ok, error) {
+      if (!ok) { root.sourceWriteFailed(error); return }
+      root.sourceList = Sources.load(root.sourceWritePayload)
+      if (!root.sourceBeingSaved) {
+        root.savingSource = false
+        root.calendarSaved(true, "")
+        if (root.refreshAfterSourceWrite && root.rangeStart && root.rangeEnd)
+          root.refresh(root.rangeStart, root.rangeEnd)
+        root.refreshAfterSourceWrite = false
+        return
+      }
+      root.storeSourcePassword(true)
+    })
+  }
+
+  function storeSourcePassword(refreshAfter) {
+    if (!service || typeof service.credentialPut !== "function") {
+      sourceWriteFailed("Credential storage is unavailable")
+      return
+    }
+    var sourceId = sourceBeingSaved ? String(sourceBeingSaved.id || "") : ""
+    var secret = sourceSecret
+    service.credentialPut("calendar-password", sourceId, "", secret, function(ok, error) {
+      root.sourceSecret = ""
+      root.sourceBeingSaved = null
+      root.savingSource = false
+      if (!ok) {
+        root.calendarSaved(false, String(error || "Could not save the password"))
+        return
+      }
+      root.calendarSaved(true, "")
+      if (refreshAfter && root.rangeStart && root.rangeEnd)
+        root.refresh(root.rangeStart, root.rangeEnd)
+    })
   }
 
   function replaceActiveSourceEvents(values) {
@@ -551,77 +619,6 @@ Item {
       root.sourcesLoaded = true
     }
   }
-
-
-  Process {
-    id: passwordStore
-    stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { id: passwordStoreError; waitForEnd: true }
-    onStarted: write(root.passwordToSave + "\n")
-    onExited: function(exitCode) {
-      if (exitCode !== 0) {
-        root.passwordToSave = ""
-        root.passwordSaveQueue = []
-        root.savingPassword = false
-        root.passwordSaved(false, String(passwordStoreError.text || "Could not save the password"))
-        return
-      }
-      root.storeNextPassword()
-    }
-  }
-
-  Process {
-    id: sourceWriter
-    stdinEnabled: true
-    stderr: StdioCollector { id: sourceWriteError; waitForEnd: true }
-    onStarted: write(root.sourceWritePayload + "\n")
-    onExited: function(exitCode) {
-      if (exitCode !== 0) {
-        root.savingSource = false
-        root.sourceSecret = ""
-        root.refreshAfterSourceWrite = false
-        root.calendarSaved(false, String(sourceWriteError.text || "Could not save the calendar"))
-        return
-      }
-      root.sourceList = Sources.load(root.sourceWritePayload)
-      if (!root.sourceBeingSaved) {
-        root.savingSource = false
-        root.calendarSaved(true, "")
-        if (root.refreshAfterSourceWrite && root.rangeStart && root.rangeEnd)
-          root.refresh(root.rangeStart, root.rangeEnd)
-        root.refreshAfterSourceWrite = false
-        return
-      }
-      sourcePasswordStore.command = [root.pluginDir + "/scripts/keyring-store.sh"]
-        .concat(Sources.keyringAttributes(root.sourceBeingSaved.id))
-      sourcePasswordStore.running = true
-    }
-  }
-
-  Process {
-    id: sourcePasswordStore
-    stdinEnabled: true
-    stderr: StdioCollector { id: sourcePasswordError; waitForEnd: true }
-    onStarted: write(root.sourceSecret + "\n")
-    onExited: function(exitCode) {
-      root.sourceSecret = ""
-      root.sourceBeingSaved = null
-      root.savingSource = false
-      if (exitCode !== 0) {
-        root.calendarSaved(false, String(sourcePasswordError.text || "Could not save the password"))
-        return
-      }
-      root.calendarSaved(true, "")
-      if (root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
-    }
-  }
-
-
-
-
-
-
 
 
   CalendarCache {

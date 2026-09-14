@@ -69,6 +69,9 @@ impl Session {
         if matches!(method, "system.info" | "system.quit" | "providers.list") {
             return dispatch(method, params);
         }
+        if method.starts_with("credentials.") {
+            return crate::credentials::rpc::call(method, params).await;
+        }
         if matches!(method, "reader.open" | "reader.render" | "reader.cancel") {
             return Box::pin(self.reader_call(method, params)).await;
         }
@@ -424,7 +427,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 3, "methods": methods::ALL,
+            "protocol": 1, "apiVersion": 4, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", target_os = "linux"))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),

@@ -1,4 +1,5 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
+.DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
@@ -74,9 +75,19 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarView.qml \
 	ui/components/WeekCalendarView.qml \
 	ui/bar/BarPreview.qml
+APP_QML_FILES := app/qml/Main.qml app/qml/StandaloneShell.qml app/qml/StandaloneManifest.qml
+APP_BUILD_DIR ?= app/build
+APP_EXEEXT := $(if $(filter Windows_NT,$(OS)),.exe,)
+APP_BACKEND := $(CURDIR)/target/debug/omamail$(APP_EXEEXT)
+APP_EXECUTABLE := $(CURDIR)/$(APP_BUILD_DIR)/omamail-app$(APP_EXEEXT)
 
 .PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
-	test-qml test-local test-backend-process qml-check validate bench install
+	test-qml test-app-qml test-local test-backend-process qml-check validate bench install \
+	app-build app-run help
+
+help:
+	@echo "make app-build  Build the standalone backend and Qt desktop host"
+	@echo "make app-run    Build and run the desktop host from source resources"
 
 test: test-rust test-js test-shell test-qml
 
@@ -153,6 +164,7 @@ test-shell: test-shell-portable test-shell-libcurl
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
+	python3 tests/test_app_make.py
 	python3 tests/test_diagnostics.py
 	python3 tests/test_network_migration.py
 	python3 tests/test_plugin_workflow.py
@@ -222,6 +234,20 @@ test-qml:
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
+test-app-qml:
+	cmake -S app -B "$(APP_BUILD_DIR)" -DOMAMAIL_BACKEND="$(APP_BACKEND)"
+	cmake --build "$(APP_BUILD_DIR)" --parallel
+	python3 app/tests/test_qml_inventory.py
+	QT_QPA_PLATFORM=offscreen ctest --test-dir "$(APP_BUILD_DIR)" --output-on-failure -R 'tst_standalone_composition'
+
+app-build:
+	cargo build --locked --no-default-features --features standalone --target-dir "$(CURDIR)/target" --bin omamail
+	cmake -S app -B "$(APP_BUILD_DIR)" -DOMAMAIL_BACKEND="$(APP_BACKEND)"
+	cmake --build "$(APP_BUILD_DIR)" --parallel
+
+app-run: app-build
+	OMAMAIL_DEVELOPMENT_RESOURCES=1 OMAMAIL_BIN="$(APP_BACKEND)" "$(APP_EXECUTABLE)"
+
 # Both engines on the same fixtures. The QML column is the one that decides
 # anything — the shell runs that engine, not node's — so run it on the machine
 # the shell runs on. Not part of `test`: it takes a few seconds and measures
@@ -232,6 +258,7 @@ bench:
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:
 	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES)
+	$(QMLLINT) -I app/qml/imports -I app/build/qml $(APP_QML_FILES)
 
 validate: test qml-check
 	omarchy plugin validate .
