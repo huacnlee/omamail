@@ -54,6 +54,8 @@ jobs:
       - name: Build and test the standalone host
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py check)"
@@ -63,7 +65,7 @@ jobs:
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "$version" --standalone
       - name: Build and exercise the production archive
         env:
@@ -109,6 +111,8 @@ jobs:
       - name: Build and test the standalone host
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py check)"
@@ -118,7 +122,7 @@ jobs:
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "$version" --standalone
       - name: Build and exercise the production archive
         env:
@@ -161,6 +165,8 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           $ErrorActionPreference = "Stop"
           $version = python scripts/package-backend.py check
@@ -173,7 +179,7 @@ jobs:
           ctest --test-dir build/app -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
           python app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
           python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version $version --standalone
           if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }

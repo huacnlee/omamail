@@ -78,6 +78,9 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 block = job_block(self.workflow, job)
                 for needle in required:
                     self.assertIn(needle, block)
+                self.assertIn("QT_QUICK_CONTROLS_STYLE: Omamail", block)
+                self.assertIn("QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic", block)
+                self.assertIn("-import app/qml/styles", block)
                 if "windows" in job:
                     self.assertNotRegex(block, r"(?i)\$host\s*=")
                     self.assertIn("& $appExecutable --smoke-test", block)
@@ -104,6 +107,9 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 self.assertIn("cmake -S app", block)
                 self.assertIn("ctest --test-dir", block)
                 self.assertIn("-input app/tests/qml/tst_host_contract.qml", block)
+                self.assertIn("QT_QUICK_CONTROLS_STYLE: Omamail", block)
+                self.assertIn("QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic", block)
+                self.assertIn("-import app/qml/styles", block)
                 self.assertIn("test_backend_api.py", block)
                 self.assertIn("--standalone", block)
                 self.assertIn("--check-resources", block)

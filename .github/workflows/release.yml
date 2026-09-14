@@ -140,6 +140,8 @@ jobs:
       - name: Test and build the standalone backend and Qt host
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
           cargo test --locked --no-default-features --features standalone
@@ -148,7 +150,7 @@ jobs:
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone
       - name: Package, unpack, and test the macOS archive and installer
         env:
@@ -218,6 +220,8 @@ jobs:
       - name: Test and build the standalone backend and Qt host
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
           cargo test --locked --no-default-features --features standalone
@@ -226,7 +230,7 @@ jobs:
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone
       - name: Package, unpack, and test the Linux archive and installer
         env:
@@ -287,6 +291,8 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           $ErrorActionPreference = "Stop"
           cargo build --release --locked --no-default-features --features standalone
@@ -299,7 +305,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
           python app/tests/test_qml_inventory.py
           if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
           python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone
           if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }

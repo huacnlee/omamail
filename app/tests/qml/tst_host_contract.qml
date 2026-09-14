@@ -125,7 +125,7 @@ TestCase {
   function test_tooltip_draws_an_opaque_nonzero_surface_behind_its_text() {
     Color.applySystemAppearance("light")
     toolTip.visible = true
-    wait(Style.tooltipDelay + 20)
+    tryCompare(toolTip, "opened", true, Style.tooltipDelay + 1000)
     verify(toolTip.width > toolTip.contentItem.implicitWidth)
     verify(toolTip.height > toolTip.contentItem.implicitHeight)
     compare(toolTip.background.width, toolTip.width)
@@ -136,6 +136,7 @@ TestCase {
     verify(toolTip.background.z < toolTip.contentItem.z)
     compare(String(toolTip.background.color), String(Color.surface))
     toolTip.visible = false
+    tryCompare(toolTip, "opened", false)
   }
 
   function test_button_tooltip_uses_the_shared_styled_surface() {
