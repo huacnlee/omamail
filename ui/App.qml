@@ -113,6 +113,11 @@ Item {
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
+  // Shared structural border used by both the mail surface and the standalone
+  // host window. Keeping this semantic role here makes the native chrome track
+  // the same active Omarchy theme as the dividers inside it.
+  readonly property color borderColor: Style.normalBorderColor
+  readonly property int borderWidth: Style.normalBorderWidth
   readonly property color calendarBorder: Style.normalBorderColor
   readonly property color calendarTodayBackground: Style.selectedAccentFill
   readonly property int calendarBorderWidth: Style.normalBorderWidth

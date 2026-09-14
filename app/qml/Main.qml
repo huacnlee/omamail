@@ -110,6 +110,20 @@ ApplicationWindow {
     standaloneWindowChrome: true
   }
 
+  Rectangle {
+    id: windowBorder
+    objectName: "standalone-window-border"
+    anchors.fill: parent
+    z: 1000000
+    visible: root.visibility !== Window.Maximized
+      && root.visibility !== Window.FullScreen
+    color: Qt.rgba(mailApp.background.r, mailApp.background.g,
+      mailApp.background.b, 0)
+    border.width: mailApp.borderWidth
+    border.color: mailApp.borderColor
+    antialiasing: false
+  }
+
   Connections {
     target: root.nativeHost
     ignoreUnknownSignals: true
