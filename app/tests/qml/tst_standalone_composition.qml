@@ -126,6 +126,56 @@ TestCase {
     compare(host.quitCalled, true)
   }
 
+  function test_window_size_restores_and_is_saved_after_resize() {
+    var path = "/fixture/config/omamail/window-size.json"
+    host.files = ({})
+    host.files[path] = JSON.stringify({width: 1040, height: 680})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    compare(composition.width, 1040)
+    compare(composition.height, 680)
+    composition.width = 1110
+    composition.height = 710
+    composition.scheduleWindowSizeSave()
+    composition.saveWindowSize()
+    var saved = JSON.parse(host.files[path])
+    compare(saved.width, 1110)
+    compare(saved.height, 710)
+    composition.destroy()
+    wait(0)
+    var restarted = createTemporaryObject(compositionComponent, testCase)
+    verify(restarted)
+    compare(restarted.width, 1110)
+    compare(restarted.height, 710)
+  }
+
+  function test_bad_window_size_uses_bounded_default() {
+    var path = "/fixture/config/omamail/window-size.json"
+    host.files = ({})
+    host.files[path] = "{broken JSON"
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    compare(composition.width, Math.min(1280, Math.max(760, composition.availableWindowWidth)))
+    compare(composition.height, Math.min(900, Math.max(520, composition.availableWindowHeight)))
+    compare(composition.boundedWindowDimension(759, 1280, 760, 1920), 1280)
+    compare(composition.boundedWindowDimension("900", 900, 520, 1080), 900)
+    compare(composition.boundedWindowDimension(20000, 1280, 760, 1920), 1280)
+    compare(composition.boundedWindowDimension(1600, 1280, 760, 1200), 1200)
+  }
+
+  function test_non_windowed_size_does_not_replace_saved_normal_size() {
+    var path = "/fixture/config/omamail/window-size.json"
+    host.files = ({})
+    host.files[path] = JSON.stringify({width: 1040, height: 680})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    composition.visibility = Window.Maximized
+    composition.width = 1400
+    composition.height = 850
+    composition.saveWindowSize()
+    compare(JSON.parse(host.files[path]), {width:1040, height:680})
+  }
+
   function test_shell_persists_settings_and_routes_activation_payload() {
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)

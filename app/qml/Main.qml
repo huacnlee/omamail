@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import Quickshell
 import Omamail.Native
 import "../../ui" as Omamail
@@ -11,8 +12,8 @@ ApplicationWindow {
   flags: Qt.Window | Qt.FramelessWindowHint
   title: "Omamail"
   color: mailApp.background
-  width: 980
-  height: 720
+  width: 1280
+  height: 900
   minimumWidth: 760
   minimumHeight: 520
 
@@ -31,6 +32,67 @@ ApplicationWindow {
   readonly property alias app: mailApp
   property var pendingActivation: null
   property bool initialOpenIssued: false
+  property bool windowSizeLoaded: false
+  property int normalWindowWidth: 1280
+  property int normalWindowHeight: 900
+  readonly property int availableWindowWidth: Screen.availableWidth > 0
+    ? Math.floor(Screen.availableWidth) : 1280
+  readonly property int availableWindowHeight: Screen.availableHeight > 0
+    ? Math.floor(Screen.availableHeight) : 900
+
+  function boundedWindowDimension(value, fallback, minimum, available) {
+    if (typeof value !== "number" || !isFinite(value) || Math.floor(value) !== value
+        || value < minimum || value > 16384)
+      return Math.min(fallback, Math.max(minimum, available))
+    return Math.min(value, Math.max(minimum, available))
+  }
+
+  function restoreWindowSize() {
+    var saved = ({})
+    var path = shellAdapter.configPath("window-size.json")
+    if (path !== "" && root.nativeFileStore && typeof root.nativeFileStore.read === "function") {
+      var result = root.nativeFileStore.read(path)
+      if (result && result.ok === true) {
+        try { saved = JSON.parse(String(result.text || "")) }
+        catch (error) { saved = ({}) }
+      }
+    }
+    normalWindowWidth = boundedWindowDimension(saved.width, 1280, minimumWidth,
+      availableWindowWidth)
+    normalWindowHeight = boundedWindowDimension(saved.height, 900, minimumHeight,
+      availableWindowHeight)
+    width = normalWindowWidth
+    height = normalWindowHeight
+    windowSizeLoaded = true
+  }
+
+  function scheduleWindowSizeSave() {
+    if (!windowSizeLoaded || visibility !== Window.Windowed) return
+    normalWindowWidth = Math.floor(width)
+    normalWindowHeight = Math.floor(height)
+    windowSizeSettling.restart()
+  }
+
+  function saveWindowSize() {
+    windowSizeSettling.stop()
+    if (!windowSizeLoaded || visibility !== Window.Windowed) return
+    shellAdapter.writeConfig("window-size.json", JSON.stringify({
+      width: normalWindowWidth,
+      height: normalWindowHeight
+    }), function(ok, error) {})
+  }
+
+  onWidthChanged: scheduleWindowSizeSave()
+  onHeightChanged: scheduleWindowSizeSave()
+  onClosing: saveWindowSize()
+
+  Timer {
+    id: windowSizeSettling
+    objectName: "window-size-settling"
+    interval: 500
+    repeat: false
+    onTriggered: root.saveWindowSize()
+  }
 
   function openInitialWindow() {
     if (initialOpenIssued) return
@@ -146,6 +208,7 @@ ApplicationWindow {
   }
 
   Component.onCompleted: {
+    restoreWindowSize()
     var pending = root.nativeHost ? root.nativeHost.pendingNotificationActivation || ({}) : ({})
     if (String(pending.accountId || "") !== "" && String(pending.messageId || "") !== "")
       root.pendingActivation = ({ accountId: String(pending.accountId),
