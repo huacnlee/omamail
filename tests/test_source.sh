@@ -1070,6 +1070,8 @@ oversized=$(cd ..
       [ -f "$file" ] || continue
       case "$file" in
         (preview.png) ceiling=$preview_limit ;;
+        (app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf) ceiling=2573248 ;;
+        (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
@@ -1081,6 +1083,21 @@ if [ -n "$oversized" ]; then
   printf '%s\n' "$oversized" >&2
   fail "the files above are over their size ceiling; keep large assets out of the clone"
 fi
+
+# The standalone host embeds two exact upstream Nerd Fonts assets. Keep their
+# exceptions tied to reviewed bytes and to the provenance shipped beside them;
+# a different font must update all three deliberately.
+font_provenance=app/assets/fonts/NerdFonts-PROVENANCE.md
+[ -f "../$font_provenance" ] || fail "bundled fonts must record their provenance"
+while read -r expected file; do
+  actual=$(cd .. && shasum -a 256 "$file" | awk '{print $1}')
+  [ "$actual" = "$expected" ] || fail "$file does not match its reviewed upstream checksum"
+  grep -q "$expected" "../$font_provenance" \
+    || fail "$file checksum is missing from its shipped provenance"
+done <<'FONT_CHECKSUMS'
+f2a5ea6cfab397445ffab00c0370927b66d61e560a05db5db271b42006381c1a app/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf
+fe471e538392f51910faab985fa8e192a39dd3426125edd15b71b3680df0e749 app/assets/fonts/SymbolsNerdFontMono-Regular.ttf
+FONT_CHECKSUMS
 
 # The compose form, account boundary and raw-message builder must keep the
 # selected send-as address all the way to the provider. A missing link silently

@@ -76,7 +76,12 @@ try {
             "omamail/bin/platforms/qwindows.dll",
             "omamail/manifest.json",
             "omamail/licenses/NerdFonts-LICENSE",
+            "omamail/licenses/JetBrainsMono-LICENSE",
             "omamail/licenses/NerdFonts-README.md",
+            "omamail/licenses/NerdFonts-PROVENANCE.md",
+            "omamail/licenses/Apache-2.0.txt",
+            "omamail/licenses/Pomicons-OFL-1.1.txt",
+            "omamail/licenses/GLYPH-SOURCES.md",
             "omamail/app-icon.ico",
             "omamail/release.json"
         )) {

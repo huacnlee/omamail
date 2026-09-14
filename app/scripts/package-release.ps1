@@ -72,7 +72,10 @@ $ManifestPath = Resolve-InputPath $Manifest
 $IconPath = Resolve-InputPath $Icon
 $DistPath = Resolve-InputPath $Dist
 $NerdFontsLicensePath = Join-Path $RepoRoot "app\assets\fonts\NerdFonts-LICENSE"
+$JetBrainsMonoLicensePath = Join-Path $RepoRoot "app\assets\fonts\JetBrainsMono-LICENSE"
 $NerdFontsReadmePath = Join-Path $RepoRoot "app\assets\fonts\NerdFonts-README.md"
+$NerdFontsProvenancePath = Join-Path $RepoRoot "app\assets\fonts\NerdFonts-PROVENANCE.md"
+$NerdFontsThirdPartyPath = Join-Path $RepoRoot "app\assets\fonts\licenses"
 
 Assert-File $HostPath "standalone host"
 Assert-File $BackendPath "backend"
@@ -81,7 +84,10 @@ Assert-Directory $UiPath "shared UI directory"
 Assert-File $ManifestPath "manifest"
 Assert-File $IconPath "application icon"
 Assert-File $NerdFontsLicensePath "Nerd Fonts license"
+Assert-File $JetBrainsMonoLicensePath "JetBrains Mono license"
 Assert-File $NerdFontsReadmePath "Nerd Fonts notices"
+Assert-File $NerdFontsProvenancePath "Nerd Fonts provenance"
+Assert-Directory $NerdFontsThirdPartyPath "Nerd Fonts third-party licenses"
 Assert-File (Join-Path $QmlPath "Main.qml") "standalone QML entry point"
 Assert-File (Join-Path $UiPath "Service.qml") "shared UI entry point"
 Assert-X64Pe $HostPath "standalone host"
@@ -137,7 +143,10 @@ try {
     $Licenses = Join-Path $Package "licenses"
     New-Item -ItemType Directory -Force $Licenses | Out-Null
     Copy-Item -LiteralPath $NerdFontsLicensePath -Destination (Join-Path $Licenses "NerdFonts-LICENSE")
+    Copy-Item -LiteralPath $JetBrainsMonoLicensePath -Destination (Join-Path $Licenses "JetBrainsMono-LICENSE")
     Copy-Item -LiteralPath $NerdFontsReadmePath -Destination (Join-Path $Licenses "NerdFonts-README.md")
+    Copy-Item -LiteralPath $NerdFontsProvenancePath -Destination (Join-Path $Licenses "NerdFonts-PROVENANCE.md")
+    Copy-Item -Path (Join-Path $NerdFontsThirdPartyPath "*") -Destination $Licenses
 
     if ($SyntheticTestMode) {
         $Platforms = Join-Path $Bin "platforms"
