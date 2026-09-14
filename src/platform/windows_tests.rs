@@ -94,13 +94,15 @@ fn junction(path: &Path, target: &Path) {
     let name: Vec<u16> = substitute.encode_utf16().collect();
     let mut data = Vec::new();
     data.extend(0xa0000003u32.to_le_bytes()); // IO_REPARSE_TAG_MOUNT_POINT
-    data.extend(((8 + (name.len() + 1) * 2) as u16).to_le_bytes());
+    data.extend(((8 + (name.len() + 2) * 2) as u16).to_le_bytes());
     data.extend(0u16.to_le_bytes());
     data.extend(0u16.to_le_bytes()); // SubstituteNameOffset
     data.extend(((name.len() * 2) as u16).to_le_bytes());
     data.extend(((name.len() * 2) as u16).to_le_bytes()); // Empty print name at NUL.
     data.extend(0u16.to_le_bytes());
-    for unit in name.into_iter().chain(Some(0)) {
+    // The path buffer carries separately terminated substitute and print
+    // names, even though the latter is empty.
+    for unit in name.into_iter().chain([0, 0]) {
         data.extend(unit.to_le_bytes());
     }
     let wide: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();

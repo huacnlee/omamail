@@ -42,13 +42,13 @@ impl LocalEndpoint {
     pub(crate) fn listen(&self) -> Result<LocalListener> {
         private_fs::validate_owned_root(&self.dir)?;
         let mut pending = None;
-        for attempt in 0..10 {
+        for attempt in 0..100 {
             match create_server(&self.name, true) {
                 Ok(server) => {
                     pending = Some(server);
                     break;
                 }
-                Err(error) if attempt < 9 => {
+                Err(error) if attempt < 99 => {
                     let _ = error;
                     std::thread::sleep(Duration::from_millis(10));
                 }

@@ -490,11 +490,16 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
     let mut buffer = vec![0u64; 8192];
     let capacity = buffer.len() * size_of::<u64>();
     let mut out = Vec::new();
+    let mut first = true;
     loop {
         if unsafe {
             GetFileInformationByHandleEx(
                 stream.as_raw_handle(),
-                FileIdBothDirectoryInfo,
+                if first {
+                    FileIdBothDirectoryRestartInfo
+                } else {
+                    FileIdBothDirectoryInfo
+                },
                 buffer.as_mut_ptr().cast(),
                 capacity as u32,
             )
@@ -506,6 +511,7 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
                 Err("cache_unavailable")
             };
         }
+        first = false;
         let mut offset = 0;
         loop {
             let name_offset = offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
