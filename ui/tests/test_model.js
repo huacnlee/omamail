@@ -1482,6 +1482,30 @@ const alsoDeep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
 assert.strictEqual(model.sameSummaries([deep], [alsoDeep]), false,
   "the comparison stops rather than following an unbounded structure")
 
+// ---------------------------------------------------- conversation projection
+
+assert.strictEqual(model.projectionKey({ thread: { id: "t1" }, mailboxKey: "inbox" }), "t1\ninbox")
+assert.strictEqual(model.projectionKey({ thread: { id: "t1" }, mailboxKey: "archive" }), "t1\narchive",
+  "the same thread viewed from another mailbox is another rail")
+assert.strictEqual(model.projectionKey({ thread: null, mailboxKey: "inbox" }), "\ninbox",
+  "a message outside any thread has no thread in its key")
+assert.strictEqual(model.projectionKey(null), "\n")
+assert.strictEqual(model.projectionKey({ thread: "t1" }), "\n", "a thread that is not an object names nothing")
+
+const drawn = { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages",
+  navigation: { a: { next: "b" } }, memberIds: ["a", "b"] }
+deepEqual(model.pendingProjection(drawn, true),
+  { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages", navigation: {}, memberIds: ["a", "b"] },
+  "the same thread keeps the rail and loses only its navigation")
+assert.notStrictEqual(model.pendingProjection(drawn, true), drawn, "as a new object, so the view notices")
+deepEqual(drawn.navigation, { a: { next: "b" } }, "and the one in hand is not written to")
+deepEqual(model.pendingProjection(drawn, false),
+  { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] },
+  "a different thread starts from nothing")
+deepEqual(model.pendingProjection(null, true), { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+assert.notStrictEqual(model.pendingProjection(null, false), model.pendingProjection(null, false),
+  "a blank is a fresh object each time")
+
 assert.strictEqual(model.activityStatus({}), "", "nothing in flight says nothing")
 assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")

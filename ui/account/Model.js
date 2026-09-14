@@ -1363,6 +1363,30 @@ function badgeCount(summary) {
   return block && block.count >= Conversation.MINIMUM_MEMBERS ? block.count : 0
 }
 
+// ---------------------------------------------------- conversation projection
+
+// The thread a projection source is about, in the mailbox it is viewed from,
+// as one key. The source names a thread when the reader is inside one; two
+// sources with the same key are asking about the same rail.
+function projectionKey(source) {
+  var thread = source && typeof source === "object" ? source.thread : null
+  var id = thread && typeof thread === "object" && thread.id ? String(thread.id) : ""
+  var mailbox = source && typeof source === "object" ? String(source.mailboxKey || "") : ""
+  return id + "\n" + mailbox
+}
+
+// What the reader draws while a new projection is in flight. About the same
+// thread, the one in hand stays up — the rail, its stops and its caption —
+// and only the navigation goes, so a stale next or previous cannot be
+// followed before the answer lands. About a different thread, nothing: its
+// stops are not this one's.
+var BLANK_PROJECTION = { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] }
+
+function pendingProjection(projection, sameThread) {
+  if (!sameThread || !projection || typeof projection !== "object") return Object.assign({}, BLANK_PROJECTION)
+  return Object.assign({}, projection, { navigation: {} })
+}
+
 function resultSummary(list, estimate, hasMore) {
   var shown = Array.isArray(list) ? list.length : 0
   if (shown === 0) return "No messages"
