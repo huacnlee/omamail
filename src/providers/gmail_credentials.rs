@@ -105,9 +105,12 @@ fn read_file(file: File, account: &str) -> Result<Client, &'static str> {
     parse_client(&bytes, account)
 }
 fn read_at(config: &Path, account: &str) -> Result<Client, &'static str> {
-    let dir = crate::platform::private_fs::directories_readonly(config, &["omamail"])
-        .map_err(storage_error)?
-        .ok_or("gmail_client_unreadable")?;
+    let dir = crate::platform::private_fs::directories_readonly(
+        config,
+        &[crate::platform::dirs::APP_DIRECTORY],
+    )
+    .map_err(storage_error)?
+    .ok_or("gmail_client_unreadable")?;
     let file = crate::platform::private_fs::regular_readonly(&dir, "credentials.json")
         .map_err(storage_error)?
         .ok_or("gmail_client_unreadable")?;
@@ -227,9 +230,13 @@ mod tests {
                 SERIAL.fetch_add(1, Ordering::Relaxed)
             ));
             let config = root.join("config");
-            let directory = crate::platform::private_fs::directories(&config, &["omamail"], true)
-                .unwrap()
-                .unwrap();
+            let directory = crate::platform::private_fs::directories(
+                &config,
+                &[crate::platform::dirs::APP_DIRECTORY],
+                true,
+            )
+            .unwrap()
+            .unwrap();
             Self {
                 root,
                 config,
@@ -241,7 +248,9 @@ mod tests {
                 .unwrap();
         }
         fn path(&self) -> PathBuf {
-            self.config.join("omamail/credentials.json")
+            self.config
+                .join(crate::platform::dirs::APP_DIRECTORY)
+                .join("credentials.json")
         }
     }
     impl Drop for Fixture {
@@ -276,6 +285,7 @@ mod tests {
             fixture.root.join("downloads"),
         )
         .unwrap();
+        assert_eq!(dirs.config_directory(), fixture.config.join("omamail"));
         let _override =
             crate::platform::dirs::install_test_override(dirs, fixture.root.join("different-home"))
                 .unwrap();

@@ -1,24 +1,35 @@
+#[cfg(unix)]
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+};
+use std::{
+    io::{BufRead, BufReader, Write},
     process::{Command, Stdio},
 };
 
+#[cfg(target_os = "macos")]
 fn config_root(home: &Path, xdg: &Path) -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = xdg;
-        home.join("Library/Application Support")
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = home;
-        xdg.to_owned()
-    }
+    let _ = xdg;
+    home.join("Library/Application Support")
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn config_root(home: &Path, xdg: &Path) -> PathBuf {
+    let _ = home;
+    xdg.to_owned()
 }
 
+#[test]
+fn gmail_config_directory_uses_the_shared_platform_contract() {
+    let dirs = omamail::platform::dirs::AppDirs::discover().unwrap();
+    assert_eq!(
+        dirs.config_directory(),
+        dirs.config.join(omamail::platform::dirs::APP_DIRECTORY)
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn mail_gmail_actions_default_to_preview_and_keep_credential_failures_explicit() {
     let temp = Command::new("mktemp").arg("-d").output().unwrap();
@@ -142,6 +153,7 @@ fn malformed_gmail_requests_are_refused_before_credentials_or_network() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn gmail_registry_and_private_credentials_gate_keyring_access() {
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(

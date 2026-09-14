@@ -94,24 +94,28 @@ fn get_request() -> Request {
 async fn mail_send_preview_reads_google_identity_without_mutation_or_local_writes() {
     use crate::mail::tests::{account_fixture, fixture_tree, isolated};
     use serde_json::json;
-    use std::os::unix::fs::PermissionsExt;
     if isolated() {
         return;
     }
     let fixture = account_fixture(json!({"version":1,"activeId":"audit@example.org",
         "accounts":[{"provider":"gmail","email":"audit@example.org"}]}));
-    let credentials = fixture.config.join("omamail");
-    std::fs::create_dir_all(&credentials).unwrap();
-    let client_file = credentials.join("credentials.json");
-    std::fs::write(
-        &client_file,
+    let credentials = crate::platform::private_fs::directories(
+        &fixture.config,
+        &[crate::platform::dirs::APP_DIRECTORY],
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    crate::platform::private_fs::atomic_replace(
+        &credentials,
+        "credentials.json",
         json!({"installed":{
         "client_id":"123-audit.apps.googleusercontent.com",
         "client_secret":"synthetic-client-secret"}})
-        .to_string(),
+        .to_string()
+        .as_bytes(),
     )
     .unwrap();
-    std::fs::set_permissions(&client_file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let _credential =
         crate::credentials::tests::isolated_store(crate::credentials::tests::SingleCredential {
             key: crate::credentials::CredentialKey {

@@ -5,6 +5,10 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+/// Shared backend/standalone-host contract: every application-owned directory
+/// is this single component below its platform-native root.
+pub const APP_DIRECTORY: &str = "omamail";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppDirs {
     pub config: PathBuf,
@@ -163,6 +167,10 @@ impl AppDirs {
             runtime: absolute(runtime)?,
             downloads: absolute(downloads)?,
         })
+    }
+
+    pub fn config_directory(&self) -> PathBuf {
+        self.config.join(APP_DIRECTORY)
     }
 }
 fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
