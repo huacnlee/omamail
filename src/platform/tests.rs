@@ -219,6 +219,25 @@ mod unix {
         let dir = directories(&temp.0, &["omamail"], true).unwrap().unwrap();
         atomic_replace(&dir, "record", b"private").unwrap();
         let path = temp.0.join("omamail/record");
+        drop(lock_exclusive(&dir, "lease").unwrap());
+        let lease_path = temp.0.join("omamail/lease");
+        assert!(
+            Command::new("/bin/chmod")
+                .args(["+a", "everyone allow read,write"])
+                .arg(&lease_path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(lock_exclusive(&dir, "lease").is_err());
+        assert!(
+            Command::new("/bin/chmod")
+                .arg("-N")
+                .arg(&lease_path)
+                .status()
+                .unwrap()
+                .success()
+        );
         assert!(
             Command::new("/bin/chmod")
                 .args(["+a", "everyone allow read"])

@@ -416,6 +416,7 @@ pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
     {
         return Err("cache_unsafe_path");
     }
+    validate_acl(&file, true)?;
     if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("private_fs_busy");
     }
