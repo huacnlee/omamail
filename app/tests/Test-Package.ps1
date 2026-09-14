@@ -75,6 +75,8 @@ try {
             "omamail/ui/Service.qml",
             "omamail/bin/platforms/qwindows.dll",
             "omamail/manifest.json",
+            "omamail/licenses/NerdFonts-LICENSE",
+            "omamail/licenses/NerdFonts-README.md",
             "omamail/app-icon.ico",
             "omamail/release.json"
         )) {

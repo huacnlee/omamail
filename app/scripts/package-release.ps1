@@ -71,6 +71,8 @@ $UiPath = Resolve-InputPath $Ui
 $ManifestPath = Resolve-InputPath $Manifest
 $IconPath = Resolve-InputPath $Icon
 $DistPath = Resolve-InputPath $Dist
+$NerdFontsLicensePath = Join-Path $RepoRoot "app\assets\fonts\NerdFonts-LICENSE"
+$NerdFontsReadmePath = Join-Path $RepoRoot "app\assets\fonts\NerdFonts-README.md"
 
 Assert-File $HostPath "standalone host"
 Assert-File $BackendPath "backend"
@@ -78,6 +80,8 @@ Assert-Directory $QmlPath "standalone QML directory"
 Assert-Directory $UiPath "shared UI directory"
 Assert-File $ManifestPath "manifest"
 Assert-File $IconPath "application icon"
+Assert-File $NerdFontsLicensePath "Nerd Fonts license"
+Assert-File $NerdFontsReadmePath "Nerd Fonts notices"
 Assert-File (Join-Path $QmlPath "Main.qml") "standalone QML entry point"
 Assert-File (Join-Path $UiPath "Service.qml") "shared UI entry point"
 Assert-X64Pe $HostPath "standalone host"
@@ -130,6 +134,10 @@ try {
     Copy-Item -LiteralPath $QmlPath -Destination (Join-Path $Package "qml") -Recurse
     Copy-Item -LiteralPath $UiPath -Destination (Join-Path $Package "ui") -Recurse
     Copy-Item -LiteralPath $ManifestPath -Destination (Join-Path $Package "manifest.json")
+    $Licenses = Join-Path $Package "licenses"
+    New-Item -ItemType Directory -Force $Licenses | Out-Null
+    Copy-Item -LiteralPath $NerdFontsLicensePath -Destination (Join-Path $Licenses "NerdFonts-LICENSE")
+    Copy-Item -LiteralPath $NerdFontsReadmePath -Destination (Join-Path $Licenses "NerdFonts-README.md")
 
     if ($SyntheticTestMode) {
         $Platforms = Join-Path $Bin "platforms"

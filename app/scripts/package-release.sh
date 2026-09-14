@@ -73,10 +73,12 @@ trap 'rm -rf "$stage" "$extract"' EXIT HUP INT TERM
 
 copy_product_files() {
   destination=$1
-  mkdir -p "$destination/qml" "$destination/ui"
+  mkdir -p "$destination/qml" "$destination/ui" "$destination/licenses"
   cp -R "$qml/." "$destination/qml/"
   cp -R "$ui/." "$destination/ui/"
   cp "$manifest" "$destination/manifest.json"
+  cp "$repo_root/app/assets/fonts/NerdFonts-LICENSE" "$destination/licenses/NerdFonts-LICENSE"
+  cp "$repo_root/app/assets/fonts/NerdFonts-README.md" "$destination/licenses/NerdFonts-README.md"
   cat > "$destination/release.json" <<EOF
 {"schemaVersion":1,"name":"omamail","version":"$version","target":"$target","topLevel":"$top_level"}
 EOF

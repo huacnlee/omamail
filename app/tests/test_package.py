@@ -102,6 +102,8 @@ class PackageTest(unittest.TestCase):
                 "Contents/MacOS/omamail-app", "Contents/MacOS/omamail",
                 "Contents/Resources/qml/Main.qml", "Contents/Resources/ui/Service.qml",
                 "Contents/Resources/manifest.json",
+                "Contents/Resources/licenses/NerdFonts-LICENSE",
+                "Contents/Resources/licenses/NerdFonts-README.md",
                 "Contents/PlugIns/platforms/libqcocoa.dylib",
                 "Contents/Resources/omamail.icns",
                 "Contents/Info.plist",
@@ -114,6 +116,7 @@ class PackageTest(unittest.TestCase):
             [
                 "bin/omamail-app", "bin/omamail", "bin/qt.conf", "qml/Main.qml", "ui/Service.qml",
                 "manifest.json", "plugins/platforms/libqxcb.so",
+                "licenses/NerdFonts-LICENSE", "licenses/NerdFonts-README.md",
                 "share/applications/omamail.desktop",
                 "share/icons/hicolor/scalable/apps/omamail.svg",
             ],
