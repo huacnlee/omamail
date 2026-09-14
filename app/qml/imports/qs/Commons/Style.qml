@@ -4,6 +4,12 @@ import QtQuick
 QtObject {
   id: root
 
+  property var shellTheme: ({
+    font: { baseSize: 12, overrides: {} },
+    spacing: { scale: 1, scaleWithFont: true, overrides: {} },
+    controls: {}, popups: {}
+  })
+
   readonly property FontLoader iconFont: FontLoader {
     source: "../../../../assets/fonts/SymbolsNerdFontMono-Regular.ttf"
   }
@@ -16,30 +22,79 @@ QtObject {
   // Omarchy shell baseline at the inspected revision. Bundle its default
   // Nerd Font so every standalone platform gets the same text metrics and
   // glyph coverage without depending on the host's font configuration.
-  readonly property real baseFontSize: 12
-  property real spacingScale: 1
+  readonly property real baseFontSize: shellTheme.font.baseSize
+  readonly property real fontScale: Math.max(1 / 12, baseFontSize / 12)
+  readonly property real spacingScale: shellTheme.spacing.scale
+    * (shellTheme.spacing.scaleWithFont ? fontScale : 1)
   readonly property real cornerRadius: 0
-  readonly property real normalBorderWidth: 1
+  readonly property real normalBorderWidth: controlNumber("normal-border-width", 1)
+  readonly property real hoverBorderWidth: controlNumber("hover-cursor-border-width", normalBorderWidth)
+  readonly property real selectedBorderWidth: controlNumber("selected-border-width", 0)
+  readonly property real focusBorderWidth: controlNumber("focus-border-width", hoverBorderWidth)
   readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
   readonly property var font: ({
     family: textFont.status === FontLoader.Ready ? textFont.name : "monospace",
     iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
-    title: Math.round(baseFontSize * 1.167),
-    heading: Math.round(baseFontSize * 1.333),
-    subtitle: Math.round(baseFontSize * 1.083),
-    body: Math.round(baseFontSize),
-    bodySmall: Math.round(baseFontSize * 0.917),
-    caption: Math.round(baseFontSize * 0.833),
-    iconLarge: Math.round(baseFontSize * 1.5),
-    icon: Math.round(baseFontSize * 1.167),
-    iconSmall: Math.round(baseFontSize * 0.917)
+    baseSize: baseFontSize,
+    title: fontToken("title", 1.167),
+    heading: fontToken("heading", 1.333),
+    subtitle: fontToken("subtitle", 1.083),
+    body: fontToken("body", 1),
+    bodySmall: fontToken("body-small", 0.917),
+    caption: fontToken("caption", 0.833),
+    display: fontToken("display", 2),
+    displayLarge: fontToken("display-large", 2.333),
+    iconLarge: fontToken("icon-large", 1.5),
+    icon: fontToken("icon", 1.167),
+    iconSmall: fontToken("icon-small", 0.917)
   })
   readonly property var spacing: ({
-    controlPaddingX: space(10), controlPaddingY: space(6), inputPaddingY: space(7),
-    controlHeight: space(28), controlGap: space(8), sm: space(4), md: space(6),
-    popupRowHeight: space(28)
+    xxs: spacingToken("xxs", 2), xs: spacingToken("xs", 3),
+    sm: spacingToken("sm", 4), md: spacingToken("md", 6),
+    lg: spacingToken("lg", 8), xl: spacingToken("xl", 10),
+    xxl: spacingToken("xxl", 12), xxxl: spacingToken("xxxl", 14),
+    huge: spacingToken("huge", 18),
+    controlPaddingX: spacingToken("control-padding-x", 10),
+    controlPaddingY: spacingToken("control-padding-y", 6),
+    inputPaddingY: spacingToken("input-padding-y", 7),
+    controlHeight: spacingToken("control-height", 28),
+    controlGap: spacingToken("control-gap", 8),
+    popupRowHeight: spacingToken("popup-row-height", 28),
+    dropdownWidth: spacingToken("dropdown-width", 240),
+    searchableDropdownWidth: spacingToken("searchable-dropdown-width", 260),
+    numberFieldWidth: spacingToken("number-field-width", 120),
+    searchablePopupMinHeight: spacingToken("searchable-popup-min-height", 220),
+    rowGap: spacingToken("row-gap", 8), rowPaddingX: spacingToken("row-padding-x", 12),
+    labelGap: spacingToken("label-gap", 4), panelGap: spacingToken("panel-gap", 14),
+    panelPadding: spacingToken("panel-padding", 18),
+    popupPadding: spacingToken("popup-padding", 14)
   })
+
+  function applyShellTheme(value) { shellTheme = value }
+  function fontToken(key, multiplier) {
+    var value = shellTheme.font.overrides[key]
+    return value === undefined ? Math.max(1, Math.round(baseFontSize * multiplier)) : value
+  }
+  function spacingToken(key, fallback) {
+    var value = shellTheme.spacing.overrides[key]
+    return value === undefined ? space(fallback) : Math.round(value)
+  }
+  function controlNumber(key, fallback) {
+    var value = shellTheme.controls[key]
+    return value === undefined ? fallback : Number(value)
+  }
+  function controlColor(key, foreground, accent, fallback) {
+    var token = String(shellTheme.controls[key] || "").replace(/^\s+|\s+$/g, "")
+    var role = token.toLowerCase()
+    if (role === "foreground" || role === "text") return foreground
+    if (role === "accent") return accent
+    if (role === "urgent") return Color.urgent
+    if (role === "background") return Color.background
+    if (role === "transparent") return Qt.rgba(0, 0, 0, 0)
+    if (role === "hover" || role === "hover-cursor" || role === "inherit") return fallback
+    return token.charAt(0) === "#" ? token : fallback
+  }
 
   function space(value) {
     var n = Number(value) * spacingScale
@@ -54,12 +109,18 @@ QtObject {
       first.a * (1 - n) + second.a * n)
   }
   function mutedColorFor(foreground, background) { return mix(foreground, background, 0.46) }
-  function hoverFillFor(foreground, _accent) { return withAlpha(foreground, 0.08) }
-  function selectedFillFor(foreground, _accent) { return withAlpha(foreground, 0.18) }
-  function selectedStateColor(foreground, _accent) { return foreground }
-  function selectionFillFor(foreground, _accent) { return withAlpha(foreground, 0.35) }
-  function pressedFillFor(foreground, _accent) { return withAlpha(foreground, 0.22) }
-  function normalFillFor(foreground, _accent) { return withAlpha(foreground, 0.04) }
-  function normalBorderFor(foreground, _accent) { return withAlpha(foreground, 0.4) }
-  function hoverBorderFor(foreground, _accent) { return withAlpha(foreground, 0.25) }
+  function stateColor(key, foreground, accent, fallback) {
+    return controlColor(key + "-color", foreground, accent, fallback || foreground)
+  }
+  function hoverFillFor(foreground, accent) { return withAlpha(stateColor("hover-cursor", foreground, accent, foreground), controlNumber("hover-cursor-fill-alpha", 0.08)) }
+  function selectedFillFor(foreground, accent) { return withAlpha(selectedStateColor(foreground, accent), controlNumber("selected-fill-alpha", 0.18)) }
+  function selectedStateColor(foreground, accent) { return stateColor("selected", foreground, accent, foreground) }
+  function selectionFillFor(foreground, accent) { return withAlpha(stateColor("selection", foreground, accent, foreground), controlNumber("selection-fill-alpha", 0.35)) }
+  function pressedFillFor(foreground, accent) { return withAlpha(stateColor("pressed", foreground, accent, stateColor("hover-cursor", foreground, accent, foreground)), controlNumber("pressed-fill-alpha", 0.22)) }
+  function normalFillFor(foreground, accent) { return withAlpha(stateColor("normal", foreground, accent, foreground), controlNumber("normal-fill-alpha", 0.04)) }
+  function normalBorderFor(foreground, accent) { return withAlpha(stateColor("normal", foreground, accent, foreground), controlNumber("normal-border-alpha", 0.4)) }
+  function hoverBorderFor(foreground, accent) { return withAlpha(stateColor("hover-cursor", foreground, accent, foreground), controlNumber("hover-cursor-border-alpha", 0.25)) }
+  function selectedBorderFor(foreground, accent) { return withAlpha(stateColor("selected", foreground, accent, foreground), controlNumber("selected-border-alpha", 1)) }
+  function focusFillFor(foreground, accent) { return withAlpha(stateColor("focus", foreground, accent, stateColor("hover-cursor", foreground, accent, foreground)), controlNumber("focus-fill-alpha", controlNumber("hover-cursor-fill-alpha", 0.08))) }
+  function focusBorderFor(foreground, accent) { return withAlpha(stateColor("focus", foreground, accent, stateColor("hover-cursor", foreground, accent, foreground)), controlNumber("focus-border-alpha", controlNumber("hover-cursor-border-alpha", 0.25))) }
 }

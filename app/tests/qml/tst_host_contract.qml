@@ -225,6 +225,56 @@ TestCase {
     compare(String(Color.accent), "#654321")
   }
 
+  function test_shell_theme_and_user_override_apply_atomically() {
+    var themeRoot = "/fixture/home/.local/state/omarchy/current/theme"
+    var userShell = "/fixture/home/.config/omarchy/shell.toml"
+    host.files = ({})
+    host.files[themeRoot + "/colors.toml"] =
+      "background='#101010'\nforeground='#eeeeee'\naccent='#336699'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'"
+    host.files[themeRoot + "/shell.toml"] =
+      "[font]\nbase-size=14\nbody=17\n"
+      + "[spacing]\nscale=1.5\nscale-with-font=false\ncontrol-height=31\n"
+      + "[controls]\nnormal-fill-alpha=0.12\nselected-color=accent\n"
+      + "[popups]\nbackground=background\nbackground-alpha=0.8\ntext=accent\nborder=foreground\nborder-alpha=0.3"
+    host.files[userShell] =
+      "[font]\nbase-size=16\n[spacing]\ncontrol-height=38\n"
+      + "[controls]\nnormal-fill-alpha=0.2"
+
+    verify(Color.reload())
+    compare(Style.font.body, 17)
+    compare(Style.font.caption, 13)
+    compare(Style.spacing.controlHeight, 38)
+    compare(Style.space(10), 15)
+    fuzzyCompare(Style.normalFillFor(Color.foreground, Color.accent).a, 0.2, 0.001)
+    compare(String(Style.selectedStateColor(Color.foreground, Color.accent)), "#336699")
+    compare(String(Color.popups.text), "#336699")
+    fuzzyCompare(Color.popups.background.a, 0.8, 0.001)
+    fuzzyCompare(Color.popups.border.a, 0.3, 0.001)
+    verify(host.watched[themeRoot + "/shell.toml"])
+    verify(host.watched[userShell])
+  }
+
+  function test_shell_theme_watch_removes_stale_user_overrides() {
+    var themeRoot = "/fixture/home/.local/state/omarchy/current/theme"
+    var userShell = "/fixture/home/.config/omarchy/shell.toml"
+    host.files = ({})
+    host.files[themeRoot + "/colors.toml"] =
+      "background='#101010'\nforeground='#eeeeee'\naccent='#336699'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'"
+    host.files[themeRoot + "/shell.toml"] = "[font]\nbase-size=14\n[spacing]\ncontrol-height=30"
+    host.files[userShell] = "[font]\nbase-size=18\n[spacing]\ncontrol-height=44"
+    verify(Color.reload())
+    compare(Style.font.body, 18)
+    compare(Style.spacing.controlHeight, 44)
+
+    var replacement = ({})
+    replacement[themeRoot + "/colors.toml"] = host.files[themeRoot + "/colors.toml"]
+    replacement[themeRoot + "/shell.toml"] = host.files[themeRoot + "/shell.toml"]
+    host.files = replacement
+    host.changed(userShell)
+    compare(Style.font.body, 14)
+    compare(Style.spacing.controlHeight, 30)
+  }
+
   function test_split_parser_buffers_incomplete_frames() {
     var parser = createTemporaryObject(parserComponent, testCase)
     verify(parser)
