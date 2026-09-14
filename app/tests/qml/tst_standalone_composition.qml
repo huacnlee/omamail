@@ -39,6 +39,24 @@ TestCase {
     text: "Delayed help"
   }
 
+  Item {
+    id: tooltipTrigger
+    x: 40
+    y: 40
+    width: 120
+    height: 32
+    ToolTip { id: positionedToolTip; visible: false; text: "Anchored help" }
+  }
+
+  Item {
+    id: edgeTooltipTrigger
+    x: -10
+    y: testCase.height - height
+    width: 24
+    height: 16
+    ToolTip { id: edgeToolTip; visible: false; text: "Edge anchored help" }
+  }
+
   Component {
     id: compositionComponent
     Standalone.Main { nativeHost: host; nativeFileStore: host }
@@ -80,6 +98,33 @@ TestCase {
     compare(String(tooltipBackground.color), String(Color.popups.background))
     compare(String(tooltipBackground.border.color), String(Color.popups.border))
     compare(tooltipBackground.radius, Style.cornerRadius)
+  }
+
+  function test_tooltip_is_anchored_below_the_trigger_not_the_pointer() {
+    positionedToolTip.visible = true
+    wait(Style.tooltipDelay + 20)
+    verify(positionedToolTip.y >= tooltipTrigger.height)
+    var anchoredX = positionedToolTip.x
+    var anchoredY = positionedToolTip.y
+    mouseMove(tooltipTrigger, 1, 1)
+    wait(20)
+    compare(positionedToolTip.x, anchoredX)
+    compare(positionedToolTip.y, anchoredY)
+    mouseMove(tooltipTrigger, tooltipTrigger.width - 1, tooltipTrigger.height - 1)
+    wait(20)
+    compare(positionedToolTip.x, anchoredX)
+    compare(positionedToolTip.y, anchoredY)
+    positionedToolTip.visible = false
+  }
+
+  function test_tooltip_flips_above_and_clamps_to_window_edges() {
+    edgeToolTip.visible = true
+    wait(Style.tooltipDelay + 20)
+    var anchor = edgeTooltipTrigger.mapToItem(null, 0, 0)
+    verify(anchor.x + edgeToolTip.x >= 0)
+    verify(anchor.x + edgeToolTip.x + edgeToolTip.width <= testCase.width)
+    verify(anchor.y + edgeToolTip.y + edgeToolTip.height < anchor.y)
+    edgeToolTip.visible = false
   }
 
   function test_one_shared_service_and_app_with_standalone_capabilities() {

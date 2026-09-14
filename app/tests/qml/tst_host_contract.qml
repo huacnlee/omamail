@@ -122,6 +122,22 @@ TestCase {
     compare(String(toolTip.palette.windowText), String(Color.popups.text))
   }
 
+  function test_tooltip_draws_an_opaque_nonzero_surface_behind_its_text() {
+    Color.applySystemAppearance("light")
+    toolTip.visible = true
+    wait(Style.tooltipDelay + 20)
+    verify(toolTip.width > toolTip.contentItem.implicitWidth)
+    verify(toolTip.height > toolTip.contentItem.implicitHeight)
+    compare(toolTip.background.width, toolTip.width)
+    compare(toolTip.background.height, toolTip.height)
+    verify(toolTip.background.visible)
+    compare(toolTip.background.opacity, 1)
+    compare(toolTip.background.color.a, 1)
+    verify(toolTip.background.z < toolTip.contentItem.z)
+    compare(String(toolTip.background.color), String(Color.surface))
+    toolTip.visible = false
+  }
+
   function test_button_tooltip_uses_the_shared_styled_surface() {
     verify(findChild(button, "omamail-tooltip-background"))
     verify(findChild(button, "omamail-tooltip-label"))
