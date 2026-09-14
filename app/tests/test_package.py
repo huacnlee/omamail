@@ -75,6 +75,7 @@ class PackageTest(unittest.TestCase):
             self.assertEqual(roots, {top})
             self.assertEqual(len(names), len(set(names)))
             self.assertFalse(any(member.isdev() or member.isfifo() for member in members))
+            self.assertFalse(any("JetBrainsMono" in name for name in names))
             for path in required:
                 self.assertIn(f"{top}/{path}", names)
             metadata_name = (f"{top}/Contents/Resources/release.json"
@@ -113,7 +114,6 @@ class PackageTest(unittest.TestCase):
                 "Contents/Resources/qml/Main.qml", "Contents/Resources/ui/Service.qml",
                 "Contents/Resources/manifest.json",
                 "Contents/Resources/licenses/NerdFonts-LICENSE",
-                "Contents/Resources/licenses/JetBrainsMono-LICENSE",
                 "Contents/Resources/licenses/NerdFonts-README.md",
                 "Contents/Resources/licenses/NerdFonts-PROVENANCE.md",
                 "Contents/Resources/licenses/Apache-2.0.txt",
@@ -132,7 +132,6 @@ class PackageTest(unittest.TestCase):
                 "bin/omamail-app", "bin/omamail", "bin/qt.conf", "qml/Main.qml", "ui/Service.qml",
                 "manifest.json", "plugins/platforms/libqxcb.so",
                 "licenses/NerdFonts-LICENSE", "licenses/NerdFonts-README.md",
-                "licenses/JetBrainsMono-LICENSE",
                 "licenses/NerdFonts-PROVENANCE.md", "licenses/Apache-2.0.txt",
                 "licenses/Pomicons-OFL-1.1.txt", "licenses/GLYPH-SOURCES.md",
                 "share/applications/omamail.desktop",

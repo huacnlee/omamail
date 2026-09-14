@@ -190,10 +190,10 @@ TestCase {
     compare(Style.spacing.controlGap, 8)
   }
 
-  function test_standalone_bundles_the_omarchy_nerd_icon_range() {
-    tryCompare(Style.textFont, "status", FontLoader.Ready)
+  function test_standalone_uses_native_text_and_bundles_the_nerd_icon_range() {
     tryCompare(Style.iconFont, "status", FontLoader.Ready)
-    compare(Style.font.family, "JetBrainsMono Nerd Font Mono")
+    compare(Style.font.family, Style.metrics.font.family)
+    verify(Style.font.family.length > 0)
     compare(Style.font.iconFamily, "Symbols Nerd Font Mono")
     var icon = createTemporaryObject(actionIconComponent, testCase)
     verify(icon)

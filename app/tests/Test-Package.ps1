@@ -68,6 +68,8 @@ try {
         $Names = @($Zip.Entries | ForEach-Object { $_.FullName })
         Assert-True (-not @($Names | Where-Object { -not $_.StartsWith("omamail/") }).Count) `
             "archive contains more than one top-level directory"
+        Assert-True (-not @($Names | Where-Object { $_ -match "JetBrainsMono" }).Count) `
+            "archive must use the platform text font instead of bundling JetBrains Mono"
         foreach ($Required in @(
             "omamail/bin/omamail-app.exe",
             "omamail/bin/omamail.exe",
@@ -76,7 +78,6 @@ try {
             "omamail/bin/platforms/qwindows.dll",
             "omamail/manifest.json",
             "omamail/licenses/NerdFonts-LICENSE",
-            "omamail/licenses/JetBrainsMono-LICENSE",
             "omamail/licenses/NerdFonts-README.md",
             "omamail/licenses/NerdFonts-PROVENANCE.md",
             "omamail/licenses/Apache-2.0.txt",
