@@ -29,6 +29,7 @@ Item {
     accentColor: Color.accent
     dimColor: Color.foreground
     panelFontFamily: "monospace"
+    slots: [{ kind: "mailbox", key: "inbox" }]
   }
 
   SignalSpy { id: folded; target: sidebar; signalName: "folderToggled" }
@@ -56,7 +57,11 @@ Item {
       return null
     }
 
-    function init() { folded.clear(); opened.clear(); mailbox.clear() }
+    function init() {
+      folded.clear(); opened.clear(); mailbox.clear()
+      sidebar.numbersVisible = false
+      sidebar.collapsed = false
+    }
 
     function test_the_chevron_folds_without_opening() {
       var folds = named(sidebar, "fold", [])
@@ -85,6 +90,15 @@ Item {
       compare(opened.count, 1)
       compare(opened.signalArguments[0][0], "Work/2026", "opened by the server's id, not the leaf")
       compare(folded.count, 0)
+    }
+
+    function test_shortcut_number_is_an_informational_chip() {
+      sidebar.collapsed = true
+      sidebar.numbersVisible = true
+      var chip = named(sidebar, "mailbox-shortcut-chip", [])[0]
+      verify(chip, "the numbered mailbox draws its shortcut hint")
+      verify(chip.color.a < Style.selectedFillFor(Color.foreground, Color.accent).a,
+        "a shortcut hint must not use the much heavier selected-state fill")
     }
   }
 }

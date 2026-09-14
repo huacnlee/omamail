@@ -256,6 +256,7 @@ Item {
     // letting go.
     Rectangle {
       id: slotChip
+      objectName: "mailbox-shortcut-chip"
       visible: entry.showsNumber
       anchors.verticalCenter: parent.verticalCenter
       anchors.horizontalCenter: root.collapsed ? parent.horizontalCenter : undefined
@@ -264,7 +265,10 @@ Item {
       width: Style.space(16)
       height: width
       radius: Style.cornerRadius
-      color: Style.selectedFillFor(root.textColor, root.accentColor)
+      // This names a shortcut; it is not another selected state layered over
+      // the selected mailbox row. The lighter normal fill stays legible on
+      // dark themes without becoming a stack of grey tabs on Lupine.
+      color: Style.normalFillFor(root.textColor, root.accentColor)
 
       Text {
         anchors.centerIn: parent
