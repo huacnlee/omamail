@@ -825,18 +825,12 @@ fn process_argv(pid: u32) -> Vec<u8> {
 
 #[cfg(target_os = "windows")]
 fn process_argv(pid: u32) -> Vec<u8> {
-    let query = format!("(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine");
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &query])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    assert!(
-        !output.stdout.is_empty(),
-        "child process command line missing"
-    );
-    output.stdout
+    windows_process::process_argv(pid)
 }
+
+#[cfg(target_os = "windows")]
+#[path = "support/windows_process.rs"]
+mod windows_process;
 
 #[test]
 fn task_commands_have_only_the_approved_vocabulary_and_execute_switch() {
