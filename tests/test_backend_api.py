@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import subprocess
 import signal
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,7 +101,7 @@ async function call(method, params = {}, errorCode = null, advertised = true) {
     pending.set(id, {resolve, timer:setTimeout(() => fail(new Error('RPC deadline: ' + method)), 10000)});
     child.stdin.write(Wire.request(id, method, params));
   });
-  if (errorCode !== null) { assert.equal(reply.error && reply.error.code, errorCode, method); return reply.error; }
+  if (errorCode !== null) { assert.equal(reply.error && reply.error.code, errorCode, method + ': ' + JSON.stringify(reply.error)); return reply.error; }
   assert.ok(!reply.error, method + ': ' + JSON.stringify(reply.error));
   return reply.result;
 }
@@ -149,7 +150,7 @@ function storageSnapshot(directory = process.env.HOME) {
   function at(value, path) { return path ? path.split('.').reduce((v, key) => v === undefined || v === null ? undefined : v[key], value) : value; }
   assert.ok(Array.isArray(contract.contractCases) && contract.contractCases.length);
   for (const fixture of contract.contractCases) {
-    const registryPath = process.env.XDG_CONFIG_HOME + '/omamail/accounts.json';
+    const registryPath = process.env.CONTRACT_REGISTRY_PATH;
     const emptyRegistry = fixture.name === 'mail list requires an account';
     const registryBefore = emptyRegistry ? fs.readFileSync(registryPath) : null;
     if (emptyRegistry) fs.writeFileSync(registryPath, JSON.stringify({version:1,accounts:[]}));
@@ -248,18 +249,44 @@ def main():
             or len(contract['methods']) != len(set(contract['methods']))):
         raise SystemExit('Invalid backend-api.json')
     with tempfile.TemporaryDirectory(prefix='omamail-api-contract-') as directory:
-        home = Path(directory)
+        # macOS exposes its temporary root through /var, a symlink to
+        # /private/var. The production storage boundary refuses symlinked
+        # ancestors, so seed and advertise the canonical isolated root.
+        home = Path(directory).resolve()
         env = {key: value for key, value in os.environ.items()
                if key in ('PATH', 'LANG', 'LC_ALL', 'SYSTEMROOT')}
-        env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / 'config'),
-                   XDG_CACHE_HOME=str(home / 'cache'), XDG_DATA_HOME=str(home / 'data'),
-                   XDG_STATE_HOME=str(home / 'state'), XDG_RUNTIME_DIR=str(home / 'run'),
+        if os.name == 'nt':
+            config_root = home / 'AppData/Roaming'
+            local_root = home / 'AppData/Local'
+            cache_root = local_root / 'OmamailData/Cache'
+            state_root = local_root / 'OmamailData/State'
+            data_root = local_root / 'OmamailData'
+            runtime_root = local_root / 'OmamailData/Runtime'
+            env.update(USERPROFILE=str(home), APPDATA=str(config_root),
+                       LOCALAPPDATA=str(local_root))
+        elif sys.platform == 'darwin':
+            config_root = home / 'Library/Application Support'
+            cache_root = home / 'Library/Caches'
+            state_root = config_root
+            data_root = config_root
+            runtime_root = home / 'run'
+        else:
+            config_root = home / 'config'
+            cache_root = home / 'cache'
+            state_root = home / 'state'
+            data_root = home / 'data'
+            runtime_root = home / 'run'
+            env.update(XDG_CONFIG_HOME=str(config_root), XDG_CACHE_HOME=str(cache_root),
+                       XDG_DATA_HOME=str(data_root), XDG_STATE_HOME=str(state_root),
+                       XDG_RUNTIME_DIR=str(runtime_root))
+        registry = config_root / 'omamail/accounts.json'
+        env.update(HOME=str(home), TMPDIR=str(runtime_root), TEMP=str(runtime_root),
+                   TMP=str(runtime_root), CONTRACT_REGISTRY_PATH=str(registry),
                    CONTRACT_ROOT=str(ROOT), CONTRACT_BINARY=str(binary),
                    CONTRACT_VERSION=args.expected_version or '',
                    CONTRACT_RELEASED='1' if args.released else '',
                    CONTRACT_STANDALONE='1' if args.standalone else '')
-        (home / 'run').mkdir(mode=0o700)
-        registry = home / 'config/omamail/accounts.json'
+        runtime_root.mkdir(parents=True, mode=0o700)
         registry.parent.mkdir(parents=True)
         # Every provider the contract cases name is registered in both views:
         # a released case is the same fixture it was while unreleased.
@@ -272,9 +299,9 @@ def main():
         registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',
                                         'accounts': accounts}))
         registry.chmod(0o600)
-        for name in ('cache', 'state', 'data'):
-            sentinel = home / name / 'omamail/sentinel'
-            sentinel.parent.mkdir(parents=True)
+        for root in (cache_root, state_root, data_root):
+            sentinel = root / 'omamail/sentinel'
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
             sentinel.write_bytes(b'preserve existing user state\n')
         helpers = home / 'bin'
         helpers.mkdir()
