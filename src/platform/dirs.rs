@@ -13,11 +13,65 @@ pub struct AppDirs {
     pub runtime: PathBuf,
     pub downloads: PathBuf,
 }
+
+#[cfg(test)]
+static TEST_OVERRIDE: std::sync::Mutex<Option<TestAppDirs>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestAppDirs {
+    dirs: AppDirs,
+    home: PathBuf,
+}
+
+#[cfg(test)]
+pub(crate) struct TestAppDirsOverride;
+
+#[cfg(test)]
+impl Drop for TestAppDirsOverride {
+    fn drop(&mut self) {
+        *TEST_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_test_override(
+    dirs: AppDirs,
+    home: PathBuf,
+) -> Result<TestAppDirsOverride, &'static str> {
+    let mut current = TEST_OVERRIDE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if current.is_some() {
+        return Err("test_directories_override_active");
+    }
+    *current = Some(TestAppDirs { dirs, home });
+    Ok(TestAppDirsOverride)
+}
+
 impl AppDirs {
     pub fn discover() -> Result<Self, &'static str> {
+        #[cfg(test)]
+        if let Some(override_dirs) = TEST_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            return Ok(override_dirs.dirs);
+        }
         Self::discover_with(|name| std::env::var_os(name), &std::env::temp_dir())
     }
     pub fn home() -> Result<PathBuf, &'static str> {
+        #[cfg(test)]
+        if let Some(override_dirs) = TEST_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            return Ok(override_dirs.home);
+        }
         #[cfg(windows)]
         {
             return known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Profile);
@@ -219,6 +273,55 @@ mod download_tests {
             "an explicit override must not read user-dirs.dirs"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_override_precedes_native_directory_discovery() {
+        let name = std::thread::current().name().unwrap().to_owned();
+        if std::env::var("OMAMAIL_DIR_OVERRIDE_TEST_CHILD").as_deref() != Ok(name.as_str()) {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &name, "--test-threads=1", "--nocapture"])
+                .env("OMAMAIL_DIR_OVERRIDE_TEST_CHILD", &name)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("omamail-dirs-override-{}", std::process::id()));
+        let expected = AppDirs::from_roots(
+            root.join("config"),
+            root.join("cache"),
+            root.join("state"),
+            root.join("runtime"),
+            root.join("downloads"),
+        )
+        .unwrap();
+        let expected_home = root.join("home");
+        let override_guard =
+            install_test_override(expected.clone(), expected_home.clone()).unwrap();
+        assert_eq!(AppDirs::discover().unwrap(), expected);
+        assert_eq!(AppDirs::home().unwrap(), expected_home);
+        drop(override_guard);
+        assert!(
+            TEST_OVERRIDE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none(),
+            "dropping the fixture must restore native directory discovery"
+        );
     }
 }
 

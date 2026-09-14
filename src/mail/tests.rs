@@ -41,6 +41,7 @@ pub(crate) fn isolated() -> bool {
 
 pub(crate) struct AccountFixture {
     _environment: MutexGuard<'static, ()>,
+    dirs_override: Option<crate::platform::dirs::TestAppDirsOverride>,
     previous: Option<OsString>,
     previous_cache: Option<OsString>,
     previous_state: Option<OsString>,
@@ -120,6 +121,7 @@ pub(crate) fn fixture_tree(root: &std::path::Path) -> Vec<(PathBuf, MetadataStat
 
 impl Drop for AccountFixture {
     fn drop(&mut self) {
+        drop(self.dirs_override.take());
         unsafe {
             if let Some(previous) = &self.previous {
                 env::set_var("XDG_CONFIG_HOME", previous);
@@ -164,11 +166,20 @@ pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
     let previous_state = env::var_os("XDG_STATE_HOME");
     let previous_home = env::var_os("HOME");
     let home = root.join("home");
+    let dirs = crate::platform::dirs::AppDirs::from_roots(
+        root.join("config"),
+        root.join("cache"),
+        root.join("state"),
+        root.join("runtime"),
+        root.join("downloads"),
+    )
+    .unwrap();
+    let dirs_override =
+        crate::platform::dirs::install_test_override(dirs.clone(), home.clone()).unwrap();
     unsafe { env::set_var("XDG_CONFIG_HOME", root.join("config")) };
     unsafe { env::set_var("XDG_CACHE_HOME", root.join("cache")) };
     unsafe { env::set_var("XDG_STATE_HOME", root.join("state")) };
     unsafe { env::set_var("HOME", &home) };
-    let dirs = crate::platform::dirs::AppDirs::discover().unwrap();
     fs::create_dir_all(dirs.config.join("omamail")).unwrap();
     fs::write(
         dirs.config.join("omamail/accounts.json"),
@@ -187,6 +198,7 @@ pub(crate) fn account_fixture(registry: Value) -> AccountFixture {
     .unwrap();
     AccountFixture {
         _environment: environment,
+        dirs_override: Some(dirs_override),
         previous,
         previous_cache,
         previous_state,
