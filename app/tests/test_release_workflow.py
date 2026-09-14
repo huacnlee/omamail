@@ -93,6 +93,9 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("cmake --build build/app --config Release", block)
                     self.assertIn("ctest --test-dir build/app -C Release", block)
                     self.assertIn("-HostBinary build/app/Release/omamail-app.exe", block)
+                elif "macos" in job:
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: cocoa"), 1)
                 else:
                     self.assertIn("test_package.py", block)
                     self.assertIn("test_install.sh", block)
@@ -129,6 +132,9 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("cmake --build build/app --config Release", block)
                     self.assertIn("ctest --test-dir build/app -C Release", block)
                     self.assertIn("-HostBinary build/app/Release/omamail-app.exe", block)
+                elif target == "macos-aarch64":
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
+                    self.assertEqual(block.count("QT_QPA_PLATFORM: cocoa"), 1)
                 else:
                     self.assertIn(f"package-release.sh {target}", block)
                     self.assertIn("test_package.py", block)

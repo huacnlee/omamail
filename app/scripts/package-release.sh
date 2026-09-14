@@ -104,6 +104,7 @@ if [ "$target" = macos-aarch64 ]; then
   cp "$backend" "$app/Contents/MacOS/omamail"
   copy_product_files "$app/Contents/Resources"
   sed "s/__VERSION__/$version/g" "$repo_root/app/resources/macos/Info.plist" > "$app/Contents/Info.plist"
+  cp "$repo_root/app/resources/macos/omamail.icns" "$app/Contents/Resources/omamail.icns"
   chmod 755 "$app/Contents/MacOS/omamail-app" "$app/Contents/MacOS/omamail"
   if [ "$test_layout" -eq 1 ]; then
     [ -f "$platform_plugin" ] || { printf 'test platform plugin is missing\n' >&2; exit 1; }
@@ -113,10 +114,26 @@ if [ "$target" = macos-aarch64 ]; then
     else deploy=$(command -v macdeployqt || true)
     fi
     [ -n "$deploy" ] || { printf 'macdeployqt is required\n' >&2; exit 1; }
-    "$deploy" "$app" -qmldir="$app/Contents/Resources" -always-overwrite
+    qt_libs=$(qt_query QT_INSTALL_LIBS)
+    [ -d "$qt_libs" ] || { printf 'Qt library directory is missing: %s\n' "$qt_libs" >&2; exit 1; }
+    svg_framework="$qt_libs/QtSvg.framework/Versions/A/QtSvg"
+    if [ -f "$svg_framework" ]; then
+      svg_framework=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$svg_framework")
+      svg_libs=$(dirname "$(dirname "$(dirname "$(dirname "$svg_framework")")")")
+      "$deploy" "$app" -qmldir="$app/Contents/Resources" \
+        -libpath="$qt_libs" -libpath="$svg_libs" -always-overwrite -no-codesign
+    else
+      "$deploy" "$app" -qmldir="$app/Contents/Resources" \
+        -libpath="$qt_libs" -always-overwrite -no-codesign
+    fi
     [ -f "$app/Contents/PlugIns/platforms/libqcocoa.dylib" ] || { printf 'macdeployqt omitted the Cocoa platform plugin\n' >&2; exit 1; }
+    command -v codesign >/dev/null 2>&1 || { printf 'codesign is required\n' >&2; exit 1; }
+    # macdeployqt rewrites Mach-O load commands, invalidating Homebrew's
+    # ad-hoc signatures. Re-seal the self-contained bundle without an identity
+    # so macOS can load it; this is not Developer ID signing or notarization.
+    codesign --force --deep --sign - "$app"
+    codesign --verify --deep --strict "$app"
   fi
-  cp "$repo_root/app/resources/macos/omamail.icns" "$app/Contents/Resources/omamail.icns"
   archive="$dist/omamail-app-macos-aarch64.tar.gz"
 else
   top_level=omamail.app
@@ -246,17 +263,19 @@ if [ "$test_layout" -eq 0 ]; then
   if [ "$target" = macos-aarch64 ]; then
     packaged_host="$extract/Omamail.app/Contents/MacOS/omamail-app"
     packaged_backend="$extract/Omamail.app/Contents/MacOS/omamail"
+    smoke_platform=cocoa
   else
     packaged_host="$extract/omamail.app/bin/omamail-app"
     packaged_backend="$extract/omamail.app/bin/omamail"
+    smoke_platform=offscreen
   fi
   isolated="$extract/home"
   mkdir -p "$isolated/config" "$isolated/cache" "$isolated/state"
   HOME="$isolated" XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" XDG_STATE_HOME="$isolated/state" \
-    QT_QPA_PLATFORM=offscreen "$packaged_host" --check-resources
+    QT_QPA_PLATFORM="$smoke_platform" "$packaged_host" --check-resources
   ready="$extract/ready.json"
   HOME="$isolated" XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" XDG_STATE_HOME="$isolated/state" \
-    QT_QPA_PLATFORM=offscreen "$packaged_host" --smoke-test "$ready"
+    QT_QPA_PLATFORM="$smoke_platform" "$packaged_host" --smoke-test "$ready"
   [ -s "$ready" ] || { printf 'standalone smoke test did not write readiness metadata\n' >&2; exit 1; }
   backend_version=$($packaged_backend --version)
   [ "$backend_version" = "omamail $version" ] || { printf 'bundled backend version mismatch: %s\n' "$backend_version" >&2; exit 1; }

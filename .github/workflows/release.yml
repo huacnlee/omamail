@@ -154,7 +154,7 @@ jobs:
           python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone
       - name: Package, unpack, and test the macOS archive and installer
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: cocoa
         run: |
           set -euo pipefail
           bash app/scripts/package-release.sh macos-aarch64 \

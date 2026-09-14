@@ -170,6 +170,15 @@ class PackageTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires OMAMAIL_PACKAGE_TEST_MODE=1", result.stderr)
 
+    def test_macos_deployment_handles_split_qt_and_reseals_bundle(self):
+        source = PACKAGER.read_text(encoding="utf-8")
+        self.assertIn('QtSvg.framework/Versions/A/QtSvg', source)
+        self.assertIn('-libpath="$svg_libs"', source)
+        self.assertIn('-no-codesign', source)
+        self.assertIn('codesign --force --deep --sign - "$app"', source)
+        self.assertIn('codesign --verify --deep --strict "$app"', source)
+        self.assertIn('smoke_platform=cocoa', source)
+
 
 if __name__ == "__main__":
     unittest.main()
