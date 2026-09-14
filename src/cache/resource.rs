@@ -130,7 +130,7 @@ fn put_at(root: &Path, params: &Value, live: &Mutex<bool>) -> Result<Value> {
     Ok(json!({"stored":true}))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[test]

@@ -14,7 +14,7 @@ pub mod query;
 pub mod render;
 pub mod resource;
 mod store;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
@@ -281,3 +281,6 @@ fn entries(dir: &File) -> Result<Vec<(SystemTime, String)>> {
     }
     Ok(found)
 }
+
+#[cfg(all(test, windows))]
+mod windows_tests;

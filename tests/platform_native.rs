@@ -3,3 +3,9 @@
 #![allow(dead_code, unused_imports)]
 #[path = "../src/platform/mod.rs"]
 mod platform;
+
+#[cfg(windows)]
+#[path = "../src/cache/mod.rs"]
+mod cache;
+#[cfg(windows)]
+pub use omamail::message;

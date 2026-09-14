@@ -251,7 +251,18 @@ pub(crate) fn open_dir(
     create: bool,
     private: bool,
 ) -> Result<Option<File>> {
-    // Existing objects are validated, never silently "repaired" after a leak.
+    open_directory(parent, name, create, private, private)
+}
+fn open_directory(
+    parent: &File,
+    name: &OsStr,
+    create: bool,
+    private: bool,
+    writable: bool,
+) -> Result<Option<File>> {
+    // Mutation consumers flush directory metadata after replacing/removing cache
+    // entries. FlushFileBuffers requires GENERIC_WRITE; traversal and explicit
+    // readonly calls retain only read access.
     let Some(file) = open_at(
         parent,
         name,
@@ -261,7 +272,7 @@ pub(crate) fn open_dir(
         } else {
             nt::FILE_OPEN
         },
-        READ,
+        READ | if writable { FILE_GENERIC_WRITE } else { 0 },
         SHARE,
     )?
     else {
@@ -271,6 +282,14 @@ pub(crate) fn open_dir(
     Ok(Some(file))
 }
 pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<Option<File>> {
+    walk_directories(root, suffix, create, false)
+}
+fn walk_directories(
+    root: &Path,
+    suffix: &[&str],
+    create: bool,
+    readonly: bool,
+) -> Result<Option<File>> {
     let (drive, components) = path_parts(root)?;
     // Validate the whole input before creation can have any side effect.
     for name in suffix {
@@ -284,7 +303,7 @@ pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<
         parent = next;
     }
     for name in suffix {
-        let Some(next) = open_dir(&parent, name.as_ref(), create, true)? else {
+        let Some(next) = open_directory(&parent, name.as_ref(), create, true, !readonly)? else {
             return Ok(None);
         };
         parent = next;
@@ -292,23 +311,22 @@ pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<
     Ok(Some(parent))
 }
 pub(crate) fn directories_readonly(root: &Path, suffix: &[&str]) -> Result<Option<File>> {
-    directories(root, suffix, false)
+    walk_directories(root, suffix, false, true)
 }
 pub(crate) fn validate_owned_root(dir: &File) -> Result<()> {
     check_kind(dir, true)?;
     security::validate(dir.as_raw_handle(), true)
 }
 pub(crate) fn open_private(dir: &File, name: &str, writable: bool) -> Result<Option<File>> {
-    validate_owned_root(dir)?;
-    let Some(file) = open_at(
+    regular_with_access(
         dir,
-        name.as_ref(),
-        false,
-        nt::FILE_OPEN,
-        READ | if writable { FILE_GENERIC_WRITE } else { 0 },
-        SHARE,
-    )?
-    else {
+        name,
+        READ | FILE_WRITE_ATTRIBUTES | if writable { FILE_GENERIC_WRITE } else { 0 },
+    )
+}
+fn regular_with_access(dir: &File, name: &str, access: u32) -> Result<Option<File>> {
+    validate_owned_root(dir)?;
+    let Some(file) = open_at(dir, name.as_ref(), false, nt::FILE_OPEN, access, SHARE)? else {
         return Ok(None);
     };
     security::validate(file.as_raw_handle(), true)?;
@@ -316,7 +334,7 @@ pub(crate) fn open_private(dir: &File, name: &str, writable: bool) -> Result<Opt
 }
 pub(crate) use open_private as regular;
 pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
-    open_private(dir, name, false)
+    regular_with_access(dir, name, READ)
 }
 
 fn delete_handle(file: &File) -> Result<()> {

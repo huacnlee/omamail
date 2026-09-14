@@ -577,5 +577,5 @@ async fn persist(root: Option<PathBuf>, account: &str, state: &mut State) -> Res
     state.dirty = false;
     Ok(())
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
