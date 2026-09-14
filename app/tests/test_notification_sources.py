@@ -34,6 +34,7 @@ for required in (
 assert windows.index("m_notifier.Show(toast);") < windows.index("removeEntry(key);")
 assert "using namespace winrt;" not in windows
 assert "using namespace Windows::" not in windows
+assert "#include <winrt/Windows.Foundation.h>" in windows
 assert "using winrt::Windows::Foundation::IInspectable;" in windows
 assert "using winrt::Windows::UI::Notifications::ToastNotification;" in windows
 
