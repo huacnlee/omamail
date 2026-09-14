@@ -24,7 +24,12 @@ assert "/target/standalone/debug/omamail" in build
 assert "cmake --build" in build
 
 run = make("-n", "app-run")
-launch = run.splitlines()[-1]
+launches = [
+    line for line in run.splitlines()
+    if "OMAMAIL_DEVELOPMENT_RESOURCES=1" in line
+]
+assert len(launches) == 1, run
+launch = launches[0]
 assert "OMAMAIL_DEVELOPMENT_RESOURCES=1" in launch
 assert 'OMAMAIL_BIN="' in launch and "/target/standalone/debug/omamail" in launch
 assert "/app/build/omamail-app" in launch
