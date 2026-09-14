@@ -119,6 +119,14 @@ binary.write_text("#!/bin/sh\\nprintf 'omamail 0.8.2\\\\n'\\n")
 binary.chmod(0o700)
 ''')
         cargo.chmod(0o700)
+        runtime_python = tools / "python3"
+        runtime_python.write_text(f"#!{sys.executable}\n" + '''import platform, runpy, sys
+platform.system = lambda: "Linux"
+platform.machine = lambda: "x86_64"
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+''')
+        runtime_python.chmod(0o700)
         link = self.root / "scripts/link-plugin.sh"
         link.write_text(f'''#!/bin/sh
 set -eu
